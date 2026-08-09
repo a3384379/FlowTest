@@ -170,6 +170,25 @@ body {
   margin-top: 16px;
 }
 
+.workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.7fr) minmax(580px, 1.3fr);
+  gap: 16px;
+}
+
+.workflow-meta {
+  margin-bottom: 12px;
+}
+
+.workflow-json textarea {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+}
+
+.workflow-result-card {
+  margin-top: 16px;
+}
+
 .import-format-row {
   display: flex;
   align-items: center;
@@ -229,7 +248,8 @@ body {
   }
 
   .console-grid,
-  .dashboard-grid {
+  .dashboard-grid,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 

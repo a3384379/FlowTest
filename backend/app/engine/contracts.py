@@ -1,4 +1,5 @@
 from enum import StrEnum
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -21,6 +22,22 @@ class NodeStatus(StrEnum):
     FAILED = "failed"
     SKIPPED = "skipped"
     CANCELLED = "cancelled"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self is not NodeStatus.PENDING and self is not NodeStatus.RUNNING
+
+
+class WorkflowRunStatus(StrEnum):
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RetryCategory(StrEnum):
+    NETWORK_ERROR = "network_error"
+    SERVER_ERROR = "5xx"
 
 
 class Position(BaseModel):
@@ -88,6 +105,26 @@ class WorkflowSettings(BaseModel):
     default_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
+class ApiNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_definition_id: UUID
+    timeout_seconds: int | None = Field(default=None, ge=1, le=300)
+    max_retries: int = Field(default=0, ge=0, le=3)
+    retry_on: tuple[RetryCategory, ...] = Field(
+        default=(RetryCategory.NETWORK_ERROR, RetryCategory.SERVER_ERROR),
+        min_length=1,
+        max_length=2,
+    )
+    retry_delay_seconds: float = Field(default=0, ge=0, le=60)
+
+    @model_validator(mode="after")
+    def validate_retry_categories(self) -> "ApiNodeConfig":
+        if len(self.retry_on) != len(set(self.retry_on)):
+            raise ValueError("Retry categories must be unique")
+        return self
+
+
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -119,7 +156,15 @@ class WorkflowDefinition(BaseModel):
             if edge.source == edge.target:
                 raise ValueError(f"Edge {edge.id} cannot connect a node to itself")
         self._validate_acyclic(known_nodes)
+        self._validate_endpoints(starts[0].id, {node.id for node in ends})
+        self._validate_connected(starts[0].id, {node.id for node in ends}, known_nodes)
         return self
+
+    def _validate_endpoints(self, start_id: str, end_ids: set[str]) -> None:
+        if any(edge.target == start_id for edge in self.edges):
+            raise ValueError("Start node cannot have incoming edges")
+        if any(edge.source in end_ids for edge in self.edges):
+            raise ValueError("End nodes cannot have outgoing edges")
 
     def _validate_acyclic(self, node_ids: set[str]) -> None:
         incoming = dict.fromkeys(node_ids, 0)
@@ -139,3 +184,40 @@ class WorkflowDefinition(BaseModel):
                     ready.append(target)
         if visited != len(node_ids):
             raise ValueError("Workflow must be a directed acyclic graph")
+
+    def _validate_connected(self, start_id: str, end_ids: set[str], node_ids: set[str]) -> None:
+        outgoing: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+        incoming: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+        for edge in self.edges:
+            outgoing[edge.source].add(edge.target)
+            incoming[edge.target].add(edge.source)
+
+        reachable = _walk(start_id, outgoing)
+        if unreachable := node_ids - reachable:
+            raise ValueError(
+                f"Workflow contains nodes unreachable from start: {sorted(unreachable)}"
+            )
+
+        reaches_end: set[str] = set()
+        for end_id in end_ids:
+            reaches_end.update(_walk(end_id, incoming))
+        if dangling := node_ids - reaches_end:
+            raise ValueError(f"Workflow contains nodes without a path to end: {sorted(dangling)}")
+
+
+def parse_api_node_config(node: WorkflowNode) -> ApiNodeConfig:
+    if node.type is not NodeType.API:
+        raise ValueError(f"Node {node.id} is not an API node")
+    return ApiNodeConfig.model_validate(node.config)
+
+
+def _walk(origin: str, adjacency: dict[str, set[str]]) -> set[str]:
+    visited: set[str] = set()
+    pending = [origin]
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        pending.extend(adjacency[current] - visited)
+    return visited

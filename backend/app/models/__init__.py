@@ -6,6 +6,7 @@ from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.imports import ImportRun
+from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
 __all__ = [
     "APICallExecution",
@@ -23,4 +24,8 @@ __all__ = [
     "RefreshSession",
     "Secret",
     "User",
+    "Workflow",
+    "WorkflowExecution",
+    "WorkflowNodeExecution",
+    "WorkflowVersion",
 ]

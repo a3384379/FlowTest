@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V0.2 接口资产`。
+当前状态：`S5 Workflow 执行引擎（V0.2 迭代中）`。
 
 ## 技术栈
 
@@ -65,6 +65,12 @@ Bearer、Basic 和 Header/Query API Key 已接入真实请求执行。上传文�
 MinIO，数据库只保留 Artifact 元数据与 SHA-256；支持 multipart 请求、受权下载、文件大小、
 文件哈希和 Content-Type 断言。Web 管理端提供中文导入 Diff、文件仓库和认证/文件请求配置。
 
+S5 已提供 Workflow 草稿、乐观并发修订号、不可变发布版本和 Execution Snapshot；发布前校验
+Start/End、循环、不可达节点、悬空路径、节点配置及项目内 API 引用。独立异步 DAG 调度器支持
+依赖就绪并行、默认 fail-fast、失败传播、1～300 秒超时、网络错误/5xx 分类重试和持久化取消。
+每次执行固定 Workflow、API 与 Environment 版本，后续草稿、API 或环境修改不会改变历史快照。
+Web 管理端已开放流程草稿编辑、发布、运行和节点结果/历史查看；可视化画布在 S6 接入。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -72,6 +78,9 @@ MinIO，数据库只保留 Artifact 元数据与 SHA-256；支持 multipart 请�
 运行 `backend/.venv/bin/python scripts/smoke_s4.py` 可继续验收重复导入去重、Secret Bearer、
 multipart 上传、二进制响应外置、文件断言和受权下载。macOS 自带 Python 版本过旧时可改用
 `uv run --project backend python scripts/smoke_s4.py`。
+
+运行 `uv run --project backend python scripts/smoke_s5.py` 可验收不可变发布、DAG 执行、API
+版本快照、5xx 重试和跨请求取消。脚本默认复用 Compose Mock 服务并保持所有敏感值脱敏。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

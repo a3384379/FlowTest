@@ -16,9 +16,10 @@ import { useAuthStore } from './features/auth/auth-store'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
+const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 
 const { Header, Content, Sider } = Layout
-type PageKey = 'dashboard' | 'apis'
+type PageKey = 'dashboard' | 'apis' | 'workflows'
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -56,7 +57,7 @@ function AuthenticatedShell() {
             { key: 'dashboard', icon: <DashboardOutlined />, label: '首页' },
             { key: 'projects', icon: <FolderOpenOutlined />, label: '项目管理', disabled: true },
             { key: 'apis', icon: <ApiOutlined />, label: '接口管理' },
-            { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排', disabled: true },
+            { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排' },
             { key: 'reports', icon: <BarChartOutlined />, label: '测试报告', disabled: true },
           ]}
         />
@@ -75,7 +76,9 @@ function AuthenticatedShell() {
         </Header>
         <Content className="content">
           <Suspense fallback={<PageLoading />}>
-            {page === 'dashboard' ? <DashboardPage /> : <ApiConsolePage />}
+            {page === 'dashboard' && <DashboardPage />}
+            {page === 'apis' && <ApiConsolePage />}
+            {page === 'workflows' && <WorkflowsPage />}
           </Suspense>
         </Content>
       </Layout>
