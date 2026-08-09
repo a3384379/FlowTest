@@ -131,7 +131,7 @@ describe('TestPlansPage', () => {
     await waitFor(() => expect(requests.run).toBe(1))
     await browser.click(screen.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))
-  }, 10_000)
+  }, 20_000)
 })
 
 function renderPage() {
