@@ -17,6 +17,36 @@ minio_volume="flowtest_restore_minio_${suffix}"
 postgres_container="flowtest-restore-postgres-${suffix}"
 minio_container="flowtest-restore-minio-${suffix}"
 
+wait_for_postgres() {
+  local _attempt
+  local postgres_logs
+  for _attempt in $(seq 1 60); do
+    postgres_logs="$(docker logs "${postgres_container}" 2>&1 || true)"
+    if [[ "${postgres_logs}" == *"PostgreSQL init process complete; ready for start up."* ]] && \
+      docker exec "${postgres_container}" pg_isready -U flowtest -d flowtest >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "PostgreSQL 隔离恢复容器未在 60 秒内完成初始化" >&2
+  docker logs "${postgres_container}" >&2 || true
+  return 1
+}
+
+wait_for_minio() {
+  local _attempt
+  for _attempt in $(seq 1 60); do
+    if docker exec "${minio_container}" curl -fsS http://localhost:9000/minio/health/live \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "MinIO 隔离恢复容器未在 60 秒内就绪" >&2
+  docker logs "${minio_container}" >&2 || true
+  return 1
+}
+
 cleanup() {
   docker rm -f "${postgres_container}" "${minio_container}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
@@ -36,21 +66,8 @@ docker run -d --name "${minio_container}" --network "${network}" \
   -v "${minio_volume}:/data" \
   minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
 
-for _attempt in $(seq 1 60); do
-  if docker exec "${postgres_container}" pg_isready -U flowtest -d flowtest >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-docker exec "${postgres_container}" pg_isready -U flowtest -d flowtest >/dev/null
-for _attempt in $(seq 1 60); do
-  if docker exec "${minio_container}" curl -fsS http://localhost:9000/minio/health/live \
-    >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-docker exec "${minio_container}" curl -fsS http://localhost:9000/minio/health/live >/dev/null
+wait_for_postgres
+wait_for_minio
 
 docker exec -i "${postgres_container}" pg_restore \
   --username flowtest --dbname flowtest --no-owner --no-acl < "${backup_directory}/postgres.dump"
