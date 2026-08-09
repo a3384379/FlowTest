@@ -17,6 +17,8 @@ class NodeType(StrEnum):
     CONDITION = "condition"
     DELAY = "delay"
     DATASET = "dataset"
+    SUBFLOW = "subflow"
+    FOR_EACH = "for_each"
     END = "end"
 
 
@@ -190,6 +192,22 @@ class DatasetNodeConfig(BaseModel):
     sheet_name: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class SubFlowNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: UUID
+    workflow_version: int = Field(ge=1)
+
+
+class ForEachNodeConfig(SubFlowNodeConfig):
+    source_node_id: str = Field(min_length=1, max_length=128)
+    expression: str = Field(min_length=1, max_length=500)
+    item_variable: VariableName = "item"
+    index_variable: VariableName = "index"
+    concurrency: int = Field(default=5, ge=1, le=20)
+    fail_fast: bool = True
+
+
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -317,6 +335,8 @@ NodeConfig = (
     | ConditionNodeConfig
     | DelayNodeConfig
     | DatasetNodeConfig
+    | SubFlowNodeConfig
+    | ForEachNodeConfig
     | None
 )
 
@@ -334,6 +354,10 @@ def parse_node_config(node: WorkflowNode) -> NodeConfig:
         return DelayNodeConfig.model_validate(node.config)
     if node.type is NodeType.DATASET:
         return DatasetNodeConfig.model_validate(node.config)
+    if node.type is NodeType.SUBFLOW:
+        return SubFlowNodeConfig.model_validate(node.config)
+    if node.type is NodeType.FOR_EACH:
+        return ForEachNodeConfig.model_validate(node.config)
     if node.config:
         raise ValueError(f"Node {node.id} does not accept configuration")
     return None

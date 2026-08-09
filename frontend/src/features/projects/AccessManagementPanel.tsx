@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useAuthStore } from '../auth/auth-store'
 import {
   addTeamMember,
-  createTeam,
+  createTeam as createTeamRequest,
   createUser,
   listProjectMembers,
   listProjectTeamGrants,
@@ -93,6 +93,14 @@ function useAccessManagement(projectId: string) {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
+
+  function createAndSelectTeam(values: { name: string; description: string }) {
+    mutation.mutate(async () => {
+      const created = await createTeamRequest(values)
+      setTeamId(created.id)
+      return created
+    })
+  }
   return {
     projectId,
     isAdministrator,
@@ -108,6 +116,7 @@ function useAccessManagement(projectId: string) {
     teamMembersLoading: teamMembers.isLoading,
     pending: mutation.isPending,
     run: mutation.mutate,
+    createAndSelectTeam,
   }
 }
 
@@ -288,11 +297,7 @@ function CreateOrganizationEntities({ state }: { state: AccessState }) {
           创建用户
         </Button>
       </Form>
-      <Form
-        form={teamForm}
-        layout="inline"
-        onFinish={(values) => state.run(() => createTeam(values))}
-      >
+      <Form form={teamForm} layout="inline" onFinish={state.createAndSelectTeam}>
         <Form.Item name="name" rules={[{ required: true }]}>
           <Input placeholder="团队名称" />
         </Form.Item>

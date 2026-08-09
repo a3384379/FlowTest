@@ -28,6 +28,15 @@ class WorkflowRepository:
     async def get(self, workflow_id: UUID) -> Workflow | None:
         return await self._session.get(Workflow, workflow_id)
 
+    async def get_for_update(self, workflow_id: UUID) -> Workflow | None:
+        result = await self._session.execute(
+            select(Workflow)
+            .where(Workflow.id == workflow_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def get_version(self, version_id: UUID) -> WorkflowVersion | None:
         return await self._session.get(WorkflowVersion, version_id)
 

@@ -165,6 +165,7 @@ class WorkflowScheduler:
         context: ExecutionContext | None = None,
         cancellation: CancellationToken | None = None,
         on_node_status: NodeStatusCallback | None = None,
+        selected_node_ids: frozenset[str] | None = None,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
@@ -174,6 +175,9 @@ class WorkflowScheduler:
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
         notified: dict[str, NodeStatus] = {}
+
+        if selected_node_ids is not None:
+            _exclude_unselected(nodes, statuses, records, selected_node_ids)
 
         await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
 
@@ -455,6 +459,27 @@ def _record_remaining(
         if node_id not in records:
             statuses[node_id] = status
             records[node_id] = _record(node, status)
+
+
+def _exclude_unselected(
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    selected_node_ids: frozenset[str],
+) -> None:
+    unknown = selected_node_ids - nodes.keys()
+    if unknown:
+        raise ValueError(f"Debug scope references unknown nodes: {sorted(unknown)}")
+    for node_id, node in nodes.items():
+        if node_id in selected_node_ids:
+            continue
+        statuses[node_id] = NodeStatus.SKIPPED
+        records[node_id] = _record(
+            node,
+            NodeStatus.SKIPPED,
+            error_code="DEBUG_SCOPE_EXCLUDED",
+            error_message="节点不在本次调试范围内",
+        )
 
 
 def _failed_record(

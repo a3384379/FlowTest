@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type {
   ApiDefinition,
   Artifact,
+  Workflow,
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowFieldMapping,
@@ -16,6 +17,7 @@ type InspectorProps = {
   definition: WorkflowDefinition
   apis: ApiDefinition[]
   artifacts: Artifact[]
+  workflows?: Workflow[]
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
   onDelete: () => void
@@ -26,6 +28,7 @@ export default function WorkflowNodeInspector({
   definition,
   apis,
   artifacts,
+  workflows = [],
   editable,
   onChange,
   onDelete,
@@ -47,6 +50,7 @@ export default function WorkflowNodeInspector({
         definition={definition}
         apis={apis}
         artifacts={artifacts}
+        workflows={workflows}
         editable={editable}
         onUpdate={updateNode}
       />
@@ -84,6 +88,7 @@ function NodeTypeFields({
   definition,
   apis,
   artifacts,
+  workflows,
   editable,
   onUpdate,
 }: {
@@ -91,6 +96,7 @@ function NodeTypeFields({
   definition: WorkflowDefinition
   apis: ApiDefinition[]
   artifacts: Artifact[]
+  workflows: Workflow[]
   editable: boolean
   onUpdate: (node: WorkflowNode) => void
 }) {
@@ -201,7 +207,133 @@ function NodeTypeFields({
       </>
     )
   }
+  if (node.type === 'subflow' || node.type === 'for_each') {
+    return (
+      <SubflowFields
+        node={node}
+        definition={definition}
+        workflows={workflows}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    )
+  }
   return null
+}
+
+function SubflowFields({
+  node,
+  definition,
+  workflows,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+  workflows: Workflow[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <>
+      <Field label="已发布子流程">
+        <Select
+          showSearch
+          optionFilterProp="label"
+          disabled={!editable}
+          value={stringConfig(node, 'workflow_id') || undefined}
+          options={workflows.map((workflow) => ({
+            value: workflow.id,
+            label: `${workflow.name} · v${workflow.current_version}`,
+          }))}
+          onChange={(value) => {
+            const selected = workflows.find((workflow) => workflow.id === value)
+            onUpdate(
+              updateNodeConfigs(node, {
+                workflow_id: value,
+                workflow_version: selected?.current_version ?? 1,
+              }),
+            )
+          }}
+        />
+      </Field>
+      <Field label="固定版本">
+        <InputNumber
+          disabled={!editable}
+          min={1}
+          value={numberConfig(node, 'workflow_version', 1)}
+          onChange={(value) => onUpdate(updateNodeConfig(node, 'workflow_version', value ?? 1))}
+        />
+      </Field>
+      {node.type === 'for_each' && (
+        <ForEachFields
+          node={node}
+          definition={definition}
+          editable={editable}
+          onUpdate={onUpdate}
+        />
+      )}
+    </>
+  )
+}
+
+function ForEachFields({
+  node,
+  definition,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <>
+      <SourceAndExpression
+        node={node}
+        definition={definition}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <TextConfig
+        label="元素变量"
+        configKey="item_variable"
+        fallback="item"
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <TextConfig
+        label="索引变量"
+        configKey="index_variable"
+        fallback="index"
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <Field label="循环并发">
+        <InputNumber
+          disabled={!editable}
+          min={1}
+          max={20}
+          value={numberConfig(node, 'concurrency', 5)}
+          onChange={(value) => onUpdate(updateNodeConfig(node, 'concurrency', value ?? 5))}
+        />
+      </Field>
+      <Field label="失败策略">
+        <Select
+          disabled={!editable}
+          value={node.config.fail_fast === false ? 'continue' : 'fail_fast'}
+          options={[
+            { value: 'fail_fast', label: '首项失败即停止' },
+            { value: 'continue', label: '继续处理其他项' },
+          ]}
+          onChange={(value) => onUpdate(updateNodeConfig(node, 'fail_fast', value === 'fail_fast'))}
+        />
+      </Field>
+    </>
+  )
 }
 
 function ApiFields({
@@ -470,6 +602,10 @@ function replaceNode(definition: WorkflowDefinition, replacement: WorkflowNode) 
 
 function updateNodeConfig(node: WorkflowNode, key: string, value: unknown): WorkflowNode {
   return { ...node, config: { ...node.config, [key]: value } }
+}
+
+function updateNodeConfigs(node: WorkflowNode, values: Record<string, unknown>): WorkflowNode {
+  return { ...node, config: { ...node.config, ...values } }
 }
 
 function upstreamNodes(definition: WorkflowDefinition, targetId: string): WorkflowNode[] {

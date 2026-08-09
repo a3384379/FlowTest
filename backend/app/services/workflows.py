@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID, uuid4
@@ -15,13 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.expressions import SafeExpressionError, validate_safe_expression
+from app.domain.test_assets import VersionChange, version_changes
 from app.engine.contracts import (
     ApiNodeConfig,
     AssertNodeConfig,
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
+    ForEachNodeConfig,
     NodeType,
+    SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
     parse_node_config,
@@ -53,7 +57,7 @@ from app.services.workflow_snapshots import (
     WorkflowSnapshotBuilder,
 )
 
-SUPPORTED_S7_NODE_TYPES = frozenset(NodeType)
+SUPPORTED_NODE_TYPES = frozenset(NodeType)
 CANCELLATION_POLL_SECONDS = 0.05
 DATASET_CONCURRENCY = 5
 
@@ -80,6 +84,13 @@ class WorkflowBatchPlan:
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowVersionDiff:
+    from_version: int
+    to_version: int
+    changes: tuple[VersionChange, ...]
 
 
 class WorkflowService:
@@ -158,7 +169,7 @@ class WorkflowService:
         definition: WorkflowDefinition | None,
     ) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        workflow = await self._get_workflow(project_id, workflow_id)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
         if workflow.draft_revision != expected_revision:
             raise AppError(
                 code="WORKFLOW_DRAFT_CONFLICT",
@@ -196,9 +207,9 @@ class WorkflowService:
 
     async def publish(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> WorkflowVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        workflow = await self._get_workflow(project_id, workflow_id)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
         definition = self._load_definition(workflow.draft_definition)
-        await self._validate_publishable(project_id, definition)
+        await self._validate_publishable(project_id, workflow.id, definition)
         next_version = (workflow.current_version or 0) + 1
         serialized = definition.model_dump(mode="json")
         published = WorkflowVersion(
@@ -230,6 +241,118 @@ class WorkflowService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         await self._get_workflow(project_id, workflow_id)
         return await self._workflows.list_versions(workflow_id)
+
+    async def diff_versions(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        from_version: int,
+        to_version: int,
+    ) -> WorkflowVersionDiff:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        workflow = await self._get_workflow(project_id, workflow_id)
+        before = await self._find_version(workflow.id, from_version)
+        after = await self._find_version(workflow.id, to_version)
+        return WorkflowVersionDiff(
+            from_version=from_version,
+            to_version=to_version,
+            changes=version_changes(
+                cast(dict[str, JsonValue], before.definition),
+                cast(dict[str, JsonValue], after.definition),
+            ),
+        )
+
+    async def debug_to_breakpoint(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        environment_id: UUID,
+        version: int | None,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        breakpoint_node_id: str,
+    ) -> WorkflowRunResult:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        workflow = await self._get_workflow(project_id, workflow_id)
+        selected = await self._select_version(workflow, version)
+        definition = self._load_definition(selected.definition)
+        scope = _upstream_node_ids(definition, breakpoint_node_id, include_target=False)
+        prepared = await self._snapshots.prepare(
+            actor=actor,
+            project_id=project_id,
+            workflow=workflow,
+            version=selected,
+            definition=definition,
+            environment_id=environment_id,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
+        if len(prepared.runs) != 1:
+            raise AppError(
+                code="DATASET_DEBUG_NOT_SUPPORTED",
+                message="断点调试暂不支持 Dataset 批量执行",
+                status_code=422,
+            )
+        result = await self._run_scoped(
+            project_id=project_id,
+            definition=definition,
+            prepared=prepared.runs[0],
+            runtime_variables=runtime_variables,
+            selected_node_ids=scope,
+        )
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="workflow.debugged",
+            resource_type="workflow",
+            resource_id=workflow.id,
+            details={
+                "version": selected.version,
+                "breakpoint_node_id": breakpoint_node_id,
+            },
+        )
+        await self._session.commit()
+        return result
+
+    async def replay_node(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        node_id: str,
+    ) -> WorkflowRunResult:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        execution = await self._get_execution(project_id, execution_id)
+        plan = await self.load_execution_plan(execution.id)
+        if isinstance(plan, WorkflowBatchPlan):
+            raise AppError(
+                code="DATASET_REPLAY_NOT_SUPPORTED",
+                message="请在数据集子执行上重放节点",
+                status_code=422,
+            )
+        scope = _upstream_node_ids(plan.definition, node_id, include_target=True)
+        result = await self._run_scoped(
+            project_id=project_id,
+            definition=plan.definition,
+            prepared=plan.prepared,
+            runtime_variables=plan.runtime_variables,
+            selected_node_ids=scope,
+        )
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="workflow.node_replayed",
+            resource_type="workflow_execution",
+            resource_id=execution.id,
+            details={"node_id": node_id},
+        )
+        await self._session.commit()
+        return result
 
     async def execute(
         self,
@@ -367,6 +490,7 @@ class WorkflowService:
                     plan.prepared.requests,
                     plan.definition,
                     network_policy,
+                    subflows=plan.prepared.subflows,
                 )
             )
             result = await self._run_with_cancellation_poll(
@@ -401,6 +525,43 @@ class WorkflowService:
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, nodes
+
+    async def _run_scoped(
+        self,
+        *,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        prepared: PreparedExecution,
+        runtime_variables: dict[str, str],
+        selected_node_ids: frozenset[str],
+    ) -> WorkflowRunResult:
+        network_policy = await self._projects.load_runtime_security_policy(project_id)
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            result = await WorkflowScheduler(
+                WorkflowNodeExecutor(
+                    client,
+                    prepared.requests,
+                    definition,
+                    network_policy,
+                    subflows=prepared.subflows,
+                )
+            ).run(
+                definition,
+                context=ExecutionContext(
+                    workflow_variables=cast(dict[str, JsonValue], definition.variables),
+                    dataset_variables=prepared.dataset_variables,
+                    runtime_variables=cast(dict[str, JsonValue], runtime_variables),
+                ),
+                selected_node_ids=selected_node_ids,
+            )
+        return WorkflowRunResult(
+            status=result.status,
+            records=tuple(
+                replace(record, output=cast(JsonValue, redact(record.output)))
+                for record in result.records
+            ),
+            context=cast(dict[str, JsonValue], redact(result.context)),
+        )
 
     async def load_execution_for_run(self, execution_id: UUID) -> WorkflowExecution:
         execution = await self._workflows.get_execution(execution_id)
@@ -519,13 +680,14 @@ class WorkflowService:
         await self._session.refresh(execution)
         return execution
 
-    async def _validate_publishable(self, project_id: UUID, definition: WorkflowDefinition) -> None:
+    async def _validate_publishable(
+        self,
+        project_id: UUID,
+        workflow_id: UUID,
+        definition: WorkflowDefinition,
+    ) -> None:
         unsupported = sorted(
-            {
-                node.type.value
-                for node in definition.nodes
-                if node.type not in SUPPORTED_S7_NODE_TYPES
-            }
+            {node.type.value for node in definition.nodes if node.type not in SUPPORTED_NODE_TYPES}
         )
         if unsupported:
             raise AppError(
@@ -541,6 +703,11 @@ class WorkflowService:
                 self._validate_jmespath(mapping.source.path, edge.id)
         if any(node.type is NodeType.DATASET for node in definition.nodes):
             await self._datasets.prepare(project_id=project_id, definition=definition)
+        await self._validate_subflow_graph(
+            project_id=project_id,
+            definition=definition,
+            workflow_path=(workflow_id,),
+        )
 
     async def _validate_publishable_node(
         self,
@@ -574,6 +741,24 @@ class WorkflowService:
                 config.source_node_id,
             )
             self._validate_jmespath(config.expression, node.id)
+        if isinstance(config, ForEachNodeConfig):
+            self._validate_control_source(
+                definition,
+                {item.id for item in definition.nodes},
+                node.id,
+                config.source_node_id,
+            )
+            try:
+                validate_safe_expression(config.expression)
+            except SafeExpressionError as error:
+                raise AppError(
+                    code=error.code,
+                    message=error.message,
+                    status_code=422,
+                    details={"node_id": node.id},
+                ) from error
+        if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
+            await self._load_subflow_version(project_id, config)
         if isinstance(config, DatasetNodeConfig):
             artifact = await self._session.get(Artifact, config.artifact_id)
             if artifact is None or artifact.project_id != project_id:
@@ -583,6 +768,69 @@ class WorkflowService:
                     status_code=422,
                     details={"node_id": node.id},
                 )
+
+    async def _validate_subflow_graph(
+        self,
+        *,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        workflow_path: tuple[UUID, ...],
+    ) -> None:
+        for node in definition.nodes:
+            config = parse_node_config(node)
+            if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
+                continue
+            if config.workflow_id in workflow_path:
+                raise AppError(
+                    code="SUBFLOW_RECURSION",
+                    message="子流程调用图不能包含递归",
+                    status_code=422,
+                    details={
+                        "node_id": node.id,
+                        "workflow_path": [
+                            str(item) for item in (*workflow_path, config.workflow_id)
+                        ],
+                    },
+                )
+            if len(workflow_path) >= 5:
+                raise AppError(
+                    code="SUBFLOW_DEPTH_EXCEEDED",
+                    message="子流程最大嵌套深度为 5",
+                    status_code=422,
+                    details={"node_id": node.id},
+                )
+            version = await self._load_subflow_version(project_id, config)
+            nested = self._load_definition(version.definition)
+            if any(item.type is NodeType.DATASET for item in nested.nodes):
+                raise AppError(
+                    code="SUBFLOW_DATASET_NOT_SUPPORTED",
+                    message="子流程暂不支持 Dataset 节点",
+                    status_code=422,
+                    details={"node_id": node.id},
+                )
+            await self._validate_subflow_graph(
+                project_id=project_id,
+                definition=nested,
+                workflow_path=(*workflow_path, config.workflow_id),
+            )
+
+    async def _load_subflow_version(
+        self,
+        project_id: UUID,
+        config: SubFlowNodeConfig | ForEachNodeConfig,
+    ) -> WorkflowVersion:
+        workflow = await self._workflows.get(config.workflow_id)
+        version = await self._workflows.find_version(
+            config.workflow_id,
+            config.workflow_version,
+        )
+        if workflow is None or workflow.project_id != project_id or version is None:
+            raise AppError(
+                code="SUBFLOW_VERSION_NOT_FOUND",
+                message="子流程只能引用同项目中已发布的版本",
+                status_code=422,
+            )
+        return version
 
     @staticmethod
     def _validate_control_source(
@@ -795,8 +1043,24 @@ class WorkflowService:
             )
         return version
 
+    async def _find_version(self, workflow_id: UUID, version: int) -> WorkflowVersion:
+        model = await self._workflows.find_version(workflow_id, version)
+        if model is None:
+            raise AppError(
+                code="WORKFLOW_VERSION_NOT_FOUND",
+                message="工作流版本不存在",
+                status_code=404,
+            )
+        return model
+
     async def _get_workflow(self, project_id: UUID, workflow_id: UUID) -> Workflow:
         workflow = await self._workflows.get(workflow_id)
+        if workflow is None or workflow.project_id != project_id:
+            raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
+        return workflow
+
+    async def _get_workflow_for_update(self, project_id: UUID, workflow_id: UUID) -> Workflow:
+        workflow = await self._workflows.get_for_update(workflow_id)
         if workflow is None or workflow.project_id != project_id:
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         return workflow
@@ -887,3 +1151,31 @@ def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str)
         visited.add(current)
         pending.extend(outgoing[current] - visited)
     return False
+
+
+def _upstream_node_ids(
+    definition: WorkflowDefinition,
+    target_id: str,
+    *,
+    include_target: bool,
+) -> frozenset[str]:
+    node_ids = {node.id for node in definition.nodes}
+    if target_id not in node_ids:
+        raise AppError(
+            code="WORKFLOW_NODE_NOT_FOUND",
+            message="工作流节点不存在",
+            status_code=404,
+            details={"node_id": target_id},
+        )
+    incoming: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    for edge in definition.edges:
+        incoming[edge.target].add(edge.source)
+    selected: set[str] = {target_id} if include_target else set()
+    pending = list(incoming[target_id])
+    while pending:
+        current = pending.pop()
+        if current in selected:
+            continue
+        selected.add(current)
+        pending.extend(incoming[current] - selected)
+    return frozenset(selected)

@@ -4,16 +4,22 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
+from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.schemas.common import Page
 from app.schemas.workflows import (
     WorkflowCreate,
+    WorkflowDebugNodeResponse,
+    WorkflowDebugRequest,
+    WorkflowDebugResponse,
     WorkflowDraftUpdate,
     WorkflowExecuteRequest,
     WorkflowExecutionDetailResponse,
     WorkflowExecutionResponse,
     WorkflowNodeExecutionResponse,
     WorkflowResponse,
+    WorkflowVersionChangeResponse,
+    WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
 )
 from app.services.idempotency import IdempotencyService
@@ -129,6 +135,60 @@ async def list_workflow_versions(
     return [WorkflowVersionResponse.model_validate(version) for version in versions]
 
 
+@router.get(
+    "/workflows/{workflow_id}/versions/{from_version}/diff/{to_version}",
+    response_model=WorkflowVersionDiffResponse,
+)
+async def diff_workflow_versions(
+    project_id: UUID,
+    workflow_id: UUID,
+    from_version: int,
+    to_version: int,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowVersionDiffResponse:
+    diff = await WorkflowService(session).diff_versions(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+        from_version=from_version,
+        to_version=to_version,
+    )
+    return WorkflowVersionDiffResponse(
+        from_version=diff.from_version,
+        to_version=diff.to_version,
+        changes=[
+            WorkflowVersionChangeResponse(
+                path=change.path,
+                before=change.before,
+                after=change.after,
+            )
+            for change in diff.changes
+        ],
+    )
+
+
+@router.post("/workflows/{workflow_id}/debug", response_model=WorkflowDebugResponse)
+async def debug_workflow(
+    project_id: UUID,
+    workflow_id: UUID,
+    payload: WorkflowDebugRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowDebugResponse:
+    result = await WorkflowService(session).debug_to_breakpoint(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+        environment_id=payload.environment_id,
+        version=payload.version,
+        runtime_variables=payload.runtime_variables,
+        runtime_headers=payload.runtime_headers,
+        breakpoint_node_id=payload.breakpoint_node_id,
+    )
+    return _debug_response(result, mode="breakpoint", target_node_id=payload.breakpoint_node_id)
+
+
 @router.post(
     "/workflows/{workflow_id}/executions",
     response_model=WorkflowExecutionResponse,
@@ -222,6 +282,26 @@ async def cancel_workflow_execution(
     return WorkflowExecutionResponse.model_validate(execution)
 
 
+@router.post(
+    "/workflow-executions/{execution_id}/nodes/{node_id}/replay",
+    response_model=WorkflowDebugResponse,
+)
+async def replay_workflow_node(
+    project_id: UUID,
+    execution_id: UUID,
+    node_id: str,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowDebugResponse:
+    result = await WorkflowService(session).replay_node(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        node_id=node_id,
+    )
+    return _debug_response(result, mode="replay", target_node_id=node_id)
+
+
 def _execution_detail(
     execution: WorkflowExecution,
     nodes: list[WorkflowNodeExecution],
@@ -231,4 +311,33 @@ def _execution_detail(
         execution=WorkflowExecutionResponse.model_validate(execution),
         nodes=[WorkflowNodeExecutionResponse.model_validate(node) for node in nodes],
         children=[WorkflowExecutionResponse.model_validate(child) for child in children],
+    )
+
+
+def _debug_response(
+    result: WorkflowRunResult,
+    *,
+    mode: str,
+    target_node_id: str,
+) -> WorkflowDebugResponse:
+    return WorkflowDebugResponse(
+        status=result.status,
+        mode=mode,
+        target_node_id=target_node_id,
+        context=result.context,
+        nodes=[
+            WorkflowDebugNodeResponse(
+                node_id=record.node_id,
+                node_type=record.node_type.value,
+                name=record.name,
+                status=record.status,
+                attempts=record.attempts,
+                output=record.output,
+                error_code=record.error_code,
+                error_message=record.error_message,
+                started_at=record.started_at,
+                completed_at=record.completed_at,
+            )
+            for record in result.records
+        ],
     )

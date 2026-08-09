@@ -4,8 +4,8 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import WorkflowDesigner from './WorkflowDesigner'
-import { addTypedNode, connectNodes } from './workflow-graph'
-import { apiDefinition, workflowDefinition } from '../test/fixtures'
+import { addTypedNode, autoLayoutWorkflow, connectNodes, pasteNode } from './workflow-graph'
+import { apiDefinition, workflow, workflowDefinition } from '../test/fixtures'
 import type { Artifact, WorkflowDefinition } from '../lib/api'
 
 describe('WorkflowDesigner', () => {
@@ -102,6 +102,71 @@ describe('WorkflowDesigner', () => {
     expect(addTypedNode(workflowDefinition, 'end', null).nodes.at(-1)?.type).toBe('end')
   })
 
+  it('adds version-pinned SubFlow and bounded ForEach nodes', () => {
+    const reference = { workflowId: workflow.id, workflowVersion: 3 }
+    const subflow = addTypedNode(workflowDefinition, 'subflow', null, reference)
+    expect(subflow.nodes.at(-1)?.config).toEqual({
+      workflow_id: workflow.id,
+      workflow_version: 3,
+    })
+    const loop = addTypedNode(workflowDefinition, 'for_each', null, reference)
+    expect(loop.nodes.at(-1)?.config).toMatchObject({
+      workflow_id: workflow.id,
+      workflow_version: 3,
+      source_node_id: 'end',
+      expression: 'body.items',
+      concurrency: 5,
+      fail_fast: true,
+    })
+  })
+
+  it('copies, pastes, automatically lays out, undoes, and redoes canvas changes', async () => {
+    const browser = userEvent.setup()
+    render(<DesignerHarness initial={workflowDefinition} />)
+
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    await browser.click(screen.getByRole('button', { name: /复制/ }))
+    await browser.click(screen.getByRole('button', { name: /粘贴/ }))
+    expect(screen.getByText('查询用户 副本')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /撤销/ }))
+    expect(screen.queryByText('查询用户 副本')).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('button', { name: /重做/ }))
+    expect(screen.getByText('查询用户 副本')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /自动布局/ }))
+
+    const pasted = pasteNode(workflowDefinition, workflowDefinition.nodes[1])
+    expect(pasted.nodes.at(-1)?.name).toBe('查询用户 副本')
+    expect(autoLayoutWorkflow(workflowDefinition).nodes.map((node) => node.position.x)).toEqual([
+      0, 240, 480,
+    ])
+  })
+
+  it('adds and configures published SubFlow and ForEach nodes', async () => {
+    const browser = userEvent.setup()
+    render(<DesignerHarness initial={advancedDefinition} />)
+
+    fireEvent.click(screen.getByTestId('rf__node-foreach'))
+    expect(screen.getByLabelText('固定版本')).toHaveValue('1')
+    expect(screen.getByLabelText('JMESPath 表达式')).toHaveValue('body.items')
+    expect(screen.getByLabelText('元素变量')).toHaveValue('item')
+    expect(screen.getByLabelText('索引变量')).toHaveValue('index')
+
+    await browser.clear(screen.getByLabelText('JMESPath 表达式'))
+    await browser.type(screen.getByLabelText('JMESPath 表达式'), 'body.users')
+    await browser.clear(screen.getByLabelText('元素变量'))
+    await browser.type(screen.getByLabelText('元素变量'), 'user')
+    await browser.clear(screen.getByLabelText('索引变量'))
+    await browser.type(screen.getByLabelText('索引变量'), 'position')
+    fireEvent.change(screen.getByLabelText('循环并发'), { target: { value: '8' } })
+    await browser.click(screen.getByText('首项失败即停止'))
+    await browser.click(screen.getByText('继续处理其他项'))
+
+    await browser.click(screen.getByRole('button', { name: /子流程/ }))
+    await browser.click(screen.getByRole('button', { name: /ForEach/ }))
+    expect(screen.getAllByText('子流程').length).toBeGreaterThan(1)
+    expect(screen.getByText('循环子流程')).toBeVisible()
+  })
+
   it('labels the first two condition edges and rejects a third branch', () => {
     const base: WorkflowDefinition = {
       ...workflowDefinition,
@@ -135,6 +200,7 @@ function DesignerHarness({ initial }: { initial: WorkflowDefinition }) {
       definition={definition}
       apis={[apiDefinition]}
       artifacts={[datasetArtifact]}
+      workflows={[workflow]}
       statuses={{}}
       editable
       onChange={setDefinition}
@@ -263,6 +329,36 @@ const controlDefinition: WorkflowDefinition = {
       condition: null,
       mappings: [],
     },
+  ],
+  settings: { fail_fast: true, concurrency: 20, default_timeout_seconds: 30 },
+}
+
+const advancedDefinition: WorkflowDefinition = {
+  schema_version: '1.0',
+  variables: {},
+  nodes: [
+    { id: 'start', type: 'start', name: '开始', position: { x: 0, y: 0 }, config: {} },
+    {
+      id: 'foreach',
+      type: 'for_each',
+      name: '批量用户',
+      position: { x: 240, y: 0 },
+      config: {
+        workflow_id: workflow.id,
+        workflow_version: 1,
+        source_node_id: 'start',
+        expression: 'body.items',
+        item_variable: 'item',
+        index_variable: 'index',
+        concurrency: 5,
+        fail_fast: true,
+      },
+    },
+    { id: 'end', type: 'end', name: '结束', position: { x: 480, y: 0 }, config: {} },
+  ],
+  edges: [
+    { id: 'start-loop', source: 'start', target: 'foreach', condition: null, mappings: [] },
+    { id: 'loop-end', source: 'foreach', target: 'end', condition: null, mappings: [] },
   ],
   settings: { fail_fast: true, concurrency: 20, default_timeout_seconds: 30 },
 }

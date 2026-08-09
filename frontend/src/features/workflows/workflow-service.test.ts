@@ -13,6 +13,8 @@ import {
 import { server } from '../../test/server'
 import {
   createWorkflow,
+  debugWorkflow,
+  diffWorkflowVersions,
   executeWorkflow,
   getWorkflowExecution,
   linearWorkflow,
@@ -22,6 +24,7 @@ import {
   listWorkflowExecutions,
   listWorkflows,
   publishWorkflow,
+  replayWorkflowNode,
   updateWorkflowDraft,
 } from './workflow-service'
 
@@ -52,6 +55,24 @@ describe('workflow service', () => {
       }),
       http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/versions`, () =>
         HttpResponse.json(workflowVersion),
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflows/${workflow.id}/versions/1/diff/2`, () =>
+        HttpResponse.json(versionDiff),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/workflows/${workflow.id}/debug`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({
+            environment_id: environment.id,
+            version: 1,
+            breakpoint_node_id: 'api',
+          })
+          return HttpResponse.json(debugResult)
+        },
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/workflow-executions/${workflowRunningExecution.id}/nodes/api/replay`,
+        () => HttpResponse.json({ ...debugResult, mode: 'replay' }),
       ),
       http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/executions`, () =>
         HttpResponse.json(workflowRunningExecution, { status: 202 }),
@@ -85,6 +106,13 @@ describe('workflow service', () => {
       await updateWorkflowDraft(project.id, workflow, workflow.draft_definition),
     ).toMatchObject({ draft_revision: 2 })
     expect(await publishWorkflow(project.id, workflow.id)).toEqual(workflowVersion)
+    expect(await diffWorkflowVersions(project.id, workflow.id, 1, 2)).toEqual(versionDiff)
+    expect(await debugWorkflow(project.id, workflow.id, environment.id, 1, 'api')).toEqual(
+      debugResult,
+    )
+    expect(await replayWorkflowNode(project.id, workflowRunningExecution.id, 'api')).toMatchObject({
+      mode: 'replay',
+    })
     expect(await executeWorkflow(project.id, workflow.id, environment.id)).toEqual(
       workflowRunningExecution,
     )
@@ -104,3 +132,17 @@ describe('workflow service', () => {
     expect(definition.nodes[1].config.api_definition_id).toBe(apiDefinition.id)
   })
 })
+
+const versionDiff = {
+  from_version: 1,
+  to_version: 2,
+  changes: [{ path: '$.nodes', before: [], after: [] }],
+}
+
+const debugResult = {
+  status: 'passed',
+  mode: 'breakpoint',
+  target_node_id: 'api',
+  context: {},
+  nodes: [],
+}

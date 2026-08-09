@@ -7,9 +7,11 @@ import {
   type Project,
   type Workflow,
   type WorkflowDefinition,
+  type WorkflowDebugResult,
   type WorkflowExecution,
   type WorkflowExecutionDetail,
   type WorkflowVersion,
+  type WorkflowVersionDiff,
 } from '../../lib/api'
 
 export async function listProjects(): Promise<Page<Project>> {
@@ -75,6 +77,47 @@ export async function publishWorkflow(
 ): Promise<WorkflowVersion> {
   const response = await apiClient.post<WorkflowVersion>(
     `/projects/${projectId}/workflows/${workflowId}/versions`,
+  )
+  return response.data
+}
+
+export async function diffWorkflowVersions(
+  projectId: string,
+  workflowId: string,
+  fromVersion: number,
+  toVersion: number,
+): Promise<WorkflowVersionDiff> {
+  const response = await apiClient.get<WorkflowVersionDiff>(
+    `/projects/${projectId}/workflows/${workflowId}/versions/${fromVersion}/diff/${toVersion}`,
+  )
+  return response.data
+}
+
+export async function debugWorkflow(
+  projectId: string,
+  workflowId: string,
+  environmentId: string,
+  version: number,
+  breakpointNodeId: string,
+): Promise<WorkflowDebugResult> {
+  const response = await apiClient.post<WorkflowDebugResult>(
+    `/projects/${projectId}/workflows/${workflowId}/debug`,
+    {
+      environment_id: environmentId,
+      version,
+      breakpoint_node_id: breakpointNodeId,
+    },
+  )
+  return response.data
+}
+
+export async function replayWorkflowNode(
+  projectId: string,
+  executionId: string,
+  nodeId: string,
+): Promise<WorkflowDebugResult> {
+  const response = await apiClient.post<WorkflowDebugResult>(
+    `/projects/${projectId}/workflow-executions/${executionId}/nodes/${nodeId}/replay`,
   )
   return response.data
 }

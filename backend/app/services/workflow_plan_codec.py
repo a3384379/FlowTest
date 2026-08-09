@@ -9,7 +9,7 @@ from app.domain.scopes import HeaderScope, VariableScope
 from app.engine.contracts import WorkflowDefinition
 from app.services.api_assets import PreparedHeader, PreparedRequest, PreparedVariable
 from app.services.executions import PreparedMultipart, PreparedUpload
-from app.services.workflow_runtime import PreparedWorkflowRequest
+from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
 from app.services.workflow_snapshots import PreparedExecution
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowRunPlan
 
@@ -59,6 +59,18 @@ class StoredPreparedExecution(BaseModel):
     snapshot: dict[str, JsonValue]
     requests: dict[str, StoredRequest]
     dataset_variables: dict[str, JsonValue]
+    subflows: dict[str, "StoredPreparedSubflow"] = Field(default_factory=dict)
+
+
+class StoredPreparedSubflow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workflow_id: UUID
+    workflow_version: int
+    fingerprint: str
+    definition: WorkflowDefinition
+    requests: dict[str, StoredRequest]
+    subflows: dict[str, "StoredPreparedSubflow"]
+    snapshot: dict[str, JsonValue]
 
 
 class StoredRunPlan(BaseModel):
@@ -130,6 +142,9 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
             requests={
                 name: _store_request(value) for name, value in plan.prepared.requests.items()
             },
+            subflows={
+                node_id: _store_subflow(value) for node_id, value in plan.prepared.subflows.items()
+            },
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
@@ -152,6 +167,18 @@ def _store_request(prepared: PreparedWorkflowRequest) -> StoredRequest:
         ],
         body_kind=prepared.body_kind,
         multipart=_store_multipart(prepared.multipart),
+    )
+
+
+def _store_subflow(prepared: PreparedSubflow) -> StoredPreparedSubflow:
+    return StoredPreparedSubflow(
+        workflow_id=prepared.workflow_id,
+        workflow_version=prepared.workflow_version,
+        fingerprint=prepared.fingerprint,
+        definition=prepared.definition,
+        requests={name: _store_request(value) for name, value in prepared.requests.items()},
+        subflows={node_id: _store_subflow(value) for node_id, value in prepared.subflows.items()},
+        snapshot=prepared.snapshot,
     )
 
 
@@ -184,6 +211,9 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
             requests={
                 name: _load_request(value) for name, value in stored.prepared.requests.items()
             },
+            subflows={
+                node_id: _load_subflow(value) for node_id, value in stored.prepared.subflows.items()
+            },
             dataset_variables=stored.prepared.dataset_variables,
         ),
         runtime_variables=stored.runtime_variables,
@@ -212,6 +242,18 @@ def _load_request(stored: StoredRequest) -> PreparedWorkflowRequest:
         ),
         body_kind=stored.body_kind,
         multipart=_load_multipart(stored.multipart),
+    )
+
+
+def _load_subflow(stored: StoredPreparedSubflow) -> PreparedSubflow:
+    return PreparedSubflow(
+        workflow_id=stored.workflow_id,
+        workflow_version=stored.workflow_version,
+        fingerprint=stored.fingerprint,
+        definition=stored.definition,
+        requests={name: _load_request(value) for name, value in stored.requests.items()},
+        subflows={node_id: _load_subflow(value) for node_id, value in stored.subflows.items()},
+        snapshot=stored.snapshot,
     )
 
 

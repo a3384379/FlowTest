@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
 
-import { activePassword, administratorEmail, bootstrapPassword, submitLogin } from './support/auth'
+import {
+  activePassword,
+  administratorEmail,
+  authenticationStatePath,
+  bootstrapPassword,
+  submitLogin,
+} from './support/auth'
 
 test('管理员登录并完成首次密码初始化', async ({ page }) => {
   await page.goto('/')
@@ -34,4 +41,6 @@ test('管理员登录并完成首次密码初始化', async ({ page }) => {
   }
 
   await expect(page.getByRole('heading', { name: '工作台' })).toBeVisible()
+  await mkdir('.playwright/.auth', { recursive: true })
+  await page.context().storageState({ path: authenticationStatePath })
 })

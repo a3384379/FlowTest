@@ -1,11 +1,14 @@
 import {
   ApartmentOutlined,
+  BugOutlined,
   CloudUploadOutlined,
+  DiffOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RedoOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import { useState } from 'react'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -26,10 +29,12 @@ export default function WorkflowsPage() {
     <>
       <WorkflowHeading state={state} onCreate={() => setCreateOpen(true)} />
       <WorkflowWorkspace state={state} />
-      <LatestRunCard result={state.lastResult} />
+      <LatestRunCard state={state} />
+      <DebugResultCard result={state.debugResult} />
       <Card title="工作流执行历史" className="workflow-result-card">
         <ExecutionTable items={state.executions.data?.items ?? []} />
       </Card>
+      <VersionDiffDialog state={state} />
       <CreateWorkflowDialog
         open={createOpen}
         submitting={state.creating}
@@ -43,14 +48,19 @@ export default function WorkflowsPage() {
 
 type WorkflowState = ReturnType<typeof useWorkflows>
 
-function LatestRunCard({ result }: { result: WorkflowState['lastResult'] }) {
+function LatestRunCard({ state }: { state: WorkflowState }) {
+  const result = state.lastResult
   const datasetChildren = result?.children ?? []
   return (
     <Card title="最近一次运行" className="workflow-result-card">
       {datasetChildren.length ? (
         <DatasetRunSummary items={datasetChildren} />
       ) : (
-        <NodeTable nodes={result?.nodes ?? []} />
+        <NodeTable
+          nodes={result?.nodes ?? []}
+          replaying={state.replaying}
+          onReplay={(nodeId) => void state.replayNode(nodeId)}
+        />
       )}
     </Card>
   )
@@ -117,7 +127,7 @@ function WorkflowWorkspace({ state }: { state: WorkflowState }) {
 
 function DraftActions({ state }: { state: WorkflowState }) {
   return (
-    <Space>
+    <Space wrap>
       <Button
         icon={<SaveOutlined />}
         disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
@@ -143,6 +153,30 @@ function DraftActions({ state }: { state: WorkflowState }) {
       >
         运行
       </Button>
+      <Select
+        aria-label="调试断点"
+        className="workflow-breakpoint-select"
+        value={state.breakpointNodeId}
+        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
+        options={state.breakpointNodes.map((node) => ({ value: node.id, label: node.name }))}
+        onChange={state.setBreakpointSelection}
+      />
+      <Button
+        icon={<BugOutlined />}
+        disabled={!canExecute(state) || !state.breakpointNodeId}
+        loading={state.debugging}
+        onClick={() => void state.debugToBreakpoint()}
+      >
+        调试至断点
+      </Button>
+      <Button
+        icon={<DiffOutlined />}
+        disabled={(state.selectedWorkflow?.current_version ?? 0) < 2}
+        loading={state.comparing}
+        onClick={() => void state.compareLatestVersions()}
+      >
+        版本 Diff
+      </Button>
     </Space>
   )
 }
@@ -157,9 +191,11 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         <PublishedTag version={workflow.current_version} />
       </Space>
       <WorkflowDesigner
+        key={workflow.id}
         definition={state.designerDefinition}
         apis={state.apis.data?.items ?? []}
         artifacts={state.artifacts.data?.items ?? []}
+        workflows={(state.workflows.data?.items ?? []).filter((item) => item.id !== workflow.id)}
         statuses={state.nodeStatuses}
         editable={!state.activeExecutionId}
         onChange={state.setDraftDefinition}
@@ -221,10 +257,23 @@ function WorkflowTable({
   )
 }
 
-function NodeTable({ nodes }: { nodes: WorkflowNodeExecution[] }) {
+type DisplayNode = Pick<
+  WorkflowNodeExecution,
+  'node_id' | 'node_type' | 'name' | 'status' | 'attempts' | 'error_message'
+>
+
+function NodeTable({
+  nodes,
+  replaying = false,
+  onReplay,
+}: {
+  nodes: DisplayNode[]
+  replaying?: boolean
+  onReplay?: (nodeId: string) => void
+}) {
   return (
     <Table
-      rowKey="id"
+      rowKey="node_id"
       size="small"
       pagination={false}
       dataSource={nodes}
@@ -240,8 +289,58 @@ function NodeTable({ nodes }: { nodes: WorkflowNodeExecution[] }) {
         },
         { title: '尝试次数', dataIndex: 'attempts', width: 100 },
         { title: '错误', dataIndex: 'error_message' },
+        ...(onReplay
+          ? [
+              {
+                title: '操作',
+                width: 100,
+                render: (_value: unknown, node: DisplayNode) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<RedoOutlined />}
+                    loading={replaying}
+                    onClick={() => onReplay(node.node_id)}
+                  >
+                    重放
+                  </Button>
+                ),
+              },
+            ]
+          : []),
       ]}
     />
+  )
+}
+
+function DebugResultCard({ result }: { result: WorkflowState['debugResult'] }) {
+  if (!result) return null
+  return (
+    <Card
+      title={result.mode === 'breakpoint' ? '断点调试结果' : '节点重放结果'}
+      className="workflow-result-card"
+      extra={<Tag color={result.status === 'passed' ? 'green' : 'red'}>{result.status}</Tag>}
+    >
+      <NodeTable nodes={result.nodes} />
+    </Card>
+  )
+}
+
+function VersionDiffDialog({ state }: { state: WorkflowState }) {
+  return (
+    <Modal
+      title="工作流版本 Diff"
+      open={Boolean(state.versionDiff)}
+      footer={null}
+      destroyOnHidden
+      onCancel={state.closeVersionDiff}
+    >
+      {state.versionDiff && (
+        <pre className="workflow-version-diff">
+          {JSON.stringify(state.versionDiff.changes, null, 2)}
+        </pre>
+      )}
+    </Modal>
   )
 }
 

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+import { authenticationStatePath } from './e2e/support/auth'
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -26,6 +28,7 @@ export default defineConfig({
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
+        storageState: authenticationStatePath,
       },
     },
   ],

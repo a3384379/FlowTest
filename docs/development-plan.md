@@ -106,7 +106,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 已完成 |
 | S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 已完成 |
 | S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 已完成 |
-| S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 待实施 |
+| S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 已完成 |
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 待实施 |
 | S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 待实施 |
 | S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 待实施 |
@@ -144,3 +144,13 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 5. Web 新增“测试资产”深链接，覆盖用例/套件编辑、发布、Diff、克隆和批量移动；任务中心可直接选择已发布 Workflow、Case 或 Suite。
 6. `20260810_0012` 已在真实 PostgreSQL 完成 0011→0012→0011→0012 往返及 Alembic 漂移检查；后端总覆盖率 90.14%，执行引擎 Mapping/Control/Scheduler 分别为 100%/98%/97%，前端覆盖率四项均超过 80%。
 7. Playwright 打通“用例两次发布与 Diff → 克隆 → 套件发布 → Test Plan 固定套件目标”，并保持 S14 与 V1 浏览器主路径兼容。
+
+## S16 完成清单
+
+1. Node SDK V2 使用带类型的 Handler Registry 隔离调度器与节点实现；Celery 继续只恢复固定执行计划并调用独立异步引擎。
+2. SubFlow 固定同项目已发布版本；父 Snapshot 递归保存子流程定义、指纹、API 和下级引用，发布时禁止递归并限制最大深度 5。
+3. ForEach 使用安全 JMESPath 从上游输出取得数组，限制最多 1000 项、默认并发 5、最大 20，并支持 fail-fast 与继续后汇总失败。
+4. 工作流版本 Diff 返回稳定字段路径；断点调试裁剪至目标祖先子图，节点重放从原 Execution 加密计划恢复，两者统一脱敏和审计。
+5. React Flow 画布支持 SubFlow/ForEach 配置、复制粘贴、50 步撤销重做与拓扑自动布局，选择态不会污染定义历史。
+6. 当前明确拒绝把含 Dataset 节点的 Workflow 作为 SubFlow；嵌套 Dataset 在定义父执行/行执行/循环项的兼容持久化协议后再开放。
+7. 后端单元/服务/引擎测试、前端交互测试和 Playwright 真实链路覆盖递归拒绝、固定快照、循环并发、版本 Diff、断点与重放。
