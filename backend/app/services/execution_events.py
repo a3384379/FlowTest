@@ -1,8 +1,8 @@
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -65,7 +65,10 @@ class RedisExecutionEventBus:
         return stored
 
     async def _history(self, execution_id: UUID) -> list[ExecutionEvent]:
-        values = await self._client.lrange(_history_key(execution_id), 0, -1)
+        values = await cast(
+            Awaitable[list[str]],
+            self._client.lrange(_history_key(execution_id), 0, -1),
+        )
         return [ExecutionEvent.model_validate(json.loads(value)) for value in values]
 
     async def subscribe(

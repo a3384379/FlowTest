@@ -38,6 +38,10 @@ class WorkflowRunCoordinator:
         self._tasks[plan.execution_id] = task
         task.add_done_callback(lambda _completed: self._tasks.pop(plan.execution_id, None))
 
+    async def run_now(self, plan: WorkflowExecutionPlan) -> None:
+        """Run a persisted plan in the current worker event loop."""
+        await self._run(plan)
+
     async def wait_for(self, execution_id: UUID) -> None:
         task = self._tasks.get(execution_id)
         if task is not None:

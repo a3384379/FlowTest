@@ -5,6 +5,7 @@ import {
   DashboardOutlined,
   FolderOpenOutlined,
   LogoutOutlined,
+  ScheduleOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { Avatar, Button, Layout, Menu, Space, Spin, Tag, Typography } from 'antd'
@@ -17,9 +18,10 @@ import { useAuthStore } from './features/auth/auth-store'
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
+const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 
 const { Header, Content, Sider } = Layout
-type PageKey = 'dashboard' | 'apis' | 'workflows'
+type PageKey = 'dashboard' | 'apis' | 'workflows' | 'tasks'
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -58,6 +60,7 @@ function AuthenticatedShell() {
             { key: 'projects', icon: <FolderOpenOutlined />, label: '项目管理', disabled: true },
             { key: 'apis', icon: <ApiOutlined />, label: '接口管理' },
             { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排' },
+            { key: 'tasks', icon: <ScheduleOutlined />, label: '任务执行' },
             { key: 'reports', icon: <BarChartOutlined />, label: '测试报告', disabled: true },
           ]}
         />
@@ -79,6 +82,7 @@ function AuthenticatedShell() {
             {page === 'dashboard' && <DashboardPage />}
             {page === 'apis' && <ApiConsolePage />}
             {page === 'workflows' && <WorkflowsPage />}
+            {page === 'tasks' && <TestPlansPage />}
           </Suspense>
         </Content>
       </Layout>

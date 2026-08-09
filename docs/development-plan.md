@@ -18,9 +18,9 @@
 | S5（已完成） | Workflow 数据模型与执行内核 | Workflow/Version、Node/Edge、Snapshot；DAG 校验；ExecutionContext；失败传播、超时、重试和取消 | 循环、悬空边、缺失配置可在运行前定位；历史执行绑定不可变快照；串并行行为测试通过 |
 | S6（已完成） | 可视化流程最小闭环 | React Flow 画布；Start/API/End 节点；拖拽、连线、保存；DAG 串行/并行执行；Redis Pub/Sub + WebSocket 状态推送 | 可视化搭建 A→B/C→D 并按依赖并行运行，节点状态实时可见 |
 | S7（已完成） | V0.3 字段映射、控制节点与数据驱动 | Extract、Assert、Condition、Delay、Dataset；结构化字段绑定；变量来源追踪；CSV/JSON/Excel 行级执行 | A 响应可映射到 B 请求；条件分支、跳过、断言和数据行子执行可解释 |
-| S8（第 17～18 周） | 测试计划与任务系统 | Test Plan；批量/手工执行；Redis 队列和 Worker；重试、取消；定时任务 | API 服务与 Worker 解耦；计划可排队、取消和重试且状态一致 |
+| S8（已完成） | 测试计划与任务系统 | Test Plan；批量/手工执行；Celery Worker/Beat；重试、取消；定时任务；CI Token 与签名 Webhook | API 与 Worker 解耦；计划可排队、取消、重试、定时和外部触发且状态一致 |
 | S9（第 19～20 周） | V0.4 报告与执行中心 | 执行中心；步骤级报告；失败分类；趋势；WebSocket；HTML 导出 | 报告可从汇总下钻到脱敏请求/响应、提取和断言；失败可定位到节点 |
-| S10（第 21～22 周） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；CI/Webhook 触发；通知接口 | 权限矩阵通过；导入变更可审阅选择；外部系统可安全触发并查询结果 |
+| S10（第 21～22 周） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；Secret 与 SSRF 加固；限流和幂等 | 权限矩阵通过；导入变更可审阅选择；安全边界和操作一致性测试通过 |
 | S11（第 23～24 周） | V1.0 内部发布 | 性能与容量测试；SSRF/Secret/限流加固；备份恢复；部署手册；试点迁移 | 试点项目连续运行 2 周；P0 缺陷清零；回滚、恢复和告警演练通过 |
 
 ## S7 完成清单
@@ -31,6 +31,15 @@
 4. 字段映射支持 A 响应到 B 的 Query/Header/Body/Variable，持久化脱敏映射轨迹。
 5. React Flow 节点库、属性面板、条件边、数据集选择、运行聚合及行为测试已完成。
 6. Compose 验收覆盖两行数据的真假分支、映射、变量来源和父级聚合。
+
+## S8 完成清单
+
+1. Celery Worker 仅接收执行 ID，使用 `asyncio.Runner` 加载 AES-256-GCM 加密计划并调用独立执行引擎。
+2. Celery Beat 领取数据库中的到期计划；Compose 为 Worker 和 Beat 提供独立服务、健康检查和固定 Redis broker/backend。
+3. Test Plan 支持最多 100 个固定版本执行项、默认并发 5、应用失败重试、批量聚合和取消传播。
+4. 手动、定时、CI Token 和 HMAC-SHA256 Webhook 触发共享持久化 Run/Run Item 状态机。
+5. CI Token 固定项目和 `execute:workflow`/`execute:test-plan` 范围，仅保存摘要并支持吊销。
+6. Web 任务中心支持计划创建、队列观察、取消、CI Token 和一次性 Webhook Secret 展示。
 
 ## 版本验收门槛
 

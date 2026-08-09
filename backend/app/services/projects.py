@@ -249,6 +249,9 @@ class ProjectService:
                 code="PROJECT_FORBIDDEN", message="仅项目 Owner 可管理成员", status_code=403
             )
 
+    async def authorize_owner(self, *, actor: User, project_id: UUID) -> None:
+        await self._authorize_owner(actor=actor, project_id=project_id)
+
     async def _validate_parent(self, *, project_id: UUID, parent_id: UUID | None) -> None:
         if parent_id is None:
             return

@@ -1,3 +1,21 @@
+x-flowtest-environment: &flowtest-environment
+  FLOWTEST_ENVIRONMENT: local
+  FLOWTEST_DEBUG: "true"
+  FLOWTEST_SECRET_KEY: ${FLOWTEST_SECRET_KEY:-local-development-only-change-before-production}
+  FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: ${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL:-admin@flowtest.dev}
+  FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD:-FlowTest-Change-Me-123!}
+  FLOWTEST_SECURE_COOKIES: "false"
+  FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_DATA_ENCRYPTION_KEY:-Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI=}
+  FLOWTEST_CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+  FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:flowtest@postgres:5432/flowtest
+  FLOWTEST_REDIS_URL: redis://redis:6379/0
+  FLOWTEST_CELERY_BROKER_URL: redis://redis:6379/1
+  FLOWTEST_CELERY_RESULT_BACKEND: redis://redis:6379/2
+  FLOWTEST_S3_ENDPOINT_URL: http://minio:9000
+  FLOWTEST_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-flowtest}
+  FLOWTEST_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-flowtest-local-secret}
+  FLOWTEST_S3_BUCKET: flowtest-artifacts
+
 services:
   postgres:
     image: postgres:17.6-alpine
@@ -64,21 +82,7 @@ services:
   backend:
     build:
       context: ./backend
-    environment:
-      FLOWTEST_ENVIRONMENT: local
-      FLOWTEST_DEBUG: "true"
-      FLOWTEST_SECRET_KEY: ${FLOWTEST_SECRET_KEY:-local-development-only-change-before-production}
-      FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: ${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL:-admin@flowtest.dev}
-      FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD:-FlowTest-Change-Me-123!}
-      FLOWTEST_SECURE_COOKIES: "false"
-      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_DATA_ENCRYPTION_KEY:-Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI=}
-      FLOWTEST_CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
-      FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:flowtest@postgres:5432/flowtest
-      FLOWTEST_REDIS_URL: redis://redis:6379/0
-      FLOWTEST_S3_ENDPOINT_URL: http://minio:9000
-      FLOWTEST_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-flowtest}
-      FLOWTEST_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-flowtest-local-secret}
-      FLOWTEST_S3_BUCKET: flowtest-artifacts
+    environment: *flowtest-environment
     ports:
       - "8000:8000"
     healthcheck:
@@ -98,6 +102,56 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasking.celery_app.celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${FLOWTEST_WORKER_CONCURRENCY:-4}",
+        "--hostname=worker@%h",
+      ]
+    environment: *flowtest-environment
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasking.celery_app.celery_app",
+        "beat",
+        "--loglevel=INFO",
+        "--pidfile=/tmp/celerybeat.pid",
+        "--schedule=/tmp/celerybeat-schedule",
+      ]
+    environment: *flowtest-environment
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $$(cat /tmp/celerybeat.pid)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      worker:
         condition: service_healthy
 
   frontend:

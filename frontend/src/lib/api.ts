@@ -226,6 +226,61 @@ export type WorkflowExecutionDetail = {
   children: WorkflowExecution[]
 }
 
+export type TestPlanItem = {
+  id: string
+  workflow_id: string
+  environment_id: string
+  workflow_version: number
+  position: number
+  max_retries: number
+  runtime_variables: Record<string, string>
+  runtime_headers: Record<string, string>
+}
+
+export type TestPlan = {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  enabled: boolean
+  schedule_interval_seconds: number | null
+  next_run_at: string | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+  items: TestPlanItem[]
+}
+
+export type CreatedTestPlan = TestPlan & { webhook_secret: string }
+
+export type TestPlanRun = {
+  id: string
+  project_id: string
+  test_plan_id: string
+  requested_by_id: string
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
+  trigger_type: 'manual' | 'schedule' | 'ci' | 'webhook'
+  cancel_requested_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  error_message: string | null
+  created_at: string
+}
+
+export type ServiceToken = {
+  id: string
+  project_id: string
+  name: string
+  token_prefix: string
+  scopes: Array<'execute:workflow' | 'execute:test-plan'>
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+export type CreatedServiceToken = ServiceToken & { token: string }
+
 export type ExecutionEvent = {
   sequence: number
   type: 'execution.started' | 'node.status' | 'execution.completed'

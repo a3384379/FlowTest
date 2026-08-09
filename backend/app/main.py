@@ -14,7 +14,8 @@ from app.core.storage import ensure_storage_bucket
 from app.middleware.trace import TraceIdMiddleware
 from app.services.auth import bootstrap_administrator
 from app.services.execution_events import RedisExecutionEventBus
-from app.services.workflow_coordinator import WorkflowRunCoordinator
+from app.tasking.celery_app import celery_app
+from app.tasking.dispatch import CeleryTaskDispatcher
 
 
 @asynccontextmanager
@@ -26,12 +27,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         redis_client,
         retention_seconds=settings.workflow_event_retention_seconds,
     )
-    coordinator = WorkflowRunCoordinator(session_factory, event_bus)
+    dispatcher = CeleryTaskDispatcher(celery_app)
     application.state.database_session_factory = session_factory
     application.state.execution_event_bus = event_bus
-    application.state.workflow_run_coordinator = coordinator
+    application.state.workflow_run_coordinator = dispatcher
+    application.state.test_plan_dispatcher = dispatcher
     yield
-    await coordinator.shutdown()
     await close_redis()
     await close_database()
 

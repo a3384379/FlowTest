@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, cast
 
 import jwt
 from fastapi import Depends, Request
@@ -10,7 +10,7 @@ from app.core.errors import AppError
 from app.core.security import token_service
 from app.models.access import User
 from app.repositories.access import UserRepository
-from app.services.workflow_coordinator import WorkflowRunCoordinator
+from app.tasking.dispatch import TestPlanDispatcher, WorkflowDispatcher
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -59,15 +59,29 @@ async def require_system_admin(current_user: CurrentUser) -> User:
 SystemAdministrator = Annotated[User, Depends(require_system_admin)]
 
 
-def get_workflow_coordinator(request: Request) -> WorkflowRunCoordinator:
+def get_workflow_coordinator(request: Request) -> WorkflowDispatcher:
     coordinator = getattr(request.app.state, "workflow_run_coordinator", None)
-    if not isinstance(coordinator, WorkflowRunCoordinator):
+    if coordinator is None or not callable(getattr(coordinator, "start", None)):
         raise AppError(
             code="WORKFLOW_RUNNER_UNAVAILABLE",
             message="工作流运行服务尚未就绪",
             status_code=503,
         )
-    return coordinator
+    return cast(WorkflowDispatcher, coordinator)
 
 
-WorkflowCoordinator = Annotated[WorkflowRunCoordinator, Depends(get_workflow_coordinator)]
+WorkflowCoordinator = Annotated[WorkflowDispatcher, Depends(get_workflow_coordinator)]
+
+
+def get_test_plan_dispatcher(request: Request) -> TestPlanDispatcher:
+    dispatcher = getattr(request.app.state, "test_plan_dispatcher", None)
+    if dispatcher is None or not callable(getattr(dispatcher, "start_test_plan", None)):
+        raise AppError(
+            code="TASK_QUEUE_UNAVAILABLE",
+            message="后台任务队列尚未就绪",
+            status_code=503,
+        )
+    return cast(TestPlanDispatcher, dispatcher)
+
+
+TestPlanQueue = Annotated[TestPlanDispatcher, Depends(get_test_plan_dispatcher)]
