@@ -1,7 +1,7 @@
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import DateTime, MetaData, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 NAMING_CONVENTION = {
@@ -27,4 +27,4 @@ class TimestampMixin:
 
 
 class UuidPrimaryKeyMixin:
-    id: Mapped[UUID]
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

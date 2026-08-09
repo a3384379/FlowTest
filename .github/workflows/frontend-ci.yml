@@ -39,3 +39,6 @@ jobs:
       - name: Build
         working-directory: frontend
         run: pnpm build
+      - name: Dependency audit
+        working-directory: frontend
+        run: pnpm audit --audit-level high

@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
-    secret_key: str = "change-me-before-production"
+    secret_key: str = "change-me-before-production-at-least-32-bytes"
+    access_token_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_token_days: int = Field(default=7, ge=1, le=30)
+    bootstrap_admin_email: str = "admin@flowtest.dev"
+    bootstrap_admin_password: str = "FlowTest-Change-Me-123!"
+    secure_cookies: bool = False
     cors_origins: list[str] = ["http://localhost:5173"]
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"
