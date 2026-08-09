@@ -18,8 +18,11 @@
 | 恶意导入与文件 | 文档解析限制、50 MB 上限、对象 key 服务端生成、Manifest 文件名编码与哈希校验 |
 | 重放、重复执行与洪泛 | Idempotency-Key、Webhook 时间窗/HMAC、Redis 分桶限流、CI Token scope |
 | 工作流历史篡改 | 不可变 Version/Snapshot、审计 Trace ID、发布前 DAG/配置校验 |
-| 供应链与镜像漏洞 | uv/pnpm 锁、依赖审计、Ruff 安全规则、Action SHA 固定、Docker Scout 高危/严重扫描 |
+| 供应链与镜像漏洞 | uv/pnpm 锁、依赖审计、Ruff 安全规则、Action SHA 固定、Grype 高危/严重扫描 |
 | 备份篡改或恢复失败 | PostgreSQL custom dump、MinIO SHA-256 Manifest、隔离卷自动恢复验证 |
+
+临时扫描例外必须记录在 [漏洞例外台账](vulnerability-exceptions.md)，包含范围、原因、补偿控制、
+责任人与到期日；Critical 漏洞不得例外。
 
 ## 残余风险
 

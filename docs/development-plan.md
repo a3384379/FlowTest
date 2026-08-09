@@ -65,7 +65,7 @@
 2. `/api/v1/metrics` 暴露归一化 HTTP 指标和执行状态指标；Compose 服务具有健康检查、持久卷和 CPU/内存限制，Nginx 提供 TLS 1.2/1.3 接入模板。
 3. 容量脚本以并发 30 执行 300 个请求，要求零失败且 P95 不超过 500 ms；本地 ARM64 验收实际 P95 为 153 ms。
 4. PostgreSQL custom-format dump 与 MinIO manifest/SHA-256 备份可在隔离容器和隔离卷中完整恢复，并逐个校验对象哈希。
-5. Ruff 安全规则、依赖审计、ShellCheck 和 Docker Scout 镜像扫描进入 CI；Backend、Frontend 和 Mock 最终镜像均无可修复 Critical/High 漏洞。
+5. Ruff 安全规则、依赖审计、ShellCheck 和 Grype 镜像扫描进入 CI；未登记的可修复 Critical/High 漏洞会阻止发布，Python 3.12 暂无兼容补丁的 High 项进入有到期日的公开例外台账。
 6. S11 Compose 冒烟打通登录、令牌提取、查询用户、创建订单、断言和脱敏报告，并覆盖失败、重试、超时、并行、取消、Viewer 拒绝、指标和清理；Playwright 固化登录、治理、报告与主菜单验收。
 
 ## 版本验收门槛

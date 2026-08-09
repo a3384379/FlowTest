@@ -46,26 +46,29 @@ jobs:
           docker build -t flowtest-frontend:ci frontend
           docker build -t flowtest-mock-target:ci mock-target
       - name: Scan backend image
-        uses: docker/scout-action@481412c8b8de36d0f79e85aa382c60397466feb6 # v1
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          command: cves
-          image: local://flowtest-backend:ci
-          only-severities: critical,high
+          image: flowtest-backend:ci
+          severity-cutoff: high
           only-fixed: true
-          exit-code: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
       - name: Scan frontend image
-        uses: docker/scout-action@481412c8b8de36d0f79e85aa382c60397466feb6 # v1
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          command: cves
-          image: local://flowtest-frontend:ci
-          only-severities: critical,high
+          image: flowtest-frontend:ci
+          severity-cutoff: high
           only-fixed: true
-          exit-code: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
       - name: Scan mock target image
-        uses: docker/scout-action@481412c8b8de36d0f79e85aa382c60397466feb6 # v1
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          command: cves
-          image: local://flowtest-mock-target:ci
-          only-severities: critical,high
+          image: flowtest-mock-target:ci
+          severity-cutoff: high
           only-fixed: true
-          exit-code: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml

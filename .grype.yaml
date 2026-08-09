@@ -1,0 +1,27 @@
+show-suppressed: true
+
+# Python 3.12 is a fixed V1.0 platform constraint. Grype currently reports the
+# following CPython advisories as "fixed" only in newer interpreter branches,
+# not in a compatible 3.12 patch. Every exception is tracked in the repository
+# security ledger and must be removed when the next 3.12 security image ships.
+ignore:
+  - vulnerability: CVE-2026-7210
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-11940
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-15308
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-6100
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-4224
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-11972
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-3644
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-9669
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-3298
+    package: { name: python, version: 3.12.13, type: binary }
+  - vulnerability: CVE-2026-4786
+    package: { name: python, version: 3.12.13, type: binary }

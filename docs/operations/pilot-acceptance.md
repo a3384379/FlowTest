@@ -22,13 +22,13 @@
 
 | 门槛 | 结果 |
 |---|---|
-| Backend | 110 passed、2 skipped，覆盖率 89.53% |
+| Backend | 110 passed、2 skipped，覆盖率 89.56% |
 | Frontend | 34 passed；语句 83.56%、分支 76.92%、函数 81.81%、行 85.38% |
 | 真实迁移 | PostgreSQL `upgrade → downgrade → upgrade` 与 Alembic 漂移检查通过 |
 | Mock 业务链路 | 登录、令牌提取、并行查询/下单、断言、脱敏报告通过 |
 | 失败行为 | 5xx 重试、超时分类、依赖并行、运行中取消通过 |
 | 安全治理 | Viewer 拒绝、Secret/Token 脱敏、SSRF、限流、幂等、审计通过 |
-| 镜像安全 | Backend、Frontend、Mock 可修复 Critical/High 漏洞均为 0 |
+| 镜像安全 | 未登记的可修复 Critical/High 为 0；Python 3.12 的 10 项 High 兼容性例外公开登记并设到期日 |
 | 容量 | 300 请求、并发 30、0 失败、P95 153 ms、约 539.25 req/s |
 | 备份恢复 | PostgreSQL 与 21 个 MinIO 对象在隔离卷恢复，全部哈希验证通过 |
 | 中文 Web | Playwright 登录/会话、保留策略、安全白名单、审计日志、脱敏报告下钻与主菜单验收通过 |

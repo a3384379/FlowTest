@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import Select, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.logging import redact
@@ -109,7 +110,14 @@ async def test_metrics_are_low_cardinality_and_include_execution_gauges() -> Non
     assert 'path="/api/v1/projects/{id}/reports"' in rendered
     assert 'status="200"' in rendered
     assert "flowtest_execution_records" in rendered
+    unavailable = await render_metrics(registry, cast(AsyncSession, UnavailableSession()))
+    assert "flowtest_execution_metrics_available 0" in unavailable
     await engine.dispose()
+
+
+class UnavailableSession:
+    async def execute(self, _statement: Select[tuple[object, ...]]) -> None:
+        raise OSError("database is unavailable")
 
 
 def test_workflow_response_secret_is_available_only_before_persistence_redaction() -> None:

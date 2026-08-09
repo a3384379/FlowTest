@@ -99,7 +99,7 @@ async def render_metrics(registry: MetricsRegistry, session: AsyncSession) -> st
             for status, count in sorted(rows):
                 labels = _labels(kind=kind, status=str(status))
                 lines.append(f"flowtest_execution_records{{{labels}}} {int(count)}")
-    except SQLAlchemyError:
+    except (OSError, SQLAlchemyError):
         lines.extend(
             [
                 "# HELP flowtest_execution_metrics_available Execution store metrics availability.",
