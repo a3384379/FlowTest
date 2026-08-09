@@ -16,6 +16,7 @@ import type {
 } from '../lib/api'
 import { project } from '../test/fixtures'
 import { server } from '../test/server'
+import ProjectTestProvider from '../test/ProjectTestProvider'
 import ReportsPage from './ReportsPage'
 
 const execution: ReportExecution = {
@@ -209,7 +210,9 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ReportsPage />
+        <ProjectTestProvider section="reports">
+          <ReportsPage />
+        </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )

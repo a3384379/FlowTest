@@ -3,6 +3,7 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage, type ExecutionDetail, type ImportRun } from '../../lib/api'
+import { useProjectContext } from '../projects/use-project-context'
 import {
   createApi,
   createEnvironment,
@@ -15,7 +16,6 @@ import {
   listArtifacts,
   listEnvironments,
   listExecutions,
-  listProjects,
   uploadArtifact,
   type CreateApiInput,
   type CreateEnvironmentInput,
@@ -25,15 +25,13 @@ import {
 export function useApiConsole() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [projectSelection, setProjectSelection] = useState<string | null>(null)
+  const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | null>(null)
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [result, setResult] = useState<ExecutionDetail | null>(null)
   const [lastImport, setLastImport] = useState<ImportRun | null>(null)
 
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listProjects })
-  const projectId = selectedOrFirst(projectSelection, projects.data?.items)
   const environments = useQuery({
     queryKey: ['environments', projectId],
     queryFn: () => listEnvironments(requiredId(projectId)),
@@ -107,7 +105,7 @@ export function useApiConsole() {
   })
 
   function selectProject(value: string) {
-    setProjectSelection(value)
+    selectContextProject(value)
     setEnvironmentSelection(null)
     setApiSelection(null)
     setResult(null)

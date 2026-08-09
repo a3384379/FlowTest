@@ -57,6 +57,14 @@ body {
   padding: 28px;
 }
 
+.global-project-select {
+  min-width: 190px;
+}
+
+.page-breadcrumb {
+  margin-bottom: 16px;
+}
+
 .page-heading {
   display: flex;
   align-items: flex-start;
@@ -83,6 +91,16 @@ body {
 
 .trend-card {
   min-height: 260px;
+}
+
+.dashboard-trend-chart {
+  width: 100%;
+  height: 210px;
+}
+
+.dashboard-pass-rate {
+  display: grid;
+  gap: 6px;
 }
 
 .full-width {

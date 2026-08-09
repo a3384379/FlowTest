@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router-dom'
 import zhCN from 'antd/locale/zh_CN'
 
 import App from './App'
@@ -27,7 +28,9 @@ createRoot(document.getElementById('root')!).render(
     >
       <AntdApp>
         <QueryClientProvider client={queryClient}>
-          <App />
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
         </QueryClientProvider>
       </AntdApp>
     </ConfigProvider>

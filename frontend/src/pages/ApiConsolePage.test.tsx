@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import ApiConsolePage from './ApiConsolePage'
 import { apiDefinition, environment, executionDetail, project } from '../test/fixtures'
 import { server } from '../test/server'
+import ProjectTestProvider from '../test/ProjectTestProvider'
 
 describe('ApiConsolePage', () => {
   it('runs an API and renders its assertion and history', async () => {
@@ -61,7 +62,9 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ApiConsolePage />
+        <ProjectTestProvider section="apis">
+          <ApiConsolePage />
+        </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )
