@@ -2,11 +2,11 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S7 数据驱动与控制节点（V0.3）`。
+当前状态：`S8 测试计划与任务系统（V0.3）`。
 
 ## 技术栈
 
-- 后端：Python 3.12、FastAPI、Pydantic、SQLAlchemy、HTTPX
+- 后端：Python 3.12、FastAPI、Pydantic、SQLAlchemy、HTTPX、Celery/Beat
 - 前端：React 19、TypeScript、Vite、Ant Design、React Flow
 - 数据：PostgreSQL、Redis、MinIO/S3
 - 部署：Docker Compose、Nginx
@@ -83,6 +83,13 @@ JMESPath 源路径和 Query/Header/Body/Variable 目标位置。条件节点固�
 Excel 数据集固定到执行 Snapshot，每行生成一个可下钻子执行，默认并发 5、最多 1000 行；
 父执行聚合行级状态，Execution Context 保留 Workflow/Dataset/Runtime 变量值与来源。
 
+S8 已将执行平面迁移到 Celery Worker：API 只持久化 AES-256-GCM 加密运行计划并发送执行 ID，
+Worker 通过 `asyncio.Runner` 恢复固定快照后调用独立异步执行引擎。Test Plan 支持批量执行、
+失败重试、取消传播和 Celery Beat 定时间隔；每次运行复制固定 Workflow Version、Environment 和
+Runtime 配置。项目 Owner 可创建只显示一次、只保存摘要的 CI Token，并限制
+`execute:workflow`/`execute:test-plan` 范围；签名 Webhook 使用五分钟时间窗拒绝过期请求。
+Web 管理端新增“任务执行”页面，用于创建计划、查看队列、取消和生成外部触发凭据。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -99,6 +106,9 @@ multipart 上传、二进制响应外置、文件断言和受权下载。macOS �
 
 运行 `uv run --project backend python scripts/smoke_s7.py` 可验收 JSON 数据集父子执行、字段映射、
 提取、断言、真假条件分支、跳过原因、汇合语义和变量来源追踪。
+
+运行 `uv run --project backend python scripts/smoke_s8.py` 可验收真实 Celery Worker 执行、双工作流
+测试计划、CI Token、签名 Webhook、Beat 调度配置和跨 Worker 取消传播。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

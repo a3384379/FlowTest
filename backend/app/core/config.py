@@ -13,13 +13,18 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "0.2.0"
+    app_version: str = "0.3.0"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_result_backend: str = "redis://localhost:6379/2"
+    scheduler_poll_seconds: int = Field(default=15, ge=5, le=300)
+    test_plan_concurrency: int = Field(default=5, ge=1, le=20)
+    webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=3600)
     workflow_event_retention_seconds: int = Field(default=86_400, ge=60, le=604_800)
     secret_key: str = "change-me-before-production-at-least-32-bytes"
     access_token_minutes: int = Field(default=15, ge=1, le=60)

@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -100,6 +101,8 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    run_payload_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    run_payload_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
 
 
 class WorkflowNodeExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):

@@ -12,6 +12,7 @@ from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.engine.contracts import (
@@ -82,7 +83,7 @@ WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
 
 
 class WorkflowService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
         self._session = session
         self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
@@ -90,6 +91,7 @@ class WorkflowService:
         self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
+        self._secrets = secrets
 
     async def list_workflows(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
@@ -291,7 +293,7 @@ class WorkflowService:
                 environment_id=environment_id,
                 snapshot=prepared.runs[0].snapshot,
             )
-            return execution, self._run_plan(
+            plan: WorkflowExecutionPlan = self._run_plan(
                 execution=execution,
                 actor=actor,
                 project_id=project_id,
@@ -300,16 +302,52 @@ class WorkflowService:
                 prepared=prepared.runs[0],
                 runtime_variables=runtime_variables,
             )
-        return await self._start_dataset_execution(
-            actor=actor,
-            project_id=project_id,
-            workflow=workflow,
-            version=selected,
-            environment_id=environment_id,
-            definition=definition,
-            prepared=prepared,
-            runtime_variables=runtime_variables,
+        else:
+            execution, plan = await self._start_dataset_execution(
+                actor=actor,
+                project_id=project_id,
+                workflow=workflow,
+                version=selected,
+                environment_id=environment_id,
+                definition=definition,
+                prepared=prepared,
+                runtime_variables=runtime_variables,
+            )
+        await self._persist_execution_plan(execution, plan)
+        return execution, plan
+
+    async def load_execution_plan(self, execution_id: UUID) -> WorkflowExecutionPlan:
+        from app.services.workflow_plan_codec import decode_execution_plan
+
+        execution = await self.load_execution_for_run(execution_id)
+        if execution.run_payload_ciphertext is None or execution.run_payload_nonce is None:
+            raise AppError(
+                code="WORKFLOW_PLAN_NOT_FOUND",
+                message="工作流执行计划不存在",
+                status_code=409,
+            )
+        payload = self._secrets.decrypt(
+            EncryptedValue(
+                ciphertext=execution.run_payload_ciphertext,
+                nonce=execution.run_payload_nonce,
+            ),
+            associated_data=_execution_plan_associated_data(execution.id),
         )
+        return decode_execution_plan(payload)
+
+    async def _persist_execution_plan(
+        self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
+    ) -> None:
+        from app.services.workflow_plan_codec import encode_execution_plan
+
+        encrypted = self._secrets.encrypt(
+            encode_execution_plan(plan),
+            associated_data=_execution_plan_associated_data(execution.id),
+        )
+        execution.run_payload_ciphertext = encrypted.ciphertext
+        execution.run_payload_nonce = encrypted.nonce
+        await self._session.commit()
+        await self._session.refresh(execution)
 
     async def run_prepared(
         self,
@@ -822,6 +860,10 @@ class WorkflowService:
 def _fingerprint(definition: dict[str, object]) -> str:
     canonical = json.dumps(definition, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _execution_plan_associated_data(execution_id: UUID) -> bytes:
+    return f"workflow-execution:{execution_id}:run-plan".encode()
 
 
 def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str) -> bool:
