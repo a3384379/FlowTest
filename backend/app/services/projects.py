@@ -4,8 +4,14 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.domain.access import FolderMoveError, ProjectRole, validate_folder_parent
-from app.models.access import Folder, Project, ProjectMember, User
+from app.domain.access import (
+    FolderMoveError,
+    ProjectCapability,
+    ProjectRole,
+    validate_folder_parent,
+)
+from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_policy_values
+from app.models.access import AuditLog, Folder, Project, ProjectMember, User
 from app.repositories.access import ProjectRepository, UserRepository
 from app.services.audit import AuditService
 
@@ -14,6 +20,10 @@ from app.services.audit import AuditService
 class ProjectAccess:
     project: Project
     role: ProjectRole | None
+
+    @property
+    def capabilities(self) -> frozenset[ProjectCapability]:
+        return frozenset(ProjectCapability) if self.role is None else self.role.capabilities
 
 
 class ProjectService:
@@ -86,6 +96,81 @@ class ProjectService:
     async def list_members(self, *, actor: User, project_id: UUID) -> list[ProjectMember]:
         await self.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._projects.list_members(project_id)
+
+    async def get_security_policy(self, *, actor: User, project_id: UUID) -> OutboundNetworkPolicy:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.READ,
+        )
+        return _project_network_policy(access.project)
+
+    async def load_runtime_security_policy(self, project_id: UUID) -> OutboundNetworkPolicy:
+        project = await self._projects.get(project_id)
+        if project is None:
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        return _project_network_policy(project)
+
+    async def update_security_policy(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        allowed_hosts: list[str],
+        allowed_private_cidrs: list[str],
+    ) -> OutboundNetworkPolicy:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_SECURITY,
+        )
+        try:
+            validate_policy_values(allowed_hosts, allowed_private_cidrs)
+            policy = OutboundNetworkPolicy(
+                tuple(allowed_hosts), tuple(allowed_private_cidrs)
+            ).normalized()
+        except (OutboundPolicyError, ValueError) as error:
+            raise AppError(
+                code="INVALID_OUTBOUND_POLICY",
+                message=str(error),
+                status_code=422,
+            ) from error
+        access.project.outbound_allowed_hosts = list(policy.allowed_hosts)
+        access.project.outbound_allowed_private_cidrs = list(policy.allowed_private_cidrs)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="project.security_policy_updated",
+            resource_type="project",
+            resource_id=project_id,
+            details={
+                "allowed_hosts": list(policy.allowed_hosts),
+                "allowed_private_cidrs": list(policy.allowed_private_cidrs),
+            },
+        )
+        await self._session.commit()
+        return policy
+
+    async def list_audit_logs(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        action: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[AuditLog], int]:
+        await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.VIEW_AUDIT,
+        )
+        return await self._projects.list_audit_logs(
+            project_id=project_id,
+            action=action,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
 
     async def upsert_member(
         self, *, actor: User, project_id: UUID, user_id: UUID, role: ProjectRole
@@ -227,7 +312,14 @@ class ProjectService:
         )
         await self._session.commit()
 
-    async def authorize(self, *, actor: User, project_id: UUID, editing: bool) -> ProjectAccess:
+    async def authorize(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        editing: bool = False,
+        capability: ProjectCapability | None = None,
+    ) -> ProjectAccess:
         project = await self._projects.get(project_id)
         if project is None:
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
@@ -236,18 +328,17 @@ class ProjectService:
         role = await self._projects.get_role(project_id=project_id, user_id=actor.id)
         if role is None:
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
-        if editing and not role.can_edit:
-            raise AppError(code="PROJECT_FORBIDDEN", message="没有项目编辑权限", status_code=403)
+        required = capability or (ProjectCapability.EDIT if editing else ProjectCapability.READ)
+        if not role.allows(required):
+            raise AppError(code="PROJECT_FORBIDDEN", message="没有所需的项目权限", status_code=403)
         return ProjectAccess(project=project, role=role)
 
     async def _authorize_owner(self, *, actor: User, project_id: UUID) -> None:
-        access = await self.authorize(actor=actor, project_id=project_id, editing=True)
-        if not actor.is_system_admin and (
-            access.role is None or not access.role.can_manage_members
-        ):
-            raise AppError(
-                code="PROJECT_FORBIDDEN", message="仅项目 Owner 可管理成员", status_code=403
-            )
+        await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_MEMBERS,
+        )
 
     async def authorize_owner(self, *, actor: User, project_id: UUID) -> None:
         await self._authorize_owner(actor=actor, project_id=project_id)
@@ -288,3 +379,10 @@ class ProjectService:
                 message="项目至少需要保留一名 Owner",
                 status_code=409,
             )
+
+
+def _project_network_policy(project: Project) -> OutboundNetworkPolicy:
+    return OutboundNetworkPolicy(
+        allowed_hosts=tuple(project.outbound_allowed_hosts),
+        allowed_private_cidrs=tuple(project.outbound_allowed_private_cidrs),
+    )

@@ -143,6 +143,7 @@ class APIDefinitionResponse(BaseModel):
     name: str
     description: str
     current_version: int
+    is_active: bool
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime

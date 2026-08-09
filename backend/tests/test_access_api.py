@@ -416,6 +416,100 @@ async def test_non_system_owner_can_manage_members_and_transfer_ownership(
 
 
 @pytest.mark.asyncio
+async def test_permission_matrix_security_policy_and_audit_access(client: AsyncClient) -> None:
+    admin_headers = _authorization(
+        (await _login(client, ADMIN_EMAIL, ADMIN_PASSWORD))["access_token"]
+    )
+    owner = await _create_user(client, admin_headers, "governance-owner@example.com")
+    editor = await _create_user(client, admin_headers, "governance-editor@example.com")
+    viewer = await _create_user(client, admin_headers, "governance-viewer@example.com")
+    owner_headers = _authorization(
+        (await _login(client, owner["email"], "initial-password-123!"))["access_token"]
+    )
+    project = await client.post(
+        "/api/v1/projects",
+        headers=owner_headers,
+        json={"name": "Governed project"},
+    )
+    project_id = project.json()["id"]
+    for member, role in ((editor, "editor"), (viewer, "viewer")):
+        response = await client.put(
+            f"/api/v1/projects/{project_id}/members/{member['id']}",
+            headers=owner_headers,
+            json={"user_id": member["id"], "role": role},
+        )
+        assert response.status_code == 200
+
+    editor_headers = _authorization(
+        (await _login(client, editor["email"], "initial-password-123!"))["access_token"]
+    )
+    viewer_headers = _authorization(
+        (await _login(client, viewer["email"], "initial-password-123!"))["access_token"]
+    )
+    owner_permissions = await client.get(
+        f"/api/v1/projects/{project_id}/permissions", headers=owner_headers
+    )
+    editor_permissions = await client.get(
+        f"/api/v1/projects/{project_id}/permissions", headers=editor_headers
+    )
+    viewer_permissions = await client.get(
+        f"/api/v1/projects/{project_id}/permissions", headers=viewer_headers
+    )
+    assert owner_permissions.json()["capabilities"] == [
+        "edit",
+        "execute",
+        "manage_members",
+        "manage_security",
+        "read",
+        "view_audit",
+    ]
+    assert editor_permissions.json()["capabilities"] == ["edit", "execute", "read"]
+    assert viewer_permissions.json()["capabilities"] == ["read"]
+    assert set(owner_permissions.json()["matrix"]) == {"owner", "editor", "viewer"}
+
+    trace_id = "governance-policy-test"
+    policy = await client.put(
+        f"/api/v1/projects/{project_id}/security-policy",
+        headers={**owner_headers, "X-Trace-ID": trace_id},
+        json={
+            "allowed_hosts": ["*.example.com", "api.internal"],
+            "allowed_private_cidrs": ["10.20.0.1/16"],
+        },
+    )
+    assert policy.status_code == 200, policy.text
+    assert policy.json() == {
+        "allowed_hosts": ["*.example.com", "api.internal"],
+        "allowed_private_cidrs": ["10.20.0.0/16"],
+    }
+    assert (
+        await client.put(
+            f"/api/v1/projects/{project_id}/security-policy",
+            headers=editor_headers,
+            json={"allowed_hosts": [], "allowed_private_cidrs": []},
+        )
+    ).status_code == 403
+    invalid = await client.put(
+        f"/api/v1/projects/{project_id}/security-policy",
+        headers=owner_headers,
+        json={"allowed_hosts": [], "allowed_private_cidrs": ["169.254.0.0/16"]},
+    )
+    assert invalid.status_code == 422
+
+    audit = await client.get(
+        f"/api/v1/projects/{project_id}/audit-logs",
+        headers=owner_headers,
+        params={"action": "project.security_policy_updated"},
+    )
+    assert audit.status_code == 200
+    assert audit.json()["total"] == 1
+    assert audit.json()["items"][0]["details"]["trace_id"] == trace_id
+    forbidden_audit = await client.get(
+        f"/api/v1/projects/{project_id}/audit-logs", headers=viewer_headers
+    )
+    assert forbidden_audit.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_administrator_is_idempotent() -> None:
     test_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)

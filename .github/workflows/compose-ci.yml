@@ -14,6 +14,7 @@ on:
       - "scripts/smoke_s7.py"
       - "scripts/smoke_s8.py"
       - "scripts/smoke_s9.py"
+      - "scripts/smoke_s10.py"
       - ".github/workflows/compose-ci.yml"
   push:
     branches: [main]
@@ -29,6 +30,7 @@ on:
       - "scripts/smoke_s7.py"
       - "scripts/smoke_s8.py"
       - "scripts/smoke_s9.py"
+      - "scripts/smoke_s10.py"
       - ".github/workflows/compose-ci.yml"
 
 permissions:
@@ -67,6 +69,8 @@ jobs:
         run: python3 scripts/smoke_s8.py
       - name: Verify S9 reports, HTML export, trends, and signed notification flow
         run: python3 scripts/smoke_s9.py
+      - name: Verify S10 governance, security, import merge, and idempotency flow
+        run: python3 scripts/smoke_s10.py
       - name: Print service logs on failure
         if: failure()
         run: docker compose logs --no-color --tail=300

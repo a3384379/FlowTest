@@ -22,6 +22,7 @@ from app.schemas.tasking import (
     TestPlanUpdate,
 )
 from app.schemas.workflows import WorkflowExecuteRequest, WorkflowExecutionResponse
+from app.services.idempotency import IdempotencyService
 from app.services.tasking import ServiceTokenService, TestPlanDetail, TestPlanService
 from app.services.workflows import WorkflowService
 
@@ -119,15 +120,27 @@ async def run_test_plan(
     session: SessionDependency,
     current_user: CurrentUser,
     queue: TestPlanQueue,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TestPlanRunResponse:
-    run = await TestPlanService(session).queue_run(
-        actor=current_user,
+    async def start() -> TestPlanRunResponse:
+        run = await TestPlanService(session).queue_run(
+            actor=current_user,
+            project_id=project_id,
+            plan_id=plan_id,
+            trigger=TestPlanTrigger.MANUAL,
+        )
+        queue.start_test_plan(run.id)
+        return TestPlanRunResponse.model_validate(run)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
         project_id=project_id,
-        plan_id=plan_id,
-        trigger=TestPlanTrigger.MANUAL,
+        actor_key=f"user:{current_user.id}",
+        operation=f"test-plan.run:{plan_id}",
+        request_payload={},
+        action=start,
     )
-    queue.start_test_plan(run.id)
-    return TestPlanRunResponse.model_validate(run)
+    return TestPlanRunResponse.model_validate(response)
 
 
 @router.get("/projects/{project_id}/test-plan-runs", response_model=Page[TestPlanRunResponse])
@@ -248,22 +261,35 @@ async def ci_run_test_plan(
     session: SessionDependency,
     queue: TestPlanQueue,
     authorization: Annotated[str | None, Header()] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TestPlanRunResponse:
     identity = await ServiceTokenService(session).authenticate(
         raw_token=_bearer_token(authorization),
         project_id=project_id,
         required_scope=ServiceTokenScope.EXECUTE_TEST_PLAN,
     )
-    plan = await TestPlanService(session).get(
-        actor=identity.actor, project_id=project_id, plan_id=plan_id
+
+    async def start() -> TestPlanRunResponse:
+        plan = await TestPlanService(session).get(
+            actor=identity.actor, project_id=project_id, plan_id=plan_id
+        )
+        run = await TestPlanService(session).queue_external_run(
+            plan=plan.plan,
+            requested_by_id=identity.actor.id,
+            trigger=TestPlanTrigger.CI,
+        )
+        queue.start_test_plan(run.id)
+        return TestPlanRunResponse.model_validate(run)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"service-token:{identity.model.id}",
+        operation=f"ci.test-plan.run:{plan_id}",
+        request_payload={},
+        action=start,
     )
-    run = await TestPlanService(session).queue_external_run(
-        plan=plan.plan,
-        requested_by_id=identity.actor.id,
-        trigger=TestPlanTrigger.CI,
-    )
-    queue.start_test_plan(run.id)
-    return TestPlanRunResponse.model_validate(run)
+    return TestPlanRunResponse.model_validate(response)
 
 
 @router.post(
@@ -278,23 +304,36 @@ async def ci_run_workflow(
     session: SessionDependency,
     coordinator: WorkflowCoordinator,
     authorization: Annotated[str | None, Header()] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> WorkflowExecutionResponse:
     identity = await ServiceTokenService(session).authenticate(
         raw_token=_bearer_token(authorization),
         project_id=project_id,
         required_scope=ServiceTokenScope.EXECUTE_WORKFLOW,
     )
-    execution, plan = await WorkflowService(session).prepare_execution(
-        actor=identity.actor,
+
+    async def start() -> WorkflowExecutionResponse:
+        execution, plan = await WorkflowService(session).prepare_execution(
+            actor=identity.actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            environment_id=payload.environment_id,
+            version=payload.version,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+        )
+        coordinator.start(plan)
+        return WorkflowExecutionResponse.model_validate(execution)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
         project_id=project_id,
-        workflow_id=workflow_id,
-        environment_id=payload.environment_id,
-        version=payload.version,
-        runtime_variables=payload.runtime_variables,
-        runtime_headers=payload.runtime_headers,
+        actor_key=f"service-token:{identity.model.id}",
+        operation=f"ci.workflow.execute:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
     )
-    coordinator.start(plan)
-    return WorkflowExecutionResponse.model_validate(execution)
+    return WorkflowExecutionResponse.model_validate(response)
 
 
 @router.post(

@@ -1,9 +1,10 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.domain.access import ProjectRole
+from app.domain.access import ProjectCapability, ProjectRole
 
 
 class UserResponse(BaseModel):
@@ -75,6 +76,30 @@ class ProjectResponse(BaseModel):
     role: ProjectRole | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectPermissionResponse(BaseModel):
+    effective_role: str
+    capabilities: list[ProjectCapability]
+    matrix: dict[str, list[ProjectCapability]]
+
+
+class ProjectSecurityPolicy(BaseModel):
+    allowed_hosts: list[str] = Field(default_factory=list, max_length=100)
+    allowed_private_cidrs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class AuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    actor_user_id: UUID | None
+    project_id: UUID | None
+    action: str
+    resource_type: str
+    resource_id: UUID | None
+    details: dict[str, Any]
+    created_at: datetime
 
 
 class MemberUpsert(BaseModel):

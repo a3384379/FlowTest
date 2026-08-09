@@ -9,6 +9,10 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
   FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:flowtest@postgres:5432/flowtest
   FLOWTEST_REDIS_URL: redis://redis:6379/0
+  FLOWTEST_RATE_LIMIT_ENABLED: "true"
+  FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE: "10"
+  FLOWTEST_EXECUTION_RATE_LIMIT_PER_MINUTE: "30"
+  FLOWTEST_WRITE_RATE_LIMIT_PER_MINUTE: "120"
   FLOWTEST_CELERY_BROKER_URL: redis://redis:6379/1
   FLOWTEST_CELERY_RESULT_BACKEND: redis://redis:6379/2
   FLOWTEST_S3_ENDPOINT_URL: http://minio:9000

@@ -7,8 +7,10 @@ import httpx
 from pydantic import JsonValue
 
 from app.core.config import settings
+from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
+from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.contracts import (
     FieldMapping,
@@ -28,6 +30,7 @@ from app.services.executions import (
     _response_body,
     _send_request,
 )
+from app.services.outbound import OutboundRequestGuard, outbound_request_guard
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +46,14 @@ class WorkflowNodeExecutor:
         client: httpx.AsyncClient,
         requests: dict[str, PreparedWorkflowRequest],
         definition: WorkflowDefinition,
+        network_policy: OutboundNetworkPolicy,
+        outbound_guard: OutboundRequestGuard = outbound_request_guard,
     ) -> None:
         self._client = client
         self._requests = requests
         self._mappings = _mappings_by_target(definition)
+        self._network_policy = network_policy
+        self._outbound_guard = outbound_guard
 
     async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         if node.type is not NodeType.API:
@@ -59,6 +66,10 @@ class WorkflowNodeExecutor:
                 context,
             )
         except MappingResolutionError as error:
+            raise NodeExecutionError(code=error.code, message=error.message) from error
+        try:
+            await self._outbound_guard.enforce(request.url, self._network_policy)
+        except AppError as error:
             raise NodeExecutionError(code=error.code, message=error.message) from error
         try:
             response = await _send_request(

@@ -8,7 +8,8 @@ import {
   createEnvironment,
   createProject,
   downloadArtifact,
-  importApiDocument,
+  mergeApiImport,
+  previewApiDocument,
   executeApi,
   listApis,
   listArtifacts,
@@ -78,12 +79,21 @@ export function useApiConsole() {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
-  const importMutation = useMutation({
-    mutationFn: (file: File) => importApiDocument(requiredId(projectId), file),
+  const previewImportMutation = useMutation({
+    mutationFn: (file: File) => previewApiDocument(requiredId(projectId), file),
+    onSuccess: (value) => {
+      setLastImport(value)
+      void message.success('导入差异已生成，请选择需要合并的接口')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const mergeImportMutation = useMutation({
+    mutationFn: (selectedKeys: string[]) =>
+      mergeApiImport(requiredId(projectId), requiredId(lastImport?.id ?? null), selectedKeys),
     onSuccess: async (value) => {
       setLastImport(value)
       await queryClient.invalidateQueries({ queryKey: ['apis', projectId] })
-      void message.success('接口文档导入完成')
+      void message.success('所选接口已合并')
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
@@ -150,8 +160,9 @@ export function useApiConsole() {
     result,
     lastImport,
     clearImportResult: () => setLastImport(null),
-    importDocument: importMutation.mutateAsync,
-    importing: importMutation.isPending,
+    previewImport: previewImportMutation.mutateAsync,
+    mergeImport: mergeImportMutation.mutateAsync,
+    importing: previewImportMutation.isPending || mergeImportMutation.isPending,
     uploadFile: uploadMutation.mutateAsync,
     uploading: uploadMutation.isPending,
     downloadFile,
@@ -164,7 +175,8 @@ export function useApiConsole() {
       projectMutation.isPending,
       environmentMutation.isPending,
       apiMutation.isPending,
-      importMutation.isPending,
+      previewImportMutation.isPending,
+      mergeImportMutation.isPending,
       uploadMutation.isPending,
     ].some(Boolean),
   }

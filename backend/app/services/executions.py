@@ -28,6 +28,8 @@ from app.repositories.executions import ExecutionRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
 from app.services.artifacts import ArtifactService
+from app.services.audit import AuditService
+from app.services.outbound import OutboundRequestGuard, outbound_request_guard
 from app.services.projects import ProjectService
 
 SENSITIVE_RESPONSE_HEADERS = frozenset(
@@ -61,13 +63,16 @@ class ExecutionService:
         session: AsyncSession,
         *,
         http_client: httpx.AsyncClient | None = None,
+        outbound_guard: OutboundRequestGuard = outbound_request_guard,
     ) -> None:
         self._session = session
         self._repository = ExecutionRepository(session)
         self._assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
         self._projects = ProjectService(session)
+        self._audit = AuditService(session)
         self._http_client = http_client
+        self._outbound_guard = outbound_guard
 
     async def execute(
         self,
@@ -111,6 +116,8 @@ class ExecutionService:
             use_body_override=use_body_override,
             redact=True,
         )
+        policy = await self._projects.get_security_policy(actor=actor, project_id=project_id)
+        await self._outbound_guard.enforce(raw_request.url, policy)
         body_kind = BodyKind(version.body_kind)
         multipart = (
             await self._prepare_multipart(project_id=project_id, body=raw_request.body)
@@ -143,6 +150,15 @@ class ExecutionService:
             completed_at=None,
         )
         self._repository.add(execution)
+        await self._session.flush()
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="api.execution_started",
+            resource_type="api_execution",
+            resource_id=execution.id,
+            details={"api_definition_id": str(definition_id)},
+        )
         await self._session.commit()
         await self._session.refresh(execution)
 
@@ -296,6 +312,14 @@ class ExecutionService:
         results = [self._assertion_result(execution.id, outcome) for outcome in outcomes]
         for result in results:
             self._repository.add(result)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="api.execution_completed",
+            resource_type="api_execution",
+            resource_id=execution.id,
+            details={"status": execution.status, "response_status": response.status_code},
+        )
         await self._session.commit()
         await self._session.refresh(execution)
         for result in results:
@@ -349,6 +373,14 @@ class ExecutionService:
         execution.response_status = response_status
         execution.response_size_bytes = response_size
         execution.completed_at = datetime.now(UTC)
+        self._audit.record(
+            actor_user_id=execution.triggered_by_id,
+            project_id=execution.project_id,
+            action="api.execution_completed",
+            resource_type="api_execution",
+            resource_id=execution.id,
+            details={"status": execution.status, "error_code": code},
+        )
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, []

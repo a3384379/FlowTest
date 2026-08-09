@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 
@@ -89,6 +90,16 @@ def main() -> None:
             token=token,
         )
         project_id = str(project["id"])
+        target_host = urlsplit(config.target_url).hostname or "mock-target"
+        client.call(
+            "PUT",
+            f"/projects/{project_id}/security-policy",
+            {
+                "allowed_hosts": [target_host],
+                "allowed_private_cidrs": ["172.16.0.0/12"],
+            },
+            token=token,
+        )
         environment = client.call(
             "POST",
             f"/projects/{project_id}/environments",

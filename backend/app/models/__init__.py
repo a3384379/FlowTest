@@ -5,6 +5,7 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.executions import APICallExecution, AssertionResult
+from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
@@ -20,6 +21,7 @@ __all__ = [
     "Base",
     "Environment",
     "Folder",
+    "IdempotencyRecord",
     "ImportRun",
     "NotificationDelivery",
     "NotificationWebhook",

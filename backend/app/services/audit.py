@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context import get_trace_id
+from app.core.logging import redact
 from app.models.access import AuditLog
 
 
@@ -28,7 +30,10 @@ class AuditService:
                 action=action,
                 resource_type=resource_type,
                 resource_id=resource_id,
-                details=details or {},
+                details=cast(
+                    dict[str, Any],
+                    redact({"trace_id": get_trace_id(), **(details or {})}),
+                ),
                 created_at=datetime.now(UTC),
             )
         )

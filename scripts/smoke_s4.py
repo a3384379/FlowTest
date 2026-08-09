@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from typing import Any, cast
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 
@@ -43,13 +44,17 @@ class APIClient:
         payload: dict[str, Any] | None = None,
         *,
         token: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode()
         content = self._request(
             Request(
                 f"{self._base_url}{path}",
                 data=body,
-                headers=self._headers(token, content_type="application/json"),
+                headers={
+                    **self._headers(token, content_type="application/json"),
+                    **(extra_headers or {}),
+                },
                 method=method,
             )
         )
@@ -144,6 +149,7 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
         token=token,
     )
     project_id = str(project["id"])
+    _allow_compose_target(client, token, project_id, config.target_url)
     environment = client.json(
         "POST",
         f"/projects/{project_id}/environments",
@@ -371,6 +377,24 @@ def _change_password(client: APIClient, token: str, current: str, new: str) -> N
         "POST",
         "/auth/change-password",
         {"current_password": current, "new_password": new},
+        token=token,
+    )
+
+
+def _allow_compose_target(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    target_url: str,
+) -> None:
+    target_host = urlsplit(target_url).hostname or "mock-target"
+    client.json(
+        "PUT",
+        f"/projects/{project_id}/security-policy",
+        {
+            "allowed_hosts": [target_host],
+            "allowed_private_cidrs": ["172.16.0.0/12"],
+        },
         token=token,
     )
 

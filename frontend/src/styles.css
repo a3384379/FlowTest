@@ -457,3 +457,10 @@ body {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+.governance-table {
+  margin-top: 16px;
+}
+
+.governance-policy-form {
+  margin-top: 16px;
+}

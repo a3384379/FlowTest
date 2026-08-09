@@ -1,6 +1,7 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.domain.assertions import AssertionSpec
@@ -13,6 +14,7 @@ from app.schemas.executions import (
     ExecutionResponse,
 )
 from app.services.executions import ExecutionService
+from app.services.idempotency import IdempotencyService
 
 router = APIRouter(prefix="/projects/{project_id}")
 
@@ -24,28 +26,40 @@ async def execute_api(
     payload: ExecuteAPIRequest,
     session: SessionDependency,
     current_user: CurrentUser,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ExecutionDetailResponse:
-    execution, assertions = await ExecutionService(session).execute(
-        actor=current_user,
+    async def run() -> ExecutionDetailResponse:
+        execution, assertions = await ExecutionService(session).execute(
+            actor=current_user,
+            project_id=project_id,
+            definition_id=definition_id,
+            environment_id=payload.environment_id,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+            body_override=payload.body_override,
+            use_body_override=payload.use_body_override,
+            timeout_seconds=payload.timeout_seconds,
+            assertions=tuple(
+                AssertionSpec(
+                    kind=assertion.kind,
+                    operator=assertion.operator,
+                    target=assertion.target,
+                    expected=assertion.expected,
+                )
+                for assertion in payload.assertions
+            ),
+        )
+        return _execution_detail(execution, assertions)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
         project_id=project_id,
-        definition_id=definition_id,
-        environment_id=payload.environment_id,
-        runtime_variables=payload.runtime_variables,
-        runtime_headers=payload.runtime_headers,
-        body_override=payload.body_override,
-        use_body_override=payload.use_body_override,
-        timeout_seconds=payload.timeout_seconds,
-        assertions=tuple(
-            AssertionSpec(
-                kind=assertion.kind,
-                operator=assertion.operator,
-                target=assertion.target,
-                expected=assertion.expected,
-            )
-            for assertion in payload.assertions
-        ),
+        actor_key=f"user:{current_user.id}",
+        operation=f"api.execute:{definition_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=run,
     )
-    return _execution_detail(execution, assertions)
+    return ExecutionDetailResponse.model_validate(response)
 
 
 @router.get("/executions", response_model=Page[ExecutionResponse])

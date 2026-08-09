@@ -9,7 +9,8 @@ type ImportDialogProps = {
   importing: boolean
   result: ImportRun | null
   onClose: () => void
-  onImport: (file: File) => Promise<ImportRun>
+  onPreview: (file: File) => Promise<ImportRun>
+  onMerge: (selectedKeys: string[]) => Promise<ImportRun>
 }
 
 const changeLabels: Record<ImportChange, { label: string; color: string }> = {
@@ -21,6 +22,10 @@ const changeLabels: Record<ImportChange, { label: string; color: string }> = {
 
 export default function ImportDialog(props: ImportDialogProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [selectedKeys, setSelectedKeys] = useState<string[] | null>(null)
+  const effectiveSelectedKeys = selectedKeys ?? defaultSelection(props.result)
+
+  const completed = props.result?.status === 'applied'
 
   return (
     <Modal
@@ -28,18 +33,44 @@ export default function ImportDialog(props: ImportDialogProps) {
       width={820}
       open={props.open}
       confirmLoading={props.importing}
-      okText="开始导入"
-      okButtonProps={{ disabled: !file || Boolean(props.result) }}
+      okText={completed ? '完成' : props.result ? '合并所选' : '生成 Diff'}
+      okButtonProps={{ disabled: !props.result && !file }}
       onCancel={() => {
         setFile(null)
+        setSelectedKeys(null)
         props.onClose()
       }}
-      onOk={() => file && props.onImport(file)}
+      onOk={() => {
+        if (completed) {
+          setFile(null)
+          setSelectedKeys(null)
+          props.onClose()
+        } else if (props.result) {
+          void props.onMerge(effectiveSelectedKeys)
+        } else if (file) {
+          void props.onPreview(file)
+        }
+      }}
       destroyOnHidden
     >
-      {props.result ? <ImportResult result={props.result} /> : <ImportPicker onChange={setFile} />}
+      {props.result ? (
+        <ImportResult
+          result={props.result}
+          selectedKeys={effectiveSelectedKeys}
+          onSelectionChange={setSelectedKeys}
+        />
+      ) : (
+        <ImportPicker onChange={setFile} />
+      )}
     </Modal>
   )
+}
+
+function defaultSelection(result: ImportRun | null): string[] {
+  if (result?.status !== 'preview') return []
+  return result.results
+    .filter((item) => item.change === 'added' || item.change === 'changed')
+    .map((item) => item.import_key)
 }
 
 function ImportPicker({ onChange }: { onChange: (file: File) => void }) {
@@ -73,9 +104,27 @@ function ImportPicker({ onChange }: { onChange: (file: File) => void }) {
   )
 }
 
-function ImportResult({ result }: { result: ImportRun }) {
+function ImportResult({
+  result,
+  selectedKeys,
+  onSelectionChange,
+}: {
+  result: ImportRun
+  selectedKeys: string[]
+  onSelectionChange: (keys: string[]) => void
+}) {
   return (
     <>
+      <Alert
+        type={result.status === 'applied' ? 'success' : 'warning'}
+        showIcon
+        title={result.status === 'applied' ? '合并完成' : '请选择需要合并的变更'}
+        description={
+          result.status === 'applied'
+            ? `已应用 ${result.applied_keys.length} 项变更。`
+            : '新增和变更默认选中；删除项默认不选中，只有明确选择后才会停用接口。'
+        }
+      />
       <Space size="large" className="import-statistics">
         <Statistic title="新增" value={result.added} styles={{ content: { color: '#16a34a' } }} />
         <Statistic title="变更" value={result.changed} styles={{ content: { color: '#2563eb' } }} />
@@ -91,6 +140,15 @@ function ImportResult({ result }: { result: ImportRun }) {
         size="small"
         pagination={false}
         dataSource={result.results}
+        rowSelection={
+          result.status === 'preview'
+            ? {
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => onSelectionChange(keys.map(String)),
+                getCheckboxProps: (item) => ({ disabled: item.change === 'unchanged' }),
+              }
+            : undefined
+        }
         columns={[
           { title: '接口', dataIndex: 'name' },
           { title: '方法', dataIndex: 'method', width: 90 },

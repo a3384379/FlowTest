@@ -42,6 +42,7 @@ export const apiDefinition: ApiDefinition = {
   name: '查询当前用户',
   description: '',
   current_version: 1,
+  is_active: true,
 }
 
 export const executionDetail: ExecutionDetail = {

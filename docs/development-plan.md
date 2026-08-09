@@ -20,7 +20,7 @@
 | S7（已完成） | V0.3 字段映射、控制节点与数据驱动 | Extract、Assert、Condition、Delay、Dataset；结构化字段绑定；变量来源追踪；CSV/JSON/Excel 行级执行 | A 响应可映射到 B 请求；条件分支、跳过、断言和数据行子执行可解释 |
 | S8（已完成） | 测试计划与任务系统 | Test Plan；批量/手工执行；Celery Worker/Beat；重试、取消；定时任务；CI Token 与签名 Webhook | API 与 Worker 解耦；计划可排队、取消、重试、定时和外部触发且状态一致 |
 | S9（已完成） | V0.4 报告与执行中心 | 执行中心；步骤级报告；失败分类；趋势；签名通知；HTML 导出 | 报告可从汇总下钻到脱敏请求/响应、提取和断言；失败可定位到节点 |
-| S10（第 21～22 周） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；Secret 与 SSRF 加固；限流和幂等 | 权限矩阵通过；导入变更可审阅选择；安全边界和操作一致性测试通过 |
+| S10（已完成） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；Secret 与 SSRF 加固；限流和幂等 | 权限矩阵通过；导入变更可审阅选择；安全边界和操作一致性测试通过 |
 | S11（第 23～24 周） | V1.0 内部发布 | 性能与容量测试；SSRF/Secret/限流加固；备份恢复；部署手册；试点迁移 | 试点项目连续运行 2 周；P0 缺陷清零；回滚、恢复和告警演练通过 |
 
 ## S7 完成清单
@@ -49,6 +49,15 @@
 4. HTML 报告使用安全转义生成并以 `report` Artifact 存入 MinIO，可通过项目授权链路下载。
 5. 通用通知 Webhook 使用一次性 AES-GCM Secret、`timestamp.body` HMAC-SHA256 签名和完整投递历史。
 6. Web 报告页提供 ECharts 趋势、失败分布、执行下钻、HTML 下载、通知配置和投递状态。
+
+## S10 完成清单
+
+1. 固定 System Admin、Project Owner、Editor、Viewer 权限矩阵，并通过领域能力统一约束成员、安全策略和审计访问。
+2. OpenAPI/Postman 重导入采用只读 Diff 与显式 Merge；删除项默认保留，选中后才停用，重复提交保持幂等。
+3. API 调试、Workflow 和通知 Webhook 在 DNS 解析后统一执行域名/CIDR 校验，拒绝元数据、回环、链路本地和未授权私网地址。
+4. 登录、执行、写操作使用独立 Redis 限流桶；直接执行、Workflow、Test Plan 和 CI 触发统一支持 `Idempotency-Key`。
+5. Secret 继续只写不可读；审计详情统一脱敏并保存 Trace ID，Owner 可在 Web 治理页检索项目审计记录。
+6. PostgreSQL 真实迁移完成升级、回滚和模型漂移验证；Compose 冒烟覆盖导入、权限、幂等、SSRF、Secret 和审计完整性。
 
 ## 版本验收门槛
 

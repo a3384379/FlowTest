@@ -16,6 +16,9 @@ const importRun: ImportRun = {
   changed: 1,
   deleted: 1,
   unchanged: 1,
+  status: 'preview',
+  applied_keys: [],
+  applied_at: null,
   results: [
     {
       import_key: 'key-1',
@@ -32,10 +35,18 @@ const importRun: ImportRun = {
 
 describe('S4 API console panels', () => {
   it('selects an import document and renders its diff', async () => {
-    const onImport = vi.fn(async () => importRun)
+    const onPreview = vi.fn(async () => importRun)
+    const onMerge = vi.fn(async () => ({ ...importRun, status: 'applied' as const }))
     const onClose = vi.fn()
     const { rerender } = render(
-      <ImportDialog open importing={false} result={null} onClose={onClose} onImport={onImport} />,
+      <ImportDialog
+        open
+        importing={false}
+        result={null}
+        onClose={onClose}
+        onPreview={onPreview}
+        onMerge={onMerge}
+      />,
     )
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')
     expect(fileInput).not.toBeNull()
@@ -43,8 +54,8 @@ describe('S4 API console panels', () => {
       fileInput!,
       new File(['{}'], 'openapi.json', { type: 'application/json' }),
     )
-    await userEvent.click(screen.getByRole('button', { name: '开始导入' }))
-    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ name: 'openapi.json' }))
+    await userEvent.click(screen.getByRole('button', { name: '生成 Diff' }))
+    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ name: 'openapi.json' }))
 
     rerender(
       <ImportDialog
@@ -52,12 +63,15 @@ describe('S4 API console panels', () => {
         importing={false}
         result={importRun}
         onClose={onClose}
-        onImport={onImport}
+        onPreview={onPreview}
+        onMerge={onMerge}
       />,
     )
     expect(screen.getByText('查询用户')).toBeInTheDocument()
     expect(screen.getAllByText('新增')).not.toHaveLength(0)
     expect(screen.getByText('待停用')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '合并所选' }))
+    expect(onMerge).toHaveBeenCalledWith(['key-1'])
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onClose).toHaveBeenCalled()
   })

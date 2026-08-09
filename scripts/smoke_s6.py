@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime
 from typing import Any
 
-from smoke_s4 import APIClient, SmokeConfig, _change_password
+from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password
 from smoke_s5 import _create_api, _wait_for_completion
 
 
@@ -39,6 +39,7 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
         token=token,
     )
     project_id = str(project["id"])
+    _allow_compose_target(client, token, project_id, config.target_url)
     environment = client.json(
         "POST",
         f"/projects/{project_id}/environments",
