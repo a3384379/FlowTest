@@ -55,6 +55,8 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 
