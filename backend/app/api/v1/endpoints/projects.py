@@ -4,14 +4,18 @@ from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.core.errors import AppError
+from app.domain.access import ProjectRole
 from app.schemas.access import (
+    AuditLogResponse,
     FolderCreate,
     FolderResponse,
     FolderUpdate,
     MemberResponse,
     MemberUpsert,
     ProjectCreate,
+    ProjectPermissionResponse,
     ProjectResponse,
+    ProjectSecurityPolicy,
     ProjectUpdate,
 )
 from app.schemas.common import Page
@@ -56,6 +60,74 @@ async def get_project(
 ) -> ProjectResponse:
     return _project_response(
         await ProjectService(session).get(actor=current_user, project_id=project_id)
+    )
+
+
+@router.get("/{project_id}/permissions", response_model=ProjectPermissionResponse)
+async def get_project_permissions(
+    project_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> ProjectPermissionResponse:
+    access = await ProjectService(session).get(actor=current_user, project_id=project_id)
+    return ProjectPermissionResponse(
+        effective_role="system_admin" if current_user.is_system_admin else str(access.role),
+        capabilities=sorted(access.capabilities, key=str),
+        matrix={role.value: sorted(role.capabilities, key=str) for role in ProjectRole},
+    )
+
+
+@router.get("/{project_id}/security-policy", response_model=ProjectSecurityPolicy)
+async def get_project_security_policy(
+    project_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> ProjectSecurityPolicy:
+    policy = await ProjectService(session).get_security_policy(
+        actor=current_user, project_id=project_id
+    )
+    return ProjectSecurityPolicy(
+        allowed_hosts=list(policy.allowed_hosts),
+        allowed_private_cidrs=list(policy.allowed_private_cidrs),
+    )
+
+
+@router.put("/{project_id}/security-policy", response_model=ProjectSecurityPolicy)
+async def update_project_security_policy(
+    project_id: UUID,
+    payload: ProjectSecurityPolicy,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectSecurityPolicy:
+    policy = await ProjectService(session).update_security_policy(
+        actor=current_user,
+        project_id=project_id,
+        allowed_hosts=payload.allowed_hosts,
+        allowed_private_cidrs=payload.allowed_private_cidrs,
+    )
+    return ProjectSecurityPolicy(
+        allowed_hosts=list(policy.allowed_hosts),
+        allowed_private_cidrs=list(policy.allowed_private_cidrs),
+    )
+
+
+@router.get("/{project_id}/audit-logs", response_model=Page[AuditLogResponse])
+async def list_project_audit_logs(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    action: str | None = Query(default=None, max_length=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[AuditLogResponse]:
+    logs, total = await ProjectService(session).list_audit_logs(
+        actor=current_user,
+        project_id=project_id,
+        action=action,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[AuditLogResponse.model_validate(item) for item in logs],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 

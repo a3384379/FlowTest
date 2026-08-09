@@ -106,13 +106,16 @@ class APIAssetRepository:
         )
 
     async def list_definitions(
-        self, *, project_id: UUID, offset: int, limit: int
+        self, *, project_id: UUID, offset: int, limit: int, include_inactive: bool = False
     ) -> tuple[list[APIDefinition], int]:
+        filters = [APIDefinition.project_id == project_id]
+        if not include_inactive:
+            filters.append(APIDefinition.is_active.is_(True))
         definitions = list(
             (
                 await self._session.scalars(
                     select(APIDefinition)
-                    .where(APIDefinition.project_id == project_id)
+                    .where(*filters)
                     .order_by(APIDefinition.created_at.desc())
                     .offset(offset)
                     .limit(limit)
@@ -120,9 +123,7 @@ class APIAssetRepository:
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count())
-            .select_from(APIDefinition)
-            .where(APIDefinition.project_id == project_id)
+            select(func.count()).select_from(APIDefinition).where(*filters)
         )
         return definitions, int(total or 0)
 

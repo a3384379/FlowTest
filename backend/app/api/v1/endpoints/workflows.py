@@ -1,6 +1,7 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
@@ -15,6 +16,7 @@ from app.schemas.workflows import (
     WorkflowResponse,
     WorkflowVersionResponse,
 )
+from app.services.idempotency import IdempotencyService
 from app.services.workflows import WorkflowService
 
 router = APIRouter(prefix="/projects/{project_id}")
@@ -139,18 +141,30 @@ async def execute_workflow(
     session: SessionDependency,
     current_user: CurrentUser,
     coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> WorkflowExecutionResponse:
-    execution, plan = await WorkflowService(session).prepare_execution(
-        actor=current_user,
+    async def start() -> WorkflowExecutionResponse:
+        execution, plan = await WorkflowService(session).prepare_execution(
+            actor=current_user,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            environment_id=payload.environment_id,
+            version=payload.version,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+        )
+        coordinator.start(plan)
+        return WorkflowExecutionResponse.model_validate(execution)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
         project_id=project_id,
-        workflow_id=workflow_id,
-        environment_id=payload.environment_id,
-        version=payload.version,
-        runtime_variables=payload.runtime_variables,
-        runtime_headers=payload.runtime_headers,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.execute:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
     )
-    coordinator.start(plan)
-    return WorkflowExecutionResponse.model_validate(execution)
+    return WorkflowExecutionResponse.model_validate(response)
 
 
 @router.get("/workflow-executions", response_model=Page[WorkflowExecutionResponse])

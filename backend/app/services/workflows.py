@@ -359,9 +359,15 @@ class WorkflowService:
         token = CancellationToken()
         if execution.cancel_requested_at is not None:
             token.cancel()
+        network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             scheduler = WorkflowScheduler(
-                WorkflowNodeExecutor(client, plan.prepared.requests, plan.definition)
+                WorkflowNodeExecutor(
+                    client,
+                    plan.prepared.requests,
+                    plan.definition,
+                    network_policy,
+                )
             )
             result = await self._run_with_cancellation_poll(
                 scheduler=scheduler,

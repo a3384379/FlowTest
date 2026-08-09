@@ -58,6 +58,7 @@ export type ApiDefinition = {
   name: string
   description: string
   current_version: number
+  is_active: boolean
 }
 
 export type AssertionResult = {
@@ -106,7 +107,7 @@ export type ImportItem = {
   method: string
   path: string
   change: ImportChange
-  definition_id: string
+  definition_id: string | null
   version: number
 }
 
@@ -121,6 +122,34 @@ export type ImportRun = {
   deleted: number
   unchanged: number
   results: ImportItem[]
+  status: 'preview' | 'applied'
+  applied_keys: string[]
+  applied_at: string | null
+  created_at: string
+}
+
+export type ProjectCapability =
+  'read' | 'edit' | 'execute' | 'manage_members' | 'manage_security' | 'view_audit'
+
+export type ProjectPermission = {
+  effective_role: 'system_admin' | 'owner' | 'editor' | 'viewer'
+  capabilities: ProjectCapability[]
+  matrix: Record<'owner' | 'editor' | 'viewer', ProjectCapability[]>
+}
+
+export type ProjectSecurityPolicy = {
+  allowed_hosts: string[]
+  allowed_private_cidrs: string[]
+}
+
+export type AuditLog = {
+  id: string
+  actor_user_id: string | null
+  project_id: string
+  action: string
+  resource_type: string
+  resource_id: string | null
+  details: Record<string, unknown>
   created_at: string
 }
 

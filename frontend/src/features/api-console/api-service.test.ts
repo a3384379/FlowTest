@@ -10,12 +10,13 @@ import {
   createProject,
   downloadArtifact,
   executeApi,
-  importApiDocument,
+  mergeApiImport,
   listApis,
   listArtifacts,
   listEnvironments,
   listExecutions,
   listProjects,
+  previewApiDocument,
   uploadArtifact,
 } from './api-service'
 
@@ -108,15 +109,30 @@ describe('API console service', () => {
       deleted: 0,
       unchanged: 0,
       results: [],
+      status: 'preview' as const,
+      applied_keys: [],
+      applied_at: null,
       created_at: '2026-08-09T00:00:00Z',
     }
     server.use(
-      http.post(`/api/v1/projects/${project.id}/imports`, async ({ request }) => {
+      http.post(`/api/v1/projects/${project.id}/imports/preview`, async ({ request }) => {
         const form = await request.formData()
         expect((form.get('document') as Blob).size).toBeGreaterThan(0)
         expect(form.get('source_type')).toBe('auto')
         return HttpResponse.json(importRun, { status: 201 })
       }),
+      http.post(
+        `/api/v1/projects/${project.id}/imports/${importRun.id}/merge`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({ selected_keys: ['api-key'] })
+          return HttpResponse.json({
+            ...importRun,
+            status: 'applied',
+            applied_keys: ['api-key'],
+            applied_at: '2026-08-09T00:01:00Z',
+          })
+        },
+      ),
       http.get(`/api/v1/projects/${project.id}/files`, () =>
         HttpResponse.json({ items: [artifact], total: 1, page: 1, page_size: 100 }),
       ),
@@ -128,11 +144,12 @@ describe('API console service', () => {
     )
 
     expect(
-      await importApiDocument(
+      await previewApiDocument(
         project.id,
         new File(['{}'], 'openapi.json', { type: 'application/json' }),
       ),
     ).toEqual(importRun)
+    expect((await mergeApiImport(project.id, importRun.id, ['api-key'])).status).toBe('applied')
     expect((await listArtifacts(project.id)).items).toEqual([artifact])
     expect(
       await uploadArtifact(

@@ -255,6 +255,7 @@ class APIAssetService:
             name=name.strip(),
             description=description.strip(),
             current_version=1,
+            is_active=True,
             created_by_id=actor.id,
         )
         self._assets.add(definition)
@@ -517,7 +518,7 @@ class APIAssetService:
 
     async def _get_definition(self, project_id: UUID, definition_id: UUID) -> APIDefinition:
         definition = await self._assets.get_definition(definition_id)
-        if definition is None or definition.project_id != project_id:
+        if definition is None or definition.project_id != project_id or not definition.is_active:
             raise AppError(code="API_NOT_FOUND", message="API 不存在", status_code=404)
         return definition
 

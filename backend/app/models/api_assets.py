@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -72,6 +73,9 @@ class APIDefinition(UuidPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     current_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", index=True
+    )
     import_key: Mapped[str | None] = mapped_column(String(64), index=True)
     import_fingerprint: Mapped[str | None] = mapped_column(String(64))
     import_source: Mapped[str | None] = mapped_column(String(255), index=True)

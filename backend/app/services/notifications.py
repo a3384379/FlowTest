@@ -18,6 +18,7 @@ from app.models.tasking import TestPlanRun
 from app.models.workflows import WorkflowExecution
 from app.repositories.reporting import ReportingRepository
 from app.services.audit import AuditService
+from app.services.outbound import OutboundRequestGuard, outbound_request_guard
 from app.services.projects import ProjectService
 
 DELIVERY_TIMEOUT_SECONDS = 10.0
@@ -137,10 +138,18 @@ class NotificationWebhookService:
 
 
 class NotificationDeliveryService:
-    def __init__(self, session: AsyncSession, *, secrets_box: SecretBox = secret_box) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        secrets_box: SecretBox = secret_box,
+        outbound_guard: OutboundRequestGuard = outbound_request_guard,
+    ) -> None:
         self._session = session
         self._reports = ReportingRepository(session)
         self._secrets = secrets_box
+        self._outbound_guard = outbound_guard
+        self._projects = ProjectService(session)
 
     async def deliver_workflow(self, execution_id: UUID) -> None:
         execution = await self._reports.get_execution(execution_id)
@@ -218,6 +227,8 @@ class NotificationDeliveryService:
         self._reports.add(delivery)
         await self._session.flush()
         try:
+            policy = await self._projects.load_runtime_security_policy(webhook.project_id)
+            await self._outbound_guard.enforce(webhook.url, policy)
             async with httpx.AsyncClient(
                 follow_redirects=False,
                 timeout=DELIVERY_TIMEOUT_SECONDS,
@@ -239,9 +250,11 @@ class NotificationDeliveryService:
             else:
                 delivery.status = "failed"
                 delivery.error_message = f"通知端点返回 HTTP {response.status_code}"
-        except httpx.HTTPError as error:
+        except (httpx.HTTPError, AppError) as error:
             delivery.status = "failed"
-            delivery.error_message = type(error).__name__
+            delivery.error_message = (
+                error.code if isinstance(error, AppError) else type(error).__name__
+            )
         await self._session.commit()
 
 

@@ -1,0 +1,104 @@
+import pytest
+
+from app.domain.access import ProjectCapability, ProjectRole
+from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_outbound_url
+from app.services.rate_limit import RedisRateLimiter
+
+
+def test_fixed_role_capability_matrix() -> None:
+    assert ProjectRole.OWNER.capabilities == frozenset(ProjectCapability)
+    assert ProjectRole.EDITOR.capabilities == {
+        ProjectCapability.READ,
+        ProjectCapability.EDIT,
+        ProjectCapability.EXECUTE,
+    }
+    assert ProjectRole.VIEWER.capabilities == {ProjectCapability.READ}
+    assert not ProjectRole.EDITOR.allows(ProjectCapability.MANAGE_SECURITY)
+    assert not ProjectRole.VIEWER.allows(ProjectCapability.EXECUTE)
+
+
+@pytest.mark.asyncio
+async def test_outbound_policy_blocks_ssrf_and_allows_explicit_private_cidr() -> None:
+    async def public(_host: str, _port: int) -> tuple[str, ...]:
+        return ("1.1.1.1",)
+
+    addresses = await validate_outbound_url(
+        "https://api.example.com/users",
+        OutboundNetworkPolicy(allowed_hosts=("*.example.com",)),
+        resolver=public,
+    )
+    assert addresses == ("1.1.1.1",)
+
+    with pytest.raises(OutboundPolicyError, match="允许列表"):
+        await validate_outbound_url(
+            "https://evil.example.net",
+            OutboundNetworkPolicy(allowed_hosts=("*.example.com",)),
+            resolver=public,
+        )
+
+    async def private(_host: str, _port: int) -> tuple[str, ...]:
+        return ("10.20.30.40",)
+
+    with pytest.raises(OutboundPolicyError, match="未授权的私有网络"):
+        await validate_outbound_url(
+            "http://internal.example.com",
+            OutboundNetworkPolicy(),
+            resolver=private,
+        )
+    assert await validate_outbound_url(
+        "http://internal.example.com",
+        OutboundNetworkPolicy(allowed_private_cidrs=("10.20.0.0/16",)),
+        resolver=private,
+    ) == ("10.20.30.40",)
+
+    async def metadata(_host: str, _port: int) -> tuple[str, ...]:
+        return ("169.254.169.254",)
+
+    with pytest.raises(OutboundPolicyError, match="禁止访问"):
+        await validate_outbound_url(
+            "http://metadata.internal",
+            OutboundNetworkPolicy(allowed_private_cidrs=("169.254.0.0/16",)),
+            resolver=metadata,
+        )
+
+
+@pytest.mark.asyncio
+async def test_outbound_policy_rejects_credentials_and_mixed_dns_answers() -> None:
+    async def mixed(_host: str, _port: int) -> tuple[str, ...]:
+        return ("1.1.1.1", "127.0.0.1")
+
+    with pytest.raises(OutboundPolicyError, match="用户凭据"):
+        await validate_outbound_url(
+            "https://user:password@example.com",
+            OutboundNetworkPolicy(),
+            resolver=mixed,
+        )
+    with pytest.raises(OutboundPolicyError, match="禁止访问"):
+        await validate_outbound_url(
+            "https://example.com",
+            OutboundNetworkPolicy(),
+            resolver=mixed,
+        )
+
+
+class FakeRateClient:
+    def __init__(self, results: list[list[int]]) -> None:
+        self.results = results
+        self.calls: list[tuple[str, int, tuple[object, ...]]] = []
+
+    async def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object:
+        self.calls.append((script, numkeys, keys_and_args))
+        return self.results.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_exposes_remaining_and_retry_after() -> None:
+    fake = FakeRateClient([[1, 60], [3, 42]])
+    limiter = RedisRateLimiter(fake)
+
+    allowed = await limiter.check(key="user", limit=2, window_seconds=60)
+    blocked = await limiter.check(key="user", limit=2, window_seconds=60)
+
+    assert allowed.allowed and allowed.remaining == 1
+    assert not blocked.allowed and blocked.remaining == 0 and blocked.retry_after == 42
+    assert fake.calls[0][2] == ("flowtest:rate:user", 60)

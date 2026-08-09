@@ -11,6 +11,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.redis import close_redis, redis_client
 from app.core.storage import ensure_storage_bucket
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.trace import TraceIdMiddleware
 from app.services.auth import bootstrap_administrator
 from app.services.execution_events import RedisExecutionEventBus
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.add_middleware(RateLimitMiddleware)
     application.add_middleware(TraceIdMiddleware)
     register_exception_handlers(application)
     application.include_router(api_router, prefix=settings.api_v1_prefix)

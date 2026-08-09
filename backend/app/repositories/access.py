@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.access import ProjectRole
-from app.models.access import Folder, Project, ProjectMember, RefreshSession, User
+from app.models.access import AuditLog, Folder, Project, ProjectMember, RefreshSession, User
 
 
 class UserRepository:
@@ -188,3 +188,27 @@ class ProjectRepository:
             select(Folder.id).join(descendants, Folder.parent_id == descendants.c.id)
         )
         return set((await self._session.scalars(select(descendants.c.id))).all())
+
+    async def list_audit_logs(
+        self,
+        *,
+        project_id: UUID,
+        action: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[AuditLog], int]:
+        filters = [AuditLog.project_id == project_id]
+        if action:
+            filters.append(AuditLog.action == action)
+        query = select(AuditLog).where(*filters)
+        logs = list(
+            (
+                await self._session.scalars(
+                    query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+                )
+            ).all()
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(AuditLog).where(*filters)
+        )
+        return logs, int(total or 0)

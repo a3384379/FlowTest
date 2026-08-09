@@ -20,9 +20,10 @@ const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 
 const { Header, Content, Sider } = Layout
-type PageKey = 'dashboard' | 'apis' | 'workflows' | 'tasks' | 'reports'
+type PageKey = 'dashboard' | 'projects' | 'apis' | 'workflows' | 'tasks' | 'reports'
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -58,7 +59,7 @@ function AuthenticatedShell() {
           onClick={({ key }) => setPage(key as PageKey)}
           items={[
             { key: 'dashboard', icon: <DashboardOutlined />, label: '首页' },
-            { key: 'projects', icon: <FolderOpenOutlined />, label: '项目管理', disabled: true },
+            { key: 'projects', icon: <FolderOpenOutlined />, label: '项目管理' },
             { key: 'apis', icon: <ApiOutlined />, label: '接口管理' },
             { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排' },
             { key: 'tasks', icon: <ScheduleOutlined />, label: '任务执行' },
@@ -81,6 +82,7 @@ function AuthenticatedShell() {
         <Content className="content">
           <Suspense fallback={<PageLoading />}>
             {page === 'dashboard' && <DashboardPage />}
+            {page === 'projects' && <ProjectsPage />}
             {page === 'apis' && <ApiConsolePage />}
             {page === 'workflows' && <WorkflowsPage />}
             {page === 'tasks' && <TestPlansPage />}

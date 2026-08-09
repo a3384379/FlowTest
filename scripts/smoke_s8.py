@@ -11,7 +11,7 @@ import time
 from typing import Any, cast
 from urllib.request import Request, urlopen
 
-from smoke_s4 import APIClient, SmokeConfig, _change_password
+from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password
 from smoke_s5 import _create_workflow, _wait_for_completion
 
 
@@ -42,6 +42,7 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
         token=token,
     )
     project_id = str(project["id"])
+    _allow_compose_target(client, token, project_id, config.target_url)
     environment = client.json(
         "POST",
         f"/projects/{project_id}/environments",

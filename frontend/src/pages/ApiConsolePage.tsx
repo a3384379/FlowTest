@@ -148,7 +148,8 @@ export default function ApiConsolePage() {
         open={importOpen}
         importing={consoleState.importing}
         result={consoleState.lastImport}
-        onImport={consoleState.importDocument}
+        onPreview={consoleState.previewImport}
+        onMerge={consoleState.mergeImport}
         onClose={() => {
           setImportOpen(false)
           consoleState.clearImportResult()

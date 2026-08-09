@@ -2,6 +2,15 @@ from enum import StrEnum
 from uuid import UUID
 
 
+class ProjectCapability(StrEnum):
+    READ = "read"
+    EDIT = "edit"
+    EXECUTE = "execute"
+    MANAGE_MEMBERS = "manage_members"
+    MANAGE_SECURITY = "manage_security"
+    VIEW_AUDIT = "view_audit"
+
+
 class ProjectRole(StrEnum):
     OWNER = "owner"
     EDITOR = "editor"
@@ -14,6 +23,23 @@ class ProjectRole(StrEnum):
     @property
     def can_manage_members(self) -> bool:
         return self is ProjectRole.OWNER
+
+    @property
+    def capabilities(self) -> frozenset[ProjectCapability]:
+        if self is ProjectRole.OWNER:
+            return frozenset(ProjectCapability)
+        if self is ProjectRole.EDITOR:
+            return frozenset(
+                {
+                    ProjectCapability.READ,
+                    ProjectCapability.EDIT,
+                    ProjectCapability.EXECUTE,
+                }
+            )
+        return frozenset({ProjectCapability.READ})
+
+    def allows(self, capability: ProjectCapability) -> bool:
+        return capability in self.capabilities
 
 
 class FolderMoveError(ValueError):

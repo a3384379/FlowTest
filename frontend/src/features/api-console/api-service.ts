@@ -89,7 +89,7 @@ export async function createApi(projectId: string, input: CreateApiInput) {
   return response.data.definition
 }
 
-export async function importApiDocument(
+export async function previewApiDocument(
   projectId: string,
   file: File,
   sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' = 'auto',
@@ -97,7 +97,19 @@ export async function importApiDocument(
   const form = new FormData()
   form.append('document', file)
   form.append('source_type', sourceType)
-  const response = await apiClient.post<ImportRun>(`/projects/${projectId}/imports`, form)
+  const response = await apiClient.post<ImportRun>(`/projects/${projectId}/imports/preview`, form)
+  return response.data
+}
+
+export async function mergeApiImport(
+  projectId: string,
+  runId: string,
+  selectedKeys: string[],
+): Promise<ImportRun> {
+  const response = await apiClient.post<ImportRun>(
+    `/projects/${projectId}/imports/${runId}/merge`,
+    { selected_keys: selectedKeys },
+  )
   return response.data
 }
 
@@ -145,6 +157,7 @@ export async function executeApi(
         },
       ],
     },
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
   )
   return response.data
 }

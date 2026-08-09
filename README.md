@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S9 报告与执行中心（V0.4）`。
+当前状态：`S10 企业治理（V0.4）`。
 
 ## 技术栈
 
@@ -96,6 +96,12 @@ S9 已提供统一执行中心、步骤级报告、稳定失败分类和最近 7
 使用 AES-256-GCM 保存；Worker 在工作流或测试计划完成后发送 `timestamp.body` HMAC-SHA256 签名
 消息，投递 HTTP 状态与错误可在报告页查询。
 
+S10 已固定 System Admin、Project Owner、Editor、Viewer 四级权限，并在项目治理页展示有效能力、
+出站安全策略和带 Trace ID 的脱敏审计记录。OpenAPI/Postman 重导入先生成只读 Diff，再按选择进行
+Merge；删除项只有明确选中才停用。API 调试、Workflow 与通知 Webhook 统一在 DNS 解析后执行
+域名/CIDR 校验，拒绝元数据、回环和未授权私网地址。执行入口统一支持 `Idempotency-Key`，登录、
+执行与普通写请求分别使用 Redis 限流桶。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -118,6 +124,9 @@ multipart 上传、二进制响应外置、文件断言和受权下载。macOS �
 
 运行 `uv run --project backend python scripts/smoke_s9.py` 可验收失败分类、执行下钻、趋势聚合、
 MinIO HTML 报告和 Worker 到 Mock 接收器的签名通知，并重新计算 HMAC 验证请求完整性。
+
+运行 `uv run --project backend python scripts/smoke_s10.py` 可验收固定权限、出站白名单、Import
+Diff/Merge、删除停用、执行幂等、SSRF 拦截、Secret 不可读和带 Trace ID 的审计链路。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

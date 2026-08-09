@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain import network
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.scopes import HeaderScope
 from app.main import app
@@ -185,6 +186,74 @@ async def test_timeout_and_large_response_are_persisted_as_errors(
     assert network_error.json()["execution"]["error_code"] == "NETWORK_ERROR"
     assert network_error.json()["execution"]["error_message"] == "无法连接目标服务"
     assert "literal-secret" not in network_error.text
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_api_execution_idempotency_replays_response_and_rejects_payload_change(
+    execution_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(execution_client)
+    project_id, environment_id, definition_id = await _create_execution_assets(
+        execution_client,
+        headers,
+        path="/idempotent",
+        method="GET",
+        body=None,
+    )
+    target = respx.get("http://target.example.com/idempotent").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+    idempotent_headers = {**headers, "Idempotency-Key": "same-client-operation"}
+    first = await execution_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/execute",
+        headers=idempotent_headers,
+        json={"environment_id": environment_id},
+    )
+    replayed = await execution_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/execute",
+        headers=idempotent_headers,
+        json={"environment_id": environment_id},
+    )
+
+    assert first.status_code == 200, first.text
+    assert replayed.status_code == 200
+    assert replayed.json()["execution"]["id"] == first.json()["execution"]["id"]
+    assert target.call_count == 1
+
+    conflict = await execution_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/execute",
+        headers=idempotent_headers,
+        json={"environment_id": environment_id, "timeout_seconds": 5},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_api_execution_blocks_loopback_after_dns_resolution(
+    execution_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def loopback(_hostname: str, _port: int) -> tuple[str, ...]:
+        return ("127.0.0.1",)
+
+    monkeypatch.setattr(network, "resolve_host", loopback)
+    headers = await _login_headers(execution_client)
+    project_id, environment_id, definition_id = await _create_execution_assets(
+        execution_client,
+        headers,
+        path="/metadata",
+        method="GET",
+        body=None,
+    )
+    blocked = await execution_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/execute",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert blocked.status_code == 422
+    assert blocked.json()["error"]["code"] == "OUTBOUND_REQUEST_BLOCKED"
 
 
 @pytest.mark.asyncio

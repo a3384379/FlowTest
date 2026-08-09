@@ -87,6 +87,7 @@ export async function executeWorkflow(
   const response = await apiClient.post<WorkflowExecution>(
     `/projects/${projectId}/workflows/${workflowId}/executions`,
     { environment_id: environmentId },
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
   )
   return response.data
 }
