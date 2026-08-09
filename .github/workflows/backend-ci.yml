@@ -62,6 +62,13 @@ jobs:
         run: uv sync --locked --extra dev
       - name: Start infrastructure
         run: docker compose up -d --wait postgres redis minio
+      - name: Validate migrations
+        working-directory: backend
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
       - name: Run infrastructure tests
         working-directory: backend
         env:

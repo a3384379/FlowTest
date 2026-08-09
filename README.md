@@ -44,6 +44,12 @@ docker compose up --build
 - Mock 目标服务：<http://localhost:8080/docs>
 - MinIO Console：<http://localhost:9001>
 
+本地初始管理员为 `admin@flowtest.dev`，密码由
+`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置。首次登录后必须修改密码；生产部署不得沿用示例值。
+
+S1 已提供 `/api/v1/auth`、`/api/v1/users`、`/api/v1/projects`、项目成员和任意层级目录接口。
+Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15 分钟。
+
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 
 ## 开发原则
