@@ -11,6 +11,8 @@ def test_variable_precedence_and_source() -> None:
         {
             VariableScope.GLOBAL: {"baseUrl": "https://global", "shared": "global"},
             VariableScope.ENVIRONMENT: {"baseUrl": "https://test", "shared": "test"},
+            VariableScope.WORKFLOW: {"shared": "workflow"},
+            VariableScope.DATASET: {"shared": "dataset"},
             VariableScope.RUNTIME: {"shared": "runtime"},
         }
     )

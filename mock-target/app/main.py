@@ -72,3 +72,8 @@ async def slow(seconds: float = 1.0) -> dict[str, float]:
 @app.get("/failure")
 async def failure() -> None:
     raise HTTPException(status_code=500, detail="Expected failure")
+
+
+@app.post("/echo")
+async def echo(payload: dict[str, object]) -> dict[str, object]:
+    return payload

@@ -182,12 +182,12 @@ async def get_workflow_execution(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> WorkflowExecutionDetailResponse:
-    execution, nodes = await WorkflowService(session).get_execution(
+    execution, nodes, children = await WorkflowService(session).get_execution(
         actor=current_user,
         project_id=project_id,
         execution_id=execution_id,
     )
-    return _execution_detail(execution, nodes)
+    return _execution_detail(execution, nodes, children)
 
 
 @router.post(
@@ -209,9 +209,12 @@ async def cancel_workflow_execution(
 
 
 def _execution_detail(
-    execution: WorkflowExecution, nodes: list[WorkflowNodeExecution]
+    execution: WorkflowExecution,
+    nodes: list[WorkflowNodeExecution],
+    children: list[WorkflowExecution],
 ) -> WorkflowExecutionDetailResponse:
     return WorkflowExecutionDetailResponse(
         execution=WorkflowExecutionResponse.model_validate(execution),
         nodes=[WorkflowNodeExecutionResponse.model_validate(node) for node in nodes],
+        children=[WorkflowExecutionResponse.model_validate(child) for child in children],
     )

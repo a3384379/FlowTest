@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -8,11 +9,11 @@ import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.api.dependencies import get_workflow_coordinator
 from app.core.database import get_session
 from app.core.security import password_service
+from app.core.storage import StoredObject
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -24,14 +25,19 @@ ADMIN_PASSWORD = "workflow-password-123!"
 
 
 @pytest.fixture
-async def workflow_client() -> AsyncIterator[AsyncClient]:
+async def workflow_client(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> AsyncIterator[AsyncClient]:
+    storage = MemoryObjectStorage()
+    monkeypatch.setattr("app.services.artifacts.object_storage", storage)
     test_engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        f"sqlite+aiosqlite:///{tmp_path / 'workflow.db'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
     )
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
     async with test_engine.begin() as connection:
+        await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
         await connection.run_sync(Base.metadata.create_all)
     async with session_maker() as session:
         session.add(
@@ -63,6 +69,20 @@ async def workflow_client() -> AsyncIterator[AsyncClient]:
     await coordinator.shutdown()
     app.dependency_overrides.clear()
     await test_engine.dispose()
+
+
+class MemoryObjectStorage:
+    def __init__(self) -> None:
+        self.objects: dict[str, StoredObject] = {}
+
+    async def put(self, *, key: str, content: bytes, content_type: str) -> None:
+        self.objects[key] = StoredObject(content=content, content_type=content_type)
+
+    async def get(self, *, key: str) -> StoredObject:
+        return self.objects[key]
+
+    async def delete(self, *, key: str) -> None:
+        self.objects.pop(key, None)
 
 
 @respx.mock
@@ -265,6 +285,173 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     assert interrupted_result.json()["nodes"][1]["status"] == "cancelled"
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_dataset_execution_maps_rows_and_explains_condition_branches(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    dataset = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/files",
+        headers=headers,
+        files={
+            "file": (
+                "users.json",
+                json.dumps(
+                    [
+                        {"email": "enabled@example.com", "enabled": "true"},
+                        {"email": "disabled@example.com", "enabled": "false"},
+                    ]
+                ).encode(),
+                "application/json",
+            )
+        },
+    )
+    assert dataset.status_code == 201, dataset.text
+    source_api = await _create_api_definition(
+        workflow_client,
+        headers,
+        project_id,
+        name="Dataset source",
+        path="/dataset-source",
+        body={"email": "{{email}}", "enabled": "{{enabled}}"},
+    )
+    target_api = await _create_api_definition(
+        workflow_client,
+        headers,
+        project_id,
+        name="Mapped target",
+        path="/mapped-target",
+        body={"email": ""},
+    )
+    definition = _dataset_workflow_definition(
+        dataset.json()["id"],
+        source_api,
+        target_api,
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "数据驱动流程", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+
+    received: list[dict[str, Any]] = []
+
+    def echo_source(request: Any) -> Response:
+        return Response(200, json=json.loads(request.content))
+
+    def capture_target(request: Any) -> Response:
+        body = json.loads(request.content)
+        received.append(body)
+        return Response(200, json=body)
+
+    respx.post("http://workflow.example.com/dataset-source").mock(side_effect=echo_source)
+    respx.post("http://workflow.example.com/mapped-target").mock(side_effect=capture_target)
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    assert started.json()["parent_execution_id"] is None
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, started.json()["id"]
+    )
+
+    assert detail["execution"]["status"] == "passed"
+    assert detail["execution"]["context"]["dataset_summary"] == {
+        "total": 2,
+        "passed": 2,
+        "failed": 0,
+        "cancelled": 0,
+    }
+    assert [child["dataset_row_index"] for child in detail["children"]] == [0, 1]
+    assert {item["email"] for item in received} == {
+        "enabled@example.com",
+        "disabled@example.com",
+    }
+    child_details = [
+        (
+            await workflow_client.get(
+                f"/api/v1/projects/{project_id}/workflow-executions/{child['id']}",
+                headers=headers,
+            )
+        ).json()
+        for child in detail["children"]
+    ]
+    for child in child_details:
+        statuses = {node["node_id"]: node["status"] for node in child["nodes"]}
+        assert sorted(statuses[node_id] for node_id in ("true-delay", "false-delay")) == [
+            "passed",
+            "skipped",
+        ]
+        mapped = next(node for node in child["nodes"] if node["node_id"] == "target")
+        assert mapped["output"]["input_mappings"][0]["target_key"] == "email"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_dataset_parent_cancellation_reaches_active_and_queued_rows(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    dataset = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/files",
+        headers=headers,
+        files={
+            "file": (
+                "cancel.json",
+                json.dumps([{"row": index} for index in range(6)]).encode(),
+                "application/json",
+            )
+        },
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "取消数据集流程",
+            "definition": _dataset_cancel_definition(dataset.json()["id"], api_id),
+        },
+    )
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+
+    async def slow_response(_request: Any) -> Response:
+        await asyncio.sleep(5)
+        return Response(200, json={"late": True})
+
+    respx.get("http://workflow.example.com/users/v1").mock(side_effect=slow_response)
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    execution_id = started.json()["id"]
+    requested = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/cancel",
+        headers=headers,
+    )
+    assert requested.status_code == 200, requested.text
+    detail = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert detail["execution"]["status"] == "cancelled", detail
+    assert len(detail["children"]) == 6
+    assert {child["status"] for child in detail["children"]} == {"cancelled"}
+
+
 async def _wait_for_completed_execution(
     client: AsyncClient,
     headers: dict[str, str],
@@ -353,6 +540,179 @@ def _workflow_definition(api_id: str, *, max_retries: int = 0) -> dict[str, Any]
         ],
         "edges": [
             {"id": "start-api", "source": "start", "target": "api"},
+            {"id": "api-end", "source": "api", "target": "end"},
+        ],
+    }
+
+
+async def _create_api_definition(
+    client: AsyncClient,
+    headers: dict[str, str],
+    project_id: str,
+    *,
+    name: str,
+    path: str,
+    body: dict[str, Any],
+) -> str:
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": name,
+            "request": {
+                "method": "POST",
+                "path": path,
+                "body_kind": "json",
+                "body": body,
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    return str(created.json()["definition"]["id"])
+
+
+def _dataset_workflow_definition(
+    artifact_id: str,
+    source_api_id: str,
+    target_api_id: str,
+) -> dict[str, Any]:
+    return {
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "dataset",
+                "type": "dataset",
+                "name": "用户数据",
+                "position": {"x": 100, "y": 0},
+                "config": {"artifact_id": artifact_id, "format": "json"},
+            },
+            {
+                "id": "source",
+                "type": "api",
+                "name": "读取数据行",
+                "position": {"x": 200, "y": 0},
+                "config": {"api_definition_id": source_api_id},
+            },
+            {
+                "id": "extract",
+                "type": "extract",
+                "name": "提取邮箱",
+                "position": {"x": 300, "y": 0},
+                "config": {
+                    "source_node_id": "source",
+                    "expression": "body.email",
+                    "variable": "selected_email",
+                },
+            },
+            {
+                "id": "target",
+                "type": "api",
+                "name": "映射邮箱",
+                "position": {"x": 400, "y": 0},
+                "config": {"api_definition_id": target_api_id},
+            },
+            {
+                "id": "assert",
+                "type": "assert",
+                "name": "校验响应",
+                "position": {"x": 500, "y": 0},
+                "config": {
+                    "source_node_id": "target",
+                    "expression": "status_code",
+                    "operator": "equals",
+                    "expected": 200,
+                },
+            },
+            {
+                "id": "condition",
+                "type": "condition",
+                "name": "判断启用状态",
+                "position": {"x": 600, "y": 0},
+                "config": {
+                    "source_node_id": "source",
+                    "expression": "body.enabled",
+                    "operator": "equals",
+                    "expected": "true",
+                },
+            },
+            {
+                "id": "true-delay",
+                "type": "delay",
+                "name": "启用分支",
+                "position": {"x": 700, "y": -80},
+                "config": {"seconds": 0},
+            },
+            {
+                "id": "false-delay",
+                "type": "delay",
+                "name": "停用分支",
+                "position": {"x": 700, "y": 80},
+                "config": {"seconds": 0},
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 800, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-dataset", "source": "start", "target": "dataset"},
+            {"id": "dataset-source", "source": "dataset", "target": "source"},
+            {"id": "source-extract", "source": "source", "target": "extract"},
+            {
+                "id": "extract-target",
+                "source": "extract",
+                "target": "target",
+                "mappings": [
+                    {
+                        "source": {"node_id": "extract", "path": "value"},
+                        "target": {
+                            "node_id": "target",
+                            "location": "body",
+                            "key": "email",
+                        },
+                    }
+                ],
+            },
+            {"id": "target-assert", "source": "target", "target": "assert"},
+            {"id": "assert-condition", "source": "assert", "target": "condition"},
+            {
+                "id": "condition-true",
+                "source": "condition",
+                "target": "true-delay",
+                "condition": "true",
+            },
+            {
+                "id": "condition-false",
+                "source": "condition",
+                "target": "false-delay",
+                "condition": "false",
+            },
+            {"id": "true-end", "source": "true-delay", "target": "end"},
+            {"id": "false-end", "source": "false-delay", "target": "end"},
+        ],
+    }
+
+
+def _dataset_cancel_definition(artifact_id: str, api_id: str) -> dict[str, Any]:
+    return {
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "dataset",
+                "type": "dataset",
+                "name": "取消数据",
+                "position": {"x": 100, "y": 0},
+                "config": {"artifact_id": artifact_id, "format": "json"},
+            },
+            {
+                "id": "api",
+                "type": "api",
+                "name": "慢请求",
+                "position": {"x": 200, "y": 0},
+                "config": {"api_definition_id": api_id},
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 300, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-dataset", "source": "start", "target": "dataset"},
+            {"id": "dataset-api", "source": "dataset", "target": "api"},
             {"id": "api-end", "source": "api", "target": "end"},
         ],
     }

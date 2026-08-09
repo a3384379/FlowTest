@@ -29,6 +29,9 @@ describe('WorkflowsPage', () => {
       http.get(`/api/v1/projects/${project.id}/apis`, () =>
         HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 100 }),
       ),
+      http.get(`/api/v1/projects/${project.id}/files`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
         HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
       ),

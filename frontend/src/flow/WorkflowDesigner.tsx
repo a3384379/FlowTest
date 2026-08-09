@@ -1,12 +1,15 @@
 import {
   ApiOutlined,
-  DeleteOutlined,
+  BranchesOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  ExportOutlined,
   FlagOutlined,
   PlayCircleOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
 import {
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   Background,
@@ -16,7 +19,6 @@ import {
   MiniMap,
   Position,
   ReactFlow,
-  type Connection,
   type Edge,
   type EdgeChange,
   type Node,
@@ -24,14 +26,17 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Button, Empty, Input, InputNumber, Select, Space, Tag, Typography } from 'antd'
+import { Button, Empty, Select, Space, Tag, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 
-import type { ApiDefinition, WorkflowDefinition, WorkflowNode } from '../lib/api'
+import type { ApiDefinition, Artifact, WorkflowDefinition, WorkflowNode } from '../lib/api'
+import WorkflowNodeInspector from './WorkflowNodeInspector'
+import { addApiNode, addTypedNode, connectNodes } from './workflow-graph'
 
 type DesignerProps = {
   definition: WorkflowDefinition
   apis: ApiDefinition[]
+  artifacts: Artifact[]
   statuses: Record<string, string>
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
@@ -52,6 +57,7 @@ const NODE_INITIAL_HEIGHT = 64
 export default function WorkflowDesigner({
   definition,
   apis,
+  artifacts,
   statuses,
   editable,
   onChange,
@@ -73,9 +79,11 @@ export default function WorkflowDesigner({
         apiSelection={selectedApiId}
         apis={apis}
         editable={editable}
+        hasArtifacts={artifacts.length > 0}
+        hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
         onApiSelection={setApiSelection}
         onAddApi={() => selectedApiId && onChange(addApiNode(definition, selectedApiId))}
-        onAddEnd={() => onChange(addEndNode(definition))}
+        onAddNode={(type) => onChange(addTypedNode(definition, type, artifacts.at(0)?.id ?? null))}
       />
       <div className="workflow-designer-body">
         <div className="workflow-canvas" aria-label="工作流画布">
@@ -104,11 +112,13 @@ export default function WorkflowDesigner({
             <Controls />
           </ReactFlow>
         </div>
-        <NodeInspector
+        <WorkflowNodeInspector
           node={selected}
+          definition={definition}
           apis={apis}
+          artifacts={artifacts}
           editable={editable}
-          onUpdate={(node) => onChange(replaceNode(definition, node))}
+          onChange={onChange}
           onDelete={() => {
             if (!selected) return
             onChange(removeNode(definition, selected.id))
@@ -124,16 +134,20 @@ function DesignerToolbar({
   apiSelection,
   apis,
   editable,
+  hasArtifacts,
+  hasDataset,
   onApiSelection,
   onAddApi,
-  onAddEnd,
+  onAddNode,
 }: {
   apiSelection?: string
   apis: ApiDefinition[]
   editable: boolean
+  hasArtifacts: boolean
+  hasDataset: boolean
   onApiSelection: (value: string) => void
   onAddApi: () => void
-  onAddEnd: () => void
+  onAddNode: (type: Exclude<WorkflowNode['type'], 'start' | 'api'>) => void
 }) {
   return (
     <div className="workflow-toolbar">
@@ -153,7 +167,38 @@ function DesignerToolbar({
         <Button icon={<PlusOutlined />} disabled={!editable || !apiSelection} onClick={onAddApi}>
           添加接口节点
         </Button>
-        <Button icon={<FlagOutlined />} disabled={!editable} onClick={onAddEnd}>
+        <Button icon={<ExportOutlined />} disabled={!editable} onClick={() => onAddNode('extract')}>
+          提取
+        </Button>
+        <Button
+          icon={<CheckCircleOutlined />}
+          disabled={!editable}
+          onClick={() => onAddNode('assert')}
+        >
+          断言
+        </Button>
+        <Button
+          icon={<BranchesOutlined />}
+          disabled={!editable}
+          onClick={() => onAddNode('condition')}
+        >
+          条件
+        </Button>
+        <Button
+          icon={<ClockCircleOutlined />}
+          disabled={!editable}
+          onClick={() => onAddNode('delay')}
+        >
+          延时
+        </Button>
+        <Button
+          icon={<DatabaseOutlined />}
+          disabled={!editable || hasDataset || !hasArtifacts}
+          onClick={() => onAddNode('dataset')}
+        >
+          数据集
+        </Button>
+        <Button icon={<FlagOutlined />} disabled={!editable} onClick={() => onAddNode('end')}>
           添加结束节点
         </Button>
       </Space>
@@ -181,85 +226,6 @@ function WorkflowNodeCard({ data }: NodeProps<CanvasNode>) {
   )
 }
 
-function NodeInspector({
-  node,
-  apis,
-  editable,
-  onUpdate,
-  onDelete,
-}: {
-  node: WorkflowNode | null
-  apis: ApiDefinition[]
-  editable: boolean
-  onUpdate: (node: WorkflowNode) => void
-  onDelete: () => void
-}) {
-  if (!node) {
-    return (
-      <aside className="workflow-inspector">
-        <Typography.Title level={5}>节点配置</Typography.Title>
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个节点进行配置" />
-      </aside>
-    )
-  }
-  const apiId =
-    typeof node.config.api_definition_id === 'string' ? node.config.api_definition_id : undefined
-  return (
-    <aside className="workflow-inspector">
-      <Typography.Title level={5}>节点配置</Typography.Title>
-      <label>
-        <span>名称</span>
-        <Input
-          disabled={!editable}
-          value={node.name}
-          onChange={(event) => onUpdate({ ...node, name: event.target.value })}
-        />
-      </label>
-      {node.type === 'api' && (
-        <>
-          <label>
-            <span>接口</span>
-            <Select
-              disabled={!editable}
-              value={apiId}
-              options={apis.map((api) => ({ label: api.name, value: api.id }))}
-              onChange={(value) => onUpdate(updateNodeConfig(node, 'api_definition_id', value))}
-            />
-          </label>
-          <label>
-            <span>超时（秒）</span>
-            <InputNumber
-              disabled={!editable}
-              min={1}
-              max={300}
-              value={numberConfig(node, 'timeout_seconds', 30)}
-              onChange={(value) => onUpdate(updateNodeConfig(node, 'timeout_seconds', value ?? 30))}
-            />
-          </label>
-          <label>
-            <span>最大重试次数</span>
-            <InputNumber
-              disabled={!editable}
-              min={0}
-              max={3}
-              value={numberConfig(node, 'max_retries', 0)}
-              onChange={(value) => onUpdate(updateNodeConfig(node, 'max_retries', value ?? 0))}
-            />
-          </label>
-        </>
-      )}
-      <Button
-        danger
-        icon={<DeleteOutlined />}
-        disabled={!editable || node.type === 'start'}
-        onClick={onDelete}
-      >
-        删除节点
-      </Button>
-    </aside>
-  )
-}
-
 function toCanvasNode(node: WorkflowNode, status = 'pending'): CanvasNode {
   return {
     id: node.id,
@@ -277,6 +243,7 @@ function toCanvasEdge(edge: WorkflowDefinition['edges'][number]): Edge {
     source: edge.source,
     target: edge.target,
     markerEnd: { type: MarkerType.ArrowClosed },
+    label: edge.condition ? (edge.condition === 'true' ? '是' : '否') : undefined,
   }
 }
 
@@ -306,53 +273,6 @@ function applyCanvasEdgeChanges(
   return { ...definition, edges: definition.edges.filter((edge) => remaining.has(edge.id)) }
 }
 
-function connectNodes(
-  definition: WorkflowDefinition,
-  edges: Edge[],
-  connection: Connection,
-): WorkflowDefinition {
-  if (!connection.source || !connection.target || connection.source === connection.target)
-    return definition
-  const id = `${connection.source}-${connection.target}-${Date.now()}`
-  const changed = addEdge({ ...connection, id }, edges)
-  if (!changed.some((edge) => edge.id === id)) return definition
-  return {
-    ...definition,
-    edges: [
-      ...definition.edges,
-      { id, source: connection.source, target: connection.target, condition: null, mappings: [] },
-    ],
-  }
-}
-
-function addApiNode(definition: WorkflowDefinition, apiId: string): WorkflowDefinition {
-  const id = uniqueNodeId(definition, 'api')
-  return {
-    ...definition,
-    nodes: [
-      ...definition.nodes,
-      {
-        id,
-        type: 'api',
-        name: `接口请求 ${definition.nodes.filter((node) => node.type === 'api').length + 1}`,
-        position: nextPosition(definition),
-        config: { api_definition_id: apiId, max_retries: 0, retry_on: ['network_error', '5xx'] },
-      },
-    ],
-  }
-}
-
-function addEndNode(definition: WorkflowDefinition): WorkflowDefinition {
-  const id = uniqueNodeId(definition, 'end')
-  return {
-    ...definition,
-    nodes: [
-      ...definition.nodes,
-      { id, type: 'end', name: '结束', position: nextPosition(definition), config: {} },
-    ],
-  }
-}
-
 function removeNode(definition: WorkflowDefinition, nodeId: string): WorkflowDefinition {
   return {
     ...definition,
@@ -361,41 +281,15 @@ function removeNode(definition: WorkflowDefinition, nodeId: string): WorkflowDef
   }
 }
 
-function replaceNode(
-  definition: WorkflowDefinition,
-  replacement: WorkflowNode,
-): WorkflowDefinition {
-  return {
-    ...definition,
-    nodes: definition.nodes.map((node) => (node.id === replacement.id ? replacement : node)),
-  }
-}
-
-function updateNodeConfig(node: WorkflowNode, key: string, value: unknown): WorkflowNode {
-  return { ...node, config: { ...node.config, [key]: value } }
-}
-
-function numberConfig(node: WorkflowNode, key: string, fallback: number): number {
-  const value = node.config[key]
-  return typeof value === 'number' ? value : fallback
-}
-
-function uniqueNodeId(definition: WorkflowDefinition, prefix: string): string {
-  const existing = new Set(definition.nodes.map((node) => node.id))
-  let index = existing.size + 1
-  while (existing.has(`${prefix}-${index}`)) index += 1
-  return `${prefix}-${index}`
-}
-
-function nextPosition(definition: WorkflowDefinition) {
-  const maxX = Math.max(0, ...definition.nodes.map((node) => node.position.x))
-  return { x: maxX + 220, y: 120 + (definition.nodes.length % 3) * 100 }
-}
-
 function nodeTypeLabel(type: WorkflowNode['type']): string {
   const labels: Partial<Record<WorkflowNode['type'], string>> = {
     start: '开始',
     api: '接口',
+    extract: '提取',
+    assert: '断言',
+    condition: '条件',
+    delay: '延时',
+    dataset: '数据集',
     end: '结束',
   }
   return labels[type] ?? type
@@ -404,6 +298,11 @@ function nodeTypeLabel(type: WorkflowNode['type']): string {
 function nodeIcon(type: WorkflowNode['type']) {
   if (type === 'start') return <PlayCircleOutlined />
   if (type === 'end') return <FlagOutlined />
+  if (type === 'extract') return <ExportOutlined />
+  if (type === 'assert') return <CheckCircleOutlined />
+  if (type === 'condition') return <BranchesOutlined />
+  if (type === 'delay') return <ClockCircleOutlined />
+  if (type === 'dataset') return <DatabaseOutlined />
   return <ApiOutlined />
 }
 

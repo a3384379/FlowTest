@@ -7,3 +7,4 @@
 3. Workflow 持久化格式
 4. Execution Snapshot 与状态机
 5. 后台执行与实时事件传输
+6. 数据集、字段映射与条件分支语义

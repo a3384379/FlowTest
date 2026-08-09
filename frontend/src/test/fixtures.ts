@@ -76,6 +76,7 @@ export const executionDetail: ExecutionDetail = {
 
 export const workflowDefinition: WorkflowDefinition = {
   schema_version: '1.0',
+  variables: {},
   nodes: [
     { id: 'start', type: 'start', name: '开始', position: { x: 0, y: 0 }, config: {} },
     {
@@ -119,9 +120,13 @@ export const workflowVersion: WorkflowVersion = {
 export const workflowExecutionDetail: WorkflowExecutionDetail = {
   execution: {
     id: '00000000-0000-4000-8000-000000000070',
+    project_id: project.id,
     workflow_id: workflow.id,
     workflow_version_id: workflowVersion.id,
     environment_id: environment.id,
+    triggered_by_id: user.id,
+    parent_execution_id: null,
+    dataset_row_index: null,
     status: 'passed',
     snapshot: { workflow: { version: 2 } },
     context: {},
@@ -155,6 +160,7 @@ export const workflowExecutionDetail: WorkflowExecutionDetail = {
       error_message: null,
     },
   ],
+  children: [],
 }
 
 export const workflowRunningExecution = {

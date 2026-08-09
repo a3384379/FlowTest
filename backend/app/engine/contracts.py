@@ -1,7 +1,12 @@
 from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+from app.domain.assertions import ComparisonOperator
+
+VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
 
 class NodeType(StrEnum):
@@ -40,6 +45,25 @@ class RetryCategory(StrEnum):
     SERVER_ERROR = "5xx"
 
 
+class MappingTransformKind(StrEnum):
+    IDENTITY = "identity"
+    TEMPLATE = "template"
+
+
+class MappingTargetLocation(StrEnum):
+    QUERY = "query"
+    HEADER = "header"
+    BODY = "body"
+    VARIABLE = "variable"
+
+
+class DatasetFormat(StrEnum):
+    AUTO = "auto"
+    CSV = "csv"
+    JSON = "json"
+    EXCEL = "excel"
+
+
 class Position(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,23 +74,23 @@ class Position(BaseModel):
 class MappingSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    node_id: str
-    path: str
+    node_id: str = Field(min_length=1, max_length=128)
+    path: str = Field(min_length=1, max_length=500)
 
 
 class MappingTransform(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: str = "template"
-    template: str = "{{value}}"
+    kind: MappingTransformKind = MappingTransformKind.IDENTITY
+    template: str = Field(default="{{value}}", max_length=4000)
 
 
 class MappingTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    node_id: str
-    location: str
-    key: str
+    node_id: str = Field(min_length=1, max_length=128)
+    location: MappingTargetLocation
+    key: str = Field(min_length=1, max_length=500)
 
 
 class FieldMapping(BaseModel):
@@ -125,10 +149,52 @@ class ApiNodeConfig(BaseModel):
         return self
 
 
+class ExtractNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_node_id: str = Field(min_length=1, max_length=128)
+    expression: str = Field(min_length=1, max_length=500)
+    variable: VariableName
+    required: bool = True
+
+
+class AssertNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_node_id: str = Field(min_length=1, max_length=128)
+    expression: str = Field(min_length=1, max_length=500)
+    operator: ComparisonOperator = ComparisonOperator.EQUALS
+    expected: JsonValue = None
+
+
+class ConditionNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_node_id: str = Field(min_length=1, max_length=128)
+    expression: str = Field(min_length=1, max_length=500)
+    operator: ComparisonOperator = ComparisonOperator.EQUALS
+    expected: JsonValue = None
+
+
+class DelayNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seconds: float = Field(ge=0, le=300)
+
+
+class DatasetNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_id: UUID
+    format: DatasetFormat = DatasetFormat.AUTO
+    sheet_name: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = "1.0"
+    variables: dict[VariableName, str] = Field(default_factory=dict)
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
     settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
@@ -148,17 +214,50 @@ class WorkflowDefinition(BaseModel):
             raise ValueError("Workflow must contain exactly one start node")
         if not ends:
             raise ValueError("Workflow must contain at least one end node")
+        datasets = [node for node in self.nodes if node.type is NodeType.DATASET]
+        if len(datasets) > 1:
+            raise ValueError("Workflow can contain at most one dataset node")
 
         known_nodes = set(node_ids)
+        nodes_by_id = {node.id: node for node in self.nodes}
         for edge in self.edges:
             if edge.source not in known_nodes or edge.target not in known_nodes:
                 raise ValueError(f"Edge {edge.id} references an unknown node")
             if edge.source == edge.target:
                 raise ValueError(f"Edge {edge.id} cannot connect a node to itself")
+            self._validate_edge(edge, nodes_by_id)
+        self._validate_condition_branches(nodes_by_id)
         self._validate_acyclic(known_nodes)
         self._validate_endpoints(starts[0].id, {node.id for node in ends})
         self._validate_connected(starts[0].id, {node.id for node in ends}, known_nodes)
         return self
+
+    @staticmethod
+    def _validate_edge(edge: WorkflowEdge, nodes: dict[str, WorkflowNode]) -> None:
+        source = nodes[edge.source]
+        if edge.condition is not None:
+            if source.type is not NodeType.CONDITION:
+                raise ValueError(f"Edge {edge.id} condition requires a condition source node")
+            if edge.condition not in {"true", "false"}:
+                raise ValueError(f"Edge {edge.id} condition must be true or false")
+        for mapping in edge.mappings:
+            if mapping.source.node_id != edge.source or mapping.target.node_id != edge.target:
+                raise ValueError(f"Edge {edge.id} mapping endpoints must match the edge")
+
+    def _validate_condition_branches(self, nodes: dict[str, WorkflowNode]) -> None:
+        for node in nodes.values():
+            if node.type is not NodeType.CONDITION:
+                continue
+            outgoing = [edge for edge in self.edges if edge.source == node.id]
+            conditions = [edge.condition for edge in outgoing]
+            if (
+                len(conditions) != 2
+                or conditions.count("true") != 1
+                or conditions.count("false") != 1
+            ):
+                raise ValueError(
+                    f"Condition node {node.id} must have exactly one true and one false edge"
+                )
 
     def _validate_endpoints(self, start_id: str, end_ids: set[str]) -> None:
         if any(edge.target == start_id for edge in self.edges):
@@ -209,6 +308,35 @@ def parse_api_node_config(node: WorkflowNode) -> ApiNodeConfig:
     if node.type is not NodeType.API:
         raise ValueError(f"Node {node.id} is not an API node")
     return ApiNodeConfig.model_validate(node.config)
+
+
+NodeConfig = (
+    ApiNodeConfig
+    | ExtractNodeConfig
+    | AssertNodeConfig
+    | ConditionNodeConfig
+    | DelayNodeConfig
+    | DatasetNodeConfig
+    | None
+)
+
+
+def parse_node_config(node: WorkflowNode) -> NodeConfig:
+    if node.type is NodeType.API:
+        return ApiNodeConfig.model_validate(node.config)
+    if node.type is NodeType.EXTRACT:
+        return ExtractNodeConfig.model_validate(node.config)
+    if node.type is NodeType.ASSERT:
+        return AssertNodeConfig.model_validate(node.config)
+    if node.type is NodeType.CONDITION:
+        return ConditionNodeConfig.model_validate(node.config)
+    if node.type is NodeType.DELAY:
+        return DelayNodeConfig.model_validate(node.config)
+    if node.type is NodeType.DATASET:
+        return DatasetNodeConfig.model_validate(node.config)
+    if node.config:
+        raise ValueError(f"Node {node.id} does not accept configuration")
+    return None
 
 
 def _walk(origin: str, adjacency: dict[str, set[str]]) -> set[str]:

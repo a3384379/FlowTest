@@ -379,6 +379,8 @@ class APIAssetService:
         use_body_override: bool,
         redact: bool = True,
         version_number: int | None = None,
+        workflow_variables: dict[str, str] | None = None,
+        dataset_variables: dict[str, str] | None = None,
     ) -> PreparedRequest:
         _definition, api_version = await self.get_detail(
             actor=actor,
@@ -400,6 +402,8 @@ class APIAssetService:
                 **environment.variables,
                 **{f"secret.{name}": value for name, value in secret_values.items()},
             },
+            workflow_values=workflow_variables or {},
+            dataset_values=dataset_variables or {},
             runtime_values=runtime_variables,
         )
         try:

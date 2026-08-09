@@ -1,6 +1,7 @@
 import {
   apiClient,
   type ApiDefinition,
+  type Artifact,
   type Environment,
   type Page,
   type Project,
@@ -25,6 +26,13 @@ export async function listEnvironments(projectId: string): Promise<Environment[]
 
 export async function listApis(projectId: string): Promise<Page<ApiDefinition>> {
   const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
+    params: { page: 1, page_size: 100 },
+  })
+  return response.data
+}
+
+export async function listArtifacts(projectId: string): Promise<Page<Artifact>> {
+  const response = await apiClient.get<Page<Artifact>>(`/projects/${projectId}/files`, {
     params: { page: 1, page_size: 100 },
   })
   return response.data
@@ -104,6 +112,7 @@ export async function listWorkflowExecutions(projectId: string): Promise<Page<Wo
 export function linearWorkflow(apiId: string): WorkflowDefinition {
   return {
     schema_version: '1.0',
+    variables: {},
     nodes: [
       { id: 'start', type: 'start', name: '开始', position: { x: 0, y: 80 }, config: {} },
       {

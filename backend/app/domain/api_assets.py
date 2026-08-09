@@ -101,6 +101,8 @@ def build_variables(
     global_values: dict[str, str],
     project_values: dict[str, str],
     environment_values: dict[str, str],
+    workflow_values: dict[str, str],
+    dataset_values: dict[str, str],
     runtime_values: dict[str, str],
 ) -> dict[str, ResolvedValue]:
     return resolve_variables(
@@ -108,6 +110,8 @@ def build_variables(
             VariableScope.GLOBAL: global_values,
             VariableScope.PROJECT: project_values,
             VariableScope.ENVIRONMENT: environment_values,
+            VariableScope.WORKFLOW: workflow_values,
+            VariableScope.DATASET: dataset_values,
             VariableScope.RUNTIME: runtime_values,
         }
     )

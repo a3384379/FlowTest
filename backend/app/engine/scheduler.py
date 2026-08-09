@@ -2,16 +2,19 @@ import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Protocol
 
 from pydantic import JsonValue
 
 from app.engine.contracts import (
     ApiNodeConfig,
+    DelayNodeConfig,
     NodeStatus,
     NodeType,
     RetryCategory,
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowNode,
     WorkflowRunStatus,
 )
@@ -66,8 +69,17 @@ NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
 
 @dataclass(slots=True)
 class ExecutionContext:
+    workflow_variables: dict[str, JsonValue] = field(default_factory=dict)
+    dataset_variables: dict[str, JsonValue] = field(default_factory=dict)
     runtime_variables: dict[str, JsonValue] = field(default_factory=dict)
     _node_outputs: dict[str, JsonValue] = field(default_factory=dict)
+    _extracted_variables: dict[str, JsonValue] = field(default_factory=dict)
+    _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self._record_scope(self.workflow_variables, "workflow")
+        self._record_scope(self.dataset_variables, "dataset")
+        self._record_scope(self.runtime_variables, "runtime")
 
     def output_of(self, node_id: str) -> JsonValue:
         return self._node_outputs.get(node_id)
@@ -75,11 +87,52 @@ class ExecutionContext:
     def record_output(self, node_id: str, output: JsonValue) -> None:
         self._node_outputs[node_id] = output
 
+    def record_variable(
+        self,
+        name: str,
+        value: JsonValue,
+        *,
+        node_id: str,
+        path: str,
+    ) -> None:
+        self._extracted_variables[name] = value
+        if name not in self.dataset_variables and name not in self.runtime_variables:
+            self._variable_sources[name] = {
+                "scope": "workflow",
+                "node_id": node_id,
+                "path": path,
+            }
+
+    def variable(self, name: str) -> JsonValue:
+        if name in self.runtime_variables:
+            return self.runtime_variables[name]
+        if name in self.dataset_variables:
+            return self.dataset_variables[name]
+        if name in self._extracted_variables:
+            return self._extracted_variables[name]
+        return self.workflow_variables.get(name)
+
+    def resolved_variables(self) -> dict[str, JsonValue]:
+        return {
+            **self.workflow_variables,
+            **self._extracted_variables,
+            **self.dataset_variables,
+            **self.runtime_variables,
+        }
+
     def snapshot(self) -> dict[str, JsonValue]:
         return {
             "runtime_variables": dict(self.runtime_variables),
+            "workflow_variables": dict(self.workflow_variables),
+            "dataset_variables": dict(self.dataset_variables),
+            "resolved_variables": self.resolved_variables(),
+            "variable_sources": dict(self._variable_sources),
             "node_outputs": dict(self._node_outputs),
         }
+
+    def _record_scope(self, values: dict[str, JsonValue], scope: str) -> None:
+        for name in values:
+            self._variable_sources[name] = {"scope": scope, "node_id": None, "path": name}
 
 
 class NodeExecutor(Protocol):
@@ -116,7 +169,7 @@ class WorkflowScheduler:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
         nodes = {node.id: node for node in definition.nodes}
-        predecessors = _predecessors(definition)
+        incoming = _incoming_edges(definition)
         statuses = dict.fromkeys(nodes, NodeStatus.PENDING)
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
@@ -131,12 +184,13 @@ class WorkflowScheduler:
                 await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
                 break
 
-            _skip_blocked(nodes, predecessors, statuses, records)
+            _skip_blocked(nodes, incoming, statuses, records, run_context)
             _schedule_ready(
                 definition,
                 nodes,
-                predecessors,
+                incoming,
                 statuses,
+                records,
                 active,
                 run_context,
                 self._run_node,
@@ -235,7 +289,7 @@ class WorkflowScheduler:
 
 @dataclass(frozen=True, slots=True)
 class _ExecutionPolicy:
-    timeout_seconds: int
+    timeout_seconds: float
     max_retries: int
     retry_on: frozenset[RetryCategory]
     retry_delay_seconds: float
@@ -250,6 +304,14 @@ def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _Exec
             retry_on=frozenset(config.retry_on),
             retry_delay_seconds=config.retry_delay_seconds,
         )
+    if node.type is NodeType.DELAY:
+        delay = DelayNodeConfig.model_validate(node.config)
+        return _ExecutionPolicy(
+            timeout_seconds=delay.seconds + 1,
+            max_retries=0,
+            retry_on=frozenset(),
+            retry_delay_seconds=0,
+        )
     return _ExecutionPolicy(
         timeout_seconds=default_timeout_seconds,
         max_retries=0,
@@ -258,18 +320,26 @@ def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _Exec
     )
 
 
-def _predecessors(definition: WorkflowDefinition) -> dict[str, set[str]]:
-    result: dict[str, set[str]] = {node.id: set() for node in definition.nodes}
+class _EdgeState(StrEnum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    BLOCKED = "blocked"
+
+
+def _incoming_edges(definition: WorkflowDefinition) -> dict[str, list[WorkflowEdge]]:
+    result: dict[str, list[WorkflowEdge]] = {node.id: [] for node in definition.nodes}
     for edge in definition.edges:
-        result[edge.target].add(edge.source)
+        result[edge.target].append(edge)
     return result
 
 
 def _skip_blocked(
     nodes: dict[str, WorkflowNode],
-    predecessors: dict[str, set[str]],
+    incoming: dict[str, list[WorkflowEdge]],
     statuses: dict[str, NodeStatus],
     records: dict[str, NodeRunRecord],
+    context: ExecutionContext,
 ) -> None:
     changed = True
     while changed:
@@ -277,13 +347,19 @@ def _skip_blocked(
         for node_id, node in nodes.items():
             if statuses[node_id] is not NodeStatus.PENDING:
                 continue
-            dependencies = predecessors[node_id]
-            if (
-                dependencies
-                and all(statuses[item].is_terminal for item in dependencies)
-                and any(statuses[item] is not NodeStatus.PASSED for item in dependencies)
-            ):
-                record = _record(node, NodeStatus.SKIPPED)
+            states = [_edge_state(edge, statuses, records, context) for edge in incoming[node_id]]
+            if states and _edges_require_skip(states):
+                branch_not_selected = _EdgeState.BLOCKED not in states
+                record = _record(
+                    node,
+                    NodeStatus.SKIPPED,
+                    error_code=(
+                        "BRANCH_NOT_SELECTED" if branch_not_selected else "UPSTREAM_BLOCKED"
+                    ),
+                    error_message=(
+                        "条件分支未被选择" if branch_not_selected else "上游节点未成功完成"
+                    ),
+                )
                 statuses[node_id] = record.status
                 records[node_id] = record
                 changed = True
@@ -292,8 +368,9 @@ def _skip_blocked(
 def _schedule_ready(
     definition: WorkflowDefinition,
     nodes: dict[str, WorkflowNode],
-    predecessors: dict[str, set[str]],
+    incoming: dict[str, list[WorkflowEdge]],
     statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
     active: dict[asyncio.Task[NodeRunRecord], str],
     context: ExecutionContext,
     runner: Callable[[WorkflowNode, ExecutionContext, int], Coroutine[Any, Any, NodeRunRecord]],
@@ -305,7 +382,9 @@ def _schedule_ready(
         node
         for node_id, node in nodes.items()
         if statuses[node_id] is NodeStatus.PENDING
-        and all(statuses[item] is NodeStatus.PASSED for item in predecessors[node_id])
+        and _edges_are_ready(
+            [_edge_state(edge, statuses, records, context) for edge in incoming[node_id]]
+        )
     ]
     for node in ready[:capacity]:
         statuses[node.id] = NodeStatus.RUNNING
@@ -313,6 +392,50 @@ def _schedule_ready(
             runner(node, context, definition.settings.default_timeout_seconds)
         )
         active[task] = node.id
+
+
+def _edge_state(
+    edge: WorkflowEdge,
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    context: ExecutionContext,
+) -> _EdgeState:
+    status = statuses[edge.source]
+    if status in {NodeStatus.PENDING, NodeStatus.RUNNING}:
+        return _EdgeState.PENDING
+    if status is NodeStatus.SKIPPED:
+        record = records.get(edge.source)
+        return (
+            _EdgeState.INACTIVE
+            if record is not None and record.error_code == "BRANCH_NOT_SELECTED"
+            else _EdgeState.BLOCKED
+        )
+    if status in {NodeStatus.FAILED, NodeStatus.CANCELLED}:
+        return _EdgeState.BLOCKED
+    if edge.condition is None:
+        return _EdgeState.ACTIVE
+    output = context.output_of(edge.source)
+    matched = output.get("matched") if isinstance(output, dict) else None
+    if not isinstance(matched, bool):
+        return _EdgeState.BLOCKED
+    expected = edge.condition == "true"
+    return _EdgeState.ACTIVE if matched is expected else _EdgeState.INACTIVE
+
+
+def _edges_are_ready(states: list[_EdgeState]) -> bool:
+    if not states:
+        return True
+    return (
+        _EdgeState.PENDING not in states
+        and _EdgeState.BLOCKED not in states
+        and (_EdgeState.ACTIVE in states)
+    )
+
+
+def _edges_require_skip(states: list[_EdgeState]) -> bool:
+    if _EdgeState.PENDING in states:
+        return False
+    return _EdgeState.BLOCKED in states or _EdgeState.ACTIVE not in states
 
 
 async def _cancel_active(active: dict[asyncio.Task[NodeRunRecord], str]) -> None:

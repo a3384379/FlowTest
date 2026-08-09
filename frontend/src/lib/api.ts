@@ -137,16 +137,29 @@ export type WorkflowNode = {
   config: Record<string, unknown>
 }
 
+export type WorkflowFieldMapping = {
+  source: { node_id: string; path: string }
+  transform: { kind: 'identity' | 'template'; template: string }
+  target: {
+    node_id: string
+    location: 'query' | 'header' | 'body' | 'variable'
+    key: string
+  }
+}
+
+export type WorkflowEdge = {
+  id: string
+  source: string
+  target: string
+  condition: 'true' | 'false' | null
+  mappings: WorkflowFieldMapping[]
+}
+
 export type WorkflowDefinition = {
   schema_version: string
+  variables: Record<string, string>
   nodes: WorkflowNode[]
-  edges: Array<{
-    id: string
-    source: string
-    target: string
-    condition: string | null
-    mappings: unknown[]
-  }>
+  edges: WorkflowEdge[]
   settings: {
     fail_fast: boolean
     concurrency: number
@@ -178,9 +191,13 @@ export type WorkflowVersion = {
 
 export type WorkflowExecution = {
   id: string
+  project_id: string
   workflow_id: string
   workflow_version_id: string
   environment_id: string
+  triggered_by_id: string
+  parent_execution_id: string | null
+  dataset_row_index: number | null
   status: 'running' | 'passed' | 'failed' | 'cancelled'
   snapshot: Record<string, unknown>
   context: Record<string, unknown>
@@ -206,6 +223,7 @@ export type WorkflowNodeExecution = {
 export type WorkflowExecutionDetail = {
   execution: WorkflowExecution
   nodes: WorkflowNodeExecution[]
+  children: WorkflowExecution[]
 }
 
 export type ExecutionEvent = {

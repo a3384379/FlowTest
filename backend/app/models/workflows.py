@@ -58,6 +58,17 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('running', 'passed', 'failed', 'cancelled')",
             name="workflow_execution_status",
         ),
+        CheckConstraint(
+            "(parent_execution_id IS NULL AND dataset_row_index IS NULL) OR "
+            "(parent_execution_id IS NOT NULL AND dataset_row_index IS NOT NULL "
+            "AND dataset_row_index >= 0)",
+            name="workflow_execution_dataset_child",
+        ),
+        UniqueConstraint(
+            "parent_execution_id",
+            "dataset_row_index",
+            name="uq_workflow_executions_parent_dataset_row",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -75,6 +86,10 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     triggered_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
+    parent_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), index=True
+    )
+    dataset_row_index: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), index=True)
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

@@ -75,7 +75,7 @@ def evaluate_assertion(snapshot: ResponseSnapshot, spec: AssertionSpec) -> Asser
         actual = _extract_actual(snapshot, spec)
         if spec.kind is AssertionKind.JSON_SCHEMA:
             return _evaluate_schema(spec, actual)
-        passed = _compare(actual, spec.expected, spec.operator)
+        passed = compare_values(actual, spec.expected, spec.operator)
         message = "断言通过" if passed else f"实际值 {actual!r} 不满足 {spec.operator.value}"
         return AssertionOutcome(spec=spec, actual=actual, passed=passed, message=message)
     except (JSONPathError, JMESPathError, SchemaError, KeyError, TypeError, ValueError) as error:
@@ -135,7 +135,7 @@ def _evaluate_schema(spec: AssertionSpec, actual: JsonValue) -> AssertionOutcome
     return AssertionOutcome(spec=spec, actual=actual, passed=False, message=message)
 
 
-def _compare(actual: JsonValue, expected: JsonValue, operator: ComparisonOperator) -> bool:
+def compare_values(actual: JsonValue, expected: JsonValue, operator: ComparisonOperator) -> bool:
     if operator is ComparisonOperator.EXISTS:
         return actual is not None
     if operator is ComparisonOperator.EQUALS:
