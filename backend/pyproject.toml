@@ -38,6 +38,8 @@ dev = [
   "pytest-cov>=7,<8",
   "respx>=0.22,<1",
   "ruff>=0.16,<1",
+  "types-jmespath>=1.1,<2",
+  "types-jsonschema>=4.26,<5",
 ]
 
 [tool.setuptools.packages.find]
@@ -66,6 +68,10 @@ known-first-party = ["app"]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["jsonpath_ng.*"]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 concurrency = ["greenlet", "thread"]

@@ -8,7 +8,20 @@ from app.core.config import settings
 from app.core.context import get_trace_id
 
 SENSITIVE_KEYS = frozenset(
-    {"authorization", "cookie", "password", "refresh_token", "secret", "token"}
+    {
+        "access_token",
+        "api_key",
+        "authorization",
+        "client_secret",
+        "cookie",
+        "password",
+        "proxy-authorization",
+        "refresh_token",
+        "secret",
+        "set-cookie",
+        "token",
+        "x-api-key",
+    }
 )
 
 
