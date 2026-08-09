@@ -55,6 +55,7 @@ jobs:
     env:
       FLOWTEST_E2E_ACTIVE_PASSWORD: FlowTest-E2E-Admin-123!
       FLOWTEST_SMOKE_ADMIN_PASSWORD: FlowTest-E2E-Admin-123!
+      FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE: "100"
       FLOWTEST_EXECUTION_RATE_LIMIT_PER_MINUTE: "500"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
