@@ -1,5 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
+from app.core.config import Settings
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_outbound_url
 from app.services.rate_limit import RedisRateLimiter
@@ -15,6 +17,27 @@ def test_fixed_role_capability_matrix() -> None:
     assert ProjectRole.VIEWER.capabilities == {ProjectCapability.READ}
     assert not ProjectRole.EDITOR.allows(ProjectCapability.MANAGE_SECURITY)
     assert not ProjectRole.VIEWER.allows(ProjectCapability.EXECUTE)
+
+
+def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
+    with pytest.raises(ValidationError, match="生产环境"):
+        Settings(_env_file=None, environment="production")
+
+    configured = Settings(
+        _env_file=None,
+        environment="production",
+        secret_key="production-signing-key-with-more-than-32-bytes",
+        bootstrap_admin_password="production-admin-password",
+        data_encryption_key="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+        s3_secret_key="production-object-storage-secret",
+        secure_cookies=True,
+    )
+    assert configured.secure_cookies
+
+
+def test_retention_default_does_not_exceed_system_limit() -> None:
+    with pytest.raises(ValidationError, match="默认保留天数"):
+        Settings(_env_file=None, retention_default_days=31, retention_max_days=30)
 
 
 @pytest.mark.asyncio

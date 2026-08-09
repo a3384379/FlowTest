@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "0.4.0"
+    app_version: str = "1.0.0"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
     scheduler_poll_seconds: int = Field(default=15, ge=5, le=300)
+    retention_cleanup_interval_seconds: int = Field(default=86_400, ge=300, le=604_800)
+    retention_default_days: int = Field(default=90, ge=1, le=3650)
+    retention_max_days: int = Field(default=3650, ge=30, le=3650)
     test_plan_concurrency: int = Field(default=5, ge=1, le=20)
     webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=3600)
     rate_limit_enabled: bool = False
@@ -30,21 +33,37 @@ class Settings(BaseSettings):
     execution_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
     write_rate_limit_per_minute: int = Field(default=120, ge=1, le=5000)
     workflow_event_retention_seconds: int = Field(default=86_400, ge=60, le=604_800)
-    secret_key: str = "change-me-before-production-at-least-32-bytes"
+    secret_key: str = "change-me-before-production-at-least-32-bytes"  # noqa: S105
     access_token_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_days: int = Field(default=7, ge=1, le=30)
     bootstrap_admin_email: str = "admin@flowtest.dev"
-    bootstrap_admin_password: str = "FlowTest-Change-Me-123!"
+    bootstrap_admin_password: str = "FlowTest-Change-Me-123!"  # noqa: S105
     secure_cookies: bool = False
     data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
     cors_origins: list[str] = ["http://localhost:5173"]
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"
-    s3_secret_key: str = "flowtest-local-secret"
+    s3_secret_key: str = "flowtest-local-secret"  # noqa: S105
     s3_bucket: str = "flowtest-artifacts"
     request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
     artifact_limit_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
+
+    @model_validator(mode="after")
+    def validate_settings(self) -> "Settings":
+        if self.retention_default_days > self.retention_max_days:
+            raise ValueError("默认保留天数不能超过系统保留上限")
+        if self.environment.lower() not in {"production", "prod"}:
+            return self
+        unsafe = (
+            self.secret_key == "change-me-before-production-at-least-32-bytes"  # noqa: S105
+            or self.bootstrap_admin_password == "FlowTest-Change-Me-123!"  # noqa: S105
+            or self.data_encryption_key == "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
+            or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
+        )
+        if unsafe or not self.secure_cookies:
+            raise ValueError("生产环境必须替换默认密钥、管理员密码并启用安全 Cookie")
+        return self
 
 
 @lru_cache

@@ -23,3 +23,7 @@ Worker 使用加密计划调用独立异步协调器。
 
 报告由 Execution Snapshot 与节点执行记录派生，HTML 通过 ArtifactService 写入 MinIO。Worker
 到达终态后发送 HMAC-SHA256 签名通知；通知失败独立记录，不改变测试执行结果。
+
+Prometheus 指标由 `/api/v1/metrics` 提供。项目级执行、报告和附件默认保留 90 天，System Admin
+可通过 `/api/v1/maintenance/retention-cleanup` 手动触发与 Beat 相同的清理用例；审计日志不会被
+项目保留任务删除。备份、恢复和容量验证命令见仓库根目录 `docs/operations`。

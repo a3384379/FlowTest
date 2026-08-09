@@ -24,6 +24,7 @@ FastAPI Control Plane
 backend/app/
 ├── api/          # HTTP 适配层，不放业务规则
 ├── core/         # 配置、安全、数据库、日志
+├── observability/# 低基数指标与运行状态
 ├── domain/       # 领域实体、值对象和规则
 ├── services/     # 应用用例与事务编排
 ├── repositories/ # 持久化接口及实现
@@ -69,6 +70,8 @@ frontend/src/
 - 请求、响应、上传、下载、超时与并发均设置上限。
 - 第一版只提供安全函数 DSL，不运行任意用户脚本。
 - 生产环境运行需要明显标识、权限控制和审计记录。
+- 生产配置拒绝示例密钥、示例管理员密码和不安全 Cookie。
+- 运行时响应只在内存中供字段映射使用，进入数据库、日志和报告前统一脱敏。
 
 ## 6. 质量策略
 
@@ -76,3 +79,11 @@ frontend/src/
 - 数据库、Redis、导入器和 HTTP 调用使用集成测试。
 - 一条稳定的示例业务流程作为端到端回归基线。
 - 工作流 Schema 与 API OpenAPI 契约进入版本控制。
+- 每次发布执行容量门槛、镜像 CVE 扫描和隔离卷恢复演练。
+
+## 7. 运行与恢复边界
+
+- API、Worker 与 Beat 共享 PostgreSQL、Redis 和 MinIO，但执行引擎不依赖 Celery。
+- Beat 每日执行项目保留期清理；运行中执行与审计记录不会被项目清理任务删除。
+- `/api/v1/metrics` 暴露 HTTP 延迟/计数与持久化执行状态，不把 UUID 作为标签。
+- PostgreSQL 与 MinIO 作为一个恢复点备份；数据加密密钥必须由部署方在备份系统外安全托管。

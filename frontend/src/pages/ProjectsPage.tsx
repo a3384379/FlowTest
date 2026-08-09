@@ -9,6 +9,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Row,
   Select,
   Space,
@@ -21,16 +22,19 @@ import { useEffect, useState } from 'react'
 
 import {
   getProjectPermission,
+  getProjectRetentionPolicy,
   getProjectSecurityPolicy,
   listManagedProjects,
   listProjectAuditLogs,
   updateProjectSecurityPolicy,
+  updateProjectRetentionPolicy,
 } from '../features/projects/project-service'
 import {
   apiErrorMessage,
   type AuditLog,
   type ProjectCapability,
   type ProjectPermission,
+  type ProjectRetentionPolicy,
   type ProjectSecurityPolicy,
 } from '../lib/api'
 
@@ -77,6 +81,11 @@ function useProjectsPageState() {
     queryFn: () => getProjectSecurityPolicy(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
+  const retention = useQuery({
+    queryKey: ['project-retention-policy', projectId],
+    queryFn: () => getProjectRetentionPolicy(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
   const canManageSecurity = hasCapability(permission.data, 'manage_security')
   const canViewAudit = hasCapability(permission.data, 'view_audit')
   const audit = useQuery({
@@ -99,6 +108,17 @@ function useProjectsPageState() {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
+  const updateRetention = useMutation({
+    mutationFn: (days: number) => updateProjectRetentionPolicy(requiredId(projectId), days),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-retention-policy', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-audit', projectId] }),
+      ])
+      void message.success('数据保留策略已保存')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
   return {
     projectId,
     projects: projects.data?.items ?? [],
@@ -111,6 +131,10 @@ function useProjectsPageState() {
     canManageSecurity,
     updatePolicy: (values: PolicyForm) => updatePolicy.mutate(policyPayload(values)),
     updatePolicyPending: updatePolicy.isPending,
+    retention: retention.data,
+    retentionLoading: retention.isLoading,
+    updateRetention: (days: number) => updateRetention.mutate(days),
+    updateRetentionPending: updateRetention.isPending,
     canViewAudit,
     audit: audit.data?.items ?? [],
     auditLoading: audit.isLoading,
@@ -147,9 +171,56 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           saving={state.updatePolicyPending}
           onSave={state.updatePolicy}
         />
+        <RetentionPolicyPanel
+          policy={state.retention}
+          loading={state.retentionLoading}
+          canManage={state.canManageSecurity}
+          saving={state.updateRetentionPending}
+          onSave={state.updateRetention}
+        />
         <AuditPanel visible={state.canViewAudit} loading={state.auditLoading} items={state.audit} />
       </Row>
     </>
+  )
+}
+
+function RetentionPolicyPanel({
+  policy,
+  loading,
+  canManage,
+  saving,
+  onSave,
+}: {
+  policy?: ProjectRetentionPolicy
+  loading: boolean
+  canManage: boolean
+  saving: boolean
+  onSave: (days: number) => void
+}) {
+  const [form] = Form.useForm<{ retention_days: number }>()
+  useEffect(() => {
+    if (policy) form.setFieldsValue({ retention_days: policy.retention_days })
+  }, [form, policy])
+  return (
+    <Col xs={24} xl={10}>
+      <Card title="数据保留策略" loading={loading}>
+        <Typography.Paragraph type="secondary">
+          执行、报告与附件到期后由每日清理任务删除；审计记录不随项目保留期清理。
+        </Typography.Paragraph>
+        <Form form={form} layout="inline" onFinish={(values) => onSave(values.retention_days)}>
+          <Form.Item
+            label="保留天数"
+            name="retention_days"
+            rules={[{ required: true, message: '请输入保留天数' }]}
+          >
+            <InputNumber min={1} max={policy?.maximum_days ?? 3650} disabled={!canManage} />
+          </Form.Item>
+          <Button htmlType="submit" type="primary" disabled={!canManage} loading={saving}>
+            保存保留策略
+          </Button>
+        </Form>
+      </Card>
+    </Col>
   )
 }
 

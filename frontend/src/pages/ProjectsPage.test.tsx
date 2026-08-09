@@ -12,6 +12,7 @@ import ProjectsPage from './ProjectsPage'
 describe('ProjectsPage', () => {
   it('shows the permission matrix, updates network policy and renders audit trace', async () => {
     const saved = vi.fn()
+    const savedRetention = vi.fn()
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -44,6 +45,14 @@ describe('ProjectsPage', () => {
         const body = await request.json()
         saved(body)
         return HttpResponse.json(body)
+      }),
+      http.get(`/api/v1/projects/${project.id}/retention-policy`, () =>
+        HttpResponse.json({ retention_days: 90, maximum_days: 3650 }),
+      ),
+      http.put(`/api/v1/projects/${project.id}/retention-policy`, async ({ request }) => {
+        const body = (await request.json()) as { retention_days: number }
+        savedRetention(body)
+        return HttpResponse.json({ ...body, maximum_days: 3650 })
       }),
       http.get(`/api/v1/projects/${project.id}/audit-logs`, () =>
         HttpResponse.json({
@@ -83,6 +92,11 @@ describe('ProjectsPage', () => {
         allowed_private_cidrs: ['10.20.0.0/16'],
       }),
     )
+    const retention = await screen.findByRole('spinbutton', { name: '保留天数' })
+    await browser.clear(retention)
+    await browser.type(retention, '120')
+    await browser.click(screen.getByRole('button', { name: '保存保留策略' }))
+    await waitFor(() => expect(savedRetention).toHaveBeenCalledWith({ retention_days: 120 }))
   })
 })
 

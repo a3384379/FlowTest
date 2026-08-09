@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -52,6 +53,7 @@ class RefreshSession(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
 class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "projects"
+    __table_args__ = (CheckConstraint("retention_days BETWEEN 1 AND 3650", name="retention_days"),)
 
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
@@ -59,6 +61,7 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     outbound_allowed_hosts: Mapped[list[str]] = mapped_column(JSON, default=list)
     outbound_allowed_private_cidrs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    retention_days: Mapped[int] = mapped_column(Integer, default=90, server_default="90")
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

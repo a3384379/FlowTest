@@ -27,14 +27,14 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105 -- OAuth token type identifier
     expires_in: int
     user: UserResponse
 
 
 class AccessTokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105 -- OAuth token type identifier
     expires_in: int
 
 
@@ -87,6 +87,15 @@ class ProjectPermissionResponse(BaseModel):
 class ProjectSecurityPolicy(BaseModel):
     allowed_hosts: list[str] = Field(default_factory=list, max_length=100)
     allowed_private_cidrs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ProjectRetentionPolicy(BaseModel):
+    retention_days: int = Field(ge=1, le=3650)
+    maximum_days: int = Field(ge=30, le=3650)
+
+
+class ProjectRetentionUpdate(BaseModel):
+    retention_days: int = Field(ge=1, le=3650)
 
 
 class AuditLogResponse(BaseModel):

@@ -12,6 +12,7 @@ from app.core.database import close_database, session_factory
 from app.core.storage import ensure_storage_bucket
 from app.services.execution_events import RedisExecutionEventBus
 from app.services.notifications import NotificationDeliveryService
+from app.services.retention import RetentionCleanupService
 from app.services.tasking import TestPlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -69,6 +70,17 @@ async def _enqueue_due_test_plans() -> None:
         runs = await TestPlanService(session).queue_due_runs(datetime.now(UTC))
     for run in runs:
         celery_app.send_task("flowtest.run_test_plan", args=[str(run.id)])
+
+
+@celery_app.task(name="flowtest.cleanup_retention")  # type: ignore[untyped-decorator]
+def cleanup_retention() -> None:
+    _run_async(_cleanup_retention)
+
+
+async def _cleanup_retention() -> None:
+    async with session_factory() as session:
+        summary = await RetentionCleanupService(session).cleanup()
+    logger.info("Retention cleanup completed: %s", summary)
 
 
 def _run_async(operation: Callable[[], Coroutine[Any, Any, None]]) -> None:

@@ -495,6 +495,24 @@ async def test_permission_matrix_security_policy_and_audit_access(client: AsyncC
     )
     assert invalid.status_code == 422
 
+    retention = await client.put(
+        f"/api/v1/projects/{project_id}/retention-policy",
+        headers=owner_headers,
+        json={"retention_days": 120},
+    )
+    assert retention.status_code == 200
+    assert retention.json() == {"retention_days": 120, "maximum_days": 3650}
+    readable_retention = await client.get(
+        f"/api/v1/projects/{project_id}/retention-policy", headers=viewer_headers
+    )
+    assert readable_retention.json()["retention_days"] == 120
+    forbidden_retention = await client.put(
+        f"/api/v1/projects/{project_id}/retention-policy",
+        headers=editor_headers,
+        json={"retention_days": 30},
+    )
+    assert forbidden_retention.status_code == 403
+
     audit = await client.get(
         f"/api/v1/projects/{project_id}/audit-logs",
         headers=owner_headers,

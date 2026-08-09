@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S10 企业治理（V0.4）`。
+当前状态：`S11 内部发布（V1.0）`。
 
 ## 技术栈
 
@@ -102,6 +102,12 @@ Merge；删除项只有明确选中才停用。API 调试、Workflow 与通知 W
 域名/CIDR 校验，拒绝元数据、回环和未授权私网地址。执行入口统一支持 `Idempotency-Key`，登录、
 执行与普通写请求分别使用 Redis 限流桶。
 
+S11 已提供项目级 1～3650 天保留策略和每日 90 天清理任务、Prometheus 指标、Compose 资源限制、
+Nginx TLS 接入模板、Critical/High 镜像漏洞门槛、容量测试以及 PostgreSQL/MinIO 备份恢复工具。
+V1.0 验收链路覆盖“登录 → 提取令牌 → 并行查询用户/创建订单 → 断言 → 脱敏报告”，并验证失败、
+超时、重试、取消、并行、Viewer 拒绝和清理行为。部署、升级、回滚、监控和恢复说明位于
+[`docs/operations`](docs/operations)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -127,6 +133,24 @@ MinIO HTML 报告和 Worker 到 Mock 接收器的签名通知，并重新计算 
 
 运行 `uv run --project backend python scripts/smoke_s10.py` 可验收固定权限、出站白名单、Import
 Diff/Merge、删除停用、执行幂等、SSRF 拦截、Secret 不可读和带 Trace ID 的审计链路。
+
+运行 `uv run --project backend python scripts/smoke_s11.py` 可验收 V1.0 Mock 业务链路、失败分类、
+超时、重试、并行、取消、Viewer 权限、Token 持久化脱敏、指标和保留清理。容量与恢复门槛分别为：
+
+```bash
+uv run --project backend python scripts/capacity_s11.py
+scripts/backup.sh /absolute/path/to/backup
+scripts/verify_restore.sh /absolute/path/to/backup
+```
+
+执行全部本地质量门槛使用 `./scripts/check.sh`。
+
+Compose 冒烟产生 S11 验收数据后，可执行可重复的 Playwright 中文 Web 验收：
+
+```bash
+pnpm --dir frontend e2e:setup
+pnpm --dir frontend e2e
+```
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

@@ -8,7 +8,6 @@ from pydantic import JsonValue
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.logging import redact
 from app.domain.api_assets import BodyKind
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
@@ -26,7 +25,6 @@ from app.engine.scheduler import ExecutionContext, NodeExecutionError
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.executions import (
     PreparedMultipart,
-    _redact_response_headers,
     _response_body,
     _send_request,
 )
@@ -123,8 +121,11 @@ def _response_output(response: httpx.Response) -> dict[str, JsonValue]:
         )
     return {
         "status_code": response.status_code,
-        "headers": cast(JsonValue, _redact_response_headers(dict(response.headers))),
-        "body": cast(JsonValue, redact(_response_body(response))),
+        # Runtime context keeps the raw response so downstream mappings can consume
+        # tokens and cookies. WorkflowService redacts node records and context before
+        # either value crosses the persistence boundary.
+        "headers": cast(JsonValue, dict(response.headers)),
+        "body": _response_body(response),
         "size_bytes": size_bytes,
     }
 
