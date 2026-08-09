@@ -17,7 +17,7 @@ from app.services.projects import ProjectService
 
 router = APIRouter()
 EVENTS_SUBPROTOCOL = "flowtest.events.v1"
-TOKEN_SUBPROTOCOL_PREFIX = "flowtest.token."
+TOKEN_SUBPROTOCOL_PREFIX = "flowtest.token."  # noqa: S105 -- protocol marker, not a credential
 
 
 @router.websocket("/executions/{execution_id}/events")

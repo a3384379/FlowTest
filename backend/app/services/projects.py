@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.access import (
     FolderMoveError,
@@ -48,6 +49,7 @@ class ProjectService:
         project = Project(
             name=name.strip(),
             description=description.strip(),
+            retention_days=settings.retention_default_days,
             created_by_id=actor.id,
         )
         self._projects.add(project)
@@ -150,6 +152,44 @@ class ProjectService:
         )
         await self._session.commit()
         return policy
+
+    async def get_retention_policy(self, *, actor: User, project_id: UUID) -> int:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.READ,
+        )
+        return access.project.retention_days
+
+    async def update_retention_policy(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        retention_days: int,
+    ) -> int:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_SECURITY,
+        )
+        if not 1 <= retention_days <= settings.retention_max_days:
+            raise AppError(
+                code="INVALID_RETENTION_POLICY",
+                message=f"保留天数必须在 1 到 {settings.retention_max_days} 之间",
+                status_code=422,
+            )
+        access.project.retention_days = retention_days
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="project.retention_policy_updated",
+            resource_type="project",
+            resource_id=project_id,
+            details={"retention_days": retention_days},
+        )
+        await self._session.commit()
+        return retention_days
 
     async def list_audit_logs(
         self,

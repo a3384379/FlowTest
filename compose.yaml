@@ -15,6 +15,9 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_WRITE_RATE_LIMIT_PER_MINUTE: "120"
   FLOWTEST_CELERY_BROKER_URL: redis://redis:6379/1
   FLOWTEST_CELERY_RESULT_BACKEND: redis://redis:6379/2
+  FLOWTEST_RETENTION_CLEANUP_INTERVAL_SECONDS: "86400"
+  FLOWTEST_RETENTION_DEFAULT_DAYS: "90"
+  FLOWTEST_RETENTION_MAX_DAYS: "3650"
   FLOWTEST_S3_ENDPOINT_URL: http://minio:9000
   FLOWTEST_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-flowtest}
   FLOWTEST_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-flowtest-local-secret}
@@ -36,6 +39,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
 
   redis:
     image: redis:8.2.1-alpine
@@ -48,6 +56,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
 
   minio:
     image: minio/minio:RELEASE.2025-07-23T15-54-02Z
@@ -65,6 +78,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
 
   mock-target:
     build:
@@ -82,6 +100,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
 
   backend:
     build:
@@ -107,6 +130,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
 
   worker:
     build:
@@ -134,6 +162,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 1G
 
   beat:
     build:
@@ -157,6 +190,11 @@ services:
     depends_on:
       worker:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
 
   frontend:
     build:
@@ -171,6 +209,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
 
 volumes:
   postgres_data:

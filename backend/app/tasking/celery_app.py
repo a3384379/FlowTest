@@ -23,6 +23,10 @@ celery_app.conf.update(
         "enqueue-due-test-plans": {
             "task": "flowtest.enqueue_due_test_plans",
             "schedule": settings.scheduler_poll_seconds,
-        }
+        },
+        "cleanup-retention": {
+            "task": "flowtest.cleanup_retention",
+            "schedule": settings.retention_cleanup_interval_seconds,
+        },
     },
 )

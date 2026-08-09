@@ -12,6 +12,9 @@ on:
       - "scripts/smoke_s8.py"
       - "scripts/smoke_s9.py"
       - "scripts/smoke_s10.py"
+      - "scripts/smoke_s11.py"
+      - "scripts/storage_transfer.py"
+      - "scripts/capacity_s11.py"
       - ".github/workflows/backend-ci.yml"
   push:
     branches: [main]
@@ -25,6 +28,9 @@ on:
       - "scripts/smoke_s8.py"
       - "scripts/smoke_s9.py"
       - "scripts/smoke_s10.py"
+      - "scripts/smoke_s11.py"
+      - "scripts/storage_transfer.py"
+      - "scripts/capacity_s11.py"
       - ".github/workflows/backend-ci.yml"
 
 permissions:
@@ -34,11 +40,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.11.32"
           enable-cache: true
@@ -49,9 +55,9 @@ jobs:
       - name: Format and lint
         working-directory: backend
         run: |
-          uv run ruff format --check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py ../scripts/smoke_s6.py ../scripts/smoke_s7.py ../scripts/smoke_s8.py ../scripts/smoke_s9.py ../scripts/smoke_s10.py
-          uv run ruff check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py ../scripts/smoke_s6.py ../scripts/smoke_s7.py ../scripts/smoke_s8.py ../scripts/smoke_s9.py ../scripts/smoke_s10.py
-          uv run mypy app ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py ../scripts/smoke_s6.py ../scripts/smoke_s7.py ../scripts/smoke_s8.py ../scripts/smoke_s9.py ../scripts/smoke_s10.py
+          uv run ruff format --check . ../scripts/*.py
+          uv run ruff check . ../scripts/*.py
+          uv run mypy app ../scripts/*.py
           uv run lint-imports
       - name: Test
         working-directory: backend
@@ -64,11 +70,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.11.32"
           enable-cache: true

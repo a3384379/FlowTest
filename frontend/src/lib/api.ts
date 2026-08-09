@@ -142,6 +142,11 @@ export type ProjectSecurityPolicy = {
   allowed_private_cidrs: string[]
 }
 
+export type ProjectRetentionPolicy = {
+  retention_days: number
+  maximum_days: number
+}
+
 export type AuditLog = {
   id: string
   actor_user_id: string | null

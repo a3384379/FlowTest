@@ -1,12 +1,15 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
+from fastapi.responses import PlainTextResponse
 
+from app.api.dependencies import SessionDependency
 from app.core.config import settings
 from app.core.database import check_database
 from app.core.redis import check_redis
 from app.core.storage import check_storage
+from app.observability.metrics import MetricsRegistry, render_metrics
 from app.schemas.health import HealthResponse, ReadinessResponse
 
 router = APIRouter()
@@ -42,3 +45,12 @@ async def readiness(response: Response) -> ReadinessResponse:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return ReadinessResponse(status="degraded", checks=statuses)
     return ReadinessResponse(status="ok", checks=statuses)
+
+
+@router.get("/metrics", include_in_schema=False, response_class=PlainTextResponse)
+async def metrics(request: Request, session: SessionDependency) -> PlainTextResponse:
+    registry = request.app.state.metrics_registry
+    if not isinstance(registry, MetricsRegistry):
+        return PlainTextResponse("", status_code=503)
+    content = await render_metrics(registry, session)
+    return PlainTextResponse(content, media_type="text/plain; version=0.0.4; charset=utf-8")

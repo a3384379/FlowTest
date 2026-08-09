@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.access import ProjectRole
 from app.schemas.access import (
@@ -15,6 +16,8 @@ from app.schemas.access import (
     ProjectCreate,
     ProjectPermissionResponse,
     ProjectResponse,
+    ProjectRetentionPolicy,
+    ProjectRetentionUpdate,
     ProjectSecurityPolicy,
     ProjectUpdate,
 )
@@ -105,6 +108,31 @@ async def update_project_security_policy(
         allowed_hosts=list(policy.allowed_hosts),
         allowed_private_cidrs=list(policy.allowed_private_cidrs),
     )
+
+
+@router.get("/{project_id}/retention-policy", response_model=ProjectRetentionPolicy)
+async def get_project_retention_policy(
+    project_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> ProjectRetentionPolicy:
+    days = await ProjectService(session).get_retention_policy(
+        actor=current_user, project_id=project_id
+    )
+    return ProjectRetentionPolicy(retention_days=days, maximum_days=settings.retention_max_days)
+
+
+@router.put("/{project_id}/retention-policy", response_model=ProjectRetentionPolicy)
+async def update_project_retention_policy(
+    project_id: UUID,
+    payload: ProjectRetentionUpdate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectRetentionPolicy:
+    days = await ProjectService(session).update_retention_policy(
+        actor=current_user,
+        project_id=project_id,
+        retention_days=payload.retention_days,
+    )
+    return ProjectRetentionPolicy(retention_days=days, maximum_days=settings.retention_max_days)
 
 
 @router.get("/{project_id}/audit-logs", response_model=Page[AuditLogResponse])
