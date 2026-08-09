@@ -59,6 +59,7 @@ class ExecutionResponse(BaseModel):
     response_status: int | None
     response_headers: dict[str, str]
     response_body: JsonValue
+    response_artifact_id: UUID | None
     response_size_bytes: int | None
     elapsed_ms: float | None
     error_code: str | None

@@ -3,6 +3,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="FlowTest Mock Target", version="1.0.0")
@@ -51,6 +52,15 @@ async def create_order(
 async def upload(file: Annotated[UploadFile, File()]) -> dict[str, object]:
     content = await file.read()
     return {"filename": file.filename, "content_type": file.content_type, "size": len(content)}
+
+
+@app.get("/download")
+async def download() -> Response:
+    return Response(
+        b"flowtest-download",
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="flowtest.bin"'},
+    )
 
 
 @app.get("/slow")

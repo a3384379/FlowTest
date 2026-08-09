@@ -1,4 +1,7 @@
+import hashlib
 import json
+import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import cast
@@ -22,12 +25,34 @@ from app.domain.execution import ExecutionStatus
 from app.models.access import User
 from app.models.executions import APICallExecution, AssertionResult
 from app.repositories.executions import ExecutionRepository
+from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
+from app.services.artifacts import ArtifactService
 from app.services.projects import ProjectService
 
 SENSITIVE_RESPONSE_HEADERS = frozenset(
     {"authorization", "cookie", "proxy-authorization", "set-cookie", "x-api-key"}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedUpload:
+    field: str
+    filename: str
+    content_type: str
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedMultipart:
+    fields: dict[str, str]
+    files: tuple[PreparedUpload, ...]
+
+    @property
+    def size_bytes(self) -> int:
+        return sum(len(item.content) for item in self.files) + sum(
+            len(name.encode()) + len(value.encode()) for name, value in self.fields.items()
+        )
 
 
 class ExecutionService:
@@ -40,6 +65,7 @@ class ExecutionService:
         self._session = session
         self._repository = ExecutionRepository(session)
         self._assets = APIAssetService(session)
+        self._artifacts = ArtifactService(session)
         self._projects = ProjectService(session)
         self._http_client = http_client
 
@@ -85,6 +111,12 @@ class ExecutionService:
             use_body_override=use_body_override,
             redact=True,
         )
+        body_kind = BodyKind(version.body_kind)
+        multipart = (
+            await self._prepare_multipart(project_id=project_id, body=raw_request.body)
+            if body_kind is BodyKind.MULTIPART
+            else None
+        )
         execution = APICallExecution(
             project_id=project_id,
             api_definition_id=definition_id,
@@ -102,6 +134,7 @@ class ExecutionService:
             response_status=None,
             response_headers={},
             response_body=None,
+            response_artifact_id=None,
             response_size_bytes=None,
             elapsed_ms=None,
             error_code=None,
@@ -113,11 +146,21 @@ class ExecutionService:
         await self._session.commit()
         await self._session.refresh(execution)
 
-        if _serialized_body_size(raw_request.body) > settings.inline_body_limit_bytes:
+        request_size = (
+            multipart.size_bytes
+            if multipart is not None
+            else _serialized_body_size(raw_request.body)
+        )
+        request_limit = (
+            settings.artifact_limit_bytes
+            if body_kind is BodyKind.MULTIPART
+            else settings.inline_body_limit_bytes
+        )
+        if request_size > request_limit:
             return await self._fail_execution(
                 execution,
                 code="REQUEST_TOO_LARGE",
-                message="请求体超过 2 MB 内联上限",
+                message="请求体超过允许的大小上限",
                 elapsed_ms=0,
             )
 
@@ -128,12 +171,15 @@ class ExecutionService:
             response = await _send_request(
                 client,
                 raw_request,
-                body_kind=BodyKind(version.body_kind),
+                body_kind=body_kind,
                 timeout_seconds=timeout_seconds,
+                multipart=multipart,
             )
             elapsed_ms = (perf_counter() - started) * 1000
             return await self._complete(
                 execution=execution,
+                actor=actor,
+                project_id=project_id,
                 response=response,
                 elapsed_ms=elapsed_ms,
                 specs=assertions,
@@ -176,38 +222,69 @@ class ExecutionService:
         assertions = await self._repository.list_assertions(execution.id)
         return execution, assertions
 
+    async def _prepare_multipart(self, *, project_id: UUID, body: JsonValue) -> PreparedMultipart:
+        payload = MultipartBody.model_validate(body)
+        files: list[PreparedUpload] = []
+        for reference in payload.files:
+            loaded = await self._artifacts.load(
+                project_id=project_id,
+                artifact_id=reference.artifact_id,
+            )
+            files.append(
+                PreparedUpload(
+                    field=reference.field,
+                    filename=loaded.artifact.filename,
+                    content_type=loaded.artifact.content_type,
+                    content=loaded.content,
+                )
+            )
+        return PreparedMultipart(fields=payload.fields, files=tuple(files))
+
     async def _complete(
         self,
         *,
         execution: APICallExecution,
+        actor: User,
+        project_id: UUID,
         response: httpx.Response,
         elapsed_ms: float,
         specs: tuple[AssertionSpec, ...],
     ) -> tuple[APICallExecution, list[AssertionResult]]:
         response_size = len(response.content)
-        if response_size > settings.inline_body_limit_bytes:
+        if response_size > settings.artifact_limit_bytes:
             return await self._fail_execution(
                 execution,
                 code="RESPONSE_TOO_LARGE",
-                message="响应体超过 2 MB 内联保存上限",
+                message="响应体超过 50 MB 上限",
                 elapsed_ms=elapsed_ms,
                 response_status=response.status_code,
                 response_size=response_size,
             )
-        body = _response_body(response)
         headers = dict(response.headers)
+        content_type = _content_type(headers)
+        content_sha256 = hashlib.sha256(response.content).hexdigest()
+        body, artifact_id = await self._persist_response_body(
+            actor=actor,
+            project_id=project_id,
+            response=response,
+            content_type=content_type,
+        )
         outcomes = evaluate_assertions(
             ResponseSnapshot(
                 status_code=response.status_code,
                 elapsed_ms=elapsed_ms,
                 headers=headers,
                 body=body,
+                content_size=response_size,
+                content_sha256=content_sha256,
+                content_type=content_type,
             ),
             specs,
         )
         execution.response_status = response.status_code
         execution.response_headers = _redact_response_headers(headers)
         execution.response_body = cast(JsonValue, redact(body))
+        execution.response_artifact_id = artifact_id
         execution.response_size_bytes = response_size
         execution.elapsed_ms = elapsed_ms
         execution.status = (
@@ -224,6 +301,36 @@ class ExecutionService:
         for result in results:
             await self._session.refresh(result)
         return execution, results
+
+    async def _persist_response_body(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        response: httpx.Response,
+        content_type: str,
+    ) -> tuple[JsonValue, UUID | None]:
+        if not response.content:
+            return None, None
+        if len(response.content) <= settings.inline_body_limit_bytes and _is_inline(content_type):
+            return _response_body(response), None
+        artifact = await self._artifacts.store_response(
+            actor=actor,
+            project_id=project_id,
+            filename=_response_filename(response.headers),
+            content_type=content_type,
+            content=response.content,
+        )
+        return (
+            {
+                "artifact_id": str(artifact.id),
+                "filename": artifact.filename,
+                "content_type": artifact.content_type,
+                "size_bytes": artifact.size_bytes,
+                "sha256": artifact.sha256,
+            },
+            artifact.id,
+        )
 
     async def _fail_execution(
         self,
@@ -266,6 +373,7 @@ async def _send_request(
     *,
     body_kind: BodyKind,
     timeout_seconds: int,
+    multipart: PreparedMultipart | None = None,
 ) -> httpx.Response:
     headers = {header.name: header.value for header in request.headers}
     timeout = httpx.Timeout(timeout_seconds)
@@ -295,6 +403,24 @@ async def _send_request(
             data=form,
             timeout=timeout,
         )
+    if body_kind is BodyKind.MULTIPART:
+        if multipart is None:
+            raise ValueError("Multipart request requires prepared files")
+        multipart_headers = {
+            name: value for name, value in headers.items() if name.lower() != "content-type"
+        }
+        files = [
+            (item.field, (item.filename, item.content, item.content_type))
+            for item in multipart.files
+        ]
+        return await client.request(
+            request.method.value,
+            request.url,
+            headers=multipart_headers,
+            data=multipart.fields,
+            files=files,
+            timeout=timeout,
+        )
     return await client.request(
         request.method.value,
         request.url,
@@ -310,6 +436,30 @@ def _response_body(response: httpx.Response) -> JsonValue:
         return cast(JsonValue, response.json())
     except ValueError:
         return response.text
+
+
+def _content_type(headers: dict[str, str]) -> str:
+    return headers.get("content-type", "application/octet-stream").split(";", 1)[0].strip()
+
+
+def _is_inline(content_type: str) -> bool:
+    return (
+        content_type.startswith("text/")
+        or content_type in {"application/json", "application/xml", "application/javascript"}
+        or content_type.endswith("+json")
+        or content_type.endswith("+xml")
+    )
+
+
+def _response_filename(headers: httpx.Headers) -> str:
+    disposition = headers.get("content-disposition", "")
+    encoded_match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, flags=re.IGNORECASE)
+    if encoded_match:
+        from urllib.parse import unquote
+
+        return unquote(encoded_match.group(1))
+    match = re.search(r'filename="?([^";]+)', disposition, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else "response.bin"
 
 
 def _redact_response_headers(headers: dict[str, str]) -> dict[str, str]:

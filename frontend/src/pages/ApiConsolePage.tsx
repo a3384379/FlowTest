@@ -1,9 +1,11 @@
-import { ApiOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { ApiOutlined, ImportOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Card, Empty, InputNumber, Select, Space, Table, Tag, Typography } from 'antd'
 import { useState } from 'react'
 
+import ArtifactPanel from '../features/api-console/ArtifactPanel'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import ExecutionResultPanel from '../features/api-console/ExecutionResultPanel'
+import ImportDialog from '../features/api-console/ImportDialog'
 import type {
   CreateApiInput,
   CreateEnvironmentInput,
@@ -16,6 +18,7 @@ type DialogState = 'project' | 'environment' | 'api' | null
 
 export default function ApiConsolePage() {
   const [dialog, setDialog] = useState<DialogState>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const consoleState = useApiConsole()
 
   async function addProject(input: CreateProjectInput) {
@@ -61,6 +64,13 @@ export default function ApiConsolePage() {
           />
           <Button icon={<PlusOutlined />} onClick={() => setDialog('project')}>
             新建项目
+          </Button>
+          <Button
+            icon={<ImportOutlined />}
+            disabled={!canCreateAssets}
+            onClick={() => setImportOpen(true)}
+          >
+            导入接口
           </Button>
           <Select
             aria-label="当前环境"
@@ -116,6 +126,15 @@ export default function ApiConsolePage() {
         </Card>
       </div>
 
+      <ArtifactPanel
+        disabled={!canCreateAssets}
+        loading={consoleState.artifacts.isLoading}
+        uploading={consoleState.uploading}
+        items={consoleState.artifacts.data?.items ?? []}
+        onUpload={consoleState.uploadFile}
+        onDownload={consoleState.downloadFile}
+      />
+
       <CreateDialogs
         open={dialog}
         submitting={consoleState.submitting}
@@ -123,6 +142,17 @@ export default function ApiConsolePage() {
         onCreateProject={addProject}
         onCreateEnvironment={addEnvironment}
         onCreateApi={addApi}
+        artifacts={consoleState.artifacts.data?.items ?? []}
+      />
+      <ImportDialog
+        open={importOpen}
+        importing={consoleState.importing}
+        result={consoleState.lastImport}
+        onImport={consoleState.importDocument}
+        onClose={() => {
+          setImportOpen(false)
+          consoleState.clearImportResult()
+        }}
       />
     </>
   )

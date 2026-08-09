@@ -29,6 +29,9 @@ describe('ApiConsolePage', () => {
           page_size: 20,
         }),
       ),
+      http.get(`/api/v1/projects/${project.id}/files`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
       http.post(
         `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/execute`,
         async ({ request }) => {

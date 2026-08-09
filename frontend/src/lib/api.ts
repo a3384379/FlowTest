@@ -80,10 +80,48 @@ export type Execution = {
   response_status: number | null
   response_headers: Record<string, string>
   response_body: unknown
+  response_artifact_id: string | null
   elapsed_ms: number | null
   error_code: string | null
   error_message: string | null
   started_at: string
+}
+
+export type Artifact = {
+  id: string
+  project_id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  sha256: string
+  purpose: 'upload' | 'response'
+  created_at: string
+}
+
+export type ImportChange = 'added' | 'changed' | 'deleted' | 'unchanged'
+
+export type ImportItem = {
+  import_key: string
+  name: string
+  method: string
+  path: string
+  change: ImportChange
+  definition_id: string
+  version: number
+}
+
+export type ImportRun = {
+  id: string
+  project_id: string
+  source_type: 'openapi3' | 'swagger2' | 'postman'
+  source_name: string
+  source_sha256: string
+  added: number
+  changed: number
+  deleted: number
+  unchanged: number
+  results: ImportItem[]
+  created_at: string
 }
 
 export type ExecutionDetail = {

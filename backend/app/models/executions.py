@@ -40,6 +40,9 @@ class APICallExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     response_status: Mapped[int | None] = mapped_column(Integer)
     response_headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     response_body: Mapped[Any | None] = mapped_column(JSON)
+    response_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), index=True
+    )
     response_size_bytes: Mapped[int | None] = mapped_column(Integer)
     elapsed_ms: Mapped[float | None] = mapped_column(Float)
     error_code: Mapped[str | None] = mapped_column(String(100))

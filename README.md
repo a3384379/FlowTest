@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V0.1 单接口闭环`。
+当前状态：`V0.2 接口资产`。
 
 ## 技术栈
 
@@ -59,9 +59,19 @@ S3 已提供 HTTPX 异步执行、GET/POST/PUT/PATCH/DELETE、响应与耗时查
 “创建项目与环境 → 创建 API → 发送请求 → 查看断言与历史”闭环；请求与响应中的认证信息、
 Cookie、Token、Password 和 Secret 会在持久化及展示前统一脱敏。
 
+S4 已提供 OpenAPI 3、Swagger 2、Postman Collection 导入和指纹去重；重导入返回
+`added/changed/deleted/unchanged`，变更接口自动创建不可变新版本，删除项只预览不自动停用。
+Bearer、Basic 和 Header/Query API Key 已接入真实请求执行。上传文件和二进制响应统一存放于
+MinIO，数据库只保留 Artifact 元数据与 SHA-256；支持 multipart 请求、受权下载、文件大小、
+文件哈希和 Content-Type 断言。Web 管理端提供中文导入 Diff、文件仓库和认证/文件请求配置。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
+
+运行 `backend/.venv/bin/python scripts/smoke_s4.py` 可继续验收重复导入去重、Secret Bearer、
+multipart 上传、二进制响应外置、文件断言和受权下载。macOS 自带 Python 版本过旧时可改用
+`uv run --project backend python scripts/smoke_s4.py`。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

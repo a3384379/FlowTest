@@ -20,6 +20,9 @@ class AssertionKind(StrEnum):
     JSONPATH = "jsonpath"
     JMESPATH = "jmespath"
     JSON_SCHEMA = "json_schema"
+    FILE_SIZE = "file_size"
+    FILE_SHA256 = "file_sha256"
+    CONTENT_TYPE = "content_type"
 
 
 class ComparisonOperator(StrEnum):
@@ -48,6 +51,9 @@ class ResponseSnapshot:
     elapsed_ms: float
     headers: dict[str, str]
     body: JsonValue
+    content_size: int = 0
+    content_sha256: str = ""
+    content_type: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,17 +97,31 @@ def _extract_actual(snapshot: ResponseSnapshot, spec: AssertionSpec) -> JsonValu
             raise ValueError("Header 断言缺少 target")
         headers = {name.lower(): value for name, value in snapshot.headers.items()}
         return headers.get(spec.target.lower())
+    if spec.kind in {AssertionKind.JSONPATH, AssertionKind.JMESPATH}:
+        return _extract_body_value(snapshot.body, spec)
+    return _extract_file_value(snapshot, spec.kind)
+
+
+def _extract_body_value(body: JsonValue, spec: AssertionSpec) -> JsonValue:
     if spec.kind is AssertionKind.JSONPATH:
         if not spec.target:
             raise ValueError("JSONPath 断言缺少表达式")
-        matches = [match.value for match in parse_jsonpath(spec.target).find(snapshot.body)]
+        matches = [match.value for match in parse_jsonpath(spec.target).find(body)]
         if not matches:
             return None
         return matches[0] if len(matches) == 1 else matches
-    if spec.kind is AssertionKind.JMESPATH:
-        if not spec.target:
-            raise ValueError("JMESPath 断言缺少表达式")
-        return cast(JsonValue, jmespath.search(spec.target, snapshot.body))
+    if not spec.target:
+        raise ValueError("JMESPath 断言缺少表达式")
+    return cast(JsonValue, jmespath.search(spec.target, body))
+
+
+def _extract_file_value(snapshot: ResponseSnapshot, kind: AssertionKind) -> JsonValue:
+    if kind is AssertionKind.FILE_SIZE:
+        return snapshot.content_size
+    if kind is AssertionKind.FILE_SHA256:
+        return snapshot.content_sha256
+    if kind is AssertionKind.CONTENT_TYPE:
+        return snapshot.content_type
     return snapshot.body
 
 

@@ -3,9 +3,9 @@ set -eu
 
 (
   cd backend
-  uv run ruff format --check . ../scripts/smoke_s3.py
-  uv run ruff check . ../scripts/smoke_s3.py
-  uv run mypy app ../scripts/smoke_s3.py
+  uv run ruff format --check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py
+  uv run ruff check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py
+  uv run mypy app ../scripts/smoke_s3.py ../scripts/smoke_s4.py
   uv run lint-imports
   uv run pytest
   uv run pip-audit

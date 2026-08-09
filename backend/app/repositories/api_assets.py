@@ -82,6 +82,29 @@ class APIAssetRepository:
     async def get_definition(self, definition_id: UUID) -> APIDefinition | None:
         return await self._session.get(APIDefinition, definition_id)
 
+    async def find_imported_definition(
+        self, *, project_id: UUID, import_key: str
+    ) -> APIDefinition | None:
+        query = select(APIDefinition).where(
+            APIDefinition.project_id == project_id,
+            APIDefinition.import_key == import_key,
+        )
+        return (await self._session.execute(query)).scalar_one_or_none()
+
+    async def list_imported_definitions(
+        self, *, project_id: UUID, import_source: str
+    ) -> list[APIDefinition]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(APIDefinition).where(
+                        APIDefinition.project_id == project_id,
+                        APIDefinition.import_source == import_source,
+                    )
+                )
+            ).all()
+        )
+
     async def list_definitions(
         self, *, project_id: UUID, offset: int, limit: int
     ) -> tuple[list[APIDefinition], int]:

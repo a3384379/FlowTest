@@ -2,16 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useState } from 'react'
 
-import { apiErrorMessage, type ExecutionDetail } from '../../lib/api'
+import { apiErrorMessage, type ExecutionDetail, type ImportRun } from '../../lib/api'
 import {
   createApi,
   createEnvironment,
   createProject,
+  downloadArtifact,
+  importApiDocument,
   executeApi,
   listApis,
+  listArtifacts,
   listEnvironments,
   listExecutions,
   listProjects,
+  uploadArtifact,
   type CreateApiInput,
   type CreateEnvironmentInput,
   type CreateProjectInput,
@@ -25,6 +29,7 @@ export function useApiConsole() {
   const [apiSelection, setApiSelection] = useState<string | null>(null)
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [result, setResult] = useState<ExecutionDetail | null>(null)
+  const [lastImport, setLastImport] = useState<ImportRun | null>(null)
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: listProjects })
   const projectId = selectedOrFirst(projectSelection, projects.data?.items)
@@ -43,6 +48,11 @@ export function useApiConsole() {
   const history = useQuery({
     queryKey: ['executions', projectId],
     queryFn: () => listExecutions(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const artifacts = useQuery({
+    queryKey: ['artifacts', projectId],
+    queryFn: () => listArtifacts(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
 
@@ -65,6 +75,23 @@ export function useApiConsole() {
       setResult(value)
       await queryClient.invalidateQueries({ queryKey: ['executions', projectId] })
       void message.success(executionMessage(value))
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const importMutation = useMutation({
+    mutationFn: (file: File) => importApiDocument(requiredId(projectId), file),
+    onSuccess: async (value) => {
+      setLastImport(value)
+      await queryClient.invalidateQueries({ queryKey: ['apis', projectId] })
+      void message.success('接口文档导入完成')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadArtifact(requiredId(projectId), file),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['artifacts', projectId] })
+      void message.success('文件上传成功')
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
@@ -100,6 +127,12 @@ export function useApiConsole() {
     })
   }
 
+  async function downloadFile(artifactId: string) {
+    const artifact = artifacts.data?.items.find((item) => item.id === artifactId)
+    if (!artifact) return
+    await withErrorMessage(message.error, () => downloadArtifact(requiredId(projectId), artifact))
+  }
+
   return {
     projects,
     projectId,
@@ -111,9 +144,17 @@ export function useApiConsole() {
     apiId,
     setApiSelection,
     history,
+    artifacts,
     expectedStatus,
     setExpectedStatus,
     result,
+    lastImport,
+    clearImportResult: () => setLastImport(null),
+    importDocument: importMutation.mutateAsync,
+    importing: importMutation.isPending,
+    uploadFile: uploadMutation.mutateAsync,
+    uploading: uploadMutation.isPending,
+    downloadFile,
     execute: executionMutation.mutate,
     executing: executionMutation.isPending,
     addProject,
@@ -123,6 +164,8 @@ export function useApiConsole() {
       projectMutation.isPending,
       environmentMutation.isPending,
       apiMutation.isPending,
+      importMutation.isPending,
+      uploadMutation.isPending,
     ].some(Boolean),
   }
 }

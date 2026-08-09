@@ -45,6 +45,7 @@ export const executionDetail: ExecutionDetail = {
     response_status: 200,
     response_headers: { 'content-type': 'application/json' },
     response_body: { id: 7, name: '测试用户' },
+    response_artifact_id: null,
     elapsed_ms: 18.2,
     error_code: null,
     error_message: null,
