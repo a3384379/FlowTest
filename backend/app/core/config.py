@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
     artifact_limit_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
+    feature_teams_enabled: bool = False
+    feature_test_assets_enabled: bool = False
+    feature_advanced_workflows_enabled: bool = False
+    feature_data_nodes_enabled: bool = False
+    feature_contract_testing_enabled: bool = False
+    feature_quality_center_enabled: bool = False
+    feature_oidc_enabled: bool = False
+    feature_ai_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":

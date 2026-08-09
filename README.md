@@ -6,7 +6,7 @@ FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标
 
 ## 技术栈
 
-- 后端：Python 3.12、FastAPI、Pydantic、SQLAlchemy、HTTPX、Celery/Beat
+- 后端：Python 3.13、FastAPI、Pydantic、SQLAlchemy、HTTPX、Celery/Beat
 - 前端：React 19、TypeScript、Vite、Ant Design、React Flow
 - 数据：PostgreSQL、Redis、MinIO/S3
 - 部署：Docker Compose、Nginx
@@ -23,11 +23,12 @@ FlowTest/
 └── compose.yaml        # 本地依赖和应用编排
 ```
 
-领域边界及完整目录说明见 [docs/architecture.md](docs/architecture.md)，实施节奏见 [docs/development-plan.md](docs/development-plan.md)。
+领域边界及完整目录说明见 [docs/architecture.md](docs/architecture.md)，V1/V2 实施节奏见
+[docs/development-plan.md](docs/development-plan.md)。
 
 ## 本地启动
 
-推荐安装：Python 3.12、Node.js 20.19+ 或 22.12+、Docker。
+推荐安装：Python 3.13、Node.js 20.19+ 或 22.12+、Docker。
 
 ```bash
 cp .env.example .env
@@ -139,6 +140,7 @@ Diff/Merge、删除停用、执行幂等、SSRF 拦截、Secret 不可读和带 
 
 ```bash
 uv run --project backend python scripts/capacity_s11.py
+uv run --project backend python scripts/capacity_workflow.py
 scripts/backup.sh /absolute/path/to/backup
 scripts/verify_restore.sh /absolute/path/to/backup
 ```

@@ -19,6 +19,25 @@ async def test_health_check() -> None:
 
 
 @pytest.mark.asyncio
+async def test_v2_features_are_disabled_by_default() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/features")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "teams": False,
+        "test_assets": False,
+        "advanced_workflows": False,
+        "data_nodes": False,
+        "contract_testing": False,
+        "quality_center": False,
+        "oidc": False,
+        "ai": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_metrics_endpoint_uses_prometheus_text_format() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

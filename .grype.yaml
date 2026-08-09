@@ -1,27 +1,13 @@
 show-suppressed: true
 
-# Python 3.12 is a fixed V1.0 platform constraint. Grype currently reports the
-# following CPython advisories as "fixed" only in newer interpreter branches,
-# not in a compatible 3.12 patch. Every exception is tracked in the repository
-# security ledger and must be removed when the next 3.12 security image ships.
+# Grype v0.116.1 currently ignores the Python PSF CNA branch ranges and treats
+# these advisories as fixed only by Python 3.15. The image contains 3.13.15,
+# which the CNA records identify as the first unaffected 3.13 release. Keep the
+# match exact and remove it as soon as the Grype database adopts those ranges.
 ignore:
-  - vulnerability: CVE-2026-7210
-    package: { name: python, version: 3.12.13, type: binary }
   - vulnerability: CVE-2026-11940
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-15308
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-6100
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-4224
-    package: { name: python, version: 3.12.13, type: binary }
+    package: { name: python, version: 3.13.15, type: binary }
   - vulnerability: CVE-2026-11972
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-3644
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-9669
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-3298
-    package: { name: python, version: 3.12.13, type: binary }
-  - vulnerability: CVE-2026-4786
-    package: { name: python, version: 3.12.13, type: binary }
+    package: { name: python, version: 3.13.15, type: binary }
+  - vulnerability: CVE-2026-15308
+    package: { name: python, version: 3.13.15, type: binary }
