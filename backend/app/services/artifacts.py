@@ -82,6 +82,24 @@ class ArtifactService:
             purpose="response",
         )
 
+    async def store_report(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        filename: str,
+        content: bytes,
+    ) -> Artifact:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._store(
+            actor=actor,
+            project_id=project_id,
+            filename=filename,
+            content_type="text/html; charset=utf-8",
+            content=content,
+            purpose="report",
+        )
+
     async def list_artifacts(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
     ) -> tuple[list[Artifact], int]:

@@ -19,7 +19,7 @@
 | S6（已完成） | 可视化流程最小闭环 | React Flow 画布；Start/API/End 节点；拖拽、连线、保存；DAG 串行/并行执行；Redis Pub/Sub + WebSocket 状态推送 | 可视化搭建 A→B/C→D 并按依赖并行运行，节点状态实时可见 |
 | S7（已完成） | V0.3 字段映射、控制节点与数据驱动 | Extract、Assert、Condition、Delay、Dataset；结构化字段绑定；变量来源追踪；CSV/JSON/Excel 行级执行 | A 响应可映射到 B 请求；条件分支、跳过、断言和数据行子执行可解释 |
 | S8（已完成） | 测试计划与任务系统 | Test Plan；批量/手工执行；Celery Worker/Beat；重试、取消；定时任务；CI Token 与签名 Webhook | API 与 Worker 解耦；计划可排队、取消、重试、定时和外部触发且状态一致 |
-| S9（第 19～20 周） | V0.4 报告与执行中心 | 执行中心；步骤级报告；失败分类；趋势；WebSocket；HTML 导出 | 报告可从汇总下钻到脱敏请求/响应、提取和断言；失败可定位到节点 |
+| S9（已完成） | V0.4 报告与执行中心 | 执行中心；步骤级报告；失败分类；趋势；签名通知；HTML 导出 | 报告可从汇总下钻到脱敏请求/响应、提取和断言；失败可定位到节点 |
 | S10（第 21～22 周） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；Secret 与 SSRF 加固；限流和幂等 | 权限矩阵通过；导入变更可审阅选择；安全边界和操作一致性测试通过 |
 | S11（第 23～24 周） | V1.0 内部发布 | 性能与容量测试；SSRF/Secret/限流加固；备份恢复；部署手册；试点迁移 | 试点项目连续运行 2 周；P0 缺陷清零；回滚、恢复和告警演练通过 |
 
@@ -40,6 +40,15 @@
 4. 手动、定时、CI Token 和 HMAC-SHA256 Webhook 触发共享持久化 Run/Run Item 状态机。
 5. CI Token 固定项目和 `execute:workflow`/`execute:test-plan` 范围，仅保存摘要并支持吊销。
 6. Web 任务中心支持计划创建、队列观察、取消、CI Token 和一次性 Webhook Secret 展示。
+
+## S9 完成清单
+
+1. 执行中心从不可变 Snapshot 和节点记录派生汇总、耗时、步骤状态及数据集子执行，不复制报告事实。
+2. 步骤报告下钻展示脱敏请求/响应、提取、断言、输入映射、尝试次数和稳定错误码。
+3. 失败按断言、超时、网络、HTTP 4xx/5xx、配置、取消和运行错误分类；提供最近 7～90 日趋势。
+4. HTML 报告使用安全转义生成并以 `report` Artifact 存入 MinIO，可通过项目授权链路下载。
+5. 通用通知 Webhook 使用一次性 AES-GCM Secret、`timestamp.body` HMAC-SHA256 签名和完整投递历史。
+6. Web 报告页提供 ECharts 趋势、失败分布、执行下钻、HTML 下载、通知配置和投递状态。
 
 ## 版本验收门槛
 

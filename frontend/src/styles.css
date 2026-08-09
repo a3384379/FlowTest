@@ -190,6 +190,43 @@ body {
   word-break: break-all;
 }
 
+.report-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.report-trend-chart {
+  width: 100%;
+  height: 260px;
+}
+
+.report-notification-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.report-payload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-code {
+  max-height: 220px;
+  padding: 12px;
+  overflow: auto;
+  color: #334155;
+  background: #f6f8fb;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .workflow-meta {
   margin-bottom: 12px;
 }

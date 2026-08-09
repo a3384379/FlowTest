@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -10,11 +11,14 @@ from app.core.config import settings
 from app.core.database import close_database, session_factory
 from app.core.storage import ensure_storage_bucket
 from app.services.execution_events import RedisExecutionEventBus
+from app.services.notifications import NotificationDeliveryService
 from app.services.tasking import TestPlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflows import WorkflowService
 from app.tasking.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="flowtest.run_workflow")  # type: ignore[untyped-decorator]
@@ -32,6 +36,7 @@ async def _run_workflow(execution_id: UUID) -> None:
             client, retention_seconds=settings.workflow_event_retention_seconds
         )
         await WorkflowRunCoordinator(session_factory, events).run_now(plan)
+        await _deliver_workflow_notification(execution_id)
     finally:
         await client.aclose()
 
@@ -49,6 +54,7 @@ async def _run_test_plan(run_id: UUID) -> None:
             client, retention_seconds=settings.workflow_event_retention_seconds
         )
         await TestPlanRunCoordinator(session_factory, events).run(run_id)
+        await _deliver_test_plan_notification(run_id)
     finally:
         await client.aclose()
 
@@ -78,3 +84,25 @@ def _redis_client() -> Redis:
         Redis,
         Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True),
     )
+
+
+async def _deliver_workflow_notification(execution_id: UUID) -> None:
+    try:
+        async with session_factory() as session:
+            await NotificationDeliveryService(session).deliver_workflow(execution_id)
+    except Exception:
+        logger.exception(
+            "Workflow notification delivery failed",
+            extra={"execution_id": str(execution_id)},
+        )
+
+
+async def _deliver_test_plan_notification(run_id: UUID) -> None:
+    try:
+        async with session_factory() as session:
+            await NotificationDeliveryService(session).deliver_test_plan(run_id)
+    except Exception:
+        logger.exception(
+            "Test plan notification delivery failed",
+            extra={"test_plan_run_id": str(run_id)},
+        )

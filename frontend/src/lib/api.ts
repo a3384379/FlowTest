@@ -94,7 +94,7 @@ export type Artifact = {
   content_type: string
   size_bytes: number
   sha256: string
-  purpose: 'upload' | 'response'
+  purpose: 'upload' | 'response' | 'report'
   created_at: string
 }
 
@@ -280,6 +280,99 @@ export type ServiceToken = {
 }
 
 export type CreatedServiceToken = ServiceToken & { token: string }
+
+export type FailureCategory =
+  | 'assertion'
+  | 'timeout'
+  | 'network'
+  | 'http_client'
+  | 'http_server'
+  | 'configuration'
+  | 'cancelled'
+  | 'runtime'
+  | 'none'
+
+export type ReportExecution = {
+  id: string
+  workflow_id: string
+  workflow_name: string
+  workflow_version: number
+  status: 'running' | 'passed' | 'failed' | 'cancelled'
+  failure_category: FailureCategory
+  total_nodes: number
+  passed_nodes: number
+  failed_nodes: number
+  skipped_nodes: number
+  duration_ms: number | null
+  started_at: string
+  completed_at: string | null
+}
+
+export type ReportNode = {
+  id: string
+  node_id: string
+  node_type: string
+  name: string
+  status: WorkflowNodeExecution['status']
+  attempts: number
+  duration_ms: number | null
+  request: unknown
+  response: unknown
+  extraction: unknown
+  assertion: unknown
+  input_mappings: unknown
+  error_code: string | null
+  error_message: string | null
+}
+
+export type ReportExecutionDetail = {
+  summary: ReportExecution
+  nodes: ReportNode[]
+  context: Record<string, unknown>
+  dataset_children: ReportExecution[]
+}
+
+export type ReportTrend = {
+  points: Array<{
+    date: string
+    total: number
+    passed: number
+    failed: number
+    cancelled: number
+    pass_rate: number
+    average_duration_ms: number
+  }>
+  failures: Array<{ category: FailureCategory; count: number }>
+}
+
+export type NotificationEvent = 'workflow.completed' | 'test_plan.completed'
+
+export type NotificationWebhook = {
+  id: string
+  project_id: string
+  name: string
+  url: string
+  events: NotificationEvent[]
+  enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreatedNotificationWebhook = NotificationWebhook & { secret: string }
+
+export type NotificationDelivery = {
+  id: string
+  webhook_id: string
+  event_type: NotificationEvent
+  resource_id: string
+  status: 'pending' | 'delivered' | 'failed'
+  attempt: number
+  response_status: number | null
+  error_message: string | null
+  delivered_at: string | null
+  created_at: string
+}
 
 export type ExecutionEvent = {
   sequence: number

@@ -6,6 +6,7 @@ from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.imports import ImportRun
+from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
@@ -20,6 +21,8 @@ __all__ = [
     "Environment",
     "Folder",
     "ImportRun",
+    "NotificationDelivery",
+    "NotificationWebhook",
     "Project",
     "ProjectMember",
     "RefreshSession",
