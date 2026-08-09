@@ -17,6 +17,7 @@ Prometheus 抓取 `/api/v1/metrics`：
 
 ```bash
 uv run --project backend python scripts/capacity_s11.py
+uv run --project backend python scripts/capacity_workflow.py
 ```
 
 默认对 `/api/v1/live` 发出 300 个请求、并发 30，要求零失败且 P95 不超过 500 ms。
@@ -28,3 +29,16 @@ uv run --project backend python scripts/capacity_s11.py
 2026-08-09 在 Docker Desktop ARM64 单机 Compose 环境执行：300 请求、并发 30、0 失败，
 耗时 0.556 秒，P95 0.153 秒，吞吐约 539.25 req/s。该数据是本地健康端点基线，不能替代
 真实业务工作流容量测试；生产宿主机或资源限制变化后必须重新记录。
+
+S12 新增 `capacity_workflow.py`，它会创建并发布一个包含真实 HTTP API 节点的 Workflow，默认以
+并发 5 完成 20 次持久化、入队、Worker 执行和结果查询。门槛默认要求零失败且端到端 P95 不超过
+10 秒；可通过 `FLOWTEST_CAPACITY_WORKFLOW_REQUESTS`、
+`FLOWTEST_CAPACITY_WORKFLOW_CONCURRENCY` 和 `FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS` 调整。
+
+## V1.1 真实 Workflow 基线
+
+2026-08-09 在 Docker Desktop ARM64 单机 Compose 环境执行：20 个持久化 Workflow
+执行、并发 5、0 失败，耗时 0.724 秒，端到端 P95 0.270 秒，吞吐约
+27.64 execution/s。该基线使用 Python 3.13.15 镜像，覆盖 API 请求、快照持久化、Celery
+入队、Worker 调度、
+HTTP 节点和终态查询；它不代表 S19 的 8C/16G、100/1000 最终容量承诺。

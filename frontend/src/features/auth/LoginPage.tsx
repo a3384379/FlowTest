@@ -46,14 +46,24 @@ export default function LoginPage() {
             name="email"
             rules={[{ required: true, type: 'email', message: '请输入有效邮箱' }]}
           >
-            <Input prefix={<MailOutlined />} size="large" placeholder="name@example.com" />
+            <Input
+              autoComplete="username"
+              prefix={<MailOutlined />}
+              size="large"
+              placeholder="name@example.com"
+            />
           </Form.Item>
           <Form.Item
             label="密码"
             name="password"
             rules={[{ required: true, message: '请输入密码' }]}
           >
-            <Input.Password prefix={<LockOutlined />} size="large" placeholder="请输入密码" />
+            <Input.Password
+              autoComplete="current-password"
+              prefix={<LockOutlined />}
+              size="large"
+              placeholder="请输入密码"
+            />
           </Form.Item>
           <Button type="primary" htmlType="submit" size="large" block loading={submitting}>
             登录

@@ -65,7 +65,7 @@
 2. `/api/v1/metrics` 暴露归一化 HTTP 指标和执行状态指标；Compose 服务具有健康检查、持久卷和 CPU/内存限制，Nginx 提供 TLS 1.2/1.3 接入模板。
 3. 容量脚本以并发 30 执行 300 个请求，要求零失败且 P95 不超过 500 ms；本地 ARM64 验收实际 P95 为 153 ms。
 4. PostgreSQL custom-format dump 与 MinIO manifest/SHA-256 备份可在隔离容器和隔离卷中完整恢复，并逐个校验对象哈希。
-5. Ruff 安全规则、依赖审计、ShellCheck 和 Grype 镜像扫描进入 CI；未登记的可修复 Critical/High 漏洞会阻止发布，Python 3.12 暂无兼容补丁的 High 项进入有到期日的公开例外台账。
+5. Ruff 安全规则、依赖审计、ShellCheck 和 Grype 镜像扫描进入 CI；未登记的可修复 Critical/High 漏洞会阻止发布，S12 升级 Python 3.13 后已删除原 Python 3.12 临时例外。
 6. S11 Compose 冒烟打通登录、令牌提取、查询用户、创建订单、断言和脱敏报告，并覆盖失败、重试、超时、并行、取消、Viewer 拒绝、指标和清理；Playwright 固化登录、治理、报告与主菜单验收。
 
 ## 版本验收门槛
@@ -94,3 +94,24 @@
 ## 暂缓项
 
 V1.0 前不进入主线：任意 Python/JavaScript 执行、SQL/Redis/Kafka 节点、Mock、性能测试、gRPC、AI 自动生成。它们必须复用稳定的 Node SDK、Context、Snapshot 和报告协议后再引入。
+
+## V2.0 迭代路线
+
+V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔离未完成能力。
+任意脚本、Kafka、gRPC、Kubernetes、多租户和完整性能测试保持在 V2.1 边界外。
+
+| 迭代 | 版本目标 | 主要交付 | 状态 |
+|---|---|---|---|
+| S12 | V1.1 稳定基线 | Python 3.13、依赖/镜像升级、V2 Feature Flags、真实 Workflow 容量基线、试点观察机制 | 实施中 |
+| S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 待实施 |
+| S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 待实施 |
+| S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 待实施 |
+| S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 待实施 |
+| S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 待实施 |
+| S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 待实施 |
+| S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 待实施 |
+| S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 待实施 |
+| S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 待实施 |
+
+S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
+[`docs/operations/soak-observation.md`](operations/soak-observation.md)。

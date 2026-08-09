@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "flowtest-backend"
 version = "1.0.0"
 description = "FlowTest API automation platform backend"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
   "alembic>=1.19,<2",
   "argon2-cffi>=25.1,<26",
@@ -61,7 +61,7 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C90", "RUF", "S"]
@@ -74,7 +74,7 @@ known-first-party = ["app"]
 "../scripts/smoke_*.py" = ["S105", "S310"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true
 

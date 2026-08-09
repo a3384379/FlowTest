@@ -10,7 +10,7 @@ from app.core.database import check_database
 from app.core.redis import check_redis
 from app.core.storage import check_storage
 from app.observability.metrics import MetricsRegistry, render_metrics
-from app.schemas.health import HealthResponse, ReadinessResponse
+from app.schemas.health import FeatureFlagsResponse, HealthResponse, ReadinessResponse
 
 router = APIRouter()
 
@@ -22,6 +22,20 @@ async def liveness() -> HealthResponse:
         status="ok",
         service=settings.app_name,
         version=settings.app_version,
+    )
+
+
+@router.get("/features", response_model=FeatureFlagsResponse)
+async def feature_flags() -> FeatureFlagsResponse:
+    return FeatureFlagsResponse(
+        teams=settings.feature_teams_enabled,
+        test_assets=settings.feature_test_assets_enabled,
+        advanced_workflows=settings.feature_advanced_workflows_enabled,
+        data_nodes=settings.feature_data_nodes_enabled,
+        contract_testing=settings.feature_contract_testing_enabled,
+        quality_center=settings.feature_quality_center_enabled,
+        oidc=settings.feature_oidc_enabled,
+        ai=settings.feature_ai_enabled,
     )
 
 

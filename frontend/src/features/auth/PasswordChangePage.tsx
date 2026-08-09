@@ -33,14 +33,14 @@ export default function PasswordChangePage() {
         {error && <Alert type="error" showIcon message={error} className="form-alert" />}
         <Form<PasswordValues> layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="当前密码" name="currentPassword" rules={[{ required: true }]}>
-            <Input.Password />
+            <Input.Password autoComplete="current-password" />
           </Form.Item>
           <Form.Item
             label="新密码"
             name="newPassword"
             rules={[{ required: true, min: 12, message: '新密码至少 12 位' }]}
           >
-            <Input.Password />
+            <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item
             label="确认新密码"
@@ -57,7 +57,7 @@ export default function PasswordChangePage() {
               }),
             ]}
           >
-            <Input.Password />
+            <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block loading={submitting}>
             保存并进入平台
