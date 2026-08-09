@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S5 Workflow 执行引擎（V0.2 迭代中）`。
+当前状态：`S6 可视化流程与实时执行（V0.2 迭代中）`。
 
 ## 技术栈
 
@@ -69,7 +69,13 @@ S5 已提供 Workflow 草稿、乐观并发修订号、不可变发布版本和 
 Start/End、循环、不可达节点、悬空路径、节点配置及项目内 API 引用。独立异步 DAG 调度器支持
 依赖就绪并行、默认 fail-fast、失败传播、1～300 秒超时、网络错误/5xx 分类重试和持久化取消。
 每次执行固定 Workflow、API 与 Environment 版本，后续草稿、API 或环境修改不会改变历史快照。
-Web 管理端已开放流程草稿编辑、发布、运行和节点结果/历史查看；可视化画布在 S6 接入。
+Web 管理端已开放流程草稿编辑、发布、运行和节点结果/历史查看。
+
+S6 已将 Workflow 编辑升级为 React Flow 画布，支持 Start/API/End 节点、拖拽、
+连线、节点属性配置、草稿保存、发布和运行。工作流执行接口现在返回
+`202 Accepted`，后台协调器按固定 Snapshot 执行；节点状态通过 Redis Pub/Sub 和
+`/api/v1/executions/{id}/events` WebSocket 实时推送。WebSocket 使用访问令牌子协议认证，
+Redis 保留短期序列化事件用于连接后回放，前端同时使用轻量轮询保证最终一致。
 
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
@@ -81,6 +87,9 @@ multipart 上传、二进制响应外置、文件断言和受权下载。macOS �
 
 运行 `uv run --project backend python scripts/smoke_s5.py` 可验收不可变发布、DAG 执行、API
 版本快照、5xx 重试和跨请求取消。脚本默认复用 Compose Mock 服务并保持所有敏感值脱敏。
+
+运行 `uv run --project backend python scripts/smoke_s6.py` 可验收后台启动语义、节点结果持久化和
+`Start → A → B/C → D → End` 的依赖就绪并行；验收会直接比较 B/C 执行时间区间是否重叠。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

@@ -180,9 +180,123 @@ body {
   margin-bottom: 12px;
 }
 
-.workflow-json textarea {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+.workflow-designer {
+  overflow: hidden;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+}
+
+.workflow-toolbar {
+  min-height: 54px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5eaf2;
+  background: #fafcff;
+}
+
+.workflow-api-select {
+  width: 180px;
+}
+
+.workflow-designer-body {
+  display: grid;
+  grid-template-columns: minmax(500px, 1fr) 220px;
+  min-height: 540px;
+}
+
+.workflow-canvas {
+  min-width: 0;
+  height: 540px;
+  background: #f8faff;
+}
+
+.workflow-inspector {
+  padding: 16px;
+  border-left: 1px solid #e5eaf2;
+  background: white;
+}
+
+.workflow-inspector h5 {
+  margin-top: 0;
+}
+
+.workflow-inspector label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  color: #64748b;
   font-size: 12px;
+}
+
+.workflow-inspector .ant-select,
+.workflow-inspector .ant-input-number {
+  width: 100%;
+}
+
+.flow-node {
+  width: 190px;
+  min-height: 64px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  color: #1e293b;
+  background: white;
+  border: 2px solid #94a3b8;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgb(15 23 42 / 9%);
+}
+
+.flow-node strong,
+.flow-node small {
+  display: block;
+}
+
+.flow-node small {
+  margin-top: 3px;
+  color: #64748b;
+}
+
+.flow-node-icon {
+  color: #2563eb;
+  font-size: 20px;
+}
+
+.flow-node-status {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.flow-node-start {
+  border-color: #22c55e;
+}
+
+.flow-node-end {
+  border-color: #8b5cf6;
+}
+
+.flow-node.is-running {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 5px rgb(37 99 235 / 12%);
+}
+
+.flow-node.is-passed {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.flow-node.is-failed {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.flow-node.is-cancelled,
+.flow-node.is-skipped {
+  opacity: 0.68;
 }
 
 .workflow-result-card {
@@ -251,6 +365,15 @@ body {
   .dashboard-grid,
   .workflow-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-designer-body {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-inspector {
+    border-top: 1px solid #e5eaf2;
+    border-left: 0;
   }
 
   .stat-grid {

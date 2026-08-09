@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
+    workflow_event_retention_seconds: int = Field(default=86_400, ge=60, le=604_800)
     secret_key: str = "change-me-before-production-at-least-32-bytes"
     access_token_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_days: int = Field(default=7, ge=1, le=30)

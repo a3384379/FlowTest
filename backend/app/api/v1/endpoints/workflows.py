@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 
-from app.api.dependencies import CurrentUser, SessionDependency
+from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.schemas.common import Page
 from app.schemas.workflows import (
@@ -127,15 +127,20 @@ async def list_workflow_versions(
     return [WorkflowVersionResponse.model_validate(version) for version in versions]
 
 
-@router.post("/workflows/{workflow_id}/executions", response_model=WorkflowExecutionDetailResponse)
+@router.post(
+    "/workflows/{workflow_id}/executions",
+    response_model=WorkflowExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def execute_workflow(
     project_id: UUID,
     workflow_id: UUID,
     payload: WorkflowExecuteRequest,
     session: SessionDependency,
     current_user: CurrentUser,
-) -> WorkflowExecutionDetailResponse:
-    execution, nodes = await WorkflowService(session).execute(
+    coordinator: WorkflowCoordinator,
+) -> WorkflowExecutionResponse:
+    execution, plan = await WorkflowService(session).prepare_execution(
         actor=current_user,
         project_id=project_id,
         workflow_id=workflow_id,
@@ -144,7 +149,8 @@ async def execute_workflow(
         runtime_variables=payload.runtime_variables,
         runtime_headers=payload.runtime_headers,
     )
-    return _execution_detail(execution, nodes)
+    coordinator.start(plan)
+    return WorkflowExecutionResponse.model_validate(execution)
 
 
 @router.get("/workflow-executions", response_model=Page[WorkflowExecutionResponse])

@@ -8,12 +8,14 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.users import router as users_router
+from app.api.v1.endpoints.workflow_events import router as workflow_events_router
 from app.api.v1.endpoints.workflows import router as workflows_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, tags=["system"])
 api_router.include_router(auth_router, tags=["auth"])
 api_router.include_router(workflows_router, tags=["workflows"])
+api_router.include_router(workflow_events_router, tags=["workflow-events"])
 api_router.include_router(executions_router, tags=["executions"])
 api_router.include_router(imports_router, tags=["imports"])
 api_router.include_router(artifacts_router, tags=["files"])

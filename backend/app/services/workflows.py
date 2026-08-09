@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -19,6 +20,7 @@ from app.engine.contracts import (
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    NodeStatusCallback,
     WorkflowRunResult,
     WorkflowScheduler,
 )
@@ -34,10 +36,24 @@ from app.repositories.workflows import WorkflowRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 from app.services.workflow_runtime import WorkflowNodeExecutor
-from app.services.workflow_snapshots import WorkflowSnapshotBuilder
+from app.services.workflow_snapshots import (
+    PreparedExecution,
+    WorkflowSnapshotBuilder,
+)
 
 SUPPORTED_S5_NODE_TYPES = frozenset({NodeType.START, NodeType.API, NodeType.END})
 CANCELLATION_POLL_SECONDS = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRunPlan:
+    execution_id: UUID
+    actor_id: UUID
+    project_id: UUID
+    workflow_version: int
+    definition: WorkflowDefinition
+    prepared: PreparedExecution
+    runtime_variables: dict[str, str]
 
 
 class WorkflowService:
@@ -198,6 +214,28 @@ class WorkflowService:
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
+        execution, plan = await self.prepare_execution(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            environment_id=environment_id,
+            version=version,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
+        return await self.run_prepared(execution=execution, plan=plan)
+
+    async def prepare_execution(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        environment_id: UUID,
+        version: int | None,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow(project_id, workflow_id)
         selected = await self._select_version(workflow, version)
@@ -220,15 +258,33 @@ class WorkflowService:
             environment_id=environment_id,
             snapshot=prepared.snapshot,
         )
+        return execution, WorkflowRunPlan(
+            execution_id=execution.id,
+            actor_id=actor.id,
+            project_id=project_id,
+            workflow_version=selected.version,
+            definition=definition,
+            prepared=prepared,
+            runtime_variables=dict(runtime_variables),
+        )
+
+    async def run_prepared(
+        self,
+        *,
+        execution: WorkflowExecution,
+        plan: WorkflowRunPlan,
+        on_node_status: NodeStatusCallback | None = None,
+    ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
         token = CancellationToken()
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            scheduler = WorkflowScheduler(WorkflowNodeExecutor(client, prepared.requests))
+            scheduler = WorkflowScheduler(WorkflowNodeExecutor(client, plan.prepared.requests))
             result = await self._run_with_cancellation_poll(
                 scheduler=scheduler,
-                definition=definition,
+                definition=plan.definition,
                 execution=execution,
                 token=token,
-                runtime_variables=runtime_variables,
+                runtime_variables=plan.runtime_variables,
+                on_node_status=on_node_status,
             )
         nodes = self._node_models(execution.id, result)
         self._workflows.add_all(nodes)
@@ -242,18 +298,36 @@ class WorkflowService:
             execution.error_code = failed.error_code
             execution.error_message = failed.error_message
         self._audit.record(
-            actor_user_id=actor.id,
-            project_id=project_id,
+            actor_user_id=plan.actor_id,
+            project_id=plan.project_id,
             action="workflow.executed",
             resource_type="workflow_execution",
             resource_id=execution.id,
-            details={"status": result.status.value, "workflow_version": selected.version},
+            details={"status": result.status.value, "workflow_version": plan.workflow_version},
         )
         await self._session.commit()
         await self._session.refresh(execution)
-        for node in nodes:
-            await self._session.refresh(node)
         return execution, nodes
+
+    async def load_execution_for_run(self, execution_id: UUID) -> WorkflowExecution:
+        execution = await self._workflows.get_execution(execution_id)
+        if execution is None:
+            raise AppError(
+                code="WORKFLOW_EXECUTION_NOT_FOUND",
+                message="工作流执行不存在",
+                status_code=404,
+            )
+        return execution
+
+    async def mark_runtime_failed(self, execution_id: UUID) -> WorkflowExecution:
+        execution = await self.load_execution_for_run(execution_id)
+        execution.status = "failed"
+        execution.error_code = "WORKFLOW_RUNTIME_ERROR"
+        execution.error_message = "工作流运行服务发生内部错误"
+        execution.completed_at = datetime.now(UTC)
+        await self._session.commit()
+        await self._session.refresh(execution)
+        return execution
 
     async def request_cancel(
         self, *, actor: User, project_id: UUID, execution_id: UUID
@@ -370,6 +444,7 @@ class WorkflowService:
         execution: WorkflowExecution,
         token: CancellationToken,
         runtime_variables: dict[str, str],
+        on_node_status: NodeStatusCallback | None,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
@@ -378,14 +453,19 @@ class WorkflowService:
                     runtime_variables=cast(dict[str, JsonValue], runtime_variables)
                 ),
                 cancellation=token,
+                on_node_status=on_node_status,
             )
         )
-        while not task.done():
-            await asyncio.wait({task}, timeout=CANCELLATION_POLL_SECONDS)
-            await self._session.refresh(execution, attribute_names=["cancel_requested_at"])
-            if execution.cancel_requested_at is not None:
-                token.cancel()
-        return await task
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=CANCELLATION_POLL_SECONDS)
+                await self._session.refresh(execution, attribute_names=["cancel_requested_at"])
+                if execution.cancel_requested_at is not None:
+                    token.cancel()
+            return await task
+        except asyncio.CancelledError:
+            token.cancel()
+            return await task
 
     async def _select_version(self, workflow: Workflow, requested: int | None) -> WorkflowVersion:
         selected_number = requested or workflow.current_version

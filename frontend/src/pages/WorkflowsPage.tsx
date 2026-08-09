@@ -5,11 +5,12 @@ import {
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { Button, Card, Empty, Input, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd'
 import { useState } from 'react'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
+import WorkflowDesigner from '../flow/WorkflowDesigner'
 import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
 
 export default function WorkflowsPage() {
@@ -96,7 +97,7 @@ function WorkflowWorkspace({ state }: { state: WorkflowState }) {
           onSelect={state.setWorkflowSelection}
         />
       </Card>
-      <Card title="草稿定义" extra={<DraftActions state={state} />}>
+      <Card title="可视化草稿" extra={<DraftActions state={state} />}>
         <DraftEditor state={state} />
       </Card>
     </div>
@@ -108,7 +109,7 @@ function DraftActions({ state }: { state: WorkflowState }) {
     <Space>
       <Button
         icon={<SaveOutlined />}
-        disabled={!state.selectedWorkflow}
+        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
         loading={state.saving}
         onClick={() => void state.saveDraft()}
       >
@@ -116,7 +117,7 @@ function DraftActions({ state }: { state: WorkflowState }) {
       </Button>
       <Button
         icon={<CloudUploadOutlined />}
-        disabled={!state.selectedWorkflow}
+        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
         loading={state.publishing}
         onClick={() => void state.publish()}
       >
@@ -126,7 +127,7 @@ function DraftActions({ state }: { state: WorkflowState }) {
         type="primary"
         icon={<PlayCircleOutlined />}
         disabled={!canExecute(state)}
-        loading={state.executing}
+        loading={state.executing || Boolean(state.activeExecutionId)}
         onClick={() => void state.execute()}
       >
         运行
@@ -144,12 +145,12 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         <Tag color="blue">草稿 r{workflow.draft_revision}</Tag>
         <PublishedTag version={workflow.current_version} />
       </Space>
-      <Input.TextArea
-        aria-label="工作流 JSON"
-        className="workflow-json"
-        value={state.draftText}
-        onChange={(event) => state.setDraftText(event.target.value)}
-        autoSize={{ minRows: 18, maxRows: 28 }}
+      <WorkflowDesigner
+        definition={state.designerDefinition}
+        apis={state.apis.data?.items ?? []}
+        statuses={state.nodeStatuses}
+        editable={!state.activeExecutionId}
+        onChange={state.setDraftDefinition}
       />
     </>
   )
@@ -162,12 +163,14 @@ function PublishedTag({ version }: { version: number | null }) {
 }
 
 function canExecute(state: WorkflowState): boolean {
-  return [
-    state.projectId,
-    state.environmentId,
-    state.workflowId,
-    state.selectedWorkflow?.current_version,
-  ].every(Boolean)
+  return (
+    [
+      state.projectId,
+      state.environmentId,
+      state.workflowId,
+      state.selectedWorkflow?.current_version,
+    ].every(Boolean) && !state.activeExecutionId
+  )
 }
 
 function WorkflowTable({

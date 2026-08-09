@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import {
   apiErrorMessage,
+  type ExecutionEvent,
   type WorkflowDefinition,
   type WorkflowExecutionDetail,
 } from '../../lib/api'
+import { useAuthStore } from '../auth/auth-store'
+import { useExecutionEvents } from './use-execution-events'
 import {
   createWorkflow,
   executeWorkflow,
+  getWorkflowExecution,
   listApis,
   listEnvironments,
   listProjects,
@@ -24,11 +28,20 @@ export type CreateWorkflowInput = { name: string; description: string; apiId: st
 export function useWorkflows() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
+  const token = useAuthStore((store) => store.token)
   const [projectSelection, setProjectSelection] = useState<string | null>(null)
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [workflowSelection, setWorkflowSelection] = useState<string | null>(null)
-  const [draftEdit, setDraftEdit] = useState<{ workflowId: string; text: string } | null>(null)
+  const [draftEdit, setDraftEdit] = useState<{
+    workflowId: string
+    definition: WorkflowDefinition
+  } | null>(null)
   const [lastResult, setLastResult] = useState<WorkflowExecutionDetail | null>(null)
+  const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
+  const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({})
+  const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
+  const completedExecutionId = useRef<string | null>(null)
+  const completingExecutionId = useRef<string | null>(null)
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: listProjects })
   const projectId = selectedOrFirst(projectSelection, projects.data?.items)
@@ -50,13 +63,12 @@ export function useWorkflows() {
   })
   const workflowId = selectedOrFirst(workflowSelection, workflows.data?.items)
   const selectedWorkflow = workflows.data?.items.find((item) => item.id === workflowId) ?? null
-  const draftText = draftSource(draftEdit, workflowId, selectedWorkflow)
+  const draftDefinition = draftSource(draftEdit, workflowId, selectedWorkflow)
   const executions = useQuery({
     queryKey: ['workflow-executions', projectId],
     queryFn: () => listWorkflowExecutions(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-
   const createMutation = useMutation({
     mutationFn: (input: CreateWorkflowInput) => createWorkflow(requiredId(projectId), input),
   })
@@ -72,12 +84,17 @@ export function useWorkflows() {
       executeWorkflow(requiredId(projectId), requiredId(workflowId), requiredId(environmentId)),
   })
 
+  useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
+
   function selectProject(value: string) {
     setProjectSelection(value)
     setEnvironmentSelection(null)
     setWorkflowSelection(null)
     setDraftEdit(null)
     setLastResult(null)
+    setActiveExecutionId(null)
+    setNodeStatuses({})
+    setExecutionDefinition(null)
   }
 
   async function addWorkflow(input: CreateWorkflowInput) {
@@ -91,8 +108,7 @@ export function useWorkflows() {
 
   async function saveDraft() {
     await runMutation(message.error, async () => {
-      const definition = parseDefinition(draftText)
-      await saveMutation.mutateAsync(definition)
+      await saveMutation.mutateAsync(draftDefinition)
       setDraftEdit(null)
       await refreshWorkflows()
       void message.success('草稿已保存')
@@ -109,13 +125,58 @@ export function useWorkflows() {
 
   async function execute() {
     await runMutation(message.error, async () => {
-      const result = await executeMutation.mutateAsync()
+      const execution = await executeMutation.mutateAsync()
+      const runningDefinition = snapshotDefinition(execution.snapshot) ?? draftDefinition
+      setLastResult(null)
+      setExecutionDefinition(runningDefinition)
+      setNodeStatuses(
+        Object.fromEntries(runningDefinition.nodes.map((node) => [node.id, 'pending'])),
+      )
+      completedExecutionId.current = null
+      setActiveExecutionId(execution.id)
+      void watchExecution(execution.id)
+      void message.info('工作流已开始运行')
+    })
+  }
+
+  function handleExecutionEvent(event: ExecutionEvent) {
+    if (event.type === 'node.status' && event.node_id && event.node_status) {
+      const nodeId = event.node_id
+      const status = event.node_status
+      setNodeStatuses((current) => ({ ...current, [nodeId]: status }))
+    }
+    if (event.type === 'execution.completed') void completeExecution(event.execution_id)
+  }
+
+  async function watchExecution(executionId: string) {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      await delay(500)
+      if (await completeExecution(executionId)) return
+    }
+    void message.error('等待工作流执行结果超时')
+  }
+
+  async function completeExecution(executionId: string): Promise<boolean> {
+    if (completedExecutionId.current === executionId) return true
+    if (completingExecutionId.current === executionId) return false
+    completingExecutionId.current = executionId
+    try {
+      const result = await getWorkflowExecution(requiredId(projectId), executionId)
+      if (result.execution.status === 'running') return false
+      completedExecutionId.current = executionId
       setLastResult(result)
+      setNodeStatuses(Object.fromEntries(result.nodes.map((node) => [node.node_id, node.status])))
+      setActiveExecutionId(null)
       await queryClient.invalidateQueries({ queryKey: ['workflow-executions', projectId] })
       void message.success(
         result.execution.status === 'passed' ? '工作流执行通过' : '工作流执行完成',
       )
-    })
+      return true
+    } catch {
+      return false
+    } finally {
+      if (completingExecutionId.current === executionId) completingExecutionId.current = null
+    }
   }
 
   async function refreshWorkflows() {
@@ -135,10 +196,17 @@ export function useWorkflows() {
     setWorkflowSelection,
     selectedWorkflow,
     executions,
-    draftText,
-    setDraftText: (text: string) => {
-      if (workflowId) setDraftEdit({ workflowId, text })
+    draftDefinition,
+    designerDefinition: executionDefinition ?? draftDefinition,
+    setDraftDefinition: (definition: WorkflowDefinition) => {
+      if (workflowId) {
+        setDraftEdit({ workflowId, definition })
+        setExecutionDefinition(null)
+        setNodeStatuses({})
+      }
     },
+    nodeStatuses,
+    activeExecutionId,
     lastResult,
     addWorkflow,
     saveDraft,
@@ -154,12 +222,12 @@ export function useWorkflows() {
 type Identified = { id: string }
 
 function draftSource(
-  edit: { workflowId: string; text: string } | null,
+  edit: { workflowId: string; definition: WorkflowDefinition } | null,
   workflowId: string | null,
   workflow: { draft_definition: WorkflowDefinition } | null,
-): string {
-  if (edit?.workflowId === workflowId) return edit.text
-  return workflow ? JSON.stringify(workflow.draft_definition, null, 2) : ''
+): WorkflowDefinition {
+  if (edit?.workflowId === workflowId) return edit.definition
+  return workflow?.draft_definition ?? emptyDefinition()
 }
 
 function selectedOrFirst(selection: string | null, items?: Identified[]): string | null {
@@ -176,12 +244,27 @@ function requiredWorkflow<T>(value: T | null): T {
   return value
 }
 
-function parseDefinition(source: string): WorkflowDefinition {
-  const parsed: unknown = JSON.parse(source)
-  if (!isRecord(parsed) || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-    throw new Error('工作流 JSON 必须包含 nodes 和 edges 数组')
+function emptyDefinition(): WorkflowDefinition {
+  return {
+    schema_version: '1.0',
+    nodes: [],
+    edges: [],
+    settings: { fail_fast: true, concurrency: 20, default_timeout_seconds: 30 },
   }
-  return parsed as WorkflowDefinition
+}
+
+function snapshotDefinition(snapshot: Record<string, unknown>): WorkflowDefinition | null {
+  const workflow = snapshot.workflow
+  if (!isRecord(workflow)) return null
+  const definition = workflow.definition
+  if (
+    !isRecord(definition) ||
+    !Array.isArray(definition.nodes) ||
+    !Array.isArray(definition.edges)
+  ) {
+    return null
+  }
+  return definition as WorkflowDefinition
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -198,4 +281,8 @@ async function runMutation(
     showError(apiErrorMessage(error))
     throw error
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }

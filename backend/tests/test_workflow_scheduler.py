@@ -9,6 +9,7 @@ from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
     NodeExecutionError,
+    NodeStatusUpdate,
     WorkflowScheduler,
 )
 
@@ -86,15 +87,19 @@ async def test_scheduler_runs_independent_branches_in_parallel() -> None:
         middle_nodes=[
             api_node("a"),
             api_node("b"),
+            api_node("c"),
+            api_node("d"),
         ],
         edges=[
             {"id": "s-a", "source": "start", "target": "a"},
-            {"id": "s-b", "source": "start", "target": "b"},
-            {"id": "a-e", "source": "a", "target": "end"},
-            {"id": "b-e", "source": "b", "target": "end"},
+            {"id": "a-b", "source": "a", "target": "b"},
+            {"id": "a-c", "source": "a", "target": "c"},
+            {"id": "b-d", "source": "b", "target": "d"},
+            {"id": "c-d", "source": "c", "target": "d"},
+            {"id": "d-e", "source": "d", "target": "end"},
         ],
     )
-    executor = ControlledExecutor({"a": {"delay": 0.02}, "b": {"delay": 0.02}})
+    executor = ControlledExecutor({"b": {"delay": 0.02}, "c": {"delay": 0.02}})
 
     result = await WorkflowScheduler(executor).run(definition)
 
@@ -105,8 +110,37 @@ async def test_scheduler_runs_independent_branches_in_parallel() -> None:
         NodeStatus.PASSED,
         NodeStatus.PASSED,
         NodeStatus.PASSED,
+        NodeStatus.PASSED,
+        NodeStatus.PASSED,
     ]
     assert result.context["node_outputs"]["a"] == {"node": "a", "attempt": 1}
+
+
+@pytest.mark.asyncio
+async def test_scheduler_reports_pending_running_and_terminal_node_states() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    result = await WorkflowScheduler(ControlledExecutor()).run(definition, on_node_status=capture)
+
+    assert result.status is not None
+    by_node: dict[str, list[NodeStatus]] = defaultdict(list)
+    for update in updates:
+        by_node[update.node_id].append(update.status)
+    assert by_node == {
+        "start": [NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.PASSED],
+        "api": [NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.PASSED],
+        "end": [NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.PASSED],
+    }
 
 
 @pytest.mark.asyncio

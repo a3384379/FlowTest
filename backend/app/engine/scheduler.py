@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -49,6 +49,21 @@ class WorkflowRunResult:
     context: dict[str, JsonValue]
 
 
+@dataclass(frozen=True, slots=True)
+class NodeStatusUpdate:
+    node_id: str
+    node_type: NodeType
+    name: str
+    status: NodeStatus
+    attempts: int
+    error_code: str | None
+    error_message: str | None
+    occurred_at: datetime
+
+
+NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
+
+
 @dataclass(slots=True)
 class ExecutionContext:
     runtime_variables: dict[str, JsonValue] = field(default_factory=dict)
@@ -96,6 +111,7 @@ class WorkflowScheduler:
         *,
         context: ExecutionContext | None = None,
         cancellation: CancellationToken | None = None,
+        on_node_status: NodeStatusCallback | None = None,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
@@ -104,11 +120,15 @@ class WorkflowScheduler:
         statuses = dict.fromkeys(nodes, NodeStatus.PENDING)
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
+        notified: dict[str, NodeStatus] = {}
+
+        await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
 
         while len(records) < len(nodes):
             if token.cancelled:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
                 break
 
             _skip_blocked(nodes, predecessors, statuses, records)
@@ -121,9 +141,11 @@ class WorkflowScheduler:
                 run_context,
                 self._run_node,
             )
+            await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
             if not active:
                 if len(records) < len(nodes):
                     _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED)
+                    await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
                 break
 
             cancellation_wait = asyncio.create_task(token.wait())
@@ -133,6 +155,7 @@ class WorkflowScheduler:
             if cancellation_wait in done:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
                 break
             cancellation_wait.cancel()
             await asyncio.gather(cancellation_wait, return_exceptions=True)
@@ -149,9 +172,12 @@ class WorkflowScheduler:
                 else:
                     failed = True
 
+            await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+
             if failed and definition.settings.fail_fast:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
                 break
 
         ordered = tuple(records[node.id] for node in definition.nodes)
@@ -355,3 +381,31 @@ def _workflow_status(records: tuple[NodeRunRecord, ...]) -> WorkflowRunStatus:
     if any(record.status is NodeStatus.CANCELLED for record in records):
         return WorkflowRunStatus.CANCELLED
     return WorkflowRunStatus.PASSED
+
+
+async def _notify_status_changes(
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    notified: dict[str, NodeStatus],
+    callback: NodeStatusCallback | None,
+) -> None:
+    if callback is None:
+        return
+    for node_id, status in statuses.items():
+        if notified.get(node_id) is status:
+            continue
+        record = records.get(node_id)
+        await callback(
+            NodeStatusUpdate(
+                node_id=node_id,
+                node_type=nodes[node_id].type,
+                name=nodes[node_id].name,
+                status=status,
+                attempts=record.attempts if record else 0,
+                error_code=record.error_code if record else None,
+                error_message=record.error_message if record else None,
+                occurred_at=record.completed_at if record else datetime.now(UTC),
+            )
+        )
+        notified[node_id] = status
