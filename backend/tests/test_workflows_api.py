@@ -195,6 +195,122 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert historical_snapshot["apis"]["api"]["version"] == 2
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_subflow_foreach_diff_breakpoint_replay_and_recursion_guards(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    child_created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "子流程", "definition": _empty_workflow_definition()},
+    )
+    assert child_created.status_code == 201, child_created.text
+    child_id = child_created.json()["id"]
+    child_v1 = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{child_id}/versions",
+        headers=headers,
+    )
+    assert child_v1.status_code == 200, child_v1.text
+
+    parent_definition = _for_each_workflow_definition(api_id, child_id, 1)
+    parent_created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "批量子流程", "definition": parent_definition},
+    )
+    assert parent_created.status_code == 201, parent_created.text
+    parent = parent_created.json()
+    parent_id = parent["id"]
+    parent_v1 = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}/versions",
+        headers=headers,
+    )
+    assert parent_v1.status_code == 200, parent_v1.text
+
+    changed_definition = json.loads(json.dumps(parent_definition))
+    changed_definition["nodes"][2]["name"] = "遍历用户 (新版草稿)"
+    updated = await workflow_client.patch(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}",
+        headers=headers,
+        json={"expected_revision": parent["draft_revision"], "definition": changed_definition},
+    )
+    assert updated.status_code == 200, updated.text
+    parent_v2 = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}/versions",
+        headers=headers,
+    )
+    assert parent_v2.status_code == 200, parent_v2.text
+    diff = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}/versions/1/diff/2",
+        headers=headers,
+    )
+    assert diff.status_code == 200, diff.text
+    assert {item["path"] for item in diff.json()["changes"]} == {"$.nodes"}
+
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"items": [{"id": 1}, {"id": 2}]})
+    )
+    debugged = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}/debug",
+        headers=headers,
+        json={
+            "environment_id": environment_id,
+            "version": 1,
+            "breakpoint_node_id": "loop",
+        },
+    )
+    assert debugged.status_code == 200, debugged.text
+    debug_nodes = {item["node_id"]: item for item in debugged.json()["nodes"]}
+    assert debug_nodes["source"]["status"] == "passed"
+    assert debug_nodes["loop"]["error_code"] == "DEBUG_SCOPE_EXCLUDED"
+
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{parent_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id, "version": 1},
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client,
+        headers,
+        project_id,
+        executed.json()["id"],
+    )
+    assert detail["execution"]["status"] == "passed", detail
+    loop = next(item for item in detail["nodes"] if item["node_id"] == "loop")
+    assert loop["output"]["total"] == 2
+    assert loop["output"]["items"][1]["result"]["workflow_version"] == 1
+    assert detail["execution"]["snapshot"]["subflows"]["loop"]["workflow"]["version"] == 1
+
+    replayed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{executed.json()['id']}"
+        "/nodes/source/replay",
+        headers=headers,
+    )
+    assert replayed.status_code == 200, replayed.text
+    replay_nodes = {item["node_id"]: item for item in replayed.json()["nodes"]}
+    assert replay_nodes["source"]["status"] == "passed"
+    assert replay_nodes["loop"]["status"] == "skipped"
+    assert len(target.calls) == 3
+
+    recursive_child = _subflow_workflow_definition(parent_id, 1)
+    child_updated = await workflow_client.patch(
+        f"/api/v1/projects/{project_id}/workflows/{child_id}",
+        headers=headers,
+        json={"expected_revision": 1, "definition": recursive_child},
+    )
+    assert child_updated.status_code == 200, child_updated.text
+    recursion = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{child_id}/versions",
+        headers=headers,
+    )
+    assert recursion.status_code == 422
+    assert recursion.json()["error"]["code"] == "SUBFLOW_RECURSION"
+
+
 @pytest.mark.asyncio
 async def test_publish_rejects_invalid_or_cross_project_api_configuration(
     workflow_client: AsyncClient,
@@ -541,6 +657,79 @@ def _workflow_definition(api_id: str, *, max_retries: int = 0) -> dict[str, Any]
         "edges": [
             {"id": "start-api", "source": "start", "target": "api"},
             {"id": "api-end", "source": "api", "target": "end"},
+        ],
+    }
+
+
+def _empty_workflow_definition() -> dict[str, Any]:
+    return {
+        "schema_version": "2.0",
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 220, "y": 0}},
+        ],
+        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+    }
+
+
+def _for_each_workflow_definition(
+    api_id: str,
+    child_workflow_id: str,
+    child_version: int,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "2.0",
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "source",
+                "type": "api",
+                "name": "读取用户",
+                "position": {"x": 220, "y": 0},
+                "config": {"api_definition_id": api_id},
+            },
+            {
+                "id": "loop",
+                "type": "for_each",
+                "name": "遍历用户",
+                "position": {"x": 440, "y": 0},
+                "config": {
+                    "workflow_id": child_workflow_id,
+                    "workflow_version": child_version,
+                    "source_node_id": "source",
+                    "expression": "body.items",
+                    "item_variable": "user",
+                    "concurrency": 2,
+                    "fail_fast": False,
+                },
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 660, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-source", "source": "start", "target": "source"},
+            {"id": "source-loop", "source": "source", "target": "loop"},
+            {"id": "loop-end", "source": "loop", "target": "end"},
+        ],
+    }
+
+
+def _subflow_workflow_definition(workflow_id: str, version: int) -> dict[str, Any]:
+    return {
+        "schema_version": "2.0",
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "subflow",
+                "type": "subflow",
+                "name": "调用父流程",
+                "position": {"x": 220, "y": 0},
+                "config": {"workflow_id": workflow_id, "workflow_version": version},
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 440, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-subflow", "source": "start", "target": "subflow"},
+            {"id": "subflow-end", "source": "subflow", "target": "end"},
         ],
     }
 

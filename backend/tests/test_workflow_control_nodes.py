@@ -1,12 +1,16 @@
 from typing import Any
+from uuid import UUID
 
+import httpx
 import pytest
 from pydantic import JsonValue
 
+from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import FieldMapping, NodeStatus, WorkflowDefinition, WorkflowNode
 from app.engine.control_nodes import execute_control_node
 from app.engine.mappings import MappingResolutionError, resolve_field_mappings
 from app.engine.scheduler import ExecutionContext, NodeExecutionError, WorkflowScheduler
+from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
 
 
 class ControlExecutor:
@@ -207,12 +211,9 @@ async def test_control_node_handles_optional_extract_delay_dataset_and_boundarie
     context = ExecutionContext(dataset_variables={"region": "cn"})
     context.record_output("source", {"body": {}})
 
-    assert (
-        await execute_control_node(
-            WorkflowNode.model_validate(_node("start", "start", {})), context
-        )
-        is None
-    )
+    assert await execute_control_node(
+        WorkflowNode.model_validate(_node("start", "start", {})), context
+    ) == {"variables": {"region": "cn"}}
     extracted = await execute_control_node(
         WorkflowNode.model_validate(
             _node(
@@ -274,6 +275,125 @@ async def test_control_node_reports_invalid_expression_and_unsupported_executor(
     assert unsupported.value.code == "UNSUPPORTED_NODE_TYPE"
 
 
+@pytest.mark.asyncio
+async def test_subflow_inherits_variables_from_an_immutable_prepared_version() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000101")
+    nested = _nested_workflow()
+    node = WorkflowNode.model_validate(
+        _node(
+            "nested",
+            "subflow",
+            {"workflow_id": str(workflow_id), "workflow_version": 2},
+        )
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=2,
+        fingerprint="f" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={"workflow": {"id": str(workflow_id), "version": 2}},
+    )
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        output = await executor.execute(
+            node,
+            ExecutionContext(runtime_variables={"tenant": "flowtest"}),
+        )
+
+    assert output["status"] == "passed"
+    assert output["workflow_version"] == 2
+    assert output["nodes"][0]["output"] == {"variables": {"tenant": "flowtest"}}
+
+
+@pytest.mark.asyncio
+async def test_for_each_runs_bounded_subflows_and_exposes_item_variables() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000102")
+    node = WorkflowNode.model_validate(
+        _node(
+            "loop",
+            "for_each",
+            {
+                "workflow_id": str(workflow_id),
+                "workflow_version": 1,
+                "source_node_id": "source",
+                "expression": "body.items",
+                "item_variable": "current",
+                "index_variable": "position",
+                "concurrency": 2,
+                "fail_fast": False,
+            },
+        )
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="a" * 64,
+        definition=_nested_workflow(),
+        requests={},
+        subflows={},
+        snapshot={},
+    )
+    context = ExecutionContext(runtime_variables={"tenant": "flowtest"})
+    context.record_output("source", {"body": {"items": ["a", "b", "c"]}})
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        output = await executor.execute(node, context)
+
+    assert output["total"] == 3
+    assert output["completed"] == 3
+    assert [item["index"] for item in output["items"]] == [0, 1, 2]
+    variables = output["items"][1]["result"]["nodes"][0]["output"]["variables"]
+    assert variables == {"tenant": "flowtest", "current": "b", "position": 1}
+
+
+@pytest.mark.asyncio
+async def test_for_each_rejects_non_arrays_and_more_than_one_thousand_items() -> None:
+    workflow_id = "00000000-0000-0000-0000-000000000103"
+    node = WorkflowNode.model_validate(
+        _node(
+            "loop",
+            "for_each",
+            {
+                "workflow_id": workflow_id,
+                "workflow_version": 1,
+                "source_node_id": "source",
+                "expression": "items",
+            },
+        )
+    )
+    context = ExecutionContext()
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+        )
+        context.record_output("source", {"items": "not-an-array"})
+        with pytest.raises(NodeExecutionError) as wrong_type:
+            await executor.execute(node, context)
+        assert wrong_type.value.code == "FOR_EACH_SOURCE_NOT_ARRAY"
+
+        context.record_output("source", {"items": list(range(1001))})
+        with pytest.raises(NodeExecutionError) as over_limit:
+            await executor.execute(node, context)
+        assert over_limit.value.code == "FOR_EACH_LIMIT_EXCEEDED"
+
+
 def _condition_workflow() -> WorkflowDefinition:
     return WorkflowDefinition.model_validate(
         {
@@ -303,6 +423,30 @@ def _condition_workflow() -> WorkflowDefinition:
                 _edge("enabled", "end"),
                 _edge("disabled", "end"),
             ],
+        }
+    )
+
+
+def _nested_workflow() -> WorkflowDefinition:
+    return WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [_node("start", "start", {}), _node("end", "end", {})],
+            "edges": [_edge("start", "end")],
+        }
+    )
+
+
+def _wrapper_workflow(node: WorkflowNode) -> WorkflowDefinition:
+    return WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                _node("start", "start", {}),
+                node.model_dump(mode="json"),
+                _node("end", "end", {}),
+            ],
+            "edges": [_edge("start", node.id), _edge(node.id, "end")],
         }
     )
 

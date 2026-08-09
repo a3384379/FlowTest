@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import cast
 from uuid import UUID
 
@@ -9,17 +10,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
-from app.engine.contracts import NodeType, WorkflowDefinition, parse_api_node_config
+from app.engine.contracts import (
+    ForEachNodeConfig,
+    NodeType,
+    SubFlowNodeConfig,
+    WorkflowDefinition,
+    parse_api_node_config,
+    parse_node_config,
+)
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.workflows import Workflow, WorkflowVersion
 from app.repositories.api_assets import APIAssetRepository
+from app.repositories.workflows import WorkflowRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
 from app.services.artifacts import ArtifactService
 from app.services.datasets import WorkflowDatasetService
 from app.services.executions import PreparedMultipart, PreparedUpload
-from app.services.workflow_runtime import PreparedWorkflowRequest
+from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +36,7 @@ class PreparedExecution:
     snapshot: dict[str, JsonValue]
     requests: dict[str, PreparedWorkflowRequest]
     dataset_variables: dict[str, JsonValue]
+    subflows: dict[str, PreparedSubflow] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +47,7 @@ class PreparedWorkflow:
 
 class WorkflowSnapshotBuilder:
     def __init__(self, session: AsyncSession) -> None:
+        self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
         self._api_assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
@@ -70,6 +81,16 @@ class WorkflowSnapshotBuilder:
                 runtime_headers=runtime_headers,
                 dataset_variables=row,
             )
+            subflows = await self._prepare_subflows(
+                actor=actor,
+                project_id=project_id,
+                definition=definition,
+                environment_id=environment_id,
+                runtime_variables=runtime_variables,
+                runtime_headers=runtime_headers,
+                dataset_variables=row,
+                depth=1,
+            )
             runs.append(
                 PreparedExecution(
                     snapshot=_snapshot(
@@ -77,6 +98,7 @@ class WorkflowSnapshotBuilder:
                         version=version,
                         environment=environment,
                         apis=api_snapshots,
+                        subflows=subflows,
                         dataset=(
                             dataset.snapshot(
                                 row_index=row_index,
@@ -89,6 +111,7 @@ class WorkflowSnapshotBuilder:
                         runtime_headers=runtime_headers,
                     ),
                     requests=requests,
+                    subflows=subflows,
                     dataset_variables=dict(row),
                 )
             )
@@ -99,6 +122,83 @@ class WorkflowSnapshotBuilder:
                 "dataset": dataset.snapshot(),
             }
         return PreparedWorkflow(snapshot=parent_snapshot, runs=tuple(runs))
+
+    async def _prepare_subflows(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        dataset_variables: dict[str, JsonValue],
+        depth: int,
+    ) -> dict[str, PreparedSubflow]:
+        prepared: dict[str, PreparedSubflow] = {}
+        for node in definition.nodes:
+            config = parse_node_config(node)
+            if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
+                continue
+            if depth >= 5:
+                raise AppError(
+                    code="SUBFLOW_DEPTH_EXCEEDED",
+                    message="子流程最大嵌套深度为 5",
+                    status_code=422,
+                )
+            workflow = await self._workflows.get(config.workflow_id)
+            version = await self._workflows.find_version(
+                config.workflow_id,
+                config.workflow_version,
+            )
+            if workflow is None or workflow.project_id != project_id or version is None:
+                raise AppError(
+                    code="SUBFLOW_VERSION_NOT_FOUND",
+                    message=f"节点 {node.name} 引用的子流程版本不存在",
+                    status_code=422,
+                )
+            nested_definition = WorkflowDefinition.model_validate(version.definition)
+            if any(item.type is NodeType.DATASET for item in nested_definition.nodes):
+                raise AppError(
+                    code="SUBFLOW_DATASET_NOT_SUPPORTED",
+                    message="子流程暂不支持 Dataset 节点",
+                    status_code=422,
+                )
+            requests, api_snapshots = await self._prepare_api_nodes(
+                actor=actor,
+                project_id=project_id,
+                definition=nested_definition,
+                environment_id=environment_id,
+                runtime_variables=runtime_variables,
+                runtime_headers=runtime_headers,
+                dataset_variables=dataset_variables,
+            )
+            children = await self._prepare_subflows(
+                actor=actor,
+                project_id=project_id,
+                definition=nested_definition,
+                environment_id=environment_id,
+                runtime_variables=runtime_variables,
+                runtime_headers=runtime_headers,
+                dataset_variables=dataset_variables,
+                depth=depth + 1,
+            )
+            snapshot = _nested_snapshot(
+                workflow=workflow,
+                version=version,
+                apis=api_snapshots,
+                subflows=children,
+            )
+            prepared[node.id] = PreparedSubflow(
+                workflow_id=workflow.id,
+                workflow_version=version.version,
+                fingerprint=version.fingerprint,
+                definition=nested_definition,
+                requests=requests,
+                subflows=children,
+                snapshot=snapshot,
+            )
+        return prepared
 
     async def _prepare_api_nodes(
         self,
@@ -223,6 +323,7 @@ def _snapshot(
     version: WorkflowVersion,
     environment: Environment,
     apis: dict[str, JsonValue],
+    subflows: dict[str, PreparedSubflow],
     dataset: JsonValue,
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
@@ -238,11 +339,32 @@ def _snapshot(
         },
         "environment": _environment_snapshot(environment),
         "apis": apis,
+        "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "dataset": dataset,
         "runtime": cast(
             JsonValue,
             redact({"variables": runtime_variables, "headers": runtime_headers}),
         ),
+    }
+
+
+def _nested_snapshot(
+    *,
+    workflow: Workflow,
+    version: WorkflowVersion,
+    apis: dict[str, JsonValue],
+    subflows: dict[str, PreparedSubflow],
+) -> dict[str, JsonValue]:
+    return {
+        "workflow": {
+            "id": str(workflow.id),
+            "version_id": str(version.id),
+            "version": version.version,
+            "fingerprint": version.fingerprint,
+            "definition": version.definition,
+        },
+        "apis": apis,
+        "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
     }
 
 

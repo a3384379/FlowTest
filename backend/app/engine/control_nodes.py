@@ -20,7 +20,9 @@ from app.engine.scheduler import ExecutionContext, NodeExecutionError
 
 
 async def execute_control_node(node: WorkflowNode, context: ExecutionContext) -> JsonValue:
-    if node.type in {NodeType.START, NodeType.END}:
+    if node.type is NodeType.START:
+        return {"variables": context.resolved_variables()}
+    if node.type is NodeType.END:
         return None
     config = parse_node_config(node)
     try:

@@ -1,7 +1,9 @@
+import asyncio
 import json
 from dataclasses import dataclass, replace
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
 
 import httpx
 from pydantic import JsonValue
@@ -9,19 +11,29 @@ from pydantic import JsonValue
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.api_assets import BodyKind
+from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.contracts import (
     FieldMapping,
+    ForEachNodeConfig,
     MappingTargetLocation,
     NodeType,
     RetryCategory,
+    SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
+    parse_node_config,
 )
 from app.engine.control_nodes import execute_control_node
 from app.engine.mappings import MappingResolutionError, ResolvedFieldMapping, resolve_field_mappings
-from app.engine.scheduler import ExecutionContext, NodeExecutionError
+from app.engine.node_sdk import NodeHandlerRegistration, NodeHandlerRegistry
+from app.engine.scheduler import (
+    ExecutionContext,
+    NodeExecutionError,
+    WorkflowRunResult,
+    WorkflowScheduler,
+)
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.executions import (
     PreparedMultipart,
@@ -38,6 +50,17 @@ class PreparedWorkflowRequest:
     multipart: PreparedMultipart | None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedSubflow:
+    workflow_id: UUID
+    workflow_version: int
+    fingerprint: str
+    definition: WorkflowDefinition
+    requests: dict[str, PreparedWorkflowRequest]
+    subflows: dict[str, "PreparedSubflow"]
+    snapshot: dict[str, JsonValue]
+
+
 class WorkflowNodeExecutor:
     def __init__(
         self,
@@ -45,17 +68,32 @@ class WorkflowNodeExecutor:
         requests: dict[str, PreparedWorkflowRequest],
         definition: WorkflowDefinition,
         network_policy: OutboundNetworkPolicy,
+        subflows: dict[str, PreparedSubflow] | None = None,
         outbound_guard: OutboundRequestGuard = outbound_request_guard,
     ) -> None:
         self._client = client
         self._requests = requests
         self._mappings = _mappings_by_target(definition)
         self._network_policy = network_policy
+        self._subflows = subflows or {}
         self._outbound_guard = outbound_guard
+        control_types = frozenset(NodeType) - {NodeType.API, NodeType.SUBFLOW, NodeType.FOR_EACH}
+        self._handlers = NodeHandlerRegistry(
+            [
+                NodeHandlerRegistration(NodeType.API, self._execute_api),
+                NodeHandlerRegistration(NodeType.SUBFLOW, self._execute_subflow),
+                NodeHandlerRegistration(NodeType.FOR_EACH, self._execute_for_each),
+                *[
+                    NodeHandlerRegistration(node_type, execute_control_node)
+                    for node_type in control_types
+                ],
+            ]
+        )
 
     async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
-        if node.type is not NodeType.API:
-            return await execute_control_node(node, context)
+        return await self._handlers.execute(node, context)
+
+    async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         prepared = self._requests[node.id]
         try:
             request, mapping_trace = _apply_mappings(
@@ -106,6 +144,183 @@ class WorkflowNodeExecutor:
                 output=output,
             )
         return output
+
+    async def _execute_subflow(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, SubFlowNodeConfig) or isinstance(config, ForEachNodeConfig):
+            raise NodeExecutionError(
+                code="INVALID_SUBFLOW_CONFIG",
+                message=f"节点 {node.name} 的子流程配置无效",
+            )
+        prepared = self._prepared_subflow(node)
+        result = await self._run_subflow(prepared, context.resolved_variables())
+        output = _subflow_output(prepared, result)
+        if result.status.value != "passed":
+            raise NodeExecutionError(
+                code="SUBFLOW_FAILED",
+                message=f"子流程 {node.name} 执行失败",
+                output=output,
+            )
+        return output
+
+    async def _execute_for_each(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, ForEachNodeConfig):
+            raise NodeExecutionError(
+                code="INVALID_FOR_EACH_CONFIG",
+                message=f"节点 {node.name} 的循环配置无效",
+            )
+        try:
+            items = evaluate_bounded_array(
+                config.expression,
+                context.output_of(config.source_node_id),
+            )
+        except SafeExpressionError as error:
+            raise NodeExecutionError(code=error.code, message=error.message) from error
+
+        prepared = self._prepared_subflow(node)
+        completed = await self._run_for_each_items(prepared, config, context, items)
+        output = _for_each_output(config, items, completed)
+        if _for_each_failed(completed):
+            raise NodeExecutionError(
+                code="FOR_EACH_ITEM_FAILED",
+                message=f"循环节点 {node.name} 包含失败项",
+                output=output,
+            )
+        return output
+
+    async def _run_for_each_items(
+        self,
+        prepared: PreparedSubflow,
+        config: ForEachNodeConfig,
+        context: ExecutionContext,
+        items: list[JsonValue],
+    ) -> list[dict[str, JsonValue]]:
+        semaphore = asyncio.Semaphore(config.concurrency)
+        tasks = [
+            asyncio.create_task(
+                self._run_for_each_item(prepared, config, context, semaphore, index, item)
+            )
+            for index, item in enumerate(items)
+        ]
+        return await _collect_for_each_tasks(tasks, fail_fast=config.fail_fast)
+
+    async def _run_for_each_item(
+        self,
+        prepared: PreparedSubflow,
+        config: ForEachNodeConfig,
+        context: ExecutionContext,
+        semaphore: asyncio.Semaphore,
+        index: int,
+        item: JsonValue,
+    ) -> dict[str, JsonValue]:
+        async with semaphore:
+            variables = {
+                **context.resolved_variables(),
+                config.item_variable: item,
+                config.index_variable: index,
+            }
+            result = await self._run_subflow(prepared, variables)
+            return {
+                "index": index,
+                "item": item,
+                "result": _subflow_output(prepared, result),
+            }
+
+    async def _run_subflow(
+        self,
+        prepared: PreparedSubflow,
+        runtime_variables: dict[str, JsonValue],
+    ) -> WorkflowRunResult:
+        executor = WorkflowNodeExecutor(
+            self._client,
+            prepared.requests,
+            prepared.definition,
+            self._network_policy,
+            subflows=prepared.subflows,
+            outbound_guard=self._outbound_guard,
+        )
+        return await WorkflowScheduler(executor).run(
+            prepared.definition,
+            context=ExecutionContext(
+                workflow_variables=dict(prepared.definition.variables),
+                runtime_variables=runtime_variables,
+            ),
+        )
+
+    def _prepared_subflow(self, node: WorkflowNode) -> PreparedSubflow:
+        prepared = self._subflows.get(node.id)
+        if prepared is None:
+            raise NodeExecutionError(
+                code="SUBFLOW_SNAPSHOT_MISSING",
+                message=f"节点 {node.name} 缺少固定子流程快照",
+            )
+        return prepared
+
+
+def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:
+    return {
+        "workflow_id": str(prepared.workflow_id),
+        "workflow_version": prepared.workflow_version,
+        "fingerprint": prepared.fingerprint,
+        "status": result.status.value,
+        "nodes": [
+            {
+                "node_id": record.node_id,
+                "node_type": record.node_type.value,
+                "name": record.name,
+                "status": record.status.value,
+                "attempts": record.attempts,
+                "output": record.output,
+                "error_code": record.error_code,
+                "error_message": record.error_message,
+            }
+            for record in result.records
+        ],
+        "context": result.context,
+    }
+
+
+async def _collect_for_each_tasks(
+    tasks: list[asyncio.Task[dict[str, JsonValue]]],
+    *,
+    fail_fast: bool,
+) -> list[dict[str, JsonValue]]:
+    completed: list[dict[str, JsonValue]] = []
+    try:
+        for finished in asyncio.as_completed(tasks):
+            item_result = await finished
+            completed.append(item_result)
+            if fail_fast and _for_each_failed([item_result]):
+                break
+    finally:
+        for pending in tasks:
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    completed.sort(key=lambda item: cast(int, item["index"]))
+    return completed
+
+
+def _for_each_failed(items: list[dict[str, JsonValue]]) -> bool:
+    return any(
+        isinstance(item["result"], dict) and item["result"].get("status") != "passed"
+        for item in items
+    )
+
+
+def _for_each_output(
+    config: ForEachNodeConfig,
+    items: list[JsonValue],
+    completed: list[dict[str, JsonValue]],
+) -> dict[str, JsonValue]:
+    return {
+        "total": len(items),
+        "completed": len(completed),
+        "concurrency": config.concurrency,
+        "fail_fast": config.fail_fast,
+        "items": cast(JsonValue, completed),
+    }
 
 
 def _response_output(response: httpx.Response) -> dict[str, JsonValue]:

@@ -216,6 +216,48 @@ async def test_scheduler_cancels_running_and_pending_nodes() -> None:
     assert result.records[2].status is NodeStatus.CANCELLED
 
 
+@pytest.mark.asyncio
+async def test_scheduler_debug_scope_executes_only_selected_ancestors() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("first"), api_node("breakpoint"), api_node("after")],
+        edges=[
+            {"id": "s-f", "source": "start", "target": "first"},
+            {"id": "f-b", "source": "first", "target": "breakpoint"},
+            {"id": "b-a", "source": "breakpoint", "target": "after"},
+            {"id": "a-e", "source": "after", "target": "end"},
+        ],
+    )
+    executor = ControlledExecutor()
+
+    result = await WorkflowScheduler(executor).run(
+        definition,
+        selected_node_ids=frozenset({"start", "first"}),
+    )
+
+    by_id = {record.node_id: record for record in result.records}
+    assert executor.attempts == {"start": 1, "first": 1}
+    assert by_id["breakpoint"].status is NodeStatus.SKIPPED
+    assert by_id["breakpoint"].error_code == "DEBUG_SCOPE_EXCLUDED"
+    assert result.status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_debug_scope_rejects_unknown_nodes() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="unknown"):
+        await WorkflowScheduler(ControlledExecutor()).run(
+            definition,
+            selected_node_ids=frozenset({"missing"}),
+        )
+
+
 def test_contract_rejects_unreachable_and_dangling_nodes() -> None:
     with pytest.raises(ValidationError, match="unreachable from start"):
         workflow(

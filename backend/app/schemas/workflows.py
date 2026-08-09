@@ -52,11 +52,27 @@ class WorkflowVersionResponse(BaseModel):
     published_at: datetime
 
 
+class WorkflowVersionChangeResponse(BaseModel):
+    path: str
+    before: JsonValue
+    after: JsonValue
+
+
+class WorkflowVersionDiffResponse(BaseModel):
+    from_version: int
+    to_version: int
+    changes: list[WorkflowVersionChangeResponse]
+
+
 class WorkflowExecuteRequest(BaseModel):
     environment_id: UUID
     version: int | None = Field(default=None, ge=1)
     runtime_variables: dict[RuntimeVariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
+
+
+class WorkflowDebugRequest(WorkflowExecuteRequest):
+    breakpoint_node_id: str = Field(min_length=1, max_length=128)
 
 
 class WorkflowExecutionResponse(BaseModel):
@@ -101,3 +117,24 @@ class WorkflowExecutionDetailResponse(BaseModel):
     execution: WorkflowExecutionResponse
     nodes: list[WorkflowNodeExecutionResponse]
     children: list[WorkflowExecutionResponse] = Field(default_factory=list)
+
+
+class WorkflowDebugNodeResponse(BaseModel):
+    node_id: str
+    node_type: str
+    name: str
+    status: NodeStatus
+    attempts: int
+    output: JsonValue
+    error_code: str | None
+    error_message: str | None
+    started_at: datetime | None
+    completed_at: datetime
+
+
+class WorkflowDebugResponse(BaseModel):
+    status: WorkflowRunStatus
+    mode: str
+    target_node_id: str
+    context: dict[str, JsonValue]
+    nodes: list[WorkflowDebugNodeResponse]
