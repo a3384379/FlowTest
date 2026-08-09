@@ -129,6 +129,85 @@ export type ExecutionDetail = {
   assertions: AssertionResult[]
 }
 
+export type WorkflowNode = {
+  id: string
+  type: 'start' | 'api' | 'extract' | 'assert' | 'condition' | 'delay' | 'dataset' | 'end'
+  name: string
+  position: { x: number; y: number }
+  config: Record<string, unknown>
+}
+
+export type WorkflowDefinition = {
+  schema_version: string
+  nodes: WorkflowNode[]
+  edges: Array<{
+    id: string
+    source: string
+    target: string
+    condition: string | null
+    mappings: unknown[]
+  }>
+  settings: {
+    fail_fast: boolean
+    concurrency: number
+    default_timeout_seconds: number
+  }
+}
+
+export type Workflow = {
+  id: string
+  project_id: string
+  folder_id: string | null
+  name: string
+  description: string
+  draft_definition: WorkflowDefinition
+  draft_revision: number
+  current_version: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type WorkflowVersion = {
+  id: string
+  workflow_id: string
+  version: number
+  definition: WorkflowDefinition
+  fingerprint: string
+  published_at: string
+}
+
+export type WorkflowExecution = {
+  id: string
+  workflow_id: string
+  workflow_version_id: string
+  environment_id: string
+  status: 'running' | 'passed' | 'failed' | 'cancelled'
+  snapshot: Record<string, unknown>
+  context: Record<string, unknown>
+  error_code: string | null
+  error_message: string | null
+  cancel_requested_at: string | null
+  started_at: string
+  completed_at: string | null
+}
+
+export type WorkflowNodeExecution = {
+  id: string
+  node_id: string
+  node_type: string
+  name: string
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled'
+  attempts: number
+  output: unknown
+  error_code: string | null
+  error_message: string | null
+}
+
+export type WorkflowExecutionDetail = {
+  execution: WorkflowExecution
+  nodes: WorkflowNodeExecution[]
+}
+
 export function apiErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.error?.message

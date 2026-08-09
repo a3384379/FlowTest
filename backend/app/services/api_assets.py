@@ -378,11 +378,13 @@ class APIAssetService:
         body_override: JsonValue,
         use_body_override: bool,
         redact: bool = True,
+        version_number: int | None = None,
     ) -> PreparedRequest:
-        _definition, version = await self.get_detail(
+        _definition, api_version = await self.get_detail(
             actor=actor,
             project_id=project_id,
             definition_id=definition_id,
+            version=version_number,
         )
         environment = await self._get_environment(project_id, environment_id)
         project = await self._projects.get(project_id)
@@ -402,17 +404,23 @@ class APIAssetService:
         )
         try:
             base_url = render_template(environment.base_url, variables).rstrip("/")
-            path = render_template(version.path, variables).lstrip("/")
+            path = render_template(api_version.path, variables).lstrip("/")
             query = [
                 (
                     render_template(str(item["name"]), variables),
                     render_template(str(item["value"]), variables),
                 )
-                for item in version.query_parameters
+                for item in api_version.query_parameters
                 if bool(item.get("enabled", True))
             ]
-            api_headers = dict(version.headers)
-            _apply_auth(version.auth_kind, version.auth_config, api_headers, query, variables)
+            api_headers = dict(api_version.headers)
+            _apply_auth(
+                api_version.auth_kind,
+                api_version.auth_config,
+                api_headers,
+                query,
+                variables,
+            )
             resolved_headers = merge_headers(
                 {
                     HeaderScope.SYSTEM: SYSTEM_HEADERS,
@@ -430,7 +438,9 @@ class APIAssetService:
                 )
                 for header in resolved_headers.values()
             )
-            selected_body = body_override if use_body_override else cast(JsonValue, version.body)
+            selected_body = (
+                body_override if use_body_override else cast(JsonValue, api_version.body)
+            )
             rendered_body = render_json(selected_body, variables)
         except ValueError as error:
             raise AppError(
@@ -441,7 +451,7 @@ class APIAssetService:
             url = f"{url}?{urlencode(query)}"
         secret_variable_names = {f"secret.{name}" for name in secret_values}
         prepared = PreparedRequest(
-            method=version.http_method,
+            method=api_version.http_method,
             url=url,
             headers=prepared_headers,
             body=rendered_body,
@@ -460,8 +470,8 @@ class APIAssetService:
         return _redacted_request(
             prepared,
             secret_values=secret_values,
-            auth_kind=AuthKind(version.auth_kind),
-            auth_config=version.auth_config,
+            auth_kind=AuthKind(api_version.auth_kind),
+            auth_config=api_version.auth_config,
         )
 
     async def _load_secret_values(

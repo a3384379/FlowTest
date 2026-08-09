@@ -6,6 +6,7 @@ on:
       - "backend/**"
       - "scripts/smoke_s3.py"
       - "scripts/smoke_s4.py"
+      - "scripts/smoke_s5.py"
       - ".github/workflows/backend-ci.yml"
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - "backend/**"
       - "scripts/smoke_s3.py"
       - "scripts/smoke_s4.py"
+      - "scripts/smoke_s5.py"
       - ".github/workflows/backend-ci.yml"
 
 permissions:
@@ -37,9 +39,9 @@ jobs:
       - name: Format and lint
         working-directory: backend
         run: |
-          uv run ruff format --check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py
-          uv run ruff check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py
-          uv run mypy app ../scripts/smoke_s3.py ../scripts/smoke_s4.py
+          uv run ruff format --check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py
+          uv run ruff check . ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py
+          uv run mypy app ../scripts/smoke_s3.py ../scripts/smoke_s4.py ../scripts/smoke_s5.py
           uv run lint-imports
       - name: Test
         working-directory: backend
