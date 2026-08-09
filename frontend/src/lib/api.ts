@@ -146,7 +146,7 @@ export type ImportItem = {
 export type ImportRun = {
   id: string
   project_id: string
-  source_type: 'openapi3' | 'swagger2' | 'postman'
+  source_type: 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
   source_name: string
   source_sha256: string
   added: number
@@ -188,6 +188,105 @@ export type AuditLog = {
   resource_id: string | null
   details: Record<string, unknown>
   created_at: string
+}
+
+export type ProjectMember = {
+  id: string
+  project_id: string
+  user_id: string
+  role: 'owner' | 'editor' | 'viewer'
+  created_at: string
+  updated_at: string
+}
+
+export type Team = {
+  id: string
+  name: string
+  description: string
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type TeamMember = {
+  id: string
+  team_id: string
+  user_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ProjectTeamGrant = {
+  id: string
+  project_id: string
+  team_id: string
+  role: 'editor' | 'viewer'
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type Folder = {
+  id: string
+  project_id: string
+  parent_id: string | null
+  name: string
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ProjectConfiguration = {
+  project_id: string
+  variables: Record<string, string>
+  headers: Record<string, string>
+}
+
+export type SecretMetadata = {
+  id: string
+  project_id: string
+  environment_id: string | null
+  name: string
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiRequestParameter = {
+  name: string
+  value: string
+  enabled: boolean
+}
+
+export type ApiVersion = {
+  id: string
+  api_definition_id: string
+  version: number
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  path: string
+  query_parameters: ApiRequestParameter[]
+  headers: Record<string, string>
+  body_kind: 'none' | 'json' | 'raw' | 'form' | 'multipart'
+  body: unknown
+  auth_kind: 'none' | 'bearer' | 'basic' | 'api_key'
+  auth_config: Record<string, string>
+  extraction_rules: Array<{
+    name: string
+    kind: 'jsonpath' | 'jmespath' | 'header'
+    expression: string
+  }>
+  assertions: Array<{
+    kind: string
+    operator: string
+    target: string | null
+    expected: unknown
+  }>
+  created_at: string
+}
+
+export type ApiDetail = {
+  definition: ApiDefinition
+  version: ApiVersion
 }
 
 export type ExecutionDetail = {

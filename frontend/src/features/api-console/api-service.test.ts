@@ -6,10 +6,13 @@ import { server } from '../../test/server'
 import { apiClient } from '../../lib/api'
 import {
   createApi,
+  createApiVersion,
   createEnvironment,
   createProject,
   downloadArtifact,
   executeApi,
+  exportApis,
+  getApiDetail,
   mergeApiImport,
   listApis,
   listArtifacts,
@@ -17,6 +20,7 @@ import {
   listExecutions,
   listProjects,
   previewApiDocument,
+  previewApi,
   uploadArtifact,
 } from './api-service'
 
@@ -49,13 +53,14 @@ describe('API console service', () => {
   })
 
   it('maps API definitions, execution, and history', async () => {
+    const bodyKinds: string[] = []
     server.use(
       http.get(`/api/v1/projects/${project.id}/apis`, () =>
         HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 100 }),
       ),
       http.post(`/api/v1/projects/${project.id}/apis`, async ({ request }) => {
         const payload = (await request.json()) as { request: { body_kind: string } }
-        expect(payload.request.body_kind).toBe('json')
+        bodyKinds.push(payload.request.body_kind)
         return HttpResponse.json({ definition: apiDefinition }, { status: 201 })
       }),
       http.post(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/execute`, () =>
@@ -81,10 +86,109 @@ describe('API console service', () => {
         body: { amount: 99 },
       }),
     ).toEqual(apiDefinition)
+    expect(
+      await createApi(project.id, {
+        name: '无 Body 请求',
+        description: '',
+        method: 'GET',
+        path: '/health',
+        body: null,
+      }),
+    ).toEqual(apiDefinition)
+    expect(bodyKinds).toEqual(['json', 'none'])
     expect(await executeApi(project.id, apiDefinition.id, environment.id, 200)).toEqual(
       executionDetail,
     )
+    expect(
+      await executeApi(project.id, apiDefinition.id, environment.id, 201, [
+        { kind: 'status_code', operator: 'equals', target: null, expected: 201 },
+      ]),
+    ).toEqual(executionDetail)
     expect((await listExecutions(project.id)).items).toEqual([executionDetail.execution])
+  })
+
+  it('loads, versions, previews, and exports an API workbench document', async () => {
+    const version = {
+      id: 'version-1',
+      api_definition_id: apiDefinition.id,
+      version: 1,
+      method: 'POST' as const,
+      path: '/orders',
+      query_parameters: [{ name: 'region', value: 'cn', enabled: true }],
+      headers: { 'X-Trace': '{{trace_id}}' },
+      body_kind: 'json' as const,
+      body: { amount: 99 },
+      auth_kind: 'bearer' as const,
+      auth_config: { token: '{{secret.API_TOKEN}}' },
+      extraction_rules: [{ name: 'order_id', kind: 'jsonpath' as const, expression: '$.id' }],
+      assertions: [{ kind: 'status_code', operator: 'equals', target: null, expected: 201 }],
+      created_at: '2026-08-09T00:00:00Z',
+    }
+    const detail = { definition: apiDefinition, version }
+    const preview = {
+      method: 'POST',
+      url: 'http://mock-target:8080/orders?region=cn',
+      headers: [{ name: 'Authorization', value: '***', source: 'api' }],
+      body: { amount: 99 },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json(detail),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/versions`,
+        async ({ request }) => {
+          expect(await request.json()).toMatchObject({ path: '/orders' })
+          return HttpResponse.json({ ...version, version: 2 }, { status: 201 })
+        },
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/preview`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({
+            environment_id: environment.id,
+            runtime_variables: {},
+            runtime_headers: {},
+          })
+          return HttpResponse.json(preview)
+        },
+      ),
+    )
+
+    expect(await getApiDetail(project.id, apiDefinition.id)).toEqual(detail)
+    expect(
+      await createApiVersion(project.id, apiDefinition.id, {
+        method: version.method,
+        path: version.path,
+        query_parameters: version.query_parameters,
+        headers: version.headers,
+        body_kind: version.body_kind,
+        body: version.body,
+        auth: { kind: version.auth_kind, values: version.auth_config },
+        extraction_rules: version.extraction_rules,
+        assertions: version.assertions,
+      }),
+    ).toMatchObject({ version: 2 })
+    expect(await previewApi(project.id, apiDefinition.id, environment.id)).toEqual(preview)
+
+    const createObjectUrl = vi.fn(() => 'blob:export')
+    const revokeObjectUrl = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const get = vi
+      .spyOn(apiClient, 'get')
+      .mockResolvedValueOnce({
+        data: 'har-export',
+        headers: { 'content-disposition': 'attachment; filename="apis.har"' },
+      } as never)
+      .mockResolvedValueOnce({ data: 'curl-export', headers: {} } as never)
+    await exportApis(project.id, 'har')
+    await exportApis(project.id, 'curl')
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(createObjectUrl).toHaveBeenCalledTimes(2)
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:export')
+    get.mockRestore()
   })
 
   it('uploads import documents and project artifacts', async () => {

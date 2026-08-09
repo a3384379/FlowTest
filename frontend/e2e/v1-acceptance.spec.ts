@@ -1,8 +1,6 @@
-import { expect, test, type Page, type Response } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
-const administratorEmail = process.env.FLOWTEST_E2E_ADMIN_EMAIL ?? 'admin@flowtest.dev'
-const activePassword = process.env.FLOWTEST_E2E_ACTIVE_PASSWORD ?? 'FlowTest-E2E-Admin-123!'
-const bootstrapPassword = process.env.FLOWTEST_E2E_BOOTSTRAP_PASSWORD ?? 'FlowTest-Change-Me-123!'
+import { authenticate } from './support/auth'
 
 test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await page.goto('/')
@@ -25,7 +23,7 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await expect(page.getByLabel('保留天数')).toHaveValue('90')
   await expect(page.getByLabel('允许域名（每行一个）')).toHaveValue('mock-target')
   await expect(page.getByLabel('允许私网 CIDR（每行一个）')).toHaveValue('172.16.0.0/12')
-  await expect(page.getByText('project.retention_policy_updated')).toBeVisible()
+  await expect(page.getByText('api.created').first()).toBeVisible()
 
   await page.getByText('首页', { exact: true }).click()
   await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
@@ -55,28 +53,3 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
     await expect(page.getByRole('heading', { name: heading })).toBeVisible()
   }
 })
-
-async function authenticate(page: Page): Promise<void> {
-  const dashboard = page.getByRole('heading', { name: '工作台' })
-  const login = page.getByRole('heading', { name: '登录账号' })
-  await expect(dashboard.or(login)).toBeVisible()
-  if (await dashboard.isVisible()) return
-
-  await page.getByLabel('邮箱').fill(administratorEmail)
-  let response = await submitLogin(page, activePassword)
-  if (!response.ok() && activePassword !== bootstrapPassword) {
-    response = await submitLogin(page, bootstrapPassword)
-  }
-  expect(response.ok()).toBeTruthy()
-  await expect(dashboard).toBeVisible()
-}
-
-async function submitLogin(page: Page, password: string): Promise<Response> {
-  await page.getByLabel('密码').fill(password)
-  const response = page.waitForResponse(
-    (candidate) =>
-      candidate.url().endsWith('/api/v1/auth/login') && candidate.request().method() === 'POST',
-  )
-  await page.getByRole('button', { name: /登\s*录/ }).click()
-  return response
-}

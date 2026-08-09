@@ -4,7 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from app.domain.api_assets import AuthKind, BodyKind, HttpMethod, JsonValue
+from app.domain.api_assets import AuthKind, BodyKind, ExtractionKind, HttpMethod, JsonValue
+from app.domain.assertions import AssertionKind, ComparisonOperator
 from app.domain.scopes import HeaderScope, VariableScope
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
@@ -76,6 +77,19 @@ class AuthConfiguration(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
+class ExtractionRuleInput(BaseModel):
+    name: VariableName
+    kind: ExtractionKind
+    expression: str = Field(min_length=1, max_length=2048)
+
+
+class APIVersionAssertionInput(BaseModel):
+    kind: AssertionKind
+    operator: ComparisonOperator = ComparisonOperator.EQUALS
+    target: str | None = Field(default=None, max_length=2048)
+    expected: JsonValue = None
+
+
 class MultipartFileReference(BaseModel):
     field: str = Field(min_length=1, max_length=160)
     artifact_id: UUID
@@ -94,6 +108,8 @@ class APIVersionInput(BaseModel):
     body_kind: BodyKind = BodyKind.NONE
     body: JsonValue = None
     auth: AuthConfiguration = Field(default_factory=AuthConfiguration)
+    extraction_rules: list[ExtractionRuleInput] = Field(default_factory=list, max_length=100)
+    assertions: list[APIVersionAssertionInput] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_body_shape(self) -> "APIVersionInput":
@@ -129,6 +145,8 @@ class APIVersionResponse(BaseModel):
     body: JsonValue
     auth_kind: AuthKind
     auth_config: dict[str, str]
+    extraction_rules: list[ExtractionRuleInput]
+    assertions: list[APIVersionAssertionInput]
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime

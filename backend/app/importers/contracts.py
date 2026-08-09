@@ -31,6 +31,10 @@ class ImportSourceType(StrEnum):
     OPENAPI3 = "openapi3"
     SWAGGER2 = "swagger2"
     POSTMAN = "postman"
+    HAR = "har"
+    CURL = "curl"
+    BRUNO = "bruno"
+    EXCEL = "excel"
 
 
 class ImportChange(StrEnum):
@@ -78,10 +82,36 @@ def _json_string_mapping(values: dict[str, str]) -> dict[str, JsonValue]:
 
 
 def imported_value(name: str, value: str) -> str:
-    if name.lower() not in SENSITIVE_IMPORT_NAMES:
+    if not is_sensitive_import_name(name):
         return value
     secret_name = re.sub(r"[^A-Za-z0-9_]", "_", name).upper()
     return f"{{{{secret.IMPORTED_{secret_name}}}}}"
+
+
+def is_sensitive_import_name(name: str) -> bool:
+    lowered = name.lower()
+    if lowered in SENSITIVE_IMPORT_NAMES:
+        return True
+    segments = {segment for segment in re.split(r"[^a-z0-9]+", lowered) if segment}
+    if segments & {"authorization", "cookie", "password", "secret", "token"}:
+        return True
+    normalized = "".join(character for character in lowered if character.isalnum())
+    return normalized.endswith(("authorization", "cookie", "password", "secret", "token", "apikey"))
+
+
+def sanitize_imported_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, list):
+        return [sanitize_imported_json(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: (
+                imported_value(key, "")
+                if is_sensitive_import_name(key)
+                else sanitize_imported_json(item)
+            )
+            for key, item in value.items()
+        }
+    return value
 
 
 def empty_request(*, method: HttpMethod, path: str) -> APIVersionSpec:

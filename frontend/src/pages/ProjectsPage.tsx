@@ -20,6 +20,8 @@ import {
 } from 'antd'
 import { useEffect } from 'react'
 
+import AccessManagementPanel from '../features/projects/AccessManagementPanel'
+import AssetManagementPanel from '../features/projects/AssetManagementPanel'
 import {
   getProjectPermission,
   getProjectRetentionPolicy,
@@ -85,6 +87,8 @@ function useProjectsPageState() {
     enabled: Boolean(projectId),
   })
   const canManageSecurity = hasCapability(permission.data, 'manage_security')
+  const canManageMembers = hasCapability(permission.data, 'manage_members')
+  const canEdit = hasCapability(permission.data, 'edit')
   const canViewAudit = hasCapability(permission.data, 'view_audit')
   const audit = useQuery({
     queryKey: ['project-audit', projectId],
@@ -127,6 +131,8 @@ function useProjectsPageState() {
     policyLoading: policy.isLoading,
     form,
     canManageSecurity,
+    canManageMembers,
+    canEdit,
     updatePolicy: (values: PolicyForm) => updatePolicy.mutate(policyPayload(values)),
     updatePolicyPending: updatePolicy.isPending,
     retention: retention.data,
@@ -176,6 +182,16 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           saving={state.updateRetentionPending}
           onSave={state.updateRetention}
         />
+        {state.projectId && (
+          <Col span={24}>
+            <AccessManagementPanel projectId={state.projectId} canManage={state.canManageMembers} />
+          </Col>
+        )}
+        {state.projectId && (
+          <Col span={24}>
+            <AssetManagementPanel projectId={state.projectId} canEdit={state.canEdit} />
+          </Col>
+        )}
         <AuditPanel visible={state.canViewAudit} loading={state.auditLoading} items={state.audit} />
       </Row>
     </>

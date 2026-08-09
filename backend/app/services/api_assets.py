@@ -548,6 +548,23 @@ class APIAssetService:
             body=request.body,
             auth_kind=request.auth_kind.value,
             auth_config=request.auth_config,
+            extraction_rules=[
+                {
+                    "name": rule.name,
+                    "kind": rule.kind.value,
+                    "expression": rule.expression,
+                }
+                for rule in request.extraction_rules
+            ],
+            assertions=[
+                {
+                    "kind": assertion.kind,
+                    "operator": assertion.operator,
+                    "target": assertion.target,
+                    "expected": assertion.expected,
+                }
+                for assertion in request.assertions
+            ],
             created_by_id=actor_id,
         )
 

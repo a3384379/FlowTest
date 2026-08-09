@@ -511,6 +511,8 @@ def _version_model(
         body=request.body,
         auth_kind=request.auth_kind.value,
         auth_config=request.auth_config,
+        extraction_rules=[],
+        assertions=[],
         created_by_id=actor_id,
     )
 

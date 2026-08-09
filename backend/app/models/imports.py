@@ -12,7 +12,7 @@ class ImportRun(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "import_runs"
     __table_args__ = (
         CheckConstraint(
-            "source_type IN ('openapi3', 'swagger2', 'postman')",
+            "source_type IN ('openapi3', 'swagger2', 'postman', 'har', 'curl', 'bruno', 'excel')",
             name="import_run_source_type",
         ),
         CheckConstraint("status IN ('applied', 'preview')", name="import_run_status"),
@@ -30,7 +30,7 @@ class ImportRun(UuidPrimaryKeyMixin, TimestampMixin, Base):
     unchanged: Mapped[int] = mapped_column(Integer, default=0)
     results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(16), default="applied", server_default="applied")
-    applied_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    applied_keys: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     payload_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
     payload_nonce: Mapped[bytes | None] = mapped_column(LargeBinary(12))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

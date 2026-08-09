@@ -2,21 +2,31 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useState } from 'react'
 
-import { apiErrorMessage, type ExecutionDetail, type ImportRun } from '../../lib/api'
+import {
+  apiErrorMessage,
+  type ApiDetail,
+  type ExecutionDetail,
+  type ImportRun,
+} from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   createApi,
+  createApiVersion,
   createEnvironment,
   createProject,
   downloadArtifact,
   mergeApiImport,
   previewApiDocument,
   executeApi,
+  exportApis,
+  getApiDetail,
   listApis,
   listArtifacts,
   listEnvironments,
   listExecutions,
   uploadArtifact,
+  previewApi,
+  type ApiVersionInput,
   type CreateApiInput,
   type CreateEnvironmentInput,
   type CreateProjectInput,
@@ -44,6 +54,11 @@ export function useApiConsole() {
     enabled: Boolean(projectId),
   })
   const apiId = selectedOrFirst(apiSelection, apis.data?.items)
+  const apiDetail = useQuery({
+    queryKey: ['api-detail', projectId, apiId],
+    queryFn: () => getApiDetail(requiredId(projectId), requiredId(apiId)),
+    enabled: Boolean(projectId && apiId),
+  })
   const history = useQuery({
     queryKey: ['executions', projectId],
     queryFn: () => listExecutions(requiredId(projectId)),
@@ -69,6 +84,7 @@ export function useApiConsole() {
         requiredId(apiId),
         requiredId(environmentId),
         expectedStatus,
+        apiDetail.data?.version.assertions,
       ),
     onSuccess: async (value) => {
       setResult(value)
@@ -78,7 +94,13 @@ export function useApiConsole() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const previewImportMutation = useMutation({
-    mutationFn: (file: File) => previewApiDocument(requiredId(projectId), file),
+    mutationFn: ({
+      file,
+      sourceType,
+    }: {
+      file: File
+      sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
+    }) => previewApiDocument(requiredId(projectId), file, sourceType),
     onSuccess: (value) => {
       setLastImport(value)
       void message.success('导入差异已生成，请选择需要合并的接口')
@@ -101,6 +123,29 @@ export function useApiConsole() {
       await queryClient.invalidateQueries({ queryKey: ['artifacts', projectId] })
       void message.success('文件上传成功')
     },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const versionMutation = useMutation({
+    mutationFn: (input: ApiVersionInput) =>
+      createApiVersion(requiredId(projectId), requiredId(apiId), input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['apis', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['api-detail', projectId, apiId] }),
+      ])
+      void message.success('接口新版本已保存')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const previewMutation = useMutation({
+    mutationFn: () =>
+      previewApi(requiredId(projectId), requiredId(apiId), requiredId(environmentId)),
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const exportMutation = useMutation({
+    mutationFn: (format: 'har' | 'curl' | 'bruno' | 'excel') =>
+      exportApis(requiredId(projectId), format),
+    onSuccess: () => void message.success('接口资产已导出'),
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
 
@@ -150,6 +195,7 @@ export function useApiConsole() {
     setEnvironmentSelection,
     apis,
     apiId,
+    apiDetail,
     setApiSelection,
     history,
     artifacts,
@@ -169,6 +215,12 @@ export function useApiConsole() {
     addProject,
     addEnvironment,
     addApi,
+    saveVersion: versionMutation.mutateAsync,
+    savingVersion: versionMutation.isPending,
+    previewRequest: previewMutation.mutateAsync,
+    previewing: previewMutation.isPending,
+    exportApis: exportMutation.mutate,
+    exporting: exportMutation.isPending,
     submitting: [
       projectMutation.isPending,
       environmentMutation.isPending,
@@ -176,9 +228,12 @@ export function useApiConsole() {
       previewImportMutation.isPending,
       mergeImportMutation.isPending,
       uploadMutation.isPending,
+      versionMutation.isPending,
     ].some(Boolean),
   }
 }
+
+export type ApiConsoleDetail = ApiDetail
 
 type Identified = { id: string }
 

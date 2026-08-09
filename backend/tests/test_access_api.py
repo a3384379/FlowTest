@@ -528,6 +528,100 @@ async def test_permission_matrix_security_policy_and_audit_access(client: AsyncC
 
 
 @pytest.mark.asyncio
+async def test_team_grants_and_direct_membership_precedence(client: AsyncClient) -> None:
+    admin_headers = _authorization(
+        (await _login(client, ADMIN_EMAIL, ADMIN_PASSWORD))["access_token"]
+    )
+    owner = await _create_user(client, admin_headers, "team-owner@example.com")
+    direct_viewer = await _create_user(client, admin_headers, "direct-viewer@example.com")
+    team_editor = await _create_user(client, admin_headers, "team-editor@example.com")
+    owner_headers = _authorization(
+        (await _login(client, owner["email"], "initial-password-123!"))["access_token"]
+    )
+    direct_viewer_headers = _authorization(
+        (await _login(client, direct_viewer["email"], "initial-password-123!"))["access_token"]
+    )
+    team_editor_headers = _authorization(
+        (await _login(client, team_editor["email"], "initial-password-123!"))["access_token"]
+    )
+
+    forbidden_team = await client.post(
+        "/api/v1/teams",
+        headers=owner_headers,
+        json={"name": "Forbidden team"},
+    )
+    assert forbidden_team.status_code == 403
+    team_response = await client.post(
+        "/api/v1/teams",
+        headers=admin_headers,
+        json={"name": "Quality", "description": "API quality team"},
+    )
+    assert team_response.status_code == 201, team_response.text
+    team_id = team_response.json()["id"]
+    members = await client.get(f"/api/v1/teams/{team_id}/members", headers=admin_headers)
+    assert members.status_code == 200
+    forbidden_members = await client.get(f"/api/v1/teams/{team_id}/members", headers=owner_headers)
+    assert forbidden_members.status_code == 403
+    for user in (direct_viewer, team_editor):
+        member = await client.put(
+            f"/api/v1/teams/{team_id}/members/{user['id']}",
+            headers=admin_headers,
+            json={"user_id": user["id"]},
+        )
+        assert member.status_code == 200, member.text
+
+    project_response = await client.post(
+        "/api/v1/projects",
+        headers=owner_headers,
+        json={"name": "Team access project"},
+    )
+    project_id = project_response.json()["id"]
+    direct = await client.put(
+        f"/api/v1/projects/{project_id}/members/{direct_viewer['id']}",
+        headers=owner_headers,
+        json={"user_id": direct_viewer["id"], "role": "viewer"},
+    )
+    assert direct.status_code == 200
+    grant = await client.put(
+        f"/api/v1/projects/{project_id}/team-grants/{team_id}",
+        headers=owner_headers,
+        json={"team_id": team_id, "role": "editor"},
+    )
+    assert grant.status_code == 200, grant.text
+
+    team_projects = await client.get("/api/v1/projects", headers=team_editor_headers)
+    assert team_projects.json()["items"][0]["role"] == "editor"
+    edited = await client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=team_editor_headers,
+        json={"description": "Edited through team grant"},
+    )
+    assert edited.status_code == 200
+
+    direct_permissions = await client.get(
+        f"/api/v1/projects/{project_id}/permissions",
+        headers=direct_viewer_headers,
+    )
+    assert direct_permissions.json()["effective_role"] == "viewer"
+    direct_edit = await client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=direct_viewer_headers,
+        json={"description": "Direct membership must win"},
+    )
+    assert direct_edit.status_code == 403
+
+    grants = await client.get(f"/api/v1/projects/{project_id}/team-grants", headers=owner_headers)
+    assert grants.status_code == 200
+    assert grants.json()[0]["role"] == "editor"
+    removed = await client.delete(
+        f"/api/v1/teams/{team_id}/members/{team_editor['id']}", headers=admin_headers
+    )
+    assert removed.status_code == 204
+    hidden = await client.get(f"/api/v1/projects/{project_id}", headers=team_editor_headers)
+    assert hidden.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_administrator_is_idempotent() -> None:
     test_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)

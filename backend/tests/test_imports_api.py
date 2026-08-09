@@ -1,8 +1,10 @@
 import json
 from collections.abc import AsyncIterator
+from io import BytesIO
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -213,6 +215,120 @@ async def test_import_preview_selective_merge_and_explicit_deactivation(
     assert different.json()["error"]["code"] == "IMPORT_ALREADY_APPLIED"
 
 
+@pytest.mark.asyncio
+async def test_har_curl_bruno_excel_import_and_export(import_client: AsyncClient) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    documents = [
+        (
+            "traffic.har",
+            "auto",
+            json.dumps(
+                {
+                    "log": {
+                        "entries": [
+                            {
+                                "comment": "=2+2",
+                                "request": {
+                                    "method": "GET",
+                                    "url": "https://api.example.com/har-users?page=1",
+                                    "headers": [],
+                                },
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+        ),
+        (
+            "request.curl",
+            "curl",
+            (
+                b"curl -X POST 'https://api.example.com/curl-orders?token=live-token' "
+                b"-H 'Authorization: Bearer live-auth' "
+                b'--json \'{"password":"live-password","sku":"A1"}\''
+            ),
+        ),
+        (
+            "collection.bruno.json",
+            "auto",
+            json.dumps(
+                {
+                    "bruno": "FlowTest Collection",
+                    "items": [
+                        {
+                            "name": "Bruno products",
+                            "request": {
+                                "method": "GET",
+                                "url": "/bruno-products?active=true",
+                                "headers": {"Accept": "application/json"},
+                            },
+                        }
+                    ],
+                }
+            ).encode(),
+        ),
+        ("apis.xlsx", "excel", _excel_document()),
+    ]
+    for filename, source_type, content in documents:
+        response = await _upload_document(
+            import_client,
+            headers,
+            project_id,
+            content,
+            filename=filename,
+            source_type=source_type,
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["added"] == 1
+
+    definitions = await import_client.get(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        params={"page": 1, "page_size": 100},
+    )
+    assert definitions.json()["total"] == 4
+    curl_api = next(item for item in definitions.json()["items"] if item["name"] == "cURL import")
+    detail = await import_client.get(
+        f"/api/v1/projects/{project_id}/apis/{curl_api['id']}", headers=headers
+    )
+    assert detail.json()["version"]["headers"]["Authorization"].startswith("{{secret.")
+    assert detail.json()["version"]["query_parameters"][0]["value"].startswith("{{secret.")
+    assert detail.json()["version"]["body"]["password"].startswith("{{secret.")
+
+    for export_format, suffix in (
+        ("har", ".har"),
+        ("curl", ".curl.txt"),
+        ("bruno", ".bruno.json"),
+        ("excel", ".xlsx"),
+    ):
+        exported = await import_client.get(
+            f"/api/v1/projects/{project_id}/exports/apis",
+            headers=headers,
+            params={"format": export_format},
+        )
+        assert exported.status_code == 200, exported.text
+        assert suffix in exported.headers["content-disposition"]
+        assert exported.content
+        if export_format == "excel":
+            assert exported.content.startswith(b"PK")
+            workbook = load_workbook(BytesIO(exported.content), data_only=False)
+            sheet = workbook.active
+            assert sheet is not None
+            values = [str(cell.value) for row in sheet.iter_rows() for cell in row]
+            assert "'=2+2" in values
+            serialized = "\n".join(values)
+            assert "live-token" not in serialized
+            assert "live-password" not in serialized
+            assert "live-auth" not in serialized
+        if export_format == "curl":
+            assert b"curl -X" in exported.content
+        if export_format != "excel":
+            assert b"live-token" not in exported.content
+            assert b"live-password" not in exported.content
+            assert b"live-auth" not in exported.content
+
+
 async def _login_headers(client: AsyncClient) -> dict[str, str]:
     response = await client.post(
         "/api/v1/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
@@ -236,12 +352,15 @@ async def _upload_document(
     headers: dict[str, str],
     project_id: str,
     content: bytes,
+    *,
+    filename: str = "sample.json",
+    source_type: str = "auto",
 ):
     return await client.post(
         f"/api/v1/projects/{project_id}/imports",
         headers=headers,
-        files={"document": ("sample.json", content, "application/json")},
-        data={"source_type": "auto"},
+        files={"document": (filename, content, "application/octet-stream")},
+        data={"source_type": source_type},
     )
 
 
@@ -267,3 +386,38 @@ def _openapi_document(paths: dict[str, object]) -> bytes:
             "paths": paths,
         }
     ).encode()
+
+
+def _excel_document() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.append(
+        [
+            "name",
+            "method",
+            "path",
+            "description",
+            "query",
+            "headers",
+            "body",
+            "auth_kind",
+            "auth_config",
+        ]
+    )
+    sheet.append(
+        [
+            "Excel inventory",
+            "GET",
+            "/excel-inventory",
+            "Imported from Excel",
+            '{"limit": 10}',
+            '{"Accept": "application/json"}',
+            "",
+            "none",
+            "{}",
+        ]
+    )
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()

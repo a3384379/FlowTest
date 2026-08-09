@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S11 内部发布（V1.0）`。
+当前状态：`V2.0 路线 S14 团队与 API 工作台已完成`；S12 真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -108,6 +108,12 @@ Nginx TLS 接入模板、Critical/High 镜像漏洞门槛、容量测试以及 P
 V1.0 验收链路覆盖“登录 → 提取令牌 → 并行查询用户/创建订单 → 断言 → 脱敏报告”，并验证失败、
 超时、重试、取消、并行、Viewer 拒绝和清理行为。部署、升级、回滚、监控和恢复说明位于
 [`docs/operations`](docs/operations)。
+
+S12–S14 已将运行基线升级到 Python 3.13，并提供 V2 Feature Flags、真实 Workflow 容量基线、
+React Router 项目深链接和真实 Dashboard。单组织团队模型支持成员与项目 Editor/Viewer 授权，
+直接项目成员权限优先于团队授权。Web 项目治理页可管理用户、团队、目录、环境、变量、Header 和
+只写 Secret；API 工作台可持续编辑 Params、Headers、Auth、Body、提取和断言并保存不可变版本。
+导入导出已扩展至 HAR、cURL、Bruno 和 Excel，认证信息始终使用 Secret 引用或脱敏占位。
 
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目

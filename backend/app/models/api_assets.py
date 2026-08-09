@@ -110,6 +110,12 @@ class APIVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):
     body: Mapped[Any | None] = mapped_column(JSON)
     auth_kind: Mapped[str] = mapped_column(String(16), default=AuthKind.NONE.value)
     auth_config: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    extraction_rules: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+    assertions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     @property

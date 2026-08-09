@@ -17,11 +17,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.domain.access import ProjectRole
+from app.domain.access import ProjectRole, TeamGrantRole
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
 
-def _project_role_values(role_type: type[ProjectRole]) -> list[str]:
+def _project_role_values(role_type: type[ProjectRole] | type[TeamGrantRole]) -> list[str]:
     return [role.value for role in role_type]
 
 
@@ -57,10 +57,14 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
-    variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
-    headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
-    outbound_allowed_hosts: Mapped[list[str]] = mapped_column(JSON, default=list)
-    outbound_allowed_private_cidrs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default="{}")
+    headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default="{}")
+    outbound_allowed_hosts: Mapped[list[str]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+    outbound_allowed_private_cidrs: Mapped[list[str]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
     retention_days: Mapped[int] = mapped_column(Integer, default=90, server_default="90")
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
@@ -85,6 +89,45 @@ class ProjectMember(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
         index=True,
     )
+
+
+class Team(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "teams"
+
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
+
+class TeamMember(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "team_members"
+    __table_args__ = (UniqueConstraint("team_id", "user_id", name="uq_team_members_team_user"),)
+
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+
+class ProjectTeamGrant(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "project_team_grants"
+    __table_args__ = (
+        UniqueConstraint("project_id", "team_id", name="uq_project_team_grants_project_team"),
+        CheckConstraint("role IN ('editor', 'viewer')", name="team_grant_role"),
+    )
+
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    role: Mapped[TeamGrantRole] = mapped_column(
+        Enum(
+            TeamGrantRole,
+            native_enum=False,
+            length=16,
+            values_callable=_project_role_values,
+        ),
+        index=True,
+    )
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 
 class Folder(UuidPrimaryKeyMixin, TimestampMixin, Base):
