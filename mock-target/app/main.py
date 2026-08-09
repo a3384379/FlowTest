@@ -2,7 +2,7 @@ import asyncio
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -77,3 +77,22 @@ async def failure() -> None:
 @app.post("/echo")
 async def echo(payload: dict[str, object]) -> dict[str, object]:
     return payload
+
+
+@app.post("/notifications/flowtest", status_code=status.HTTP_204_NO_CONTENT)
+async def receive_flowtest_notification(request: Request) -> Response:
+    app.state.last_notification = {
+        "event": request.headers.get("X-FlowTest-Event"),
+        "timestamp": request.headers.get("X-FlowTest-Timestamp"),
+        "signature": request.headers.get("X-FlowTest-Signature"),
+        "body": await request.json(),
+    }
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/notifications/last")
+async def last_flowtest_notification() -> dict[str, object]:
+    notification = getattr(app.state, "last_notification", None)
+    if not isinstance(notification, dict):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notification")
+    return notification

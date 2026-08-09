@@ -19,9 +19,10 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
+const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 
 const { Header, Content, Sider } = Layout
-type PageKey = 'dashboard' | 'apis' | 'workflows' | 'tasks'
+type PageKey = 'dashboard' | 'apis' | 'workflows' | 'tasks' | 'reports'
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -61,7 +62,7 @@ function AuthenticatedShell() {
             { key: 'apis', icon: <ApiOutlined />, label: '接口管理' },
             { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排' },
             { key: 'tasks', icon: <ScheduleOutlined />, label: '任务执行' },
-            { key: 'reports', icon: <BarChartOutlined />, label: '测试报告', disabled: true },
+            { key: 'reports', icon: <BarChartOutlined />, label: '测试报告' },
           ]}
         />
       </Sider>
@@ -83,6 +84,7 @@ function AuthenticatedShell() {
             {page === 'apis' && <ApiConsolePage />}
             {page === 'workflows' && <WorkflowsPage />}
             {page === 'tasks' && <TestPlansPage />}
+            {page === 'reports' && <ReportsPage />}
           </Suspense>
         </Content>
       </Layout>

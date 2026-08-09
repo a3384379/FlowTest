@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S8 测试计划与任务系统（V0.3）`。
+当前状态：`S9 报告与执行中心（V0.4）`。
 
 ## 技术栈
 
@@ -90,6 +90,12 @@ Runtime 配置。项目 Owner 可创建只显示一次、只保存摘要的 CI T
 `execute:workflow`/`execute:test-plan` 范围；签名 Webhook 使用五分钟时间窗拒绝过期请求。
 Web 管理端新增“任务执行”页面，用于创建计划、查看队列、取消和生成外部触发凭据。
 
+S9 已提供统一执行中心、步骤级报告、稳定失败分类和最近 7～90 日趋势。报告从不可变执行快照、
+脱敏节点输出和变量来源实时派生，可下钻请求/响应、提取、断言、映射轨迹及数据集子执行；HTML
+导出作为 `report` Artifact 存入 MinIO。项目 Owner 可配置通用通知 Webhook，Secret 仅显示一次并
+使用 AES-256-GCM 保存；Worker 在工作流或测试计划完成后发送 `timestamp.body` HMAC-SHA256 签名
+消息，投递 HTTP 状态与错误可在报告页查询。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -109,6 +115,9 @@ multipart 上传、二进制响应外置、文件断言和受权下载。macOS �
 
 运行 `uv run --project backend python scripts/smoke_s8.py` 可验收真实 Celery Worker 执行、双工作流
 测试计划、CI Token、签名 Webhook、Beat 调度配置和跨 Worker 取消传播。
+
+运行 `uv run --project backend python scripts/smoke_s9.py` 可验收失败分类、执行下钻、趋势聚合、
+MinIO HTML 报告和 Worker 到 Mock 接收器的签名通知，并重新计算 HMAC 验证请求完整性。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

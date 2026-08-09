@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "0.3.0"
+    app_version: str = "0.4.0"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
