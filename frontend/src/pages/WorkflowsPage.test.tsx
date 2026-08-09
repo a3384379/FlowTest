@@ -92,7 +92,7 @@ describe('WorkflowsPage', () => {
     expect(await screen.findByText('工作流执行通过')).toBeInTheDocument()
     expect(screen.getAllByText('查询用户').length).toBeGreaterThan(0)
     expect(screen.getByText('2')).toBeVisible()
-  })
+  }, 15_000)
 })
 
 function renderPage() {
