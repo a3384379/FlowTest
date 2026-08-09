@@ -71,6 +71,7 @@ services:
       FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: ${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL:-admin@flowtest.dev}
       FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD:-FlowTest-Change-Me-123!}
       FLOWTEST_SECURE_COOKIES: "false"
+      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_DATA_ENCRYPTION_KEY:-Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI=}
       FLOWTEST_CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
       FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:flowtest@postgres:5432/flowtest
       FLOWTEST_REDIS_URL: redis://redis:6379/0

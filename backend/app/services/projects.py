@@ -57,7 +57,7 @@ class ProjectService:
         return ProjectAccess(project=project, role=ProjectRole.OWNER)
 
     async def get(self, *, actor: User, project_id: UUID) -> ProjectAccess:
-        return await self._authorize(actor=actor, project_id=project_id, editing=False)
+        return await self.authorize(actor=actor, project_id=project_id, editing=False)
 
     async def update(
         self,
@@ -67,7 +67,7 @@ class ProjectService:
         name: str | None,
         description: str | None,
     ) -> ProjectAccess:
-        access = await self._authorize(actor=actor, project_id=project_id, editing=True)
+        access = await self.authorize(actor=actor, project_id=project_id, editing=True)
         if name is not None:
             access.project.name = name.strip()
         if description is not None:
@@ -84,7 +84,7 @@ class ProjectService:
         return access
 
     async def list_members(self, *, actor: User, project_id: UUID) -> list[ProjectMember]:
-        await self._authorize(actor=actor, project_id=project_id, editing=False)
+        await self.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._projects.list_members(project_id)
 
     async def upsert_member(
@@ -136,13 +136,13 @@ class ProjectService:
         await self._session.commit()
 
     async def list_folders(self, *, actor: User, project_id: UUID) -> list[Folder]:
-        await self._authorize(actor=actor, project_id=project_id, editing=False)
+        await self.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._projects.list_folders(project_id)
 
     async def create_folder(
         self, *, actor: User, project_id: UUID, name: str, parent_id: UUID | None
     ) -> Folder:
-        await self._authorize(actor=actor, project_id=project_id, editing=True)
+        await self.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_parent(project_id=project_id, parent_id=parent_id)
         normalized_name = name.strip()
         await self._ensure_unique_folder_name(
@@ -177,7 +177,7 @@ class ProjectService:
         parent_id: UUID | None,
         change_parent: bool,
     ) -> Folder:
-        await self._authorize(actor=actor, project_id=project_id, editing=True)
+        await self.authorize(actor=actor, project_id=project_id, editing=True)
         folder = await self._get_project_folder(project_id=project_id, folder_id=folder_id)
         next_parent_id = folder.parent_id
         if change_parent:
@@ -215,7 +215,7 @@ class ProjectService:
         return folder
 
     async def delete_folder(self, *, actor: User, project_id: UUID, folder_id: UUID) -> None:
-        await self._authorize(actor=actor, project_id=project_id, editing=True)
+        await self.authorize(actor=actor, project_id=project_id, editing=True)
         folder = await self._get_project_folder(project_id=project_id, folder_id=folder_id)
         await self._projects.delete(folder)
         self._audit.record(
@@ -227,7 +227,7 @@ class ProjectService:
         )
         await self._session.commit()
 
-    async def _authorize(self, *, actor: User, project_id: UUID, editing: bool) -> ProjectAccess:
+    async def authorize(self, *, actor: User, project_id: UUID, editing: bool) -> ProjectAccess:
         project = await self._projects.get(project_id)
         if project is None:
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
@@ -241,7 +241,7 @@ class ProjectService:
         return ProjectAccess(project=project, role=role)
 
     async def _authorize_owner(self, *, actor: User, project_id: UUID) -> None:
-        access = await self._authorize(actor=actor, project_id=project_id, editing=True)
+        access = await self.authorize(actor=actor, project_id=project_id, editing=True)
         if not actor.is_system_admin and (
             access.role is None or not access.role.can_manage_members
         ):

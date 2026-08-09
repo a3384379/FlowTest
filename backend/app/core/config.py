@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@flowtest.dev"
     bootstrap_admin_password: str = "FlowTest-Change-Me-123!"
     secure_cookies: bool = False
+    data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
     cors_origins: list[str] = ["http://localhost:5173"]
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"

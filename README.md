@@ -50,6 +50,10 @@ docker compose up --build
 S1 已提供 `/api/v1/auth`、`/api/v1/users`、`/api/v1/projects`、项目成员和任意层级目录接口。
 Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15 分钟。
 
+S2 已提供项目变量/Header、环境、AES-256-GCM Secret、API Definition/不可变版本和请求预览。
+Secret 只允许写入，列表与详情不返回明文、密文或 nonce；生产部署必须替换
+`FLOWTEST_DATA_ENCRYPTION_KEY`，并安全备份该密钥。
+
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 
 ## 开发原则
