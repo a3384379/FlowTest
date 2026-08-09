@@ -377,6 +377,7 @@ class APIAssetService:
         runtime_headers: dict[str, str],
         body_override: JsonValue,
         use_body_override: bool,
+        redact: bool = True,
     ) -> PreparedRequest:
         _definition, version = await self.get_detail(
             actor=actor,
@@ -438,12 +439,26 @@ class APIAssetService:
         url = f"{base_url}/{path}"
         if query:
             url = f"{url}?{urlencode(query)}"
-        return _redacted_request(
+        secret_variable_names = {f"secret.{name}" for name in secret_values}
+        prepared = PreparedRequest(
             method=version.http_method,
             url=url,
             headers=prepared_headers,
             body=rendered_body,
-            variables=variables,
+            variables=tuple(
+                PreparedVariable(
+                    name=name,
+                    value=resolved.value,
+                    source=VariableScope(resolved.source),
+                    secret=name in secret_variable_names,
+                )
+                for name, resolved in variables.items()
+            ),
+        )
+        if not redact:
+            return prepared
+        return _redacted_request(
+            prepared,
             secret_values=secret_values,
             auth_kind=AuthKind(version.auth_kind),
             auth_config=version.auth_config,
@@ -550,12 +565,8 @@ def _apply_auth(
 
 
 def _redacted_request(
+    prepared: PreparedRequest,
     *,
-    method: HttpMethod,
-    url: str,
-    headers: tuple[PreparedHeader, ...],
-    body: JsonValue,
-    variables: dict[str, ResolvedValue],
     secret_values: dict[str, str],
     auth_kind: AuthKind,
     auth_config: dict[str, str],
@@ -573,25 +584,22 @@ def _redacted_request(
             ),
             source=header.source,
         )
-        for header in headers
+        for header in prepared.headers
     )
-    secret_variable_names = {f"secret.{name}" for name in secret_values}
     prepared_variables = tuple(
         PreparedVariable(
-            name=name,
-            value=REDACTED_VALUE
-            if name in secret_variable_names
-            else _redact_text(resolved.value, secrets),
-            source=VariableScope(resolved.source),
-            secret=name in secret_variable_names,
+            name=variable.name,
+            value=REDACTED_VALUE if variable.secret else _redact_text(variable.value, secrets),
+            source=variable.source,
+            secret=variable.secret,
         )
-        for name, resolved in variables.items()
+        for variable in prepared.variables
     )
     return PreparedRequest(
-        method=method,
-        url=_redact_url(url, secrets, auth_kind=auth_kind, auth_config=auth_config),
+        method=prepared.method,
+        url=_redact_url(prepared.url, secrets, auth_kind=auth_kind, auth_config=auth_config),
         headers=redacted_headers,
-        body=_redact_json(body, secrets),
+        body=_redact_json(prepared.body, secrets),
         variables=prepared_variables,
     )
 

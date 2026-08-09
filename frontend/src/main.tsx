@@ -1,10 +1,17 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ConfigProvider } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import zhCN from 'antd/locale/zh_CN'
 
 import App from './App'
 import './styles.css'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 15_000, retry: 1 },
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,7 +25,11 @@ createRoot(document.getElementById('root')!).render(
         },
       }}
     >
-      <App />
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </AntdApp>
     </ConfigProvider>
   </StrictMode>,
 )
