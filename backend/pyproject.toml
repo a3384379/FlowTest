@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowtest-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "FlowTest API automation platform backend"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -26,6 +26,7 @@ dependencies = [
   "redis>=8.1,<9",
   "sqlalchemy[asyncio]>=2.0.51,<3",
   "uvicorn[standard]>=0.52,<1",
+  "openpyxl>=3.1.5,<4",
 ]
 
 [project.optional-dependencies]
@@ -92,3 +93,8 @@ name = "Domain is independent from delivery and infrastructure"
 type = "forbidden"
 source_modules = ["app.domain", "app.engine"]
 forbidden_modules = ["app.api", "app.models", "app.repositories"]
+
+[dependency-groups]
+dev = [
+    "types-openpyxl>=3.1.5,<4",
+]

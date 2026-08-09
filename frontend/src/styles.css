@@ -203,7 +203,7 @@ body {
 
 .workflow-designer-body {
   display: grid;
-  grid-template-columns: minmax(500px, 1fr) 220px;
+  grid-template-columns: minmax(500px, 1fr) 280px;
   min-height: 540px;
 }
 
@@ -234,6 +234,32 @@ body {
 .workflow-inspector .ant-select,
 .workflow-inspector .ant-input-number {
   width: 100%;
+}
+
+.mapping-section {
+  padding-top: 14px;
+  margin: 4px 0 18px;
+  border-top: 1px solid #e5eaf2;
+}
+
+.mapping-heading {
+  width: 100%;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mapping-editor {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #f8fafc;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+}
+
+.dataset-run-summary {
+  margin-bottom: 20px;
 }
 
 .flow-node {

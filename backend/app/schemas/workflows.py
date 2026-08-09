@@ -68,6 +68,8 @@ class WorkflowExecutionResponse(BaseModel):
     workflow_version_id: UUID
     environment_id: UUID
     triggered_by_id: UUID
+    parent_execution_id: UUID | None
+    dataset_row_index: int | None
     status: WorkflowRunStatus
     snapshot: dict[str, JsonValue]
     context: dict[str, JsonValue]
@@ -98,3 +100,4 @@ class WorkflowNodeExecutionResponse(BaseModel):
 class WorkflowExecutionDetailResponse(BaseModel):
     execution: WorkflowExecutionResponse
     nodes: list[WorkflowNodeExecutionResponse]
+    children: list[WorkflowExecutionResponse] = Field(default_factory=list)

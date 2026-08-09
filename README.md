@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`S6 可视化流程与实时执行（V0.2 迭代中）`。
+当前状态：`S7 数据驱动与控制节点（V0.3）`。
 
 ## 技术栈
 
@@ -77,6 +77,12 @@ S6 已将 Workflow 编辑升级为 React Flow 画布，支持 Start/API/End 节�
 `/api/v1/executions/{id}/events` WebSocket 实时推送。WebSocket 使用访问令牌子协议认证，
 Redis 保留短期序列化事件用于连接后回放，前端同时使用轻量轮询保证最终一致。
 
+S7 已提供 Extract、Assert、Condition、Delay 和 Dataset 节点；字段映射使用稳定节点 ID、
+JMESPath 源路径和 Query/Header/Body/Variable 目标位置。条件节点固定为一条 true 和一条 false
+出边，未选择分支记为 `skipped/BRANCH_NOT_SELECTED`，汇合节点只等待激活分支。CSV、JSON、
+Excel 数据集固定到执行 Snapshot，每行生成一个可下钻子执行，默认并发 5、最多 1000 行；
+父执行聚合行级状态，Execution Context 保留 Workflow/Dataset/Runtime 变量值与来源。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -90,6 +96,9 @@ multipart 上传、二进制响应外置、文件断言和受权下载。macOS �
 
 运行 `uv run --project backend python scripts/smoke_s6.py` 可验收后台启动语义、节点结果持久化和
 `Start → A → B/C → D → End` 的依赖就绪并行；验收会直接比较 B/C 执行时间区间是否重叠。
+
+运行 `uv run --project backend python scripts/smoke_s7.py` 可验收 JSON 数据集父子执行、字段映射、
+提取、断言、真假条件分支、跳过原因、汇合语义和变量来源追踪。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

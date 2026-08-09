@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.repositories.api_assets import APIAssetRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
 from app.services.artifacts import ArtifactService
+from app.services.datasets import WorkflowDatasetService
 from app.services.executions import PreparedMultipart, PreparedUpload
 from app.services.workflow_runtime import PreparedWorkflowRequest
 
@@ -24,6 +26,13 @@ from app.services.workflow_runtime import PreparedWorkflowRequest
 class PreparedExecution:
     snapshot: dict[str, JsonValue]
     requests: dict[str, PreparedWorkflowRequest]
+    dataset_variables: dict[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedWorkflow:
+    snapshot: dict[str, JsonValue]
+    runs: tuple[PreparedExecution, ...]
 
 
 class WorkflowSnapshotBuilder:
@@ -31,6 +40,7 @@ class WorkflowSnapshotBuilder:
         self._api_repository = APIAssetRepository(session)
         self._api_assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
+        self._datasets = WorkflowDatasetService(session)
 
     async def prepare(
         self,
@@ -43,8 +53,64 @@ class WorkflowSnapshotBuilder:
         environment_id: UUID,
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
-    ) -> PreparedExecution:
+    ) -> PreparedWorkflow:
         environment = await self._get_environment(project_id, environment_id)
+        dataset = await self._datasets.prepare(project_id=project_id, definition=definition)
+        rows: tuple[dict[str, JsonValue], ...] = (
+            dataset.parsed.rows if dataset is not None else ({},)
+        )
+        runs: list[PreparedExecution] = []
+        for row_index, row in enumerate(rows):
+            requests, api_snapshots = await self._prepare_api_nodes(
+                actor=actor,
+                project_id=project_id,
+                definition=definition,
+                environment_id=environment_id,
+                runtime_variables=runtime_variables,
+                runtime_headers=runtime_headers,
+                dataset_variables=row,
+            )
+            runs.append(
+                PreparedExecution(
+                    snapshot=_snapshot(
+                        workflow=workflow,
+                        version=version,
+                        environment=environment,
+                        apis=api_snapshots,
+                        dataset=(
+                            dataset.snapshot(
+                                row_index=row_index,
+                                row=cast(JsonValue, redact(row)),
+                            )
+                            if dataset is not None
+                            else None
+                        ),
+                        runtime_variables=runtime_variables,
+                        runtime_headers=runtime_headers,
+                    ),
+                    requests=requests,
+                    dataset_variables=dict(row),
+                )
+            )
+        parent_snapshot = runs[0].snapshot
+        if dataset is not None:
+            parent_snapshot = {
+                **parent_snapshot,
+                "dataset": dataset.snapshot(),
+            }
+        return PreparedWorkflow(snapshot=parent_snapshot, runs=tuple(runs))
+
+    async def _prepare_api_nodes(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        dataset_variables: dict[str, JsonValue],
+    ) -> tuple[dict[str, PreparedWorkflowRequest], dict[str, JsonValue]]:
         requests: dict[str, PreparedWorkflowRequest] = {}
         api_snapshots: dict[str, JsonValue] = {}
         for node in definition.nodes:
@@ -62,6 +128,8 @@ class WorkflowSnapshotBuilder:
                 definition=api_definition,
                 version=api_version,
                 environment_id=environment_id,
+                workflow_variables=definition.variables,
+                dataset_variables=_template_variables(dataset_variables),
                 runtime_variables=runtime_variables,
                 runtime_headers=runtime_headers,
             )
@@ -77,17 +145,7 @@ class WorkflowSnapshotBuilder:
                 api_version,
                 redacted_request,
             )
-        return PreparedExecution(
-            snapshot=_snapshot(
-                workflow=workflow,
-                version=version,
-                environment=environment,
-                apis=api_snapshots,
-                runtime_variables=runtime_variables,
-                runtime_headers=runtime_headers,
-            ),
-            requests=requests,
-        )
+        return requests, api_snapshots
 
     async def _prepare_requests(
         self,
@@ -97,6 +155,8 @@ class WorkflowSnapshotBuilder:
         definition: APIDefinition,
         version: APIVersion,
         environment_id: UUID,
+        workflow_variables: dict[str, str],
+        dataset_variables: dict[str, str],
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
     ) -> tuple[PreparedRequest, PreparedRequest]:
@@ -110,6 +170,8 @@ class WorkflowSnapshotBuilder:
             body_override=None,
             use_body_override=False,
             version_number=version.version,
+            workflow_variables=workflow_variables,
+            dataset_variables=dataset_variables,
             redact=False,
         )
         redacted = await self._api_assets.preview(
@@ -122,6 +184,8 @@ class WorkflowSnapshotBuilder:
             body_override=None,
             use_body_override=False,
             version_number=version.version,
+            workflow_variables=workflow_variables,
+            dataset_variables=dataset_variables,
             redact=True,
         )
         return raw, redacted
@@ -159,6 +223,7 @@ def _snapshot(
     version: WorkflowVersion,
     environment: Environment,
     apis: dict[str, JsonValue],
+    dataset: JsonValue,
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
 ) -> dict[str, JsonValue]:
@@ -173,7 +238,7 @@ def _snapshot(
         },
         "environment": _environment_snapshot(environment),
         "apis": apis,
-        "dataset": None,
+        "dataset": dataset,
         "runtime": cast(
             JsonValue,
             redact({"variables": runtime_variables, "headers": runtime_headers}),
@@ -198,6 +263,19 @@ def _api_snapshot(
             "headers": {item.name: item.value for item in request.headers},
             "body": request.body,
         },
+        "variables": {
+            item.name: {"value": item.value, "source": item.source.value}
+            for item in request.variables
+        },
+    }
+
+
+def _template_variables(values: dict[str, JsonValue]) -> dict[str, str]:
+    return {
+        name: value
+        if isinstance(value, str)
+        else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        for name, value in values.items()
     }
 
 

@@ -13,7 +13,12 @@ from app.services.execution_events import (
     ExecutionEventBus,
     ExecutionEventType,
 )
-from app.services.workflows import WorkflowRunPlan, WorkflowService
+from app.services.workflows import (
+    WorkflowBatchPlan,
+    WorkflowExecutionPlan,
+    WorkflowRunPlan,
+    WorkflowService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +33,7 @@ class WorkflowRunCoordinator:
         self._events = events
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
-    def start(self, plan: WorkflowRunPlan) -> None:
+    def start(self, plan: WorkflowExecutionPlan) -> None:
         task = asyncio.create_task(self._run(plan), name=f"workflow-{plan.execution_id}")
         self._tasks[plan.execution_id] = task
         task.add_done_callback(lambda _completed: self._tasks.pop(plan.execution_id, None))
@@ -47,7 +52,7 @@ class WorkflowRunCoordinator:
         await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
 
-    async def _run(self, plan: WorkflowRunPlan) -> None:
+    async def _run(self, plan: WorkflowExecutionPlan) -> None:
         await self._publish(
             ExecutionEvent(
                 type=ExecutionEventType.EXECUTION_STARTED,
@@ -57,7 +62,11 @@ class WorkflowRunCoordinator:
             )
         )
         try:
-            execution = await self._execute(plan)
+            execution = (
+                await self._execute_batch(plan)
+                if isinstance(plan, WorkflowBatchPlan)
+                else await self._execute(plan)
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -76,6 +85,39 @@ class WorkflowRunCoordinator:
                 error_message=execution.error_message,
             )
         )
+
+    async def _execute_batch(self, plan: WorkflowBatchPlan) -> WorkflowExecution:
+        semaphore = asyncio.Semaphore(plan.concurrency)
+
+        async def execute_child(child: WorkflowRunPlan) -> None:
+            async with semaphore:
+                await self._publish(
+                    ExecutionEvent(
+                        type=ExecutionEventType.EXECUTION_STARTED,
+                        execution_id=child.execution_id,
+                        emitted_at=datetime.now(UTC),
+                        execution_status="running",
+                    )
+                )
+                try:
+                    execution = await self._execute(child)
+                except Exception:
+                    logger.exception(
+                        "Dataset child execution failed",
+                        extra={"execution_id": str(child.execution_id)},
+                    )
+                    execution = await self._mark_failed(child)
+                await self._publish_completion(execution)
+
+        tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            async with self._session_maker() as session:
+                await WorkflowService(session).cancel_incomplete_batch(plan.execution_id)
+        async with self._session_maker() as session:
+            return await WorkflowService(session).complete_batch(plan.execution_id)
 
     async def _execute(self, plan: WorkflowRunPlan) -> WorkflowExecution:
         async with self._session_maker() as session:
@@ -105,9 +147,21 @@ class WorkflowRunCoordinator:
             )
             return completed
 
-    async def _mark_failed(self, plan: WorkflowRunPlan) -> WorkflowExecution:
+    async def _mark_failed(self, plan: WorkflowExecutionPlan) -> WorkflowExecution:
         async with self._session_maker() as session:
             return await WorkflowService(session).mark_runtime_failed(plan.execution_id)
+
+    async def _publish_completion(self, execution: WorkflowExecution) -> None:
+        await self._publish(
+            ExecutionEvent(
+                type=ExecutionEventType.EXECUTION_COMPLETED,
+                execution_id=execution.id,
+                emitted_at=datetime.now(UTC),
+                execution_status=execution.status,
+                error_code=execution.error_code,
+                error_message=execution.error_message,
+            )
+        )
 
     async def _publish(self, event: ExecutionEvent) -> None:
         try:

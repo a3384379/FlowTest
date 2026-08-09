@@ -15,6 +15,7 @@ import {
   executeWorkflow,
   getWorkflowExecution,
   listApis,
+  listArtifacts,
   listEnvironments,
   listProjects,
   listWorkflowExecutions,
@@ -54,6 +55,11 @@ export function useWorkflows() {
   const apis = useQuery({
     queryKey: ['apis', projectId],
     queryFn: () => listApis(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const artifacts = useQuery({
+    queryKey: ['artifacts', projectId],
+    queryFn: () => listArtifacts(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
   const workflows = useQuery({
@@ -191,6 +197,7 @@ export function useWorkflows() {
     environmentId,
     setEnvironmentSelection,
     apis,
+    artifacts,
     workflows,
     workflowId,
     setWorkflowSelection,
@@ -247,6 +254,7 @@ function requiredWorkflow<T>(value: T | null): T {
 function emptyDefinition(): WorkflowDefinition {
   return {
     schema_version: '1.0',
+    variables: {},
     nodes: [],
     edges: [],
     settings: { fail_fast: true, concurrency: 20, default_timeout_seconds: 30 },

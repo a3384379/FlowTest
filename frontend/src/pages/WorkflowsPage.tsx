@@ -26,9 +26,7 @@ export default function WorkflowsPage() {
     <>
       <WorkflowHeading state={state} onCreate={() => setCreateOpen(true)} />
       <WorkflowWorkspace state={state} />
-      <Card title="最近一次运行" className="workflow-result-card">
-        <NodeTable nodes={state.lastResult?.nodes ?? []} />
-      </Card>
+      <LatestRunCard result={state.lastResult} />
       <Card title="工作流执行历史" className="workflow-result-card">
         <ExecutionTable items={state.executions.data?.items ?? []} />
       </Card>
@@ -44,6 +42,19 @@ export default function WorkflowsPage() {
 }
 
 type WorkflowState = ReturnType<typeof useWorkflows>
+
+function LatestRunCard({ result }: { result: WorkflowState['lastResult'] }) {
+  const datasetChildren = result?.children ?? []
+  return (
+    <Card title="最近一次运行" className="workflow-result-card">
+      {datasetChildren.length ? (
+        <DatasetRunSummary items={datasetChildren} />
+      ) : (
+        <NodeTable nodes={result?.nodes ?? []} />
+      )}
+    </Card>
+  )
+}
 
 function WorkflowHeading({ state, onCreate }: { state: WorkflowState; onCreate: () => void }) {
   return (
@@ -148,6 +159,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
       <WorkflowDesigner
         definition={state.designerDefinition}
         apis={state.apis.data?.items ?? []}
+        artifacts={state.artifacts.data?.items ?? []}
         statuses={state.nodeStatuses}
         editable={!state.activeExecutionId}
         onChange={state.setDraftDefinition}
@@ -230,6 +242,36 @@ function NodeTable({ nodes }: { nodes: WorkflowNodeExecution[] }) {
         { title: '错误', dataIndex: 'error_message' },
       ]}
     />
+  )
+}
+
+function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
+  if (!items.length) return null
+  return (
+    <div className="dataset-run-summary">
+      <Typography.Title level={5}>数据集子执行</Typography.Title>
+      <Table
+        rowKey="id"
+        size="small"
+        pagination={false}
+        dataSource={items}
+        columns={[
+          {
+            title: '数据行',
+            dataIndex: 'dataset_row_index',
+            width: 100,
+            render: (value: number) => value + 1,
+          },
+          {
+            title: '状态',
+            dataIndex: 'status',
+            width: 100,
+            render: (status: string) => <StatusTag status={status} />,
+          },
+          { title: '错误', dataIndex: 'error_message' },
+        ]}
+      />
+    </div>
   )
 }
 

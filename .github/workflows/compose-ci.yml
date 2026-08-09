@@ -11,6 +11,7 @@ on:
       - "scripts/smoke_s4.py"
       - "scripts/smoke_s5.py"
       - "scripts/smoke_s6.py"
+      - "scripts/smoke_s7.py"
       - ".github/workflows/compose-ci.yml"
   push:
     branches: [main]
@@ -23,6 +24,7 @@ on:
       - "scripts/smoke_s4.py"
       - "scripts/smoke_s5.py"
       - "scripts/smoke_s6.py"
+      - "scripts/smoke_s7.py"
       - ".github/workflows/compose-ci.yml"
 
 permissions:
@@ -55,6 +57,8 @@ jobs:
         run: python3 scripts/smoke_s5.py
       - name: Verify S6 visual asynchronous parallel workflow flow
         run: python3 scripts/smoke_s6.py
+      - name: Verify S7 dataset, mapping, and control-node flow
+        run: python3 scripts/smoke_s7.py
       - name: Print service logs on failure
         if: failure()
         run: docker compose logs --no-color --tail=300

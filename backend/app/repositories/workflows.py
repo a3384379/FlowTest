@@ -1,6 +1,8 @@
+from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflows import (
@@ -20,7 +22,7 @@ class WorkflowRepository:
     def add(self, entity: WorkflowEntity) -> None:
         self._session.add(entity)
 
-    def add_all(self, entities: list[WorkflowNodeExecution]) -> None:
+    def add_all(self, entities: Sequence[WorkflowEntity]) -> None:
         self._session.add_all(entities)
 
     async def get(self, workflow_id: UUID) -> Workflow | None:
@@ -93,7 +95,10 @@ class WorkflowRepository:
             (
                 await self._session.scalars(
                     select(WorkflowExecution)
-                    .where(WorkflowExecution.project_id == project_id)
+                    .where(
+                        WorkflowExecution.project_id == project_id,
+                        WorkflowExecution.parent_execution_id.is_(None),
+                    )
                     .order_by(WorkflowExecution.started_at.desc())
                     .offset(offset)
                     .limit(limit)
@@ -103,9 +108,34 @@ class WorkflowRepository:
         total = await self._session.scalar(
             select(func.count())
             .select_from(WorkflowExecution)
-            .where(WorkflowExecution.project_id == project_id)
+            .where(
+                WorkflowExecution.project_id == project_id,
+                WorkflowExecution.parent_execution_id.is_(None),
+            )
         )
         return items, int(total or 0)
+
+    async def list_child_executions(self, execution_id: UUID) -> list[WorkflowExecution]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(WorkflowExecution)
+                    .where(WorkflowExecution.parent_execution_id == execution_id)
+                    .order_by(WorkflowExecution.dataset_row_index)
+                )
+            ).all()
+        )
+
+    async def request_child_cancellation(self, execution_id: UUID, requested_at: datetime) -> None:
+        await self._session.execute(
+            update(WorkflowExecution)
+            .where(
+                WorkflowExecution.parent_execution_id == execution_id,
+                WorkflowExecution.status == "running",
+                WorkflowExecution.cancel_requested_at.is_(None),
+            )
+            .values(cancel_requested_at=requested_at)
+        )
 
     async def list_node_executions(self, execution_id: UUID) -> list[WorkflowNodeExecution]:
         return list(

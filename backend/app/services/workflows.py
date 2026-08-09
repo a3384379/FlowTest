@@ -4,18 +4,26 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
+import jmespath
+from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.engine.contracts import (
+    ApiNodeConfig,
+    AssertNodeConfig,
+    ConditionNodeConfig,
+    DatasetNodeConfig,
+    ExtractNodeConfig,
     NodeType,
     WorkflowDefinition,
-    parse_api_node_config,
+    WorkflowNode,
+    parse_node_config,
 )
 from app.engine.scheduler import (
     CancellationToken,
@@ -25,6 +33,7 @@ from app.engine.scheduler import (
     WorkflowScheduler,
 )
 from app.models.access import Folder, User
+from app.models.artifacts import Artifact
 from app.models.workflows import (
     Workflow,
     WorkflowExecution,
@@ -34,15 +43,18 @@ from app.models.workflows import (
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.services.audit import AuditService
+from app.services.datasets import WorkflowDatasetService
 from app.services.projects import ProjectService
 from app.services.workflow_runtime import WorkflowNodeExecutor
 from app.services.workflow_snapshots import (
     PreparedExecution,
+    PreparedWorkflow,
     WorkflowSnapshotBuilder,
 )
 
-SUPPORTED_S5_NODE_TYPES = frozenset({NodeType.START, NodeType.API, NodeType.END})
+SUPPORTED_S7_NODE_TYPES = frozenset(NodeType)
 CANCELLATION_POLL_SECONDS = 0.05
+DATASET_CONCURRENCY = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +68,26 @@ class WorkflowRunPlan:
     runtime_variables: dict[str, str]
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowBatchPlan:
+    execution_id: UUID
+    actor_id: UUID
+    project_id: UUID
+    workflow_version: int
+    children: tuple[WorkflowRunPlan, ...]
+    concurrency: int = DATASET_CONCURRENCY
+
+
+WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
+
+
 class WorkflowService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
         self._snapshots = WorkflowSnapshotBuilder(session)
+        self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
 
@@ -223,6 +249,12 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        if isinstance(plan, WorkflowBatchPlan):
+            raise AppError(
+                code="DATASET_REQUIRES_COORDINATOR",
+                message="数据集工作流必须通过后台协调器运行",
+                status_code=500,
+            )
         return await self.run_prepared(execution=execution, plan=plan)
 
     async def prepare_execution(
@@ -235,7 +267,7 @@ class WorkflowService:
         version: int | None,
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
-    ) -> tuple[WorkflowExecution, WorkflowRunPlan]:
+    ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow(project_id, workflow_id)
         selected = await self._select_version(workflow, version)
@@ -250,22 +282,33 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
-        execution = await self._start_execution(
+        if prepared.snapshot["dataset"] is None:
+            execution = await self._start_execution(
+                actor=actor,
+                project_id=project_id,
+                workflow=workflow,
+                version=selected,
+                environment_id=environment_id,
+                snapshot=prepared.runs[0].snapshot,
+            )
+            return execution, self._run_plan(
+                execution=execution,
+                actor=actor,
+                project_id=project_id,
+                workflow_version=selected.version,
+                definition=definition,
+                prepared=prepared.runs[0],
+                runtime_variables=runtime_variables,
+            )
+        return await self._start_dataset_execution(
             actor=actor,
             project_id=project_id,
             workflow=workflow,
             version=selected,
             environment_id=environment_id,
-            snapshot=prepared.snapshot,
-        )
-        return execution, WorkflowRunPlan(
-            execution_id=execution.id,
-            actor_id=actor.id,
-            project_id=project_id,
-            workflow_version=selected.version,
             definition=definition,
             prepared=prepared,
-            runtime_variables=dict(runtime_variables),
+            runtime_variables=runtime_variables,
         )
 
     async def run_prepared(
@@ -276,13 +319,19 @@ class WorkflowService:
         on_node_status: NodeStatusCallback | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
         token = CancellationToken()
+        if execution.cancel_requested_at is not None:
+            token.cancel()
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            scheduler = WorkflowScheduler(WorkflowNodeExecutor(client, plan.prepared.requests))
+            scheduler = WorkflowScheduler(
+                WorkflowNodeExecutor(client, plan.prepared.requests, plan.definition)
+            )
             result = await self._run_with_cancellation_poll(
                 scheduler=scheduler,
                 definition=plan.definition,
                 execution=execution,
                 token=token,
+                workflow_variables=plan.definition.variables,
+                dataset_variables=plan.prepared.dataset_variables,
                 runtime_variables=plan.runtime_variables,
                 on_node_status=on_node_status,
             )
@@ -329,6 +378,19 @@ class WorkflowService:
         await self._session.refresh(execution)
         return execution
 
+    async def cancel_incomplete_batch(self, execution_id: UUID) -> None:
+        children = await self._workflows.list_child_executions(execution_id)
+        completed_at = datetime.now(UTC)
+        for child in children:
+            if child.status != "running":
+                continue
+            child.status = "cancelled"
+            child.error_code = "DATASET_RUNNER_STOPPED"
+            child.error_message = "数据集子执行在运行服务停止时被取消"
+            child.cancel_requested_at = child.cancel_requested_at or completed_at
+            child.completed_at = completed_at
+        await self._session.commit()
+
     async def request_cancel(
         self, *, actor: User, project_id: UUID, execution_id: UUID
     ) -> WorkflowExecution:
@@ -341,7 +403,9 @@ class WorkflowService:
                 status_code=409,
             )
         if execution.cancel_requested_at is None:
-            execution.cancel_requested_at = datetime.now(UTC)
+            requested_at = datetime.now(UTC)
+            execution.cancel_requested_at = requested_at
+            await self._workflows.request_child_cancellation(execution.id, requested_at)
             await self._session.commit()
             await self._session.refresh(execution)
         return execution
@@ -358,18 +422,65 @@ class WorkflowService:
 
     async def get_execution(
         self, *, actor: User, project_id: UUID, execution_id: UUID
-    ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
+    ) -> tuple[
+        WorkflowExecution,
+        list[WorkflowNodeExecution],
+        list[WorkflowExecution],
+    ]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._get_execution(project_id, execution_id)
         nodes = await self._workflows.list_node_executions(execution.id)
-        return execution, nodes
+        children = await self._workflows.list_child_executions(execution.id)
+        return execution, nodes, children
+
+    async def complete_batch(self, execution_id: UUID) -> WorkflowExecution:
+        execution = await self.load_execution_for_run(execution_id)
+        children = await self._workflows.list_child_executions(execution_id)
+        if not children or any(child.status == "running" for child in children):
+            raise AppError(
+                code="DATASET_EXECUTION_INCOMPLETE",
+                message="数据集子执行尚未全部完成",
+                status_code=409,
+            )
+        counts = {
+            status: sum(child.status == status for child in children)
+            for status in ("passed", "failed", "cancelled")
+        }
+        if counts["failed"]:
+            execution.status = "failed"
+            execution.error_code = "DATASET_ROWS_FAILED"
+            execution.error_message = f"{counts['failed']} 个数据集子执行失败"
+        elif counts["cancelled"]:
+            execution.status = "cancelled"
+            execution.error_code = "DATASET_ROWS_CANCELLED"
+            execution.error_message = f"{counts['cancelled']} 个数据集子执行已取消"
+        else:
+            execution.status = "passed"
+        execution.context = {
+            "dataset_summary": {
+                "total": len(children),
+                **counts,
+            }
+        }
+        execution.completed_at = datetime.now(UTC)
+        self._audit.record(
+            actor_user_id=execution.triggered_by_id,
+            project_id=execution.project_id,
+            action="workflow.dataset_executed",
+            resource_type="workflow_execution",
+            resource_id=execution.id,
+            details=cast(dict[str, JsonValue], execution.context["dataset_summary"]),
+        )
+        await self._session.commit()
+        await self._session.refresh(execution)
+        return execution
 
     async def _validate_publishable(self, project_id: UUID, definition: WorkflowDefinition) -> None:
         unsupported = sorted(
             {
                 node.type.value
                 for node in definition.nodes
-                if node.type not in SUPPORTED_S5_NODE_TYPES
+                if node.type not in SUPPORTED_S7_NODE_TYPES
             }
         )
         if unsupported:
@@ -380,23 +491,29 @@ class WorkflowService:
                 details={"node_types": unsupported},
             )
         for node in definition.nodes:
-            if node.type is not NodeType.API:
-                if node.config:
-                    raise AppError(
-                        code="INVALID_NODE_CONFIG",
-                        message=f"节点 {node.name} 不接受配置项",
-                        status_code=422,
-                    )
-                continue
-            try:
-                config = parse_api_node_config(node)
-            except (ValidationError, ValueError) as error:
-                raise AppError(
-                    code="INVALID_NODE_CONFIG",
-                    message=f"API 节点 {node.name} 配置无效",
-                    status_code=422,
-                    details={"node_id": node.id},
-                ) from error
+            await self._validate_publishable_node(project_id, definition, node)
+        for edge in definition.edges:
+            for mapping in edge.mappings:
+                self._validate_jmespath(mapping.source.path, edge.id)
+        if any(node.type is NodeType.DATASET for node in definition.nodes):
+            await self._datasets.prepare(project_id=project_id, definition=definition)
+
+    async def _validate_publishable_node(
+        self,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+    ) -> None:
+        try:
+            config = parse_node_config(node)
+        except (ValidationError, ValueError) as error:
+            raise AppError(
+                code="INVALID_NODE_CONFIG",
+                message=f"节点 {node.name} 配置无效",
+                status_code=422,
+                details={"node_id": node.id},
+            ) from error
+        if isinstance(config, ApiNodeConfig):
             definition_model = await self._api_repository.get_definition(config.api_definition_id)
             if definition_model is None or definition_model.project_id != project_id:
                 raise AppError(
@@ -405,6 +522,50 @@ class WorkflowService:
                     status_code=422,
                     details={"node_id": node.id},
                 )
+        if isinstance(config, (ExtractNodeConfig, AssertNodeConfig, ConditionNodeConfig)):
+            self._validate_control_source(
+                definition,
+                {node.id for node in definition.nodes},
+                node.id,
+                config.source_node_id,
+            )
+            self._validate_jmespath(config.expression, node.id)
+        if isinstance(config, DatasetNodeConfig):
+            artifact = await self._session.get(Artifact, config.artifact_id)
+            if artifact is None or artifact.project_id != project_id:
+                raise AppError(
+                    code="ARTIFACT_NOT_FOUND",
+                    message=f"Dataset 节点 {node.name} 引用的文件不存在",
+                    status_code=422,
+                    details={"node_id": node.id},
+                )
+
+    @staticmethod
+    def _validate_control_source(
+        definition: WorkflowDefinition,
+        node_ids: set[str],
+        node_id: str,
+        source_node_id: str,
+    ) -> None:
+        if source_node_id not in node_ids or not _is_upstream(definition, source_node_id, node_id):
+            raise AppError(
+                code="INVALID_NODE_SOURCE",
+                message="控制节点的数据源必须是其上游节点",
+                status_code=422,
+                details={"node_id": node_id, "source_node_id": source_node_id},
+            )
+
+    @staticmethod
+    def _validate_jmespath(expression: str, resource_id: str) -> None:
+        try:
+            jmespath.compile(expression)
+        except JMESPathError as error:
+            raise AppError(
+                code="INVALID_JMESPATH",
+                message="JMESPath 表达式无效",
+                status_code=422,
+                details={"resource_id": resource_id},
+            ) from error
 
     async def _start_execution(
         self,
@@ -416,12 +577,97 @@ class WorkflowService:
         environment_id: UUID,
         snapshot: dict[str, JsonValue],
     ) -> WorkflowExecution:
-        execution = WorkflowExecution(
+        execution = self._execution_model(
+            actor=actor,
+            project_id=project_id,
+            workflow=workflow,
+            version=version,
+            environment_id=environment_id,
+            snapshot=snapshot,
+        )
+        self._workflows.add(execution)
+        await self._session.commit()
+        await self._session.refresh(execution)
+        return execution
+
+    async def _start_dataset_execution(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow: Workflow,
+        version: WorkflowVersion,
+        environment_id: UUID,
+        definition: WorkflowDefinition,
+        prepared: PreparedWorkflow,
+        runtime_variables: dict[str, str],
+    ) -> tuple[WorkflowExecution, WorkflowBatchPlan]:
+        parent = self._execution_model(
+            actor=actor,
+            project_id=project_id,
+            workflow=workflow,
+            version=version,
+            environment_id=environment_id,
+            snapshot=prepared.snapshot,
+        )
+        children = [
+            self._execution_model(
+                actor=actor,
+                project_id=project_id,
+                workflow=workflow,
+                version=version,
+                environment_id=environment_id,
+                snapshot=run.snapshot,
+                parent_execution_id=parent.id,
+                dataset_row_index=index,
+            )
+            for index, run in enumerate(prepared.runs)
+        ]
+        self._workflows.add(parent)
+        self._workflows.add_all(children)
+        await self._session.commit()
+        await self._session.refresh(parent)
+        plans = tuple(
+            self._run_plan(
+                execution=child,
+                actor=actor,
+                project_id=project_id,
+                workflow_version=version.version,
+                definition=definition,
+                prepared=run,
+                runtime_variables=runtime_variables,
+            )
+            for child, run in zip(children, prepared.runs, strict=True)
+        )
+        return parent, WorkflowBatchPlan(
+            execution_id=parent.id,
+            actor_id=actor.id,
+            project_id=project_id,
+            workflow_version=version.version,
+            children=plans,
+        )
+
+    @staticmethod
+    def _execution_model(
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow: Workflow,
+        version: WorkflowVersion,
+        environment_id: UUID,
+        snapshot: dict[str, JsonValue],
+        parent_execution_id: UUID | None = None,
+        dataset_row_index: int | None = None,
+    ) -> WorkflowExecution:
+        return WorkflowExecution(
+            id=uuid4(),
             project_id=project_id,
             workflow_id=workflow.id,
             workflow_version_id=version.id,
             environment_id=environment_id,
             triggered_by_id=actor.id,
+            parent_execution_id=parent_execution_id,
+            dataset_row_index=dataset_row_index,
             status="running",
             snapshot=snapshot,
             context={},
@@ -431,10 +677,27 @@ class WorkflowService:
             started_at=datetime.now(UTC),
             completed_at=None,
         )
-        self._workflows.add(execution)
-        await self._session.commit()
-        await self._session.refresh(execution)
-        return execution
+
+    @staticmethod
+    def _run_plan(
+        *,
+        execution: WorkflowExecution,
+        actor: User,
+        project_id: UUID,
+        workflow_version: int,
+        definition: WorkflowDefinition,
+        prepared: PreparedExecution,
+        runtime_variables: dict[str, str],
+    ) -> WorkflowRunPlan:
+        return WorkflowRunPlan(
+            execution_id=execution.id,
+            actor_id=actor.id,
+            project_id=project_id,
+            workflow_version=workflow_version,
+            definition=definition,
+            prepared=prepared,
+            runtime_variables=dict(runtime_variables),
+        )
 
     async def _run_with_cancellation_poll(
         self,
@@ -443,6 +706,8 @@ class WorkflowService:
         definition: WorkflowDefinition,
         execution: WorkflowExecution,
         token: CancellationToken,
+        workflow_variables: dict[str, str],
+        dataset_variables: dict[str, JsonValue],
         runtime_variables: dict[str, str],
         on_node_status: NodeStatusCallback | None,
     ) -> WorkflowRunResult:
@@ -450,7 +715,9 @@ class WorkflowService:
             scheduler.run(
                 definition,
                 context=ExecutionContext(
-                    runtime_variables=cast(dict[str, JsonValue], runtime_variables)
+                    workflow_variables=cast(dict[str, JsonValue], workflow_variables),
+                    dataset_variables=dataset_variables,
+                    runtime_variables=cast(dict[str, JsonValue], runtime_variables),
                 ),
                 cancellation=token,
                 on_node_status=on_node_status,
@@ -555,3 +822,20 @@ class WorkflowService:
 def _fingerprint(definition: dict[str, object]) -> str:
     canonical = json.dumps(definition, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str) -> bool:
+    outgoing: dict[str, set[str]] = {node.id: set() for node in definition.nodes}
+    for edge in definition.edges:
+        outgoing[edge.source].add(edge.target)
+    pending = [source_id]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == target_id:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        pending.extend(outgoing[current] - visited)
+    return False
