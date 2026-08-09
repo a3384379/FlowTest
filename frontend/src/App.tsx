@@ -45,15 +45,25 @@ export default function App() {
           <div className="page-heading">
             <div>
               <Typography.Title level={2}>工作台</Typography.Title>
-              <Typography.Text type="secondary">项目工程已初始化，下一步从单接口闭环开始。</Typography.Text>
+              <Typography.Text type="secondary">
+                项目工程已初始化，下一步从单接口闭环开始。
+              </Typography.Text>
             </div>
           </div>
 
           <div className="stat-grid">
-            <Card><Statistic title="项目数" value={0} prefix={<FolderOpenOutlined />} /></Card>
-            <Card><Statistic title="接口数" value={0} prefix={<ApiOutlined />} /></Card>
-            <Card><Statistic title="工作流" value={0} prefix={<ApartmentOutlined />} /></Card>
-            <Card><Statistic title="今日通过" value={0} prefix={<CheckCircleOutlined />} /></Card>
+            <Card>
+              <Statistic title="项目数" value={0} prefix={<FolderOpenOutlined />} />
+            </Card>
+            <Card>
+              <Statistic title="接口数" value={0} prefix={<ApiOutlined />} />
+            </Card>
+            <Card>
+              <Statistic title="工作流" value={0} prefix={<ApartmentOutlined />} />
+            </Card>
+            <Card>
+              <Statistic title="今日通过" value={0} prefix={<CheckCircleOutlined />} />
+            </Card>
           </div>
 
           <div className="dashboard-grid">
@@ -74,7 +84,9 @@ export default function App() {
                   {
                     title: '状态',
                     dataIndex: 'status',
-                    render: (status: string) => <Tag color={status === '通过' ? 'green' : 'default'}>{status}</Tag>,
+                    render: (status: string) => (
+                      <Tag color={status === '通过' ? 'green' : 'default'}>{status}</Tag>
+                    ),
                   },
                   { title: '通过率', dataIndex: 'rate' },
                 ]}

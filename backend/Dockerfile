@@ -1,4 +1,5 @@
-FROM python:3.12-slim AS runtime
+FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
+FROM python:3.12.13-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,9 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY --from=uv /uv /uvx /bin/
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
-RUN python -m pip install --upgrade pip && python -m pip install .
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 

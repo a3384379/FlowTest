@@ -8,7 +8,7 @@ FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标
 
 - 后端：Python 3.12、FastAPI、Pydantic、SQLAlchemy、HTTPX
 - 前端：React 19、TypeScript、Vite、Ant Design、React Flow
-- 数据：PostgreSQL、Redis
+- 数据：PostgreSQL、Redis、MinIO/S3
 - 部署：Docker Compose、Nginx
 
 ## 目录
@@ -40,6 +40,9 @@ docker compose up --build
 - API：<http://localhost:8000>
 - OpenAPI：<http://localhost:8000/docs>
 - 健康检查：<http://localhost:8000/api/v1/health>
+- Readiness：<http://localhost:8000/api/v1/ready>
+- Mock 目标服务：<http://localhost:8080/docs>
+- MinIO Console：<http://localhost:9001>
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

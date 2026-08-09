@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,11 +16,19 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: str = "local"
     debug: bool = False
+    log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "change-me-before-production"
     cors_origins: list[str] = ["http://localhost:5173"]
+    s3_endpoint_url: str = "http://localhost:9000"
+    s3_access_key: str = "flowtest"
+    s3_secret_key: str = "flowtest-local-secret"
+    s3_bucket: str = "flowtest-artifacts"
+    request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
+    artifact_limit_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
 
 
 @lru_cache
