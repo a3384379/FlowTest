@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from app.domain.api_assets import AuthKind, BodyKind, HttpMethod, JsonValue
 from app.domain.scopes import HeaderScope, VariableScope
@@ -76,6 +76,16 @@ class AuthConfiguration(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
+class MultipartFileReference(BaseModel):
+    field: str = Field(min_length=1, max_length=160)
+    artifact_id: UUID
+
+
+class MultipartBody(BaseModel):
+    fields: dict[str, str] = Field(default_factory=dict)
+    files: list[MultipartFileReference] = Field(default_factory=list, max_length=20)
+
+
 class APIVersionInput(BaseModel):
     method: HttpMethod
     path: str = Field(min_length=1, max_length=2048)
@@ -84,6 +94,12 @@ class APIVersionInput(BaseModel):
     body_kind: BodyKind = BodyKind.NONE
     body: JsonValue = None
     auth: AuthConfiguration = Field(default_factory=AuthConfiguration)
+
+    @model_validator(mode="after")
+    def validate_body_shape(self) -> "APIVersionInput":
+        if self.body_kind is BodyKind.MULTIPART:
+            MultipartBody.model_validate(self.body)
+        return self
 
 
 class APIDefinitionCreate(BaseModel):

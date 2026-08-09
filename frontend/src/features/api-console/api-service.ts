@@ -1,13 +1,17 @@
 import {
   apiClient,
+  type Artifact,
   type ApiDefinition,
   type Environment,
   type ExecutionDetail,
+  type ImportRun,
   type Page,
   type Project,
 } from '../../lib/api'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type BodyKind = 'none' | 'json' | 'multipart'
+export type AuthKind = 'none' | 'bearer' | 'basic' | 'api_key'
 
 export type CreateProjectInput = {
   name: string
@@ -27,6 +31,8 @@ export type CreateApiInput = {
   method: HttpMethod
   path: string
   body: unknown
+  body_kind?: BodyKind
+  auth?: { kind: AuthKind; values: Record<string, string> }
 }
 
 export async function listProjects(): Promise<Page<Project>> {
@@ -62,7 +68,7 @@ export async function listApis(projectId: string): Promise<Page<ApiDefinition>> 
 }
 
 export async function createApi(projectId: string, input: CreateApiInput) {
-  const bodyKind = input.body === null ? 'none' : 'json'
+  const bodyKind = input.body_kind ?? (input.body === null ? 'none' : 'json')
   const response = await apiClient.post<{ definition: ApiDefinition }>(
     `/projects/${projectId}/apis`,
     {
@@ -76,11 +82,49 @@ export async function createApi(projectId: string, input: CreateApiInput) {
         headers: {},
         body_kind: bodyKind,
         body: input.body,
-        auth: { kind: 'none', values: {} },
+        auth: input.auth ?? { kind: 'none', values: {} },
       },
     },
   )
   return response.data.definition
+}
+
+export async function importApiDocument(
+  projectId: string,
+  file: File,
+  sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' = 'auto',
+): Promise<ImportRun> {
+  const form = new FormData()
+  form.append('document', file)
+  form.append('source_type', sourceType)
+  const response = await apiClient.post<ImportRun>(`/projects/${projectId}/imports`, form)
+  return response.data
+}
+
+export async function listArtifacts(projectId: string): Promise<Page<Artifact>> {
+  const response = await apiClient.get<Page<Artifact>>(`/projects/${projectId}/files`, {
+    params: { page: 1, page_size: 100 },
+  })
+  return response.data
+}
+
+export async function uploadArtifact(projectId: string, file: File): Promise<Artifact> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await apiClient.post<Artifact>(`/projects/${projectId}/files`, form)
+  return response.data
+}
+
+export async function downloadArtifact(projectId: string, artifact: Artifact): Promise<void> {
+  const response = await apiClient.get<Blob>(`/projects/${projectId}/files/${artifact.id}`, {
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(response.data)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = artifact.filename
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function executeApi(

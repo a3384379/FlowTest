@@ -58,7 +58,10 @@ class Secret(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
 class APIDefinition(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "api_definitions"
-    __table_args__ = (Index("ix_api_definitions_project_folder", "project_id", "folder_id"),)
+    __table_args__ = (
+        Index("ix_api_definitions_project_folder", "project_id", "folder_id"),
+        UniqueConstraint("project_id", "import_key", name="uq_api_definitions_project_import_key"),
+    )
 
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
@@ -69,6 +72,9 @@ class APIDefinition(UuidPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     current_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    import_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    import_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    import_source: Mapped[str | None] = mapped_column(String(255), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 
@@ -79,7 +85,10 @@ class APIVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')", name="api_http_method"
         ),
-        CheckConstraint("body_kind IN ('none', 'json', 'raw', 'form')", name="api_body_kind"),
+        CheckConstraint(
+            "body_kind IN ('none', 'json', 'raw', 'form', 'multipart')",
+            name="api_body_kind",
+        ),
         CheckConstraint(
             "auth_kind IN ('none', 'bearer', 'basic', 'api_key')", name="api_auth_kind"
         ),

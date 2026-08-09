@@ -24,6 +24,7 @@ class BodyKind(StrEnum):
     JSON = "json"
     RAW = "raw"
     FORM = "form"
+    MULTIPART = "multipart"
 
 
 class AuthKind(StrEnum):

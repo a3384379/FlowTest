@@ -8,6 +8,7 @@ on:
       - "mock-target/**"
       - "compose.yaml"
       - "scripts/smoke_s3.py"
+      - "scripts/smoke_s4.py"
       - ".github/workflows/compose-ci.yml"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "mock-target/**"
       - "compose.yaml"
       - "scripts/smoke_s3.py"
+      - "scripts/smoke_s4.py"
       - ".github/workflows/compose-ci.yml"
 
 permissions:
@@ -40,6 +42,8 @@ jobs:
           curl --fail --retry 10 --retry-delay 2 http://localhost:3000/
       - name: Verify S3 API execution flow
         run: python3 scripts/smoke_s3.py
+      - name: Verify S4 import, authentication, and file flow
+        run: python3 scripts/smoke_s4.py
       - name: Print service logs on failure
         if: failure()
         run: docker compose logs --no-color --tail=300

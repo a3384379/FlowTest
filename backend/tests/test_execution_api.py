@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import password_service
 from app.domain.api_assets import BodyKind, HttpMethod
@@ -147,6 +148,7 @@ async def test_execute_assert_and_read_history(execution_client: AsyncClient) ->
 @pytest.mark.asyncio
 async def test_timeout_and_large_response_are_persisted_as_errors(
     execution_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     headers = await _login_headers(execution_client)
     project_id, environment_id, definition_id = await _create_execution_assets(
@@ -162,6 +164,7 @@ async def test_timeout_and_large_response_are_persisted_as_errors(
     assert timed_out.json()["execution"]["status"] == "error"
     assert timed_out.json()["execution"]["error_code"] == "REQUEST_TIMEOUT"
 
+    monkeypatch.setattr(settings, "artifact_limit_bytes", settings.inline_body_limit_bytes)
     route.side_effect = None
     route.return_value = Response(200, content=b"x" * (2 * 1024 * 1024 + 1))
     too_large = await execution_client.post(
