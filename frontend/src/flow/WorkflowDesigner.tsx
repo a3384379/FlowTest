@@ -1,13 +1,19 @@
 import {
   ApiOutlined,
+  ApartmentOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   ExportOutlined,
   FlagOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RedoOutlined,
+  RetweetOutlined,
+  SnippetsOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
 import {
   applyEdgeChanges,
@@ -29,14 +35,27 @@ import '@xyflow/react/dist/style.css'
 import { Button, Empty, Select, Space, Tag, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 
-import type { ApiDefinition, Artifact, WorkflowDefinition, WorkflowNode } from '../lib/api'
+import type {
+  ApiDefinition,
+  Artifact,
+  Workflow,
+  WorkflowDefinition,
+  WorkflowNode,
+} from '../lib/api'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
-import { addApiNode, addTypedNode, connectNodes } from './workflow-graph'
+import {
+  addApiNode,
+  addTypedNode,
+  autoLayoutWorkflow,
+  connectNodes,
+  pasteNode,
+} from './workflow-graph'
 
 type DesignerProps = {
   definition: WorkflowDefinition
   apis: ApiDefinition[]
   artifacts: Artifact[]
+  workflows?: Workflow[]
   statuses: Record<string, string>
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
@@ -58,12 +77,22 @@ export default function WorkflowDesigner({
   definition,
   apis,
   artifacts,
+  workflows = [],
   statuses,
   editable,
   onChange,
 }: DesignerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | undefined>(apis.at(0)?.id)
+  const publishedWorkflows = workflows.filter((workflow) => workflow.current_version)
+  const [subflowSelection, setSubflowSelection] = useState<string | undefined>(
+    publishedWorkflows.at(0)?.id,
+  )
+  const [clipboard, setClipboard] = useState<WorkflowNode | null>(null)
+  const [history, setHistory] = useState<{
+    past: WorkflowDefinition[]
+    future: WorkflowDefinition[]
+  }>({ past: [], future: [] })
   const nodes = useMemo(
     () => definition.nodes.map((node) => toCanvasNode(node, statuses[node.id])),
     [definition.nodes, statuses],
@@ -71,6 +100,38 @@ export default function WorkflowDesigner({
   const edges = useMemo(() => definition.edges.map(toCanvasEdge), [definition.edges])
   const selected = definition.nodes.find((node) => node.id === selectedId) ?? null
   const selectedApiId = apiSelection ?? apis.at(0)?.id
+  const selectedSubflow =
+    publishedWorkflows.find((workflow) => workflow.id === subflowSelection) ??
+    publishedWorkflows.at(0)
+
+  function applyChange(next: WorkflowDefinition) {
+    if (next === definition) return
+    setHistory((current) => ({
+      past: [...current.past.slice(-49), structuredClone(definition)],
+      future: [],
+    }))
+    onChange(next)
+  }
+
+  function undo() {
+    const previous = history.past.at(-1)
+    if (!previous) return
+    setHistory({
+      past: history.past.slice(0, -1),
+      future: [...history.future, structuredClone(definition)],
+    })
+    onChange(previous)
+  }
+
+  function redo() {
+    const next = history.future.at(-1)
+    if (!next) return
+    setHistory({
+      past: [...history.past, structuredClone(definition)],
+      future: history.future.slice(0, -1),
+    })
+    onChange(next)
+  }
 
   if (!definition.nodes.length) return <Empty description="请选择工作流" />
   return (
@@ -78,12 +139,38 @@ export default function WorkflowDesigner({
       <DesignerToolbar
         apiSelection={selectedApiId}
         apis={apis}
+        subflowSelection={selectedSubflow?.id}
+        subflows={publishedWorkflows}
         editable={editable}
         hasArtifacts={artifacts.length > 0}
         hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
         onApiSelection={setApiSelection}
-        onAddApi={() => selectedApiId && onChange(addApiNode(definition, selectedApiId))}
-        onAddNode={(type) => onChange(addTypedNode(definition, type, artifacts.at(0)?.id ?? null))}
+        onSubflowSelection={setSubflowSelection}
+        onAddApi={() => selectedApiId && applyChange(addApiNode(definition, selectedApiId))}
+        onAddNode={(type) =>
+          applyChange(
+            addTypedNode(
+              definition,
+              type,
+              artifacts.at(0)?.id ?? null,
+              selectedSubflow?.current_version
+                ? {
+                    workflowId: selectedSubflow.id,
+                    workflowVersion: selectedSubflow.current_version,
+                  }
+                : null,
+            ),
+          )
+        }
+        canCopy={Boolean(selected)}
+        canPaste={Boolean(clipboard)}
+        canUndo={history.past.length > 0}
+        canRedo={history.future.length > 0}
+        onCopy={() => selected && setClipboard(structuredClone(selected))}
+        onPaste={() => clipboard && applyChange(pasteNode(definition, clipboard))}
+        onUndo={undo}
+        onRedo={redo}
+        onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
       />
       <div className="workflow-designer-body">
         <div className="workflow-canvas" aria-label="工作流画布">
@@ -98,13 +185,13 @@ export default function WorkflowDesigner({
             onNodeClick={(_event, node) => setSelectedId(node.id)}
             onPaneClick={() => setSelectedId(null)}
             onNodesChange={(changes) => {
-              if (editable) onChange(applyCanvasNodeChanges(definition, nodes, changes))
+              if (editable) applyChange(applyCanvasNodeChanges(definition, nodes, changes))
             }}
             onEdgesChange={(changes) => {
-              if (editable) onChange(applyCanvasEdgeChanges(definition, edges, changes))
+              if (editable) applyChange(applyCanvasEdgeChanges(definition, edges, changes))
             }}
             onConnect={(connection) => {
-              if (editable) onChange(connectNodes(definition, edges, connection))
+              if (editable) applyChange(connectNodes(definition, edges, connection))
             }}
           >
             <Background gap={20} size={1} />
@@ -117,11 +204,12 @@ export default function WorkflowDesigner({
           definition={definition}
           apis={apis}
           artifacts={artifacts}
+          workflows={publishedWorkflows}
           editable={editable}
-          onChange={onChange}
+          onChange={applyChange}
           onDelete={() => {
             if (!selected) return
-            onChange(removeNode(definition, selected.id))
+            applyChange(removeNode(definition, selected.id))
             setSelectedId(null)
           }}
         />
@@ -133,21 +221,45 @@ export default function WorkflowDesigner({
 function DesignerToolbar({
   apiSelection,
   apis,
+  subflowSelection,
+  subflows,
   editable,
   hasArtifacts,
   hasDataset,
   onApiSelection,
+  onSubflowSelection,
   onAddApi,
   onAddNode,
+  canCopy,
+  canPaste,
+  canUndo,
+  canRedo,
+  onCopy,
+  onPaste,
+  onUndo,
+  onRedo,
+  onAutoLayout,
 }: {
   apiSelection?: string
   apis: ApiDefinition[]
+  subflowSelection?: string
+  subflows: Workflow[]
   editable: boolean
   hasArtifacts: boolean
   hasDataset: boolean
   onApiSelection: (value: string) => void
+  onSubflowSelection: (value: string) => void
   onAddApi: () => void
   onAddNode: (type: Exclude<WorkflowNode['type'], 'start' | 'api'>) => void
+  canCopy: boolean
+  canPaste: boolean
+  canUndo: boolean
+  canRedo: boolean
+  onCopy: () => void
+  onPaste: () => void
+  onUndo: () => void
+  onRedo: () => void
+  onAutoLayout: () => void
 }) {
   return (
     <div className="workflow-toolbar">
@@ -198,8 +310,49 @@ function DesignerToolbar({
         >
           数据集
         </Button>
+        <Select
+          aria-label="待添加子流程"
+          value={subflowSelection}
+          disabled={!editable}
+          placeholder="选择已发布流程"
+          className="workflow-api-select"
+          options={subflows.map((workflow) => ({
+            label: `${workflow.name} · v${workflow.current_version}`,
+            value: workflow.id,
+          }))}
+          onChange={onSubflowSelection}
+        />
+        <Button
+          icon={<ApartmentOutlined />}
+          disabled={!editable || !subflowSelection}
+          onClick={() => onAddNode('subflow')}
+        >
+          子流程
+        </Button>
+        <Button
+          icon={<RetweetOutlined />}
+          disabled={!editable || !subflowSelection}
+          onClick={() => onAddNode('for_each')}
+        >
+          ForEach
+        </Button>
         <Button icon={<FlagOutlined />} disabled={!editable} onClick={() => onAddNode('end')}>
           添加结束节点
+        </Button>
+        <Button icon={<CopyOutlined />} disabled={!editable || !canCopy} onClick={onCopy}>
+          复制
+        </Button>
+        <Button icon={<SnippetsOutlined />} disabled={!editable || !canPaste} onClick={onPaste}>
+          粘贴
+        </Button>
+        <Button icon={<UndoOutlined />} disabled={!editable || !canUndo} onClick={onUndo}>
+          撤销
+        </Button>
+        <Button icon={<RedoOutlined />} disabled={!editable || !canRedo} onClick={onRedo}>
+          重做
+        </Button>
+        <Button icon={<ApartmentOutlined />} disabled={!editable} onClick={onAutoLayout}>
+          自动布局
         </Button>
       </Space>
       <Typography.Text type="secondary">
@@ -252,7 +405,9 @@ function applyCanvasNodeChanges(
   nodes: CanvasNode[],
   changes: NodeChange<CanvasNode>[],
 ): WorkflowDefinition {
-  const changed = applyNodeChanges(changes, nodes)
+  const positionChanges = changes.filter((change) => change.type === 'position')
+  if (!positionChanges.length) return definition
+  const changed = applyNodeChanges(positionChanges, nodes)
   const positions = new Map(changed.map((node) => [node.id, node.position]))
   return {
     ...definition,
@@ -268,7 +423,9 @@ function applyCanvasEdgeChanges(
   edges: Edge[],
   changes: EdgeChange<Edge>[],
 ): WorkflowDefinition {
-  const changed = applyEdgeChanges(changes, edges)
+  const removalChanges = changes.filter((change) => change.type === 'remove')
+  if (!removalChanges.length) return definition
+  const changed = applyEdgeChanges(removalChanges, edges)
   const remaining = new Set(changed.map((edge) => edge.id))
   return { ...definition, edges: definition.edges.filter((edge) => remaining.has(edge.id)) }
 }
@@ -290,6 +447,8 @@ function nodeTypeLabel(type: WorkflowNode['type']): string {
     condition: '条件',
     delay: '延时',
     dataset: '数据集',
+    subflow: '子流程',
+    for_each: 'ForEach',
     end: '结束',
   }
   return labels[type] ?? type
@@ -303,6 +462,8 @@ function nodeIcon(type: WorkflowNode['type']) {
   if (type === 'condition') return <BranchesOutlined />
   if (type === 'delay') return <ClockCircleOutlined />
   if (type === 'dataset') return <DatabaseOutlined />
+  if (type === 'subflow') return <ApartmentOutlined />
+  if (type === 'for_each') return <RetweetOutlined />
   return <ApiOutlined />
 }
 

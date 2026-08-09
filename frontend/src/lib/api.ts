@@ -296,7 +296,17 @@ export type ExecutionDetail = {
 
 export type WorkflowNode = {
   id: string
-  type: 'start' | 'api' | 'extract' | 'assert' | 'condition' | 'delay' | 'dataset' | 'end'
+  type:
+    | 'start'
+    | 'api'
+    | 'extract'
+    | 'assert'
+    | 'condition'
+    | 'delay'
+    | 'dataset'
+    | 'subflow'
+    | 'for_each'
+    | 'end'
   name: string
   position: { x: number; y: number }
   config: Record<string, unknown>
@@ -352,6 +362,31 @@ export type WorkflowVersion = {
   definition: WorkflowDefinition
   fingerprint: string
   published_at: string
+}
+
+export type WorkflowVersionDiff = {
+  from_version: number
+  to_version: number
+  changes: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type WorkflowDebugResult = {
+  status: 'running' | 'passed' | 'failed' | 'cancelled'
+  mode: 'breakpoint' | 'replay'
+  target_node_id: string
+  context: Record<string, unknown>
+  nodes: Array<{
+    node_id: string
+    node_type: string
+    name: string
+    status: WorkflowNodeExecution['status']
+    attempts: number
+    output: unknown
+    error_code: string | null
+    error_message: string | null
+    started_at: string | null
+    completed_at: string
+  }>
 }
 
 export type WorkflowExecution = {

@@ -5,14 +5,18 @@ import { useRef, useState } from 'react'
 import {
   apiErrorMessage,
   type ExecutionEvent,
+  type WorkflowDebugResult,
   type WorkflowDefinition,
   type WorkflowExecutionDetail,
+  type WorkflowVersionDiff,
 } from '../../lib/api'
 import { useAuthStore } from '../auth/auth-store'
 import { useProjectContext } from '../projects/use-project-context'
 import { useExecutionEvents } from './use-execution-events'
 import {
   createWorkflow,
+  debugWorkflow,
+  diffWorkflowVersions,
   executeWorkflow,
   getWorkflowExecution,
   listApis,
@@ -21,6 +25,7 @@ import {
   listWorkflowExecutions,
   listWorkflows,
   publishWorkflow,
+  replayWorkflowNode,
   updateWorkflowDraft,
 } from './workflow-service'
 
@@ -41,6 +46,9 @@ export function useWorkflows() {
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({})
   const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
+  const [breakpointSelection, setBreakpointSelection] = useState<string | null>(null)
+  const [debugResult, setDebugResult] = useState<WorkflowDebugResult | null>(null)
+  const [versionDiff, setVersionDiff] = useState<WorkflowVersionDiff | null>(null)
   const completedExecutionId = useRef<string | null>(null)
   const completingExecutionId = useRef<string | null>(null)
 
@@ -68,6 +76,8 @@ export function useWorkflows() {
   const workflowId = selectedOrFirst(workflowSelection, workflows.data?.items)
   const selectedWorkflow = workflows.data?.items.find((item) => item.id === workflowId) ?? null
   const draftDefinition = draftSource(draftEdit, workflowId, selectedWorkflow)
+  const breakpointNodes = draftDefinition.nodes.filter((node) => node.type !== 'start')
+  const breakpointNodeId = selectedOrFirst(breakpointSelection, breakpointNodes)
   const executions = useQuery({
     queryKey: ['workflow-executions', projectId],
     queryFn: () => listWorkflowExecutions(requiredId(projectId)),
@@ -87,6 +97,36 @@ export function useWorkflows() {
     mutationFn: () =>
       executeWorkflow(requiredId(projectId), requiredId(workflowId), requiredId(environmentId)),
   })
+  const debugMutation = useMutation({
+    mutationFn: () =>
+      debugWorkflow(
+        requiredId(projectId),
+        requiredId(workflowId),
+        requiredId(environmentId),
+        requiredVersion(selectedWorkflow?.current_version),
+        requiredId(breakpointNodeId),
+      ),
+  })
+  const diffMutation = useMutation({
+    mutationFn: () => {
+      const current = requiredVersion(selectedWorkflow?.current_version)
+      if (current < 2) throw new Error('至少发布两个版本后才能比较')
+      return diffWorkflowVersions(
+        requiredId(projectId),
+        requiredId(workflowId),
+        current - 1,
+        current,
+      )
+    },
+  })
+  const replayMutation = useMutation({
+    mutationFn: (nodeId: string) =>
+      replayWorkflowNode(
+        requiredId(projectId),
+        requiredId(lastResult?.execution.id ?? null),
+        nodeId,
+      ),
+  })
 
   useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
 
@@ -99,6 +139,9 @@ export function useWorkflows() {
     setActiveExecutionId(null)
     setNodeStatuses({})
     setExecutionDefinition(null)
+    setBreakpointSelection(null)
+    setDebugResult(null)
+    setVersionDiff(null)
   }
 
   async function addWorkflow(input: CreateWorkflowInput) {
@@ -140,6 +183,26 @@ export function useWorkflows() {
       setActiveExecutionId(execution.id)
       void watchExecution(execution.id)
       void message.info('工作流已开始运行')
+    })
+  }
+
+  async function debugToBreakpoint() {
+    await runMutation(message.error, async () => {
+      setDebugResult(await debugMutation.mutateAsync())
+      void message.success('已运行至断点前')
+    })
+  }
+
+  async function compareLatestVersions() {
+    await runMutation(message.error, async () => {
+      setVersionDiff(await diffMutation.mutateAsync())
+    })
+  }
+
+  async function replayNode(nodeId: string) {
+    await runMutation(message.error, async () => {
+      setDebugResult(await replayMutation.mutateAsync(nodeId))
+      void message.success('节点重放完成')
     })
   }
 
@@ -213,14 +276,26 @@ export function useWorkflows() {
     nodeStatuses,
     activeExecutionId,
     lastResult,
+    breakpointNodes,
+    breakpointNodeId,
+    setBreakpointSelection,
+    debugResult,
+    versionDiff,
+    closeVersionDiff: () => setVersionDiff(null),
     addWorkflow,
     saveDraft,
     publish,
     execute,
+    debugToBreakpoint,
+    compareLatestVersions,
+    replayNode,
     creating: createMutation.isPending,
     saving: saveMutation.isPending,
     publishing: publishMutation.isPending,
     executing: executeMutation.isPending,
+    debugging: debugMutation.isPending,
+    comparing: diffMutation.isPending,
+    replaying: replayMutation.isPending,
   }
 }
 
@@ -236,7 +311,8 @@ function draftSource(
 }
 
 function selectedOrFirst(selection: string | null, items?: Identified[]): string | null {
-  return selection ?? items?.at(0)?.id ?? null
+  if (selection && items?.some((item) => item.id === selection)) return selection
+  return items?.at(0)?.id ?? null
 }
 
 function requiredId(value: string | null): string {
@@ -246,6 +322,11 @@ function requiredId(value: string | null): string {
 
 function requiredWorkflow<T>(value: T | null): T {
   if (!value) throw new Error('请选择工作流')
+  return value
+}
+
+function requiredVersion(value: number | null | undefined): number {
+  if (!value) throw new Error('工作流尚未发布')
   return value
 }
 

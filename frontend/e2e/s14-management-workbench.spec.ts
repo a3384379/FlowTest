@@ -128,9 +128,6 @@ async function manageTeam(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: '创建团队' }).click()
   await expect(page.getByText('成员与团队配置已更新').last()).toBeVisible()
 
-  await page.getByLabel('管理团队').click()
-  await page.keyboard.press('End')
-  await page.keyboard.press('Enter')
   await expect(page.getByText(name, { exact: true }).last()).toBeVisible()
   await organization.getByRole('combobox').nth(1).click()
   await page.getByText(administratorEmail, { exact: true }).last().click()

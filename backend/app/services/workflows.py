@@ -57,7 +57,7 @@ from app.services.workflow_snapshots import (
     WorkflowSnapshotBuilder,
 )
 
-SUPPORTED_S7_NODE_TYPES = frozenset(NodeType)
+SUPPORTED_NODE_TYPES = frozenset(NodeType)
 CANCELLATION_POLL_SECONDS = 0.05
 DATASET_CONCURRENCY = 5
 
@@ -169,7 +169,7 @@ class WorkflowService:
         definition: WorkflowDefinition | None,
     ) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        workflow = await self._get_workflow(project_id, workflow_id)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
         if workflow.draft_revision != expected_revision:
             raise AppError(
                 code="WORKFLOW_DRAFT_CONFLICT",
@@ -207,7 +207,7 @@ class WorkflowService:
 
     async def publish(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> WorkflowVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        workflow = await self._get_workflow(project_id, workflow_id)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
         definition = self._load_definition(workflow.draft_definition)
         await self._validate_publishable(project_id, workflow.id, definition)
         next_version = (workflow.current_version or 0) + 1
@@ -687,11 +687,7 @@ class WorkflowService:
         definition: WorkflowDefinition,
     ) -> None:
         unsupported = sorted(
-            {
-                node.type.value
-                for node in definition.nodes
-                if node.type not in SUPPORTED_S7_NODE_TYPES
-            }
+            {node.type.value for node in definition.nodes if node.type not in SUPPORTED_NODE_TYPES}
         )
         if unsupported:
             raise AppError(
@@ -1059,6 +1055,12 @@ class WorkflowService:
 
     async def _get_workflow(self, project_id: UUID, workflow_id: UUID) -> Workflow:
         workflow = await self._workflows.get(workflow_id)
+        if workflow is None or workflow.project_id != project_id:
+            raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
+        return workflow
+
+    async def _get_workflow_for_update(self, project_id: UUID, workflow_id: UUID) -> Workflow:
+        workflow = await self._workflows.get_for_update(workflow_id)
         if workflow is None or workflow.project_id != project_id:
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         return workflow
