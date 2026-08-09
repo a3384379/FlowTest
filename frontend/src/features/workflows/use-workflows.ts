@@ -9,6 +9,7 @@ import {
   type WorkflowExecutionDetail,
 } from '../../lib/api'
 import { useAuthStore } from '../auth/auth-store'
+import { useProjectContext } from '../projects/use-project-context'
 import { useExecutionEvents } from './use-execution-events'
 import {
   createWorkflow,
@@ -17,7 +18,6 @@ import {
   listApis,
   listArtifacts,
   listEnvironments,
-  listProjects,
   listWorkflowExecutions,
   listWorkflows,
   publishWorkflow,
@@ -30,7 +30,7 @@ export function useWorkflows() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const token = useAuthStore((store) => store.token)
-  const [projectSelection, setProjectSelection] = useState<string | null>(null)
+  const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [workflowSelection, setWorkflowSelection] = useState<string | null>(null)
   const [draftEdit, setDraftEdit] = useState<{
@@ -44,8 +44,6 @@ export function useWorkflows() {
   const completedExecutionId = useRef<string | null>(null)
   const completingExecutionId = useRef<string | null>(null)
 
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listProjects })
-  const projectId = selectedOrFirst(projectSelection, projects.data?.items)
   const environments = useQuery({
     queryKey: ['environments', projectId],
     queryFn: () => listEnvironments(requiredId(projectId)),
@@ -93,7 +91,7 @@ export function useWorkflows() {
   useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
 
   function selectProject(value: string) {
-    setProjectSelection(value)
+    selectContextProject(value)
     setEnvironmentSelection(null)
     setWorkflowSelection(null)
     setDraftEdit(null)

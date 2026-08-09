@@ -18,17 +18,17 @@ import {
   Typography,
   type FormInstance,
 } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 import {
   getProjectPermission,
   getProjectRetentionPolicy,
   getProjectSecurityPolicy,
-  listManagedProjects,
   listProjectAuditLogs,
   updateProjectSecurityPolicy,
   updateProjectRetentionPolicy,
 } from '../features/projects/project-service'
+import { useProjectContext } from '../features/projects/use-project-context'
 import {
   apiErrorMessage,
   type AuditLog,
@@ -67,10 +67,8 @@ export default function ProjectsPage() {
 function useProjectsPageState() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [selection, setSelection] = useState<string | null>(null)
+  const { projects, projectId, selectProject } = useProjectContext()
   const [form] = Form.useForm<PolicyForm>()
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listManagedProjects })
-  const projectId = selection ?? projects.data?.items.at(0)?.id ?? null
   const permission = useQuery({
     queryKey: ['project-permissions', projectId],
     queryFn: () => getProjectPermission(requiredId(projectId)),
@@ -123,7 +121,7 @@ function useProjectsPageState() {
     projectId,
     projects: projects.data?.items ?? [],
     projectsLoading: projects.isLoading,
-    setSelection,
+    setSelection: selectProject,
     permission: permission.data,
     permissionLoading: permission.isLoading,
     policyLoading: policy.isLoading,

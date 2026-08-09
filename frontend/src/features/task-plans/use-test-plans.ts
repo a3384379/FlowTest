@@ -3,13 +3,13 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useProjectContext } from '../projects/use-project-context'
 import {
   cancelTestPlanRun,
   createServiceToken,
   createTestPlan,
   listServiceTokens,
   listTaskEnvironments,
-  listTaskProjects,
   listTaskWorkflows,
   listTestPlanRuns,
   listTestPlans,
@@ -20,14 +20,12 @@ import {
 export function useTestPlans() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [projectSelection, setProjectSelection] = useState<string | null>(null)
+  const { projects, projectId, selectProject } = useProjectContext()
   const [createOpen, setCreateOpen] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState<{
     title: string
     value: string
   } | null>(null)
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listTaskProjects })
-  const projectId = projectSelection ?? projects.data?.items.at(0)?.id ?? null
   const workflows = useQuery({
     queryKey: ['task-workflows', projectId],
     queryFn: () => listTaskWorkflows(required(projectId)),
@@ -119,7 +117,7 @@ export function useTestPlans() {
   return {
     projects,
     projectId,
-    setProjectSelection,
+    setProjectSelection: selectProject,
     workflows,
     environments,
     plans,

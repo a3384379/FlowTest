@@ -3,6 +3,7 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useProjectContext } from '../projects/use-project-context'
 import {
   createNotificationWebhook,
   downloadArtifact,
@@ -12,7 +13,6 @@ import {
   listNotificationDeliveries,
   listNotificationWebhooks,
   listReportExecutions,
-  listReportProjects,
   setNotificationWebhookEnabled,
   type CreateNotificationWebhookInput,
 } from './report-service'
@@ -20,12 +20,10 @@ import {
 export function useReports() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [projectSelection, setProjectSelection] = useState<string | null>(null)
+  const { projects, projectId, selectProject } = useProjectContext()
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
   const [webhookOpen, setWebhookOpen] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listReportProjects })
-  const projectId = projectSelection ?? projects.data?.items.at(0)?.id ?? null
   const reports = useQuery({
     queryKey: ['reports', projectId],
     queryFn: () => listReportExecutions(required(projectId)),
@@ -103,7 +101,7 @@ export function useReports() {
   return {
     projects,
     projectId,
-    setProjectSelection,
+    setProjectSelection: selectProject,
     reports,
     trend,
     detail,

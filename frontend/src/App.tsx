@@ -8,12 +8,28 @@ import {
   ScheduleOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Avatar, Button, Layout, Menu, Space, Spin, Tag, Typography } from 'antd'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import {
+  Avatar,
+  Breadcrumb,
+  Button,
+  Empty,
+  Layout,
+  Menu,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from 'antd'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
 
 import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
+import ProjectProvider from './features/projects/ProjectProvider'
+import { projectPath, type ProjectSection } from './features/projects/project-routing'
+import { useProjectContext } from './features/projects/use-project-context'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
@@ -23,7 +39,15 @@ const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 
 const { Header, Content, Sider } = Layout
-type PageKey = 'dashboard' | 'projects' | 'apis' | 'workflows' | 'tasks' | 'reports'
+
+const sectionLabels: Record<ProjectSection, string> = {
+  dashboard: '首页',
+  settings: '项目管理',
+  apis: '接口管理',
+  workflows: '流程编排',
+  tasks: '任务执行',
+  reports: '测试报告',
+}
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -38,13 +62,18 @@ export default function App() {
   if (!initialized) return <FullPageLoading />
   if (!token || !user) return <LoginPage />
   if (user.requires_password_change) return <PasswordChangePage />
-  return <AuthenticatedShell />
+  return (
+    <ProjectProvider>
+      <AuthenticatedShell />
+    </ProjectProvider>
+  )
 }
 
 function AuthenticatedShell() {
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
-  const [page, setPage] = useState<PageKey>('dashboard')
+  const { projects, projectId, currentProject, section, selectProject, pathFor } =
+    useProjectContext()
   return (
     <Layout className="app-shell">
       <Sider width={224} theme="dark" className="sidebar">
@@ -55,21 +84,35 @@ function AuthenticatedShell() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[page]}
-          onClick={({ key }) => setPage(key as PageKey)}
+          selectedKeys={[section]}
           items={[
-            { key: 'dashboard', icon: <DashboardOutlined />, label: '首页' },
-            { key: 'projects', icon: <FolderOpenOutlined />, label: '项目管理' },
-            { key: 'apis', icon: <ApiOutlined />, label: '接口管理' },
-            { key: 'workflows', icon: <ApartmentOutlined />, label: '流程编排' },
-            { key: 'tasks', icon: <ScheduleOutlined />, label: '任务执行' },
-            { key: 'reports', icon: <BarChartOutlined />, label: '测试报告' },
+            navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
+            navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
+            navigationItem('apis', <ApiOutlined />, pathFor('apis')),
+            navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
+            navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
+            navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
           ]}
         />
       </Sider>
       <Layout>
         <Header className="topbar">
-          <Typography.Text strong>接口自动化测试平台</Typography.Text>
+          <Space>
+            <Typography.Text strong>接口自动化测试平台</Typography.Text>
+            <Select
+              aria-label="全局项目"
+              className="global-project-select"
+              allowClear
+              loading={projects.isLoading}
+              placeholder="全部项目"
+              value={projectId ?? undefined}
+              onChange={(value?: string) => selectProject(value ?? null)}
+              options={projects.data?.items.map((project) => ({
+                value: project.id,
+                label: project.name,
+              }))}
+            />
+          </Space>
           <Space>
             <Tag color="blue">LOCAL</Tag>
             <Avatar size="small" icon={<UserOutlined />} />
@@ -80,18 +123,65 @@ function AuthenticatedShell() {
           </Space>
         </Header>
         <Content className="content">
+          <Breadcrumb
+            className="page-breadcrumb"
+            items={breadcrumbItems(currentProject?.name ?? null, section)}
+          />
           <Suspense fallback={<PageLoading />}>
-            {page === 'dashboard' && <DashboardPage />}
-            {page === 'projects' && <ProjectsPage />}
-            {page === 'apis' && <ApiConsolePage />}
-            {page === 'workflows' && <WorkflowsPage />}
-            {page === 'tasks' && <TestPlansPage />}
-            {page === 'reports' && <ReportsPage />}
+            <ApplicationRoutes key={projectId ?? 'global'} />
           </Suspense>
         </Content>
       </Layout>
     </Layout>
   )
+}
+
+function ApplicationRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/dashboard" element={<DashboardPage />} />
+      <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
+      <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
+      <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
+      <Route path="/projects/:projectId/workflows" element={<WorkflowsPage />} />
+      <Route path="/projects/:projectId/tasks" element={<TestPlansPage />} />
+      <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
+      <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
+      {(['settings', 'apis', 'workflows', 'tasks', 'reports'] as const).map((section) => (
+        <Route
+          key={section}
+          path={`/${section}`}
+          element={<DefaultProjectRedirect section={section} />}
+        />
+      ))}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  )
+}
+
+function DefaultProjectRedirect({ section }: { section: ProjectSection }) {
+  const { projects } = useProjectContext()
+  if (projects.isLoading) return <PageLoading />
+  const projectId = projects.data?.items.at(0)?.id
+  if (!projectId) return <Empty description="暂无可访问项目" />
+  return <Navigate to={projectPath(projectId, section)} replace />
+}
+
+function ProjectIndexRedirect() {
+  const { projectId } = useProjectContext()
+  return <Navigate to={projectId ? projectPath(projectId, 'dashboard') : '/dashboard'} replace />
+}
+
+function navigationItem(section: ProjectSection, icon: ReactNode, path: string) {
+  return { key: section, icon, label: <Link to={path}>{sectionLabels[section]}</Link> }
+}
+
+function breadcrumbItems(projectName: string | null, section: ProjectSection) {
+  const items = [{ title: <Link to="/dashboard">FlowTest</Link> }]
+  if (projectName) items.push({ title: <span>{projectName}</span> })
+  items.push({ title: <span>{sectionLabels[section]}</span> })
+  return items
 }
 
 function FullPageLoading() {

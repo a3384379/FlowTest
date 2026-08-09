@@ -16,6 +16,7 @@ import {
   workflowVersion,
 } from '../test/fixtures'
 import { server } from '../test/server'
+import ProjectTestProvider from '../test/ProjectTestProvider'
 
 describe('WorkflowsPage', () => {
   it('publishes and runs an immutable workflow version', async () => {
@@ -105,7 +106,9 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <WorkflowsPage />
+        <ProjectTestProvider section="workflows">
+          <WorkflowsPage />
+        </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )

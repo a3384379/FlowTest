@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { project } from '../test/fixtures'
 import { server } from '../test/server'
+import ProjectTestProvider from '../test/ProjectTestProvider'
 import ProjectsPage from './ProjectsPage'
 
 describe('ProjectsPage', () => {
@@ -107,7 +108,9 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectsPage />
+        <ProjectTestProvider section="settings">
+          <ProjectsPage />
+        </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )

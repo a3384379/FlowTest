@@ -10,12 +10,27 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
 
   await page.getByText('项目管理', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
-  await expect(page.getByText(/^S11 V1 Pilot /)).toBeVisible()
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/settings$/)
+  const governanceUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(governanceUrl)
+  await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('main')
+      .getByText(/^S11 V1 Pilot /)
+      .first(),
+  ).toBeVisible()
   await expect(page.getByText('当前身份：系统管理员')).toBeVisible()
   await expect(page.getByLabel('保留天数')).toHaveValue('90')
   await expect(page.getByLabel('允许域名（每行一个）')).toHaveValue('mock-target')
   await expect(page.getByLabel('允许私网 CIDR（每行一个）')).toHaveValue('172.16.0.0/12')
   await expect(page.getByText('project.retention_policy_updated')).toBeVisible()
+
+  await page.getByText('首页', { exact: true }).click()
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
+  await expect(page.getByRole('heading', { name: '工作台' })).toBeVisible()
+  await expect(page.getByText(/^当前查看：S11 V1 Pilot /)).toBeVisible()
 
   await page.getByText('测试报告', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '测试报告' })).toBeVisible()

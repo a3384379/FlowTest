@@ -102,8 +102,8 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 
 | 迭代 | 版本目标 | 主要交付 | 状态 |
 |---|---|---|---|
-| S12 | V1.1 稳定基线 | Python 3.13、依赖/镜像升级、V2 Feature Flags、真实 Workflow 容量基线、试点观察机制 | 实施中 |
-| S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 待实施 |
+| S12 | V1.1 稳定基线 | Python 3.13、依赖/镜像升级、V2 Feature Flags、真实 Workflow 容量基线、试点观察机制 | 代码与自动化门槛已完成；真实两周观察持续记录 |
+| S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 已完成 |
 | S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 待实施 |
 | S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 待实施 |
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 待实施 |
@@ -115,3 +115,12 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 
 S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
 [`docs/operations/soak-observation.md`](operations/soak-observation.md)。
+
+## S13 完成清单
+
+1. React Router 以 `/projects/{project_id}/{section}` 固化页面与项目上下文，刷新和深链接均不丢失选择。
+2. 全局项目选择、侧栏链接和面包屑共享同一 URL 真源；无权限或不存在的项目会回到全局工作台。
+3. `/api/v1/dashboard/summary` 与 `/api/v1/dashboard/recent-executions` 从可访问项目、API、Workflow 及真实执行记录聚合数据，继续执行项目隔离。
+4. Dashboard 展示资产数量、今日执行/通过率、七日趋势和 API/Workflow 最近运行，时间按 Asia/Shanghai 呈现。
+5. Vite 8/Rolldown 按 React、TanStack 和 ECharts 的稳定依赖边界拆包；共享首屏块由约 765 KB 降至约 503 KB，最大按需图表块约 519 KB，均低于 550 KB 告警阈值，并通过真实浏览器加载验证。
+6. Vitest 覆盖深链接、默认项目、空项目、URL 切换和非法项目回退；Playwright 覆盖项目页刷新及项目 Dashboard 回跳。

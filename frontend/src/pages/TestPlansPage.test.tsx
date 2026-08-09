@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import type { CreatedServiceToken, CreatedTestPlan, ServiceToken, TestPlanRun } from '../lib/api'
 import { environment, project, user, workflow } from '../test/fixtures'
 import { server } from '../test/server'
+import ProjectTestProvider from '../test/ProjectTestProvider'
 import TestPlansPage from './TestPlansPage'
 
 const plan: CreatedTestPlan = {
@@ -141,7 +142,9 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <TestPlansPage />
+        <ProjectTestProvider section="tasks">
+          <TestPlansPage />
+        </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )

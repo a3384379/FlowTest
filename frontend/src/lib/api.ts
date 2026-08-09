@@ -42,6 +42,38 @@ export type Project = {
   role: 'owner' | 'editor' | 'viewer' | null
 }
 
+export type DashboardTrendPoint = {
+  date: string
+  total: number
+  passed: number
+  failed: number
+  running: number
+}
+
+export type DashboardSummary = {
+  project_count: number
+  api_count: number
+  workflow_count: number
+  today_total: number
+  today_passed: number
+  today_failed: number
+  pass_rate: number
+  trend: DashboardTrendPoint[]
+}
+
+export type RecentExecution = {
+  id: string
+  project_id: string
+  project_name: string
+  kind: 'api' | 'workflow'
+  target_id: string
+  target_name: string
+  status: string
+  started_at: string
+  completed_at: string | null
+  duration_ms: number | null
+}
+
 export type Environment = {
   id: string
   project_id: string
