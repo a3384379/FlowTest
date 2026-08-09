@@ -2,6 +2,8 @@ import {
   apiClient,
   type Artifact,
   type ApiDefinition,
+  type ApiDetail,
+  type ApiVersion,
   type Environment,
   type ExecutionDetail,
   type ImportRun,
@@ -33,6 +35,20 @@ export type CreateApiInput = {
   body: unknown
   body_kind?: BodyKind
   auth?: { kind: AuthKind; values: Record<string, string> }
+}
+
+export type ApiVersionInput = Pick<
+  ApiVersion,
+  | 'method'
+  | 'path'
+  | 'query_parameters'
+  | 'headers'
+  | 'body_kind'
+  | 'body'
+  | 'extraction_rules'
+  | 'assertions'
+> & {
+  auth: { kind: ApiVersion['auth_kind']; values: Record<string, string> }
 }
 
 export async function listProjects(): Promise<Page<Project>> {
@@ -89,10 +105,61 @@ export async function createApi(projectId: string, input: CreateApiInput) {
   return response.data.definition
 }
 
+export async function getApiDetail(projectId: string, apiId: string): Promise<ApiDetail> {
+  return (await apiClient.get<ApiDetail>(`/projects/${projectId}/apis/${apiId}`)).data
+}
+
+export async function createApiVersion(
+  projectId: string,
+  apiId: string,
+  input: ApiVersionInput,
+): Promise<ApiVersion> {
+  return (await apiClient.post<ApiVersion>(`/projects/${projectId}/apis/${apiId}/versions`, input))
+    .data
+}
+
+export async function previewApi(
+  projectId: string,
+  apiId: string,
+  environmentId: string,
+): Promise<{
+  method: string
+  url: string
+  headers: Array<{ name: string; value: string; source: string }>
+  body: unknown
+}> {
+  return (
+    await apiClient.post(`/projects/${projectId}/apis/${apiId}/preview`, {
+      environment_id: environmentId,
+      runtime_variables: {},
+      runtime_headers: {},
+    })
+  ).data
+}
+
+export async function exportApis(
+  projectId: string,
+  exportFormat: 'har' | 'curl' | 'bruno' | 'excel',
+): Promise<void> {
+  const response = await apiClient.get<Blob>(`/projects/${projectId}/exports/apis`, {
+    params: { format: exportFormat },
+    responseType: 'blob',
+  })
+  const disposition = String(response.headers['content-disposition'] ?? '')
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `flowtest.${exportFormat}`
+  const url = URL.createObjectURL(response.data)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export async function previewApiDocument(
   projectId: string,
   file: File,
-  sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' = 'auto',
+  sourceType:
+    'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel' = 'auto',
 ): Promise<ImportRun> {
   const form = new FormData()
   form.append('document', file)
@@ -144,18 +211,21 @@ export async function executeApi(
   apiId: string,
   environmentId: string,
   expectedStatus: number,
+  assertions?: ApiVersion['assertions'],
 ): Promise<ExecutionDetail> {
   const response = await apiClient.post<ExecutionDetail>(
     `/projects/${projectId}/apis/${apiId}/execute`,
     {
       environment_id: environmentId,
-      assertions: [
-        {
-          kind: 'status_code',
-          operator: 'equals',
-          expected: expectedStatus,
-        },
-      ],
+      assertions: assertions?.length
+        ? assertions
+        : [
+            {
+              kind: 'status_code',
+              operator: 'equals',
+              expected: expectedStatus,
+            },
+          ],
     },
     { headers: { 'Idempotency-Key': crypto.randomUUID() } },
   )

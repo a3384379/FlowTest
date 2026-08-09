@@ -55,7 +55,10 @@ describe('S4 API console panels', () => {
       new File(['{}'], 'openapi.json', { type: 'application/json' }),
     )
     await userEvent.click(screen.getByRole('button', { name: '生成 Diff' }))
-    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ name: 'openapi.json' }))
+    expect(onPreview).toHaveBeenCalledWith({
+      file: expect.objectContaining({ name: 'openapi.json' }),
+      sourceType: 'auto',
+    })
 
     rerender(
       <ImportDialog

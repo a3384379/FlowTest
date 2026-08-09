@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.domain.access import ProjectCapability, ProjectRole
+from app.domain.access import ProjectCapability, ProjectRole, TeamGrantRole
 
 
 class UserResponse(BaseModel):
@@ -123,6 +123,58 @@ class MemberResponse(BaseModel):
     project_id: UUID
     user_id: UUID
     role: ProjectRole
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=4000)
+
+
+class TeamUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4000)
+
+
+class TeamResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str
+    created_by_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeamMemberWrite(BaseModel):
+    user_id: UUID
+
+
+class TeamMemberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    team_id: UUID
+    user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectTeamGrantWrite(BaseModel):
+    team_id: UUID
+    role: TeamGrantRole
+
+
+class ProjectTeamGrantResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    team_id: UUID
+    role: TeamGrantRole
+    created_by_id: UUID
     created_at: datetime
     updated_at: datetime
 

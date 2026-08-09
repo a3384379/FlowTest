@@ -4,8 +4,18 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.access import ProjectRole
-from app.models.access import AuditLog, Folder, Project, ProjectMember, RefreshSession, User
+from app.domain.access import ProjectRole, TeamGrantRole
+from app.models.access import (
+    AuditLog,
+    Folder,
+    Project,
+    ProjectMember,
+    ProjectTeamGrant,
+    RefreshSession,
+    Team,
+    TeamMember,
+    User,
+)
 
 
 class UserRepository:
@@ -82,24 +92,32 @@ class ProjectRepository:
             total = await self._session.scalar(select(func.count()).select_from(Project))
             return [(project, None) for project in projects], int(total or 0)
 
-        base = (
+        direct_query = (
             select(Project, ProjectMember.role)
             .join(ProjectMember, ProjectMember.project_id == Project.id)
             .where(ProjectMember.user_id == user_id)
         )
-        rows = list(
-            (
-                await self._session.execute(
-                    base.order_by(Project.created_at.desc()).offset(offset).limit(limit)
-                )
-            ).tuples()
+        direct_rows = list((await self._session.execute(direct_query)).tuples())
+        team_query = (
+            select(Project, ProjectTeamGrant.role)
+            .join(ProjectTeamGrant, ProjectTeamGrant.project_id == Project.id)
+            .join(TeamMember, TeamMember.team_id == ProjectTeamGrant.team_id)
+            .where(TeamMember.user_id == user_id)
         )
-        count_query = (
-            select(func.count()).select_from(ProjectMember).where(ProjectMember.user_id == user_id)
-        )
-        total = await self._session.scalar(count_query)
-        accessible_rows: list[tuple[Project, ProjectRole | None]] = list(rows)
-        return accessible_rows, int(total or 0)
+        team_rows = list((await self._session.execute(team_query)).tuples())
+        direct_ids = {project.id for project, _role in direct_rows}
+        accessible: dict[UUID, tuple[Project, ProjectRole]] = {
+            project.id: (project, ProjectRole(role)) for project, role in direct_rows
+        }
+        for project, grant_role in team_rows:
+            if project.id in direct_ids:
+                continue
+            role = TeamGrantRole(grant_role).project_role
+            current = accessible.get(project.id)
+            if current is None or role is ProjectRole.EDITOR:
+                accessible[project.id] = (project, role)
+        ordered = sorted(accessible.values(), key=lambda item: item[0].created_at, reverse=True)
+        return list(ordered[offset : offset + limit]), len(ordered)
 
     async def get_role(self, *, project_id: UUID, user_id: UUID) -> ProjectRole | None:
         role = await self._session.scalar(
@@ -108,7 +126,25 @@ class ProjectRepository:
                 ProjectMember.user_id == user_id,
             )
         )
-        return ProjectRole(role) if role is not None else None
+        if role is not None:
+            return ProjectRole(role)
+        grants = list(
+            (
+                await self._session.scalars(
+                    select(ProjectTeamGrant.role)
+                    .join(TeamMember, TeamMember.team_id == ProjectTeamGrant.team_id)
+                    .where(
+                        ProjectTeamGrant.project_id == project_id,
+                        TeamMember.user_id == user_id,
+                    )
+                )
+            ).all()
+        )
+        if TeamGrantRole.EDITOR in grants:
+            return ProjectRole.EDITOR
+        if grants:
+            return ProjectRole.VIEWER
+        return None
 
     async def get_member(self, *, project_id: UUID, user_id: UUID) -> ProjectMember | None:
         result = await self._session.execute(
@@ -212,3 +248,72 @@ class ProjectRepository:
             select(func.count()).select_from(AuditLog).where(*filters)
         )
         return logs, int(total or 0)
+
+
+class TeamRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, team_id: UUID) -> Team | None:
+        return await self._session.get(Team, team_id)
+
+    async def get_by_name(self, name: str) -> Team | None:
+        result = await self._session.execute(select(Team).where(Team.name == name))
+        return result.scalar_one_or_none()
+
+    async def list_teams(self, *, offset: int, limit: int) -> tuple[list[Team], int]:
+        teams = list(
+            (
+                await self._session.scalars(
+                    select(Team).order_by(Team.name).offset(offset).limit(limit)
+                )
+            ).all()
+        )
+        total = await self._session.scalar(select(func.count()).select_from(Team))
+        return teams, int(total or 0)
+
+    async def get_member(self, *, team_id: UUID, user_id: UUID) -> TeamMember | None:
+        result = await self._session.execute(
+            select(TeamMember).where(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_members(self, team_id: UUID) -> list[TeamMember]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(TeamMember)
+                    .where(TeamMember.team_id == team_id)
+                    .order_by(TeamMember.created_at)
+                )
+            ).all()
+        )
+
+    async def get_grant(self, *, project_id: UUID, team_id: UUID) -> ProjectTeamGrant | None:
+        result = await self._session.execute(
+            select(ProjectTeamGrant).where(
+                ProjectTeamGrant.project_id == project_id,
+                ProjectTeamGrant.team_id == team_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_grants(self, project_id: UUID) -> list[ProjectTeamGrant]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(ProjectTeamGrant)
+                    .where(ProjectTeamGrant.project_id == project_id)
+                    .order_by(ProjectTeamGrant.created_at)
+                )
+            ).all()
+        )
+
+    def add(self, entity: Team | TeamMember | ProjectTeamGrant) -> None:
+        self._session.add(entity)
+
+    async def delete(self, entity: TeamMember | ProjectTeamGrant) -> None:
+        await self._session.delete(entity)

@@ -216,10 +216,23 @@ async def test_environment_secret_api_version_and_preview_flow(
             "path": "/health",
             "body_kind": "none",
             "auth": {"kind": "none", "values": {}},
+            "extraction_rules": [
+                {"name": "request_id", "kind": "header", "expression": "X-Request-ID"}
+            ],
+            "assertions": [
+                {
+                    "kind": "status_code",
+                    "operator": "equals",
+                    "target": None,
+                    "expected": 200,
+                }
+            ],
         },
     )
     assert version_two.status_code == 201
     assert version_two.json()["version"] == 2
+    assert version_two.json()["extraction_rules"][0]["name"] == "request_id"
+    assert version_two.json()["assertions"][0]["expected"] == 200
     version_three = await asset_client.post(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/versions",
         headers=headers,
@@ -251,8 +264,14 @@ async def test_environment_secret_api_version_and_preview_flow(
     original = await asset_client.get(
         f"/api/v1/projects/{project_id}/apis/{definition_id}?version=1", headers=headers
     )
+    persisted_version_two = await asset_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}?version=2", headers=headers
+    )
     assert current.json()["version"]["version"] == 3
     assert original.json()["version"]["version"] == 1
+    assert persisted_version_two.json()["version"]["extraction_rules"] == [
+        {"name": "request_id", "kind": "header", "expression": "X-Request-ID"}
+    ]
     versions = await asset_client.get(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/versions", headers=headers
     )

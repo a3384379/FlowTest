@@ -34,11 +34,32 @@ class AuthKind(StrEnum):
     API_KEY = "api_key"
 
 
+class ExtractionKind(StrEnum):
+    JSONPATH = "jsonpath"
+    JMESPATH = "jmespath"
+    HEADER = "header"
+
+
 @dataclass(frozen=True, slots=True)
 class QueryParameterSpec:
     name: str
     value: str
     enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionRuleSpec:
+    name: str
+    kind: ExtractionKind
+    expression: str
+
+
+@dataclass(frozen=True, slots=True)
+class APIAssertionSpec:
+    kind: str
+    operator: str
+    target: str | None
+    expected: JsonValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +72,8 @@ class APIVersionSpec:
     body: JsonValue
     auth_kind: AuthKind
     auth_config: dict[str, str]
+    extraction_rules: tuple[ExtractionRuleSpec, ...] = ()
+    assertions: tuple[APIAssertionSpec, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

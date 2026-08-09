@@ -125,6 +125,37 @@ def test_import_fingerprints_distinguish_identity_from_content() -> None:
     assert first_operations[0].content_fingerprint != changed_operations[0].content_fingerprint
 
 
+def test_curl_import_redacts_credentials_and_never_accepts_shell_options() -> None:
+    source_type, operations = parse_import_document(
+        b"curl -u tester:password -H 'Authorization: Bearer token' https://api.example.com/users"
+    )
+
+    assert source_type is ImportSourceType.CURL
+    request = operations[0].request
+    assert request.auth_config["password"] == "{{secret.IMPORTED_PASSWORD}}"
+    assert request.headers["Authorization"] == "{{secret.IMPORTED_AUTHORIZATION}}"
+
+    with pytest.raises(ImportDocumentError, match="暂不支持"):
+        parse_import_document(
+            b"curl https://api.example.com --output /tmp/exfiltrated",
+            ImportSourceType.CURL,
+        )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"curl https://one.example.com https://two.example.com",
+        b"curl --request TRACE https://api.example.com",
+        b"curl 'https://api.example.com",
+        b"not-curl https://api.example.com",
+    ],
+)
+def test_malformed_curl_commands_are_rejected(content: bytes) -> None:
+    with pytest.raises(ImportDocumentError):
+        parse_import_document(content, ImportSourceType.CURL)
+
+
 @pytest.mark.parametrize("content", [b"[]", b"not: [valid"])
 def test_invalid_documents_are_rejected(content: bytes) -> None:
     with pytest.raises(ImportDocumentError):

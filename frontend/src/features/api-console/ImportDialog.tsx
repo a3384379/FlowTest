@@ -9,9 +9,12 @@ type ImportDialogProps = {
   importing: boolean
   result: ImportRun | null
   onClose: () => void
-  onPreview: (file: File) => Promise<ImportRun>
+  onPreview: (input: { file: File; sourceType: ImportSourceType }) => Promise<ImportRun>
   onMerge: (selectedKeys: string[]) => Promise<ImportRun>
 }
+
+type ImportSourceType =
+  'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
 
 const changeLabels: Record<ImportChange, { label: string; color: string }> = {
   added: { label: '新增', color: 'green' },
@@ -22,6 +25,7 @@ const changeLabels: Record<ImportChange, { label: string; color: string }> = {
 
 export default function ImportDialog(props: ImportDialogProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [sourceType, setSourceType] = useState<ImportSourceType>('auto')
   const [selectedKeys, setSelectedKeys] = useState<string[] | null>(null)
   const effectiveSelectedKeys = selectedKeys ?? defaultSelection(props.result)
 
@@ -48,7 +52,7 @@ export default function ImportDialog(props: ImportDialogProps) {
         } else if (props.result) {
           void props.onMerge(effectiveSelectedKeys)
         } else if (file) {
-          void props.onPreview(file)
+          void props.onPreview({ file, sourceType })
         }
       }}
       destroyOnHidden
@@ -60,7 +64,11 @@ export default function ImportDialog(props: ImportDialogProps) {
           onSelectionChange={setSelectedKeys}
         />
       ) : (
-        <ImportPicker onChange={setFile} />
+        <ImportPicker
+          sourceType={sourceType}
+          onSourceTypeChange={setSourceType}
+          onChange={setFile}
+        />
       )}
     </Modal>
   )
@@ -73,21 +81,42 @@ function defaultSelection(result: ImportRun | null): string[] {
     .map((item) => item.import_key)
 }
 
-function ImportPicker({ onChange }: { onChange: (file: File) => void }) {
+function ImportPicker({
+  sourceType,
+  onSourceTypeChange,
+  onChange,
+}: {
+  sourceType: ImportSourceType
+  onSourceTypeChange: (value: ImportSourceType) => void
+  onChange: (file: File) => void
+}) {
   return (
     <>
       <Alert
         type="info"
         showIcon
-        title="支持 OpenAPI 3、Swagger 2 和 Postman Collection"
+        title="支持 OpenAPI 3、Swagger 2、Postman、HAR、cURL、Bruno 和 Excel"
         description="系统会按请求方法和规范化路径去重，并展示新增、变更、删除和未变化项。"
       />
       <div className="import-format-row">
         <Typography.Text>格式识别</Typography.Text>
-        <Select value="auto" disabled options={[{ value: 'auto', label: '自动识别' }]} />
+        <Select
+          value={sourceType}
+          onChange={onSourceTypeChange}
+          options={[
+            { value: 'auto', label: '自动识别' },
+            { value: 'openapi3', label: 'OpenAPI 3' },
+            { value: 'swagger2', label: 'Swagger 2' },
+            { value: 'postman', label: 'Postman Collection' },
+            { value: 'har', label: 'HAR' },
+            { value: 'curl', label: 'cURL' },
+            { value: 'bruno', label: 'Bruno' },
+            { value: 'excel', label: 'Excel' },
+          ]}
+        />
       </div>
       <Upload.Dragger
-        accept=".json,.yaml,.yml"
+        accept=".json,.yaml,.yml,.har,.txt,.curl,.bru,.xlsx"
         maxCount={1}
         beforeUpload={(selected) => {
           onChange(selected)

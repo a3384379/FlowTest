@@ -409,6 +409,58 @@ body {
   margin-bottom: 20px;
 }
 
+.management-card {
+  width: 100%;
+}
+
+.management-select {
+  min-width: 220px;
+}
+
+.role-select,
+.method-select {
+  min-width: 120px;
+}
+
+.environment-url-input {
+  min-width: 360px;
+}
+
+.workbench-request-line {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.workbench-dynamic-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.workbench-dynamic-row .ant-form-item {
+  flex: 1;
+  margin-bottom: 8px;
+}
+
+.assertion-select {
+  min-width: 150px;
+}
+
+.preview-code {
+  max-height: 520px;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+}
+
+.runner-card {
+  margin-top: 16px;
+}
+
 .selected-row td {
   background: #eff6ff !important;
 }

@@ -104,7 +104,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 |---|---|---|---|
 | S12 | V1.1 稳定基线 | Python 3.13、依赖/镜像升级、V2 Feature Flags、真实 Workflow 容量基线、试点观察机制 | 代码与自动化门槛已完成；真实两周观察持续记录 |
 | S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 已完成 |
-| S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 待实施 |
+| S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 已完成 |
 | S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 待实施 |
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 待实施 |
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 待实施 |
@@ -124,3 +124,13 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 4. Dashboard 展示资产数量、今日执行/通过率、七日趋势和 API/Workflow 最近运行，时间按 Asia/Shanghai 呈现。
 5. Vite 8/Rolldown 按 React、TanStack 和 ECharts 的稳定依赖边界拆包；共享首屏块由约 765 KB 降至约 503 KB，最大按需图表块约 519 KB，均低于 550 KB 告警阈值，并通过真实浏览器加载验证。
 6. Vitest 覆盖深链接、默认项目、空项目、URL 切换和非法项目回退；Playwright 覆盖项目页刷新及项目 Dashboard 回跳。
+
+## S14 完成清单
+
+1. 单组织 Team、TeamMember 和 ProjectTeamGrant 已落库；团队只能授予 Editor/Viewer，System Admin 最高、直接项目成员覆盖团队授权，并通过越权、撤销和数据隔离测试。
+2. 项目治理页开放用户、团队、项目成员、团队授权、任意层级目录、项目配置、环境与只写 Secret 管理；Secret 列表不返回明文、密文或 nonce。
+3. API 工作台可持续编辑 Method、Path、Params、Headers、Auth、Body、提取和断言，每次保存生成不可变版本，并可预览带来源和脱敏值的最终请求。
+4. 导入扩展至 HAR、cURL、Bruno 和 Excel，继续使用指纹 Diff/Merge；cURL 只由 `shlex` 解析且拒绝 shell 选项、多个 URL、未知方法和不完整引号，不执行输入内容。
+5. API 资产可导出 HAR、cURL、Bruno 和 Excel；认证值统一输出 Secret 引用或脱敏占位，不导出可用凭据。
+6. `20260809_0011` 可在真实 PostgreSQL 上 0010→0011→0010→0011 往返；Alembic 漂移检查现同时比较类型和服务器默认值，并对 PostgreSQL JSON 默认值采用结构化比较。
+7. Playwright 打通 API v2 保存与预览、环境、目录重命名、变量/Header、Secret、团队成员和团队授权；S3–S11 原业务冒烟保持全绿。

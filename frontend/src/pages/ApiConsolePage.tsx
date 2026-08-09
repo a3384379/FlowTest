@@ -1,8 +1,26 @@
-import { ApiOutlined, ImportOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, InputNumber, Select, Space, Table, Tag, Typography } from 'antd'
+import {
+  ApiOutlined,
+  DownloadOutlined,
+  ImportOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+} from '@ant-design/icons'
+import {
+  Button,
+  Card,
+  Dropdown,
+  Empty,
+  InputNumber,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import { useState } from 'react'
 
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
+import APIWorkbench from '../features/api-console/APIWorkbench'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import ExecutionResultPanel from '../features/api-console/ExecutionResultPanel'
 import ImportDialog from '../features/api-console/ImportDialog'
@@ -72,6 +90,26 @@ export default function ApiConsolePage() {
           >
             导入接口
           </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'har', label: '导出 HAR' },
+                { key: 'curl', label: '导出 cURL' },
+                { key: 'bruno', label: '导出 Bruno' },
+                { key: 'excel', label: '导出 Excel' },
+              ],
+              onClick: ({ key }) =>
+                consoleState.exportApis(key as 'har' | 'curl' | 'bruno' | 'excel'),
+            }}
+          >
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={!canCreateAssets}
+              loading={consoleState.exporting}
+            >
+              导出
+            </Button>
+          </Dropdown>
           <Select
             aria-label="当前环境"
             className="context-select"
@@ -114,17 +152,27 @@ export default function ApiConsolePage() {
           />
         </Card>
 
-        <Card
-          title="请求运行器"
-          extra={<RunnerActions state={consoleState} enabled={canExecute} />}
-        >
-          <RunnerContent
-            enabled={canExecute}
-            result={consoleState.result}
-            history={consoleState.history.data?.items ?? []}
-          />
-        </Card>
+        <APIWorkbench
+          detail={consoleState.apiDetail.data}
+          loading={consoleState.apiDetail.isLoading}
+          saving={consoleState.savingVersion}
+          previewing={consoleState.previewing}
+          onSave={consoleState.saveVersion}
+          onPreview={consoleState.previewRequest}
+        />
       </div>
+
+      <Card
+        title="请求运行器"
+        className="runner-card"
+        extra={<RunnerActions state={consoleState} enabled={canExecute} />}
+      >
+        <RunnerContent
+          enabled={canExecute}
+          result={consoleState.result}
+          history={consoleState.history.data?.items ?? []}
+        />
+      </Card>
 
       <ArtifactPanel
         disabled={!canCreateAssets}

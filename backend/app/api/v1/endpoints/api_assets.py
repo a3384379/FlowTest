@@ -3,7 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency
-from app.domain.api_assets import APIVersionSpec, QueryParameterSpec
+from app.domain.api_assets import (
+    APIAssertionSpec,
+    APIVersionSpec,
+    ExtractionRuleSpec,
+    QueryParameterSpec,
+)
 from app.schemas.api_assets import (
     APIDefinitionCreate,
     APIDefinitionResponse,
@@ -303,4 +308,17 @@ def _version_spec(payload: APIVersionInput) -> APIVersionSpec:
         body=payload.body,
         auth_kind=payload.auth.kind,
         auth_config=payload.auth.values,
+        extraction_rules=tuple(
+            ExtractionRuleSpec(name=item.name, kind=item.kind, expression=item.expression)
+            for item in payload.extraction_rules
+        ),
+        assertions=tuple(
+            APIAssertionSpec(
+                kind=item.kind.value,
+                operator=item.operator.value,
+                target=item.target,
+                expected=item.expected,
+            )
+            for item in payload.assertions
+        ),
     )

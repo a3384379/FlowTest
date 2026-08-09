@@ -42,6 +42,15 @@ class ProjectRole(StrEnum):
         return capability in self.capabilities
 
 
+class TeamGrantRole(StrEnum):
+    EDITOR = "editor"
+    VIEWER = "viewer"
+
+    @property
+    def project_role(self) -> ProjectRole:
+        return ProjectRole(self.value)
+
+
 class FolderMoveError(ValueError):
     """Raised when a folder move would violate tree invariants."""
 
