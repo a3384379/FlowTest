@@ -6,3 +6,4 @@
 2. 变量/Header 作用域
 3. Workflow 持久化格式
 4. Execution Snapshot 与状态机
+5. 后台执行与实时事件传输

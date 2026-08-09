@@ -1,7 +1,7 @@
 from typing import Annotated
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.core.errors import AppError
 from app.core.security import token_service
 from app.models.access import User
 from app.repositories.access import UserRepository
+from app.services.workflow_coordinator import WorkflowRunCoordinator
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -56,3 +57,17 @@ async def require_system_admin(current_user: CurrentUser) -> User:
 
 
 SystemAdministrator = Annotated[User, Depends(require_system_admin)]
+
+
+def get_workflow_coordinator(request: Request) -> WorkflowRunCoordinator:
+    coordinator = getattr(request.app.state, "workflow_run_coordinator", None)
+    if not isinstance(coordinator, WorkflowRunCoordinator):
+        raise AppError(
+            code="WORKFLOW_RUNNER_UNAVAILABLE",
+            message="工作流运行服务尚未就绪",
+            status_code=503,
+        )
+    return coordinator
+
+
+WorkflowCoordinator = Annotated[WorkflowRunCoordinator, Depends(get_workflow_coordinator)]

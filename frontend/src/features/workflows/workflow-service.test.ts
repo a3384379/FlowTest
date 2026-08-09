@@ -7,12 +7,14 @@ import {
   project,
   workflow,
   workflowExecutionDetail,
+  workflowRunningExecution,
   workflowVersion,
 } from '../../test/fixtures'
 import { server } from '../../test/server'
 import {
   createWorkflow,
   executeWorkflow,
+  getWorkflowExecution,
   linearWorkflow,
   listApis,
   listEnvironments,
@@ -52,7 +54,11 @@ describe('workflow service', () => {
         HttpResponse.json(workflowVersion),
       ),
       http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/executions`, () =>
-        HttpResponse.json(workflowExecutionDetail),
+        HttpResponse.json(workflowRunningExecution, { status: 202 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/workflow-executions/${workflowRunningExecution.id}`,
+        () => HttpResponse.json(workflowExecutionDetail),
       ),
       http.get(`/api/v1/projects/${project.id}/workflow-executions`, () =>
         HttpResponse.json({
@@ -80,6 +86,9 @@ describe('workflow service', () => {
     ).toMatchObject({ draft_revision: 2 })
     expect(await publishWorkflow(project.id, workflow.id)).toEqual(workflowVersion)
     expect(await executeWorkflow(project.id, workflow.id, environment.id)).toEqual(
+      workflowRunningExecution,
+    )
+    expect(await getWorkflowExecution(project.id, workflowRunningExecution.id)).toEqual(
       workflowExecutionDetail,
     )
     expect((await listWorkflowExecutions(project.id)).items).toEqual([

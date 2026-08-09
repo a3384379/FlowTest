@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import secrets
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from smoke_s4 import APIClient, SmokeConfig, _change_password
@@ -50,7 +49,6 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
     _verify_retry(client, token, project_id, environment_id)
     cancelled_execution = _verify_cancellation(
         client,
-        config,
         token,
         project_id,
         environment_id,
@@ -79,11 +77,12 @@ def _verify_snapshot(
     )
     if published["version"] != 1:
         raise RuntimeError("first immutable workflow version was not v1")
-    result = client.json(
-        "POST",
-        f"/projects/{project_id}/workflows/{workflow_id}/executions",
-        {"environment_id": environment_id},
-        token=token,
+    result = _start_and_wait(
+        client,
+        token,
+        project_id,
+        workflow_id,
+        environment_id,
     )
     if result["execution"]["status"] != "passed":
         raise RuntimeError(f"workflow execution failed: {result}")
@@ -131,11 +130,12 @@ def _verify_retry(
         f"/projects/{project_id}/workflows/{workflow_id}/versions",
         token=token,
     )
-    result = client.json(
-        "POST",
-        f"/projects/{project_id}/workflows/{workflow_id}/executions",
-        {"environment_id": environment_id},
-        token=token,
+    result = _start_and_wait(
+        client,
+        token,
+        project_id,
+        workflow_id,
+        environment_id,
     )
     api_node = next(node for node in result["nodes"] if node["node_id"] == "api")
     if result["execution"]["status"] != "failed" or api_node["attempts"] != 2:
@@ -144,7 +144,6 @@ def _verify_retry(
 
 def _verify_cancellation(
     client: APIClient,
-    config: SmokeConfig,
     token: str,
     project_id: str,
     environment_id: str,
@@ -163,46 +162,58 @@ def _verify_cancellation(
         f"/projects/{project_id}/workflows/{workflow_id}/versions",
         token=token,
     )
-    execution_client = APIClient(config.api_url)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(
-            execution_client.json,
-            "POST",
-            f"/projects/{project_id}/workflows/{workflow_id}/executions",
-            {"environment_id": environment_id},
-            token=token,
-        )
-        execution_id = _wait_for_execution(client, token, project_id, workflow_id)
-        requested = client.json(
-            "POST",
-            f"/projects/{project_id}/workflow-executions/{execution_id}/cancel",
-            token=token,
-        )
-        if requested["cancel_requested_at"] is None:
-            raise RuntimeError("workflow cancellation request was not persisted")
-        result = future.result(timeout=3)
+    started = client.json(
+        "POST",
+        f"/projects/{project_id}/workflows/{workflow_id}/executions",
+        {"environment_id": environment_id},
+        token=token,
+    )
+    execution_id = str(started["id"])
+    requested = client.json(
+        "POST",
+        f"/projects/{project_id}/workflow-executions/{execution_id}/cancel",
+        token=token,
+    )
+    if requested["cancel_requested_at"] is None:
+        raise RuntimeError("workflow cancellation request was not persisted")
+    result = _wait_for_completion(client, token, project_id, execution_id)
     if result["execution"]["status"] != "cancelled":
         raise RuntimeError("running workflow was not cancelled")
     return result
 
 
-def _wait_for_execution(
+def _start_and_wait(
     client: APIClient,
     token: str,
     project_id: str,
     workflow_id: str,
-) -> str:
-    for _attempt in range(80):
-        page = client.json(
+    environment_id: str,
+) -> dict[str, Any]:
+    started = client.json(
+        "POST",
+        f"/projects/{project_id}/workflows/{workflow_id}/executions",
+        {"environment_id": environment_id},
+        token=token,
+    )
+    return _wait_for_completion(client, token, project_id, str(started["id"]))
+
+
+def _wait_for_completion(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    execution_id: str,
+) -> dict[str, Any]:
+    for _attempt in range(200):
+        detail = client.json(
             "GET",
-            f"/projects/{project_id}/workflow-executions?page=1&page_size=20",
+            f"/projects/{project_id}/workflow-executions/{execution_id}",
             token=token,
         )
-        matching = [item for item in page["items"] if item["workflow_id"] == workflow_id]
-        if matching:
-            return str(matching[0]["id"])
+        if detail["execution"]["status"] != "running":
+            return detail
         time.sleep(0.05)
-    raise RuntimeError("running workflow did not appear in execution history")
+    raise RuntimeError("workflow execution did not complete")
 
 
 def _create_api(

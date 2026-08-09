@@ -9,18 +9,29 @@ from app.core.config import settings
 from app.core.database import close_database, session_factory
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.redis import close_redis
+from app.core.redis import close_redis, redis_client
 from app.core.storage import ensure_storage_bucket
 from app.middleware.trace import TraceIdMiddleware
 from app.services.auth import bootstrap_administrator
+from app.services.execution_events import RedisExecutionEventBus
+from app.services.workflow_coordinator import WorkflowRunCoordinator
 
 
 @asynccontextmanager
-async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     await ensure_storage_bucket()
     async with session_factory() as session:
         await bootstrap_administrator(session)
+    event_bus = RedisExecutionEventBus(
+        redis_client,
+        retention_seconds=settings.workflow_event_retention_seconds,
+    )
+    coordinator = WorkflowRunCoordinator(session_factory, event_bus)
+    application.state.database_session_factory = session_factory
+    application.state.execution_event_bus = event_bus
+    application.state.workflow_run_coordinator = coordinator
     yield
+    await coordinator.shutdown()
     await close_redis()
     await close_database()
 

@@ -75,10 +75,20 @@ export async function executeWorkflow(
   projectId: string,
   workflowId: string,
   environmentId: string,
-): Promise<WorkflowExecutionDetail> {
-  const response = await apiClient.post<WorkflowExecutionDetail>(
+): Promise<WorkflowExecution> {
+  const response = await apiClient.post<WorkflowExecution>(
     `/projects/${projectId}/workflows/${workflowId}/executions`,
     { environment_id: environmentId },
+  )
+  return response.data
+}
+
+export async function getWorkflowExecution(
+  projectId: string,
+  executionId: string,
+): Promise<WorkflowExecutionDetail> {
+  const response = await apiClient.get<WorkflowExecutionDetail>(
+    `/projects/${projectId}/workflow-executions/${executionId}`,
   )
   return response.data
 }

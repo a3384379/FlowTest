@@ -16,22 +16,21 @@
 | S3（已完成） | V0.1 单接口闭环 | HTTPX 异步请求；常用 HTTP 方法；响应查看；状态码/JSONPath/JMESPath/Schema/响应时间断言；执行历史 | 从页面创建 API、发送、断言并回看脱敏请求/响应 |
 | S4（已完成） | V0.2 接口资产 | OpenAPI 3 / Swagger 2 导入；Postman Collection 导入；Auth；上传/下载基础断言 | 示例文档稳定导入；重复导入不重复创建；常用认证和文件接口可调试 |
 | S5（已完成） | Workflow 数据模型与执行内核 | Workflow/Version、Node/Edge、Snapshot；DAG 校验；ExecutionContext；失败传播、超时、重试和取消 | 循环、悬空边、缺失配置可在运行前定位；历史执行绑定不可变快照；串并行行为测试通过 |
-| S6（第 13～14 周） | 可视化流程最小闭环 | React Flow 画布；Start/API/End 节点；拖拽、连线、保存；DAG 串行/并行执行；状态推送 | 可视化搭建 A→B/C→D 并按依赖并行运行，节点状态实时可见 |
+| S6（已完成） | 可视化流程最小闭环 | React Flow 画布；Start/API/End 节点；拖拽、连线、保存；DAG 串行/并行执行；Redis Pub/Sub + WebSocket 状态推送 | 可视化搭建 A→B/C→D 并按依赖并行运行，节点状态实时可见 |
 | S7（第 15～16 周） | V0.3 字段映射与控制节点 | Extract、Assert、Condition、Delay；结构化字段绑定；变量来源追踪；失败传播策略 | A 响应字段可视化映射到 B 请求；条件分支、跳过和断言结果可解释 |
 | S8（第 17～18 周） | 测试计划与任务系统 | Test Plan；批量/手工执行；Redis 队列和 Worker；重试、取消；定时任务 | API 服务与 Worker 解耦；计划可排队、取消和重试且状态一致 |
 | S9（第 19～20 周） | V0.4 报告与执行中心 | 执行中心；步骤级报告；失败分类；趋势；WebSocket；HTML 导出 | 报告可从汇总下钻到脱敏请求/响应、提取和断言；失败可定位到节点 |
 | S10（第 21～22 周） | 企业治理 | 项目级 RBAC；审计日志；Import Diff/Merge；CI/Webhook 触发；通知接口 | 权限矩阵通过；导入变更可审阅选择；外部系统可安全触发并查询结果 |
 | S11（第 23～24 周） | V1.0 内部发布 | 性能与容量测试；SSRF/Secret/限流加固；备份恢复；部署手册；试点迁移 | 试点项目连续运行 2 周；P0 缺陷清零；回滚、恢复和告警演练通过 |
 
-## 近期可执行 Backlog（S6）
+## 近期可执行 Backlog（S7）
 
-1. 使用 React Flow 实现 Start/API/End 节点画布、拖拽、缩放和连线。
-2. 将画布状态序列化为现有 Workflow Definition，不建立第二套图契约。
-3. 提供节点属性面板，配置 API 引用、超时、重试和失败策略。
-4. 接入保存草稿、发布版本和运行入口，并展示后端发布校验错误位置。
-5. 通过 Redis Pub/Sub 发布执行事件，以 WebSocket 推送节点状态。
-6. 验证 A→B/C→D 依赖并行，确保画布状态与后端事件最终一致。
-7. 补齐 React Flow 组件测试和 Playwright 可视化流程闭环。
+1. 实现 Extract 和 Assert 节点，在 ExecutionContext 中记录结构化输入、输出和来源。
+2. 实现 Condition 和 Delay 节点，冻结条件分支、跳过与失败传播语义。
+3. 实现 Dataset 节点及 CSV/JSON/Excel 解析，限制 1000 行并以默认并发 5 形成子执行。
+4. 实现结构化字段映射，支持 A 响应字段映射到 B 请求，并显示变量来源。
+5. 扩展 React Flow 节点库、属性面板、运行着色和测试。
+6. 补齐数据驱动、条件分支、跳过解释及变量追踪验收，发布 `v0.3.0`。
 
 ## 版本验收门槛
 

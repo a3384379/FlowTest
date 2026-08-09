@@ -156,3 +156,10 @@ export const workflowExecutionDetail: WorkflowExecutionDetail = {
     },
   ],
 }
+
+export const workflowRunningExecution = {
+  ...workflowExecutionDetail.execution,
+  status: 'running' as const,
+  snapshot: { workflow: { version: 2, definition: workflowDefinition } },
+  completed_at: null,
+}

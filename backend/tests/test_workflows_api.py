@@ -1,6 +1,8 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import UUID
 
 import pytest
 import respx
@@ -8,11 +10,14 @@ from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.dependencies import get_workflow_coordinator
 from app.core.database import get_session
 from app.core.security import password_service
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.services.execution_events import ExecutionEvent
+from app.services.workflow_coordinator import WorkflowRunCoordinator
 
 ADMIN_EMAIL = "workflow-admin@example.com"
 ADMIN_PASSWORD = "workflow-password-123!"
@@ -45,12 +50,17 @@ async def workflow_client() -> AsyncIterator[AsyncClient]:
         async with session_maker() as session:
             yield session
 
+    events = RecordingEventBus()
+    coordinator = WorkflowRunCoordinator(session_maker, events)
+    app.state.workflow_run_coordinator = coordinator
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_workflow_coordinator] = lambda: coordinator
     async with AsyncClient(
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://test",
     ) as client:
         yield client
+    await coordinator.shutdown()
     app.dependency_overrides.clear()
     await test_engine.dispose()
 
@@ -128,8 +138,10 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
         headers=headers,
         json={"environment_id": environment_id, "version": 1},
     )
-    assert executed.status_code == 200, executed.text
-    detail = executed.json()
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, executed.json()["id"]
+    )
     assert detail["execution"]["status"] == "passed"
     assert detail["nodes"][1]["attempts"] == 2
     assert detail["nodes"][1]["output"]["body"] == {"id": 7}
@@ -139,7 +151,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert snapshot["apis"]["api"]["version"] == 2
     assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v2")
     assert snapshot["apis"]["api"]["spec"]["auth_config"]["value"] == "***"
-    assert "snapshot-api-key" not in executed.text
+    assert "snapshot-api-key" not in json.dumps(detail)
 
     environment_changed = await workflow_client.patch(
         f"/api/v1/projects/{project_id}/environments/{environment_id}",
@@ -218,14 +230,13 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
         return Response(200, json={"late": True})
 
     respx.get("http://workflow.example.com/users/v1").mock(side_effect=slow_response)
-    running = asyncio.create_task(
-        workflow_client.post(
-            f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
-            headers=headers,
-            json={"environment_id": environment_id},
-        )
+    running = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
     )
-    execution_id = await _wait_for_running_execution(workflow_client, headers, project_id)
+    assert running.status_code == 202, running.text
+    execution_id = running.json()["id"]
     cancelled = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/cancel",
         headers=headers,
@@ -233,27 +244,53 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["cancel_requested_at"] is not None
 
-    completed = await asyncio.wait_for(running, timeout=2)
-    assert completed.status_code == 200, completed.text
-    result = completed.json()
+    result = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
     assert result["execution"]["status"] == "cancelled"
     assert result["nodes"][1]["status"] == "cancelled"
 
+    interrupted = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert interrupted.status_code == 202
+    await asyncio.sleep(0.1)
+    await app.state.workflow_run_coordinator.shutdown()
+    interrupted_result = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{interrupted.json()['id']}",
+        headers=headers,
+    )
+    assert interrupted_result.status_code == 200
+    assert interrupted_result.json()["execution"]["status"] == "cancelled"
+    assert interrupted_result.json()["nodes"][1]["status"] == "cancelled"
 
-async def _wait_for_running_execution(
+
+async def _wait_for_completed_execution(
     client: AsyncClient,
     headers: dict[str, str],
     project_id: str,
-) -> str:
-    for _attempt in range(40):
+    execution_id: str,
+) -> dict[str, Any]:
+    await app.state.workflow_run_coordinator.wait_for(UUID(execution_id))
+    for _attempt in range(100):
         response = await client.get(
-            f"/api/v1/projects/{project_id}/workflow-executions",
+            f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}",
             headers=headers,
         )
-        if response.status_code == 200 and response.json()["items"]:
-            return str(response.json()["items"][0]["id"])
+        if response.status_code == 200 and response.json()["execution"]["status"] != "running":
+            return dict(response.json())
         await asyncio.sleep(0.01)
-    raise AssertionError("workflow execution did not enter running state")
+    raise AssertionError("workflow execution did not complete")
+
+
+class RecordingEventBus:
+    def __init__(self) -> None:
+        self.events: list[ExecutionEvent] = []
+
+    async def publish(self, event: ExecutionEvent) -> ExecutionEvent:
+        stored = event.model_copy(update={"sequence": len(self.events) + 1})
+        self.events.append(stored)
+        return stored
 
 
 async def _login_headers(client: AsyncClient) -> dict[str, str]:

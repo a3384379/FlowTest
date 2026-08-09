@@ -208,6 +208,21 @@ export type WorkflowExecutionDetail = {
   nodes: WorkflowNodeExecution[]
 }
 
+export type ExecutionEvent = {
+  sequence: number
+  type: 'execution.started' | 'node.status' | 'execution.completed'
+  execution_id: string
+  emitted_at: string
+  node_id: string | null
+  node_name: string | null
+  node_type: string | null
+  node_status: WorkflowNodeExecution['status'] | null
+  attempts: number
+  error_code: string | null
+  error_message: string | null
+  execution_status: WorkflowExecution['status'] | null
+}
+
 export function apiErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.error?.message
