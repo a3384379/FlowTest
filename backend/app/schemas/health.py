@@ -7,3 +7,8 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
     version: str
+
+
+class ReadinessResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    checks: dict[str, Literal["ok", "error"]]

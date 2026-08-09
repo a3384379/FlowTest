@@ -13,11 +13,15 @@ __pycache__/
 .ruff_cache/
 .venv/
 htmlcov/
+.coverage.*
 
 # Node
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 # Editors and operating systems
 .DS_Store
