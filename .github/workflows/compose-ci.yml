@@ -109,7 +109,7 @@ jobs:
       - name: Verify V1.0 browser acceptance flow
         run: pnpm --dir frontend e2e
       - name: Run API capacity gate
-        run: python3 scripts/capacity_s11.py
+        run: uv run --project backend python scripts/capacity_s11.py
       - name: Verify backup recovery in isolated volumes
         run: |
           backup_directory="$(mktemp -d)"
