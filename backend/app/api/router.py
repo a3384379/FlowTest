@@ -13,6 +13,7 @@ from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
+from app.api.v1.endpoints.test_assets import router as test_assets_router
 from app.api.v1.endpoints.users import router as users_router
 from app.api.v1.endpoints.workflow_events import router as workflow_events_router
 from app.api.v1.endpoints.workflows import router as workflows_router
@@ -33,4 +34,5 @@ api_router.include_router(users_router, tags=["users"])
 api_router.include_router(projects_router, tags=["projects"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
+api_router.include_router(test_assets_router, tags=["test-assets"])
 api_router.include_router(reporting_router, tags=["reports"])

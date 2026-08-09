@@ -3,10 +3,10 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowNode
+from app.engine.contracts import FieldMapping, NodeStatus, WorkflowDefinition, WorkflowNode
 from app.engine.control_nodes import execute_control_node
-from app.engine.mappings import resolve_field_mappings
-from app.engine.scheduler import ExecutionContext, WorkflowScheduler
+from app.engine.mappings import MappingResolutionError, resolve_field_mappings
+from app.engine.scheduler import ExecutionContext, NodeExecutionError, WorkflowScheduler
 
 
 class ControlExecutor:
@@ -167,6 +167,113 @@ def test_variable_precedence_is_workflow_dataset_runtime() -> None:
     assert context.snapshot()["variable_sources"]["value"]["scope"] == "runtime"
 
 
+def test_field_mapping_rejects_invalid_and_missing_sources() -> None:
+    context = ExecutionContext()
+    context.record_output("source", {"body": {"name": "FlowTest"}})
+
+    with pytest.raises(MappingResolutionError, match="无效") as invalid:
+        resolve_field_mappings([_mapping("[")], context)
+    assert invalid.value.code == "INVALID_MAPPING_PATH"
+    assert str(invalid.value) == invalid.value.message
+
+    with pytest.raises(MappingResolutionError, match="未找到值") as missing:
+        resolve_field_mappings([_mapping("body.missing")], context)
+    assert missing.value.code == "MAPPING_SOURCE_MISSING"
+
+
+@pytest.mark.parametrize(
+    ("value", "template", "expected"),
+    [
+        (42, "{{value}}", 42),
+        ("FlowTest", "name={{value}}", "name=FlowTest"),
+        ([1, 2], "items={{value}}", "items=[1,2]"),
+    ],
+)
+def test_field_mapping_template_transform_is_typed_and_deterministic(
+    value: JsonValue,
+    template: str,
+    expected: JsonValue,
+) -> None:
+    context = ExecutionContext()
+    context.record_output("source", {"value": value})
+
+    resolved = resolve_field_mappings([_mapping("value", template=template)], context)
+
+    assert resolved[0].value == expected
+
+
+@pytest.mark.asyncio
+async def test_control_node_handles_optional_extract_delay_dataset_and_boundaries() -> None:
+    context = ExecutionContext(dataset_variables={"region": "cn"})
+    context.record_output("source", {"body": {}})
+
+    assert (
+        await execute_control_node(
+            WorkflowNode.model_validate(_node("start", "start", {})), context
+        )
+        is None
+    )
+    extracted = await execute_control_node(
+        WorkflowNode.model_validate(
+            _node(
+                "extract",
+                "extract",
+                {
+                    "source_node_id": "source",
+                    "expression": "body.optional",
+                    "variable": "optional",
+                    "required": False,
+                },
+            )
+        ),
+        context,
+    )
+    assert extracted["value"] is None
+    assert context.variable("optional") is None
+    assert await execute_control_node(
+        WorkflowNode.model_validate(_node("delay", "delay", {"seconds": 0})), context
+    ) == {"seconds": 0.0}
+    assert await execute_control_node(
+        WorkflowNode.model_validate(
+            _node(
+                "dataset",
+                "dataset",
+                {
+                    "artifact_id": "00000000-0000-0000-0000-000000000001",
+                    "format": "json",
+                },
+            )
+        ),
+        context,
+    ) == {"row": {"region": "cn"}}
+
+
+@pytest.mark.asyncio
+async def test_control_node_reports_invalid_expression_and_unsupported_executor() -> None:
+    context = ExecutionContext()
+    context.record_output("source", {})
+    invalid = WorkflowNode.model_validate(
+        _node(
+            "condition",
+            "condition",
+            {
+                "source_node_id": "source",
+                "expression": "[",
+                "operator": "equals",
+                "expected": True,
+            },
+        )
+    )
+    with pytest.raises(NodeExecutionError, match="JMESPath") as expression_error:
+        await execute_control_node(invalid, context)
+    assert expression_error.value.code == "INVALID_JMESPATH"
+
+    api_node = WorkflowNode.model_validate(_node("api", "api", _api_config()))
+    with pytest.raises(NodeExecutionError, match="不支持") as unsupported:
+        await execute_control_node(api_node, context)
+    assert unsupported.value.code == "UNSUPPORTED_NODE_TYPE"
+
+
 def _condition_workflow() -> WorkflowDefinition:
     return WorkflowDefinition.model_validate(
         {
@@ -222,3 +329,16 @@ def _edge(source: str, target: str) -> dict[str, Any]:
 
 def _api_config() -> dict[str, Any]:
     return {"api_definition_id": "00000000-0000-0000-0000-000000000001"}
+
+
+def _mapping(path: str, *, template: str | None = None) -> FieldMapping:
+    transform: dict[str, str] = {}
+    if template is not None:
+        transform = {"kind": "template", "template": template}
+    return FieldMapping.model_validate(
+        {
+            "source": {"node_id": "source", "path": path},
+            "transform": transform,
+            "target": {"node_id": "target", "location": "body", "key": "value"},
+        }
+    )

@@ -5,7 +5,14 @@ import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
-import type { CreatedServiceToken, CreatedTestPlan, ServiceToken, TestPlanRun } from '../lib/api'
+import type {
+  CreatedServiceToken,
+  CreatedTestPlan,
+  ServiceToken,
+  TestCase,
+  TestPlanRun,
+  TestSuite,
+} from '../lib/api'
 import { environment, project, user, workflow } from '../test/fixtures'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
@@ -26,6 +33,9 @@ const plan: CreatedTestPlan = {
   items: [
     {
       id: '00000000-0000-4000-8000-000000000081',
+      target_type: 'workflow',
+      target_id: workflow.id,
+      target_version: 1,
       workflow_id: workflow.id,
       environment_id: environment.id,
       workflow_version: 1,
@@ -64,6 +74,41 @@ const serviceToken: CreatedServiceToken = {
   created_at: '2026-08-09T09:01:00Z',
 }
 
+const testCase: TestCase = {
+  id: '00000000-0000-4000-8000-000000000092',
+  project_id: project.id,
+  folder_id: null,
+  name: '登录用例',
+  description: '',
+  tags: [],
+  is_template: false,
+  draft_definition: {
+    workflow_id: workflow.id,
+    workflow_version: 1,
+    environment_id: environment.id,
+    runtime_variables: {},
+    runtime_headers: {},
+  },
+  current_version: 2,
+  created_by_id: user.id,
+  created_at: '2026-08-09T09:00:00Z',
+  updated_at: '2026-08-09T09:00:00Z',
+}
+
+const testSuite: TestSuite = {
+  id: '00000000-0000-4000-8000-000000000093',
+  project_id: project.id,
+  folder_id: null,
+  name: '冒烟套件',
+  description: '',
+  tags: [],
+  draft_definition: { items: [{ test_case_id: testCase.id, test_case_version: 2 }] },
+  current_version: 1,
+  created_by_id: user.id,
+  created_at: '2026-08-09T09:00:00Z',
+  updated_at: '2026-08-09T09:00:00Z',
+}
+
 describe('TestPlansPage', () => {
   it('creates, queues and cancels plans, and reveals one-time credentials', async () => {
     const requests = { created: 0, run: 0, cancelled: 0, token: 0 }
@@ -76,6 +121,12 @@ describe('TestPlansPage', () => {
       ),
       http.get(`/api/v1/projects/${project.id}/environments`, () =>
         HttpResponse.json([environment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-cases`, () =>
+        HttpResponse.json({ items: [testCase], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-suites`, () =>
+        HttpResponse.json({ items: [testSuite], total: 1, page: 1, page_size: 100 }),
       ),
       http.get(`/api/v1/projects/${project.id}/test-plans`, () =>
         HttpResponse.json({ items: [plan], total: 1, page: 1, page_size: 100 }),
@@ -91,8 +142,16 @@ describe('TestPlansPage', () => {
         return HttpResponse.json(serviceToken, { status: 201 })
       }),
       http.post(`/api/v1/projects/${project.id}/test-plans`, async ({ request }) => {
-        const body = (await request.json()) as { schedule_interval_seconds: number }
+        const body = (await request.json()) as {
+          schedule_interval_seconds: number
+          items: Array<{ target_type: string; target_id: string; environment_id: string | null }>
+        }
         expect(body.schedule_interval_seconds).toBe(1800)
+        expect(body.items[0]).toMatchObject({
+          target_type: 'suite',
+          target_id: testSuite.id,
+          environment_id: null,
+        })
         requests.created += 1
         return HttpResponse.json(plan, { status: 201 })
       }),
@@ -120,8 +179,8 @@ describe('TestPlansPage', () => {
 
     await browser.click(screen.getByRole('button', { name: /新建计划/ }))
     await browser.type(screen.getByLabelText('计划名称'), '部署回归')
-    await chooseSelect(browser, '工作流', workflow.name)
-    await chooseSelect(browser, '环境', environment.name)
+    await chooseSelect(browser, '资产类型', '测试套件')
+    await chooseSelect(browser, '测试套件', testSuite.name)
     await browser.type(screen.getByLabelText('定时间隔（分钟，留空为手动）'), '30')
     await browser.click(screen.getByRole('button', { name: 'OK' }))
     expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
@@ -155,7 +214,7 @@ async function chooseSelect(
   label: string,
   option: string,
 ) {
-  await browser.click(screen.getByLabelText(label))
+  await browser.click(screen.getByRole('combobox', { name: label }))
   await browser.click(
     await screen.findByText(option, { selector: '.ant-select-item-option-content' }),
   )

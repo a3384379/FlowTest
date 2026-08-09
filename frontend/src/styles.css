@@ -249,6 +249,10 @@ body {
   margin-bottom: 12px;
 }
 
+.asset-toolbar {
+  margin-bottom: 16px;
+}
+
 .workflow-designer {
   overflow: hidden;
   border: 1px solid #e5eaf2;

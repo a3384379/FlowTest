@@ -393,13 +393,86 @@ export type WorkflowExecutionDetail = {
 
 export type TestPlanItem = {
   id: string
-  workflow_id: string
-  environment_id: string
-  workflow_version: number
+  target_type: 'workflow' | 'case' | 'suite'
+  target_id: string
+  target_version: number
+  workflow_id: string | null
+  environment_id: string | null
+  workflow_version: number | null
   position: number
   max_retries: number
   runtime_variables: Record<string, string>
   runtime_headers: Record<string, string>
+}
+
+export type TestCaseDefinition = {
+  workflow_id: string
+  workflow_version: number | null
+  environment_id: string
+  runtime_variables: Record<string, string>
+  runtime_headers: Record<string, string>
+}
+
+export type TestCase = {
+  id: string
+  project_id: string
+  folder_id: string | null
+  name: string
+  description: string
+  tags: string[]
+  is_template: boolean
+  draft_definition: TestCaseDefinition
+  current_version: number | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type TestCaseVersion = {
+  id: string
+  test_case_id: string
+  version: number
+  definition: TestCaseDefinition & { workflow_version: number }
+  fingerprint: string
+  change_note: string
+  created_by_id: string
+  created_at: string
+}
+
+export type TestSuiteItem = {
+  test_case_id: string
+  test_case_version: number | null
+}
+
+export type TestSuite = {
+  id: string
+  project_id: string
+  folder_id: string | null
+  name: string
+  description: string
+  tags: string[]
+  draft_definition: { items: TestSuiteItem[] }
+  current_version: number | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type TestSuiteVersion = {
+  id: string
+  test_suite_id: string
+  version: number
+  definition: { items: Array<TestSuiteItem & { test_case_version: number }> }
+  fingerprint: string
+  change_note: string
+  created_by_id: string
+  created_at: string
+}
+
+export type VersionDiff = {
+  from_version: number
+  to_version: number
+  changes: Array<{ path: string; before: unknown; after: unknown }>
 }
 
 export type TestPlan = {

@@ -105,7 +105,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S12 | V1.1 稳定基线 | Python 3.13、依赖/镜像升级、V2 Feature Flags、真实 Workflow 容量基线、试点观察机制 | 代码与自动化门槛已完成；真实两周观察持续记录 |
 | S13 | v1.1.0 前端基础产品化 | React Router、项目上下文、深链接、真实 Dashboard | 已完成 |
 | S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 已完成 |
-| S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 待实施 |
+| S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 已完成 |
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 待实施 |
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 待实施 |
 | S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 待实施 |
@@ -134,3 +134,13 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 5. API 资产可导出 HAR、cURL、Bruno 和 Excel；认证值统一输出 Secret 引用或脱敏占位，不导出可用凭据。
 6. `20260809_0011` 可在真实 PostgreSQL 上 0010→0011→0010→0011 往返；Alembic 漂移检查现同时比较类型和服务器默认值，并对 PostgreSQL JSON 默认值采用结构化比较。
 7. Playwright 打通 API v2 保存与预览、环境、目录重命名、变量/Header、Secret、团队成员和团队授权；S3–S11 原业务冒烟保持全绿。
+
+## S15 完成清单
+
+1. Test Case 与 Test Suite 均采用可修改草稿和不可变发布版本；发布内容保存稳定指纹、发布说明与创建人，历史版本没有更新接口。
+2. Case 发布时固定已发布 Workflow Version 与 Environment；Suite 发布时固定每项 Case Version，并拒绝重复、跨项目和未发布引用。
+3. 资产列表支持名称/说明搜索、标签、模板、克隆和最多 100 项批量目录移动；版本 Diff 返回稳定字段路径及前后值。
+4. Test Plan Item 新增兼容的 `target_type/target_id/target_version`，旧 `workflow_id` 请求继续可用；Case/Suite 在计划创建时固定版本，Suite 入队时展开为不可变 Case Snapshot。
+5. Web 新增“测试资产”深链接，覆盖用例/套件编辑、发布、Diff、克隆和批量移动；任务中心可直接选择已发布 Workflow、Case 或 Suite。
+6. `20260810_0012` 已在真实 PostgreSQL 完成 0011→0012→0011→0012 往返及 Alembic 漂移检查；后端总覆盖率 90.14%，执行引擎 Mapping/Control/Scheduler 分别为 100%/98%/97%，前端覆盖率四项均超过 80%。
+7. Playwright 打通“用例两次发布与 Diff → 克隆 → 套件发布 → Test Plan 固定套件目标”，并保持 S14 与 V1 浏览器主路径兼容。

@@ -236,6 +236,259 @@ class MemoryObjectStorage:
         self.objects.pop(key, None)
 
 
+@pytest.mark.asyncio
+async def test_case_suite_versioning_and_fixed_plan_expansion(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    folder = await client.post(
+        f"/api/v1/projects/{project_id}/folders",
+        headers=headers,
+        json={"name": "回归资产"},
+    )
+    assert folder.status_code == 201, folder.text
+    folder_id = folder.json()["id"]
+
+    case_definition = {
+        "workflow_id": workflow_id,
+        "workflow_version": 1,
+        "environment_id": environment_id,
+        "runtime_variables": {"dataset": "v1"},
+        "runtime_headers": {"X-Case": "one"},
+    }
+    blank_name = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        json={"name": "   ", "definition": case_definition},
+    )
+    assert blank_name.status_code == 422
+    created_case = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        json={
+            "name": "用户查询用例",
+            "description": "固定工作流版本",
+            "tags": ["smoke", "api", "smoke"],
+            "is_template": True,
+            "definition": case_definition,
+        },
+    )
+    assert created_case.status_code == 201, created_case.text
+    test_case = created_case.json()
+    case_id = test_case["id"]
+    assert test_case["tags"] == ["api", "smoke"]
+    assert test_case["current_version"] is None
+    duplicate_case = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        json={
+            "name": "用户查询用例",
+            "definition": case_definition,
+        },
+    )
+    assert duplicate_case.status_code == 409
+    assert duplicate_case.json()["error"]["code"] == "TEST_CASE_NAME_EXISTS"
+
+    case_v1 = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/versions",
+        headers=headers,
+        json={"change_note": "首个基线"},
+    )
+    assert case_v1.status_code == 200, case_v1.text
+    assert case_v1.json()["version"] == 1
+    case_definition["runtime_variables"] = {"dataset": "v2", "region": "cn"}
+    updated_case = await client.patch(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}",
+        headers=headers,
+        json={
+            "name": "用户查询用例",
+            "description": "第二版草稿",
+            "folder_id": folder_id,
+            "tags": ["regression"],
+            "is_template": False,
+            "definition": case_definition,
+        },
+    )
+    assert updated_case.status_code == 200, updated_case.text
+    fetched_case = await client.get(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}", headers=headers
+    )
+    assert fetched_case.json()["description"] == "第二版草稿"
+    case_v2 = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/versions",
+        headers=headers,
+        json={"change_note": "增加地域变量"},
+    )
+    assert case_v2.status_code == 200
+    assert case_v2.json()["version"] == 2
+    versions = await client.get(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/versions", headers=headers
+    )
+    assert [item["version"] for item in versions.json()] == [2, 1]
+    case_diff = await client.get(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/versions/1/diff/2",
+        headers=headers,
+    )
+    assert case_diff.status_code == 200
+    assert {item["path"] for item in case_diff.json()["changes"]} == {
+        "$.runtime_variables.dataset",
+        "$.runtime_variables.region",
+    }
+
+    searched = await client.get(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        params={"search": "用户", "tag": "regression", "page": 1, "page_size": 20},
+    )
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    unfiltered_cases = await client.get(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        params={"is_template": False},
+    )
+    assert unfiltered_cases.json()["total"] == 1
+    cloned_case = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/clone",
+        headers=headers,
+        json={"name": "用户查询副本"},
+    )
+    assert cloned_case.status_code == 201
+    clone_id = cloned_case.json()["id"]
+    moved_cases = await client.post(
+        f"/api/v1/projects/{project_id}/test-cases/bulk-move",
+        headers=headers,
+        json={"asset_ids": [case_id, clone_id], "folder_id": folder_id},
+    )
+    assert moved_cases.json() == {"updated": 2}
+
+    duplicate_suite = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites",
+        headers=headers,
+        json={
+            "name": "重复套件",
+            "definition": {
+                "items": [
+                    {"test_case_id": case_id, "test_case_version": 1},
+                    {"test_case_id": case_id, "test_case_version": 2},
+                ]
+            },
+        },
+    )
+    assert duplicate_suite.status_code == 422
+    suite_created = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites",
+        headers=headers,
+        json={
+            "name": "冒烟套件",
+            "description": "固定用例版本",
+            "tags": ["smoke"],
+            "definition": {"items": [{"test_case_id": case_id, "test_case_version": 1}]},
+        },
+    )
+    assert suite_created.status_code == 201, suite_created.text
+    suite_id = suite_created.json()["id"]
+    suite_v1 = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/versions",
+        headers=headers,
+        json={"change_note": "套件基线"},
+    )
+    assert suite_v1.status_code == 200, suite_v1.text
+    suite_updated = await client.patch(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}",
+        headers=headers,
+        json={
+            "name": "冒烟套件",
+            "description": "第二版套件草稿",
+            "folder_id": folder_id,
+            "tags": ["regression"],
+            "definition": {"items": [{"test_case_id": case_id, "test_case_version": 2}]},
+        },
+    )
+    assert suite_updated.status_code == 200
+    fetched_suite = await client.get(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}", headers=headers
+    )
+    assert fetched_suite.json()["description"] == "第二版套件草稿"
+    suite_v2 = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/versions",
+        headers=headers,
+        json={"change_note": "切换用例版本"},
+    )
+    assert suite_v2.json()["version"] == 2
+    suite_versions = await client.get(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/versions", headers=headers
+    )
+    assert [item["version"] for item in suite_versions.json()] == [2, 1]
+    suite_diff = await client.get(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/versions/1/diff/2",
+        headers=headers,
+    )
+    assert suite_diff.json()["changes"][0]["path"] == "$.items"
+    suites = await client.get(
+        f"/api/v1/projects/{project_id}/test-suites",
+        headers=headers,
+        params={"search": "冒烟", "tag": "regression"},
+    )
+    assert suites.json()["total"] == 1
+    unfiltered_suites = await client.get(
+        f"/api/v1/projects/{project_id}/test-suites", headers=headers
+    )
+    assert unfiltered_suites.json()["total"] == 1
+    cloned_suite = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/clone",
+        headers=headers,
+        json={"name": "冒烟套件副本"},
+    )
+    assert cloned_suite.status_code == 201
+    moved_suites = await client.post(
+        f"/api/v1/projects/{project_id}/test-suites/bulk-move",
+        headers=headers,
+        json={"asset_ids": [suite_id, cloned_suite.json()["id"]], "folder_id": folder_id},
+    )
+    assert moved_suites.json()["updated"] == 2
+
+    plan_created = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "混合资产计划",
+            "items": [
+                {"workflow_id": workflow_id, "environment_id": environment_id},
+                {
+                    "target_type": "case",
+                    "target_id": case_id,
+                    "target_version": 1,
+                    "runtime_variables": {"runtime": "override"},
+                },
+                {"target_type": "suite", "target_id": suite_id, "target_version": 1},
+            ],
+        },
+    )
+    assert plan_created.status_code == 201, plan_created.text
+    plan = plan_created.json()
+    assert [item["target_type"] for item in plan["items"]] == ["workflow", "case", "suite"]
+    queued = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan['id']}/runs", headers=headers
+    )
+    assert queued.status_code == 202, queued.text
+    run_detail = await client.get(
+        f"/api/v1/projects/{project_id}/test-plan-runs/{queued.json()['id']}", headers=headers
+    )
+    assert run_detail.status_code == 200
+    expanded = run_detail.json()["items"]
+    assert len(expanded) == 3
+    case_runs = [item for item in expanded if item["target_type"] == "case"]
+    assert [item["target_version"] for item in case_runs] == [1, 1]
+    assert case_runs[0]["target_snapshot"]["definition"]["runtime_variables"] == {"dataset": "v1"}
+    assert case_runs[1]["target_snapshot"]["source_suite"] == {
+        "id": suite_id,
+        "version": 1,
+    }
+
+
 async def _login_headers(client: AsyncClient) -> dict[str, str]:
     response = await client.post(
         "/api/v1/auth/login",
