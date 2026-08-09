@@ -2,20 +2,36 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.api_assets import JsonValue
 from app.domain.tasking import ServiceTokenScope, TestPlanTrigger
+from app.domain.test_assets import TestTargetType
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
 
 class TestPlanItemInput(BaseModel):
-    workflow_id: UUID
-    environment_id: UUID
+    target_type: TestTargetType = TestTargetType.WORKFLOW
+    target_id: UUID | None = None
+    target_version: int | None = Field(default=None, ge=1)
+    workflow_id: UUID | None = None
+    environment_id: UUID | None = None
     workflow_version: int | None = Field(default=None, ge=1)
     max_retries: int = Field(default=0, ge=0, le=3)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "TestPlanItemInput":
+        if self.target_type is TestTargetType.WORKFLOW:
+            if self.target_id is None and self.workflow_id is None:
+                raise ValueError("workflow target requires target_id or workflow_id")
+            if self.environment_id is None:
+                raise ValueError("workflow target requires environment_id")
+        elif self.target_id is None:
+            raise ValueError("case/suite target requires target_id")
+        return self
 
 
 class TestPlanCreate(BaseModel):
@@ -36,9 +52,12 @@ class TestPlanUpdate(BaseModel):
 class TestPlanItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    workflow_id: UUID
-    environment_id: UUID
-    workflow_version: int
+    target_type: TestTargetType
+    target_id: UUID
+    target_version: int
+    workflow_id: UUID | None
+    environment_id: UUID | None
+    workflow_version: int | None
     position: int
     max_retries: int
     runtime_variables: dict[str, str]
@@ -82,6 +101,10 @@ class TestPlanRunResponse(BaseModel):
 class TestPlanRunItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    target_type: TestTargetType
+    target_id: UUID
+    target_version: int
+    target_snapshot: dict[str, JsonValue]
     workflow_id: UUID
     environment_id: UUID
     workflow_version: int

@@ -19,6 +19,13 @@ from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
+from app.models.test_assets import (
+    TestCase,
+    TestCaseVersion,
+    TestSuite,
+    TestSuiteVersion,
+    TestSuiteVersionItem,
+)
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
 __all__ = [
@@ -43,10 +50,15 @@ __all__ = [
     "ServiceToken",
     "Team",
     "TeamMember",
+    "TestCase",
+    "TestCaseVersion",
     "TestPlan",
     "TestPlanItem",
     "TestPlanRun",
     "TestPlanRunItem",
+    "TestSuite",
+    "TestSuiteVersion",
+    "TestSuiteVersionItem",
     "User",
     "Workflow",
     "WorkflowExecution",

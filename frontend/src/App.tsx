@@ -4,6 +4,7 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   FolderOpenOutlined,
+  FundProjectionScreenOutlined,
   LogoutOutlined,
   ScheduleOutlined,
   UserOutlined,
@@ -34,6 +35,7 @@ import { useProjectContext } from './features/projects/use-project-context'
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
+const TestAssetsPage = lazy(() => import('./pages/TestAssetsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
@@ -44,6 +46,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '首页',
   settings: '项目管理',
   apis: '接口管理',
+  assets: '测试资产',
   workflows: '流程编排',
   tasks: '任务执行',
   reports: '测试报告',
@@ -89,6 +92,7 @@ function AuthenticatedShell() {
             navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
             navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
+            navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
             navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
             navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
@@ -144,11 +148,12 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
+      <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
       <Route path="/projects/:projectId/workflows" element={<WorkflowsPage />} />
       <Route path="/projects/:projectId/tasks" element={<TestPlansPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
-      {(['settings', 'apis', 'workflows', 'tasks', 'reports'] as const).map((section) => (
+      {(['settings', 'apis', 'assets', 'workflows', 'tasks', 'reports'] as const).map((section) => (
         <Route
           key={section}
           path={`/${section}`}

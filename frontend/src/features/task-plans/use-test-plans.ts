@@ -10,6 +10,8 @@ import {
   createTestPlan,
   listServiceTokens,
   listTaskEnvironments,
+  listTaskTestCases,
+  listTaskTestSuites,
   listTaskWorkflows,
   listTestPlanRuns,
   listTestPlans,
@@ -34,6 +36,16 @@ export function useTestPlans() {
   const environments = useQuery({
     queryKey: ['task-environments', projectId],
     queryFn: () => listTaskEnvironments(required(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const testCases = useQuery({
+    queryKey: ['task-test-cases', projectId],
+    queryFn: () => listTaskTestCases(required(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const testSuites = useQuery({
+    queryKey: ['task-test-suites', projectId],
+    queryFn: () => listTaskTestSuites(required(projectId)),
     enabled: Boolean(projectId),
   })
   const plans = useQuery({
@@ -120,6 +132,8 @@ export function useTestPlans() {
     setProjectSelection: selectProject,
     workflows,
     environments,
+    testCases,
+    testSuites,
     plans,
     runs,
     tokens,

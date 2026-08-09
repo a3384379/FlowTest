@@ -7,6 +7,7 @@ describe('project routing', () => {
     expect(globalPath('dashboard')).toBe('/dashboard')
     expect(globalPath('apis')).toBe('/apis')
     expect(projectPath('project-1', 'workflows')).toBe('/projects/project-1/workflows')
+    expect(projectPath('project-1', 'assets')).toBe('/projects/project-1/assets')
   })
 
   it('reads supported sections and falls back safely', () => {

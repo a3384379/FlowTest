@@ -6,15 +6,20 @@ import {
   type Page,
   type Project,
   type ServiceToken,
+  type TestCase,
   type TestPlan,
   type TestPlanRun,
+  type TestSuite,
   type Workflow,
 } from '../../lib/api'
 
+export type TestPlanTargetType = 'workflow' | 'case' | 'suite'
+
 export type CreateTestPlanInput = {
   name: string
-  workflowId: string
-  environmentId: string
+  targetType: TestPlanTargetType
+  targetId: string
+  environmentId: string | null
   intervalSeconds: number | null
   maxRetries: number
 }
@@ -38,6 +43,20 @@ export async function listTaskEnvironments(projectId: string): Promise<Environme
   return response.data
 }
 
+export async function listTaskTestCases(projectId: string): Promise<Page<TestCase>> {
+  const response = await apiClient.get<Page<TestCase>>(`/projects/${projectId}/test-cases`, {
+    params: { page: 1, page_size: 100 },
+  })
+  return response.data
+}
+
+export async function listTaskTestSuites(projectId: string): Promise<Page<TestSuite>> {
+  const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
+    params: { page: 1, page_size: 100 },
+  })
+  return response.data
+}
+
 export async function listTestPlans(projectId: string): Promise<Page<TestPlan>> {
   const response = await apiClient.get<Page<TestPlan>>(`/projects/${projectId}/test-plans`, {
     params: { page: 1, page_size: 100 },
@@ -55,7 +74,8 @@ export async function createTestPlan(
     schedule_interval_seconds: input.intervalSeconds,
     items: [
       {
-        workflow_id: input.workflowId,
+        target_type: input.targetType,
+        target_id: input.targetId,
         environment_id: input.environmentId,
         max_retries: input.maxRetries,
       },

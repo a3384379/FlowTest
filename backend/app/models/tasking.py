@@ -47,20 +47,34 @@ class TestPlanItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("test_plan_id", "position", name="uq_test_plan_items_plan_position"),
         CheckConstraint("position >= 0", name="test_plan_item_position"),
-        CheckConstraint("workflow_version >= 1", name="test_plan_item_workflow_version"),
+        CheckConstraint(
+            "target_type IN ('workflow', 'case', 'suite')",
+            name="test_plan_item_target_type",
+        ),
+        CheckConstraint("target_version >= 1", name="test_plan_item_target_version"),
+        CheckConstraint(
+            "target_type != 'workflow' OR "
+            "(workflow_id IS NOT NULL AND environment_id IS NOT NULL AND workflow_version >= 1)",
+            name="test_plan_item_workflow_target",
+        ),
         CheckConstraint("max_retries BETWEEN 0 AND 3", name="test_plan_item_max_retries"),
     )
 
     test_plan_id: Mapped[UUID] = mapped_column(
         ForeignKey("test_plans.id", ondelete="CASCADE"), index=True
     )
-    workflow_id: Mapped[UUID] = mapped_column(
+    target_type: Mapped[str] = mapped_column(
+        String(16), default="workflow", server_default="workflow"
+    )
+    target_id: Mapped[UUID] = mapped_column(index=True)
+    target_version: Mapped[int] = mapped_column(Integer)
+    workflow_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("workflows.id", ondelete="RESTRICT"), index=True
     )
-    environment_id: Mapped[UUID] = mapped_column(
+    environment_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("environments.id", ondelete="RESTRICT"), index=True
     )
-    workflow_version: Mapped[int] = mapped_column(Integer)
+    workflow_version: Mapped[int | None] = mapped_column(Integer)
     position: Mapped[int] = mapped_column(Integer)
     max_retries: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     runtime_variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
@@ -107,11 +121,22 @@ class TestPlanRunItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint("attempts BETWEEN 0 AND 4", name="test_plan_run_item_attempts"),
         CheckConstraint("max_retries BETWEEN 0 AND 3", name="test_plan_run_item_max_retries"),
+        CheckConstraint(
+            "target_type IN ('workflow', 'case')",
+            name="test_plan_run_item_target_type",
+        ),
+        CheckConstraint("target_version >= 1", name="test_plan_run_item_target_version"),
     )
 
     test_plan_run_id: Mapped[UUID] = mapped_column(
         ForeignKey("test_plan_runs.id", ondelete="CASCADE"), index=True
     )
+    target_type: Mapped[str] = mapped_column(
+        String(16), default="workflow", server_default="workflow"
+    )
+    target_id: Mapped[UUID] = mapped_column(index=True)
+    target_version: Mapped[int] = mapped_column(Integer)
+    target_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     workflow_id: Mapped[UUID] = mapped_column(
         ForeignKey("workflows.id", ondelete="RESTRICT"), index=True
     )

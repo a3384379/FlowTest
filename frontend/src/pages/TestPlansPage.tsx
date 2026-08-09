@@ -21,6 +21,7 @@ import {
 } from 'antd'
 
 import type { CreateTestPlanInput } from '../features/task-plans/task-plan-service'
+import type { TestPlanTargetType } from '../features/task-plans/task-plan-service'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
 import type { TestPlan, TestPlanRun } from '../lib/api'
 
@@ -41,7 +42,10 @@ type TaskState = ReturnType<typeof useTestPlans>
 
 function TaskHeading({ state }: { state: TaskState }) {
   const cannotCreate =
-    !state.projectId || !state.workflows.data?.items.length || !state.environments.data?.length
+    !state.projectId ||
+    (!state.workflows.data?.items.length &&
+      !state.testCases.data?.items.some(isPublished) &&
+      !state.testSuites.data?.items.some(isPublished))
   return (
     <div className="page-heading">
       <div>
@@ -127,6 +131,8 @@ function TaskDialogs({ state }: { state: TaskState }) {
         open={state.createOpen}
         workflows={state.workflows.data?.items ?? []}
         environments={state.environments.data ?? []}
+        testCases={state.testCases.data?.items.filter(isPublished) ?? []}
+        testSuites={state.testSuites.data?.items.filter(isPublished) ?? []}
         submitting={state.creating}
         onClose={() => state.setCreateOpen(false)}
         onCreate={state.addPlan}
@@ -226,6 +232,8 @@ function CreatePlanDialog({
   open,
   workflows,
   environments,
+  testCases,
+  testSuites,
   submitting,
   onClose,
   onCreate,
@@ -233,11 +241,19 @@ function CreatePlanDialog({
   open: boolean
   workflows: Array<{ id: string; name: string }>
   environments: Array<{ id: string; name: string }>
+  testCases: Array<{ id: string; name: string }>
+  testSuites: Array<{ id: string; name: string }>
   submitting: boolean
   onClose: () => void
   onCreate: (input: CreateTestPlanInput) => Promise<void>
 }) {
-  const [form] = Form.useForm<CreateTestPlanInput & { intervalMinutes: number | null }>()
+  type PlanForm = Omit<CreateTestPlanInput, 'intervalSeconds' | 'environmentId'> & {
+    environmentId?: string
+    intervalMinutes: number | null
+  }
+  const [form] = Form.useForm<PlanForm>()
+  const targetType = Form.useWatch('targetType', form) ?? 'workflow'
+  const targetOptions = selectTargetOptions(targetType, workflows, testCases, testSuites)
   return (
     <Modal
       title="新建测试计划"
@@ -250,10 +266,11 @@ function CreatePlanDialog({
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ maxRetries: 0, intervalMinutes: null }}
+        initialValues={{ targetType: 'workflow', maxRetries: 0, intervalMinutes: null }}
         onFinish={(values) =>
           void onCreate({
             ...values,
+            environmentId: values.environmentId ?? null,
             intervalSeconds: values.intervalMinutes ? values.intervalMinutes * 60 : null,
           })
         }
@@ -261,12 +278,27 @@ function CreatePlanDialog({
         <Form.Item name="name" label="计划名称" rules={[{ required: true }]}>
           <Input maxLength={200} />
         </Form.Item>
-        <Form.Item name="workflowId" label="工作流" rules={[{ required: true }]}>
-          <Select options={options(workflows)} />
+        <Form.Item name="targetType" label="资产类型" rules={[{ required: true }]}>
+          <Select
+            options={[
+              { value: 'workflow', label: '工作流' },
+              { value: 'case', label: '测试用例' },
+              { value: 'suite', label: '测试套件' },
+            ]}
+            onChange={() => {
+              form.setFieldValue('targetId', undefined)
+              form.setFieldValue('environmentId', undefined)
+            }}
+          />
         </Form.Item>
-        <Form.Item name="environmentId" label="环境" rules={[{ required: true }]}>
-          <Select options={options(environments)} />
+        <Form.Item name="targetId" label={targetLabel(targetType)} rules={[{ required: true }]}>
+          <Select options={targetOptions} />
         </Form.Item>
+        {targetType === 'workflow' && (
+          <Form.Item name="environmentId" label="环境" rules={[{ required: true }]}>
+            <Select options={options(environments)} />
+          </Form.Item>
+        )}
         <Form.Item name="intervalMinutes" label="定时间隔（分钟，留空为手动）">
           <InputNumber min={1} max={43_200} precision={0} className="full-width" />
         </Form.Item>
@@ -302,6 +334,29 @@ function StatusTag({ status }: { status: string }) {
 
 function options(items?: Array<{ id: string; name: string }>) {
   return items?.map((item) => ({ value: item.id, label: item.name }))
+}
+
+function isPublished(item: { current_version: number | null }) {
+  return item.current_version !== null
+}
+
+function targetLabel(targetType: TestPlanTargetType) {
+  const labels: Record<TestPlanTargetType, string> = {
+    workflow: '工作流',
+    case: '测试用例',
+    suite: '测试套件',
+  }
+  return labels[targetType]
+}
+
+function selectTargetOptions(
+  targetType: TestPlanTargetType,
+  workflows: Array<{ id: string; name: string }>,
+  testCases: Array<{ id: string; name: string }>,
+  testSuites: Array<{ id: string; name: string }>,
+) {
+  const targets = { workflow: workflows, case: testCases, suite: testSuites }
+  return options(targets[targetType])
 }
 
 function localTime(value: string): string {

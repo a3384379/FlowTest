@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
+from app.domain.api_assets import JsonValue
 from app.domain.tasking import (
     ServiceTokenScope,
     TestPlanTrigger,
@@ -16,14 +17,17 @@ from app.domain.tasking import (
     next_scheduled_at,
     valid_webhook_signature,
 )
+from app.domain.test_assets import TestTargetType
 from app.models.access import User
 from app.models.api_assets import Environment
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.workflows import Workflow
 from app.repositories.access import UserRepository
 from app.repositories.tasking import TaskingRepository
+from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.tasking import TestPlanItemInput
+from app.schemas.test_assets import PublishedTestCaseDefinition
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -58,10 +62,25 @@ class ServiceTokenIdentity:
     actor: User
 
 
+@dataclass(frozen=True, slots=True)
+class ExpandedPlanItem:
+    workflow_id: UUID
+    environment_id: UUID
+    workflow_version: int
+    target_type: TestTargetType
+    target_id: UUID
+    target_version: int
+    max_retries: int
+    runtime_variables: dict[str, str]
+    runtime_headers: dict[str, str]
+    target_snapshot: dict[str, JsonValue]
+
+
 class TestPlanService:
     def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
         self._session = session
         self._tasks = TaskingRepository(session)
+        self._assets = TestAssetRepository(session)
         self._workflows = WorkflowRepository(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
@@ -325,13 +344,22 @@ class TestPlanService:
         )
         self._tasks.add(run)
         await self._session.flush()
+        expanded = [
+            expanded_item
+            for item in items
+            for expanded_item in await self._expand_plan_item(plan.project_id, item)
+        ]
         snapshots = [
             TestPlanRunItem(
                 test_plan_run_id=run.id,
                 workflow_id=item.workflow_id,
                 environment_id=item.environment_id,
                 workflow_version=item.workflow_version,
-                position=item.position,
+                target_type=item.target_type.value,
+                target_id=item.target_id,
+                target_version=item.target_version,
+                target_snapshot=item.target_snapshot,
+                position=position,
                 max_retries=item.max_retries,
                 attempts=0,
                 status="queued",
@@ -340,7 +368,7 @@ class TestPlanService:
                 workflow_execution_id=None,
                 error_message=None,
             )
-            for item in items
+            for position, item in enumerate(expanded)
         ]
         self._tasks.add_all(snapshots)
         self._audit.record(
@@ -349,7 +377,7 @@ class TestPlanService:
             action="test_plan_run.queued",
             resource_type="test_plan_run",
             resource_id=run.id,
-            details={"trigger": trigger.value, "item_count": len(items)},
+            details={"trigger": trigger.value, "item_count": len(expanded)},
         )
         if commit:
             await self._session.commit()
@@ -361,13 +389,23 @@ class TestPlanService:
     ) -> tuple[TestPlanItem, ...]:
         models: list[TestPlanItem] = []
         for position, item in enumerate(inputs):
-            workflow = await self._session.get(Workflow, item.workflow_id)
+            if item.target_type is not TestTargetType.WORKFLOW:
+                models.append(await self._build_asset_item(plan_id, position, project_id, item))
+                continue
+            workflow_id = item.target_id or item.workflow_id
+            if workflow_id is None or item.environment_id is None:
+                raise AppError(
+                    code="INVALID_TEST_PLAN_ITEM",
+                    message="工作流计划项缺少目标或环境",
+                    status_code=422,
+                )
+            workflow = await self._session.get(Workflow, workflow_id)
             environment = await self._session.get(Environment, item.environment_id)
             if workflow is None or workflow.project_id != project_id:
                 raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
             if environment is None or environment.project_id != project_id:
                 raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
-            version = item.workflow_version or workflow.current_version
+            version = item.target_version or item.workflow_version or workflow.current_version
             if version is None or await self._workflows.find_version(workflow.id, version) is None:
                 raise AppError(
                     code="WORKFLOW_VERSION_NOT_FOUND",
@@ -377,6 +415,9 @@ class TestPlanService:
             models.append(
                 TestPlanItem(
                     test_plan_id=plan_id,
+                    target_type=TestTargetType.WORKFLOW.value,
+                    target_id=workflow.id,
+                    target_version=version,
                     workflow_id=workflow.id,
                     environment_id=environment.id,
                     workflow_version=version,
@@ -387,6 +428,180 @@ class TestPlanService:
                 )
             )
         return tuple(models)
+
+    async def _build_asset_item(
+        self,
+        plan_id: UUID,
+        position: int,
+        project_id: UUID,
+        item: TestPlanItemInput,
+    ) -> TestPlanItem:
+        if item.target_id is None:
+            raise AppError(
+                code="INVALID_TEST_PLAN_ITEM",
+                message="测试资产计划项缺少目标",
+                status_code=422,
+            )
+        if item.target_type is TestTargetType.CASE:
+            case = await self._assets.get_case(item.target_id)
+            if case is None or case.project_id != project_id:
+                raise AppError(
+                    code="TEST_CASE_NOT_FOUND", message="测试资产不存在", status_code=404
+                )
+            target_id = case.id
+            current_version = case.current_version
+        else:
+            suite = await self._assets.get_suite(item.target_id)
+            if suite is None or suite.project_id != project_id:
+                raise AppError(
+                    code="TEST_SUITE_NOT_FOUND", message="测试资产不存在", status_code=404
+                )
+            target_id = suite.id
+            current_version = suite.current_version
+        version = item.target_version or current_version
+        if version is None or not await self._target_version_exists(
+            item.target_type, target_id, version
+        ):
+            raise AppError(
+                code="TEST_ASSET_VERSION_NOT_FOUND",
+                message="测试资产尚未发布或版本不存在",
+                status_code=404,
+            )
+        return TestPlanItem(
+            test_plan_id=plan_id,
+            target_type=item.target_type.value,
+            target_id=target_id,
+            target_version=version,
+            workflow_id=None,
+            environment_id=None,
+            workflow_version=None,
+            position=position,
+            max_retries=item.max_retries,
+            runtime_variables=dict(item.runtime_variables),
+            runtime_headers=dict(item.runtime_headers),
+        )
+
+    async def _target_version_exists(
+        self, target_type: TestTargetType, target_id: UUID, version: int
+    ) -> bool:
+        if target_type is TestTargetType.CASE:
+            return await self._assets.find_case_version(target_id, version) is not None
+        return await self._assets.find_suite_version(target_id, version) is not None
+
+    async def _expand_plan_item(
+        self, project_id: UUID, item: TestPlanItem
+    ) -> tuple[ExpandedPlanItem, ...]:
+        target_type = TestTargetType(item.target_type)
+        if target_type is TestTargetType.WORKFLOW:
+            if (
+                item.workflow_id is None
+                or item.environment_id is None
+                or item.workflow_version is None
+            ):
+                raise AppError(
+                    code="INVALID_TEST_PLAN_ITEM",
+                    message="工作流计划项配置不完整",
+                    status_code=409,
+                )
+            return (
+                ExpandedPlanItem(
+                    workflow_id=item.workflow_id,
+                    environment_id=item.environment_id,
+                    workflow_version=item.workflow_version,
+                    target_type=target_type,
+                    target_id=item.target_id,
+                    target_version=item.target_version,
+                    max_retries=item.max_retries,
+                    runtime_variables=dict(item.runtime_variables),
+                    runtime_headers=dict(item.runtime_headers),
+                    target_snapshot={
+                        "target_type": target_type.value,
+                        "target_id": str(item.target_id),
+                        "target_version": item.target_version,
+                    },
+                ),
+            )
+        if target_type is TestTargetType.CASE:
+            return (
+                await self._expand_case(
+                    project_id,
+                    item.target_id,
+                    item.target_version,
+                    item.max_retries,
+                    item.runtime_variables,
+                    item.runtime_headers,
+                ),
+            )
+        suite = await self._assets.find_suite_version(item.target_id, item.target_version)
+        if suite is None:
+            raise AppError(
+                code="TEST_SUITE_VERSION_NOT_FOUND",
+                message="测试套件版本不存在",
+                status_code=409,
+            )
+        suite_items = await self._assets.list_suite_items(suite.id)
+        expanded: list[ExpandedPlanItem] = []
+        for suite_item in suite_items:
+            expanded.append(
+                await self._expand_case(
+                    project_id,
+                    suite_item.test_case_id,
+                    suite_item.test_case_version,
+                    item.max_retries,
+                    item.runtime_variables,
+                    item.runtime_headers,
+                    suite_id=item.target_id,
+                    suite_version=item.target_version,
+                )
+            )
+        return tuple(expanded)
+
+    async def _expand_case(
+        self,
+        project_id: UUID,
+        case_id: UUID,
+        case_version: int,
+        max_retries: int,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        *,
+        suite_id: UUID | None = None,
+        suite_version: int | None = None,
+    ) -> ExpandedPlanItem:
+        case = await self._assets.get_case(case_id)
+        version = await self._assets.find_case_version(case_id, case_version)
+        if case is None or case.project_id != project_id or version is None:
+            raise AppError(
+                code="TEST_CASE_VERSION_NOT_FOUND",
+                message="测试用例版本不存在",
+                status_code=409,
+            )
+        definition = PublishedTestCaseDefinition.model_validate(version.definition)
+        merged_variables = {**definition.runtime_variables, **runtime_variables}
+        merged_headers = {**definition.runtime_headers, **runtime_headers}
+        snapshot: dict[str, JsonValue] = {
+            "target_type": TestTargetType.CASE.value,
+            "target_id": str(case.id),
+            "target_version": version.version,
+            "definition": definition.model_dump(mode="json"),
+        }
+        if suite_id is not None:
+            snapshot["source_suite"] = {
+                "id": str(suite_id),
+                "version": suite_version,
+            }
+        return ExpandedPlanItem(
+            workflow_id=definition.workflow_id,
+            environment_id=definition.environment_id,
+            workflow_version=definition.workflow_version,
+            target_type=TestTargetType.CASE,
+            target_id=case.id,
+            target_version=version.version,
+            max_retries=max_retries,
+            runtime_variables=merged_variables,
+            runtime_headers=merged_headers,
+            target_snapshot=snapshot,
+        )
 
     async def _get_project_plan(self, project_id: UUID, plan_id: UUID) -> TestPlan:
         plan = await self._tasks.get_plan(plan_id)

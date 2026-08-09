@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V2.0 路线 S14 团队与 API 工作台已完成`；S12 真实两周试点仍按观察窗口持续记录。
+当前状态：`V2.0 路线 S15 测试资产体系已完成`；S12 真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -114,6 +114,13 @@ React Router 项目深链接和真实 Dashboard。单组织团队模型支持成
 直接项目成员权限优先于团队授权。Web 项目治理页可管理用户、团队、目录、环境、变量、Header 和
 只写 Secret；API 工作台可持续编辑 Params、Headers、Auth、Body、提取和断言并保存不可变版本。
 导入导出已扩展至 HAR、cURL、Bruno 和 Excel，认证信息始终使用 Secret 引用或脱敏占位。
+
+S15 已提供 Test Case 与 Test Suite 的可修改草稿、不可变发布版本、标签/搜索、模板、克隆、
+批量目录移动和结构化版本 Diff。发布 Case 时固定 Workflow Version 与 Environment；发布 Suite
+时固定每个 Case Version。Test Plan 继续兼容 V1 `workflow_id` 输入，同时可选择 Workflow、Case
+或 Suite；创建计划即固定目标版本，入队时将 Suite 展开为固定 Case Snapshot，之后修改或重新发布
+资产不会改变历史运行。Web“测试资产”页面和 Playwright 验收覆盖两次发布、Diff、克隆、套件发布
+及固定套件计划闭环。
 
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
