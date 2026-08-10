@@ -37,7 +37,7 @@ S12 新增 `capacity_workflow.py`，它会创建并发布一个包含真实 HTTP
 10 秒；可通过 `FLOWTEST_CAPACITY_WORKFLOW_REQUESTS`、
 `FLOWTEST_CAPACITY_WORKFLOW_CONCURRENCY` 和 `FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS` 调整。
 GitHub 托管 Runner 并非 8C/16G 参考环境，因此 CI 保持相同的 100 并发、零失败要求，使用
-30 秒兼容上限；正式发布仍必须在参考硬件上通过默认 10 秒门槛，CI 结果不能替代该记录。
+60 秒兼容上限；正式发布仍必须在参考硬件上通过默认 10 秒门槛，CI 结果不能替代该记录。
 
 ## V1.1 真实 Workflow 基线
 
