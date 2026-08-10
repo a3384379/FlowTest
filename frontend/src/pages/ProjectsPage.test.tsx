@@ -36,6 +36,17 @@ describe('ProjectsPage', () => {
           },
         }),
       ),
+      http.get(`/api/v1/projects/${project.id}/members`, () => HttpResponse.json([])),
+      http.get('/api/v1/teams', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/team-grants`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/folders`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/configuration`, () =>
+        HttpResponse.json({ variables: [], headers: [] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/security-policy`, () =>
         HttpResponse.json({
           allowed_hosts: ['api.example.com'],

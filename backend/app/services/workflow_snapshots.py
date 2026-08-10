@@ -13,6 +13,8 @@ from app.domain.api_assets import BodyKind
 from app.engine.contracts import (
     ForEachNodeConfig,
     NodeType,
+    RedisNodeConfig,
+    SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
     parse_api_node_config,
@@ -26,6 +28,8 @@ from app.repositories.workflows import WorkflowRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
 from app.services.artifacts import ArtifactService
+from app.services.credentials import CredentialMaterial, CredentialService
+from app.services.data_nodes import PreparedDataNode
 from app.services.datasets import WorkflowDatasetService
 from app.services.executions import PreparedMultipart, PreparedUpload
 from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
@@ -37,6 +41,7 @@ class PreparedExecution:
     requests: dict[str, PreparedWorkflowRequest]
     dataset_variables: dict[str, JsonValue]
     subflows: dict[str, PreparedSubflow] = dataclass_field(default_factory=dict)
+    data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +57,7 @@ class WorkflowSnapshotBuilder:
         self._api_assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
         self._datasets = WorkflowDatasetService(session)
+        self._credentials = CredentialService(session)
 
     async def prepare(
         self,
@@ -91,6 +97,10 @@ class WorkflowSnapshotBuilder:
                 dataset_variables=row,
                 depth=1,
             )
+            data_nodes = await self._prepare_data_nodes(
+                project_id=project_id,
+                definition=definition,
+            )
             runs.append(
                 PreparedExecution(
                     snapshot=_snapshot(
@@ -99,6 +109,7 @@ class WorkflowSnapshotBuilder:
                         environment=environment,
                         apis=api_snapshots,
                         subflows=subflows,
+                        data_nodes=data_nodes,
                         dataset=(
                             dataset.snapshot(
                                 row_index=row_index,
@@ -112,6 +123,7 @@ class WorkflowSnapshotBuilder:
                     ),
                     requests=requests,
                     subflows=subflows,
+                    data_nodes=data_nodes,
                     dataset_variables=dict(row),
                 )
             )
@@ -173,6 +185,10 @@ class WorkflowSnapshotBuilder:
                 runtime_headers=runtime_headers,
                 dataset_variables=dataset_variables,
             )
+            data_nodes = await self._prepare_data_nodes(
+                project_id=project_id,
+                definition=nested_definition,
+            )
             children = await self._prepare_subflows(
                 actor=actor,
                 project_id=project_id,
@@ -188,6 +204,7 @@ class WorkflowSnapshotBuilder:
                 version=version,
                 apis=api_snapshots,
                 subflows=children,
+                data_nodes=data_nodes,
             )
             prepared[node.id] = PreparedSubflow(
                 workflow_id=workflow.id,
@@ -197,7 +214,26 @@ class WorkflowSnapshotBuilder:
                 requests=requests,
                 subflows=children,
                 snapshot=snapshot,
+                data_nodes=data_nodes,
             )
+        return prepared
+
+    async def _prepare_data_nodes(
+        self,
+        *,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+    ) -> dict[str, PreparedDataNode]:
+        prepared: dict[str, PreparedDataNode] = {}
+        for node in definition.nodes:
+            config = parse_node_config(node)
+            if not isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
+                continue
+            material = await self._credentials.load_material(
+                project_id=project_id,
+                credential_id=config.credential_id,
+            )
+            prepared[node.id] = PreparedDataNode(credential=material)
         return prepared
 
     async def _prepare_api_nodes(
@@ -324,6 +360,7 @@ def _snapshot(
     environment: Environment,
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
+    data_nodes: dict[str, PreparedDataNode],
     dataset: JsonValue,
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
@@ -340,6 +377,7 @@ def _snapshot(
         "environment": _environment_snapshot(environment),
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
+        "data_nodes": _data_node_snapshots(data_nodes),
         "dataset": dataset,
         "runtime": cast(
             JsonValue,
@@ -354,6 +392,7 @@ def _nested_snapshot(
     version: WorkflowVersion,
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
+    data_nodes: dict[str, PreparedDataNode],
 ) -> dict[str, JsonValue]:
     return {
         "workflow": {
@@ -365,6 +404,27 @@ def _nested_snapshot(
         },
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
+        "data_nodes": _data_node_snapshots(data_nodes),
+    }
+
+
+def _data_node_snapshots(data_nodes: dict[str, PreparedDataNode]) -> dict[str, JsonValue]:
+    return {
+        node_id: _credential_snapshot(prepared.credential)
+        for node_id, prepared in data_nodes.items()
+    }
+
+
+def _credential_snapshot(credential: CredentialMaterial) -> JsonValue:
+    return {
+        "credential_id": str(credential.id),
+        "name": credential.name,
+        "kind": credential.kind.value,
+        "host": credential.host,
+        "port": credential.port,
+        "database_name": credential.database_name,
+        "username": credential.username,
+        "tls_enabled": credential.tls_enabled,
     }
 
 

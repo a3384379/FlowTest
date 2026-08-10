@@ -33,11 +33,12 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Button, Empty, Select, Space, Tag, Typography } from 'antd'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
 import type {
   ApiDefinition,
   Artifact,
+  Credential,
   Workflow,
   WorkflowDefinition,
   WorkflowNode,
@@ -56,6 +57,7 @@ type DesignerProps = {
   apis: ApiDefinition[]
   artifacts: Artifact[]
   workflows?: Workflow[]
+  credentials: Credential[]
   statuses: Record<string, string>
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
@@ -78,6 +80,7 @@ export default function WorkflowDesigner({
   apis,
   artifacts,
   workflows = [],
+  credentials,
   statuses,
   editable,
   onChange,
@@ -144,6 +147,8 @@ export default function WorkflowDesigner({
         editable={editable}
         hasArtifacts={artifacts.length > 0}
         hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
+        hasSqlCredential={credentials.some((item) => item.kind !== 'redis')}
+        hasRedisCredential={credentials.some((item) => item.kind === 'redis')}
         onApiSelection={setApiSelection}
         onSubflowSelection={setSubflowSelection}
         onAddApi={() => selectedApiId && applyChange(addApiNode(definition, selectedApiId))}
@@ -159,6 +164,7 @@ export default function WorkflowDesigner({
                     workflowVersion: selectedSubflow.current_version,
                   }
                 : null,
+              credentials,
             ),
           )
         }
@@ -205,6 +211,7 @@ export default function WorkflowDesigner({
           apis={apis}
           artifacts={artifacts}
           workflows={publishedWorkflows}
+          credentials={credentials}
           editable={editable}
           onChange={applyChange}
           onDelete={() => {
@@ -226,6 +233,8 @@ function DesignerToolbar({
   editable,
   hasArtifacts,
   hasDataset,
+  hasSqlCredential,
+  hasRedisCredential,
   onApiSelection,
   onSubflowSelection,
   onAddApi,
@@ -247,6 +256,8 @@ function DesignerToolbar({
   editable: boolean
   hasArtifacts: boolean
   hasDataset: boolean
+  hasSqlCredential: boolean
+  hasRedisCredential: boolean
   onApiSelection: (value: string) => void
   onSubflowSelection: (value: string) => void
   onAddApi: () => void
@@ -309,6 +320,20 @@ function DesignerToolbar({
           onClick={() => onAddNode('dataset')}
         >
           数据集
+        </Button>
+        <Button
+          icon={<DatabaseOutlined />}
+          disabled={isDataNodeDisabled(editable, hasSqlCredential)}
+          onClick={() => onAddNode('sql')}
+        >
+          只读 SQL
+        </Button>
+        <Button
+          icon={<DatabaseOutlined />}
+          disabled={isDataNodeDisabled(editable, hasRedisCredential)}
+          onClick={() => onAddNode('redis')}
+        >
+          Redis 读取
         </Button>
         <Select
           aria-label="待添加子流程"
@@ -449,22 +474,33 @@ function nodeTypeLabel(type: WorkflowNode['type']): string {
     dataset: '数据集',
     subflow: '子流程',
     for_each: 'ForEach',
+    sql: 'SQL',
+    redis: 'Redis',
     end: '结束',
   }
   return labels[type] ?? type
 }
 
 function nodeIcon(type: WorkflowNode['type']) {
-  if (type === 'start') return <PlayCircleOutlined />
-  if (type === 'end') return <FlagOutlined />
-  if (type === 'extract') return <ExportOutlined />
-  if (type === 'assert') return <CheckCircleOutlined />
-  if (type === 'condition') return <BranchesOutlined />
-  if (type === 'delay') return <ClockCircleOutlined />
-  if (type === 'dataset') return <DatabaseOutlined />
-  if (type === 'subflow') return <ApartmentOutlined />
-  if (type === 'for_each') return <RetweetOutlined />
-  return <ApiOutlined />
+  return nodeIcons[type] ?? <ApiOutlined />
+}
+
+const nodeIcons: Partial<Record<WorkflowNode['type'], ReactNode>> = {
+  start: <PlayCircleOutlined />,
+  end: <FlagOutlined />,
+  extract: <ExportOutlined />,
+  assert: <CheckCircleOutlined />,
+  condition: <BranchesOutlined />,
+  delay: <ClockCircleOutlined />,
+  dataset: <DatabaseOutlined />,
+  subflow: <ApartmentOutlined />,
+  for_each: <RetweetOutlined />,
+  sql: <DatabaseOutlined />,
+  redis: <DatabaseOutlined />,
+}
+
+function isDataNodeDisabled(editable: boolean, hasCredential: boolean): boolean {
+  return !editable || !hasCredential
 }
 
 function statusLabel(status: string): string {

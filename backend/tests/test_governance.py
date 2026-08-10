@@ -1,9 +1,11 @@
 import pytest
 from pydantic import ValidationError
+from starlette.requests import Request
 
-from app.core.config import Settings
+from app.core.config import Settings, settings
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_outbound_url
+from app.middleware import rate_limit as rate_limit_middleware
 from app.services.rate_limit import RedisRateLimiter
 
 
@@ -38,6 +40,28 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
 def test_retention_default_does_not_exceed_system_limit() -> None:
     with pytest.raises(ValidationError, match="默认保留天数"):
         Settings(_env_file=None, retention_default_days=31, retention_max_days=30)
+
+
+def test_public_mock_dispatch_is_rate_limited_for_every_http_method() -> None:
+    for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": method,
+                "scheme": "https",
+                "path": "/api/v1/mock/contracts/users/42",
+                "raw_path": b"/api/v1/mock/contracts/users/42",
+                "query_string": b"",
+                "headers": [],
+                "client": ("203.0.113.1", 50000),
+                "server": ("flowtest.example.com", 443),
+            }
+        )
+        assert rate_limit_middleware._rule(request) == (
+            "mock-dispatch",
+            settings.execution_rate_limit_per_minute,
+        )
 
 
 @pytest.mark.asyncio

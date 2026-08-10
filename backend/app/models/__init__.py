@@ -14,6 +14,7 @@ from app.models.access import (
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
+from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
@@ -36,10 +37,14 @@ __all__ = [
     "AssertionResult",
     "AuditLog",
     "Base",
+    "Credential",
     "Environment",
     "Folder",
     "IdempotencyRecord",
     "ImportRun",
+    "MockRequestLog",
+    "MockRoute",
+    "MockService",
     "NotificationDelivery",
     "NotificationWebhook",
     "Project",

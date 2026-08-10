@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.data_nodes import (
+    CredentialKind,
+    DataNodeValidationError,
+    validate_read_only_sql,
+    validate_redis_read,
+)
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.contracts import (
@@ -25,6 +31,8 @@ from app.engine.contracts import (
     ExtractNodeConfig,
     ForEachNodeConfig,
     NodeType,
+    RedisNodeConfig,
+    SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
@@ -46,6 +54,7 @@ from app.models.workflows import (
     WorkflowVersion,
 )
 from app.repositories.api_assets import APIAssetRepository
+from app.repositories.data_sources import DataSourceRepository
 from app.repositories.workflows import WorkflowRepository
 from app.services.audit import AuditService
 from app.services.datasets import WorkflowDatasetService
@@ -98,6 +107,7 @@ class WorkflowService:
         self._session = session
         self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
+        self._data_sources = DataSourceRepository(session)
         self._snapshots = WorkflowSnapshotBuilder(session)
         self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
@@ -491,6 +501,7 @@ class WorkflowService:
                     plan.definition,
                     network_policy,
                     subflows=plan.prepared.subflows,
+                    data_nodes=plan.prepared.data_nodes,
                 )
             )
             result = await self._run_with_cancellation_poll(
@@ -544,6 +555,7 @@ class WorkflowService:
                     definition,
                     network_policy,
                     subflows=prepared.subflows,
+                    data_nodes=prepared.data_nodes,
                 )
             ).run(
                 definition,
@@ -724,6 +736,17 @@ class WorkflowService:
                 status_code=422,
                 details={"node_id": node.id},
             ) from error
+        await self._validate_resource_node(project_id, node, config)
+        self._validate_control_node(definition, node, config)
+        if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
+            await self._load_subflow_version(project_id, config)
+
+    async def _validate_resource_node(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: object,
+    ) -> None:
         if isinstance(config, ApiNodeConfig):
             definition_model = await self._api_repository.get_definition(config.api_definition_id)
             if definition_model is None or definition_model.project_id != project_id:
@@ -733,6 +756,24 @@ class WorkflowService:
                     status_code=422,
                     details={"node_id": node.id},
                 )
+        if isinstance(config, DatasetNodeConfig):
+            artifact = await self._session.get(Artifact, config.artifact_id)
+            if artifact is None or artifact.project_id != project_id:
+                raise AppError(
+                    code="ARTIFACT_NOT_FOUND",
+                    message=f"Dataset 节点 {node.name} 引用的文件不存在",
+                    status_code=422,
+                    details={"node_id": node.id},
+                )
+        if isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
+            await self._validate_data_node(project_id, node, config)
+
+    def _validate_control_node(
+        self,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+        config: object,
+    ) -> None:
         if isinstance(config, (ExtractNodeConfig, AssertNodeConfig, ConditionNodeConfig)):
             self._validate_control_source(
                 definition,
@@ -757,17 +798,38 @@ class WorkflowService:
                     status_code=422,
                     details={"node_id": node.id},
                 ) from error
-        if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
-            await self._load_subflow_version(project_id, config)
-        if isinstance(config, DatasetNodeConfig):
-            artifact = await self._session.get(Artifact, config.artifact_id)
-            if artifact is None or artifact.project_id != project_id:
-                raise AppError(
-                    code="ARTIFACT_NOT_FOUND",
-                    message=f"Dataset 节点 {node.name} 引用的文件不存在",
-                    status_code=422,
-                    details={"node_id": node.id},
-                )
+
+    async def _validate_data_node(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: SqlNodeConfig | RedisNodeConfig,
+    ) -> None:
+        credential = await self._data_sources.get_credential(config.credential_id)
+        if credential is None or credential.project_id != project_id:
+            raise AppError(
+                code="CREDENTIAL_NOT_FOUND",
+                message=f"数据节点 {node.name} 引用的 Credential 不存在",
+                status_code=422,
+                details={"node_id": node.id},
+            )
+        kind = CredentialKind(credential.kind)
+        try:
+            if isinstance(config, SqlNodeConfig):
+                if kind is CredentialKind.REDIS:
+                    raise DataNodeValidationError("SQL 节点不能使用 Redis Credential")
+                validate_read_only_sql(config.query, kind)
+            else:
+                if kind is not CredentialKind.REDIS:
+                    raise DataNodeValidationError("Redis 节点必须使用 Redis Credential")
+                validate_redis_read(config.command, config.arguments)
+        except DataNodeValidationError as error:
+            raise AppError(
+                code="UNSAFE_DATA_NODE",
+                message=str(error),
+                status_code=422,
+                details={"node_id": node.id},
+            ) from error
 
     async def _validate_subflow_graph(
         self,

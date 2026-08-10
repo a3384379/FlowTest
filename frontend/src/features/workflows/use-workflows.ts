@@ -12,6 +12,7 @@ import {
 } from '../../lib/api'
 import { useAuthStore } from '../auth/auth-store'
 import { useProjectContext } from '../projects/use-project-context'
+import { listCredentials } from '../data-sources/data-source-service'
 import { useExecutionEvents } from './use-execution-events'
 import {
   createWorkflow,
@@ -71,6 +72,11 @@ export function useWorkflows() {
   const workflows = useQuery({
     queryKey: ['workflows', projectId],
     queryFn: () => listWorkflows(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const credentials = useQuery({
+    queryKey: ['credentials', projectId],
+    queryFn: () => listCredentials(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
   const workflowId = selectedOrFirst(workflowSelection, workflows.data?.items)
@@ -260,6 +266,7 @@ export function useWorkflows() {
     apis,
     artifacts,
     workflows,
+    credentials,
     workflowId,
     setWorkflowSelection,
     selectedWorkflow,

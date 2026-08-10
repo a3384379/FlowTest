@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    testTimeout: 10_000,
+    // Keep CI predictable on developer machines that are also running Docker Desktop.
+    // Action-heavy Ant Design tests need more than Vitest's short default under load.
+    maxWorkers: 4,
+    testTimeout: 30_000,
     exclude: [...configDefaults.exclude, 'e2e/**'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {

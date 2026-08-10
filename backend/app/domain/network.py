@@ -44,15 +44,30 @@ async def validate_outbound_url(
     if parsed.username is not None or parsed.password is not None:
         raise OutboundPolicyError("出站地址不能包含用户凭据")
 
-    normalized = policy.normalized()
     hostname = parsed.hostname.rstrip(".").lower()
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return await validate_outbound_target(hostname, port, policy, resolver=resolver)
+
+
+async def validate_outbound_target(
+    hostname: str,
+    port: int,
+    policy: OutboundNetworkPolicy,
+    *,
+    resolver: AddressResolver | None = None,
+) -> tuple[str, ...]:
+    if not 1 <= port <= 65535:
+        raise OutboundPolicyError("目标端口无效")
+    normalized = policy.normalized()
+    normalized_hostname = _normalize_host(hostname)
+    if normalized_hostname.startswith("*."):
+        raise OutboundPolicyError("目标主机不能使用通配符")
     if normalized.allowed_hosts and not any(
-        _host_matches(hostname, pattern) for pattern in normalized.allowed_hosts
+        _host_matches(normalized_hostname, pattern) for pattern in normalized.allowed_hosts
     ):
         raise OutboundPolicyError("目标域名不在项目允许列表中")
 
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    addresses = await (resolver or resolve_host)(hostname, port)
+    addresses = await (resolver or resolve_host)(normalized_hostname, port)
     if not addresses:
         raise OutboundPolicyError("目标域名没有可用地址")
     private_networks = tuple(

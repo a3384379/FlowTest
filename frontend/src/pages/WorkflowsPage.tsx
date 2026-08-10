@@ -196,6 +196,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         apis={state.apis.data?.items ?? []}
         artifacts={state.artifacts.data?.items ?? []}
         workflows={(state.workflows.data?.items ?? []).filter((item) => item.id !== workflow.id)}
+        credentials={state.credentials.data ?? []}
         statuses={state.nodeStatuses}
         editable={!state.activeExecutionId}
         onChange={state.setDraftDefinition}

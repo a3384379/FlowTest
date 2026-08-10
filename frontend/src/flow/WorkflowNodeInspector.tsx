@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type {
   ApiDefinition,
   Artifact,
+  Credential,
   Workflow,
   WorkflowDefinition,
   WorkflowEdge,
@@ -18,6 +19,7 @@ type InspectorProps = {
   apis: ApiDefinition[]
   artifacts: Artifact[]
   workflows?: Workflow[]
+  credentials: Credential[]
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
   onDelete: () => void
@@ -29,6 +31,7 @@ export default function WorkflowNodeInspector({
   apis,
   artifacts,
   workflows = [],
+  credentials,
   editable,
   onChange,
   onDelete,
@@ -45,15 +48,24 @@ export default function WorkflowNodeInspector({
           onChange={(event) => updateNode({ ...node, name: event.target.value })}
         />
       </Field>
-      <NodeTypeFields
-        node={node}
-        definition={definition}
-        apis={apis}
-        artifacts={artifacts}
-        workflows={workflows}
-        editable={editable}
-        onUpdate={updateNode}
-      />
+      {node.type === 'sql' || node.type === 'redis' ? (
+        <DataNodeFields
+          node={node}
+          credentials={credentials}
+          editable={editable}
+          onUpdate={updateNode}
+        />
+      ) : (
+        <NodeTypeFields
+          node={node}
+          definition={definition}
+          apis={apis}
+          artifacts={artifacts}
+          workflows={workflows}
+          editable={editable}
+          onUpdate={updateNode}
+        />
+      )}
       {node.type === 'api' && (
         <MappingFields
           node={node}
@@ -275,6 +287,140 @@ function SubflowFields({
       )}
     </>
   )
+}
+
+function DataNodeFields({
+  node,
+  credentials,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  credentials: Credential[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const compatible = credentials.filter((credential) =>
+    node.type === 'redis' ? credential.kind === 'redis' : credential.kind !== 'redis',
+  )
+  return (
+    <>
+      <Field label="Credential">
+        <Select
+          disabled={!editable}
+          value={stringConfig(node, 'credential_id') || undefined}
+          placeholder="选择只读 Credential"
+          options={compatible.map((credential) => ({
+            value: credential.id,
+            label: `${credential.name} · ${credential.host}:${credential.port}`,
+          }))}
+          onChange={(value) => onUpdate(updateNodeConfig(node, 'credential_id', value))}
+        />
+      </Field>
+      {node.type === 'sql' ? (
+        <>
+          <Field label="单条只读查询">
+            <Input.TextArea
+              className="code-input"
+              rows={6}
+              disabled={!editable}
+              value={stringConfig(node, 'query', 'SELECT 1 AS healthy')}
+              onChange={(event) => onUpdate(updateNodeConfig(node, 'query', event.target.value))}
+            />
+          </Field>
+          <JsonConfig
+            label="查询参数（JSON）"
+            configKey="parameters"
+            fallback={{}}
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+        </>
+      ) : (
+        <>
+          <Field label="只读命令">
+            <Select
+              disabled={!editable}
+              value={stringConfig(node, 'command', 'GET')}
+              options={[
+                'GET',
+                'MGET',
+                'HGET',
+                'HGETALL',
+                'SMEMBERS',
+                'ZRANGE',
+                'EXISTS',
+                'TTL',
+              ].map((value) => ({ value, label: value }))}
+              onChange={(value) => onUpdate(updateNodeConfig(node, 'command', value))}
+            />
+          </Field>
+          <JsonConfig
+            label="命令参数（JSON 数组）"
+            configKey="arguments"
+            fallback={['key']}
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+        </>
+      )}
+      <Field label="超时（秒）">
+        <InputNumber
+          disabled={!editable}
+          min={1}
+          max={30}
+          value={numberConfig(node, 'timeout_seconds', 30)}
+          onChange={(value) => onUpdate(updateNodeConfig(node, 'timeout_seconds', value ?? 30))}
+        />
+      </Field>
+      <Typography.Paragraph type="secondary">
+        SQL 仅允许参数化 SELECT；Redis 仅允许 GET/MGET/HGET/HGETALL/SMEMBERS/ZRANGE/EXISTS/TTL。
+      </Typography.Paragraph>
+    </>
+  )
+}
+
+function JsonConfig({
+  label,
+  configKey,
+  fallback,
+  node,
+  editable,
+  onUpdate,
+}: {
+  label: string
+  configKey: string
+  fallback: unknown
+  node: WorkflowNode
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <Field label={label}>
+      <Input.TextArea
+        key={`${node.id}-${configKey}-${JSON.stringify(node.config[configKey])}`}
+        className="code-input"
+        rows={3}
+        disabled={!editable}
+        defaultValue={JSON.stringify(node.config[configKey] ?? fallback, null, 2)}
+        onBlur={(event) => {
+          const parsed = parseJsonInput(event.target.value)
+          if (parsed !== undefined) onUpdate(updateNodeConfig(node, configKey, parsed))
+        }}
+      />
+    </Field>
+  )
+}
+
+function parseJsonInput(value: string): unknown | undefined {
+  try {
+    return JSON.parse(value) as unknown
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined
+    throw error
+  }
 }
 
 function ForEachFields({

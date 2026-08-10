@@ -53,6 +53,8 @@ frontend/src/
 - Execution：Snapshot、Context、节点结果、事件日志。
 - Test Plan：流程集合、触发器与调度。
 - Report：执行汇总、步骤详情、失败分类和趋势。
+- Data Source：加密 Credential、只读 SQL/Redis 适配器及出站网络策略。
+- Mock：无脚本的请求规则、模板响应与脱敏请求日志。
 
 ## 4. 必须前置冻结的契约
 

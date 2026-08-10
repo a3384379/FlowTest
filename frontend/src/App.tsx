@@ -3,6 +3,7 @@ import {
   ApartmentOutlined,
   BarChartOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
   LogoutOutlined,
@@ -39,6 +40,7 @@ const TestAssetsPage = lazy(() => import('./pages/TestAssetsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
+const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -48,6 +50,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   apis: '接口管理',
   assets: '测试资产',
   workflows: '流程编排',
+  data: '数据与 Mock',
   tasks: '任务执行',
   reports: '测试报告',
 }
@@ -94,6 +97,7 @@ function AuthenticatedShell() {
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
             navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
             navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
+            navigationItem('data', <DatabaseOutlined />, pathFor('data')),
             navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
           ]}
@@ -150,16 +154,19 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
       <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
       <Route path="/projects/:projectId/workflows" element={<WorkflowsPage />} />
+      <Route path="/projects/:projectId/data" element={<DataMockPage />} />
       <Route path="/projects/:projectId/tasks" element={<TestPlansPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
-      {(['settings', 'apis', 'assets', 'workflows', 'tasks', 'reports'] as const).map((section) => (
-        <Route
-          key={section}
-          path={`/${section}`}
-          element={<DefaultProjectRedirect section={section} />}
-        />
-      ))}
+      {(['settings', 'apis', 'assets', 'workflows', 'data', 'tasks', 'reports'] as const).map(
+        (section) => (
+          <Route
+            key={section}
+            path={`/${section}`}
+            element={<DefaultProjectRedirect section={section} />}
+          />
+        ),
+      )}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )

@@ -1,6 +1,6 @@
 import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
-import type { WorkflowDefinition, WorkflowNode } from '../lib/api'
+import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
 
 export function connectNodes(
   definition: WorkflowDefinition,
@@ -46,6 +46,7 @@ export function addTypedNode(
   type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
   artifactId: string | null,
   subflow: { workflowId: string; workflowVersion: number } | null = null,
+  credentials: Credential[] = [],
 ): WorkflowDefinition {
   const id = uniqueNodeId(definition, type)
   return {
@@ -57,7 +58,7 @@ export function addTypedNode(
         type,
         name: defaultNodeName(type),
         position: nextPosition(definition),
-        config: defaultNodeConfig(definition, type, artifactId, subflow),
+        config: defaultNodeConfig(definition, type, artifactId, subflow, credentials),
       },
     ],
   }
@@ -98,6 +99,8 @@ function defaultNodeName(type: Exclude<WorkflowNode['type'], 'start' | 'api'>): 
     dataset: '数据集',
     subflow: '子流程',
     for_each: '循环子流程',
+    sql: '只读 SQL',
+    redis: 'Redis 读取',
     end: '结束',
   }[type]
 }
@@ -107,6 +110,7 @@ function defaultNodeConfig(
   type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
   artifactId: string | null,
   subflow: { workflowId: string; workflowVersion: number } | null,
+  credentials: Credential[],
 ): Record<string, unknown> {
   const sourceNodeId = definition.nodes.at(-1)?.id ?? 'start'
   if (isSourceNodeType(type)) {
@@ -115,8 +119,35 @@ function defaultNodeConfig(
   if (isNestedNodeType(type)) {
     return nestedNodeConfig(type, sourceNodeId, subflow)
   }
+  return leafNodeConfig(type, artifactId, credentials)
+}
+
+function leafNodeConfig(
+  type: Exclude<
+    WorkflowNode['type'],
+    'start' | 'api' | 'extract' | 'assert' | 'condition' | 'subflow' | 'for_each'
+  >,
+  artifactId: string | null,
+  credentials: Credential[],
+): Record<string, unknown> {
   if (type === 'delay') return { seconds: 1 }
   if (type === 'dataset') return { artifact_id: artifactId ?? '', format: 'auto' }
+  if (type === 'sql') {
+    return {
+      credential_id: credentials.find((item) => item.kind !== 'redis')?.id ?? '',
+      query: 'SELECT 1 AS healthy',
+      parameters: {},
+      timeout_seconds: 30,
+    }
+  }
+  if (type === 'redis') {
+    return {
+      credential_id: credentials.find((item) => item.kind === 'redis')?.id ?? '',
+      command: 'GET',
+      arguments: ['key'],
+      timeout_seconds: 30,
+    }
+  }
   return {}
 }
 
