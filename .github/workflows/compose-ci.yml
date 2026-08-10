@@ -112,10 +112,10 @@ jobs:
         run: python3 scripts/smoke_s10.py
       - name: Verify S11 V1.0 complete business and operations flow
         run: python3 scripts/smoke_s11.py
-      - name: Verify S18 contract generation and review flow
-        run: python3 scripts/smoke_s18.py
       - name: Verify V1.0 browser acceptance flow
         run: pnpm --dir frontend e2e
+      - name: Verify S18 contract generation and review flow
+        run: python3 scripts/smoke_s18.py
       - name: Run API capacity gate
         run: uv run --project backend python scripts/capacity_s11.py
       - name: Run real Workflow capacity gate
