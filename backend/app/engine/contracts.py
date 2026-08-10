@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -19,6 +19,8 @@ class NodeType(StrEnum):
     DATASET = "dataset"
     SUBFLOW = "subflow"
     FOR_EACH = "for_each"
+    SQL = "sql"
+    REDIS = "redis"
     END = "end"
 
 
@@ -208,6 +210,24 @@ class ForEachNodeConfig(SubFlowNodeConfig):
     fail_fast: bool = True
 
 
+class SqlNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    credential_id: UUID
+    query: str = Field(min_length=1, max_length=100_000)
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    timeout_seconds: int = Field(default=30, ge=1, le=30)
+
+
+class RedisNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    credential_id: UUID
+    command: str = Field(min_length=3, max_length=16)
+    arguments: list[str] = Field(min_length=1, max_length=100)
+    timeout_seconds: int = Field(default=30, ge=1, le=30)
+
+
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -337,27 +357,30 @@ NodeConfig = (
     | DatasetNodeConfig
     | SubFlowNodeConfig
     | ForEachNodeConfig
+    | SqlNodeConfig
+    | RedisNodeConfig
     | None
 )
 
 
+_NODE_CONFIG_MODELS: dict[NodeType, type[BaseModel]] = {
+    NodeType.API: ApiNodeConfig,
+    NodeType.EXTRACT: ExtractNodeConfig,
+    NodeType.ASSERT: AssertNodeConfig,
+    NodeType.CONDITION: ConditionNodeConfig,
+    NodeType.DELAY: DelayNodeConfig,
+    NodeType.DATASET: DatasetNodeConfig,
+    NodeType.SUBFLOW: SubFlowNodeConfig,
+    NodeType.FOR_EACH: ForEachNodeConfig,
+    NodeType.SQL: SqlNodeConfig,
+    NodeType.REDIS: RedisNodeConfig,
+}
+
+
 def parse_node_config(node: WorkflowNode) -> NodeConfig:
-    if node.type is NodeType.API:
-        return ApiNodeConfig.model_validate(node.config)
-    if node.type is NodeType.EXTRACT:
-        return ExtractNodeConfig.model_validate(node.config)
-    if node.type is NodeType.ASSERT:
-        return AssertNodeConfig.model_validate(node.config)
-    if node.type is NodeType.CONDITION:
-        return ConditionNodeConfig.model_validate(node.config)
-    if node.type is NodeType.DELAY:
-        return DelayNodeConfig.model_validate(node.config)
-    if node.type is NodeType.DATASET:
-        return DatasetNodeConfig.model_validate(node.config)
-    if node.type is NodeType.SUBFLOW:
-        return SubFlowNodeConfig.model_validate(node.config)
-    if node.type is NodeType.FOR_EACH:
-        return ForEachNodeConfig.model_validate(node.config)
+    model = _NODE_CONFIG_MODELS.get(node.type)
+    if model is not None:
+        return cast(NodeConfig, model.model_validate(node.config))
     if node.config:
         raise ValueError(f"Node {node.id} does not accept configuration")
     return None

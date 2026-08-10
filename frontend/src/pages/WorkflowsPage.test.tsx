@@ -33,6 +33,7 @@ describe('WorkflowsPage', () => {
       http.get(`/api/v1/projects/${project.id}/files`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
+      http.get('/api/v1/credentials', () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
         HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
       ),
@@ -109,7 +110,7 @@ describe('WorkflowsPage', () => {
     await browser.click(screen.getAllByRole('button', { name: /重放/ })[1])
     expect(await screen.findByText('节点重放完成')).toBeInTheDocument()
     expect(screen.getByText('节点重放结果')).toBeVisible()
-  }, 15_000)
+  })
 
   it('compares the latest two immutable workflow versions', async () => {
     const versionedWorkflow = { ...workflow, current_version: 2 }
@@ -127,6 +128,7 @@ describe('WorkflowsPage', () => {
       http.get(`/api/v1/projects/${project.id}/files`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
+      http.get('/api/v1/credentials', () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
         HttpResponse.json({ items: [versionedWorkflow], total: 1, page: 1, page_size: 100 }),
       ),

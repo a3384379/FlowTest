@@ -11,6 +11,7 @@ from sqlalchemy.sql.dml import Delete
 from app.core.storage import object_storage
 from app.models.access import Project, RefreshSession
 from app.models.artifacts import Artifact
+from app.models.data_sources import MockRequestLog, MockService
 from app.models.executions import APICallExecution
 from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
@@ -32,6 +33,7 @@ class RetentionCleanupSummary:
     workflow_executions_deleted: int = 0
     test_plan_runs_deleted: int = 0
     notification_deliveries_deleted: int = 0
+    mock_request_logs_deleted: int = 0
     artifacts_deleted: int = 0
     storage_failures: int = 0
     idempotency_records_deleted: int = 0
@@ -106,6 +108,14 @@ class RetentionCleanupService:
                 NotificationDelivery.created_at < cutoff,
             )
         )
+        totals.mock_request_logs_deleted += await self._delete(
+            delete(MockRequestLog).where(
+                MockRequestLog.mock_service_id.in_(
+                    select(MockService.id).where(MockService.project_id == project_id)
+                ),
+                MockRequestLog.created_at < cutoff,
+            )
+        )
         totals.test_plan_runs_deleted += await self._delete(
             delete(TestPlanRun).where(
                 TestPlanRun.project_id == project_id,
@@ -140,6 +150,7 @@ class _MutableCleanupSummary:
     workflow_executions_deleted: int = 0
     test_plan_runs_deleted: int = 0
     notification_deliveries_deleted: int = 0
+    mock_request_logs_deleted: int = 0
     artifacts_deleted: int = 0
     storage_failures: int = 0
     idempotency_records_deleted: int = 0

@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    testTimeout: 10_000,
+    // GitHub's two-core runners become unstable when action-heavy Ant Design tests
+    // compete across several workers. Developers can still use local parallelism.
+    maxWorkers: process.env.CI ? 1 : 4,
+    testTimeout: 60_000,
     exclude: [...configDefaults.exclude, 'e2e/**'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {

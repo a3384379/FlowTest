@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import WorkflowDesigner from './WorkflowDesigner'
 import { addTypedNode, autoLayoutWorkflow, connectNodes, pasteNode } from './workflow-graph'
 import { apiDefinition, workflow, workflowDefinition } from '../test/fixtures'
-import type { Artifact, WorkflowDefinition } from '../lib/api'
+import type { Artifact, Credential, WorkflowDefinition } from '../lib/api'
 
 describe('WorkflowDesigner', () => {
   it('locks the published execution snapshot while a run is active', () => {
@@ -15,6 +15,7 @@ describe('WorkflowDesigner', () => {
         definition={workflowDefinition}
         apis={[apiDefinition]}
         artifacts={[]}
+        credentials={[]}
         statuses={{ api: 'running' }}
         editable={false}
         onChange={vi.fn()}
@@ -41,6 +42,7 @@ describe('WorkflowDesigner', () => {
         }}
         apis={[]}
         artifacts={[]}
+        credentials={[]}
         statuses={{}}
         editable
         onChange={vi.fn()}
@@ -120,6 +122,37 @@ describe('WorkflowDesigner', () => {
     })
   })
 
+  it('adds and configures credential-bound SQL and Redis nodes', () => {
+    render(<DesignerHarness initial={workflowDefinition} credentials={dataCredentials} />)
+
+    expect(screen.getByRole('button', { name: /只读 SQL/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Redis 读取/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /只读 SQL/ }))
+    fireEvent.click(screen.getByTestId('rf__node-sql-4'))
+    expect(screen.getByDisplayValue('SELECT 1 AS healthy')).toBeVisible()
+    fireEvent.change(screen.getByDisplayValue('SELECT 1 AS healthy'), {
+      target: { value: 'SELECT id FROM users WHERE id = :id' },
+    })
+    expect(screen.getByDisplayValue('SELECT id FROM users WHERE id = :id')).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: /Redis 读取/ }))
+    fireEvent.click(screen.getByTestId('rf__node-redis-5'))
+    expect(screen.getByText(/Redis 仅允许 GET\/MGET/)).toBeVisible()
+
+    const sql = addTypedNode(workflowDefinition, 'sql', null, null, dataCredentials)
+    expect(sql.nodes.at(-1)?.config).toMatchObject({
+      credential_id: dataCredentials[0].id,
+      query: 'SELECT 1 AS healthy',
+      timeout_seconds: 30,
+    })
+    const redis = addTypedNode(workflowDefinition, 'redis', null, null, dataCredentials)
+    expect(redis.nodes.at(-1)?.config).toMatchObject({
+      credential_id: dataCredentials[1].id,
+      command: 'GET',
+      arguments: ['key'],
+    })
+  })
+
   it('copies, pastes, automatically lays out, undoes, and redoes canvas changes', async () => {
     const browser = userEvent.setup()
     render(<DesignerHarness initial={workflowDefinition} />)
@@ -193,7 +226,13 @@ describe('WorkflowDesigner', () => {
   })
 })
 
-function DesignerHarness({ initial }: { initial: WorkflowDefinition }) {
+function DesignerHarness({
+  initial,
+  credentials = [],
+}: {
+  initial: WorkflowDefinition
+  credentials?: Credential[]
+}) {
   const [definition, setDefinition] = useState(initial)
   return (
     <WorkflowDesigner
@@ -201,6 +240,7 @@ function DesignerHarness({ initial }: { initial: WorkflowDefinition }) {
       apis={[apiDefinition]}
       artifacts={[datasetArtifact]}
       workflows={[workflow]}
+      credentials={credentials}
       statuses={{}}
       editable
       onChange={setDefinition}
@@ -222,6 +262,37 @@ const datasetArtifact: Artifact = {
   purpose: 'upload',
   created_at: '2026-08-09T08:00:00Z',
 }
+
+const dataCredentials: Credential[] = [
+  {
+    id: '00000000-0000-4000-8000-000000000091',
+    project_id: apiDefinition.project_id,
+    name: '业务只读库',
+    kind: 'postgresql',
+    host: 'postgres',
+    port: 5432,
+    database_name: 'flowtest',
+    username: 'reader',
+    tls_enabled: false,
+    created_by_id: '00000000-0000-4000-8000-000000000001',
+    created_at: '2026-08-10T00:00:00Z',
+    updated_at: '2026-08-10T00:00:00Z',
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000092',
+    project_id: apiDefinition.project_id,
+    name: '缓存只读',
+    kind: 'redis',
+    host: 'redis',
+    port: 6379,
+    database_name: '0',
+    username: '',
+    tls_enabled: false,
+    created_by_id: '00000000-0000-4000-8000-000000000001',
+    created_at: '2026-08-10T00:00:00Z',
+    updated_at: '2026-08-10T00:00:00Z',
+  },
+]
 
 const controlDefinition: WorkflowDefinition = {
   schema_version: '1.0',

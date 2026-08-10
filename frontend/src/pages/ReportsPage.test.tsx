@@ -200,7 +200,7 @@ describe('ReportsPage', () => {
     await browser.click(screen.getByRole('button', { name: 'OK' }))
     expect(await screen.findByText(createdWebhook.secret)).toBeInTheDocument()
     expect(calls.created).toBe(1)
-  }, 20_000)
+  })
 })
 
 function renderPage() {

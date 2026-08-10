@@ -9,6 +9,7 @@ class RetentionCleanupResponse(BaseModel):
     workflow_executions_deleted: int
     test_plan_runs_deleted: int
     notification_deliveries_deleted: int
+    mock_request_logs_deleted: int
     artifacts_deleted: int
     storage_failures: int
     idempotency_records_deleted: int

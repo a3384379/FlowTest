@@ -5,9 +5,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from app.domain.api_assets import BodyKind, HttpMethod
+from app.domain.data_nodes import CredentialKind
 from app.domain.scopes import HeaderScope, VariableScope
 from app.engine.contracts import WorkflowDefinition
 from app.services.api_assets import PreparedHeader, PreparedRequest, PreparedVariable
+from app.services.credentials import CredentialMaterial
+from app.services.data_nodes import PreparedDataNode
 from app.services.executions import PreparedMultipart, PreparedUpload
 from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
 from app.services.workflow_snapshots import PreparedExecution
@@ -54,12 +57,27 @@ class StoredRequest(BaseModel):
     multipart: StoredMultipart | None
 
 
+class StoredCredentialMaterial(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    project_id: UUID
+    name: str
+    kind: CredentialKind
+    host: str
+    port: int
+    database_name: str
+    username: str
+    secret: str
+    tls_enabled: bool
+
+
 class StoredPreparedExecution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     snapshot: dict[str, JsonValue]
     requests: dict[str, StoredRequest]
     dataset_variables: dict[str, JsonValue]
     subflows: dict[str, "StoredPreparedSubflow"] = Field(default_factory=dict)
+    data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
 
 
 class StoredPreparedSubflow(BaseModel):
@@ -71,6 +89,7 @@ class StoredPreparedSubflow(BaseModel):
     requests: dict[str, StoredRequest]
     subflows: dict[str, "StoredPreparedSubflow"]
     snapshot: dict[str, JsonValue]
+    data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
 
 
 class StoredRunPlan(BaseModel):
@@ -145,6 +164,10 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
             subflows={
                 node_id: _store_subflow(value) for node_id, value in plan.prepared.subflows.items()
             },
+            data_nodes={
+                node_id: _store_credential(value.credential)
+                for node_id, value in plan.prepared.data_nodes.items()
+            },
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
@@ -179,7 +202,15 @@ def _store_subflow(prepared: PreparedSubflow) -> StoredPreparedSubflow:
         requests={name: _store_request(value) for name, value in prepared.requests.items()},
         subflows={node_id: _store_subflow(value) for node_id, value in prepared.subflows.items()},
         snapshot=prepared.snapshot,
+        data_nodes={
+            node_id: _store_credential(value.credential)
+            for node_id, value in prepared.data_nodes.items()
+        },
     )
+
+
+def _store_credential(value: CredentialMaterial) -> StoredCredentialMaterial:
+    return StoredCredentialMaterial.model_validate(value, from_attributes=True)
 
 
 def _store_multipart(value: PreparedMultipart | None) -> StoredMultipart | None:
@@ -215,6 +246,10 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
                 node_id: _load_subflow(value) for node_id, value in stored.prepared.subflows.items()
             },
             dataset_variables=stored.prepared.dataset_variables,
+            data_nodes={
+                node_id: PreparedDataNode(credential=_load_credential(value))
+                for node_id, value in stored.prepared.data_nodes.items()
+            },
         ),
         runtime_variables=stored.runtime_variables,
     )
@@ -254,7 +289,15 @@ def _load_subflow(stored: StoredPreparedSubflow) -> PreparedSubflow:
         requests={name: _load_request(value) for name, value in stored.requests.items()},
         subflows={node_id: _load_subflow(value) for node_id, value in stored.subflows.items()},
         snapshot=stored.snapshot,
+        data_nodes={
+            node_id: PreparedDataNode(credential=_load_credential(value))
+            for node_id, value in stored.data_nodes.items()
+        },
     )
+
+
+def _load_credential(value: StoredCredentialMaterial) -> CredentialMaterial:
+    return CredentialMaterial(**value.model_dump())
 
 
 def _load_multipart(value: StoredMultipart | None) -> PreparedMultipart | None:

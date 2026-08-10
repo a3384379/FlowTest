@@ -107,7 +107,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S14 | 团队与 API 工作台 | 管理 UI、完整 API 编辑器、HAR/cURL/Bruno/Excel 导入导出 | 已完成 |
 | S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 已完成 |
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 已完成 |
-| S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 待实施 |
+| S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 已完成 |
 | S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 待实施 |
 | S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 待实施 |
 | S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 待实施 |
@@ -154,3 +154,14 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 5. React Flow 画布支持 SubFlow/ForEach 配置、复制粘贴、50 步撤销重做与拓扑自动布局，选择态不会污染定义历史。
 6. 当前明确拒绝把含 Dataset 节点的 Workflow 作为 SubFlow；嵌套 Dataset 在定义父执行/行执行/循环项的兼容持久化协议后再开放。
 7. 后端单元/服务/引擎测试、前端交互测试和 Playwright 真实链路覆盖递归拒绝、固定快照、循环并发、版本 Diff、断点与重放。
+
+## S17 完成清单
+
+1. 项目 Credential 使用 AES-256-GCM 与资源绑定 AAD 加密，接口只返回 Host、端口、类型等元数据；Secret 创建、轮换和列表均不可读回。
+2. SQL 节点支持 PostgreSQL/MySQL 参数化单条 `SELECT` 或 `WITH ... SELECT`，事务强制只读，限制 30 秒、1000 行和 2 MB；Redis 节点固定八条只读命令及参数边界。
+3. 数据节点复用 DNS、域名和私网 CIDR 策略，并在建立连接后校验实际传输对端，阻断 DNS Rebinding；发布阶段校验 Credential 类型和语法，执行计划固定加密材料，公开 Snapshot 不保存 Secret。
+4. 规则化 Mock 支持 Method、路径参数、Query/Header 条件、场景、状态码、模板响应和最多 30 秒延迟；公开调度统一限流，模板不执行脚本，传输/安全敏感 Header 和超限请求/响应被拒绝。
+5. Mock 请求日志统一脱敏 Authorization、Cookie、Token、Password 和 Secret，并纳入项目保留期清理；配置变更写入审计。
+6. Web 新增“数据与 Mock”深链接，提供 Credential、Mock 服务、路由和日志管理；React Flow 新增只读 SQL 与 Redis 节点及类型兼容的 Credential 配置。
+7. Alembic `20260810_0013` 已在真实 PostgreSQL 完成 `0012 → 0013 → 0012 → 0013` 漂移校验；后端 167 项测试通过、总覆盖率 90.79%，数据节点执行器 97%；前端 85 项测试通过，四项覆盖率均超过 80%。
+8. Compose 八服务健康检查、PostgreSQL/Redis/MinIO 真实集成测试和 Playwright S17 闭环均已通过；前后端依赖审计无已知漏洞。

@@ -1,6 +1,8 @@
 import asyncio
 import json
+import re
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
@@ -19,7 +21,9 @@ from app.engine.contracts import (
     ForEachNodeConfig,
     MappingTargetLocation,
     NodeType,
+    RedisNodeConfig,
     RetryCategory,
+    SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
@@ -35,12 +39,19 @@ from app.engine.scheduler import (
     WorkflowScheduler,
 )
 from app.services.api_assets import PreparedHeader, PreparedRequest
+from app.services.data_nodes import (
+    DataNodeRunner,
+    InfrastructureDataNodeRunner,
+    PreparedDataNode,
+)
 from app.services.executions import (
     PreparedMultipart,
     _response_body,
     _send_request,
 )
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
+
+_DATA_VARIABLE = re.compile(r"^\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\}\}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +70,7 @@ class PreparedSubflow:
     requests: dict[str, PreparedWorkflowRequest]
     subflows: dict[str, "PreparedSubflow"]
     snapshot: dict[str, JsonValue]
+    data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
 
 
 class WorkflowNodeExecutor:
@@ -70,19 +82,34 @@ class WorkflowNodeExecutor:
         network_policy: OutboundNetworkPolicy,
         subflows: dict[str, PreparedSubflow] | None = None,
         outbound_guard: OutboundRequestGuard = outbound_request_guard,
+        data_nodes: dict[str, PreparedDataNode] | None = None,
+        data_runner: DataNodeRunner | None = None,
     ) -> None:
         self._client = client
         self._requests = requests
         self._mappings = _mappings_by_target(definition)
         self._network_policy = network_policy
         self._subflows = subflows or {}
+        self._data_nodes = data_nodes or {}
         self._outbound_guard = outbound_guard
-        control_types = frozenset(NodeType) - {NodeType.API, NodeType.SUBFLOW, NodeType.FOR_EACH}
+        self._data_runner = data_runner or InfrastructureDataNodeRunner(
+            network_policy,
+            outbound_guard=outbound_guard,
+        )
+        control_types = frozenset(NodeType) - {
+            NodeType.API,
+            NodeType.SUBFLOW,
+            NodeType.FOR_EACH,
+            NodeType.SQL,
+            NodeType.REDIS,
+        }
         self._handlers = NodeHandlerRegistry(
             [
                 NodeHandlerRegistration(NodeType.API, self._execute_api),
                 NodeHandlerRegistration(NodeType.SUBFLOW, self._execute_subflow),
                 NodeHandlerRegistration(NodeType.FOR_EACH, self._execute_for_each),
+                NodeHandlerRegistration(NodeType.SQL, self._execute_sql),
+                NodeHandlerRegistration(NodeType.REDIS, self._execute_redis),
                 *[
                     NodeHandlerRegistration(node_type, execute_control_node)
                     for node_type in control_types
@@ -189,6 +216,36 @@ class WorkflowNodeExecutor:
             )
         return output
 
+    async def _execute_sql(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, SqlNodeConfig):
+            raise NodeExecutionError(code="INVALID_SQL_CONFIG", message="SQL 节点配置无效")
+        prepared = self._prepared_data_node(node)
+        parameters = {
+            name: _resolve_data_value(value, context) for name, value in config.parameters.items()
+        }
+        return await self._data_runner.execute_sql(
+            prepared.credential,
+            config.query,
+            parameters,
+            config.timeout_seconds,
+        )
+
+    async def _execute_redis(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, RedisNodeConfig):
+            raise NodeExecutionError(code="INVALID_REDIS_CONFIG", message="Redis 节点配置无效")
+        prepared = self._prepared_data_node(node)
+        arguments = [
+            _data_argument(_resolve_data_value(argument, context)) for argument in config.arguments
+        ]
+        return await self._data_runner.execute_redis(
+            prepared.credential,
+            config.command,
+            arguments,
+            config.timeout_seconds,
+        )
+
     async def _run_for_each_items(
         self,
         prepared: PreparedSubflow,
@@ -239,6 +296,8 @@ class WorkflowNodeExecutor:
             self._network_policy,
             subflows=prepared.subflows,
             outbound_guard=self._outbound_guard,
+            data_nodes=prepared.data_nodes,
+            data_runner=self._data_runner,
         )
         return await WorkflowScheduler(executor).run(
             prepared.definition,
@@ -254,6 +313,15 @@ class WorkflowNodeExecutor:
             raise NodeExecutionError(
                 code="SUBFLOW_SNAPSHOT_MISSING",
                 message=f"节点 {node.name} 缺少固定子流程快照",
+            )
+        return prepared
+
+    def _prepared_data_node(self, node: WorkflowNode) -> PreparedDataNode:
+        prepared = self._data_nodes.get(node.id)
+        if prepared is None:
+            raise NodeExecutionError(
+                code="DATA_NODE_SNAPSHOT_MISSING",
+                message=f"节点 {node.name} 缺少固定 Credential 快照",
             )
         return prepared
 
@@ -439,6 +507,32 @@ def _copy_json_object(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
 
 
 def _string_value(value: JsonValue) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _resolve_data_value(value: JsonValue, context: ExecutionContext) -> JsonValue:
+    if isinstance(value, dict):
+        return {name: _resolve_data_value(item, context) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_data_value(item, context) for item in value]
+    if not isinstance(value, str):
+        return value
+    match = _DATA_VARIABLE.fullmatch(value)
+    if match is None:
+        return value
+    variables = context.resolved_variables()
+    name = match.group(1)
+    if name not in variables:
+        raise NodeExecutionError(
+            code="DATA_NODE_VARIABLE_MISSING",
+            message=f"数据节点变量不存在: {name}",
+        )
+    return variables[name]
+
+
+def _data_argument(value: JsonValue) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

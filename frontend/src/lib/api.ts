@@ -252,6 +252,69 @@ export type SecretMetadata = {
   updated_at: string
 }
 
+export type Credential = {
+  id: string
+  project_id: string
+  name: string
+  kind: 'postgresql' | 'mysql' | 'redis'
+  host: string
+  port: number
+  database_name: string
+  username: string
+  tls_enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type MockService = {
+  id: string
+  project_id: string
+  name: string
+  slug: string
+  description: string
+  is_enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type MockRoute = {
+  id: string
+  mock_service_id: string
+  name: string
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  path_pattern: string
+  query_conditions: Record<string, string>
+  header_conditions: Record<string, string>
+  response_status: number
+  response_headers: Record<string, string>
+  response_body: unknown
+  delay_ms: number
+  scenario: string | null
+  priority: number
+  is_enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type MockRequestLog = {
+  id: string
+  mock_service_id: string
+  mock_route_id: string | null
+  method: string
+  path: string
+  query_parameters: Record<string, string>
+  headers: Record<string, string>
+  body: unknown
+  matched: boolean
+  scenario: string | null
+  response_status: number
+  duration_ms: number
+  created_at: string
+}
+
 export type ApiRequestParameter = {
   name: string
   value: string
@@ -306,6 +369,8 @@ export type WorkflowNode = {
     | 'dataset'
     | 'subflow'
     | 'for_each'
+    | 'sql'
+    | 'redis'
     | 'end'
   name: string
   position: { x: number; y: number }

@@ -51,6 +51,8 @@ def _rule(request: Request) -> tuple[str, int] | None:
     path = request.url.path
     if path.endswith("/auth/login"):
         return "auth-login", settings.auth_rate_limit_per_minute
+    if path.startswith(f"{settings.api_v1_prefix}/mock/"):
+        return "mock-dispatch", settings.execution_rate_limit_per_minute
     if request.method == "POST" and (
         path.endswith("/execute")
         or path.endswith("/executions")

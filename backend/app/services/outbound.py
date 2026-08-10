@@ -3,6 +3,7 @@ from app.domain.network import (
     AddressResolver,
     OutboundNetworkPolicy,
     OutboundPolicyError,
+    validate_outbound_target,
     validate_outbound_url,
 )
 
@@ -14,6 +15,26 @@ class OutboundRequestGuard:
     async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> tuple[str, ...]:
         try:
             return await validate_outbound_url(url, policy, resolver=self._resolver)
+        except OutboundPolicyError as error:
+            raise AppError(
+                code="OUTBOUND_REQUEST_BLOCKED",
+                message=str(error),
+                status_code=422,
+            ) from error
+
+    async def enforce_target(
+        self,
+        host: str,
+        port: int,
+        policy: OutboundNetworkPolicy,
+    ) -> tuple[str, ...]:
+        try:
+            return await validate_outbound_target(
+                host,
+                port,
+                policy,
+                resolver=self._resolver,
+            )
         except OutboundPolicyError as error:
             raise AppError(
                 code="OUTBOUND_REQUEST_BLOCKED",

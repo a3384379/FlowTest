@@ -10,6 +10,7 @@ from app.core.logging import redact
 from app.models import Base
 from app.models.access import Project, User
 from app.models.artifacts import Artifact
+from app.models.data_sources import MockRequestLog, MockService
 from app.models.governance import IdempotencyRecord
 from app.observability.metrics import MetricsRegistry, normalize_path, render_metrics
 from app.services.retention import RetentionCleanupService
@@ -53,6 +54,16 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
         )
         session.add(project)
         await session.flush()
+        mock_service = MockService(
+            project_id=project.id,
+            name="Retention Mock",
+            slug="retention-mock",
+            description="",
+            is_enabled=True,
+            created_by_id=user.id,
+        )
+        session.add(mock_service)
+        await session.flush()
         session.add_all(
             [
                 _artifact(project.id, user.id, "expired.bin", old),
@@ -69,6 +80,8 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
                     response_body={"id": "result"},
                     expires_at=now - timedelta(seconds=1),
                 ),
+                _mock_log(mock_service.id, old),
+                _mock_log(mock_service.id, now),
             ]
         )
         await session.commit()
@@ -77,14 +90,17 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
         summary = await RetentionCleanupService(session, storage).cleanup(now)
         remaining = set((await session.scalars(select(Artifact.object_key))).all())
         idempotency = list((await session.scalars(select(IdempotencyRecord))).all())
+        mock_logs = list((await session.scalars(select(MockRequestLog))).all())
 
     assert summary.projects_scanned == 1
     assert summary.artifacts_deleted == 1
     assert summary.storage_failures == 1
     assert summary.idempotency_records_deleted == 1
+    assert summary.mock_request_logs_deleted == 1
     assert storage.deleted == ["expired.bin"]
     assert remaining == {"failed.bin", "current.bin"}
     assert idempotency == []
+    assert len(mock_logs) == 1
     await engine.dispose()
 
 
@@ -146,6 +162,24 @@ def _artifact(project_id: UUID, user_id: UUID, key: str, created_at: datetime) -
         sha256="a" * 64,
         purpose="report",
         created_by_id=user_id,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def _mock_log(service_id: UUID, created_at: datetime) -> MockRequestLog:
+    return MockRequestLog(
+        mock_service_id=service_id,
+        mock_route_id=None,
+        method="GET",
+        path="/retention",
+        query_parameters={},
+        headers={},
+        body=None,
+        matched=False,
+        scenario=None,
+        response_status=404,
+        duration_ms=1,
         created_at=created_at,
         updated_at=created_at,
     )
