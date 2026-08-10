@@ -21,7 +21,8 @@ uv run --project backend python scripts/capacity_workflow.py
 uv run --project backend python scripts/capacity_s19.py
 ```
 
-默认对 `/api/v1/live` 发出 300 个请求、并发 30，要求零失败且 P95 不超过 500 ms。
+默认先用 30 个请求预热 HTTP 连接池，再对 `/api/v1/live` 发出 300 个请求、并发 30，
+要求零失败且稳态 P95 不超过 500 ms。预热只排除 CI 主机的一次性建连抖动；任一预热请求失败仍会使门禁失败。
 可通过 `FLOWTEST_CAPACITY_REQUESTS`、`FLOWTEST_CAPACITY_CONCURRENCY` 和
 `FLOWTEST_CAPACITY_P95_SECONDS` 调整。每次变更 Worker 并发、资源限制或宿主机规格后重新执行。
 
