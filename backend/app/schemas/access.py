@@ -98,6 +98,11 @@ class ProjectRetentionUpdate(BaseModel):
     retention_days: int = Field(ge=1, le=3650)
 
 
+class ProjectCapacityPolicy(BaseModel):
+    execution_concurrency_limit: int = Field(ge=1, le=100)
+    queued_run_limit: int = Field(ge=1, le=5000)
+
+
 class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -440,6 +440,18 @@ wheels = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/57/2e2a65aee2a70483cb28e2b7e15a072d00a523207593b44400d4717bb100/croniter-6.2.4.tar.gz", hash = "sha256:fc124f751b1b04805c2a04b061898b436b45ab2320b045e1e052ea895de65189", size = 166267, upload-time = "2026-07-10T09:52:59.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/ba/d678e5bd329646ca51d3c92addbc77804e86d21f4b6b6a027218e6abb010/croniter-6.2.4-py3-none-any.whl", hash = "sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d", size = 46677, upload-time = "2026-07-10T09:52:58.425Z" },
+]
+
+[[package]]
 name = "cryptography"
 version = "50.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -558,7 +570,7 @@ wheels = [
 
 [[package]]
 name = "flowtest-backend"
-version = "1.5.0"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -567,6 +579,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "boto3" },
     { name = "celery", extra = ["redis"] },
+    { name = "croniter" },
     { name = "cryptography" },
     { name = "email-validator" },
     { name = "fastapi" },
@@ -605,6 +618,7 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "types-croniter" },
     { name = "types-openpyxl" },
 ]
 
@@ -618,6 +632,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.40,<2" },
     { name = "boto3-stubs", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=1.43,<2" },
     { name = "celery", extras = ["redis"], specifier = ">=5.6,<6" },
+    { name = "croniter", specifier = ">=6,<7" },
     { name = "cryptography", specifier = ">=50.0,<51" },
     { name = "email-validator", specifier = ">=2.3,<3" },
     { name = "fastapi", specifier = ">=0.141,<1" },
@@ -650,7 +665,10 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "types-openpyxl", specifier = ">=3.1.5,<4" }]
+dev = [
+    { name = "types-croniter", specifier = ">=6,<7" },
+    { name = "types-openpyxl", specifier = ">=3.1.5,<4" },
+]
 
 [[package]]
 name = "graphql-core"
@@ -1668,6 +1686,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
+]
+
+[[package]]
+name = "types-croniter"
+version = "6.2.4.20260711"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/e1/ef8900515a103efa41b29ce81e59efb18e72bc9642139c5a3a17f6022641/types_croniter-6.2.4.20260711.tar.gz", hash = "sha256:807793e109f4e0d51ec18f6277a1a5f1d133e425ac6bee3a7c3254ab1793e0ea", size = 12164, upload-time = "2026-07-11T04:51:18.624Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/3f/896a98180a55f855bd068b97e8c99fd4ce1885a4b43f68fd7b29641084f6/types_croniter-6.2.4.20260711-py3-none-any.whl", hash = "sha256:601b68139a47fe1b2177f433132cc81fd91155f3059a49c5cb63404c389dff01", size = 9746, upload-time = "2026-07-11T04:51:17.662Z" },
 ]
 
 [[package]]

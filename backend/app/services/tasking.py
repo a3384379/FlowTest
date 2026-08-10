@@ -4,21 +4,22 @@ from datetime import UTC, datetime
 from secrets import token_hex, token_urlsafe
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.api_assets import JsonValue
+from app.domain.quality import ScheduleValidationError, next_scheduled_at
 from app.domain.tasking import (
     ServiceTokenScope,
     TestPlanTrigger,
     digest_token,
-    next_scheduled_at,
     valid_webhook_signature,
 )
 from app.domain.test_assets import TestTargetType
-from app.models.access import User
+from app.models.access import Project, User
 from app.models.api_assets import Environment
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.workflows import Workflow
@@ -95,6 +96,9 @@ class TestPlanService:
         description: str,
         enabled: bool,
         schedule_interval_seconds: int | None,
+        schedule_cron: str | None,
+        schedule_timezone: str,
+        queue_priority: int,
         items: list[TestPlanItemInput],
     ) -> CreatedTestPlan:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
@@ -107,6 +111,13 @@ class TestPlanService:
             webhook_secret,
             associated_data=_webhook_associated_data(plan_id),
         )
+        next_run_at = _next_run_at(
+            now,
+            enabled=enabled,
+            interval_seconds=schedule_interval_seconds,
+            cron_expression=schedule_cron,
+            timezone_name=schedule_timezone,
+        )
         plan = TestPlan(
             id=plan_id,
             project_id=project_id,
@@ -114,7 +125,10 @@ class TestPlanService:
             description=description.strip(),
             enabled=enabled,
             schedule_interval_seconds=schedule_interval_seconds,
-            next_run_at=next_scheduled_at(now, schedule_interval_seconds, enabled),
+            schedule_cron=schedule_cron,
+            schedule_timezone=schedule_timezone,
+            queue_priority=queue_priority,
+            next_run_at=next_run_at,
             webhook_secret_ciphertext=encrypted.ciphertext,
             webhook_secret_nonce=encrypted.nonce,
             created_by_id=actor.id,
@@ -163,6 +177,9 @@ class TestPlanService:
         description: str | None,
         enabled: bool | None,
         schedule_interval_seconds: int | None,
+        schedule_cron: str | None,
+        schedule_timezone: str | None,
+        queue_priority: int | None,
         change_schedule: bool,
     ) -> TestPlanDetail:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
@@ -177,8 +194,17 @@ class TestPlanService:
             plan.enabled = enabled
         if change_schedule:
             plan.schedule_interval_seconds = schedule_interval_seconds
-        plan.next_run_at = next_scheduled_at(
-            datetime.now(UTC), plan.schedule_interval_seconds, plan.enabled
+            plan.schedule_cron = schedule_cron
+        if schedule_timezone is not None:
+            plan.schedule_timezone = schedule_timezone
+        if queue_priority is not None:
+            plan.queue_priority = queue_priority
+        plan.next_run_at = _next_run_at(
+            datetime.now(UTC),
+            enabled=plan.enabled,
+            interval_seconds=plan.schedule_interval_seconds,
+            cron_expression=plan.schedule_cron,
+            timezone_name=plan.schedule_timezone,
         )
         self._audit.record(
             actor_user_id=actor.id,
@@ -304,7 +330,13 @@ class TestPlanService:
         plans = await self._tasks.due_plans(now)
         runs: list[TestPlanRun] = []
         for plan in plans:
-            plan.next_run_at = next_scheduled_at(now, plan.schedule_interval_seconds, plan.enabled)
+            plan.next_run_at = _next_run_at(
+                now,
+                enabled=plan.enabled,
+                interval_seconds=plan.schedule_interval_seconds,
+                cron_expression=plan.schedule_cron,
+                timezone_name=plan.schedule_timezone,
+            )
             runs.append(
                 await self._create_run(
                     plan=plan,
@@ -324,6 +356,27 @@ class TestPlanService:
         trigger: TestPlanTrigger,
         commit: bool = True,
     ) -> TestPlanRun:
+        project_result = await self._session.execute(
+            select(Project).where(Project.id == plan.project_id).with_for_update()
+        )
+        project = project_result.scalar_one_or_none()
+        if project is None:
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        queued = await self._session.scalar(
+            select(func.count())
+            .select_from(TestPlanRun)
+            .where(
+                TestPlanRun.project_id == plan.project_id,
+                TestPlanRun.status.in_(("queued", "running")),
+            )
+        )
+        if int(queued or 0) >= project.queued_run_limit:
+            raise AppError(
+                code="PROJECT_QUEUE_LIMIT_EXCEEDED",
+                message="项目排队任务数已达上限",
+                status_code=429,
+                details={"limit": project.queued_run_limit},
+            )
         items = await self._tasks.list_plan_items(plan.id)
         if not items:
             raise AppError(
@@ -331,12 +384,22 @@ class TestPlanService:
                 message="测试计划没有可执行项",
                 status_code=409,
             )
+        expanded = [
+            expanded_item
+            for item in items
+            for expanded_item in await self._expand_plan_item(plan.project_id, item)
+        ]
+        queue_name = await self._queue_name_for_items(expanded)
         run = TestPlanRun(
             project_id=plan.project_id,
             test_plan_id=plan.id,
             requested_by_id=requested_by_id,
             status="queued",
             trigger_type=trigger.value,
+            queue_priority=plan.queue_priority,
+            queue_name=queue_name,
+            baseline_run_id=None,
+            quality_summary={},
             cancel_requested_at=None,
             started_at=None,
             completed_at=None,
@@ -344,11 +407,6 @@ class TestPlanService:
         )
         self._tasks.add(run)
         await self._session.flush()
-        expanded = [
-            expanded_item
-            for item in items
-            for expanded_item in await self._expand_plan_item(plan.project_id, item)
-        ]
         snapshots = [
             TestPlanRunItem(
                 test_plan_run_id=run.id,
@@ -362,7 +420,9 @@ class TestPlanService:
                 position=position,
                 max_retries=item.max_retries,
                 attempts=0,
-                status="queued",
+                status=(
+                    "quarantined" if await self._is_quarantined(plan.project_id, item) else "queued"
+                ),
                 runtime_variables=item.runtime_variables,
                 runtime_headers=item.runtime_headers,
                 workflow_execution_id=None,
@@ -383,6 +443,28 @@ class TestPlanService:
             await self._session.commit()
             await self._session.refresh(run)
         return run
+
+    async def _is_quarantined(self, project_id: UUID, item: ExpandedPlanItem) -> bool:
+        from app.services.quality import QualityService
+
+        return await QualityService(self._session).is_quarantined(
+            project_id=project_id,
+            target_type=item.target_type.value,
+            target_id=item.target_id,
+            target_version=item.target_version,
+        )
+
+    async def _queue_name_for_items(self, items: list[ExpandedPlanItem]) -> str:
+        for item in items:
+            version = await self._workflows.find_version(item.workflow_id, item.workflow_version)
+            if version is None:
+                continue
+            nodes = version.definition.get("nodes", [])
+            if isinstance(nodes, list) and any(
+                isinstance(node, dict) and node.get("type") in {"sql", "redis"} for node in nodes
+            ):
+                return "data"
+        return "general"
 
     async def _build_items(
         self, project_id: UUID, plan_id: UUID, inputs: list[TestPlanItemInput]
@@ -757,6 +839,31 @@ def _webhook_associated_data(plan_id: UUID) -> bytes:
 
 def _invalid_webhook() -> AppError:
     return AppError(code="INVALID_WEBHOOK_SIGNATURE", message="Webhook 签名无效", status_code=401)
+
+
+def _next_run_at(
+    now: datetime,
+    *,
+    enabled: bool,
+    interval_seconds: int | None,
+    cron_expression: str | None,
+    timezone_name: str,
+) -> datetime | None:
+    try:
+        return next_scheduled_at(
+            now,
+            enabled=enabled,
+            interval_seconds=interval_seconds,
+            cron_expression=cron_expression,
+            timezone_name=timezone_name,
+        )
+    except ScheduleValidationError as error:
+        raise AppError(
+            code="INVALID_TEST_PLAN_SCHEDULE",
+            message="测试计划调度配置无效",
+            status_code=422,
+            details={"reason": str(error)},
+        ) from error
 
 
 def _aware(value: datetime) -> datetime:

@@ -21,6 +21,9 @@ export type CreateTestPlanInput = {
   targetId: string
   environmentId: string | null
   intervalSeconds: number | null
+  cronExpression: string | null
+  timezone: string
+  priority: number
   maxRetries: number
 }
 
@@ -72,6 +75,9 @@ export async function createTestPlan(
     name: input.name,
     enabled: true,
     schedule_interval_seconds: input.intervalSeconds,
+    schedule_cron: input.cronExpression,
+    schedule_timezone: input.timezone,
+    queue_priority: input.priority,
     items: [
       {
         target_type: input.targetType,

@@ -53,7 +53,17 @@ class RefreshSession(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
 class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "projects"
-    __table_args__ = (CheckConstraint("retention_days BETWEEN 1 AND 3650", name="retention_days"),)
+    __table_args__ = (
+        CheckConstraint("retention_days BETWEEN 1 AND 3650", name="retention_days"),
+        CheckConstraint(
+            "execution_concurrency_limit BETWEEN 1 AND 100",
+            name="project_execution_concurrency_limit",
+        ),
+        CheckConstraint(
+            "queued_run_limit BETWEEN 1 AND 5000",
+            name="project_queued_run_limit",
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
@@ -66,6 +76,10 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
         JSON, default=list, server_default="[]"
     )
     retention_days: Mapped[int] = mapped_column(Integer, default=90, server_default="90")
+    execution_concurrency_limit: Mapped[int] = mapped_column(
+        Integer, default=20, server_default="20"
+    )
+    queued_run_limit: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

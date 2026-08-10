@@ -18,6 +18,7 @@ Prometheus 抓取 `/api/v1/metrics`：
 ```bash
 uv run --project backend python scripts/capacity_s11.py
 uv run --project backend python scripts/capacity_workflow.py
+uv run --project backend python scripts/capacity_s19.py
 ```
 
 默认对 `/api/v1/live` 发出 300 个请求、并发 30，要求零失败且 P95 不超过 500 ms。
@@ -30,8 +31,8 @@ uv run --project backend python scripts/capacity_workflow.py
 耗时 0.556 秒，P95 0.153 秒，吞吐约 539.25 req/s。该数据是本地健康端点基线，不能替代
 真实业务工作流容量测试；生产宿主机或资源限制变化后必须重新记录。
 
-S12 新增 `capacity_workflow.py`，它会创建并发布一个包含真实 HTTP API 节点的 Workflow，默认以
-并发 5 完成 20 次持久化、入队、Worker 执行和结果查询。门槛默认要求零失败且端到端 P95 不超过
+S12 新增 `capacity_workflow.py`，它会创建并发布一个包含真实 HTTP API 节点的 Workflow，S19 默认以
+并发 100 完成 100 次持久化、入队、Worker 执行和结果查询。门槛默认要求零失败且端到端 P95 不超过
 10 秒；可通过 `FLOWTEST_CAPACITY_WORKFLOW_REQUESTS`、
 `FLOWTEST_CAPACITY_WORKFLOW_CONCURRENCY` 和 `FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS` 调整。
 
@@ -42,3 +43,14 @@ S12 新增 `capacity_workflow.py`，它会创建并发布一个包含真实 HTTP
 27.64 execution/s。该基线使用 Python 3.13.15 镜像，覆盖 API 请求、快照持久化、Celery
 入队、Worker 调度、
 HTTP 节点和终态查询；它不代表 S19 的 8C/16G、100/1000 最终容量承诺。
+
+## V1.8 质量与队列容量门槛
+
+`capacity_workflow.py` 的 S19 默认值为 100 个真实 Workflow、请求侧并发 100；
+`capacity_s19.py` 会停止 General/Data/AI Worker，创建并确认 1000 个唯一且持久化的 queued Run，
+再恢复 Worker 并等待全部终态。验收要求：1000 个 Run ID 唯一、1000 个 Workflow Execution ID
+唯一、零失败、零重复终态。默认完成超时为 900 秒，可使用 `FLOWTEST_S19_QUEUE_TASKS` 和
+`FLOWTEST_S19_QUEUE_TIMEOUT_SECONDS` 在诊断环境缩小或调整，但 CI 发布门槛始终使用默认 1000。
+
+容量结果必须同时记录 Control Plane 与 Worker 的 CPU/内存规格、Docker 版本和宿主架构。
+单机 Compose 门槛是兼容性承诺，不等价于 V3 四 Worker Plane 的分布式容量目标。

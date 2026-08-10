@@ -25,6 +25,9 @@ const plan: CreatedTestPlan = {
   description: '',
   enabled: true,
   schedule_interval_seconds: 3600,
+  schedule_cron: null,
+  schedule_timezone: 'Asia/Shanghai',
+  queue_priority: 5,
   next_run_at: '2026-08-09T10:00:00Z',
   created_by_id: user.id,
   created_at: '2026-08-09T09:00:00Z',
@@ -54,6 +57,10 @@ const queuedRun: TestPlanRun = {
   requested_by_id: user.id,
   status: 'queued',
   trigger_type: 'manual',
+  queue_priority: 5,
+  queue_name: 'general',
+  baseline_run_id: null,
+  quality_summary: {},
   cancel_requested_at: null,
   started_at: null,
   completed_at: null,
@@ -129,7 +136,27 @@ describe('TestPlansPage', () => {
         HttpResponse.json({ items: [testSuite], total: 1, page: 1, page_size: 100 }),
       ),
       http.get(`/api/v1/projects/${project.id}/test-plans`, () =>
-        HttpResponse.json({ items: [plan], total: 1, page: 1, page_size: 100 }),
+        HttpResponse.json({
+          items: [
+            plan,
+            {
+              ...plan,
+              id: `${plan.id}-cron`,
+              name: 'Cron 回归',
+              schedule_interval_seconds: null,
+              schedule_cron: '0 9 * * 1-5',
+            },
+            {
+              ...plan,
+              id: `${plan.id}-manual`,
+              name: '手动回归',
+              schedule_interval_seconds: null,
+            },
+          ],
+          total: 3,
+          page: 1,
+          page_size: 100,
+        }),
       ),
       http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
         HttpResponse.json({ items: [queuedRun], total: 1, page: 1, page_size: 50 }),
@@ -143,10 +170,22 @@ describe('TestPlansPage', () => {
       }),
       http.post(`/api/v1/projects/${project.id}/test-plans`, async ({ request }) => {
         const body = (await request.json()) as {
-          schedule_interval_seconds: number
+          schedule_interval_seconds: number | null
+          schedule_cron: string | null
+          schedule_timezone: string
+          queue_priority: number
           items: Array<{ target_type: string; target_id: string; environment_id: string | null }>
         }
-        expect(body.schedule_interval_seconds).toBe(1800)
+        if (requests.created === 0) {
+          expect(body.schedule_interval_seconds).toBe(1800)
+        } else {
+          expect(body).toMatchObject({
+            schedule_interval_seconds: null,
+            schedule_cron: '0 9 * * 1-5',
+            schedule_timezone: 'Asia/Shanghai',
+            queue_priority: 9,
+          })
+        }
         expect(body.items[0]).toMatchObject({
           target_type: 'suite',
           target_id: testSuite.id,
@@ -170,6 +209,8 @@ describe('TestPlansPage', () => {
     expect(await screen.findByRole('heading', { name: '任务执行' })).toBeVisible()
     expect(await screen.findByText('每日回归')).toBeVisible()
     expect(screen.getByText('每 60 分钟')).toBeVisible()
+    expect(screen.getByText('0 9 * * 1-5 · Asia/Shanghai')).toBeVisible()
+    expect(screen.getByText('手动')).toBeVisible()
     expect(screen.getByText('尚未使用')).toBeVisible()
 
     await browser.click(screen.getByRole('button', { name: /生成 CI Token/ }))
@@ -181,13 +222,26 @@ describe('TestPlansPage', () => {
     await browser.type(screen.getByLabelText('计划名称'), '部署回归')
     await chooseSelect(browser, '资产类型', '测试套件')
     await chooseSelect(browser, '测试套件', testSuite.name)
-    await browser.type(screen.getByLabelText('定时间隔（分钟，留空为手动）'), '30')
+    await chooseSelect(browser, '调度方式', '固定间隔')
+    await browser.type(screen.getByLabelText('定时间隔（分钟）'), '30')
     await browser.click(screen.getByRole('button', { name: 'OK' }))
     expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
     expect(requests.created).toBe(1)
     await browser.keyboard('{Escape}')
 
-    await browser.click(screen.getByRole('button', { name: /运行/ }))
+    await browser.click(screen.getByRole('button', { name: /新建计划/ }))
+    await browser.type(screen.getByLabelText('计划名称'), 'Cron 部署回归')
+    await chooseSelect(browser, '资产类型', '测试套件')
+    await chooseSelect(browser, '测试套件', testSuite.name)
+    await chooseSelect(browser, '调度方式', 'Cron')
+    await browser.type(screen.getByLabelText('Cron 表达式'), '0 9 * * 1-5')
+    await browser.clear(screen.getByLabelText('队列优先级（0 最低，9 最高）'))
+    await browser.type(screen.getByLabelText('队列优先级（0 最低，9 最高）'), '9')
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(requests.created).toBe(2))
+    await browser.keyboard('{Escape}')
+
+    await browser.click(screen.getAllByRole('button', { name: /运行/ })[0])
     await waitFor(() => expect(requests.run).toBe(1))
     await browser.click(screen.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))

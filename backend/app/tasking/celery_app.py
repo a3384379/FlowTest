@@ -19,6 +19,13 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     result_expires=86_400,
     broker_connection_retry_on_startup=True,
+    task_default_queue="general",
+    task_routes={
+        "flowtest.run_workflow": {"queue": "general"},
+        "flowtest.run_test_plan": {"queue": "general"},
+        "flowtest.*data*": {"queue": "data"},
+        "flowtest.*ai*": {"queue": "ai"},
+    },
     beat_schedule={
         "enqueue-due-test-plans": {
             "task": "flowtest.enqueue_due_test_plans",

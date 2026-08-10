@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowtest-backend"
-version = "1.5.0"
+version = "1.8.0"
 description = "FlowTest API automation platform backend"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -31,6 +31,7 @@ dependencies = [
   "uvicorn[standard]>=0.52,<1",
   "openpyxl>=3.1.5,<4",
   "schemathesis>=4.9,<5",
+  "croniter>=6,<7",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +76,7 @@ known-first-party = ["app"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S"]
 "../scripts/smoke_*.py" = ["S105", "S310"]
+"../scripts/capacity_s19.py" = ["S603"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -108,5 +110,6 @@ forbidden_modules = ["app.api", "app.models", "app.repositories"]
 
 [dependency-groups]
 dev = [
+    "types-croniter>=6,<7",
     "types-openpyxl>=3.1.5,<4",
 ]

@@ -8,10 +8,12 @@ from uuid import UUID
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_test_plan_dispatcher, get_workflow_coordinator
 from app.core.database import get_session
+from app.core.errors import AppError
 from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.domain.tasking import webhook_signature
@@ -21,6 +23,7 @@ from app.models.access import User
 from app.services.execution_events import ExecutionEvent
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
+from app.services.workflows import WorkflowService
 
 ADMIN_EMAIL = "task-admin@example.com"
 ADMIN_PASSWORD = "task-password-123!"
@@ -207,9 +210,11 @@ async def test_test_plan_ci_retry_webhook_cancel_and_schedule(
 class RecordingQueue:
     def __init__(self) -> None:
         self.test_plan_run_ids: list[UUID] = []
+        self.dispatches: list[tuple[UUID, str, int]] = []
 
-    def start_test_plan(self, run_id: UUID) -> None:
+    def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None:
         self.test_plan_run_ids.append(run_id)
+        self.dispatches.append((run_id, queue_name, priority))
 
 
 class RecordingEventBus:
@@ -234,6 +239,179 @@ class MemoryObjectStorage:
 
     async def delete(self, *, key: str) -> None:
         self.objects.pop(key, None)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_quality_gate_flaky_quarantine_cron_junit_and_capacity(
+    tasking_context: TaskingTestContext,
+) -> None:
+    context = tasking_context
+    headers = await _login_headers(context.client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(
+        context.client, headers
+    )
+    capacity = await context.client.put(
+        f"/api/v1/projects/{project_id}/capacity-policy",
+        headers=headers,
+        json={"execution_concurrency_limit": 8, "queued_run_limit": 1200},
+    )
+    assert capacity.status_code == 200, capacity.text
+    assert capacity.json()["queued_run_limit"] == 1200
+
+    invalid_cron = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "无效 Cron",
+            "schedule_cron": "* * * *",
+            "items": [{"workflow_id": workflow_id, "environment_id": environment_id}],
+        },
+    )
+    assert invalid_cron.status_code == 422
+    assert invalid_cron.json()["error"]["code"] == "INVALID_TEST_PLAN_SCHEDULE"
+
+    gate = await context.client.post(
+        f"/api/v1/projects/{project_id}/quality-gates",
+        headers=headers,
+        json={
+            "name": "主分支门禁",
+            "min_pass_rate": 50,
+            "max_failed": 1,
+            "max_flaky": 0,
+            "max_duration_regression_percent": 1000,
+            "require_no_breaking_changes": False,
+        },
+    )
+    assert gate.status_code == 201, gate.text
+    gate_id = gate.json()["id"]
+    plan = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "Cron 质量计划",
+            "schedule_cron": "0 9 * * 1-5",
+            "schedule_timezone": "Asia/Shanghai",
+            "queue_priority": 8,
+            "items": [{"workflow_id": workflow_id, "environment_id": environment_id}],
+        },
+    )
+    assert plan.status_code == 201, plan.text
+    assert plan.json()["queue_priority"] == 8
+    plan_id = plan.json()["id"]
+
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[Response(500, json={"error": "failure"}), Response(200, json={"id": 1})]
+    )
+    run_ids: list[UUID] = []
+    for expected in ("failed", "passed"):
+        queued = await context.client.post(
+            f"/api/v1/projects/{project_id}/test-plans/{plan_id}/runs", headers=headers
+        )
+        assert queued.status_code == 202, queued.text
+        assert queued.json()["queue_priority"] == 8
+        run_id = UUID(queued.json()["id"])
+        run_ids.append(run_id)
+        await PlanRunCoordinator(context.session_maker, context.events).run(run_id)
+        detail = await context.client.get(
+            f"/api/v1/projects/{project_id}/test-plan-runs/{run_id}", headers=headers
+        )
+        assert detail.json()["run"]["status"] == expected
+    assert len(target.calls) == 2
+    assert context.queue.dispatches[-1] == (run_ids[-1], "general", 8)
+
+    quality = await context.client.get(
+        f"/api/v1/projects/{project_id}/test-plan-runs/{run_ids[-1]}/quality",
+        headers=headers,
+    )
+    assert quality.status_code == 200, quality.text
+    assert quality.json()["baseline_run_id"] == str(run_ids[0])
+    assert quality.json()["summary"]["flaky"] == 1
+    assert quality.json()["evaluations"][0]["status"] == "failed"
+
+    flaky = await context.client.get(f"/api/v1/projects/{project_id}/flaky-tests", headers=headers)
+    assert flaky.status_code == 200
+    record = flaky.json()["items"][0]
+    assert record["flaky_score"] == 100
+    quarantined = await context.client.put(
+        f"/api/v1/projects/{project_id}/flaky-tests/{record['id']}/quarantine",
+        headers=headers,
+        json={"quarantined": True},
+    )
+    assert quarantined.json()["quarantined"] is True
+
+    limited = await context.client.put(
+        f"/api/v1/projects/{project_id}/capacity-policy",
+        headers=headers,
+        json={"execution_concurrency_limit": 1, "queued_run_limit": 1},
+    )
+    assert limited.status_code == 200
+
+    third = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan_id}/runs", headers=headers
+    )
+    third_id = UUID(third.json()["id"])
+    queue_denied = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan_id}/runs", headers=headers
+    )
+    assert queue_denied.status_code == 429
+    assert queue_denied.json()["error"]["code"] == "PROJECT_QUEUE_LIMIT_EXCEEDED"
+    await PlanRunCoordinator(context.session_maker, context.events).run(third_id)
+    detail = await context.client.get(
+        f"/api/v1/projects/{project_id}/test-plan-runs/{third_id}", headers=headers
+    )
+    assert detail.json()["items"][0]["status"] == "quarantined"
+    junit = await context.client.get(
+        f"/api/v1/projects/{project_id}/test-plan-runs/{third_id}/junit.xml",
+        headers=headers,
+    )
+    assert junit.status_code == 200
+    assert b"<skipped" in junit.content
+
+    token = await context.client.post(
+        f"/api/v1/projects/{project_id}/service-tokens",
+        headers=headers,
+        json={"name": "Quality Gate", "scopes": ["execute:test-plan"]},
+    )
+    raw_token = token.json()["token"]
+    ci_gate = await context.client.get(
+        f"/api/v1/ci/projects/{project_id}/test-plan-runs/{run_ids[-1]}/quality-gate",
+        params={"quality_gate_id": gate_id},
+        headers={"Authorization": f"Bearer {raw_token}"},
+    )
+    assert ci_gate.status_code == 200
+    assert ci_gate.json()["status"] == "failed"
+    ci_junit = await context.client.get(
+        f"/api/v1/ci/projects/{project_id}/test-plan-runs/{run_ids[-1]}/junit.xml",
+        headers={"Authorization": f"Bearer {raw_token}"},
+    )
+    assert ci_junit.status_code == 200
+    assert b"testsuite" in ci_junit.content
+
+    async with context.session_maker() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        service = WorkflowService(session)
+        await service.prepare_execution(
+            actor=actor,
+            project_id=UUID(project_id),
+            workflow_id=UUID(workflow_id),
+            environment_id=UUID(environment_id),
+            version=1,
+            runtime_variables={},
+            runtime_headers={},
+        )
+        with pytest.raises(AppError, match="并发") as quota_error:
+            await service.prepare_execution(
+                actor=actor,
+                project_id=UUID(project_id),
+                workflow_id=UUID(workflow_id),
+                environment_id=UUID(environment_id),
+                version=1,
+                runtime_variables={},
+                runtime_headers={},
+            )
+        assert quota_error.value.code == "PROJECT_CONCURRENCY_EXCEEDED"
 
 
 @pytest.mark.asyncio

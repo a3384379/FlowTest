@@ -1,6 +1,6 @@
 import hashlib
 import hmac
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -14,14 +14,6 @@ class TestPlanTrigger(StrEnum):
 class ServiceTokenScope(StrEnum):
     EXECUTE_WORKFLOW = "execute:workflow"
     EXECUTE_TEST_PLAN = "execute:test-plan"
-
-
-def next_scheduled_at(
-    now: datetime, interval_seconds: int | None, enabled: bool
-) -> datetime | None:
-    if not enabled or interval_seconds is None:
-        return None
-    return now.astimezone(UTC) + timedelta(seconds=interval_seconds)
 
 
 def digest_token(token: str) -> str:

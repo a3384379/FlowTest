@@ -191,6 +191,46 @@ class ProjectService:
         await self._session.commit()
         return retention_days
 
+    async def get_capacity_policy(self, *, actor: User, project_id: UUID) -> tuple[int, int]:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.READ,
+        )
+        return (
+            access.project.execution_concurrency_limit,
+            access.project.queued_run_limit,
+        )
+
+    async def update_capacity_policy(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_concurrency_limit: int,
+        queued_run_limit: int,
+    ) -> tuple[int, int]:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_SECURITY,
+        )
+        access.project.execution_concurrency_limit = execution_concurrency_limit
+        access.project.queued_run_limit = queued_run_limit
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="project.capacity_policy_updated",
+            resource_type="project",
+            resource_id=project_id,
+            details={
+                "execution_concurrency_limit": execution_concurrency_limit,
+                "queued_run_limit": queued_run_limit,
+            },
+        )
+        await self._session.commit()
+        return execution_concurrency_limit, queued_run_limit
+
     async def list_audit_logs(
         self,
         *,

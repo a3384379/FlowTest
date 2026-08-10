@@ -634,6 +634,9 @@ export type TestPlan = {
   description: string
   enabled: boolean
   schedule_interval_seconds: number | null
+  schedule_cron: string | null
+  schedule_timezone: string
+  queue_priority: number
   next_run_at: string | null
   created_by_id: string
   created_at: string
@@ -650,6 +653,10 @@ export type TestPlanRun = {
   requested_by_id: string
   status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   trigger_type: 'manual' | 'schedule' | 'ci' | 'webhook'
+  queue_priority: number
+  queue_name: 'general' | 'data' | 'ai'
+  baseline_run_id: string | null
+  quality_summary: Record<string, unknown>
   cancel_requested_at: string | null
   started_at: string | null
   completed_at: string | null
