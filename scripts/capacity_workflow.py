@@ -76,7 +76,9 @@ async def run_capacity(
     async with httpx.AsyncClient(
         base_url=api_url,
         headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+        # Let the measured P95 gate decide whether a slow submission is acceptable.
+        # A shorter transport timeout turns host contention into an unclassified crash.
+        timeout=httpx.Timeout(config.completion_timeout_seconds, connect=5.0),
     ) as client:
 
         async def execute(index: int) -> bool:
