@@ -253,6 +253,10 @@ body {
   margin-bottom: 16px;
 }
 
+.contract-panel {
+  width: 100%;
+}
+
 .workflow-designer {
   overflow: hidden;
   border: 1px solid #e5eaf2;

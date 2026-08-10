@@ -108,7 +108,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S15 | 测试资产体系 | Test Case/Suite 不可变版本、检索、模板、Diff、Plan Snapshot | 已完成 |
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 已完成 |
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 已完成 |
-| S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 待实施 |
+| S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 已完成 |
 | S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 待实施 |
 | S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 待实施 |
 | S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 待实施 |
@@ -165,3 +165,13 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 6. Web 新增“数据与 Mock”深链接，提供 Credential、Mock 服务、路由和日志管理；React Flow 新增只读 SQL 与 Redis 节点及类型兼容的 Credential 配置。
 7. Alembic `20260810_0013` 已在真实 PostgreSQL 完成 `0012 → 0013 → 0012 → 0013` 漂移校验；后端 167 项测试通过、总覆盖率 90.79%，数据节点执行器 97%；前端 85 项测试通过，四项覆盖率均超过 80%。
 8. Compose 八服务健康检查、PostgreSQL/Redis/MinIO 真实集成测试和 Playwright S17 闭环均已通过；前后端依赖审计无已知漏洞。
+
+## S18 完成清单
+
+1. OpenAPI 3.x / Swagger 2.0 文档通过 Schemathesis 校验，按操作生成边界、属性和异常三类待审核草稿，记录生成引擎版本与 Schema SHA-256。
+2. Contract Run 保存不可变 Schema、显式/自动基线、added/changed/deleted/unchanged Diff、Breaking Change 证据和字段覆盖率。
+3. 破坏性规则覆盖操作、必填请求、请求/响应类型、成功响应和响应字段，每条结果保存稳定代码和路径。
+4. 生成草稿只能单次接受或拒绝；接受前可编辑并会再次验证结构，未确认草稿不暴露执行入口，所有决策记录审计。
+5. 安全边界拒绝外部 `$ref`、超过 5 MB/64 层/10 万节点/500 操作的文档和超过 256 KB 的编辑定义；生成请求复用 Token/Secret 脱敏。
+6. Web 在测试资产中提供契约上传、基线选择、Diff/覆盖率、破坏性提示和生成草稿编辑/接受/拒绝闭环。
+7. Alembic `20260811_0014` 提供可升级与可回滚路径；后端、前端、Compose 和 Playwright 验收均覆盖契约主路径。
