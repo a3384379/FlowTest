@@ -45,7 +45,12 @@ async def run_capacity(
     _compose("stop", *WORKER_SERVICES)
     started_at = perf_counter()
     try:
-        run_ids = await _enqueue_runs(api_url, fixture, task_count)
+        run_ids = await _enqueue_runs(
+            api_url,
+            fixture,
+            task_count,
+            timeout_seconds=timeout_seconds,
+        )
         if len(set(run_ids)) != task_count:
             raise RuntimeError("queued tasks did not receive unique run identifiers")
         queued = await _list_project_runs(api_url, fixture)
@@ -80,10 +85,21 @@ async def run_capacity(
     )
 
 
-async def _enqueue_runs(api_url: str, fixture: QueueFixture, task_count: int) -> list[str]:
+async def _enqueue_runs(
+    api_url: str,
+    fixture: QueueFixture,
+    task_count: int,
+    *,
+    timeout_seconds: float,
+) -> list[str]:
     semaphore = asyncio.Semaphore(50)
     nonce = secrets.token_hex(8)
-    async with httpx.AsyncClient(base_url=api_url, timeout=30) as client:
+    limits = httpx.Limits(max_connections=50, max_keepalive_connections=50)
+    async with httpx.AsyncClient(
+        base_url=api_url,
+        timeout=httpx.Timeout(timeout_seconds, connect=5.0),
+        limits=limits,
+    ) as client:
 
         async def enqueue(index: int) -> str:
             token = fixture.service_tokens[index % len(fixture.service_tokens)]
