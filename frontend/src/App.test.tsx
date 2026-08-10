@@ -43,7 +43,7 @@ describe('App authentication', () => {
     expect(screen.getByText('接口自动化测试平台')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /退出/ }))
     expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
-  }, 20_000)
+  })
 
   it('requires a password change after first login', async () => {
     server.use(

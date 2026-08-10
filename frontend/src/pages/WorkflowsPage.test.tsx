@@ -110,7 +110,7 @@ describe('WorkflowsPage', () => {
     await browser.click(screen.getAllByRole('button', { name: /重放/ })[1])
     expect(await screen.findByText('节点重放完成')).toBeInTheDocument()
     expect(screen.getByText('节点重放结果')).toBeVisible()
-  }, 30_000)
+  })
 
   it('compares the latest two immutable workflow versions', async () => {
     const versionedWorkflow = { ...workflow, current_version: 2 }
