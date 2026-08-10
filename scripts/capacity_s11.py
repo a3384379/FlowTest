@@ -35,13 +35,9 @@ async def main() -> None:
         )
 
 
-async def run_capacity(
-    target: str, *, requests: int, concurrency: int
-) -> CapacityResult:
+async def run_capacity(target: str, *, requests: int, concurrency: int) -> CapacityResult:
     if requests < 1 or not 1 <= concurrency <= requests:
-        raise ValueError(
-            "requests and concurrency must define a positive bounded workload"
-        )
+        raise ValueError("requests and concurrency must define a positive bounded workload")
     semaphore = asyncio.Semaphore(concurrency)
     latencies: list[float] = []
     failures = 0
@@ -54,9 +50,7 @@ async def run_capacity(
 
         async def warm_connection_pool() -> None:
             """Exclude one-time TCP pool creation from the steady-state API gate."""
-            responses = await asyncio.gather(
-                *(client.get(target) for _ in range(concurrency))
-            )
+            responses = await asyncio.gather(*(client.get(target) for _ in range(concurrency)))
             if any(response.status_code != 200 for response in responses):
                 raise RuntimeError("capacity warm-up failed")
 
