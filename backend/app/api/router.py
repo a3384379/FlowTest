@@ -4,6 +4,7 @@ from app.api.v1.endpoints.api_assets import router as api_assets_router
 from app.api.v1.endpoints.api_exports import router as api_exports_router
 from app.api.v1.endpoints.artifacts import router as artifacts_router
 from app.api.v1.endpoints.auth import router as auth_router
+from app.api.v1.endpoints.contracts import router as contracts_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.data_sources import mock_dispatch_router
 from app.api.v1.endpoints.data_sources import router as data_sources_router
@@ -23,6 +24,7 @@ from app.api.v1.endpoints.workflows import router as workflows_router
 api_router = APIRouter()
 api_router.include_router(health_router, tags=["system"])
 api_router.include_router(auth_router, tags=["auth"])
+api_router.include_router(contracts_router, tags=["contracts"])
 api_router.include_router(dashboard_router, tags=["dashboard"])
 api_router.include_router(data_sources_router, tags=["data-sources"])
 api_router.include_router(mock_dispatch_router, tags=["mock-dispatch"])

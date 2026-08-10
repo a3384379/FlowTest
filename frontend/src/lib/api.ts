@@ -575,6 +575,58 @@ export type VersionDiff = {
   changes: Array<{ path: string; before: unknown; after: unknown }>
 }
 
+export type ContractRun = {
+  id: string
+  project_id: string
+  baseline_run_id: string | null
+  source_name: string
+  source_type: 'openapi3' | 'swagger2'
+  source_sha256: string
+  status: 'completed' | 'failed'
+  diff_summary: { added: number; changed: number; deleted: number; unchanged: number }
+  breaking_changes: Array<{
+    code: string
+    severity: 'breaking'
+    operation_key: string
+    path: string
+    message: string
+    before: unknown
+    after: unknown
+  }>
+  coverage: {
+    operations_total: number
+    operations_generated: number
+    operation_coverage_percent: number
+    request_fields_total: number
+    response_fields_total: number
+    schema_fields_total: number
+    schema_fields_covered: number
+    schema_coverage_percent: number
+  }
+  generated_case_count: number
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type GeneratedContractCase = {
+  id: string
+  contract_run_id: string
+  operation_key: string
+  operation_id: string
+  method: string
+  path: string
+  generation_kind: 'example' | 'boundary' | 'property' | 'negative'
+  name: string
+  definition: Record<string, unknown>
+  review_status: 'pending' | 'accepted' | 'rejected'
+  review_note: string
+  reviewed_by_id: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type TestPlan = {
   id: string
   project_id: string

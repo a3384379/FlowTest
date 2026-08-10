@@ -22,6 +22,7 @@ import {
 } from 'antd'
 import { useState } from 'react'
 
+import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
 import { useTestAssets } from '../features/test-assets/use-test-assets'
 import type {
   TestCaseDraftInput,
@@ -126,7 +127,14 @@ function AssetTabs(props: {
 }) {
   return (
     <Card>
-      <Tabs animated={false} items={[caseTab(props), suiteTab(props)]} />
+      <Tabs
+        animated={false}
+        items={[
+          caseTab(props),
+          suiteTab(props),
+          { key: 'contracts', label: '契约自动化', children: <ContractAutomationPanel /> },
+        ]}
+      />
     </Card>
   )
 }
