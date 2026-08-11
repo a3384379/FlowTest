@@ -25,6 +25,8 @@ uv run --project backend python scripts/capacity_s19.py
 要求零失败且稳态 P95 不超过 500 ms。预热只排除 CI 主机的一次性建连抖动；任一预热请求失败仍会使门禁失败。
 可通过 `FLOWTEST_CAPACITY_REQUESTS`、`FLOWTEST_CAPACITY_CONCURRENCY` 和
 `FLOWTEST_CAPACITY_P95_SECONDS` 调整。每次变更 Worker 并发、资源限制或宿主机规格后重新执行。
+GitHub 托管 Runner 保持 300 请求、并发 30 和零失败要求，使用 1 秒兼容上限；正式参考环境
+仍必须通过默认 500 ms 门槛，托管 Runner 的结果不能替代参考硬件记录。
 
 ## V1.0 基线结果
 
