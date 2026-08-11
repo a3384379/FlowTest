@@ -18,10 +18,9 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
 
   await page.getByRole('link', { name: '接口管理' }).click()
   await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
-  await selectBusinessEnvironment(page)
+  await createEnvironment(page, environmentName)
   await createApi(page, apiName)
   await editApiVersion(page, apiName)
-  await createEnvironment(page, environmentName)
 
   await page.getByRole('link', { name: '项目管理' }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
@@ -31,13 +30,6 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
   await manageTeam(page, teamName)
   await expect(page.locator('body')).not.toContainText(secretValue)
 })
-
-async function selectBusinessEnvironment(page: import('@playwright/test').Page) {
-  await page.getByLabel('当前环境').click()
-  await page.keyboard.press('End')
-  await page.keyboard.press('Enter')
-  await expect(page.getByText('V1 Mock Business', { exact: true }).last()).toBeVisible()
-}
 
 async function createEnvironment(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: '新建环境' }).click()
@@ -78,7 +70,7 @@ async function editApiVersion(page: import('@playwright/test').Page, apiName: st
 
   await panel.getByRole('button', { name: '预览最终请求' }).click()
   const preview = page.getByRole('dialog', { name: '最终请求预览（Secret 已脱敏）' })
-  await expect(preview).toContainText('http://mock-target:8080/echo')
+  await expect(preview).toContainText('http://mock-target.test:8080/echo')
   await expect(preview).toContainText('source')
   await page.keyboard.press('Escape')
 }
@@ -113,11 +105,16 @@ async function updateProjectConfiguration(page: import('@playwright/test').Page,
 
 async function writeSecret(page: import('@playwright/test').Page, name: string, value: string) {
   await page.getByRole('tab', { name: 'Secret' }).click()
-  await page.getByPlaceholder('Secret 名称').fill(name)
-  await page.getByPlaceholder('仅写入，不可读回').fill(value)
-  await page.getByRole('button', { name: '写入 Secret' }).click()
-  const row = page.getByRole('row').filter({ hasText: name })
-  await expect(row).toContainText('已加密 · 不可读回')
+  const panel = page.getByRole('tabpanel', { name: 'Secret' })
+  await panel.getByPlaceholder('Secret 名称').fill(name)
+  await panel.getByPlaceholder('仅写入，不可读回').fill(value)
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' && response.url().endsWith('/secrets') && response.ok(),
+  )
+  await panel.getByRole('button', { name: '写入 Secret' }).click()
+  await saved
+  await expect(panel.getByRole('row').filter({ hasText: name })).toContainText('已加密 · 不可读回')
 }
 
 async function manageTeam(page: import('@playwright/test').Page, name: string) {
