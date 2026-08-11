@@ -109,7 +109,7 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S16 | v1.5.0 高级 Workflow | Node SDK V2、SubFlow、ForEach、安全表达式、调试与画布增强 | 已完成 |
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 已完成 |
 | S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 已完成 |
-| S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 待实施 |
+| S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 已完成 |
 | S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 待实施 |
 | S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 待实施 |
 
@@ -175,3 +175,14 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 5. 安全边界拒绝外部 `$ref`、超过 5 MB/64 层/10 万节点/500 操作的文档和超过 256 KB 的编辑定义；生成请求复用 Token/Secret 脱敏。
 6. Web 在测试资产中提供契约上传、基线选择、Diff/覆盖率、破坏性提示和生成草稿编辑/接受/拒绝闭环。
 7. Alembic `20260811_0014` 提供可升级与可回滚路径；后端、前端、Compose 和 Playwright 验收均覆盖契约主路径。
+
+## S19 完成清单
+
+1. Test Plan 支持五字段 Cron、IANA 时区、0～9 优先级与 `general/data/ai` 队列；间隔与 Cron 互斥且最短周期为 60 秒。
+2. 项目级运行并发和排队配额在 PostgreSQL 行锁内检查；达到运行配额的 Worker 延迟领取，达到排队上限的 API 请求明确拒绝。
+3. Compose 提供 General、Data、AI 三个独立 Worker；Celery 路由按目标类型分发，同时保持已有 V1/V2 任务兼容。
+4. Flaky 使用目标版本唯一键、Upsert 与行锁确定性聚合；Owner 可隔离资产，后续 Plan Snapshot 显式记录 `quarantined`，历史运行不变。
+5. Quality Gate 支持通过率、失败数、Flaky、耗时基线回归与 Breaking Change 规则；Web 与 CI Token 接口共享持久化 Evaluation。
+6. JUnit XML 从结构化 Run/Item 数据安全导出；质量中心提供门禁、Flaky、隔离、基线摘要和 JUnit 下载。
+7. `20260811_0015` 已完成真实 PostgreSQL `0014 → 0015 → 0014 → 0015` 往返与漂移检查；单元、前端、Playwright 和 Compose 冒烟覆盖完整主路径。
+8. 容量门槛使用真实 Workflow 验证 100 并发，并在停止所有 Worker 后持久化 1000 个 Run，恢复 Worker 后验证零丢失、零重复终态和唯一 Execution。

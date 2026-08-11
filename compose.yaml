@@ -155,6 +155,7 @@ services:
         "worker",
         "--loglevel=INFO",
         "--concurrency=${FLOWTEST_WORKER_CONCURRENCY:-4}",
+        "--queues=general,celery",
         "--hostname=worker@%h",
       ]
     environment: *flowtest-environment
@@ -175,6 +176,72 @@ services:
         limits:
           cpus: "2.00"
           memory: 1G
+
+  worker-data:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasking.celery_app.celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${FLOWTEST_DATA_WORKER_CONCURRENCY:-2}",
+        "--queues=data",
+        "--hostname=worker-data@%h",
+      ]
+    environment: *flowtest-environment
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker-data@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
+  worker-ai:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasking.celery_app.celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${FLOWTEST_AI_WORKER_CONCURRENCY:-1}",
+        "--queues=ai",
+        "--hostname=worker-ai@%h",
+      ]
+    environment: *flowtest-environment
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker-ai@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
 
   beat:
     build:

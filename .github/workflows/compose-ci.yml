@@ -17,9 +17,11 @@ on:
       - "scripts/smoke_s10.py"
       - "scripts/smoke_s11.py"
       - "scripts/smoke_s18.py"
+      - "scripts/smoke_s19.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
       - "scripts/capacity_workflow.py"
+      - "scripts/capacity_s19.py"
       - "scripts/backup.sh"
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
@@ -40,9 +42,11 @@ on:
       - "scripts/smoke_s10.py"
       - "scripts/smoke_s11.py"
       - "scripts/smoke_s18.py"
+      - "scripts/smoke_s19.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
       - "scripts/capacity_workflow.py"
+      - "scripts/capacity_s19.py"
       - "scripts/backup.sh"
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
@@ -53,12 +57,17 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       FLOWTEST_E2E_ACTIVE_PASSWORD: FlowTest-E2E-Admin-123!
       FLOWTEST_SMOKE_ADMIN_PASSWORD: FlowTest-E2E-Admin-123!
       FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE: "100"
       FLOWTEST_EXECUTION_RATE_LIMIT_PER_MINUTE: "500"
+      # GitHub-hosted runners are below the documented 8C/16G reference host.
+      # Keep the same 100-way workload and zero-failure rule with a host-appropriate bound.
+      FLOWTEST_CAPACITY_P95_SECONDS: "1.0"
+      FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS: "60"
+      FLOWTEST_S19_API_CONCURRENCY: "10"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -116,10 +125,14 @@ jobs:
         run: pnpm --dir frontend e2e
       - name: Verify S18 contract generation and review flow
         run: python3 scripts/smoke_s18.py
+      - name: Verify S19 scheduling, quality gate, Flaky, and JUnit flow
+        run: python3 scripts/smoke_s19.py
       - name: Run API capacity gate
         run: uv run --project backend python scripts/capacity_s11.py
       - name: Run real Workflow capacity gate
         run: uv run --project backend python scripts/capacity_workflow.py
+      - name: Run durable 1000-task queue capacity gate
+        run: uv run --project backend python scripts/capacity_s19.py
       - name: Verify backup recovery in isolated volumes
         run: |
           backup_directory="$(mktemp -d)"

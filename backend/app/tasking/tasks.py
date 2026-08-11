@@ -69,7 +69,12 @@ async def _enqueue_due_test_plans() -> None:
     async with session_factory() as session:
         runs = await TestPlanService(session).queue_due_runs(datetime.now(UTC))
     for run in runs:
-        celery_app.send_task("flowtest.run_test_plan", args=[str(run.id)])
+        celery_app.send_task(
+            "flowtest.run_test_plan",
+            args=[str(run.id)],
+            queue=run.queue_name,
+            priority=run.queue_priority,
+        )
 
 
 @celery_app.task(name="flowtest.cleanup_retention")  # type: ignore[untyped-decorator]

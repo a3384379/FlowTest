@@ -42,7 +42,19 @@ async def run_capacity(target: str, *, requests: int, concurrency: int) -> Capac
     latencies: list[float] = []
     failures = 0
 
-    async with httpx.AsyncClient(timeout=5) as client:
+    limits = httpx.Limits(
+        max_connections=concurrency,
+        max_keepalive_connections=concurrency,
+    )
+    async with httpx.AsyncClient(timeout=5, limits=limits) as client:
+
+        async def warm_connection_pool() -> None:
+            """Exclude one-time TCP pool creation from the steady-state API gate."""
+            responses = await asyncio.gather(*(client.get(target) for _ in range(concurrency)))
+            if any(response.status_code != 200 for response in responses):
+                raise RuntimeError("capacity warm-up failed")
+
+        await warm_connection_pool()
 
         async def issue_request() -> bool:
             async with semaphore:

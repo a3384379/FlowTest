@@ -169,14 +169,23 @@ function PlanTable({ items, onRun }: { items: TestPlan[]; onRun: (id: string) =>
         {
           title: '调度',
           dataIndex: 'schedule_interval_seconds',
-          render: (value: number | null) =>
-            value ? (
+          render: (value: number | null, plan: TestPlan) =>
+            plan.schedule_cron ? (
+              <Tag icon={<ClockCircleOutlined />} color="purple">
+                {plan.schedule_cron} · {plan.schedule_timezone}
+              </Tag>
+            ) : value ? (
               <Tag icon={<ClockCircleOutlined />} color="blue">
                 每 {value / 60} 分钟
               </Tag>
             ) : (
               '手动'
             ),
+        },
+        {
+          title: '优先级',
+          dataIndex: 'queue_priority',
+          width: 80,
         },
         {
           title: '操作',
@@ -202,6 +211,7 @@ function RunTable({ items, onCancel }: { items: TestPlanRun[]; onCancel: (id: st
       locale={{ emptyText: '暂无计划运行' }}
       columns={[
         { title: '触发', dataIndex: 'trigger_type', width: 90 },
+        { title: '队列', dataIndex: 'queue_name', width: 90 },
         {
           title: '状态',
           dataIndex: 'status',
@@ -247,12 +257,18 @@ function CreatePlanDialog({
   onClose: () => void
   onCreate: (input: CreateTestPlanInput) => Promise<void>
 }) {
-  type PlanForm = Omit<CreateTestPlanInput, 'intervalSeconds' | 'environmentId'> & {
+  type PlanForm = Omit<
+    CreateTestPlanInput,
+    'intervalSeconds' | 'environmentId' | 'cronExpression'
+  > & {
     environmentId?: string
+    scheduleMode: 'manual' | 'interval' | 'cron'
     intervalMinutes: number | null
+    cronExpression?: string
   }
   const [form] = Form.useForm<PlanForm>()
   const targetType = Form.useWatch('targetType', form) ?? 'workflow'
+  const scheduleMode = Form.useWatch('scheduleMode', form) ?? 'manual'
   const targetOptions = selectTargetOptions(targetType, workflows, testCases, testSuites)
   return (
     <Modal
@@ -266,12 +282,23 @@ function CreatePlanDialog({
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ targetType: 'workflow', maxRetries: 0, intervalMinutes: null }}
+        initialValues={{
+          targetType: 'workflow',
+          maxRetries: 0,
+          scheduleMode: 'manual',
+          intervalMinutes: null,
+          timezone: 'Asia/Shanghai',
+          priority: 5,
+        }}
         onFinish={(values) =>
           void onCreate({
             ...values,
             environmentId: values.environmentId ?? null,
-            intervalSeconds: values.intervalMinutes ? values.intervalMinutes * 60 : null,
+            intervalSeconds:
+              values.scheduleMode === 'interval' && values.intervalMinutes
+                ? values.intervalMinutes * 60
+                : null,
+            cronExpression: values.scheduleMode === 'cron' ? (values.cronExpression ?? null) : null,
           })
         }
       >
@@ -299,8 +326,38 @@ function CreatePlanDialog({
             <Select options={options(environments)} />
           </Form.Item>
         )}
-        <Form.Item name="intervalMinutes" label="定时间隔（分钟，留空为手动）">
-          <InputNumber min={1} max={43_200} precision={0} className="full-width" />
+        <Form.Item name="scheduleMode" label="调度方式">
+          <Select
+            options={[
+              { value: 'manual', label: '手动' },
+              { value: 'interval', label: '固定间隔' },
+              { value: 'cron', label: 'Cron' },
+            ]}
+          />
+        </Form.Item>
+        {scheduleMode === 'interval' && (
+          <Form.Item name="intervalMinutes" label="定时间隔（分钟）" rules={[{ required: true }]}>
+            <InputNumber min={1} max={43_200} precision={0} className="full-width" />
+          </Form.Item>
+        )}
+        {scheduleMode === 'cron' && (
+          <>
+            <Form.Item name="cronExpression" label="Cron 表达式" rules={[{ required: true }]}>
+              <Input placeholder="0 9 * * 1-5" maxLength={120} />
+            </Form.Item>
+            <Form.Item name="timezone" label="时区" rules={[{ required: true }]}>
+              <Select
+                options={[
+                  { value: 'Asia/Shanghai', label: 'Asia/Shanghai' },
+                  { value: 'UTC', label: 'UTC' },
+                  { value: 'Asia/Tokyo', label: 'Asia/Tokyo' },
+                ]}
+              />
+            </Form.Item>
+          </>
+        )}
+        <Form.Item name="priority" label="队列优先级（0 最低，9 最高）">
+          <InputNumber min={0} max={9} precision={0} className="full-width" />
         </Form.Item>
         <Form.Item name="maxRetries" label="失败重试次数">
           <InputNumber min={0} max={3} precision={0} className="full-width" />

@@ -200,6 +200,20 @@ body {
   gap: 16px;
 }
 
+.quality-overview {
+  margin-bottom: 16px;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+.quality-runs-card {
+  margin-top: 16px;
+}
+
 .full-width {
   width: 100%;
 }

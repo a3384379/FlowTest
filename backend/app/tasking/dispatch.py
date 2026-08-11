@@ -11,7 +11,7 @@ class WorkflowDispatcher(Protocol):
 
 
 class TestPlanDispatcher(Protocol):
-    def start_test_plan(self, run_id: UUID) -> None: ...
+    def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None: ...
 
 
 class CeleryTaskDispatcher:
@@ -19,7 +19,33 @@ class CeleryTaskDispatcher:
         self._celery = celery
 
     def start(self, plan: WorkflowExecutionPlan) -> None:
-        self._celery.send_task("flowtest.run_workflow", args=[str(plan.execution_id)])
+        queue_name = _workflow_queue(plan)
+        self._celery.send_task(
+            "flowtest.run_workflow",
+            args=[str(plan.execution_id)],
+            queue=queue_name,
+            priority=5,
+        )
 
-    def start_test_plan(self, run_id: UUID) -> None:
-        self._celery.send_task("flowtest.run_test_plan", args=[str(run_id)])
+    def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None:
+        self._celery.send_task(
+            "flowtest.run_test_plan",
+            args=[str(run_id)],
+            queue=queue_name,
+            priority=priority,
+        )
+
+
+def _workflow_queue(plan: WorkflowExecutionPlan) -> str:
+    definitions = (
+        [child.definition for child in plan.children]
+        if hasattr(plan, "children")
+        else [plan.definition]
+    )
+    if any(
+        node.type.value in {"sql", "redis"}
+        for definition in definitions
+        for node in definition.nodes
+    ):
+        return "data"
+    return "general"

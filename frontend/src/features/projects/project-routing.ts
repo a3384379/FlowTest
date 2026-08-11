@@ -1,5 +1,13 @@
 export type ProjectSection =
-  'dashboard' | 'settings' | 'apis' | 'assets' | 'workflows' | 'data' | 'tasks' | 'reports'
+  | 'dashboard'
+  | 'settings'
+  | 'apis'
+  | 'assets'
+  | 'workflows'
+  | 'data'
+  | 'tasks'
+  | 'quality'
+  | 'reports'
 
 export function projectPath(projectId: string, section: ProjectSection): string {
   return `/projects/${projectId}/${section}`
@@ -24,6 +32,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'workflows',
     'data',
     'tasks',
+    'quality',
     'reports',
   ].includes(value ?? '')
 }

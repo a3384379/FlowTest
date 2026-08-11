@@ -35,18 +35,34 @@ class TestPlanItemInput(BaseModel):
 
 
 class TestPlanCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)
     enabled: bool = True
     schedule_interval_seconds: int | None = Field(default=None, ge=60, le=2_592_000)
+    schedule_cron: str | None = Field(default=None, min_length=1, max_length=120)
+    schedule_timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
+    queue_priority: int = Field(default=5, ge=0, le=9)
     items: list[TestPlanItemInput] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_schedule_kind(self) -> "TestPlanCreate":
+        if self.schedule_interval_seconds is not None and self.schedule_cron is not None:
+            raise ValueError("interval and cron schedule cannot be combined")
+        return self
 
 
 class TestPlanUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
     enabled: bool | None = None
     schedule_interval_seconds: int | None = Field(default=None, ge=60, le=2_592_000)
+    schedule_cron: str | None = Field(default=None, min_length=1, max_length=120)
+    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    queue_priority: int | None = Field(default=None, ge=0, le=9)
 
 
 class TestPlanItemResponse(BaseModel):
@@ -72,6 +88,9 @@ class TestPlanResponse(BaseModel):
     description: str
     enabled: bool
     schedule_interval_seconds: int | None
+    schedule_cron: str | None
+    schedule_timezone: str
+    queue_priority: int
     next_run_at: datetime | None
     created_by_id: UUID
     created_at: datetime
@@ -91,6 +110,10 @@ class TestPlanRunResponse(BaseModel):
     requested_by_id: UUID
     status: str
     trigger_type: TestPlanTrigger
+    queue_priority: int
+    queue_name: str
+    baseline_run_id: UUID | None
+    quality_summary: dict[str, object]
     cancel_requested_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None

@@ -16,7 +16,7 @@
 4. 若数据迁移不可逆或校验失败，按备份手册恢复整个 PostgreSQL + MinIO 恢复点。
 5. 验证 readiness、核心业务链路和报告下载后再恢复流量。
 
-V1.0 的 `20260809_0010`、S14 的 `20260809_0011` 与 S15 的 `20260810_0012` 迁移均包含 downgrade；正式回滚仍必须先备份当前状态。
+V1.0 的 `20260809_0010`、S14 的 `20260809_0011`、S15 的 `20260810_0012`、S17 的 `20260810_0013`、S18 的 `20260811_0014` 与 S19 的 `20260811_0015` 迁移均包含 downgrade；正式回滚仍必须先备份当前状态。
 
 S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到 v1.1.0 不需要执行 Alembic downgrade；停止新执行并切换镜像即可。已创建的 SubFlow/ForEach 草稿或发布版本使用旧应用无法编辑或执行，回滚前应导出这些定义，回升 v1.5.0 后可继续使用；既有 V1 Execution、Snapshot 和报告不受影响。
 
@@ -34,3 +34,9 @@ S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到
 - 升级会把现有 Test Plan Item 原地回填为 `target_type=workflow`，复用原 `workflow_id/workflow_version`，因此 V1 计划、CI Token、执行与报告保持兼容。
 - 回滚到 0011 会删除全部 Case/Suite 资产和版本；由于 0011 无法表达 Case/Suite 计划项，downgrade 会先删除这些计划项，再恢复 Workflow 专用列为非空。
 - 回滚前必须确认每个 Test Plan 至少保留一个 Workflow 项；若需无损保留 Case/Suite 或固定目标快照，不执行 downgrade，改用升级前 PostgreSQL + MinIO 备份恢复。
+
+## S19 / 0015 特别说明
+
+- 升级会创建 Quality Gate、Flaky Record 和 Gate Evaluation，并为 Project、Test Plan、Run 与 Run Item 增加配额、Cron、队列、基线和隔离字段；现有计划继续按手动或原固定间隔运行。
+- 回滚到 0014 会删除全部门禁、Flaky 与 Evaluation 数据，并移除 Cron、时区、队列优先级和项目配额配置；运行及报告主体保留。
+- 回滚前必须停止 Beat 和三个 Worker，防止旧代码在迁移过程中领取计划；迁移完成后再以目标版本重启。

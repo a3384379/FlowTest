@@ -13,6 +13,7 @@ from app.schemas.access import (
     FolderUpdate,
     MemberResponse,
     MemberUpsert,
+    ProjectCapacityPolicy,
     ProjectCreate,
     ProjectPermissionResponse,
     ProjectResponse,
@@ -133,6 +134,40 @@ async def update_project_retention_policy(
         retention_days=payload.retention_days,
     )
     return ProjectRetentionPolicy(retention_days=days, maximum_days=settings.retention_max_days)
+
+
+@router.get("/{project_id}/capacity-policy", response_model=ProjectCapacityPolicy)
+async def get_project_capacity_policy(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectCapacityPolicy:
+    concurrency, queued = await ProjectService(session).get_capacity_policy(
+        actor=current_user, project_id=project_id
+    )
+    return ProjectCapacityPolicy(
+        execution_concurrency_limit=concurrency,
+        queued_run_limit=queued,
+    )
+
+
+@router.put("/{project_id}/capacity-policy", response_model=ProjectCapacityPolicy)
+async def update_project_capacity_policy(
+    project_id: UUID,
+    payload: ProjectCapacityPolicy,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectCapacityPolicy:
+    concurrency, queued = await ProjectService(session).update_capacity_policy(
+        actor=current_user,
+        project_id=project_id,
+        execution_concurrency_limit=payload.execution_concurrency_limit,
+        queued_run_limit=payload.queued_run_limit,
+    )
+    return ProjectCapacityPolicy(
+        execution_concurrency_limit=concurrency,
+        queued_run_limit=queued,
+    )
 
 
 @router.get("/{project_id}/audit-logs", response_model=Page[AuditLogResponse])

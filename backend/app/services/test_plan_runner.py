@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
+from app.core.errors import AppError
 from app.models.access import User
 from app.models.tasking import TestPlanRunItem
 from app.repositories.tasking import TaskingRepository
@@ -54,8 +55,17 @@ class TestPlanRunCoordinator:
             return await tasks.list_run_items(run.id)
 
     async def _execute_item(self, run_id: UUID, item_id: UUID) -> None:
+        capacity_deadline = asyncio.get_running_loop().time() + 300
         for _attempt in range(4):
-            prepared = await self._prepare_attempt(run_id, item_id)
+            while True:
+                try:
+                    prepared = await self._prepare_attempt(run_id, item_id)
+                    break
+                except _CapacityUnavailable:
+                    if asyncio.get_running_loop().time() >= capacity_deadline:
+                        await self._fail_item_capacity(item_id)
+                        return
+                    await asyncio.sleep(0.25)
             if prepared is None:
                 return
             execution_id, plan = prepared
@@ -76,6 +86,8 @@ class TestPlanRunCoordinator:
                     item.status = "cancelled"
                     await session.commit()
                 return None
+            if item.status != "queued":
+                return None
             if item.attempts > item.max_retries:
                 return None
             actor = await session.get(User, run.requested_by_id)
@@ -84,9 +96,6 @@ class TestPlanRunCoordinator:
                 item.error_message = "触发用户不存在或已停用"
                 await session.commit()
                 return None
-            item.attempts += 1
-            item.status = "running"
-            await session.commit()
             try:
                 execution, plan = await WorkflowService(session).prepare_execution(
                     actor=actor,
@@ -97,6 +106,14 @@ class TestPlanRunCoordinator:
                     runtime_variables=item.runtime_variables,
                     runtime_headers=item.runtime_headers,
                 )
+            except AppError as error:
+                if error.code == "PROJECT_CONCURRENCY_EXCEEDED":
+                    await session.rollback()
+                    raise _CapacityUnavailable from error
+                item.status = "failed"
+                item.error_message = error.message
+                await session.commit()
+                return None
             except Exception as error:
                 logger.exception(
                     "Unable to prepare test plan item",
@@ -106,6 +123,8 @@ class TestPlanRunCoordinator:
                 item.error_message = str(error)
                 await session.commit()
                 return None
+            item.attempts += 1
+            item.status = "running"
             item.workflow_execution_id = execution.id
             await session.commit()
             return execution.id, plan
@@ -151,7 +170,18 @@ class TestPlanRunCoordinator:
             else:
                 run.status = "passed"
             run.completed_at = datetime.now(UTC)
+            from app.services.quality import QualityService
+
+            await QualityService(session).finalize_run(run=run, items=items)
             await session.commit()
+
+    async def _fail_item_capacity(self, item_id: UUID) -> None:
+        async with self._session_maker() as session:
+            item = await session.get(TestPlanRunItem, item_id)
+            if item is not None and item.status == "queued":
+                item.status = "failed"
+                item.error_message = "等待项目并发配额超时"
+                await session.commit()
 
     async def _fail_run(self, run_id: UUID, message: str) -> None:
         async with self._session_maker() as session:
@@ -168,3 +198,7 @@ class TestPlanRunCoordinator:
             run.error_message = message[:2000]
             run.completed_at = datetime.now(UTC)
             await session.commit()
+
+
+class _CapacityUnavailable(RuntimeError):
+    pass

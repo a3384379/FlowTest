@@ -26,8 +26,8 @@ class WorkflowCapacityConfig:
     @classmethod
     def from_environment(cls) -> WorkflowCapacityConfig:
         config = cls(
-            requests=int(os.getenv("FLOWTEST_CAPACITY_WORKFLOW_REQUESTS", "20")),
-            concurrency=int(os.getenv("FLOWTEST_CAPACITY_WORKFLOW_CONCURRENCY", "5")),
+            requests=int(os.getenv("FLOWTEST_CAPACITY_WORKFLOW_REQUESTS", "100")),
+            concurrency=int(os.getenv("FLOWTEST_CAPACITY_WORKFLOW_CONCURRENCY", "100")),
             p95_limit_seconds=float(os.getenv("FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS", "10")),
             completion_timeout_seconds=float(
                 os.getenv("FLOWTEST_CAPACITY_WORKFLOW_TIMEOUT_SECONDS", "120")
@@ -59,6 +59,7 @@ class CapacityFixture:
     project_id: str
     environment_id: str
     workflow_id: str
+    service_tokens: tuple[str, ...]
 
 
 async def run_capacity(
@@ -75,16 +76,22 @@ async def run_capacity(
     async with httpx.AsyncClient(
         base_url=api_url,
         headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+        # Let the measured P95 gate decide whether a slow submission is acceptable.
+        # A shorter transport timeout turns host contention into an unclassified crash.
+        timeout=httpx.Timeout(config.completion_timeout_seconds, connect=5.0),
     ) as client:
 
         async def execute(index: int) -> bool:
             async with semaphore:
                 started_at = perf_counter()
+                service_token = fixture.service_tokens[index % len(fixture.service_tokens)]
                 response = await client.post(
-                    f"/projects/{fixture.project_id}/workflows/{fixture.workflow_id}/executions",
+                    f"/ci/projects/{fixture.project_id}/workflows/{fixture.workflow_id}/executions",
                     json={"environment_id": fixture.environment_id},
-                    headers={"Idempotency-Key": f"capacity-{run_nonce}-{index}"},
+                    headers={
+                        "Authorization": f"Bearer {service_token}",
+                        "Idempotency-Key": f"capacity-{run_nonce}-{index}",
+                    },
                 )
                 response.raise_for_status()
                 execution_id = str(cast(dict[str, Any], response.json())["id"])
@@ -141,7 +148,13 @@ def _percentile_95(values: list[float]) -> float:
     return ordered[index]
 
 
-def _prepare_fixture(client: APIClient, smoke: SmokeConfig, token: str) -> CapacityFixture:
+def _prepare_fixture(
+    client: APIClient,
+    smoke: SmokeConfig,
+    token: str,
+    *,
+    request_count: int,
+) -> CapacityFixture:
     project = client.json(
         "POST",
         "/projects",
@@ -152,6 +165,12 @@ def _prepare_fixture(client: APIClient, smoke: SmokeConfig, token: str) -> Capac
         token=token,
     )
     project_id = str(project["id"])
+    client.json(
+        "PUT",
+        f"/projects/{project_id}/capacity-policy",
+        {"execution_concurrency_limit": 100, "queued_run_limit": 1000},
+        token=token,
+    )
     _allow_compose_target(client, token, project_id, smoke.target_url)
     environment = client.json(
         "POST",
@@ -173,10 +192,23 @@ def _prepare_fixture(client: APIClient, smoke: SmokeConfig, token: str) -> Capac
         f"/projects/{project_id}/workflows/{workflow_id}/versions",
         token=token,
     )
+    producer_count = max(4, (request_count + 24) // 25)
+    service_tokens = tuple(
+        str(
+            client.json(
+                "POST",
+                f"/projects/{project_id}/service-tokens",
+                {"name": f"Workflow Producer {index}", "scopes": ["execute:workflow"]},
+                token=token,
+            )["token"]
+        )
+        for index in range(producer_count)
+    )
     return CapacityFixture(
         project_id=project_id,
         environment_id=str(environment["id"]),
         workflow_id=workflow_id,
+        service_tokens=service_tokens,
     )
 
 
@@ -232,7 +264,7 @@ def main() -> None:
         active_password = f"FlowTest-Capacity-{secrets.token_urlsafe(18)}"
         _change_password(client, token, smoke.password, active_password)
     try:
-        fixture = _prepare_fixture(client, smoke, token)
+        fixture = _prepare_fixture(client, smoke, token, request_count=capacity.requests)
         result = asyncio.run(
             run_capacity(
                 api_url=smoke.api_url,

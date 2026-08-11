@@ -69,6 +69,9 @@ async def create_test_plan(
         description=payload.description,
         enabled=payload.enabled,
         schedule_interval_seconds=payload.schedule_interval_seconds,
+        schedule_cron=payload.schedule_cron,
+        schedule_timezone=payload.schedule_timezone,
+        queue_priority=payload.queue_priority,
         items=payload.items,
     )
     response = _plan_response(created.detail).model_dump()
@@ -104,7 +107,12 @@ async def update_test_plan(
         description=payload.description,
         enabled=payload.enabled,
         schedule_interval_seconds=payload.schedule_interval_seconds,
-        change_schedule="schedule_interval_seconds" in payload.model_fields_set,
+        schedule_cron=payload.schedule_cron,
+        schedule_timezone=payload.schedule_timezone,
+        queue_priority=payload.queue_priority,
+        change_schedule=bool(
+            {"schedule_interval_seconds", "schedule_cron"} & payload.model_fields_set
+        ),
     )
     return _plan_response(detail)
 
@@ -129,7 +137,7 @@ async def run_test_plan(
             plan_id=plan_id,
             trigger=TestPlanTrigger.MANUAL,
         )
-        queue.start_test_plan(run.id)
+        queue.start_test_plan(run.id, queue_name=run.queue_name, priority=run.queue_priority)
         return TestPlanRunResponse.model_validate(run)
 
     response = await IdempotencyService(session).run(
@@ -278,7 +286,7 @@ async def ci_run_test_plan(
             requested_by_id=identity.actor.id,
             trigger=TestPlanTrigger.CI,
         )
-        queue.start_test_plan(run.id)
+        queue.start_test_plan(run.id, queue_name=run.queue_name, priority=run.queue_priority)
         return TestPlanRunResponse.model_validate(run)
 
     response = await IdempotencyService(session).run(
@@ -362,7 +370,7 @@ async def webhook_run_test_plan(
         requested_by_id=plan.created_by_id,
         trigger=TestPlanTrigger.WEBHOOK,
     )
-    queue.start_test_plan(run.id)
+    queue.start_test_plan(run.id, queue_name=run.queue_name, priority=run.queue_priority)
     return TestPlanRunResponse.model_validate(run)
 
 
@@ -375,6 +383,9 @@ def _plan_response(detail: TestPlanDetail) -> TestPlanResponse:
         description=plan.description,
         enabled=plan.enabled,
         schedule_interval_seconds=plan.schedule_interval_seconds,
+        schedule_cron=plan.schedule_cron,
+        schedule_timezone=plan.schedule_timezone,
+        queue_priority=plan.queue_priority,
         next_run_at=plan.next_run_at,
         created_by_id=plan.created_by_id,
         created_at=plan.created_at,

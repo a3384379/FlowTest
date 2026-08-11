@@ -10,6 +10,7 @@ import httpx
 import jmespath
 from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue, ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
@@ -45,7 +46,7 @@ from app.engine.scheduler import (
     WorkflowRunResult,
     WorkflowScheduler,
 )
-from app.models.access import Folder, User
+from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
 from app.models.workflows import (
     Workflow,
@@ -417,6 +418,7 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        await self._ensure_execution_capacity(project_id)
         if prepared.snapshot["dataset"] is None:
             execution = await self._start_execution(
                 actor=actor,
@@ -448,6 +450,30 @@ class WorkflowService:
             )
         await self._persist_execution_plan(execution, plan)
         return execution, plan
+
+    async def _ensure_execution_capacity(self, project_id: UUID) -> None:
+        result = await self._session.execute(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )
+        project = result.scalar_one_or_none()
+        if project is None:
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        active = await self._session.scalar(
+            select(func.count())
+            .select_from(WorkflowExecution)
+            .where(
+                WorkflowExecution.project_id == project_id,
+                WorkflowExecution.parent_execution_id.is_(None),
+                WorkflowExecution.status == "running",
+            )
+        )
+        if int(active or 0) >= project.execution_concurrency_limit:
+            raise AppError(
+                code="PROJECT_CONCURRENCY_EXCEEDED",
+                message="项目并发执行配额已用尽",
+                status_code=429,
+                details={"limit": project.execution_concurrency_limit},
+            )
 
     async def load_execution_plan(self, execution_id: UUID) -> WorkflowExecutionPlan:
         from app.services.workflow_plan_codec import decode_execution_plan
