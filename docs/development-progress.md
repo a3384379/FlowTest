@@ -1,13 +1,13 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：S20 已合并；S21 功能与本地自动化门槛完成，正在发布候选收口。`v2.0.0` 仍受真实 14 天 RC 观察门槛约束。
+状态：S20、S21 已合并；`v2.0.0-rc.1` 源码候选已固定。`v2.0.0` 仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@c1e14f48688a6b7ebfb2e762bc4f72ecd104b3fd`，S20 PR #22 已全绿并 squash 合并。
-- 当前分支：`agent/s21-ai-release`，尚未提交或创建 PR。
-- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`；不得提前创建 `v2.0.0`。
+- 当前基线：`main@06699d54bceee091a2efac838e426cf7ef5c9c9e`，S21 PR #23 已 5/5 全绿并 squash 合并。
+- 当前分支：`agent/s21-release-record`，仅记录发布候选证据，不包含产品代码变化。
+- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`；不得提前创建 `v2.0.0`。
 - `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，本轮保持原样；仅在 `v2.0.0` 发布后从 S22 独立纳入 Git。
 
 ## 已完成：S20 企业与可观测性
@@ -48,17 +48,18 @@
 - 迁移：真实 PostgreSQL 完成两轮 `0017 → 0018 → 0017 → 0018`，`alembic check` 无漂移；曾发现并修复时间戳默认值与唯一约束的模型/迁移不一致。
 - Compose：API、Web、PostgreSQL、Redis、MinIO、General/Data/AI Worker 与 Beat 健康；S21 真实队列/脱敏/人工接受闭环以及 S11/S18/S19 回归通过。
 - Playwright：S21 中文 AI 页面真实浏览器链路 2/2 通过（包含登录 Setup）；测试曾发现并修复完成态 Suggestion 不自动刷新问题。
-- 依赖审计：Python 与前端生产依赖均无已知漏洞；镜像扫描仍以 S21 PR Security CI 为准。
+- 依赖与镜像安全：Python、前端生产依赖和 API/Web/Mock 发布镜像扫描全部通过。
+- GitHub CI：PR #23 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 共 5 项全部通过；Compose 同一提交完成 S1-S21 回归、100 并发 Workflow、1000 持久队列任务和隔离备份恢复。
 
 ## 尚未完成的发布门槛
 
-1. 隔离恢复、镜像扫描和 100/1000 容量门槛由 S21 PR Compose/Security CI 在同一提交上确认。
-2. S21 Draft PR 全量 GitHub CI、风险与回滚说明、Ready/squash 合并。
-3. 在同一 RC 提交上完成连续 14 个自然日观察和试点签署；该真实时间门槛不能由短时自动化代替。
+1. 将 `v2.0.0-rc.1` 部署到真实试点环境，记录 API/Web/Worker 镜像摘要、Compose 配置、宿主机规格、试点项目和负责人。
+2. 在同一 RC 候选上完成连续 14 个自然日观察和试点签署；该真实时间门槛不能由短时自动化代替。
+3. RC 期间如有代码修复，必须创建新的 RC 候选并重新开始连续观察，不沿用旧候选天数。
 
 ## 下一步
 
-1. 完成本地发布候选验证并创建 S21 Draft PR。
-2. CI 全绿后合并并创建 `v2.0.0-rc.1`，记录部署提交、镜像摘要和 14 天观察证据。
+1. 部署 `v2.0.0-rc.1`，在试点记录中补齐镜像摘要和环境元数据后开始 Day 1。
+2. 连续记录 14 个自然日的可用性、执行量、通过率、P95、队列峰值、Worker 重启、事故和用户反馈。
 3. 只有 RC 签署、恢复演练、扫描和容量证据全部通过后创建 `v2.0.0`。
 4. `v2.0.0` 发布后创建 `agent/s22-capability-sdk`，再开始 V3 S22；S22 前不提交 V3 原型资产。
