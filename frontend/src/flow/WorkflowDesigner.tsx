@@ -50,6 +50,7 @@ import {
   autoLayoutWorkflow,
   connectNodes,
   pasteNode,
+  type PaletteNodeType,
 } from './workflow-graph'
 
 type DesignerProps = {
@@ -261,7 +262,7 @@ function DesignerToolbar({
   onApiSelection: (value: string) => void
   onSubflowSelection: (value: string) => void
   onAddApi: () => void
-  onAddNode: (type: Exclude<WorkflowNode['type'], 'start' | 'api'>) => void
+  onAddNode: (type: PaletteNodeType) => void
   canCopy: boolean
   canPaste: boolean
   canUndo: boolean
@@ -467,6 +468,7 @@ function nodeTypeLabel(type: WorkflowNode['type']): string {
   const labels: Partial<Record<WorkflowNode['type'], string>> = {
     start: '开始',
     api: '接口',
+    capability: 'Capability',
     extract: '提取',
     assert: '断言',
     condition: '条件',

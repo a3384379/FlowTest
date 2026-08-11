@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "2.0.0-rc.1"
+    app_version: str = "3.0.0-dev.22"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     feature_quality_center_enabled: bool = False
     feature_oidc_enabled: bool = False
     feature_ai_enabled: bool = False
+    feature_capability_sdk_enabled: bool = False
+    feature_plugin_registry_enabled: bool = False
+    feature_runner_fabric_enabled: bool = False
     ai_base_url: str = ""
     ai_model: str = ""
     ai_api_key: str = ""

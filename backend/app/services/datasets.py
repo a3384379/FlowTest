@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.datasets import DatasetParseError, ParsedDataset, parse_dataset
+from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
     DatasetNodeConfig,
     NodeType,
@@ -46,12 +47,16 @@ class WorkflowDatasetService:
         definition: WorkflowDefinition,
     ) -> PreparedDataset | None:
         dataset_node = next(
-            (node for node in definition.nodes if node.type is NodeType.DATASET),
+            (
+                node
+                for node in definition.nodes
+                if legacy_node_adapter.as_legacy_node(node).type is NodeType.DATASET
+            ),
             None,
         )
         if dataset_node is None:
             return None
-        config = parse_node_config(dataset_node)
+        config = parse_node_config(legacy_node_adapter.as_legacy_node(dataset_node))
         if not isinstance(config, DatasetNodeConfig):
             raise AppError(
                 code="INVALID_NODE_CONFIG",

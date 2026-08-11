@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
 from app.engine.contracts import WorkflowNode
+from app.engine.results import NodeResult
 from app.engine.scheduler import ExecutionContext, NodeExecutionError, NodeExecutor
 
 INSTRUMENTATION_NAME = "flowtest"
@@ -74,9 +75,11 @@ class TracingNodeExecutor:
         self._executor = executor
         self._tracer = trace.get_tracer(INSTRUMENTATION_NAME)
 
-    async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+    async def execute(
+        self, node: WorkflowNode, context: ExecutionContext
+    ) -> NodeResult | JsonValue:
         execution_error: NodeExecutionError | None = None
-        output: JsonValue = None
+        output: NodeResult | JsonValue = None
         with self._tracer.start_as_current_span(
             "flowtest.workflow.node",
             attributes={

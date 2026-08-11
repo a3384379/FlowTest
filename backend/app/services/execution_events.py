@@ -1,47 +1,16 @@
 import json
 from collections.abc import AsyncIterator, Awaitable
-from datetime import datetime
-from enum import StrEnum
-from typing import Protocol, cast
+from typing import cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
-from app.engine.contracts import NodeStatus, WorkflowRunStatus
+from app.engine.events import ExecutionEvent, ExecutionEventType
+from app.engine.events import ExecutionEventBus as ExecutionEventBus
+
+__all__ = ["ExecutionEvent", "ExecutionEventBus", "ExecutionEventType", "RedisExecutionEventBus"]
 
 EVENT_HISTORY_LIMIT = 500
-
-
-class ExecutionEventType(StrEnum):
-    EXECUTION_STARTED = "execution.started"
-    NODE_STATUS = "node.status"
-    EXECUTION_COMPLETED = "execution.completed"
-
-
-class ExecutionEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    sequence: int = 0
-    type: ExecutionEventType
-    execution_id: UUID
-    emitted_at: datetime
-    node_id: str | None = None
-    node_name: str | None = None
-    node_type: str | None = None
-    node_status: NodeStatus | None = None
-    attempts: int = 0
-    error_code: str | None = None
-    error_message: str | None = None
-    execution_status: WorkflowRunStatus | None = None
-
-
-class ExecutionEventBus(Protocol):
-    async def publish(self, event: ExecutionEvent) -> ExecutionEvent: ...
-
-    def subscribe(
-        self, execution_id: UUID, *, after_sequence: int = 0
-    ) -> AsyncIterator[ExecutionEvent]: ...
 
 
 class RedisExecutionEventBus:

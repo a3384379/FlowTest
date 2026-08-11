@@ -131,14 +131,21 @@ class WorkflowRunCoordinator:
             async def publish_status(update: NodeStatusUpdate) -> None:
                 await self._publish(
                     ExecutionEvent(
-                        type=ExecutionEventType.NODE_STATUS,
+                        type=(
+                            ExecutionEventType.NODE_RESULT
+                            if update.result is not None
+                            else ExecutionEventType.NODE_STATUS
+                        ),
                         execution_id=plan.execution_id,
                         emitted_at=update.occurred_at,
                         node_id=update.node_id,
                         node_name=update.name,
                         node_type=update.node_type.value,
                         node_status=update.status,
+                        result=update.result,
+                        attempt=update.attempts,
                         attempts=update.attempts,
+                        fencing_token=0,
                         error_code=update.error_code,
                         error_message=update.error_message,
                     )

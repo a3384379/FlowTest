@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}html,body{margin:0;padding:0;width:2560px;height:1440px;overflow:hidden;background:#f5f7fb;color:#172033;font-family:'Noto Sans CJK SC','Microsoft YaHei','PingFang SC',Arial,sans-serif;}
+body{font-size:22px} .page{width:2560px;height:1440px;overflow:hidden;background:#f5f7fb}
+:root{--primary:#5b5cf0;--primary2:#6f6ff5;--nav:#101936;--blue:#3478f6;--cyan:#14b8a6;--green:#22a06b;--red:#e5484d;--orange:#f59e0b;--purple:#7c3aed;--border:#dce2ec;--muted:#667085;--bg:#f5f7fb;--card:#fff;}
+.card{background:white;border:1px solid var(--border);border-radius:18px;box-shadow:0 2px 10px rgba(32,48,80,.04)}
+.h1{font-size:44px;font-weight:800;letter-spacing:-.5px} .h2{font-size:30px;font-weight:800} .h3{font-size:24px;font-weight:700}
+.muted{color:var(--muted)} .small{font-size:18px} .xs{font-size:16px} .mono{font-family:'Noto Sans Mono CJK SC','SFMono-Regular',Consolas,monospace}
+.badge{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;font-size:16px;font-weight:700;background:#eef2ff;color:#4f46e5}
+.badge.green{background:#e9f8f1;color:#16855c} .badge.red{background:#fff0f0;color:#d92d20} .badge.orange{background:#fff5e6;color:#b76e00}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:46px;padding:0 20px;border-radius:10px;border:1px solid var(--border);background:white;font-size:19px;font-weight:650;color:#344054}
+.btn.primary{background:var(--primary);color:white;border-color:var(--primary)}
+.table{width:100%;border-collapse:collapse;font-size:18px} .table th{text-align:left;color:#667085;font-weight:650;background:#f8fafc;border-bottom:1px solid var(--border);padding:15px 16px} .table td{border-bottom:1px solid #edf0f5;padding:15px 16px}
+.kpi{padding:22px 24px} .kpi .num{font-size:36px;font-weight:800;margin-top:10px} .kpi .label{font-size:18px;color:#667085}
+.grid{display:grid;gap:18px}
+.divider{height:1px;background:var(--border)}
+
+.plan-page{padding:46px 58px;background:linear-gradient(180deg,#fbfcff,#f4f7fb);height:1440px}.plan-head{display:flex;align-items:center;gap:18px;margin-bottom:24px}.plan-logo{width:54px;height:54px;border-radius:16px;background:linear-gradient(135deg,#7a7cff,#5557ef);display:grid;place-items:center;color:#fff;font-weight:900;font-size:30px}.plan-title{font-size:46px;font-weight:850}.plan-sub{font-size:22px;color:#667085;margin-top:4px}.section-title{font-size:30px;font-weight:850;color:#22315c;margin:18px 0 14px}.plan-grid{display:grid;gap:18px}.plan-card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px 24px}.plan-card h3{font-size:24px;margin:0 0 12px}.plan-card ul{margin:0;padding-left:24px}.plan-card li{font-size:20px;line-height:1.62;margin:4px 0}.callout{border-left:6px solid #5b5cf0;background:#f0f1ff;border-radius:12px;padding:18px 22px}.decision{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border-bottom:1px solid #edf0f5}.decision:last-child{border-bottom:0}.num{flex:0 0 34px;height:34px;border-radius:10px;background:#eef0ff;color:#4f46e5;font-weight:800;display:grid;place-items:center;font-size:17px}.decision b{font-size:20px}.decision .desc{font-size:18px;color:#667085;margin-top:5px;line-height:1.45}.iter{background:white;border:1px solid #dfe5ef;border-radius:16px;overflow:hidden}.iter-head{display:flex;align-items:center;justify-content:space-between;background:#f6f8ff;padding:18px 20px;border-bottom:1px solid #dfe5ef}.iter-code{font-size:24px;font-weight:850;color:#4f46e5}.iter-title{font-size:24px;font-weight:850}.iter-body{padding:18px 20px}.iter-body ul{margin:0;padding-left:22px}.iter-body li{font-size:19px;line-height:1.55;margin:4px 0}.exit{margin-top:12px;padding:12px 14px;border-radius:10px;background:#f7f9fc;font-size:17px;color:#475467}.arch-layer{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:16px;padding:16px 18px;border:1px solid #dfe5ef;border-radius:14px;background:white}.arch-label{font-size:22px;font-weight:850;color:#344054}.arch-items{display:flex;gap:12px;flex-wrap:wrap}.pill{padding:10px 16px;border:1px solid #dfe5ef;background:#f8fafc;border-radius:10px;font-size:18px}.timeline{display:flex;gap:0;align-items:center;margin-top:18px}.phase{flex:1;position:relative;text-align:center}.phase:before{content:'';position:absolute;top:24px;left:0;right:0;height:5px;background:#dfe4f3}.phase:first-child:before{left:50%}.phase:last-child:before{right:50%}.dot{position:relative;margin:0 auto 10px;width:48px;height:48px;border-radius:50%;background:#5b5cf0;color:white;display:grid;place-items:center;font-weight:800;z-index:2}.phase b{font-size:18px}.phase span{display:block;font-size:15px;color:#667085;margin-top:5px}
+</style></head><body><div class="page plan-page"><div class="plan-head"><div class="plan-logo">F</div><div><div class="plan-title">FlowTest V3.0 完整开发计划（1/5）</div><div class="plan-sub">总体目标、定位升级与固定技术决策</div></div></div>
+<div class="plan-grid" style="grid-template-columns:1.1fr .9fr;align-items:start">
+  <div>
+    <div class="section-title">01　V3.0 总体目标</div>
+    <div class="plan-card"><div style="font-size:29px;font-weight:850;line-height:1.5;color:#25355f">从“接口自动化测试平台”升级为 <span style="color:#5b5cf0">API Quality Operating System</span></div><p style="font-size:20px;line-height:1.7;color:#475467">V3.0 不再以“增加更多测试节点”为中心，而是围绕软件变更构建统一质量控制闭环：识别变化、分析影响、选择测试、执行多协议与性能验证、聚合质量证据，并给出可解释的发布决策。</p></div>
+    <div class="section-title">02　V2.0 → V3.0 能力升级</div>
+    <div class="plan-grid" style="grid-template-columns:repeat(2,1fr)">
+      <div class="plan-card"><h3>多协议测试</h3><ul><li>REST / GraphQL / gRPC</li><li>Kafka / WebSocket</li><li>统一数据绑定与断言</li></ul></div>
+      <div class="plan-card"><h3>质量控制</h3><ul><li>变更影响分析</li><li>智能测试选择</li><li>发布质量门禁</li></ul></div>
+      <div class="plan-card"><h3>工程能力</h3><ul><li>性能测试实验室</li><li>分布式执行面</li><li>临时测试环境</li></ul></div>
+      <div class="plan-card"><h3>质量智能</h3><ul><li>失败聚类与根因</li><li>覆盖率矩阵</li><li>AI 测试资产维护</li></ul></div>
+    </div>
+  </div>
+  <div>
+    <div class="section-title">03　固定技术决策</div>
+    <div class="plan-card" style="padding:8px 18px">
+      <div class="decision"><div class="num">1</div><div><b>技术栈继续演进</b><div class="desc">Python 3.13、FastAPI、SQLAlchemy Async、Celery、PostgreSQL 17、Redis 8、MinIO。</div></div></div><div class="decision"><div class="num">2</div><div><b>前端渐进式升级</b><div class="desc">保留 React、Ant Design、React Flow；不进行全量重写。</div></div></div><div class="decision"><div class="num">3</div><div><b>兼容 V2 数据</b><div class="desc">/api/v1、CI Token、Workflow Snapshot、历史报告继续兼容。</div></div></div><div class="decision"><div class="num">4</div><div><b>统一 Runner 抽象</b><div class="desc">协议、性能、环境等能力统一通过 Capability / Runner 接入。</div></div></div><div class="decision"><div class="num">5</div><div><b>性能不自研内核</b><div class="desc">声明式场景编译为 k6 Runner，不开放任意 JavaScript。</div></div></div><div class="decision"><div class="num">6</div><div><b>仍禁止用户脚本</b><div class="desc">普通用户不执行任意 Python / JavaScript；管理员插件受控安装。</div></div></div><div class="decision"><div class="num">7</div><div><b>AI 保持人工审核</b><div class="desc">AI 只生成 Draft Change Set，不直接发布、不自动生产执行。</div></div></div><div class="decision"><div class="num">8</div><div><b>部署边界明确</b><div class="desc">Docker Compose 继续作为标准部署；K8s 仅作为可选 Worker 执行面。</div></div></div>
+    </div>
+  </div>
+</div>
+<div class="callout" style="margin-top:22px"><b style="font-size:22px">V3.0 核心判断：</b><span style="font-size:20px"> V2 管理“测试资产”，V3 管理“软件变更带来的质量风险”。</span></div>
+</div></body></html>

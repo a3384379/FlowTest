@@ -16,6 +16,7 @@ from app.domain.api_assets import BodyKind
 from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
+from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
     FieldMapping,
     ForEachNodeConfig,
@@ -102,6 +103,7 @@ class WorkflowNodeExecutor:
             NodeType.FOR_EACH,
             NodeType.SQL,
             NodeType.REDIS,
+            NodeType.CAPABILITY,
         }
         self._handlers = NodeHandlerRegistry(
             [
@@ -110,6 +112,7 @@ class WorkflowNodeExecutor:
                 NodeHandlerRegistration(NodeType.FOR_EACH, self._execute_for_each),
                 NodeHandlerRegistration(NodeType.SQL, self._execute_sql),
                 NodeHandlerRegistration(NodeType.REDIS, self._execute_redis),
+                NodeHandlerRegistration(NodeType.CAPABILITY, self._execute_capability),
                 *[
                     NodeHandlerRegistration(node_type, execute_control_node)
                     for node_type in control_types
@@ -119,6 +122,20 @@ class WorkflowNodeExecutor:
 
     async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         return await self._handlers.execute(node, context)
+
+    async def _execute_capability(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+    ) -> JsonValue:
+        try:
+            legacy_node = legacy_node_adapter.as_legacy_node(node)
+        except ValueError as error:
+            raise NodeExecutionError(
+                code="CAPABILITY_RUNTIME_UNAVAILABLE",
+                message="当前 Runner 不支持该能力版本",
+            ) from error
+        return await self._handlers.execute(legacy_node, context)
 
     async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         prepared = self._requests[node.id]

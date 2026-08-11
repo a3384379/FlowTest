@@ -16,6 +16,7 @@ from app.models.ai import AIJob, AISuggestion
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
+from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
 from app.models.contracts import ContractRun, GeneratedContractCase
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
 from app.models.executions import APICallExecution, AssertionResult
@@ -43,6 +44,7 @@ __all__ = [
     "AssertionResult",
     "AuditLog",
     "Base",
+    "Capability",
     "ContractRun",
     "Credential",
     "Environment",
@@ -57,12 +59,15 @@ __all__ = [
     "NotificationDelivery",
     "NotificationWebhook",
     "OIDCLoginTransaction",
+    "Plugin",
     "Project",
     "ProjectMember",
     "ProjectTeamGrant",
     "QualityGate",
     "QualityGateEvaluation",
     "RefreshSession",
+    "Runner",
+    "RunnerPool",
     "Secret",
     "ServiceToken",
     "Team",

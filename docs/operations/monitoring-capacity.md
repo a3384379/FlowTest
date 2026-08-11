@@ -82,5 +82,19 @@ HTTP 节点和终态查询；它不代表 S19 的 8C/16G、100/1000 最终容量
 `FLOWTEST_S19_API_CONCURRENCY` 在 1～50 范围内调整。该参数只控制 API 请求速率，不降低
 1000 个持久排队任务的验收目标。
 
+## V3 S22 Capability 兼容容量基线
+
+2026-08-12 在 ARM64 Docker Desktop 29.6.2 上执行，宿主机为 10 核/16 GiB，Docker VM 可用
+10 核/约 8 GiB。测试使用相同的真实 HTTP Workflow、100 个持久执行、请求侧并发 100；每轮均验证
+Execution 唯一终态，测试结束后恢复默认单 Worker：
+
+| General Worker 数 | 失败 | 总耗时 | 端到端 P95 | 吞吐 |
+|---:|---:|---:|---:|---:|
+| 1 | 0 | 3.644 秒 | 3.442 秒 | 27.44 execution/s |
+| 4 | 0 | 3.178 秒 | 3.100 秒 | 31.47 execution/s |
+
+该结果验证 S22 Legacy Adapter、Capability Snapshot 和统一 NodeResult 未破坏单机吞吐，并形成
+四 Worker 的早期对照基线；它不是 S29 远程 Runner Lease/Fencing 的 500/5000 分布式容量承诺。
+
 容量结果必须同时记录 Control Plane 与 Worker 的 CPU/内存规格、Docker 版本和宿主架构。
 单机 Compose 门槛是兼容性承诺，不等价于 V3 四 Worker Plane 的分布式容量目标。

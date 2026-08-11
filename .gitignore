@@ -23,6 +23,8 @@ frontend/coverage/
 playwright-report/
 test-results/
 frontend/.playwright/
+.playwright-cli/
+output/
 
 # Editors and operating systems
 .DS_Store

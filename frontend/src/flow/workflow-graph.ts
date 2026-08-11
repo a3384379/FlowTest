@@ -2,6 +2,8 @@ import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
 import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
 
+export type PaletteNodeType = Exclude<WorkflowNode['type'], 'start' | 'api' | 'capability'>
+
 export function connectNodes(
   definition: WorkflowDefinition,
   edges: Edge[],
@@ -43,7 +45,7 @@ export function addApiNode(definition: WorkflowDefinition, apiId: string): Workf
 
 export function addTypedNode(
   definition: WorkflowDefinition,
-  type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
+  type: PaletteNodeType,
   artifactId: string | null,
   subflow: { workflowId: string; workflowVersion: number } | null = null,
   credentials: Credential[] = [],
@@ -90,7 +92,7 @@ function nextCondition(
   return undefined
 }
 
-function defaultNodeName(type: Exclude<WorkflowNode['type'], 'start' | 'api'>): string {
+function defaultNodeName(type: PaletteNodeType): string {
   return {
     extract: '提取变量',
     assert: '断言校验',
@@ -107,7 +109,7 @@ function defaultNodeName(type: Exclude<WorkflowNode['type'], 'start' | 'api'>): 
 
 function defaultNodeConfig(
   definition: WorkflowDefinition,
-  type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
+  type: PaletteNodeType,
   artifactId: string | null,
   subflow: { workflowId: string; workflowVersion: number } | null,
   credentials: Credential[],
@@ -125,7 +127,7 @@ function defaultNodeConfig(
 function leafNodeConfig(
   type: Exclude<
     WorkflowNode['type'],
-    'start' | 'api' | 'extract' | 'assert' | 'condition' | 'subflow' | 'for_each'
+    'start' | 'api' | 'capability' | 'extract' | 'assert' | 'condition' | 'subflow' | 'for_each'
   >,
   artifactId: string | null,
   credentials: Credential[],
@@ -151,15 +153,11 @@ function leafNodeConfig(
   return {}
 }
 
-function isSourceNodeType(
-  type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
-): type is 'extract' | 'assert' | 'condition' {
+function isSourceNodeType(type: PaletteNodeType): type is 'extract' | 'assert' | 'condition' {
   return type === 'extract' || type === 'assert' || type === 'condition'
 }
 
-function isNestedNodeType(
-  type: Exclude<WorkflowNode['type'], 'start' | 'api'>,
-): type is 'subflow' | 'for_each' {
+function isNestedNodeType(type: PaletteNodeType): type is 'subflow' | 'for_each' {
   return type === 'subflow' || type === 'for_each'
 }
 

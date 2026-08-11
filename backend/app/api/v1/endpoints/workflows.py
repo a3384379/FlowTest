@@ -334,6 +334,7 @@ def _debug_response(
                 status=record.status,
                 attempts=record.attempts,
                 output=record.output,
+                result=record.result.model_dump(mode="json"),
                 error_code=record.error_code,
                 error_message=record.error_message,
                 started_at=record.started_at,

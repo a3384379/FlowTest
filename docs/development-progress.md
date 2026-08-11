@@ -1,14 +1,41 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：S20、S21 已合并；`v2.0.0-rc.1` 源码候选已固定。`v2.0.0` 仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V2 功能基线已固定；按用户明确指令从该基线启动 V3 S22。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@06699d54bceee091a2efac838e426cf7ef5c9c9e`，S21 PR #23 已 5/5 全绿并 squash 合并。
-- 当前分支：`agent/s21-release-record`，仅记录发布候选证据，不包含产品代码变化。
+- 当前基线：`main@79d399a`，S21 PR #23 与发布候选记录 PR #24 均已合并。
+- 当前分支：`agent/s22-capability-sdk`，开发版本 `3.0.0-dev.22`。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`；不得提前创建 `v2.0.0`。
-- `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，本轮保持原样；仅在 `v2.0.0` 发布后从 S22 独立纳入 Git。
+- 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
+- `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 进行中：S22 Capability SDK V3
+
+1. 已建立不可变 `CapabilityManifest`、12 个 V2 内置 Manifest、Legacy Adapter、显式 Capability
+   节点契约和 Schema SHA-256；旧 Workflow 不修改存量数据。
+2. 调度器统一生成 `NodeResult`，节点执行记录保留兼容字段并新增脱敏结果包；纯引擎层
+   `ExecutionEvent` 增加单调序号、Attempt 与 Fencing Token 契约。
+3. 已定义 Runner Control Plane 类型接口，新增 Plugin、Capability、Runner Pool、Runner 增量模型与
+   `20260812_0019` 双向迁移；分布式 Lease 的 PostgreSQL 事实源保留至 S29。
+4. Plugin Manifest 校验固定 OCI Digest、签名身份、能力所有权、禁网声明和容器加固开关；安装入口
+   在 Cosign 与隔离 Runner 完成前保持关闭。
+5. 新增 `/api/v1/v3/features`、`capabilities`、`plugins`、`runner-pools` 和 Manifest 校验接口；
+   三个 Feature Flag 默认关闭，Compose 验收只开启 Capability SDK。
+6. 前端新增中文“能力与插件中心”深链接、真实能力清单、Plugin/Runner 管理员边界和右侧
+   Context Inspector；采用 `#5b5cf0` / `#101936` V3 Token。
+7. 当前本地证据：后端 214 passed、3 skipped、覆盖率 90.85%，Ruff/mypy 通过；前端 104 项通过，
+   Statements 85.01%、Branches 80.70%、Functions 82.84%、Lines 87.04%，格式/Lint/TypeScript/构建通过。
+8. `0018 → 0019 → 0018 → 0019` 已在隔离真实 PostgreSQL 完成，`alembic check` 无漂移；现有 V2
+   Compose 数据原地升级至 `0019`，API、Web、PostgreSQL、Redis、MinIO、General/Data/AI Worker 与 Beat 健康。
+9. S22 冒烟完成 Legacy Start/End 与显式 `flow.delay@2.0.0` 混合执行，验证 Capability 版本、Schema
+   哈希和 NodeResult 固定入 Snapshot；Playwright 登录、平台深链接、能力/插件/Runner 边界 2/2 通过。
+10. 单 Worker 与四 Worker 均完成 100 个真实 Workflow、请求侧并发 100、零失败容量基线；分别为
+    P95 3.442 秒/27.44 execution/s 与 P95 3.100 秒/31.47 execution/s，测试后恢复单 Worker。
+11. 全量回归曾发现 5 项失败均源于 `skipped` NodeResult 原因码被误判为非法错误；契约调整为
+    `passed` 禁止错误、`failed` 必须有错误、`skipped/cancelled` 可携带解释原因，5 项回归现全部通过。
+12. GitHub Draft PR 与 5 项远程 CI 尚待提交后验证；未通过前不开始 S23。
 
 ## 已完成：S20 企业与可观测性
 
@@ -59,7 +86,7 @@
 
 ## 下一步
 
-1. 部署 `v2.0.0-rc.1`，在试点记录中补齐镜像摘要和环境元数据后开始 Day 1。
-2. 连续记录 14 个自然日的可用性、执行量、通过率、P95、队列峰值、Worker 重启、事故和用户反馈。
-3. 只有 RC 签署、恢复演练、扫描和容量证据全部通过后创建 `v2.0.0`。
-4. `v2.0.0` 发布后创建 `agent/s22-capability-sdk`，再开始 V3 S22；S22 前不提交 V3 原型资产。
+1. 提交 `agent/s22-capability-sdk` 并创建 Draft PR，等待 Backend Test、Backend Integration、
+   Frontend Build、Security Source/Images 与 Compose Smoke 全绿；S22 退出门槛通过后再开始 S23。
+2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
+3. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建 `v2.0.0` 正式标签。

@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
+from app.engine.capabilities import (
+    builtin_capability_registry,
+    capability_snapshot,
+    legacy_node_adapter,
+)
 from app.engine.contracts import (
     ForEachNodeConfig,
     NodeType,
@@ -158,7 +163,7 @@ class WorkflowSnapshotBuilder:
     ) -> dict[str, PreparedSubflow]:
         prepared: dict[str, PreparedSubflow] = {}
         for node in definition.nodes:
-            config = parse_node_config(node)
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
                 continue
             if depth >= 5:
@@ -235,7 +240,7 @@ class WorkflowSnapshotBuilder:
     ) -> dict[str, PreparedDataNode]:
         prepared: dict[str, PreparedDataNode] = {}
         for node in definition.nodes:
-            config = parse_node_config(node)
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
                 continue
             material = await self._credentials.load_material(
@@ -259,9 +264,10 @@ class WorkflowSnapshotBuilder:
         requests: dict[str, PreparedWorkflowRequest] = {}
         api_snapshots: dict[str, JsonValue] = {}
         for node in definition.nodes:
-            if node.type is not NodeType.API:
+            legacy_node = legacy_node_adapter.as_legacy_node(node)
+            if legacy_node.type is not NodeType.API:
                 continue
-            config = parse_api_node_config(node)
+            config = parse_api_node_config(legacy_node)
             api_definition, api_version = await self._api_assets.get_detail(
                 actor=actor,
                 project_id=project_id,
@@ -387,6 +393,7 @@ def _snapshot(
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
+        "capabilities": _capability_snapshots(version.definition),
         "dataset": dataset,
         "runtime": cast(
             JsonValue,
@@ -414,6 +421,18 @@ def _nested_snapshot(
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
+        "capabilities": _capability_snapshots(version.definition),
+    }
+
+
+def _capability_snapshots(definition: dict[str, object]) -> dict[str, JsonValue]:
+    workflow = WorkflowDefinition.model_validate(definition)
+    return {
+        node.id: cast(
+            JsonValue,
+            capability_snapshot(node, registry=builtin_capability_registry),
+        )
+        for node in workflow.nodes
     }
 
 
