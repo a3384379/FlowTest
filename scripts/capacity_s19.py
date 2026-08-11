@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Verify 1000 durable Test Plan tasks survive a drained multi-worker queue."""
 
 from __future__ import annotations
@@ -40,7 +39,12 @@ class QueueFixture:
 
 
 async def run_capacity(
-    *, api_url: str, fixture: QueueFixture, task_count: int, timeout_seconds: float
+    *,
+    api_url: str,
+    fixture: QueueFixture,
+    task_count: int,
+    timeout_seconds: float,
+    api_concurrency: int,
 ) -> QueueCapacityResult:
     _compose("stop", *WORKER_SERVICES)
     started_at = perf_counter()
@@ -50,13 +54,18 @@ async def run_capacity(
             fixture,
             task_count,
             timeout_seconds=timeout_seconds,
+            api_concurrency=api_concurrency,
         )
         if len(set(run_ids)) != task_count:
             raise RuntimeError("queued tasks did not receive unique run identifiers")
         queued = await _list_project_runs(api_url, fixture)
         staged = [item for item in queued if str(item["id"]) in set(run_ids)]
-        if len(staged) != task_count or {str(item["status"]) for item in staged} != {"queued"}:
-            raise RuntimeError("drained queue did not persist every task in queued state")
+        if len(staged) != task_count or {str(item["status"]) for item in staged} != {
+            "queued"
+        }:
+            raise RuntimeError(
+                "drained queue did not persist every task in queued state"
+            )
     finally:
         _compose("start", *WORKER_SERVICES)
     terminal = await _wait_for_terminal_runs(
@@ -65,7 +74,12 @@ async def run_capacity(
         expected_ids=set(run_ids),
         timeout_seconds=timeout_seconds,
     )
-    details = await _load_run_details(api_url, fixture, run_ids)
+    details = await _load_run_details(
+        api_url,
+        fixture,
+        run_ids,
+        api_concurrency=api_concurrency,
+    )
     execution_ids = [
         str(item["workflow_execution_id"])
         for detail in details
@@ -73,7 +87,9 @@ async def run_capacity(
         if item["workflow_execution_id"] is not None
     ]
     failures = sum(str(item["status"]) != "passed" for item in terminal)
-    duplicate_terminal_states = len(terminal) - len({str(item["id"]) for item in terminal})
+    duplicate_terminal_states = len(terminal) - len(
+        {str(item["id"]) for item in terminal}
+    )
     return QueueCapacityResult(
         queued_tasks=task_count,
         unique_run_ids=len(set(run_ids)),
@@ -91,10 +107,14 @@ async def _enqueue_runs(
     task_count: int,
     *,
     timeout_seconds: float,
+    api_concurrency: int,
 ) -> list[str]:
-    semaphore = asyncio.Semaphore(50)
+    semaphore = asyncio.Semaphore(api_concurrency)
     nonce = secrets.token_hex(8)
-    limits = httpx.Limits(max_connections=50, max_keepalive_connections=50)
+    limits = httpx.Limits(
+        max_connections=api_concurrency,
+        max_keepalive_connections=api_concurrency,
+    )
     async with httpx.AsyncClient(
         base_url=api_url,
         timeout=httpx.Timeout(timeout_seconds, connect=5.0),
@@ -114,7 +134,9 @@ async def _enqueue_runs(
                 response.raise_for_status()
                 return str(cast(dict[str, Any], response.json())["id"])
 
-        return list(await asyncio.gather(*(enqueue(index) for index in range(task_count))))
+        return list(
+            await asyncio.gather(*(enqueue(index) for index in range(task_count)))
+        )
 
 
 async def _wait_for_terminal_runs(
@@ -136,9 +158,13 @@ async def _wait_for_terminal_runs(
     raise TimeoutError("queued S19 tasks did not reach terminal states")
 
 
-async def _list_project_runs(api_url: str, fixture: QueueFixture) -> list[dict[str, Any]]:
+async def _list_project_runs(
+    api_url: str, fixture: QueueFixture
+) -> list[dict[str, Any]]:
     headers = {"Authorization": f"Bearer {fixture.access_token}"}
-    async with httpx.AsyncClient(base_url=api_url, headers=headers, timeout=30) as client:
+    async with httpx.AsyncClient(
+        base_url=api_url, headers=headers, timeout=30
+    ) as client:
         first = await client.get(
             f"/projects/{fixture.project_id}/test-plan-runs",
             params={"page": 1, "page_size": 100},
@@ -157,16 +183,31 @@ async def _list_project_runs(api_url: str, fixture: QueueFixture) -> list[dict[s
             response.raise_for_status()
             return list(cast(list[dict[str, Any]], response.json()["items"]))
 
-        remaining = await asyncio.gather(*(page(number) for number in range(2, pages + 1)))
+        remaining = await asyncio.gather(
+            *(page(number) for number in range(2, pages + 1))
+        )
         return items + [item for group in remaining for item in group]
 
 
 async def _load_run_details(
-    api_url: str, fixture: QueueFixture, run_ids: list[str]
+    api_url: str,
+    fixture: QueueFixture,
+    run_ids: list[str],
+    *,
+    api_concurrency: int,
 ) -> list[dict[str, Any]]:
-    semaphore = asyncio.Semaphore(50)
+    semaphore = asyncio.Semaphore(api_concurrency)
     headers = {"Authorization": f"Bearer {fixture.access_token}"}
-    async with httpx.AsyncClient(base_url=api_url, headers=headers, timeout=30) as client:
+    limits = httpx.Limits(
+        max_connections=api_concurrency,
+        max_keepalive_connections=api_concurrency,
+    )
+    async with httpx.AsyncClient(
+        base_url=api_url,
+        headers=headers,
+        timeout=30,
+        limits=limits,
+    ) as client:
 
         async def load(run_id: str) -> dict[str, Any]:
             async with semaphore:
@@ -189,7 +230,10 @@ def _prepare_fixture(
     project = client.json(
         "POST",
         "/projects",
-        {"name": f"S19 Queue {secrets.token_hex(5)}", "description": "1000 durable tasks"},
+        {
+            "name": f"S19 Queue {secrets.token_hex(5)}",
+            "description": "1000 durable tasks",
+        },
         token=token,
     )
     project_id = str(project["id"])
@@ -210,7 +254,9 @@ def _prepare_fixture(
     api_id = str(cast(dict[str, Any], api["definition"])["id"])
     workflow = _create_workflow(client, token, project_id, "Queue Workflow", api_id)
     workflow_id = str(workflow["id"])
-    client.json("POST", f"/projects/{project_id}/workflows/{workflow_id}/versions", token=token)
+    client.json(
+        "POST", f"/projects/{project_id}/workflows/{workflow_id}/versions", token=token
+    )
     plan = client.json(
         "POST",
         f"/projects/{project_id}/test-plans",
@@ -244,7 +290,9 @@ def _prepare_fixture(
 def _compose(action: str, *services: str) -> None:
     docker = shutil.which("docker")
     if docker is None:
-        raise RuntimeError("docker executable is required for the S19 queue capacity gate")
+        raise RuntimeError(
+            "docker executable is required for the S19 queue capacity gate"
+        )
     subprocess.run([docker, "compose", action, *services], check=True)
 
 
@@ -252,13 +300,20 @@ def main() -> None:
     config = SmokeConfig.from_environment()
     task_count = int(os.getenv("FLOWTEST_S19_QUEUE_TASKS", "1000"))
     timeout_seconds = float(os.getenv("FLOWTEST_S19_QUEUE_TIMEOUT_SECONDS", "900"))
+    api_concurrency = int(os.getenv("FLOWTEST_S19_API_CONCURRENCY", "10"))
     if not 1 <= task_count <= 1200:
         raise ValueError("S19 queue task count must be between 1 and 1200")
+    if not 1 <= api_concurrency <= 50:
+        raise ValueError("S19 API concurrency must be between 1 and 50")
     client = APIClient(config.api_url)
-    login = client.json("POST", "/auth/login", {"email": config.email, "password": config.password})
+    login = client.json(
+        "POST", "/auth/login", {"email": config.email, "password": config.password}
+    )
     token = str(login["access_token"])
     active_password = config.password
-    password_changed = bool(cast(dict[str, Any], login["user"])["requires_password_change"])
+    password_changed = bool(
+        cast(dict[str, Any], login["user"])["requires_password_change"]
+    )
     if password_changed:
         active_password = f"FlowTest-Capacity-{secrets.token_urlsafe(18)}"
         _change_password(client, token, config.password, active_password)
@@ -270,9 +325,14 @@ def main() -> None:
                 fixture=fixture,
                 task_count=task_count,
                 timeout_seconds=timeout_seconds,
+                api_concurrency=api_concurrency,
             )
         )
-        print(json.dumps({**asdict(result), "project_id": fixture.project_id}, sort_keys=True))
+        print(
+            json.dumps(
+                {**asdict(result), "project_id": fixture.project_id}, sort_keys=True
+            )
+        )
         if (
             result.failures
             or result.duplicate_terminal_states

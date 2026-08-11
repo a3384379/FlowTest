@@ -54,6 +54,9 @@ HTTP 节点和终态查询；它不代表 S19 的 8C/16G、100/1000 最终容量
 再恢复 Worker 并等待全部终态。验收要求：1000 个 Run ID 唯一、1000 个 Workflow Execution ID
 唯一、零失败、零重复终态。默认完成超时为 900 秒，可使用 `FLOWTEST_S19_QUEUE_TASKS` 和
 `FLOWTEST_S19_QUEUE_TIMEOUT_SECONDS` 在诊断环境缩小或调整，但 CI 发布门槛始终使用默认 1000。
+入队和详情读取默认使用 10 个并发 API 请求，避免压测客户端超过默认数据库连接池；可通过
+`FLOWTEST_S19_API_CONCURRENCY` 在 1～50 范围内调整。该参数只控制 API 请求速率，不降低
+1000 个持久排队任务的验收目标。
 
 容量结果必须同时记录 Control Plane 与 Worker 的 CPU/内存规格、Docker 版本和宿主架构。
 单机 Compose 门槛是兼容性承诺，不等价于 V3 四 Worker Plane 的分布式容量目标。
