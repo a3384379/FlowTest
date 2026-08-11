@@ -1,18 +1,21 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Response, status
+from fastapi import APIRouter, Cookie, Query, Response, status
+from fastapi.responses import RedirectResponse
 
-from app.api.dependencies import AuthenticatedUser, SessionDependency
+from app.api.dependencies import AuthenticatedUser, OIDCProviderDependency, SessionDependency
 from app.core.config import settings
 from app.core.errors import AppError
 from app.schemas.access import (
     AccessTokenResponse,
     LoginRequest,
     LoginResponse,
+    OIDCStatusResponse,
     PasswordChange,
     UserResponse,
 )
 from app.services.auth import AuthService, TokenPair
+from app.services.oidc import OIDCConfiguration, OIDCService
 
 router = APIRouter(prefix="/auth")
 REFRESH_COOKIE_NAME = "flowtest_refresh"
@@ -25,6 +28,49 @@ async def login(
     pair = await AuthService(session).login(email=payload.email, password=payload.password)
     _set_refresh_cookie(response, pair.refresh_token)
     return _login_response(pair)
+
+
+@router.get("/oidc/status", response_model=OIDCStatusResponse)
+async def oidc_status() -> OIDCStatusResponse:
+    return OIDCStatusResponse(
+        enabled=settings.feature_oidc_enabled,
+        provider=settings.oidc_provider_name if settings.feature_oidc_enabled else None,
+    )
+
+
+@router.get("/oidc/login", response_class=RedirectResponse)
+async def oidc_login(
+    session: SessionDependency,
+    provider: OIDCProviderDependency,
+) -> RedirectResponse:
+    login_start = await OIDCService(
+        session,
+        provider=provider,
+        configuration=OIDCConfiguration.from_settings(settings),
+    ).start_login()
+    return RedirectResponse(
+        login_start.authorization_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+
+
+@router.get("/oidc/callback", response_class=RedirectResponse)
+async def oidc_callback(
+    session: SessionDependency,
+    provider: OIDCProviderDependency,
+    state_value: str = Query(alias="state", min_length=1, max_length=512),
+    code: str = Query(min_length=1, max_length=4096),
+) -> RedirectResponse:
+    pair = await OIDCService(
+        session,
+        provider=provider,
+        configuration=OIDCConfiguration.from_settings(settings),
+    ).complete_login(state=state_value, code=code)
+    response = RedirectResponse(
+        settings.oidc_frontend_success_url,
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    _set_refresh_cookie(response, pair.refresh_token)
+    return response
 
 
 @router.post("/refresh", response_model=AccessTokenResponse)

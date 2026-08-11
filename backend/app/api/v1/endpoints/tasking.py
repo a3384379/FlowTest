@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, Request, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, TestPlanQueue, WorkflowCoordinator
+from app.composition import build_workflow_service
 from app.core.errors import AppError
 from app.domain.tasking import ServiceTokenScope, TestPlanTrigger
 from app.models.tasking import TestPlanItem
@@ -24,7 +25,6 @@ from app.schemas.tasking import (
 from app.schemas.workflows import WorkflowExecuteRequest, WorkflowExecutionResponse
 from app.services.idempotency import IdempotencyService
 from app.services.tasking import ServiceTokenService, TestPlanDetail, TestPlanService
-from app.services.workflows import WorkflowService
 
 router = APIRouter()
 
@@ -321,7 +321,7 @@ async def ci_run_workflow(
     )
 
     async def start() -> WorkflowExecutionResponse:
-        execution, plan = await WorkflowService(session).prepare_execution(
+        execution, plan = await build_workflow_service(session).prepare_execution(
             actor=identity.actor,
             project_id=project_id,
             workflow_id=workflow_id,

@@ -5,6 +5,14 @@ import { authenticate } from './support/auth'
 test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await page.goto('/')
   await authenticate(page)
+  await page.getByLabel('全局项目').click()
+  const pilotProject = page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: /^S11 V1 Pilot / })
+    .last()
+  await expect(pilotProject).toBeVisible()
+  await pilotProject.click()
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
 
   await page.getByText('项目管理', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()

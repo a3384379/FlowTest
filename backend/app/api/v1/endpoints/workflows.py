@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
+from app.composition import build_workflow_service
 from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.schemas.common import Page
@@ -204,7 +205,7 @@ async def execute_workflow(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> WorkflowExecutionResponse:
     async def start() -> WorkflowExecutionResponse:
-        execution, plan = await WorkflowService(session).prepare_execution(
+        execution, plan = await build_workflow_service(session).prepare_execution(
             actor=current_user,
             project_id=project_id,
             workflow_id=workflow_id,

@@ -3,6 +3,7 @@
 from app.models.access import (
     AuditLog,
     Folder,
+    OIDCLoginTransaction,
     Project,
     ProjectMember,
     ProjectTeamGrant,
@@ -52,6 +53,7 @@ __all__ = [
     "MockService",
     "NotificationDelivery",
     "NotificationWebhook",
+    "OIDCLoginTransaction",
     "Project",
     "ProjectMember",
     "ProjectTeamGrant",

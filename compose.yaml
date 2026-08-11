@@ -29,15 +29,53 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_FEATURE_CONTRACT_TESTING_ENABLED: ${FLOWTEST_FEATURE_CONTRACT_TESTING_ENABLED:-false}
   FLOWTEST_FEATURE_QUALITY_CENTER_ENABLED: ${FLOWTEST_FEATURE_QUALITY_CENTER_ENABLED:-false}
   FLOWTEST_FEATURE_OIDC_ENABLED: ${FLOWTEST_FEATURE_OIDC_ENABLED:-false}
+  FLOWTEST_OIDC_PROVIDER_NAME: ${FLOWTEST_OIDC_PROVIDER_NAME:-default}
+  FLOWTEST_OIDC_ISSUER_URL: ${FLOWTEST_OIDC_ISSUER_URL:-}
+  FLOWTEST_OIDC_CLIENT_ID: ${FLOWTEST_OIDC_CLIENT_ID:-}
+  FLOWTEST_OIDC_CLIENT_SECRET: ${FLOWTEST_OIDC_CLIENT_SECRET:-}
+  FLOWTEST_OIDC_REDIRECT_URI: ${FLOWTEST_OIDC_REDIRECT_URI:-http://localhost:8000/api/v1/auth/oidc/callback}
+  FLOWTEST_OIDC_FRONTEND_SUCCESS_URL: ${FLOWTEST_OIDC_FRONTEND_SUCCESS_URL:-http://localhost:3000/dashboard}
+  FLOWTEST_OIDC_ALLOWED_EMAIL_DOMAINS: ${FLOWTEST_OIDC_ALLOWED_EMAIL_DOMAINS:-[]}
+  FLOWTEST_OIDC_SCOPES: '${FLOWTEST_OIDC_SCOPES:-["openid","profile","email"]}'
+  FLOWTEST_OIDC_ALLOWED_ALGORITHMS: '${FLOWTEST_OIDC_ALLOWED_ALGORITHMS:-["RS256"]}'
+  FLOWTEST_VAULT_KV2_ENABLED: ${FLOWTEST_VAULT_KV2_ENABLED:-false}
+  FLOWTEST_VAULT_ADDRESS: ${FLOWTEST_VAULT_ADDRESS:-}
+  FLOWTEST_VAULT_TOKEN: ${FLOWTEST_VAULT_TOKEN:-}
+  FLOWTEST_VAULT_NAMESPACE: ${FLOWTEST_VAULT_NAMESPACE:-}
+  FLOWTEST_VAULT_KV2_MOUNT: ${FLOWTEST_VAULT_KV2_MOUNT:-secret}
+  FLOWTEST_VAULT_KV2_PREFIX: ${FLOWTEST_VAULT_KV2_PREFIX:-flowtest}
+  FLOWTEST_VAULT_TLS_VERIFY: ${FLOWTEST_VAULT_TLS_VERIFY:-true}
+  FLOWTEST_OTEL_ENABLED: ${FLOWTEST_OTEL_ENABLED:-false}
+  FLOWTEST_OTEL_SERVICE_NAME: ${FLOWTEST_OTEL_SERVICE_NAME:-flowtest-api}
+  FLOWTEST_OTEL_WORKER_SERVICE_NAME: ${FLOWTEST_OTEL_WORKER_SERVICE_NAME:-flowtest-worker}
+  FLOWTEST_OTEL_EXPORTER_OTLP_ENDPOINT: ${FLOWTEST_OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+  FLOWTEST_OTEL_EXPORTER_HEADERS: '${FLOWTEST_OTEL_EXPORTER_HEADERS:-{}}'
+  FLOWTEST_OTEL_TRACE_SAMPLE_RATIO: ${FLOWTEST_OTEL_TRACE_SAMPLE_RATIO:-0.1}
+  FLOWTEST_OTEL_EXPORT_TIMEOUT_SECONDS: ${FLOWTEST_OTEL_EXPORT_TIMEOUT_SECONDS:-10}
   FLOWTEST_FEATURE_AI_ENABLED: ${FLOWTEST_FEATURE_AI_ENABLED:-false}
 
 services:
   postgres:
-    image: postgres:17.6-alpine
+    build:
+      context: ./deploy/postgres-walg
+    image: flowtest-postgres-walg:17.6-v3.0.8
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-flowtest}
       POSTGRES_USER: ${POSTGRES_USER:-flowtest}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flowtest}
+      FLOWTEST_PITR_ENABLED: ${FLOWTEST_PITR_ENABLED:-false}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-s3://flowtest-artifacts/pitr/postgres}
+      AWS_ENDPOINT: ${WALG_AWS_ENDPOINT:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-flowtest}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-flowtest-local-secret}
+      AWS_REGION: ${WALG_AWS_REGION:-us-east-1}
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      WALG_COMPRESSION_METHOD: zstd
+      WALG_LIBSODIUM_KEY: ${FLOWTEST_PITR_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      WALG_LIBSODIUM_KEY_TRANSFORM: hex
+      PGHOST: /var/run/postgresql
+      PGUSER: ${POSTGRES_USER:-flowtest}
+      PGDATABASE: ${POSTGRES_DB:-flowtest}
     ports:
       - "5432:5432"
     volumes:
@@ -47,6 +85,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    depends_on:
+      minio:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -258,7 +299,11 @@ services:
       ]
     environment: *flowtest-environment
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $$(cat /tmp/celerybeat.pid)"]
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /tmp/celerybeat.pid && kill -0 $$(cat /tmp/celerybeat.pid)",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -290,7 +335,90 @@ services:
           cpus: "0.25"
           memory: 192M
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.153.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    profiles: ["observability"]
+    volumes:
+      - ./deploy/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      tempo:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    profiles: ["observability"]
+    volumes:
+      - ./deploy/observability/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    profiles: ["observability"]
+    volumes:
+      - ./deploy/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:12.4.3
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-flowtest-local-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PLUGINS_PREINSTALL: ""
+      GF_PLUGINS_PREINSTALL_SYNC: ""
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  tempo_data:
+  prometheus_data:
+  grafana_data:

@@ -5,15 +5,25 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
+from app.http.oidc import HttpOIDCProvider
 from app.models.access import User
 from app.repositories.access import UserRepository
+from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.tasking.dispatch import TestPlanDispatcher, WorkflowDispatcher
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_oidc_provider() -> OIDCProvider:
+    return HttpOIDCProvider(OIDCConfiguration.from_settings(settings))
+
+
+OIDCProviderDependency = Annotated[OIDCProvider, Depends(get_oidc_provider)]
 
 
 async def get_current_user(

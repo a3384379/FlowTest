@@ -25,7 +25,7 @@ async function createCase(page: Page, caseName: string) {
   const dialog = page.getByRole('dialog', { name: '新建测试用例' })
   await dialog.getByLabel('用例名称').fill(caseName)
   await chooseLastOption(page, dialog.getByLabel('已发布工作流'))
-  await chooseNamedOption(page, dialog.getByLabel('运行环境'), 'V1 Mock Business')
+  await chooseFirstOption(page, dialog.getByLabel('运行环境'))
   await dialog.getByLabel('标签').fill('s15')
   await page.keyboard.press('Enter')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
@@ -98,25 +98,22 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
 
 async function chooseLastOption(page: Page, select: ReturnType<Page['getByLabel']>) {
   await select.click()
-  const options = page.locator(
-    '.ant-select-dropdown:visible .ant-select-item-option:not(.ant-select-item-option-disabled)',
-  )
+  const options = page
+    .locator('.ant-select-dropdown:visible')
+    .last()
+    .locator('.ant-select-item-option:not(.ant-select-item-option-disabled)')
   await expect(options.first()).toBeVisible()
   await options.last().click()
 }
 
 async function chooseFirstOption(page: Page, select: ReturnType<Page['getByLabel']>) {
   await select.click()
-  const options = page.locator(
-    '.ant-select-dropdown:visible .ant-select-item-option:not(.ant-select-item-option-disabled)',
-  )
+  const options = page
+    .locator('.ant-select-dropdown:visible')
+    .last()
+    .locator('.ant-select-item-option:not(.ant-select-item-option-disabled)')
   await expect(options.first()).toBeVisible()
   await options.first().click()
-}
-
-async function chooseNamedOption(page: Page, select: ReturnType<Page['getByLabel']>, name: string) {
-  await select.click()
-  await page.getByText(name, { exact: true }).last().click()
 }
 
 function assetRow(page: Page, name: string) {

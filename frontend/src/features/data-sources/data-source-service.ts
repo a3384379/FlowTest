@@ -15,6 +15,7 @@ export type CredentialInput = {
   database_name: string
   username: string
   secret: string
+  secret_provider: Credential['secret_provider']
   tls_enabled: boolean
 }
 

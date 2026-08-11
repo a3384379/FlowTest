@@ -1,16 +1,31 @@
-import { ApiOutlined, LockOutlined, MailOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Form, Input, Typography } from 'antd'
-import { useState } from 'react'
+import { ApiOutlined, LockOutlined, MailOutlined, SafetyOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Divider, Form, Input, Typography } from 'antd'
+import { useEffect, useState } from 'react'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiClient, apiErrorMessage } from '../../lib/api'
 import { useAuthStore } from './auth-store'
 
 type LoginValues = { email: string; password: string }
+type OIDCStatus = { enabled: boolean; provider: string | null }
 
 export default function LoginPage() {
   const login = useAuthStore((state) => state.login)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [oidcStatus, setOIDCStatus] = useState<OIDCStatus>({ enabled: false, provider: null })
+
+  useEffect(() => {
+    let active = true
+    void apiClient
+      .get<OIDCStatus>('/auth/oidc/status')
+      .then((response) => {
+        if (active) setOIDCStatus(response.data)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
 
   async function submit(values: LoginValues) {
     setSubmitting(true)
@@ -69,6 +84,14 @@ export default function LoginPage() {
             登录
           </Button>
         </Form>
+        {oidcStatus.enabled && (
+          <>
+            <Divider plain>或</Divider>
+            <Button href="/api/v1/auth/oidc/login" icon={<SafetyOutlined />} size="large" block>
+              使用{oidcStatus.provider ? ` ${oidcStatus.provider} ` : '企业身份'}登录
+            </Button>
+          </>
+        )}
       </Card>
     </main>
   )

@@ -239,6 +239,7 @@ function credential(overrides: Partial<Credential> = {}): Credential {
     port: 5432,
     database_name: 'orders',
     username: 'reader',
+    secret_provider: 'local',
     tls_enabled: true,
     created_by_id: user.id,
     created_at: timestamp,

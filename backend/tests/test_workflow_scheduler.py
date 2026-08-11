@@ -12,6 +12,7 @@ from app.engine.scheduler import (
     NodeStatusUpdate,
     WorkflowScheduler,
 )
+from app.observability.tracing import TracingNodeExecutor
 
 
 class ControlledExecutor:
@@ -41,6 +42,26 @@ class ControlledExecutor:
             return {"node": node.id, "attempt": self.attempts[node.id]}
         finally:
             self.running -= 1
+
+
+@pytest.mark.asyncio
+async def test_tracing_preserves_retryable_node_error() -> None:
+    executor = ControlledExecutor(
+        {"api": {"failures": 1, "category": RetryCategory.SERVER_ERROR.value}}
+    )
+    definition = workflow(
+        middle_nodes=[api_node("api", max_retries=1)],
+        edges=[
+            {"id": "start-api", "source": "start", "target": "api"},
+            {"id": "api-end", "source": "api", "target": "end"},
+        ],
+    )
+
+    result = await WorkflowScheduler(TracingNodeExecutor(executor)).run(definition)
+
+    record = next(item for item in result.records if item.node_id == "api")
+    assert record.status is NodeStatus.PASSED
+    assert record.attempts == 2
 
 
 def workflow(

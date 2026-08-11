@@ -8,6 +8,7 @@ from app.domain.access import ProjectRole, TeamGrantRole
 from app.models.access import (
     AuditLog,
     Folder,
+    OIDCLoginTransaction,
     Project,
     ProjectMember,
     ProjectTeamGrant,
@@ -29,6 +30,15 @@ class UserRepository:
         result = await self._session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
+    async def get_by_oidc_identity(self, *, provider: str, subject: str) -> User | None:
+        result = await self._session.execute(
+            select(User).where(
+                User.oidc_provider == provider,
+                User.oidc_subject == subject,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list(self, *, offset: int, limit: int) -> tuple[list[User], int]:
         users = list(
             (
@@ -42,6 +52,22 @@ class UserRepository:
 
     def add(self, user: User) -> None:
         self._session.add(user)
+
+
+class OIDCLoginTransactionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_for_update(self, state_hash: str) -> OIDCLoginTransaction | None:
+        result = await self._session.execute(
+            select(OIDCLoginTransaction)
+            .where(OIDCLoginTransaction.state_hash == state_hash)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    def add(self, transaction: OIDCLoginTransaction) -> None:
+        self._session.add(transaction)
 
 
 class RefreshSessionRepository:

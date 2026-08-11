@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import close_database, session_factory
+from app.core.database import close_database, engine, session_factory
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.redis import close_redis, redis_client
@@ -15,6 +15,7 @@ from app.middleware.metrics import MetricsMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.trace import TraceIdMiddleware
 from app.observability.metrics import MetricsRegistry
+from app.observability.tracing import instrument_fastapi, shutdown_tracing
 from app.services.auth import bootstrap_administrator
 from app.services.execution_events import RedisExecutionEventBus
 from app.tasking.celery_app import celery_app
@@ -36,6 +37,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.workflow_run_coordinator = dispatcher
     application.state.test_plan_dispatcher = dispatcher
     yield
+    shutdown_tracing()
     await close_redis()
     await close_database()
 
@@ -51,6 +53,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.metrics_registry = metrics
+    instrument_fastapi(application, engine)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

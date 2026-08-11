@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from app.domain.data_nodes import CredentialKind
+from app.domain.data_nodes import CredentialKind, CredentialSecretProvider
 
 CredentialName = Annotated[str, Field(min_length=1, max_length=160)]
 MockSlug = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{2,79}$")]
@@ -19,6 +19,7 @@ class CredentialCreate(BaseModel):
     database_name: str = Field(default="", max_length=255)
     username: str = Field(default="", max_length=255)
     secret: str = Field(min_length=1, max_length=65536)
+    secret_provider: CredentialSecretProvider = CredentialSecretProvider.LOCAL
     tls_enabled: bool = False
 
     @model_validator(mode="after")
@@ -49,6 +50,7 @@ class CredentialMetadata(BaseModel):
     port: int
     database_name: str
     username: str
+    secret_provider: CredentialSecretProvider
     tls_enabled: bool
     created_by_id: UUID
     created_at: datetime

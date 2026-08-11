@@ -21,6 +21,9 @@ describe('project management panels', () => {
         is_active: true,
         is_system_admin: true,
         requires_password_change: false,
+        oidc_provider: null,
+        oidc_subject: null,
+        last_login_at: null,
       },
     })
   })
@@ -267,6 +270,9 @@ describe('project management panels', () => {
         is_active: true,
         is_system_admin: false,
         requires_password_change: false,
+        oidc_provider: null,
+        oidc_subject: null,
+        last_login_at: null,
       },
     })
     server.use(
@@ -312,6 +318,9 @@ const user = {
   is_active: true,
   is_system_admin: false,
   requires_password_change: false,
+  oidc_provider: null,
+  oidc_subject: null,
+  last_login_at: null,
 }
 
 const team = {

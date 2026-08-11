@@ -87,6 +87,17 @@ describe('App authentication', () => {
     expect(useAuthStore.getState().token).toBe('rotated-token')
   })
 
+  it('shows the configured OIDC login entry without exposing credentials', async () => {
+    server.use(http.post('/api/v1/auth/refresh', () => HttpResponse.json({}, { status: 401 })))
+
+    renderApp('/dashboard', [project], { enabled: true, provider: '公司统一身份' })
+
+    expect(await screen.findByRole('link', { name: /使用 公司统一身份 登录/ })).toHaveAttribute(
+      'href',
+      '/api/v1/auth/oidc/login',
+    )
+  })
+
   it('restores a project-scoped deep link and preserves it in navigation', async () => {
     authenticateExistingUser()
 
@@ -127,8 +138,13 @@ describe('App authentication', () => {
   })
 })
 
-function renderApp(initialEntry = '/dashboard', projects = [project]) {
+function renderApp(
+  initialEntry = '/dashboard',
+  projects = [project],
+  oidcStatus = { enabled: false, provider: null as string | null },
+) {
   server.use(
+    http.get('/api/v1/auth/oidc/status', () => HttpResponse.json(oidcStatus)),
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: projects, total: projects.length, page: 1, page_size: 100 }),
     ),

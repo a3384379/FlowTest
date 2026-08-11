@@ -13,6 +13,7 @@ from app.models.artifacts import Artifact
 from app.models.data_sources import MockRequestLog, MockService
 from app.models.governance import IdempotencyRecord
 from app.observability.metrics import MetricsRegistry, normalize_path, render_metrics
+from app.observability.task_metrics import TaskMetricsSnapshot
 from app.services.retention import RetentionCleanupService
 from app.services.workflow_runtime import _response_output
 
@@ -117,7 +118,7 @@ async def test_metrics_are_low_cardinality_and_include_execution_gauges() -> Non
         duration=0.025,
     )
     async with session_maker() as session:
-        rendered = await render_metrics(registry, session)
+        rendered = await render_metrics(registry, session, AvailableTaskMetrics())
 
     assert (
         normalize_path("/api/v1/projects/123e4567-e89b-12d3-a456-426614174000/reports")
@@ -126,14 +127,34 @@ async def test_metrics_are_low_cardinality_and_include_execution_gauges() -> Non
     assert 'path="/api/v1/projects/{id}/reports"' in rendered
     assert 'status="200"' in rendered
     assert "flowtest_execution_records" in rendered
+    assert 'flowtest_celery_queue_depth{queue="general"} 7' in rendered
+    assert "flowtest_celery_workers_active 3" in rendered
+    assert 'flowtest_celery_tasks_total{status="succeeded"} 11' in rendered
+    assert "flowtest_celery_metrics_available 1" in rendered
     unavailable = await render_metrics(registry, cast(AsyncSession, UnavailableSession()))
     assert "flowtest_execution_metrics_available 0" in unavailable
+    task_unavailable = await render_metrics(registry, session, UnavailableTaskMetrics())
+    assert "flowtest_celery_metrics_available 0" in task_unavailable
     await engine.dispose()
 
 
 class UnavailableSession:
     async def execute(self, _statement: Select[tuple[object, ...]]) -> None:
         raise OSError("database is unavailable")
+
+
+class AvailableTaskMetrics:
+    async def read(self) -> TaskMetricsSnapshot:
+        return TaskMetricsSnapshot(
+            queue_depths={"general": 7, "data": 2, "ai": 0},
+            active_workers=3,
+            task_counts={"succeeded": 11, "failed": 1},
+        )
+
+
+class UnavailableTaskMetrics:
+    async def read(self) -> TaskMetricsSnapshot:
+        raise OSError("Redis is unavailable")
 
 
 def test_workflow_response_secret_is_available_only_before_persistence_redaction() -> None:

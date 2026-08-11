@@ -49,6 +49,7 @@ describe('data source service', () => {
         database_name: 'flowtest',
         username: 'reader',
         secret: 'write-only',
+        secret_provider: 'local',
         tls_enabled: true,
       }),
     ).toEqual(credential)
@@ -134,6 +135,7 @@ const credential: Credential = {
   port: 5432,
   database_name: 'flowtest',
   username: 'reader',
+  secret_provider: 'local',
   tls_enabled: true,
   created_by_id: user.id,
   created_at: timestamp,
