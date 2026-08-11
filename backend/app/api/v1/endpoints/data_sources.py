@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.composition import build_credential_service
 from app.core.config import settings
 from app.core.errors import AppError
 from app.schemas.common import Page
@@ -21,7 +22,6 @@ from app.schemas.data_sources import (
     MockServiceResponse,
     MockServiceUpdate,
 )
-from app.services.credentials import CredentialService
 from app.services.mock_services import MockDispatchRequest, MockServiceManager
 
 router = APIRouter()
@@ -34,7 +34,9 @@ async def list_credentials(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> list[CredentialMetadata]:
-    credentials = await CredentialService(session).list(actor=current_user, project_id=project_id)
+    credentials = await build_credential_service(session).list(
+        actor=current_user, project_id=project_id
+    )
     return [CredentialMetadata.model_validate(item) for item in credentials]
 
 
@@ -48,7 +50,7 @@ async def create_credential(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> CredentialMetadata:
-    credential = await CredentialService(session).create(
+    credential = await build_credential_service(session).create(
         actor=current_user,
         project_id=payload.project_id,
         name=payload.name,
@@ -58,6 +60,7 @@ async def create_credential(
         database_name=payload.database_name,
         username=payload.username,
         secret=payload.secret,
+        secret_provider=payload.secret_provider,
         tls_enabled=payload.tls_enabled,
     )
     return CredentialMetadata.model_validate(credential)
@@ -70,7 +73,7 @@ async def update_credential(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> CredentialMetadata:
-    credential = await CredentialService(session).update(
+    credential = await build_credential_service(session).update(
         actor=current_user,
         credential_id=credential_id,
         name=payload.name,
@@ -90,7 +93,7 @@ async def delete_credential(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> Response:
-    await CredentialService(session).delete(actor=current_user, credential_id=credential_id)
+    await build_credential_service(session).delete(actor=current_user, credential_id=credential_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

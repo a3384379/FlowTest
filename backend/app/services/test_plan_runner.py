@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.composition import build_workflow_service
 from app.core.config import settings
 from app.core.errors import AppError
 from app.models.access import User
@@ -97,7 +98,7 @@ class TestPlanRunCoordinator:
                 await session.commit()
                 return None
             try:
-                execution, plan = await WorkflowService(session).prepare_execution(
+                execution, plan = await build_workflow_service(session).prepare_execution(
                     actor=actor,
                     project_id=run.project_id,
                     workflow_id=item.workflow_id,

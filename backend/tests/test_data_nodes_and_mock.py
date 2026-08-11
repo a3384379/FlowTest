@@ -1,4 +1,6 @@
 import asyncio
+import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -8,6 +10,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+import respx
 from httpx import ASGITransport, AsyncClient
 from pydantic import JsonValue
 from redis.exceptions import RedisError
@@ -15,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.composition import build_credential_service
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
@@ -230,6 +234,7 @@ async def test_credential_api_is_write_only_encrypted_and_audited(
     async with data_context.sessions() as session:
         stored = await session.get(Credential, UUID(metadata["id"]))
         assert stored is not None
+        assert stored.ciphertext is not None
         assert secret.encode() not in stored.ciphertext
         material = await CredentialService(session).load_material(
             project_id=stored.project_id,
@@ -277,6 +282,92 @@ async def test_credential_api_is_write_only_encrypted_and_audited(
         json={"name": "missing"},
     )
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_vault_credential_is_write_only_and_loaded_through_kv_v2(
+    data_context: DataTestContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "vault_kv2_enabled", True)
+    monkeypatch.setattr(settings, "vault_address", "https://vault.example")
+    monkeypatch.setattr(settings, "vault_token", "vault-test-token")
+    monkeypatch.setattr(settings, "vault_namespace", "quality")
+    client = data_context.client
+    headers = await _login_headers(client)
+    project_id = await _create_project(client, headers)
+    data_pattern = re.compile(
+        r"https://vault\.example/v1/secret/data/flowtest/projects/[^/]+/credentials/[^/]+"
+    )
+    metadata_pattern = re.compile(
+        r"https://vault\.example/v1/secret/metadata/flowtest/projects/[^/]+/credentials/[^/]+"
+    )
+    writes = respx.post(data_pattern).mock(return_value=httpx.Response(200, json={"data": {}}))
+    reads = respx.get(data_pattern).mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"data": {"secret": "vault-database-secret"}}},
+        )
+    )
+    deletes = respx.delete(metadata_pattern).mock(return_value=httpx.Response(204))
+
+    created = await client.post(
+        "/api/v1/credentials",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "Vault 订单库",
+            "kind": "postgresql",
+            "host": "db.example.com",
+            "database_name": "orders",
+            "username": "reader",
+            "secret": "vault-database-secret",
+            "secret_provider": "vault_kv_v2",
+            "tls_enabled": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    metadata = created.json()
+    assert metadata["secret_provider"] == "vault_kv_v2"
+    assert "vault-database-secret" not in created.text
+    assert "secret" not in metadata
+    assert "provider_reference" not in created.text
+    assert writes.calls.last.request.headers["x-vault-token"] == "vault-test-token"
+    assert writes.calls.last.request.headers["x-vault-namespace"] == "quality"
+    assert json.loads(writes.calls.last.request.content) == {
+        "data": {"secret": "vault-database-secret"}
+    }
+
+    async with data_context.sessions() as session:
+        stored = await session.get(Credential, UUID(metadata["id"]))
+        assert stored is not None
+        assert stored.ciphertext is None
+        assert stored.nonce is None
+        assert stored.provider_reference is not None
+        assert "vault-database-secret" not in stored.provider_reference
+        material = await build_credential_service(session).load_material(
+            project_id=stored.project_id,
+            credential_id=stored.id,
+        )
+        assert material.secret == "vault-database-secret"
+    assert reads.called
+
+    rotated = await client.patch(
+        f"/api/v1/credentials/{metadata['id']}",
+        headers=headers,
+        json={"secret": "rotated-vault-secret"},
+    )
+    assert rotated.status_code == 200
+    assert len(writes.calls) == 2
+    assert "rotated-vault-secret" not in rotated.text
+
+    deleted = await client.delete(
+        f"/api/v1/credentials/{metadata['id']}",
+        headers=headers,
+    )
+    assert deleted.status_code == 204
+    assert deletes.called
 
 
 @pytest.mark.asyncio

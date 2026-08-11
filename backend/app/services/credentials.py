@@ -1,16 +1,27 @@
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
-from app.domain.data_nodes import CredentialKind
+from app.domain.data_nodes import CredentialKind, CredentialSecretProvider
 from app.models.access import User
 from app.models.data_sources import Credential
 from app.repositories.data_sources import DataSourceRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+
+
+class ExternalCredentialSecretStore(Protocol):
+    provider_name: CredentialSecretProvider
+
+    async def write(self, *, reference: str, secret: str) -> None: ...
+
+    async def read(self, *, reference: str) -> str: ...
+
+    async def delete(self, *, reference: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,12 +39,19 @@ class CredentialMaterial:
 
 
 class CredentialService:
-    def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        secrets: SecretBox = secret_box,
+        external_secrets: ExternalCredentialSecretStore | None = None,
+    ) -> None:
         self._session = session
         self._repository = DataSourceRepository(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
         self._secrets = secrets
+        self._external_secrets = external_secrets
 
     async def create(
         self,
@@ -47,15 +65,18 @@ class CredentialService:
         database_name: str,
         username: str,
         secret: str,
+        secret_provider: CredentialSecretProvider,
         tls_enabled: bool,
     ) -> Credential:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         normalized_name = name.strip()
         await self._ensure_unique_name(project_id, normalized_name)
         credential_id = uuid4()
-        encrypted = self._secrets.encrypt(
-            secret,
-            associated_data=_associated_data(credential_id, project_id),
+        ciphertext, nonce, provider_reference = await self._store_new_secret(
+            credential_id=credential_id,
+            project_id=project_id,
+            provider=secret_provider,
+            secret=secret,
         )
         credential = Credential(
             id=credential_id,
@@ -66,8 +87,10 @@ class CredentialService:
             port=port or _default_port(kind),
             database_name=_normalize_database_name(kind, database_name),
             username=username.strip(),
-            ciphertext=encrypted.ciphertext,
-            nonce=encrypted.nonce,
+            secret_provider=secret_provider.value,
+            provider_reference=provider_reference,
+            ciphertext=ciphertext,
+            nonce=nonce,
             tls_enabled=tls_enabled,
             created_by_id=actor.id,
         )
@@ -121,12 +144,7 @@ class CredentialService:
         if tls_enabled is not None:
             credential.tls_enabled = tls_enabled
         if secret is not None:
-            encrypted = self._secrets.encrypt(
-                secret,
-                associated_data=_associated_data(credential.id, credential.project_id),
-            )
-            credential.ciphertext = encrypted.ciphertext
-            credential.nonce = encrypted.nonce
+            await self._replace_secret(credential, secret)
         self._record(actor, credential, "credential.updated")
         await self._session.commit()
         await self._session.refresh(credential)
@@ -140,6 +158,7 @@ class CredentialService:
             editing=True,
         )
         self._record(actor, credential, "credential.deleted")
+        await self._delete_external_secret(credential)
         await self._repository.delete(credential)
         await self._session.commit()
 
@@ -149,10 +168,7 @@ class CredentialService:
             raise AppError(
                 code="CREDENTIAL_NOT_FOUND", message="Credential 不存在", status_code=404
             )
-        secret = self._secrets.decrypt(
-            EncryptedValue(credential.ciphertext, credential.nonce),
-            associated_data=_associated_data(credential.id, credential.project_id),
-        )
+        secret = await self._load_secret(credential)
         return CredentialMaterial(
             id=credential.id,
             project_id=credential.project_id,
@@ -173,6 +189,75 @@ class CredentialService:
                 code="CREDENTIAL_NOT_FOUND", message="Credential 不存在", status_code=404
             )
         return credential
+
+    async def _store_new_secret(
+        self,
+        *,
+        credential_id: UUID,
+        project_id: UUID,
+        provider: CredentialSecretProvider,
+        secret: str,
+    ) -> tuple[bytes | None, bytes | None, str | None]:
+        if provider is CredentialSecretProvider.LOCAL:
+            encrypted = self._secrets.encrypt(
+                secret,
+                associated_data=_associated_data(credential_id, project_id),
+            )
+            return encrypted.ciphertext, encrypted.nonce, None
+        external = self._require_external_store(provider)
+        reference = _external_reference(project_id, credential_id)
+        await external.write(reference=reference, secret=secret)
+        return None, None, reference
+
+    async def _replace_secret(self, credential: Credential, secret: str) -> None:
+        if CredentialSecretProvider(credential.secret_provider) is CredentialSecretProvider.LOCAL:
+            encrypted = self._secrets.encrypt(
+                secret,
+                associated_data=_associated_data(credential.id, credential.project_id),
+            )
+            credential.ciphertext = encrypted.ciphertext
+            credential.nonce = encrypted.nonce
+            return
+        external = self._require_external_store(credential.secret_provider)
+        if credential.provider_reference is None:
+            raise _invalid_storage()
+        await external.write(reference=credential.provider_reference, secret=secret)
+
+    async def _load_secret(self, credential: Credential) -> str:
+        if CredentialSecretProvider(credential.secret_provider) is CredentialSecretProvider.LOCAL:
+            if credential.ciphertext is None or credential.nonce is None:
+                raise _invalid_storage()
+            return self._secrets.decrypt(
+                EncryptedValue(credential.ciphertext, credential.nonce),
+                associated_data=_associated_data(credential.id, credential.project_id),
+            )
+        external = self._require_external_store(credential.secret_provider)
+        if credential.provider_reference is None:
+            raise _invalid_storage()
+        return await external.read(reference=credential.provider_reference)
+
+    async def _delete_external_secret(self, credential: Credential) -> None:
+        if CredentialSecretProvider(credential.secret_provider) is CredentialSecretProvider.LOCAL:
+            return
+        external = self._require_external_store(credential.secret_provider)
+        if credential.provider_reference is None:
+            raise _invalid_storage()
+        await external.delete(reference=credential.provider_reference)
+
+    def _require_external_store(
+        self, provider: str | CredentialSecretProvider
+    ) -> ExternalCredentialSecretStore:
+        parsed_provider = CredentialSecretProvider(provider)
+        if (
+            self._external_secrets is None
+            or self._external_secrets.provider_name is not parsed_provider
+        ):
+            raise AppError(
+                code="CREDENTIAL_PROVIDER_UNAVAILABLE",
+                message="Credential 外部存储尚未配置",
+                status_code=503,
+            )
+        return self._external_secrets
 
     async def _ensure_unique_name(
         self,
@@ -200,7 +285,12 @@ class CredentialService:
             action=action,
             resource_type="credential",
             resource_id=credential.id,
-            details={"kind": credential.kind, "host": credential.host, "port": credential.port},
+            details={
+                "kind": credential.kind,
+                "host": credential.host,
+                "port": credential.port,
+                "secret_provider": credential.secret_provider,
+            },
         )
 
 
@@ -229,3 +319,15 @@ def _normalize_database_name(kind: CredentialKind, database_name: str) -> str:
 
 def _associated_data(credential_id: UUID, project_id: UUID) -> bytes:
     return f"flowtest:credential:{project_id}:{credential_id}".encode()
+
+
+def _external_reference(project_id: UUID, credential_id: UUID) -> str:
+    return f"projects/{project_id}/credentials/{credential_id}"
+
+
+def _invalid_storage() -> AppError:
+    return AppError(
+        code="CREDENTIAL_STORAGE_INVALID",
+        message="Credential 存储状态无效",
+        status_code=500,
+    )

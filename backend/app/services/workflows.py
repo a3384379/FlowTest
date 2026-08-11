@@ -54,10 +54,12 @@ from app.models.workflows import (
     WorkflowNodeExecution,
     WorkflowVersion,
 )
+from app.observability.tracing import TracingNodeExecutor, workflow_span
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.data_sources import DataSourceRepository
 from app.repositories.workflows import WorkflowRepository
 from app.services.audit import AuditService
+from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
 from app.services.projects import ProjectService
 from app.services.workflow_runtime import WorkflowNodeExecutor
@@ -104,12 +106,18 @@ class WorkflowVersionDiff:
 
 
 class WorkflowService:
-    def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        secrets: SecretBox = secret_box,
+        external_secrets: ExternalCredentialSecretStore | None = None,
+    ) -> None:
         self._session = session
         self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
         self._data_sources = DataSourceRepository(session)
-        self._snapshots = WorkflowSnapshotBuilder(session)
+        self._snapshots = WorkflowSnapshotBuilder(session, external_secrets=external_secrets)
         self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
@@ -521,25 +529,32 @@ class WorkflowService:
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             scheduler = WorkflowScheduler(
-                WorkflowNodeExecutor(
-                    client,
-                    plan.prepared.requests,
-                    plan.definition,
-                    network_policy,
-                    subflows=plan.prepared.subflows,
-                    data_nodes=plan.prepared.data_nodes,
+                TracingNodeExecutor(
+                    WorkflowNodeExecutor(
+                        client,
+                        plan.prepared.requests,
+                        plan.definition,
+                        network_policy,
+                        subflows=plan.prepared.subflows,
+                        data_nodes=plan.prepared.data_nodes,
+                    )
                 )
             )
-            result = await self._run_with_cancellation_poll(
-                scheduler=scheduler,
-                definition=plan.definition,
-                execution=execution,
-                token=token,
-                workflow_variables=plan.definition.variables,
-                dataset_variables=plan.prepared.dataset_variables,
-                runtime_variables=plan.runtime_variables,
-                on_node_status=on_node_status,
-            )
+            with workflow_span(
+                execution_id=execution.id,
+                project_id=plan.project_id,
+                workflow_version=plan.workflow_version,
+            ):
+                result = await self._run_with_cancellation_poll(
+                    scheduler=scheduler,
+                    definition=plan.definition,
+                    execution=execution,
+                    token=token,
+                    workflow_variables=plan.definition.variables,
+                    dataset_variables=plan.prepared.dataset_variables,
+                    runtime_variables=plan.runtime_variables,
+                    on_node_status=on_node_status,
+                )
         nodes = self._node_models(execution.id, result)
         self._workflows.add_all(nodes)
         execution.status = result.status.value
@@ -575,13 +590,15 @@ class WorkflowService:
         network_policy = await self._projects.load_runtime_security_policy(project_id)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             result = await WorkflowScheduler(
-                WorkflowNodeExecutor(
-                    client,
-                    prepared.requests,
-                    definition,
-                    network_policy,
-                    subflows=prepared.subflows,
-                    data_nodes=prepared.data_nodes,
+                TracingNodeExecutor(
+                    WorkflowNodeExecutor(
+                        client,
+                        prepared.requests,
+                        definition,
+                        network_policy,
+                        subflows=prepared.subflows,
+                        data_nodes=prepared.data_nodes,
+                    )
                 )
             ).run(
                 definition,

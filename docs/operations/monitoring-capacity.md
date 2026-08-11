@@ -9,9 +9,31 @@ Prometheus 抓取 `/api/v1/metrics`：
 - `flowtest_http_request_duration_seconds`：HTTP 延迟直方图。
 - `flowtest_execution_records`：API、Workflow、Test Plan 当前持久化状态数量。
 - `flowtest_execution_metrics_available`：数据库执行指标是否可采集。
+- `flowtest_celery_queue_depth`：General、Data、AI 三个逻辑队列（含优先级分片）的等待数。
+- `flowtest_celery_workers_active`：60 秒内持续上报心跳的 Worker 数。
+- `flowtest_celery_tasks_total`：按 succeeded、failed、retried 统计的 Worker 任务结果。
+- `flowtest_celery_metrics_available`：Redis 队列与 Worker 指标是否可采集。
 
 建议告警：readiness 连续 2 分钟失败、5xx 比例 5 分钟超过 2%、P95 超过 1 秒、
 失败执行持续升高、执行指标不可用、Worker 健康检查失败、磁盘使用率超过 80%。
+
+## 分布式追踪与 Grafana
+
+可选观测栈不会随默认 Compose 启动。启用后，API 和 Worker 将 W3C Trace Context 贯穿
+FastAPI → Celery → Workflow → Node，并由 OTel Collector 写入 Tempo：
+
+```bash
+FLOWTEST_OTEL_ENABLED=true docker compose --profile observability up -d --build --wait
+```
+
+- Grafana：`http://localhost:3001`，本地默认用户 `admin`，密码由 `GRAFANA_ADMIN_PASSWORD` 设置。
+- Prometheus：`http://localhost:9090`。
+- Tempo：`http://localhost:3200`。
+- OTel HTTP/gRPC：`localhost:4318` / `localhost:4317`。
+
+生产环境必须修改 Grafana 密码，并根据数据量调整 Tempo/Prometheus 保留期。Trace 标签只允许
+平台定义的 Execution、Project、Workflow 版本和 Node 元数据，禁止加入 Token、Credential、
+请求正文或用户输入标签。
 
 ## 可复现容量门槛
 

@@ -33,6 +33,9 @@ export type User = {
   is_active: boolean
   is_system_admin: boolean
   requires_password_change: boolean
+  oidc_provider: string | null
+  oidc_subject: string | null
+  last_login_at: string | null
 }
 
 export type Project = {
@@ -261,6 +264,7 @@ export type Credential = {
   port: number
   database_name: string
   username: string
+  secret_provider: 'local' | 'vault_kv_v2'
   tls_enabled: boolean
   created_by_id: string
   created_at: string

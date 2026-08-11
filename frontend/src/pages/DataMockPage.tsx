@@ -114,6 +114,12 @@ export function CredentialPanel({ projectId, canEdit }: { projectId: string; can
             columns={[
               { title: '名称', dataIndex: 'name' },
               { title: '类型', dataIndex: 'kind', render: credentialKindLabel },
+              {
+                title: 'Secret 存储',
+                dataIndex: 'secret_provider',
+                render: (value: Credential['secret_provider']) =>
+                  value === 'vault_kv_v2' ? 'Vault KV v2' : '平台加密',
+              },
               { title: '目标', render: (_, item) => `${item.host}:${item.port}` },
               { title: '数据库', dataIndex: 'database_name', render: (value) => value || '-' },
               {
@@ -162,7 +168,13 @@ function CredentialForm({
       name="credential"
       form={form}
       layout="vertical"
-      initialValues={{ kind: 'postgresql', tls_enabled: true, database_name: '', username: '' }}
+      initialValues={{
+        kind: 'postgresql',
+        secret_provider: 'local',
+        tls_enabled: true,
+        database_name: '',
+        username: '',
+      }}
       onFinish={onFinish}
     >
       <Form.Item name="name" label="名称" rules={[{ required: true }]}>
@@ -170,6 +182,19 @@ function CredentialForm({
       </Form.Item>
       <Form.Item name="kind" label="类型" rules={[{ required: true }]}>
         <Select options={credentialKindOptions} />
+      </Form.Item>
+      <Form.Item
+        name="secret_provider"
+        label="Secret 存储"
+        tooltip="Vault KV v2 需由系统管理员预先配置"
+        rules={[{ required: true }]}
+      >
+        <Select
+          options={[
+            { value: 'local', label: '平台 AES-256-GCM 加密' },
+            { value: 'vault_kv_v2', label: 'Vault KV v2' },
+          ]}
+        />
       </Form.Item>
       <Space align="start" className="full-width">
         <Form.Item name="host" label="Host" rules={[{ required: true }]}>

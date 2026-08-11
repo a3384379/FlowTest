@@ -17,6 +17,9 @@ export const user: User = {
   is_active: true,
   is_system_admin: true,
   requires_password_change: false,
+  oidc_provider: null,
+  oidc_subject: null,
+  last_login_at: null,
 }
 
 export const project: Project = {

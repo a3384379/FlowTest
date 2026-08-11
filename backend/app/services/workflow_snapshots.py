@@ -28,7 +28,11 @@ from app.repositories.workflows import WorkflowRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
 from app.services.artifacts import ArtifactService
-from app.services.credentials import CredentialMaterial, CredentialService
+from app.services.credentials import (
+    CredentialMaterial,
+    CredentialService,
+    ExternalCredentialSecretStore,
+)
 from app.services.data_nodes import PreparedDataNode
 from app.services.datasets import WorkflowDatasetService
 from app.services.executions import PreparedMultipart, PreparedUpload
@@ -51,13 +55,18 @@ class PreparedWorkflow:
 
 
 class WorkflowSnapshotBuilder:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        external_secrets: ExternalCredentialSecretStore | None = None,
+    ) -> None:
         self._workflows = WorkflowRepository(session)
         self._api_repository = APIAssetRepository(session)
         self._api_assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
         self._datasets = WorkflowDatasetService(session)
-        self._credentials = CredentialService(session)
+        self._credentials = CredentialService(session, external_secrets=external_secrets)
 
     async def prepare(
         self,

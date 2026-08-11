@@ -1,4 +1,5 @@
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,13 +57,63 @@ class Settings(BaseSettings):
     feature_quality_center_enabled: bool = False
     feature_oidc_enabled: bool = False
     feature_ai_enabled: bool = False
+    oidc_provider_name: str = "default"
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = "http://localhost:8000/api/v1/auth/oidc/callback"
+    oidc_frontend_success_url: str = "http://localhost:5173/dashboard"
+    oidc_allowed_email_domains: list[str] = []
+    oidc_scopes: list[str] = ["openid", "profile", "email"]
+    oidc_allowed_algorithms: list[str] = ["RS256"]
+    oidc_transaction_ttl_seconds: int = Field(default=600, ge=60, le=1800)
+    oidc_request_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    vault_kv2_enabled: bool = False
+    vault_address: str = ""
+    vault_token: str = ""
+    vault_namespace: str = ""
+    vault_kv2_mount: str = "secret"
+    vault_kv2_prefix: str = "flowtest"
+    vault_request_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    vault_tls_verify: bool = True
+    otel_enabled: bool = False
+    otel_service_name: str = "flowtest-api"
+    otel_worker_service_name: str = "flowtest-worker"
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    otel_exporter_headers: dict[str, str] = {}
+    otel_trace_sample_ratio: float = Field(default=0.1, ge=0, le=1)
+    otel_export_timeout_seconds: int = Field(default=10, ge=1, le=60)
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
         if self.retention_default_days > self.retention_max_days:
             raise ValueError("默认保留天数不能超过系统保留上限")
+        self._validate_oidc()
+        self._validate_vault()
+        self._validate_production()
+        return self
+
+    def _validate_oidc(self) -> None:
+        if not self.feature_oidc_enabled:
+            return
+        required = (
+            self.oidc_issuer_url,
+            self.oidc_client_id,
+            self.oidc_redirect_uri,
+            self.oidc_frontend_success_url,
+        )
+        if any(not value.strip() for value in required):
+            raise ValueError("启用 OIDC 时必须配置 Issuer、Client ID 和回调地址")
+        if not self.oidc_allowed_email_domains:
+            raise ValueError("启用 OIDC 时必须配置允许的邮箱域名")
+        if "openid" not in self.oidc_scopes:
+            raise ValueError("OIDC Scope 必须包含 openid")
+        if not self.oidc_allowed_algorithms:
+            raise ValueError("OIDC 必须配置至少一种允许的签名算法")
+
+    def _validate_production(self) -> None:
         if self.environment.lower() not in {"production", "prod"}:
-            return self
+            return
         unsafe = (
             self.secret_key == "change-me-before-production-at-least-32-bytes"  # noqa: S105
             or self.bootstrap_admin_password == "FlowTest-Change-Me-123!"  # noqa: S105
@@ -71,7 +122,24 @@ class Settings(BaseSettings):
         )
         if unsafe or not self.secure_cookies:
             raise ValueError("生产环境必须替换默认密钥、管理员密码并启用安全 Cookie")
-        return self
+        if self.feature_oidc_enabled:
+            oidc_urls = (
+                self.oidc_issuer_url,
+                self.oidc_redirect_uri,
+                self.oidc_frontend_success_url,
+            )
+            if any(urlsplit(url).scheme != "https" for url in oidc_urls):
+                raise ValueError("生产环境 OIDC 地址必须使用 HTTPS")
+        if self.vault_kv2_enabled and urlsplit(self.vault_address).scheme != "https":
+            raise ValueError("生产环境 Vault 地址必须使用 HTTPS")
+
+    def _validate_vault(self) -> None:
+        if not self.vault_kv2_enabled:
+            return
+        if not self.vault_address.strip() or not self.vault_token.strip():
+            raise ValueError("启用 Vault KV v2 时必须配置地址和 Token")
+        if not self.vault_kv2_mount.strip() or not self.vault_kv2_prefix.strip():
+            raise ValueError("Vault KV v2 的 Mount 和 Prefix 不能为空")
 
 
 @lru_cache

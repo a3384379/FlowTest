@@ -14,6 +14,11 @@ class CredentialKind(StrEnum):
     REDIS = "redis"
 
 
+class CredentialSecretProvider(StrEnum):
+    LOCAL = "local"
+    VAULT_KV2 = "vault_kv_v2"
+
+
 class RedisReadCommand(StrEnum):
     GET = "GET"
     MGET = "MGET"

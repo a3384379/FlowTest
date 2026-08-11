@@ -3,6 +3,7 @@ from uuid import UUID
 
 from celery import Celery
 
+from app.observability.tracing import current_trace_headers
 from app.services.workflows import WorkflowExecutionPlan
 
 
@@ -25,6 +26,7 @@ class CeleryTaskDispatcher:
             args=[str(plan.execution_id)],
             queue=queue_name,
             priority=5,
+            headers=current_trace_headers(),
         )
 
     def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None:
@@ -33,6 +35,7 @@ class CeleryTaskDispatcher:
             args=[str(run_id)],
             queue=queue_name,
             priority=priority,
+            headers=current_trace_headers(),
         )
 
 

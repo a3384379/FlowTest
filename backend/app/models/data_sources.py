@@ -23,6 +23,13 @@ class Credential(UuidPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("project_id", "name", name="uq_credentials_project_name"),
         CheckConstraint("kind IN ('postgresql', 'mysql', 'redis')", name="credential_kind"),
         CheckConstraint("port >= 1 AND port <= 65535", name="credential_port"),
+        CheckConstraint(
+            "(secret_provider = 'local' AND ciphertext IS NOT NULL "
+            "AND nonce IS NOT NULL AND provider_reference IS NULL) OR "
+            "(secret_provider = 'vault_kv_v2' AND ciphertext IS NULL "
+            "AND nonce IS NULL AND provider_reference IS NOT NULL)",
+            name="credential_secret_storage",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -34,8 +41,12 @@ class Credential(UuidPrimaryKeyMixin, TimestampMixin, Base):
     port: Mapped[int] = mapped_column(Integer)
     database_name: Mapped[str] = mapped_column(String(255), default="", server_default="")
     username: Mapped[str] = mapped_column(String(255), default="", server_default="")
-    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
-    nonce: Mapped[bytes] = mapped_column(LargeBinary(12))
+    secret_provider: Mapped[str] = mapped_column(
+        String(32), default="local", server_default="local", index=True
+    )
+    provider_reference: Mapped[str | None] = mapped_column(String(1024))
+    ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    nonce: Mapped[bytes | None] = mapped_column(LargeBinary(12))
     tls_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 

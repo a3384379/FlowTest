@@ -1,60 +1,72 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-11（Asia/Shanghai）  
-状态：用户已明确恢复开发；正在重新验证 PR #21 的五项 CI，全部通过后收口 S19。
+最后更新：2026-08-12（Asia/Shanghai）
+状态：S20 本地实现与验收完成，待 Draft PR 全量 CI；S21 尚未开始功能编码。
 
 ## 当前恢复点
 
-- 基线：`main@8328081`（S18 已合并）。
-- 当前分支：`agent/s19-quality-scale`。
-- 暂停记录提交：`02beea4`；本次恢复提交将重新触发完整 CI。
-- Draft PR：[GitHub #21](https://github.com/a3384379/FlowTest/pull/21)。
-- S17 Draft PR #19 与 S18 PR #20 已合并；S19 已实现但尚未合并、尚未创建 `v1.8.0` 标签。
-- S20、S21 与 V3 S22–S31 均未开始。
-- `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，保持原样；计划在 S22 排除 `.DS_Store` 后纳入 Git。
+- V1.8 基线：`main@7f2b6a7846ad157336c902ecfe518b49e89c8c9c`，标签 `v1.8.0`。
+- 当前分支：`agent/s20-enterprise-observability`。
+- S19 PR #21 已全绿并 squash 合并；用户要求修复的五项取消/失败检查已由新提交全部替代为通过结果。
+- S20 本地功能、迁移、单元/集成、浏览器、观测栈和 PITR 演练已通过；尚未提交 Draft PR，GitHub CI 状态待创建 PR 后记录。
+- S21 AI 助手与 V2 发布、V3 S22–S31 均未开始。
+- `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，保持原样；计划在 S22 排除 `.DS_Store` 后单独纳入 Git。
 
-## S19 已完成实现
+## S20 已完成实现
 
-1. Test Plan 支持五字段 Cron、IANA 时区、0～9 优先级，以及 `general`、`data`、`ai` 多队列。
-2. 项目并发与排队配额使用 PostgreSQL 锁保证一致性；API 和 Worker 分离处理排队、延迟领取与取消。
-3. Compose 提供 General、Data、AI 三类 Worker，并按目标类型路由任务。
-4. Flaky 记录支持确定性聚合、隔离和固定到计划 Snapshot。
-5. Quality Gate 覆盖通过率、失败数、Flaky、耗时基线回归与 Breaking Change；提供 CI Token 接口。
-6. JUnit XML 导出、质量中心中文 UI、S19 冒烟与 Playwright 验收已实现。
-7. Alembic `20260811_0015` 具备 upgrade/downgrade，并已完成真实 PostgreSQL 往返与漂移检查。
-8. 真实容量脚本覆盖 100 个并发 Workflow 和停止 Worker 后持久化 1000 个排队任务。
+### OIDC Authorization Code + PKCE
 
-## 已完成验证
+1. 新增一次性 `OIDCLoginTransaction`；state/nonce 只保存 SHA-256，PKCE verifier 使用 AES-GCM 加密。
+2. 回调在访问 Provider 前以数据库行锁消费事务，阻止并发重放；校验签名、Issuer、Audience、nonce、允许算法、邮箱已验证和允许域名。
+3. JIT 用户默认无系统管理员和项目权限；本地管理员登录保留；固定前端成功地址，不在 URL 暴露 Access Token。
+4. Access Token 保持 15 分钟；Refresh Token 通过 HttpOnly/SameSite Cookie 轮换与撤销。
+5. Alembic `20260811_0016` 提供 upgrade/downgrade。
 
-- 后端：Ruff、mypy strict、依赖边界检查通过；175 项测试通过、3 项按环境跳过，总覆盖率 90.53%。
-- 前端：94 项测试通过；Statements 83.24%、Branches 80.21%、Functions 81.26%、Lines 85.17%；构建通过。
-- Playwright：S14–S19 与 V1 主路径共 7 项通过。
-- 安全：前后端依赖审计无已知漏洞；上一完整提交的源代码和镜像扫描通过。
-- API 稳态容量：本地三次 P95 均低于 0.5 秒；脚本增加连接池预热但没有放宽默认门槛。
-- 100 Workflow：本地 100/100 通过，最近一次 P95 4.788 秒，无失败。
-- 1000 排队任务：本地 1000/1000 到达终态，Run ID 与 Execution ID 均唯一，零失败、零重复终态，耗时 41.978 秒。
-- Compose 全栈在暂停前健康；现已执行 `docker compose stop`，数据卷未删除。
+### Vault KV v2 Credential Provider
 
-## 暂停与恢复时的 CI 状态
+1. Credential 支持 `local` 与 `vault_kv_v2`；Vault 路径由平台生成，数据库仅保存 Provider 引用。
+2. 创建、运行时读取、轮换和删除均通过固定 KV v2 API；禁止重定向，生产要求 HTTPS，API 只返回元数据。
+3. Workflow Snapshot 通过注入的外部 Secret Store 固定运行材料；Vault 明文不进入 ORM、响应、日志或 Snapshot。
+4. Alembic `20260811_0017` 提供 upgrade/downgrade；若存在 Vault Credential，降级会明确拒绝而不是静默丢失引用。
 
-用户要求暂停后，已主动取消 `6391c5b` 上仍运行的 Frontend、Security 与 Compose 工作流；Backend Test 与 Integration 已通过。取消是人为停止，不代表测试失败。
+### OpenTelemetry、指标与 Grafana
 
-用户已要求继续并修复五项未通过问题。GitHub 将上述五项已取消检查显示为失败；恢复后的处理方式是以最新提交重新运行 Backend Test、Backend Integration、Frontend Build、Security Source and Images、Compose Smoke，不把取消结果当作通过。
+1. FastAPI、HTTPX、SQLAlchemy、Celery 使用 OTel 自动插桩；执行引擎通过基础设施装饰器产生 Workflow/Node Span，不依赖 OTel SDK。
+2. W3C Trace Context 已真实验证贯通 API → Celery → Workflow → Node；Trace 标签不含请求正文或 Secret。
+3. Prometheus 新增 General/Data/AI 队列深度、三类 Worker 心跳、任务 succeeded/failed/retried 计数和可用性指标。
+4. 修复不可变 `NodeExecutionError` 穿过 OTel Context Manager 后丢失重试类别的回归，并增加行为测试。
+5. 可选 Compose `observability` Profile 固定 OTel Collector 0.153.0、Tempo 2.10.7、Prometheus 3.12.0、Grafana 12.4.3；中文仪表盘和数据源已真实启动验证。
 
-此前 `41af5c8` 的 Backend、Frontend、Integration 与 Security 均通过；Compose 已通过所有功能、浏览器和 100 Workflow 步骤，最后仅因 1000 任务入队客户端固定 30 秒超时而退出。`6391c5b` 已将该传输超时绑定到整体 900 秒容量窗口，并在本地完成上述 1000/1000 验证。
+### WAL-G PITR
 
-## 当前收口步骤
+1. PostgreSQL 17.6 镜像内置 WAL-G 3.0.8；ARM64/AMD64 下载包分别固定 SHA-256 并在构建期校验。
+2. PITR 默认关闭；启用时打开 `archive_mode`，使用加密 WAL-G S3/MinIO 前缀连续归档。
+3. 提供基础备份脚本和隔离 PITR 演练脚本；临时容器与卷使用显式前缀并在结束后清理，不挂载当前数据卷。
+4. 真实演练已验证：目标时间前的 `base`、`before-target` 存在，目标时间后的 `after-target` 不存在。
 
-1. 以恢复提交重新运行 PR #21 的 Backend、Frontend、Security 与 Compose 全量 CI，不使用被取消的结果代替。
-2. 若有真实失败，基于失败日志修复并重新执行相关检查。
-3. 全绿后将 Draft PR 转为 Ready，squash 合并 `main`，删除迭代分支并创建、推送 `v1.8.0`。
-4. 从更新后的 `main` 创建 `agent/s20-enterprise-observability`；S20 首项为 OIDC Code + PKCE、Vault KV v2、OpenTelemetry/Grafana 与可选 WAL-G PITR。
-5. S20 完成并合并前，不开始 S21；S21 完成、V2 升级/回滚及真实 14 天 RC 达标前，不创建 `v2.0.0`，也不开始 S22。
+## S20 已完成验证
 
-## 已识别但未开始的 S20 接入点
+- 后端：Ruff format/check、mypy strict 全绿；190 项通过、3 项按环境跳过；总覆盖率 90.30%。
+- 安全重点：OIDC Service 97%、OIDC HTTP 96%、Credential 96%、Vault HTTP 97%，均达到 95% 模块门槛。
+- 前端：95 项通过；Statements 83.27%、Branches 80.07%、Functions 81.25%、Lines 85.19%；构建通过。
+- Playwright：Setup 1/1、S14–S19 与 V1 主路径 7/7 通过；人工浏览器验收登录与真实 Dashboard 通过。
+- 迁移：真实 PostgreSQL 完成 `0017 → 0015 → 0017`，`alembic check` 无漂移。
+- 观测栈：Collector、Tempo、Prometheus、Grafana 启动通过；Prometheus Target 为 up，Grafana 预置仪表盘可查询，跨 API/Worker Trace 可下钻。
+- 恢复：WAL-G 加密基础备份、WAL 归档和隔离时间点恢复通过。
+- 依赖审计：Python 与前端生产依赖均无已知漏洞。
+- Compose：API、Web、PostgreSQL、Redis、MinIO、General/Data/AI Worker、Beat 与可选观测栈均已真实运行。
 
-- OIDC：新增一次性服务端登录事务，校验 state、nonce、PKCE、Issuer、Audience、签名、邮箱验证和允许域名；JIT 用户默认无项目权限，本地管理员登录保留。
-- Vault：Credential 增加 `local`/`vault_kv_v2` Provider 元数据；Vault Secret 不落库、不从 API 返回。
-- 可观测性：传播 W3C Trace Context，打通 API → Celery Worker → Workflow Node；补充队列和 Worker 指标及 Grafana 模板。
-- PITR：提供可选 WAL-G Profile、备份/恢复脚本和隔离恢复演练，不能以现有逻辑备份冒充 PITR。
-- CI：可在 S20 引入固定 SHA 的 Buildx/GHA Layer Cache，减少固定 Python 3.13.15 镜像从源码重复构建时间；该优化尚未写入代码。
+## 本轮额外修复
+
+1. S15 E2E 不再假设项目列表第一项固定为 V1 Pilot，改用当前项目内可用环境。
+2. Ant Design Select 定位器限定到最后打开的可见下拉层，避免关闭动画导致跨下拉误点。
+3. V1 E2E 显式选择 `S11 V1 Pilot` 项目，避免容量/Smoke 新建项目改变路由目标。
+4. E2E Setup 无论首次改密标志如何，都会把管理员密码规范为唯一 active 密码，消除每个测试双重失败登录和限流碰撞。
+5. Compose 的 OIDC/OTel JSON 环境变量修正为无额外引号的合法 JSON。
+
+## 下一步
+
+1. 提交 S20，创建 Draft PR，执行 Backend、Frontend、Security、Compose 全量 CI；真实失败修复后再 Ready/squash 合并。
+2. 合并后从 `main` 创建 `agent/s21-ai-release`，实现 OpenAI-compatible 异步 AI Job、Suggestion 审核、严格 JSON Schema、脱敏与评测集。
+3. S21 完成升级/回滚、隔离恢复、安全扫描和两周 RC 观察前，不创建 `v2.0.0`。
+4. `v2.0.0` 真实发布前不开始 S22；V3 原型资产在 S22 以独立提交纳入。

@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.models.executions import APICallExecution
 from app.models.tasking import TestPlanRun
 from app.models.workflows import WorkflowExecution
+from app.observability.task_metrics import TaskMetricsReader
 
 HISTOGRAM_BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 UUID_PATH_SEGMENT = re.compile(
@@ -78,7 +79,11 @@ class MetricsRegistry:
         return lines
 
 
-async def render_metrics(registry: MetricsRegistry, session: AsyncSession) -> str:
+async def render_metrics(
+    registry: MetricsRegistry,
+    session: AsyncSession,
+    task_metrics: TaskMetricsReader | None = None,
+) -> str:
     lines = registry.render_http()
     lines.extend(
         [
@@ -115,7 +120,44 @@ async def render_metrics(registry: MetricsRegistry, session: AsyncSession) -> st
                 "flowtest_execution_metrics_available 1",
             ]
         )
+    if task_metrics is not None:
+        await _append_task_metrics(lines, task_metrics)
     return "\n".join(lines) + "\n"
+
+
+async def _append_task_metrics(lines: list[str], reader: TaskMetricsReader) -> None:
+    try:
+        snapshot = await reader.read()
+    except (OSError, SQLAlchemyError):
+        available = 0
+    else:
+        available = 1
+        lines.extend(
+            [
+                "# HELP flowtest_celery_queue_depth Tasks waiting in each logical queue.",
+                "# TYPE flowtest_celery_queue_depth gauge",
+            ]
+        )
+        for queue, depth in sorted(snapshot.queue_depths.items()):
+            lines.append(f'flowtest_celery_queue_depth{{queue="{_escape(queue)}"}} {depth}')
+        lines.extend(
+            [
+                "# HELP flowtest_celery_workers_active Workers with a current heartbeat.",
+                "# TYPE flowtest_celery_workers_active gauge",
+                f"flowtest_celery_workers_active {snapshot.active_workers}",
+                "# HELP flowtest_celery_tasks_total Worker task terminal outcomes.",
+                "# TYPE flowtest_celery_tasks_total counter",
+            ]
+        )
+        for status, count in sorted(snapshot.task_counts.items()):
+            lines.append(f'flowtest_celery_tasks_total{{status="{_escape(status)}"}} {count}')
+    lines.extend(
+        [
+            "# HELP flowtest_celery_metrics_available Celery metrics store availability.",
+            "# TYPE flowtest_celery_metrics_available gauge",
+            f"flowtest_celery_metrics_available {available}",
+        ]
+    )
 
 
 def normalize_path(path: str) -> str:

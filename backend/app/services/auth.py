@@ -55,6 +55,22 @@ class AuthService:
         await self._session.commit()
         return pair
 
+    async def login_oidc(self, *, user: User, provider: str) -> TokenPair:
+        if not user.is_active:
+            raise AppError(code="OIDC_USER_DISABLED", message="用户已停用", status_code=403)
+        user.last_login_at = datetime.now(UTC)
+        pair = await self._issue_pair(user)
+        self._audit.record(
+            actor_user_id=user.id,
+            project_id=None,
+            action="auth.oidc_login",
+            resource_type="user",
+            resource_id=user.id,
+            details={"provider": provider},
+        )
+        await self._session.commit()
+        return pair
+
     async def rotate(self, refresh_token: str) -> TokenPair:
         token_hash = self._tokens.digest_refresh_token(refresh_token)
         current = await self._refresh_sessions.get_by_hash(token_hash)

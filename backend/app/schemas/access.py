@@ -16,6 +16,9 @@ class UserResponse(BaseModel):
     is_active: bool
     is_system_admin: bool
     requires_password_change: bool
+    oidc_provider: str | None
+    oidc_subject: str | None
+    last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -36,6 +39,11 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105 -- OAuth token type identifier
     expires_in: int
+
+
+class OIDCStatusResponse(BaseModel):
+    enabled: bool
+    provider: str | None
 
 
 class UserCreate(BaseModel):

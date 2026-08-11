@@ -11,7 +11,8 @@
 1. 复制 `.env.example` 为 `.env`。
 2. 将 `FLOWTEST_ENVIRONMENT` 设置为 `production`。
 3. 替换 JWT 签名密钥、管理员密码、AES-256-GCM 密钥、PostgreSQL、MinIO 凭据并设置
-   `FLOWTEST_SECURE_COOKIES=true`。应用会拒绝携带示例凭据的生产配置。
+   `FLOWTEST_SECURE_COOKIES=true`。启用 OIDC、Vault、Grafana 或 PITR 时，同时替换相应 Client
+   Secret、Vault Token、Grafana 密码和 WAL-G 加密密钥。应用会拒绝核心服务携带示例凭据的生产配置。
 4. 运行 `docker compose config --quiet`，确认插值结果中没有空凭据。
 5. 运行 `docker compose up -d --build --wait`。
 6. 验证 `/api/v1/live`、`/api/v1/ready`、`/api/v1/metrics` 和 Web 首页。

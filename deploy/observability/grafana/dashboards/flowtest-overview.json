@@ -1,0 +1,67 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "flowtest-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "flowtest_celery_queue_depth", "legendFormat": "{{queue}}"}],
+      "title": "Celery 队列深度",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "flowtest-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "flowtest_celery_workers_active"}],
+      "title": "活跃 Worker",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "flowtest-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(flowtest_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "P95"
+        }
+      ],
+      "title": "API P95 延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "flowtest-prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [
+        {"expr": "sum by (kind, status) (flowtest_execution_records)", "legendFormat": "{{kind}} / {{status}}"}
+      ],
+      "title": "执行状态",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "flowtest-prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "targets": [
+        {"expr": "sum by (status) (rate(flowtest_http_requests_total[5m]))", "legendFormat": "HTTP {{status}}"}
+      ],
+      "title": "HTTP 请求速率",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["flowtest"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "FlowTest 运行概览",
+  "uid": "flowtest-overview",
+  "version": 1
+}

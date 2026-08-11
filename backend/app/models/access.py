@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -27,6 +28,9 @@ def _project_role_values(role_type: type[ProjectRole] | type[TeamGrantRole]) -> 
 
 class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("oidc_provider", "oidc_subject", name="uq_users_oidc_identity"),
+    )
 
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(120))
@@ -36,6 +40,22 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     requires_password_change: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true"
     )
+    oidc_provider: Mapped[str | None] = mapped_column(String(120), index=True)
+    oidc_subject: Mapped[str | None] = mapped_column(String(255))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OIDCLoginTransaction(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "oidc_login_transactions"
+
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64))
+    verifier_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    verifier_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    redirect_uri: Mapped[str] = mapped_column(String(2048))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RefreshSession(UuidPrimaryKeyMixin, TimestampMixin, Base):
