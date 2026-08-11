@@ -1,0 +1,37 @@
+[
+  {
+    "name": "authorization_header",
+    "metadata": {
+      "Authorization": "Bearer owner-token-must-not-leak",
+      "operation": "GET /users"
+    },
+    "sample": null,
+    "forbidden": ["owner-token-must-not-leak"],
+    "required": ["GET /users", "[REDACTED]"]
+  },
+  {
+    "name": "nested_secret_and_jwt",
+    "metadata": {
+      "connection": {
+        "clientSecret": "database-password-must-not-leak",
+        "message": "token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature123"
+      },
+      "status": 503
+    },
+    "sample": null,
+    "forbidden": ["database-password-must-not-leak", "eyJhbGciOiJSUzI1NiJ9"],
+    "required": ["503", "[REDACTED]"]
+  },
+  {
+    "name": "sample_password",
+    "metadata": {
+      "operation": "POST /login"
+    },
+    "sample": {
+      "username": "evaluation-user",
+      "password": "sample-password-must-not-leak"
+    },
+    "forbidden": ["sample-password-must-not-leak"],
+    "required": ["evaluation-user", "[REDACTED]"]
+  }
+]

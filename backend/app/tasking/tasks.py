@@ -10,6 +10,8 @@ from redis.asyncio import Redis
 from app.core.config import settings
 from app.core.database import close_database, session_factory
 from app.core.storage import ensure_storage_bucket
+from app.http.ai import OpenAICompatibleConfiguration, OpenAICompatibleProvider
+from app.services.ai import AIJobRunner
 from app.services.execution_events import RedisExecutionEventBus
 from app.services.notifications import NotificationDeliveryService
 from app.services.retention import RetentionCleanupService
@@ -86,6 +88,24 @@ async def _cleanup_retention() -> None:
     async with session_factory() as session:
         summary = await RetentionCleanupService(session).cleanup()
     logger.info("Retention cleanup completed: %s", summary)
+
+
+@celery_app.task(name="flowtest.run_ai_job")  # type: ignore[untyped-decorator]
+def run_ai_job(job_id: str) -> None:
+    _run_async(lambda: _run_ai_job(UUID(job_id)))
+
+
+async def _run_ai_job(job_id: UUID) -> None:
+    provider = OpenAICompatibleProvider(
+        OpenAICompatibleConfiguration(
+            base_url=settings.ai_base_url,
+            model=settings.ai_model,
+            api_key=settings.ai_api_key,
+            timeout_seconds=settings.ai_request_timeout_seconds,
+        )
+    )
+    async with session_factory() as session:
+        await AIJobRunner(session, provider).run(job_id)
 
 
 def _run_async(operation: Callable[[], Coroutine[Any, Any, None]]) -> None:

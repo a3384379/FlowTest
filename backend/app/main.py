@@ -36,6 +36,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.execution_event_bus = event_bus
     application.state.workflow_run_coordinator = dispatcher
     application.state.test_plan_dispatcher = dispatcher
+    application.state.ai_job_dispatcher = dispatcher
     yield
     shutdown_tracing()
     await close_redis()

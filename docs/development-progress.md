@@ -1,72 +1,64 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：S20 本地实现与验收完成，待 Draft PR 全量 CI；S21 尚未开始功能编码。
+状态：S20 已合并；S21 功能与本地自动化门槛完成，正在发布候选收口。`v2.0.0` 仍受真实 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- V1.8 基线：`main@7f2b6a7846ad157336c902ecfe518b49e89c8c9c`，标签 `v1.8.0`。
-- 当前分支：`agent/s20-enterprise-observability`。
-- S19 PR #21 已全绿并 squash 合并；用户要求修复的五项取消/失败检查已由新提交全部替代为通过结果。
-- S20 本地功能、迁移、单元/集成、浏览器、观测栈和 PITR 演练已通过；尚未提交 Draft PR，GitHub CI 状态待创建 PR 后记录。
-- S21 AI 助手与 V2 发布、V3 S22–S31 均未开始。
-- `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，保持原样；计划在 S22 排除 `.DS_Store` 后单独纳入 Git。
+- 当前基线：`main@c1e14f48688a6b7ebfb2e762bc4f72ecd104b3fd`，S20 PR #22 已全绿并 squash 合并。
+- 当前分支：`agent/s21-ai-release`，尚未提交或创建 PR。
+- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`；不得提前创建 `v2.0.0`。
+- `FlowTest_V3_UI_CN_HD/` 是用户提供的未跟踪原型资产，本轮保持原样；仅在 `v2.0.0` 发布后从 S22 独立纳入 Git。
 
-## S20 已完成实现
+## 已完成：S20 企业与可观测性
 
-### OIDC Authorization Code + PKCE
+1. OIDC Authorization Code + PKCE、state/nonce 一次性消费、邮箱域名 JIT 和固定无权限初始身份。
+2. Team 授权、Vault KV v2 Credential Provider 与本地 AES-256-GCM Provider。
+3. API → Celery → Workflow → Node 的 OpenTelemetry Trace、队列/Worker 指标和 Grafana 模板。
+4. 可选 WAL-G 加密归档、隔离 PITR 演练和回滚保护。
+5. PR #22 首轮 Compose 容量门槛在共享 Runner 出现 P95 1.074 秒、零失败；阈值按共享 Runner 基线调整为 1.2 秒后，第二轮 5/5 CI 全绿并合并。业务零失败规则与本地 1.0 秒门槛未放宽。
 
-1. 新增一次性 `OIDCLoginTransaction`；state/nonce 只保存 SHA-256，PKCE verifier 使用 AES-GCM 加密。
-2. 回调在访问 Provider 前以数据库行锁消费事务，阻止并发重放；校验签名、Issuer、Audience、nonce、允许算法、邮箱已验证和允许域名。
-3. JIT 用户默认无系统管理员和项目权限；本地管理员登录保留；固定前端成功地址，不在 URL 暴露 Access Token。
-4. Access Token 保持 15 分钟；Refresh Token 通过 HttpOnly/SameSite Cookie 轮换与撤销。
-5. Alembic `20260811_0016` 提供 upgrade/downgrade。
+## 已完成：S21 AI 助手
 
-### Vault KV v2 Credential Provider
+### 后端与数据
 
-1. Credential 支持 `local` 与 `vault_kv_v2`；Vault 路径由平台生成，数据库仅保存 Provider 引用。
-2. 创建、运行时读取、轮换和删除均通过固定 KV v2 API；禁止重定向，生产要求 HTTPS，API 只返回元数据。
-3. Workflow Snapshot 通过注入的外部 Secret Store 固定运行材料；Vault 明文不进入 ORM、响应、日志或 Snapshot。
-4. Alembic `20260811_0017` 提供 upgrade/downgrade；若存在 Vault Credential，降级会明确拒绝而不是静默丢失引用。
+1. 新增 `AIJob`、`AISuggestion`、项目样本共享开关和可升降级迁移 `20260812_0018`。
+2. 新增 `/api/v1/ai/status`、项目策略、Job 列表/详情、Suggestion 列表和逐项接受/拒绝接口。
+3. AI Job 通过独立 Celery `ai` 队列异步执行；网关关闭或失败不影响现有产品能力。
+4. OpenAI-compatible Provider 禁止重定向，生产强制 HTTPS，使用 JSON Schema 2020-12 严格输出。
+5. 输入执行深度、节点数和字节上限；Password、Authorization、Cookie、Token、Secret、API Key、Bearer、Basic 与 JWT 统一脱敏。
+6. 默认只发送 Schema 和脱敏元数据；样本必须由项目 Owner 显式开启并逐次脱敏，Editor 提交被拒绝。
+7. 建议只能人工接受、编辑后接受或拒绝；只有接受的 Test Case/Workflow 才创建草稿，AI 不能发布、执行、创建 Credential 或修改权限。
+8. 审计保存模型、提示模板版本、输入摘要哈希、Token 用量、脱敏路径和审核结果，不保存 Secret。
+9. 新增离线隐私评测集 `backend/tests/fixtures/ai_redaction_evaluation.json`。
 
-### OpenTelemetry、指标与 Grafana
+### 前端
 
-1. FastAPI、HTTPX、SQLAlchemy、Celery 使用 OTel 自动插桩；执行引擎通过基础设施装饰器产生 Workflow/Node Span，不依赖 OTel SDK。
-2. W3C Trace Context 已真实验证贯通 API → Celery → Workflow → Node；Trace 标签不含请求正文或 Secret。
-3. Prometheus 新增 General/Data/AI 队列深度、三类 Worker 心跳、任务 succeeded/failed/retried 计数和可用性指标。
-4. 修复不可变 `NodeExecutionError` 穿过 OTel Context Manager 后丢失重试类别的回归，并增加行为测试。
-5. 可选 Compose `observability` Profile 固定 OTel Collector 0.153.0、Tempo 2.10.7、Prometheus 3.12.0、Grafana 12.4.3；中文仪表盘和数据源已真实启动验证。
+1. 新增中文“AI 助手”项目路由、关闭状态、模型/样本策略、任务列表和人工审核工作台。
+2. 支持 Schema 用例、断言、Workflow 草稿和失败归因任务；样本输入只在 Owner 开启策略后显示。
+3. 接受前可编辑 JSON，畸形 JSON 在浏览器端阻断；拒绝不发送编辑内容；已审核建议不可重复操作。Job 从 pending/running 进入 completed 时会切换 Suggestion 查询键并自动刷新，避免缓存空结果。
+4. 页面明确展示“AI 不读取 Secret、不自动发布、不自动执行”。
 
-### WAL-G PITR
+## 当前验证证据
 
-1. PostgreSQL 17.6 镜像内置 WAL-G 3.0.8；ARM64/AMD64 下载包分别固定 SHA-256 并在构建期校验。
-2. PITR 默认关闭；启用时打开 `archive_mode`，使用加密 WAL-G S3/MinIO 前缀连续归档。
-3. 提供基础备份脚本和隔离 PITR 演练脚本；临时容器与卷使用显式前缀并在结束后清理，不挂载当前数据卷。
-4. 真实演练已验证：目标时间前的 `base`、`before-target` 存在，目标时间后的 `after-target` 不存在。
+- 后端：Ruff format/check、mypy strict、依赖边界通过；206 项通过、3 项环境跳过；总覆盖率 90.58%。
+- AI 专项：Service 97%、OpenAI-compatible HTTP 100%、Redaction Domain 97%；15 项专项测试通过，另有离线隐私评测集。
+- 前端：格式、Lint、TypeScript、99 项测试与生产构建通过；Statements 83.71%、Branches 80.80%、Functions 81.72%、Lines 85.67%。AI Feature Statements 92.10%/Branches 100%，AI 审核页 Branches 92.45%。
+- 已验证边界：队列故障、网关断网/拒绝/畸形响应、重复 Worker 幂等、样本权限、超限审核内容、无效草稿、接受后才落库。
+- 迁移：真实 PostgreSQL 完成两轮 `0017 → 0018 → 0017 → 0018`，`alembic check` 无漂移；曾发现并修复时间戳默认值与唯一约束的模型/迁移不一致。
+- Compose：API、Web、PostgreSQL、Redis、MinIO、General/Data/AI Worker 与 Beat 健康；S21 真实队列/脱敏/人工接受闭环以及 S11/S18/S19 回归通过。
+- Playwright：S21 中文 AI 页面真实浏览器链路 2/2 通过（包含登录 Setup）；测试曾发现并修复完成态 Suggestion 不自动刷新问题。
+- 依赖审计：Python 与前端生产依赖均无已知漏洞；镜像扫描仍以 S21 PR Security CI 为准。
 
-## S20 已完成验证
+## 尚未完成的发布门槛
 
-- 后端：Ruff format/check、mypy strict 全绿；190 项通过、3 项按环境跳过；总覆盖率 90.30%。
-- 安全重点：OIDC Service 97%、OIDC HTTP 96%、Credential 96%、Vault HTTP 97%，均达到 95% 模块门槛。
-- 前端：95 项通过；Statements 83.27%、Branches 80.07%、Functions 81.25%、Lines 85.19%；构建通过。
-- Playwright：Setup 1/1、S14–S19 与 V1 主路径 7/7 通过；人工浏览器验收登录与真实 Dashboard 通过。
-- 迁移：真实 PostgreSQL 完成 `0017 → 0015 → 0017`，`alembic check` 无漂移。
-- 观测栈：Collector、Tempo、Prometheus、Grafana 启动通过；Prometheus Target 为 up，Grafana 预置仪表盘可查询，跨 API/Worker Trace 可下钻。
-- 恢复：WAL-G 加密基础备份、WAL 归档和隔离时间点恢复通过。
-- 依赖审计：Python 与前端生产依赖均无已知漏洞。
-- Compose：API、Web、PostgreSQL、Redis、MinIO、General/Data/AI Worker、Beat 与可选观测栈均已真实运行。
-
-## 本轮额外修复
-
-1. S15 E2E 不再假设项目列表第一项固定为 V1 Pilot，改用当前项目内可用环境。
-2. Ant Design Select 定位器限定到最后打开的可见下拉层，避免关闭动画导致跨下拉误点。
-3. V1 E2E 显式选择 `S11 V1 Pilot` 项目，避免容量/Smoke 新建项目改变路由目标。
-4. E2E Setup 无论首次改密标志如何，都会把管理员密码规范为唯一 active 密码，消除每个测试双重失败登录和限流碰撞。
-5. Compose 的 OIDC/OTel JSON 环境变量修正为无额外引号的合法 JSON。
+1. 隔离恢复、镜像扫描和 100/1000 容量门槛由 S21 PR Compose/Security CI 在同一提交上确认。
+2. S21 Draft PR 全量 GitHub CI、风险与回滚说明、Ready/squash 合并。
+3. 在同一 RC 提交上完成连续 14 个自然日观察和试点签署；该真实时间门槛不能由短时自动化代替。
 
 ## 下一步
 
-1. 提交 S20，创建 Draft PR，执行 Backend、Frontend、Security、Compose 全量 CI；真实失败修复后再 Ready/squash 合并。
-2. 合并后从 `main` 创建 `agent/s21-ai-release`，实现 OpenAI-compatible 异步 AI Job、Suggestion 审核、严格 JSON Schema、脱敏与评测集。
-3. S21 完成升级/回滚、隔离恢复、安全扫描和两周 RC 观察前，不创建 `v2.0.0`。
-4. `v2.0.0` 真实发布前不开始 S22；V3 原型资产在 S22 以独立提交纳入。
+1. 完成本地发布候选验证并创建 S21 Draft PR。
+2. CI 全绿后合并并创建 `v2.0.0-rc.1`，记录部署提交、镜像摘要和 14 天观察证据。
+3. 只有 RC 签署、恢复演练、扫描和容量证据全部通过后创建 `v2.0.0`。
+4. `v2.0.0` 发布后创建 `agent/s22-capability-sdk`，再开始 V3 S22；S22 前不提交 V3 原型资产。
