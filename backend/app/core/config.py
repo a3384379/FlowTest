@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "1.8.0"
+    app_version: str = "2.0.0-rc.1"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     feature_quality_center_enabled: bool = False
     feature_oidc_enabled: bool = False
     feature_ai_enabled: bool = False
+    ai_base_url: str = ""
+    ai_model: str = ""
+    ai_api_key: str = ""
+    ai_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    ai_max_suggestions: int = Field(default=20, ge=1, le=50)
     oidc_provider_name: str = "default"
     oidc_issuer_url: str = ""
     oidc_client_id: str = ""
@@ -90,8 +95,15 @@ class Settings(BaseSettings):
             raise ValueError("默认保留天数不能超过系统保留上限")
         self._validate_oidc()
         self._validate_vault()
+        self._validate_ai()
         self._validate_production()
         return self
+
+    def _validate_ai(self) -> None:
+        if not self.feature_ai_enabled:
+            return
+        if not self.ai_base_url.strip() or not self.ai_model.strip() or not self.ai_api_key.strip():
+            raise ValueError("启用 AI 时必须配置 Base URL、Model 和 API Key")
 
     def _validate_oidc(self) -> None:
         if not self.feature_oidc_enabled:
@@ -132,6 +144,8 @@ class Settings(BaseSettings):
                 raise ValueError("生产环境 OIDC 地址必须使用 HTTPS")
         if self.vault_kv2_enabled and urlsplit(self.vault_address).scheme != "https":
             raise ValueError("生产环境 Vault 地址必须使用 HTTPS")
+        if self.feature_ai_enabled and urlsplit(self.ai_base_url).scheme != "https":
+            raise ValueError("生产环境 AI 网关必须使用 HTTPS")
 
     def _validate_vault(self) -> None:
         if not self.vault_kv2_enabled:

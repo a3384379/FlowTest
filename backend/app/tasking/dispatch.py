@@ -15,6 +15,10 @@ class TestPlanDispatcher(Protocol):
     def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None: ...
 
 
+class AIJobDispatcher(Protocol):
+    def start_ai_job(self, job_id: UUID) -> None: ...
+
+
 class CeleryTaskDispatcher:
     def __init__(self, celery: Celery) -> None:
         self._celery = celery
@@ -35,6 +39,15 @@ class CeleryTaskDispatcher:
             args=[str(run_id)],
             queue=queue_name,
             priority=priority,
+            headers=current_trace_headers(),
+        )
+
+    def start_ai_job(self, job_id: UUID) -> None:
+        self._celery.send_task(
+            "flowtest.run_ai_job",
+            args=[str(job_id)],
+            queue="ai",
+            priority=5,
             headers=current_trace_headers(),
         )
 

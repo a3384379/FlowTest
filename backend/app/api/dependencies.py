@@ -13,7 +13,7 @@ from app.http.oidc import HttpOIDCProvider
 from app.models.access import User
 from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
-from app.tasking.dispatch import TestPlanDispatcher, WorkflowDispatcher
+from app.tasking.dispatch import AIJobDispatcher, TestPlanDispatcher, WorkflowDispatcher
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -95,3 +95,17 @@ def get_test_plan_dispatcher(request: Request) -> TestPlanDispatcher:
 
 
 TestPlanQueue = Annotated[TestPlanDispatcher, Depends(get_test_plan_dispatcher)]
+
+
+def get_ai_job_dispatcher(request: Request) -> AIJobDispatcher:
+    dispatcher = getattr(request.app.state, "ai_job_dispatcher", None)
+    if dispatcher is None or not callable(getattr(dispatcher, "start_ai_job", None)):
+        raise AppError(
+            code="AI_QUEUE_UNAVAILABLE",
+            message="AI 任务队列尚未就绪",
+            status_code=503,
+        )
+    return cast(AIJobDispatcher, dispatcher)
+
+
+AIJobQueue = Annotated[AIJobDispatcher, Depends(get_ai_job_dispatcher)]

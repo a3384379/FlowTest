@@ -100,6 +100,9 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
         Integer, default=20, server_default="20"
     )
     queued_run_limit: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
+    ai_sample_sharing_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

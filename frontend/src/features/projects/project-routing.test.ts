@@ -9,11 +9,13 @@ describe('project routing', () => {
     expect(projectPath('project-1', 'workflows')).toBe('/projects/project-1/workflows')
     expect(projectPath('project-1', 'assets')).toBe('/projects/project-1/assets')
     expect(projectPath('project-1', 'quality')).toBe('/projects/project-1/quality')
+    expect(projectPath('project-1', 'ai')).toBe('/projects/project-1/ai')
   })
 
   it('reads supported sections and falls back safely', () => {
     expect(sectionFromPath('/projects/project-1/reports')).toBe('reports')
     expect(sectionFromPath('/projects/project-1/quality')).toBe('quality')
+    expect(sectionFromPath('/projects/project-1/ai')).toBe('ai')
     expect(sectionFromPath('/unexpected')).toBe('dashboard')
   })
 })

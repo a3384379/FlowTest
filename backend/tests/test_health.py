@@ -14,7 +14,7 @@ async def test_health_check() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "FlowTest API",
-        "version": "1.8.0",
+        "version": "2.0.0-rc.1",
     }
 
 

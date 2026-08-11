@@ -110,8 +110,8 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S17 | 数据与 Mock | Credential、只读 PostgreSQL/MySQL/Redis 节点、规则化 Mock | 已完成 |
 | S18 | 契约自动化 | OpenAPI 用例生成、Breaking Change、Schema 覆盖率、草稿审核 | 已完成 |
 | S19 | v1.8.0 质量与规模 | Cron/时区、多队列、配额、Flaky、JUnit、Quality Gate、100/1000 容量 | 已完成 |
-| S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 待实施 |
-| S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 待实施 |
+| S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 已完成 |
+| S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 功能完成；RC 观察待执行 |
 
 S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
 [`docs/operations/soak-observation.md`](operations/soak-observation.md)。

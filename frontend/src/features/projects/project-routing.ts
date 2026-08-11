@@ -7,6 +7,7 @@ export type ProjectSection =
   | 'data'
   | 'tasks'
   | 'quality'
+  | 'ai'
   | 'reports'
 
 export function projectPath(projectId: string, section: ProjectSection): string {
@@ -33,6 +34,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'data',
     'tasks',
     'quality',
+    'ai',
     'reports',
   ].includes(value ?? '')
 }
