@@ -8,27 +8,35 @@ test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async (
   const caseName = `S15 登录用例 ${suffix}`
   const suiteName = `S15 冒烟套件 ${suffix}`
   const planName = `S15 固定套件计划 ${suffix}`
-  const environmentName = `S15 环境 ${suffix}`
+  const firstEnvironmentName = `S15 环境 v1 ${suffix}`
+  const secondEnvironmentName = `S15 环境 v2 ${suffix}`
+  const workflowName = `S15 固定工作流 ${suffix}`
 
   await page.goto('/')
   await authenticate(page)
-  await createSecondaryEnvironment(page, environmentName)
-  await createPublishedWorkflow(page, `S15 固定工作流 ${suffix}`)
+  await createSecondaryEnvironment(page, firstEnvironmentName)
+  await createSecondaryEnvironment(page, secondEnvironmentName)
+  await createPublishedWorkflow(page, workflowName)
   await page.getByRole('link', { name: '测试资产' }).click()
   await expect(page.getByRole('heading', { name: '测试资产' })).toBeVisible()
 
-  await createCase(page, caseName)
-  await publishCaseTwiceAndReviewDiff(page, caseName)
+  await createCase(page, caseName, workflowName, firstEnvironmentName)
+  await publishCaseTwiceAndReviewDiff(page, caseName, secondEnvironmentName)
   await createAndPublishSuite(page, caseName, suiteName)
   await createSuitePlan(page, suiteName, planName)
 })
 
-async function createCase(page: Page, caseName: string) {
+async function createCase(
+  page: Page,
+  caseName: string,
+  workflowName: string,
+  environmentName: string,
+) {
   await page.getByRole('button', { name: '新建测试用例' }).click()
   const dialog = page.getByRole('dialog', { name: '新建测试用例' })
   await dialog.getByLabel('用例名称').fill(caseName)
-  await chooseLastOption(page, dialog.getByLabel('已发布工作流'))
-  await chooseLastOption(page, dialog.getByLabel('运行环境'))
+  await chooseOption(page, dialog.getByLabel('已发布工作流'), workflowName)
+  await chooseOption(page, dialog.getByLabel('运行环境'), environmentName)
   await dialog.getByLabel('标签').fill('s15')
   await page.keyboard.press('Enter')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
@@ -83,15 +91,18 @@ function authorization(token: string) {
   return { Authorization: `Bearer ${token}` }
 }
 
-async function publishCaseTwiceAndReviewDiff(page: Page, caseName: string) {
+async function publishCaseTwiceAndReviewDiff(
+  page: Page,
+  caseName: string,
+  secondEnvironmentName: string,
+) {
   await assetRow(page, caseName).getByRole('button', { name: '发布' }).click()
   await expect(assetRow(page, caseName).getByText('v1', { exact: true })).toBeVisible()
 
   await assetRow(page, caseName).getByRole('button', { name: '编辑' }).click()
   const editor = page.getByRole('dialog', { name: '编辑测试用例草稿' })
   await editor.getByLabel('说明').fill('S15 第二版固定用例')
-  await chooseFirstOption(page, editor.getByLabel('已发布工作流'))
-  await chooseFirstOption(page, editor.getByLabel('运行环境'))
+  await chooseOption(page, editor.getByLabel('运行环境'), secondEnvironmentName)
   await editor.getByRole('button', { name: /确\s*定/ }).click()
   await assetRow(page, caseName).getByRole('button', { name: '发布' }).click()
   await expect(assetRow(page, caseName).getByText('v2', { exact: true })).toBeVisible()
@@ -159,24 +170,16 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await expect(runQueue.getByRole('row').nth(1)).toContainText('passed', { timeout: 30_000 })
 }
 
-async function chooseLastOption(page: Page, select: ReturnType<Page['getByLabel']>) {
+async function chooseOption(
+  page: Page,
+  select: ReturnType<Page['getByLabel']>,
+  optionName: string,
+) {
   await select.click()
-  const options = page
-    .locator('.ant-select-dropdown:visible')
-    .last()
-    .locator('.ant-select-item-option:not(.ant-select-item-option-disabled)')
-  await expect(options.first()).toBeVisible()
-  await options.last().click()
-}
-
-async function chooseFirstOption(page: Page, select: ReturnType<Page['getByLabel']>) {
-  await select.click()
-  const options = page
-    .locator('.ant-select-dropdown:visible')
-    .last()
-    .locator('.ant-select-item-option:not(.ant-select-item-option-disabled)')
-  await expect(options.first()).toBeVisible()
-  await options.first().click()
+  const dropdown = page.locator('.ant-select-dropdown:visible').last()
+  const option = dropdown.getByText(optionName, { exact: true })
+  await expect(option).toBeVisible()
+  await option.click()
 }
 
 function assetRow(page: Page, name: string) {
