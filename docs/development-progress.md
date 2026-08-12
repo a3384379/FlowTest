@@ -43,6 +43,10 @@
     `f9ba039`，均已推送到 `agent/s27-contract-matrix`。Draft PR #30 已创建；Backend Test、
     Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 已全部触发且正在执行。
     在五项全绿前不开始 S28，也不创建 `v3.0.0-beta.2` 标签。
+13. PR #30 首轮 Backend Test 在测试前的 Ruff format 门槛失败：本地从仓库根目录格式化
+    `scripts/smoke_s27.py` 时未套用 `backend/pyproject.toml` 的 100 字符配置，CI 在 `backend` 工作目录使用
+    项目配置后识别出差异。已使用 CI 的精确命令重新格式化，并在本地通过对全部 Backend 与
+    `scripts/*.py` 的 Ruff format/check、mypy 以及依赖边界检查；该失败是真实格式门槛，不归因于计费或容量。
 
 ## 本地验收完成：S26 签名环境实验室
 

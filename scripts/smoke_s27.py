@@ -13,14 +13,10 @@ from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_pass
 def main() -> None:
     config = SmokeConfig.from_environment()
     client = APIClient(config.api_url)
-    login = client.json(
-        "POST", "/auth/login", {"email": config.email, "password": config.password}
-    )
+    login = client.json("POST", "/auth/login", {"email": config.email, "password": config.password})
     token = str(login["access_token"])
     active_password = config.password
-    password_changed = bool(
-        cast(dict[str, Any], login["user"])["requires_password_change"]
-    )
+    password_changed = bool(cast(dict[str, Any], login["user"])["requires_password_change"])
     if password_changed:
         active_password = f"FlowTest-S27-{secrets.token_urlsafe(18)}"
         _change_password(client, token, config.password, active_password)
@@ -33,9 +29,7 @@ def main() -> None:
         client.json("POST", "/auth/logout", token=token)
 
 
-def _run_acceptance(
-    client: APIClient, config: SmokeConfig, token: str
-) -> dict[str, str]:
+def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[str, str]:
     features = client.json("GET", "/v3/features", token=token)
     if not features.get("contract_hub"):
         raise RuntimeError("S27 contract hub feature is not enabled")
@@ -51,17 +45,11 @@ def _run_acceptance(
     project_id = str(project["id"])
     _allow_compose_target(client, token, project_id, config.target_url)
 
-    pact = _upload_pact(
-        client, token, project_id, version="web-1", expected_status="ok"
-    )
+    pact = _upload_pact(client, token, project_id, version="web-1", expected_status="ok")
     provider_id = str(pact["provider_service_id"])
-    graph = client.json(
-        "GET", f"/projects/{project_id}/contract-hub/service-graph", token=token
-    )
+    graph = client.json("GET", f"/projects/{project_id}/contract-hub/service-graph", token=token)
     if len(graph["nodes"]) != 2 or graph["edges"][0]["latest_status"] != "pending":
-        raise RuntimeError(
-            "S27 Pact import did not create the pending service dependency graph"
-        )
+        raise RuntimeError("S27 Pact import did not create the pending service dependency graph")
 
     verification = _verify(
         client,
@@ -72,9 +60,7 @@ def _run_acceptance(
         target_base_url=config.target_url,
     )
     if verification["status"] != "passed" or verification["passed_count"] != 1:
-        raise RuntimeError(
-            f"S27 real Compose provider verification failed: {verification}"
-        )
+        raise RuntimeError(f"S27 real Compose provider verification failed: {verification}")
     openapi = _upload_openapi(client, token, project_id, provider_id, "1.0.0")
     if openapi["provider_service_id"] != provider_id or openapi["breaking_changes"]:
         raise RuntimeError("S27 OpenAPI contract was not bound to the provider release")
@@ -112,9 +98,7 @@ def _run_acceptance(
         f"/projects/{project_id}/contract-hub/compatibility/{provider_id}",
         token=token,
     )
-    summary = client.json(
-        "GET", f"/projects/{project_id}/contract-hub/summary", token=token
-    )
+    summary = client.json("GET", f"/projects/{project_id}/contract-hub/summary", token=token)
     statuses = {cell["status"] for row in matrix["rows"] for cell in row["cells"]}
     if not {"passed", "failed"}.issubset(statuses):
         raise RuntimeError(f"S27 compatibility matrix is incomplete: {matrix}")
@@ -236,9 +220,7 @@ def _openapi_document(version: str) -> bytes:
                                         "schema": {
                                             "type": "object",
                                             "required": ["status"],
-                                            "properties": {
-                                                "status": {"type": "string"}
-                                            },
+                                            "properties": {"status": {"type": "string"}},
                                         }
                                     }
                                 },
