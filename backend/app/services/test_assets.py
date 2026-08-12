@@ -56,6 +56,7 @@ class TestCaseService:
         tags: list[str],
         is_template: bool,
         definition: TestCaseDefinitionInput,
+        commit: bool = True,
     ) -> TestCase:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         normalized_name = name.strip()
@@ -76,8 +77,9 @@ class TestCaseService:
         self._assets.add(model)
         await self._session.flush()
         self._record(actor, model, "test_case.created")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
         return model
 
     async def list_cases(
@@ -118,6 +120,7 @@ class TestCaseService:
         tags: list[str] | None,
         is_template: bool | None,
         definition: TestCaseDefinitionInput | None,
+        commit: bool = True,
     ) -> TestCase:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         model = await self._get_project_case(project_id, case_id)
@@ -138,8 +141,11 @@ class TestCaseService:
             await self._validate_definition(project_id, definition)
             model.draft_definition = _json_definition(definition)
         self._record(actor, model, "test_case.updated")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
+        else:
+            await self._session.flush()
         return model
 
     async def publish(

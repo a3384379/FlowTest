@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.quality_intelligence import FailureObservation
+from app.domain.reporting import classify_failure
+from app.models.contracts import DeploymentCompatibilityCheck
+from app.models.impact import CoverageSnapshot, ImpactRun, TestSelection
+from app.models.performance import PerformanceRun
+from app.models.quality import FlakyRecord
+from app.models.quality_intelligence import FailureCluster, ReleaseRisk
+from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
+from app.repositories.impact import ImpactRunBundle
+
+
+class QualityIntelligenceRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def add_risk(self, risk: ReleaseRisk, clusters: list[FailureCluster]) -> None:
+        self._session.add(risk)
+        self._session.add_all(clusters)
+
+    async def get_impact_bundle(self, run_id: UUID) -> ImpactRunBundle | None:
+        row = (
+            await self._session.execute(
+                select(ImpactRun, TestSelection, CoverageSnapshot)
+                .join(TestSelection, TestSelection.impact_run_id == ImpactRun.id)
+                .join(CoverageSnapshot, CoverageSnapshot.impact_run_id == ImpactRun.id)
+                .where(ImpactRun.id == run_id)
+            )
+        ).one_or_none()
+        return ImpactRunBundle(*row) if row is not None else None
+
+    async def list_risks(
+        self, *, project_id: UUID, offset: int, limit: int
+    ) -> tuple[list[ReleaseRisk], int]:
+        condition = ReleaseRisk.project_id == project_id
+        items = list(
+            (
+                await self._session.scalars(
+                    select(ReleaseRisk)
+                    .where(condition)
+                    .order_by(ReleaseRisk.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(ReleaseRisk).where(condition)
+        )
+        return items, int(total or 0)
+
+    async def get_risk(self, risk_id: UUID) -> ReleaseRisk | None:
+        return await self._session.get(ReleaseRisk, risk_id)
+
+    async def list_clusters(self, risk_id: UUID) -> list[FailureCluster]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(FailureCluster)
+                    .where(FailureCluster.release_risk_id == risk_id)
+                    .order_by(FailureCluster.occurrence_count.desc(), FailureCluster.fingerprint)
+                )
+            ).all()
+        )
+
+    async def failure_observations(
+        self, *, project_id: UUID, started_at: datetime, ended_at: datetime
+    ) -> tuple[FailureObservation, ...]:
+        rows = (
+            await self._session.execute(
+                select(WorkflowExecution, Workflow.name)
+                .join(Workflow, Workflow.id == WorkflowExecution.workflow_id)
+                .where(
+                    WorkflowExecution.project_id == project_id,
+                    WorkflowExecution.parent_execution_id.is_(None),
+                    WorkflowExecution.status == "failed",
+                    WorkflowExecution.started_at >= started_at,
+                    WorkflowExecution.started_at < ended_at,
+                )
+                .order_by(WorkflowExecution.started_at.desc())
+                .limit(5_000)
+            )
+        ).all()
+        execution_ids = [row[0].id for row in rows]
+        first_failed_nodes: dict[UUID, WorkflowNodeExecution] = {}
+        if execution_ids:
+            nodes = (
+                await self._session.scalars(
+                    select(WorkflowNodeExecution)
+                    .where(
+                        WorkflowNodeExecution.workflow_execution_id.in_(execution_ids),
+                        WorkflowNodeExecution.status == "failed",
+                    )
+                    .order_by(WorkflowNodeExecution.created_at)
+                )
+            ).all()
+            for node in nodes:
+                first_failed_nodes.setdefault(node.workflow_execution_id, node)
+        observations = []
+        for execution, workflow_name in rows:
+            failed_node = first_failed_nodes.get(execution.id)
+            error_code = failed_node.error_code if failed_node is not None else execution.error_code
+            observations.append(
+                FailureObservation(
+                    execution_id=execution.id,
+                    workflow_id=execution.workflow_id,
+                    workflow_name=workflow_name,
+                    category=classify_failure(status=execution.status, error_code=error_code).value,
+                    error_code=error_code,
+                    node_type=failed_node.node_type if failed_node is not None else None,
+                    occurred_at=execution.started_at,
+                )
+            )
+        return tuple(observations)
+
+    async def execution_counts(
+        self, *, project_id: UUID, started_at: datetime, ended_at: datetime
+    ) -> tuple[int, int]:
+        condition = (
+            WorkflowExecution.project_id == project_id,
+            WorkflowExecution.parent_execution_id.is_(None),
+            WorkflowExecution.started_at >= started_at,
+            WorkflowExecution.started_at < ended_at,
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(WorkflowExecution).where(*condition)
+        )
+        failed = await self._session.scalar(
+            select(func.count())
+            .select_from(WorkflowExecution)
+            .where(*condition, WorkflowExecution.status == "failed")
+        )
+        return int(total or 0), int(failed or 0)
+
+    async def executions_for_trend(
+        self, *, project_id: UUID, started_at: datetime, ended_at: datetime
+    ) -> list[WorkflowExecution]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(WorkflowExecution).where(
+                        WorkflowExecution.project_id == project_id,
+                        WorkflowExecution.parent_execution_id.is_(None),
+                        WorkflowExecution.started_at >= started_at,
+                        WorkflowExecution.started_at < ended_at,
+                    )
+                )
+            ).all()
+        )
+
+    async def deployment_decisions(self, project_id: UUID) -> list[str]:
+        rows = (
+            await self._session.execute(
+                select(
+                    DeploymentCompatibilityCheck.provider_service_id,
+                    DeploymentCompatibilityCheck.decision,
+                )
+                .where(DeploymentCompatibilityCheck.project_id == project_id)
+                .order_by(DeploymentCompatibilityCheck.created_at.desc())
+                .limit(1_000)
+            )
+        ).all()
+        latest: dict[UUID, str] = {}
+        for service_id, decision in rows:
+            latest.setdefault(service_id, decision)
+        return list(latest.values())
+
+    async def latest_performance_regression(self, project_id: UUID) -> tuple[UUID | None, float]:
+        run = (
+            await self._session.scalars(
+                select(PerformanceRun)
+                .where(
+                    PerformanceRun.project_id == project_id,
+                    PerformanceRun.status.in_(("passed", "failed")),
+                )
+                .order_by(PerformanceRun.created_at.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+        if run is None:
+            return None, 0.0
+        value = run.summary.get("p95_regression_percent")
+        return run.id, float(value) if isinstance(value, int | float) else 0.0
+
+    async def flaky_asset_count(self, project_id: UUID) -> int:
+        value = await self._session.scalar(
+            select(func.count())
+            .select_from(FlakyRecord)
+            .where(FlakyRecord.project_id == project_id, FlakyRecord.flaky_score > 0)
+        )
+        return int(value or 0)

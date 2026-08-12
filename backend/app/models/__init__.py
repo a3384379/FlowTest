@@ -12,7 +12,7 @@ from app.models.access import (
     TeamMember,
     User,
 )
-from app.models.ai import AIJob, AISuggestion
+from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
@@ -38,6 +38,7 @@ from app.models.imports import ImportRun
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
+from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.runner_fabric import (
     RunnerEvent,
@@ -56,6 +57,8 @@ from app.models.test_assets import (
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
 __all__ = [
+    "AIChangeItem",
+    "AIChangeSet",
     "AIJob",
     "AISuggestion",
     "APICallExecution",
@@ -75,6 +78,7 @@ __all__ = [
     "EnvironmentTemplate",
     "EnvironmentTemplateVersion",
     "EventSource",
+    "FailureCluster",
     "FlakyRecord",
     "Folder",
     "GeneratedContractCase",
@@ -100,6 +104,7 @@ __all__ = [
     "QualityGate",
     "QualityGateEvaluation",
     "RefreshSession",
+    "ReleaseRisk",
     "Runner",
     "RunnerEvent",
     "RunnerLeaseRecord",

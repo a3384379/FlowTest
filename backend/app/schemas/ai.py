@@ -4,7 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 
-AIJobType = Literal["schema_cases", "assertion_suggestions", "workflow_draft", "failure_analysis"]
+AIJobType = Literal[
+    "schema_cases", "assertion_suggestions", "workflow_draft", "failure_analysis", "change_set"
+]
 AIJobStatus = Literal["pending", "running", "completed", "failed"]
 AISuggestionType = Literal["test_case", "assertion", "workflow", "failure_analysis"]
 AIReviewStatus = Literal["pending", "accepted", "rejected"]

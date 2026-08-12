@@ -16,6 +16,7 @@ class V3FeatureFlagsResponse(BaseModel):
     environment_lab: bool
     contract_hub: bool
     impact_engine: bool
+    quality_intelligence: bool
     pact_broker: bool
 
 

@@ -53,6 +53,7 @@ const ImpactAnalysisPage = lazy(() => import('./pages/ImpactAnalysisPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
+const AIChangeSetsPage = lazy(() => import('./pages/AIChangeSetsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
@@ -76,6 +77,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   impact: '影响分析',
   quality: '质量中心',
   ai: 'AI 助手',
+  'ai-changes': 'AI 变更集',
   reports: '测试报告',
   platform: '平台管理',
   fabric: '分布式执行面',
@@ -132,6 +134,7 @@ function AuthenticatedShell() {
             navigationItem('impact', <FileSearchOutlined />, pathFor('impact')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
+            navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
             ...(user?.is_system_admin
               ? [
@@ -202,6 +205,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/impact" element={<ImpactAnalysisPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
+      <Route path="/projects/:projectId/ai-changes" element={<AIChangeSetsPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/platform" element={<PlatformCapabilitiesPage />} />
       <Route path="/execution-fabric" element={<ExecutionFabricPage />} />
@@ -221,6 +225,7 @@ function ApplicationRoutes() {
           'impact',
           'quality',
           'ai',
+          'ai-changes',
           'reports',
         ] as const
       ).map((section) => (

@@ -36,6 +36,78 @@ export type FlakyRecord = {
   updated_at: string
 }
 
+export type FailureCluster = {
+  id: string
+  release_risk_id: string
+  fingerprint: string
+  title: string
+  failure_category: string
+  error_code: string | null
+  node_type: string | null
+  occurrence_count: number
+  baseline_count: number
+  affected_workflow_ids: string[]
+  affected_workflow_names: string[]
+  sample_execution_ids: string[]
+  confidence: number
+  regression_percent: number | null
+  recommendation: string
+  created_at: string
+}
+
+export type ReleaseRiskSummary = {
+  id: string
+  project_id: string
+  impact_run_id: string
+  title: string
+  algorithm_version: string
+  window_days: number
+  score: number
+  quality_score: number
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  fingerprint: string
+  created_by_id: string
+  created_at: string
+}
+
+export type ReleaseRiskDetail = ReleaseRiskSummary & {
+  window_started_at: string
+  window_ended_at: string
+  baseline_started_at: string
+  baseline_ended_at: string
+  factors: Array<{
+    code: string
+    label: string
+    score: number
+    max_score: number
+    value: unknown
+  }>
+  evidence_snapshot: Record<string, unknown>
+  quality_trend: Array<{
+    date: string
+    total: number
+    passed: number
+    failed: number
+    pass_rate: number
+  }>
+  recommended_tests: Array<{
+    target_type: string
+    target_id: string
+    name: string
+    version: number | string | null
+    priority: 'high' | 'medium'
+    reasons: string[]
+    change_keys: string[]
+  }>
+  failure_clusters: FailureCluster[]
+}
+
+export type ReleaseRiskInput = {
+  impact_run_id: string
+  title: string
+  window_days: number
+}
+
 export async function listQualityGates(projectId: string): Promise<QualityGate[]> {
   return (await apiClient.get<QualityGate[]>(`/projects/${projectId}/quality-gates`)).data
 }
@@ -81,4 +153,28 @@ export async function downloadJunit(projectId: string, runId: string): Promise<B
     { responseType: 'text' },
   )
   return new Blob([response.data], { type: 'application/xml' })
+}
+
+export async function listReleaseRisks(projectId: string): Promise<Page<ReleaseRiskSummary>> {
+  return (
+    await apiClient.get<Page<ReleaseRiskSummary>>(`/projects/${projectId}/release-risks`, {
+      params: { page: 1, page_size: 100 },
+    })
+  ).data
+}
+
+export async function getReleaseRisk(
+  projectId: string,
+  riskId: string,
+): Promise<ReleaseRiskDetail> {
+  return (await apiClient.get<ReleaseRiskDetail>(`/projects/${projectId}/release-risks/${riskId}`))
+    .data
+}
+
+export async function createReleaseRisk(
+  projectId: string,
+  input: ReleaseRiskInput,
+): Promise<ReleaseRiskDetail> {
+  return (await apiClient.post<ReleaseRiskDetail>(`/projects/${projectId}/release-risks`, input))
+    .data
 }

@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     feature_environment_lab_enabled: bool = False
     feature_contract_hub_enabled: bool = False
     feature_impact_engine_enabled: bool = False
+    feature_quality_intelligence_enabled: bool = False
     runner_max_attempts: int = Field(default=3, ge=1, le=10)
     runner_result_limit_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
     runner_registration_ttl_seconds: int = Field(default=900, ge=60, le=86400)

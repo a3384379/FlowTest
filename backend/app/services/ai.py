@@ -37,6 +37,7 @@ _ALLOWED_SUGGESTIONS = {
     "assertion_suggestions": frozenset({"assertion"}),
     "workflow_draft": frozenset({"workflow"}),
     "failure_analysis": frozenset({"failure_analysis"}),
+    "change_set": frozenset({"test_case", "assertion", "workflow"}),
 }
 
 
@@ -292,6 +293,12 @@ class AIJobRunner:
                 output_schema=suggestion_output_schema(settings.ai_max_suggestions),
             )
             suggestions = _validated_suggestions(job, result.payload)
+            if job.job_type == "change_set":
+                from app.services.ai_change_sets import materialize_change_set_items
+
+                self._repository.add_suggestions(suggestions)
+                await self._session.flush()
+                await materialize_change_set_items(self._session, job, suggestions)
         except AIProviderError as error:
             return await self._fail(job, code=error.code, message=error.message)
         except (SchemaError, ValidationError, AIInputError, ValueError, TypeError):
@@ -299,7 +306,8 @@ class AIJobRunner:
             return await self._fail(
                 job, code="AI_RESPONSE_INVALID", message="AI 建议未通过结构或脱敏校验"
             )
-        self._repository.add_suggestions(suggestions)
+        if job.job_type != "change_set":
+            self._repository.add_suggestions(suggestions)
         job.status = "completed"
         job.token_usage = result.token_usage
         job.completed_at = datetime.now(UTC)
@@ -326,6 +334,10 @@ class AIJobRunner:
         job.error_code = code
         job.error_message = message[:500]
         job.completed_at = datetime.now(UTC)
+        if job.job_type == "change_set":
+            from app.services.ai_change_sets import mark_change_set_failed
+
+            await mark_change_set_failed(self._session, job.id)
         self._audit.record(
             actor_user_id=job.created_by_id,
             project_id=job.project_id,
@@ -398,6 +410,12 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
 def _validate_pending_suggestion(suggestion: AISuggestion, job: AIJob) -> None:
     if job.status != "completed":
         raise AppError(code="AI_JOB_NOT_COMPLETED", message="AI 任务尚未完成", status_code=409)
+    if job.job_type == "change_set":
+        raise AppError(
+            code="AI_CHANGE_SET_REVIEW_REQUIRED",
+            message="请通过 AI 变更集逐项审核",
+            status_code=409,
+        )
     if suggestion.review_status != "pending":
         raise AppError(
             code="AI_SUGGESTION_ALREADY_REVIEWED",
@@ -440,6 +458,7 @@ async def _create_workflow_draft(
         description=str(content.get("description") or "由 AI 建议生成。需人工复核"),
         folder_id=folder_id,
         definition=definition,
+        commit=False,
     )
 
 
@@ -470,6 +489,7 @@ async def _create_test_case_draft(
         tags=cast(list[str], tags_value),
         is_template=False,
         definition=definition,
+        commit=False,
     )
 
 
