@@ -236,7 +236,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
+          "celery --broker \"$$FLOWTEST_CELERY_BROKER_URL\" inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
         ]
       interval: 10s
       timeout: 10s
@@ -269,7 +269,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker-data@$$HOSTNAME --timeout 5 | grep -q pong",
+          "celery --broker \"$$FLOWTEST_CELERY_BROKER_URL\" inspect ping --destination worker-data@$$HOSTNAME --timeout 5 | grep -q pong",
         ]
       interval: 10s
       timeout: 10s
@@ -302,7 +302,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A app.tasking.celery_app.celery_app inspect ping --destination worker-ai@$$HOSTNAME --timeout 5 | grep -q pong",
+          "celery --broker \"$$FLOWTEST_CELERY_BROKER_URL\" inspect ping --destination worker-ai@$$HOSTNAME --timeout 5 | grep -q pong",
         ]
       interval: 10s
       timeout: 10s
