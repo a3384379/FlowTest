@@ -1,10 +1,10 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page, type Response } from '@playwright/test'
 
 import { authenticate } from './support/auth'
 
-test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async ({ page }) => {
-  test.setTimeout(90_000)
-  const suffix = Date.now().toString()
+test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const suffix = `${Date.now()}-${testInfo.retry}`
   const caseName = `S15 登录用例 ${suffix}`
   const suiteName = `S15 冒烟套件 ${suffix}`
   const planName = `S15 固定套件计划 ${suffix}`
@@ -39,8 +39,11 @@ async function createCase(
   await chooseOption(page, dialog.getByLabel('运行环境'), environmentName)
   await dialog.getByLabel('标签').fill('s15')
   await page.keyboard.press('Enter')
+  const created = waitForProjectPost(page, '/test-cases')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  await expect(assetRow(page, caseName)).toBeVisible()
+  await expectSuccessful(created)
+  await expect(dialog).toBeHidden()
+  await expect(assetRow(page, caseName)).toBeVisible({ timeout: 15_000 })
 }
 
 async function createPublishedWorkflow(page: Page, name: string) {
@@ -123,8 +126,11 @@ async function createSecondaryEnvironment(page: Page, name: string) {
   const dialog = page.getByRole('dialog', { name: '新建环境' })
   await dialog.getByLabel('环境名称').fill(name)
   await dialog.getByLabel('基础 URL').fill('http://mock-target.test:8080')
+  const created = waitForProjectPost(page, '/environments')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  await expect(page.getByText(name, { exact: true })).toBeVisible()
+  await expectSuccessful(created)
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 15_000 })
 }
 
 async function createAndPublishSuite(page: Page, caseName: string, suiteName: string) {
@@ -135,8 +141,11 @@ async function createAndPublishSuite(page: Page, caseName: string, suiteName: st
   await dialog.getByLabel('已发布测试用例').click()
   await page.getByText(caseName, { exact: true }).last().click()
   await page.keyboard.press('Escape')
+  const created = waitForProjectPost(page, '/test-suites')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  await expect(assetRow(page, suiteName)).toBeVisible()
+  await expectSuccessful(created)
+  await expect(dialog).toBeHidden()
+  await expect(assetRow(page, suiteName)).toBeVisible({ timeout: 15_000 })
   await assetRow(page, suiteName).getByRole('button', { name: '发布' }).click()
   await expect(assetRow(page, suiteName).getByText('v1', { exact: true })).toBeVisible()
 }
@@ -147,11 +156,13 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await page.getByRole('button', { name: '新建计划' }).click()
   const dialog = page.getByRole('dialog', { name: '新建测试计划' })
   await dialog.getByLabel('计划名称').fill(planName)
-  await dialog.getByLabel('资产类型').click()
-  await page.getByText('测试套件', { exact: true }).last().click()
-  await dialog.getByLabel('测试套件').click()
-  await page.getByText(suiteName, { exact: true }).last().click()
+  await chooseOption(page, dialog.getByLabel('资产类型'), '测试套件')
+  const suiteSelect = dialog.getByLabel('测试套件')
+  await expect(suiteSelect).toBeVisible()
+  await chooseOption(page, suiteSelect, suiteName)
+  const created = waitForProjectPost(page, '/test-plans')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
+  await expectSuccessful(created)
 
   await expect(page.getByText('Webhook Secret（仅显示一次）')).toBeVisible()
   await page.keyboard.press('Escape')
@@ -184,4 +195,18 @@ async function chooseOption(
 
 function assetRow(page: Page, name: string) {
   return page.getByRole('row').filter({ hasText: name }).first()
+}
+
+function waitForProjectPost(page: Page, pathSuffix: string): Promise<Response> {
+  return page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/v1/projects/') &&
+      response.url().endsWith(pathSuffix) &&
+      response.request().method() === 'POST',
+  )
+}
+
+async function expectSuccessful(responsePromise: Promise<Response>): Promise<void> {
+  const response = await responsePromise
+  expect(response.ok(), await response.text()).toBeTruthy()
 }

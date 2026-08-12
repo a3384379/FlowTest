@@ -3,14 +3,15 @@
 最后更新：2026-08-13（Asia/Shanghai）
 状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
 真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
-最新功能提交 `e8ef455` 的五项 CI 已全绿；精确验收证据已确认，最终文档提交待复跑完整 CI。
+功能提交 `e8ef455` 的五项 CI 已全绿；最终文档提交 `113458a` 四项通过，Compose 暴露 S15
+旧选择器与重试名称复用问题，正在做最小测试稳定性修复。
 `v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
 - 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、Compose 编排修复 `7e40dfc` 和浏览器
-  稳定性修复 `e8ef455` 已推送，Draft PR #32 保持 Draft；最终验收文档待提交。
+  稳定性修复 `e8ef455`、验收文档 `113458a` 已推送，Draft PR #32 保持 Draft；S15 最小修复待提交。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -88,6 +89,16 @@
     加密计划、500/500 Workflow 和 Task、1000 个唯一终态节点、0 重复、0 Active Lease、0 制品
     冲突、2 个实际 Worker；提交 P95 3.376032 秒，总耗时 218.597 秒。最终文档提交仍须重跑五项
     CI；未合并、未开始 S30，也未创建任何新 V3 标签。
+22. 最终文档提交 `113458a` 的 Backend Test（2 分 22 秒）与 Integration（58 秒，run
+    `31623263953`）、Frontend Build（8 分 5 秒，run `31623263861`）和 Security Source/Images
+    （8 分 35 秒，run `31623263885`）通过。Compose run `31623263871` 已通过 S3–S11、S29 Smoke、
+    S29 浏览器与 Runner→Celery 恢复，但 S15 首次运行通过资产创建后，计划资产类型用无作用域文本
+    点击且未等待条件字段，耗尽 90 秒；Playwright 重试又复用同一名称，创建请求未被显式验证。
+    最小修复为每次重试加入唯一后缀，所有 UI 创建操作等待并验证对应 POST 2xx 和 Dialog 关闭，
+    Ant Select 使用可见 Dropdown 作用域，并将完整 S15 真实链路预算调整为 180 秒。修复后必须重跑
+    完整五项 CI。本机缩减非必要服务后的真实 Compose 栈 S15 1/1 通过，场景 18.2 秒；前端
+    145 项覆盖率、格式、ESLint、TypeScript strict 与生产构建再次通过。未合并、未开始 S30，
+    也未创建任何新 V3 标签。
 
 ## 已完成：S28 变更影响引擎与确定性测试选择
 
@@ -378,7 +389,7 @@
 
 ## 下一步
 
-1. 提交并推送本轮最终验收文档，重跑 Backend Test、Backend Integration、Frontend Build、
+1. 提交并推送 S15 浏览器稳定性与验收文档修复，重跑 Backend Test、Backend Integration、Frontend Build、
    Security Source/Images 和 Compose Smoke 五项检查。
 2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；最终提交全绿后才可 Ready、squash 合并、删除远程分支并创建
    `agent/s30-failure-intelligence`。在此之前不开始 S30。
