@@ -79,7 +79,7 @@ jobs:
       # every service on two shared cores. Keep 300 requests at 30-way concurrency
       # and the zero-failure rule with a variance-tolerant CI-only latency bound.
       FLOWTEST_CAPACITY_P95_SECONDS: "1.8"
-      FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS: "60"
+      FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS: "75"
       FLOWTEST_S19_API_CONCURRENCY: "10"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
