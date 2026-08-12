@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "3.0.0-alpha.1-dev.26"
+    app_version: str = "3.0.0-beta.1-dev.27"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     feature_event_protocols_enabled: bool = False
     feature_performance_lab_enabled: bool = False
     feature_environment_lab_enabled: bool = False
+    feature_contract_hub_enabled: bool = False
     performance_max_vus: int = Field(default=100, ge=1, le=1000)
     performance_max_duration_seconds: int = Field(default=1800, ge=1, le=3600)
     performance_runner_timeout_seconds: int = Field(default=2100, ge=60, le=3900)
@@ -81,6 +82,10 @@ class Settings(BaseSettings):
     environment_cleanup_timeout_seconds: int = Field(default=120, ge=10, le=600)
     environment_health_request_timeout_seconds: int = Field(default=5, ge=1, le=30)
     environment_reconcile_interval_seconds: int = Field(default=30, ge=10, le=300)
+    pact_broker_base_url: str = ""
+    pact_broker_token: str = ""
+    pact_broker_request_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    pact_provider_request_timeout_seconds: int = Field(default=10, ge=1, le=60)
     ai_base_url: str = ""
     ai_model: str = ""
     ai_api_key: str = ""
@@ -121,6 +126,7 @@ class Settings(BaseSettings):
         self._validate_vault()
         self._validate_ai()
         self._validate_environment_lab()
+        self._validate_pact_broker()
         self._validate_production()
         return self
 
@@ -140,6 +146,23 @@ class Settings(BaseSettings):
             return
         if not self.ai_base_url.strip() or not self.ai_model.strip() or not self.ai_api_key.strip():
             raise ValueError("启用 AI 时必须配置 Base URL、Model 和 API Key")
+
+    def _validate_pact_broker(self) -> None:
+        if not self.pact_broker_base_url:
+            return
+        parsed = urlsplit(self.pact_broker_base_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise ValueError("Pact Broker 必须是无凭据、Query 和路径的 HTTP/HTTPS Origin")
+        if self.environment == "production" and parsed.scheme != "https":
+            raise ValueError("生产环境 Pact Broker 必须使用 HTTPS")
 
     def _validate_oidc(self) -> None:
         if not self.feature_oidc_enabled:

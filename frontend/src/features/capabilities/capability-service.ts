@@ -8,6 +8,8 @@ export type V3FeatureFlags = {
   event_protocols: boolean
   performance_lab: boolean
   environment_lab: boolean
+  contract_hub: boolean
+  pact_broker: boolean
 }
 
 export type CapabilityManifest = {

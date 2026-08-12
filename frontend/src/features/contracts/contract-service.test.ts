@@ -19,6 +19,10 @@ describe('contract service', () => {
     await listContractRuns('project-1')
     await createContractRun('project-1', file, 'run-1')
     await createContractRun('project-1', file, null)
+    await createContractRun('project-1', file, null, {
+      providerServiceId: 'provider-1',
+      providerVersion: '2.0.0',
+    })
     await listGeneratedContractCases('project-1', 'run-2')
 
     expect(get).toHaveBeenNthCalledWith(1, '/projects/project-1/contract-runs', {
@@ -30,6 +34,9 @@ describe('contract service', () => {
     expect(firstForm.get('baseline_run_id')).toBe('run-1')
     const secondForm = post.mock.calls[1][1] as FormData
     expect(secondForm.has('baseline_run_id')).toBe(false)
+    const providerForm = post.mock.calls[2][1] as FormData
+    expect(providerForm.get('provider_service_id')).toBe('provider-1')
+    expect(providerForm.get('provider_version')).toBe('2.0.0')
     expect(get).toHaveBeenNthCalledWith(
       2,
       '/projects/project-1/contract-runs/run-2/generated-cases',

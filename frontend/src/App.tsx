@@ -14,6 +14,7 @@ import {
   SafetyCertificateOutlined,
   ToolOutlined,
   RobotOutlined,
+  ShareAltOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import {
@@ -46,6 +47,7 @@ const TestAssetsPage = lazy(() => import('./pages/TestAssetsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 const PerformanceLabPage = lazy(() => import('./pages/PerformanceLabPage'))
 const EnvironmentLabPage = lazy(() => import('./pages/EnvironmentLabPage'))
+const ContractHubPage = lazy(() => import('./pages/ContractHubPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
@@ -67,6 +69,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   tasks: '任务执行',
   performance: '性能实验室',
   environments: '环境实验室',
+  contracts: '契约中心',
   quality: '质量中心',
   ai: 'AI 助手',
   reports: '测试报告',
@@ -120,6 +123,7 @@ function AuthenticatedShell() {
             navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
             navigationItem('performance', <ExperimentOutlined />, pathFor('performance')),
             navigationItem('environments', <CloudServerOutlined />, pathFor('environments')),
+            navigationItem('contracts', <ShareAltOutlined />, pathFor('contracts')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
@@ -185,6 +189,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/tasks" element={<TestPlansPage />} />
       <Route path="/projects/:projectId/performance" element={<PerformanceLabPage />} />
       <Route path="/projects/:projectId/environments" element={<EnvironmentLabPage />} />
+      <Route path="/projects/:projectId/contracts" element={<ContractHubPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
@@ -201,6 +206,7 @@ function ApplicationRoutes() {
           'tasks',
           'performance',
           'environments',
+          'contracts',
           'quality',
           'ai',
           'reports',

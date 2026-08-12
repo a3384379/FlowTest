@@ -9,6 +9,8 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
+from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
+from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
 from app.http.oidc import HttpOIDCProvider
 from app.models.access import User
 from app.repositories.access import UserRepository
@@ -30,6 +32,31 @@ def get_oidc_provider() -> OIDCProvider:
 
 
 OIDCProviderDependency = Annotated[OIDCProvider, Depends(get_oidc_provider)]
+
+
+def get_provider_interaction_verifier() -> ProviderInteractionVerifier:
+    return HttpProviderInteractionVerifier(
+        request_timeout_seconds=settings.pact_provider_request_timeout_seconds
+    )
+
+
+ProviderVerifier = Annotated[
+    ProviderInteractionVerifier,
+    Depends(get_provider_interaction_verifier),
+]
+
+
+def get_pact_broker_source() -> PactBrokerSource | None:
+    if not settings.pact_broker_base_url:
+        return None
+    return HttpPactBrokerSource(
+        base_url=settings.pact_broker_base_url,
+        token=settings.pact_broker_token,
+        request_timeout_seconds=settings.pact_broker_request_timeout_seconds,
+    )
+
+
+PactBroker = Annotated[PactBrokerSource | None, Depends(get_pact_broker_source)]
 
 
 async def get_current_user(

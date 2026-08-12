@@ -23,6 +23,8 @@ async def create_contract_run(
     document: Annotated[UploadFile, File()],
     source_name: Annotated[str | None, Form(max_length=255)] = None,
     baseline_run_id: Annotated[UUID | None, Form()] = None,
+    provider_service_id: Annotated[UUID | None, Form()] = None,
+    provider_version: Annotated[str | None, Form(min_length=1, max_length=120)] = None,
 ) -> ContractRunResponse:
     content = await document.read(5 * 1024 * 1024 + 1)
     model = await ContractService(session).create_run(
@@ -31,6 +33,8 @@ async def create_contract_run(
         source_name=source_name or document.filename or "openapi.yaml",
         content=content,
         baseline_run_id=baseline_run_id,
+        provider_service_id=provider_service_id,
+        provider_version=provider_version,
     )
     return ContractRunResponse.model_validate(model)
 

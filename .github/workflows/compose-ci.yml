@@ -24,6 +24,7 @@ on:
       - "scripts/smoke_s24.py"
       - "scripts/smoke_s25.py"
       - "scripts/smoke_s26.py"
+      - "scripts/smoke_s27.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -56,6 +57,7 @@ on:
       - "scripts/smoke_s24.py"
       - "scripts/smoke_s25.py"
       - "scripts/smoke_s26.py"
+      - "scripts/smoke_s27.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -83,6 +85,7 @@ jobs:
       FLOWTEST_CAPACITY_P95_SECONDS: "1.8"
       FLOWTEST_CAPACITY_WORKFLOW_P95_SECONDS: "75"
       FLOWTEST_S19_API_CONCURRENCY: "10"
+      FLOWTEST_FEATURE_CONTRACT_HUB_ENABLED: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -170,6 +173,8 @@ jobs:
         env:
           FLOWTEST_S26_RESTART_WORKER: "1"
         run: python3 scripts/smoke_s26.py
+      - name: Verify S27 Pact, provider verification, and release decision flow
+        run: python3 scripts/smoke_s27.py
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |
           docker compose stop redpanda

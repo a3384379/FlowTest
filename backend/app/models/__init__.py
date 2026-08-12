@@ -17,7 +17,14 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
-from app.models.contracts import ContractRun, GeneratedContractCase
+from app.models.contracts import (
+    ContractRun,
+    DeploymentCompatibilityCheck,
+    GeneratedContractCase,
+    PactContractVersion,
+    PactProviderVerification,
+    ServiceCatalogEntry,
+)
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
 from app.models.environment_lab import (
     EnvironmentInstance,
@@ -54,6 +61,7 @@ __all__ = [
     "Capability",
     "ContractRun",
     "Credential",
+    "DeploymentCompatibilityCheck",
     "Environment",
     "EnvironmentInstance",
     "EnvironmentTemplate",
@@ -70,6 +78,8 @@ __all__ = [
     "NotificationDelivery",
     "NotificationWebhook",
     "OIDCLoginTransaction",
+    "PactContractVersion",
+    "PactProviderVerification",
     "PerformanceGateEvaluation",
     "PerformanceRun",
     "PerformanceScenario",
@@ -84,6 +94,7 @@ __all__ = [
     "RunnerPool",
     "SchemaArtifact",
     "Secret",
+    "ServiceCatalogEntry",
     "ServiceToken",
     "Team",
     "TeamMember",
