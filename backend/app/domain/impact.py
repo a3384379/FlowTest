@@ -1,0 +1,645 @@
+import hashlib
+import re
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any, cast
+
+from google.protobuf import descriptor_pb2
+from graphql import GraphQLError, build_schema
+from pydantic import JsonValue
+
+from app.domain.contracts import breaking_changes, contract_operations
+
+MAX_GIT_DIFF_BYTES = 2 * 1024 * 1024
+MAX_GIT_DIFF_FILES = 500
+MAX_GIT_DIFF_LINES = 100_000
+MAX_CHANGE_ITEMS = 5_000
+MAX_MAPPINGS = 2_000
+
+_DIFF_HEADER = re.compile(r"^diff --git a/([A-Za-z0-9_./@+\-]+) b/([A-Za-z0-9_./@+\-]+)$")
+_SAFE_PATH = re.compile(r"^[A-Za-z0-9_./@+\-]+$")
+
+
+class SourceKind(StrEnum):
+    GIT = "git"
+    OPENAPI = "openapi"
+    GRAPHQL = "graphql"
+    GRPC = "grpc"
+
+
+class TargetType(StrEnum):
+    TEST_CASE = "test_case"
+    WORKFLOW = "workflow"
+    OPENAPI_CONTRACT = "openapi_contract"
+    PACT_CONTRACT = "pact_contract"
+    PERFORMANCE = "performance"
+
+
+class ChangeType(StrEnum):
+    ADDED = "added"
+    CHANGED = "changed"
+    DELETED = "deleted"
+
+
+class ChangeSeverity(StrEnum):
+    BREAKING = "breaking"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class ImpactInputError(ValueError):
+    """Raised when an untrusted change input violates the bounded contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeItem:
+    key: str
+    source_kind: SourceKind
+    source_key: str
+    change_type: ChangeType
+    severity: ChangeSeverity
+    label: str
+    detail: str
+    before: JsonValue = None
+    after: JsonValue = None
+
+    def as_json(self) -> dict[str, JsonValue]:
+        return {
+            "key": self.key,
+            "source_kind": self.source_kind.value,
+            "source_key": self.source_key,
+            "change_type": self.change_type.value,
+            "severity": self.severity.value,
+            "label": self.label,
+            "detail": self.detail,
+            "before": self.before,
+            "after": self.after,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AssetMapping:
+    mapping_id: str
+    source_kind: SourceKind
+    selector: str
+    target_type: TargetType
+    target_id: str
+    target_name: str
+    target_version: str | int | None
+
+
+@dataclass(slots=True)
+class _GitFile:
+    old_path: str
+    new_path: str
+    added_lines: int = 0
+    deleted_lines: int = 0
+    added_file: bool = False
+    deleted_file: bool = False
+    binary: bool = False
+
+
+@dataclass(slots=True)
+class _SelectedAsset:
+    mapping: AssetMapping
+    change_keys: set[str]
+    reasons: set[str]
+    severity: ChangeSeverity
+
+    def as_json(self) -> dict[str, JsonValue]:
+        return {
+            "asset_type": _asset_category(self.mapping.target_type),
+            "target_type": self.mapping.target_type.value,
+            "target_id": self.mapping.target_id,
+            "name": self.mapping.target_name,
+            "version": self.mapping.target_version,
+            "risk": _risk_label(self.severity),
+            "change_keys": cast(JsonValue, sorted(self.change_keys)),
+            "reasons": cast(JsonValue, sorted(self.reasons)),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactEvidence:
+    selected_assets: tuple[dict[str, JsonValue], ...]
+    graph: dict[str, JsonValue]
+    matrix: tuple[dict[str, JsonValue], ...]
+    gaps: tuple[dict[str, JsonValue], ...]
+    summary: dict[str, JsonValue]
+
+
+def parse_git_diff(content: str) -> tuple[ChangeItem, ...]:
+    lines = _validate_git_diff(content)
+    files = _parse_git_files(lines)
+    return tuple(_git_change(file) for file in files)
+
+
+def _validate_git_diff(content: str) -> list[str]:
+    encoded = content.encode("utf-8")
+    if not encoded:
+        return []
+    if len(encoded) > MAX_GIT_DIFF_BYTES:
+        raise ImpactInputError("Git Diff 超过 2 MB 上限")
+    lines = content.splitlines()
+    if len(lines) > MAX_GIT_DIFF_LINES:
+        raise ImpactInputError("Git Diff 行数超过 100000 上限")
+    return lines
+
+
+def _parse_git_files(lines: list[str]) -> list[_GitFile]:
+    files: list[_GitFile] = []
+    current: _GitFile | None = None
+    for line in lines:
+        match = _DIFF_HEADER.fullmatch(line)
+        if match:
+            if current is not None:
+                files.append(current)
+            current = _GitFile(_safe_git_path(match.group(1)), _safe_git_path(match.group(2)))
+            if len(files) >= MAX_GIT_DIFF_FILES:
+                raise ImpactInputError("Git Diff 文件数超过 500 上限")
+            continue
+        if current is None:
+            if line.strip():
+                raise ImpactInputError("Git Diff 必须使用标准 diff --git 格式")
+            continue
+        _consume_git_line(current, line)
+    if current is not None:
+        files.append(current)
+    if not files:
+        raise ImpactInputError("Git Diff 没有文件变更")
+    return files
+
+
+def diff_openapi(
+    baseline_document: dict[str, JsonValue],
+    current_document: dict[str, JsonValue],
+) -> tuple[ChangeItem, ...]:
+    baseline = contract_operations(baseline_document)
+    current = contract_operations(current_document)
+    old_by_key = {item.key: item for item in baseline}
+    new_by_key = {item.key: item for item in current}
+    changes: list[ChangeItem] = []
+    breaking_operation_keys: set[str] = set()
+    for item in breaking_changes(baseline, current):
+        operation = old_by_key[item.operation_key]
+        source_key = f"{operation.method} {operation.path}"
+        breaking_operation_keys.add(item.operation_key)
+        changes.append(
+            _change(
+                SourceKind.OPENAPI,
+                source_key,
+                ChangeType.DELETED if item.code == "OPERATION_REMOVED" else ChangeType.CHANGED,
+                ChangeSeverity.BREAKING,
+                source_key,
+                item.message,
+                item.before,
+                item.after,
+                discriminator=item.code,
+            )
+        )
+    for key in sorted(new_by_key.keys() - old_by_key.keys()):
+        operation = new_by_key[key]
+        source_key = f"{operation.method} {operation.path}"
+        changes.append(
+            _change(
+                SourceKind.OPENAPI,
+                source_key,
+                ChangeType.ADDED,
+                ChangeSeverity.INFO,
+                source_key,
+                "新增 OpenAPI 操作",
+            )
+        )
+    for key in sorted(old_by_key.keys() & new_by_key.keys()):
+        old = old_by_key[key]
+        new = new_by_key[key]
+        if key in breaking_operation_keys or _operation_signature(old) == _operation_signature(new):
+            continue
+        source_key = f"{new.method} {new.path}"
+        changes.append(
+            _change(
+                SourceKind.OPENAPI,
+                source_key,
+                ChangeType.CHANGED,
+                ChangeSeverity.WARNING,
+                source_key,
+                "OpenAPI 请求或响应结构发生兼容性变更",
+            )
+        )
+    return _bounded_changes(changes)
+
+
+def diff_graphql(baseline_content: bytes, current_content: bytes) -> tuple[ChangeItem, ...]:
+    old_fields = _graphql_fields(baseline_content)
+    new_fields = _graphql_fields(current_content)
+    changes: list[ChangeItem] = []
+    for key in sorted(old_fields.keys() - new_fields.keys()):
+        changes.append(
+            _change(
+                SourceKind.GRAPHQL,
+                key,
+                ChangeType.DELETED,
+                ChangeSeverity.BREAKING,
+                key,
+                "GraphQL 字段已删除",
+                old_fields[key],
+            )
+        )
+    for key in sorted(new_fields.keys() - old_fields.keys()):
+        changes.append(
+            _change(
+                SourceKind.GRAPHQL,
+                key,
+                ChangeType.ADDED,
+                ChangeSeverity.INFO,
+                key,
+                "新增 GraphQL 字段",
+                after=new_fields[key],
+            )
+        )
+    for key in sorted(old_fields.keys() & new_fields.keys()):
+        if old_fields[key] == new_fields[key]:
+            continue
+        changes.append(
+            _change(
+                SourceKind.GRAPHQL,
+                key,
+                ChangeType.CHANGED,
+                ChangeSeverity.BREAKING,
+                key,
+                "GraphQL 字段类型或参数签名发生变化",
+                old_fields[key],
+                new_fields[key],
+            )
+        )
+    return _bounded_changes(changes)
+
+
+def diff_grpc(baseline_content: bytes, current_content: bytes) -> tuple[ChangeItem, ...]:
+    old_shapes = _grpc_shapes(baseline_content)
+    new_shapes = _grpc_shapes(current_content)
+    changes: list[ChangeItem] = []
+    for key in sorted(old_shapes.keys() - new_shapes.keys()):
+        changes.append(
+            _change(
+                SourceKind.GRPC,
+                key,
+                ChangeType.DELETED,
+                ChangeSeverity.BREAKING,
+                key,
+                "Proto/gRPC 成员已删除",
+                old_shapes[key],
+            )
+        )
+    for key in sorted(new_shapes.keys() - old_shapes.keys()):
+        changes.append(
+            _change(
+                SourceKind.GRPC,
+                key,
+                ChangeType.ADDED,
+                ChangeSeverity.INFO,
+                key,
+                "新增 Proto/gRPC 成员",
+                after=new_shapes[key],
+            )
+        )
+    for key in sorted(old_shapes.keys() & new_shapes.keys()):
+        if old_shapes[key] == new_shapes[key]:
+            continue
+        changes.append(
+            _change(
+                SourceKind.GRPC,
+                key,
+                ChangeType.CHANGED,
+                ChangeSeverity.BREAKING,
+                key,
+                "Proto/gRPC 签名发生变化",
+                old_shapes[key],
+                new_shapes[key],
+            )
+        )
+    return _bounded_changes(changes)
+
+
+def build_impact_evidence(
+    changes: tuple[ChangeItem, ...], mappings: tuple[AssetMapping, ...]
+) -> ImpactEvidence:
+    if len(changes) > MAX_CHANGE_ITEMS:
+        raise ImpactInputError("变更项超过 5000 上限")
+    if len(mappings) > MAX_MAPPINGS:
+        raise ImpactInputError("资产映射超过 2000 上限")
+    selected: dict[tuple[TargetType, str], _SelectedAsset] = {}
+    change_assets: dict[str, set[tuple[TargetType, str]]] = {
+        change.key: set() for change in changes
+    }
+    edges: list[dict[str, JsonValue]] = []
+    for change in changes:
+        for mapping in mappings:
+            if mapping.source_kind != change.source_kind or not selector_matches(
+                mapping.selector, change.source_key
+            ):
+                continue
+            target_key = (mapping.target_type, mapping.target_id)
+            asset = selected.setdefault(
+                target_key,
+                _SelectedAsset(mapping, set(), set(), change.severity),
+            )
+            asset.change_keys.add(change.key)
+            asset.reasons.add(f"{mapping.selector} 命中 {change.source_key}")
+            asset.severity = _maximum_severity(asset.severity, change.severity)
+            change_assets[change.key].add(target_key)
+            edges.append(
+                {
+                    "from": f"change:{change.key}",
+                    "to": f"asset:{mapping.target_type.value}:{mapping.target_id}",
+                    "reason": f"映射 {mapping.selector}",
+                }
+            )
+    selected_values = tuple(
+        item.as_json()
+        for item in sorted(
+            selected.values(),
+            key=lambda value: (
+                _severity_rank(value.severity) * -1,
+                _asset_category(value.mapping.target_type),
+                value.mapping.target_name,
+            ),
+        )
+    )
+    matrix = tuple(_matrix_row(change, change_assets[change.key], selected) for change in changes)
+    gaps: tuple[dict[str, JsonValue], ...] = tuple(
+        cast(
+            dict[str, JsonValue],
+            {
+                "change_key": change.key,
+                "source_kind": change.source_kind.value,
+                "source_key": change.source_key,
+                "label": change.label,
+                "reason": "没有显式资产映射覆盖此变更",
+            },
+        )
+        for change in changes
+        if not change_assets[change.key]
+    )
+    covered = len(changes) - len(gaps)
+    total = len(changes)
+    summary: dict[str, JsonValue] = {
+        "change_count": total,
+        "breaking_change_count": sum(
+            change.severity == ChangeSeverity.BREAKING for change in changes
+        ),
+        "selected_asset_count": len(selected_values),
+        "covered_change_count": covered,
+        "gap_count": len(gaps),
+        "coverage_percent": round(covered * 100 / total, 2) if total else 100.0,
+    }
+    graph = {
+        "nodes": cast(
+            JsonValue,
+            [
+                *(
+                    {
+                        "id": f"change:{change.key}",
+                        "kind": "change",
+                        "label": change.label,
+                        "severity": change.severity.value,
+                    }
+                    for change in changes
+                ),
+                *(
+                    {
+                        "id": f"asset:{item.mapping.target_type.value}:{item.mapping.target_id}",
+                        "kind": "asset",
+                        "label": item.mapping.target_name,
+                        "asset_type": _asset_category(item.mapping.target_type),
+                    }
+                    for item in selected.values()
+                ),
+            ],
+        ),
+        "edges": cast(JsonValue, edges),
+    }
+    return ImpactEvidence(selected_values, graph, matrix, gaps, summary)
+
+
+def selector_matches(selector: str, source_key: str) -> bool:
+    return (
+        source_key.startswith(selector[:-1]) if selector.endswith("*") else selector == source_key
+    )
+
+
+def validate_selector(value: str) -> str:
+    normalized = value.strip()
+    if not normalized or len(normalized) > 512 or any(char in normalized for char in "\r\n\0"):
+        raise ImpactInputError("影响映射选择器无效")
+    if "*" in normalized[:-1] or normalized.count("*") > 1:
+        raise ImpactInputError("影响映射只允许末尾前缀通配符")
+    return normalized
+
+
+def changes_fingerprint(changes: tuple[ChangeItem, ...]) -> str:
+    payload = "\n".join(
+        f"{item.key}|{item.source_kind.value}|{item.source_key}|{item.severity.value}"
+        for item in changes
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _consume_git_line(current: _GitFile, line: str) -> None:
+    if line == "--- /dev/null":
+        current.added_file = True
+    elif line == "+++ /dev/null":
+        current.deleted_file = True
+    elif line.startswith("Binary files ") or line.startswith("GIT binary patch"):
+        current.binary = True
+    elif line.startswith("+") and not line.startswith("+++"):
+        current.added_lines += 1
+    elif line.startswith("-") and not line.startswith("---"):
+        current.deleted_lines += 1
+
+
+def _git_change(file: _GitFile) -> ChangeItem:
+    path = file.old_path if file.deleted_file else file.new_path
+    change_type = (
+        ChangeType.ADDED
+        if file.added_file
+        else ChangeType.DELETED
+        if file.deleted_file
+        else ChangeType.CHANGED
+    )
+    detail = (
+        "二进制文件变化"
+        if file.binary
+        else f"新增 {file.added_lines} 行 / 删除 {file.deleted_lines} 行"
+    )
+    return _change(
+        SourceKind.GIT,
+        path,
+        change_type,
+        ChangeSeverity.WARNING,
+        path,
+        detail,
+    )
+
+
+def _safe_git_path(value: str) -> str:
+    if (
+        not value
+        or _SAFE_PATH.fullmatch(value) is None
+        or value.startswith("/")
+        or ".." in value.split("/")
+        or value.endswith("/")
+    ):
+        raise ImpactInputError("Git Diff 包含不安全路径")
+    return value
+
+
+def _graphql_fields(content: bytes) -> dict[str, str]:
+    try:
+        schema = build_schema(content.decode("utf-8"))
+    except (GraphQLError, UnicodeDecodeError) as error:
+        raise ImpactInputError("GraphQL 基线或当前 Schema 无效") from error
+    result: dict[str, str] = {}
+    for type_name, schema_type in schema.type_map.items():
+        if type_name.startswith("__"):
+            continue
+        fields = getattr(schema_type, "fields", None)
+        if not isinstance(fields, dict):
+            continue
+        for field_name, field in fields.items():
+            arguments = getattr(field, "args", {})
+            argument_signature = ",".join(
+                f"{name}:{getattr(argument, 'type', '')}"
+                for name, argument in sorted(arguments.items())
+            )
+            result[f"{type_name}.{field_name}"] = (
+                f"({argument_signature})->{getattr(field, 'type', '')}"
+            )
+    return result
+
+
+def _grpc_shapes(content: bytes) -> dict[str, str]:
+    descriptor_set = descriptor_pb2.FileDescriptorSet()
+    try:
+        descriptor_set.ParseFromString(content)
+    except Exception as error:
+        raise ImpactInputError("Proto 基线或当前 Descriptor Set 无效") from error
+    if not descriptor_set.file:
+        raise ImpactInputError("Proto Descriptor Set 不能为空")
+    result: dict[str, str] = {}
+    for file_descriptor in descriptor_set.file:
+        package = f"{file_descriptor.package}." if file_descriptor.package else ""
+        for service in file_descriptor.service:
+            service_name = f"{package}{service.name}"
+            for method in service.method:
+                result[f"{service_name}.{method.name}"] = (
+                    f"{method.input_type.lstrip('.')}->{method.output_type.lstrip('.')}"
+                    f":client_stream={method.client_streaming}:server_stream={method.server_streaming}"
+                )
+        for message in file_descriptor.message_type:
+            _append_message_shapes(result, package, message)
+    return result
+
+
+def _append_message_shapes(
+    result: dict[str, str],
+    prefix: str,
+    message: descriptor_pb2.DescriptorProto,
+) -> None:
+    message_name = f"{prefix}{message.name}"
+    for field in message.field:
+        result[f"{message_name}.{field.name}"] = (
+            f"number={field.number}:type={field.type}:label={field.label}:"
+            f"type_name={field.type_name.lstrip('.')}"
+        )
+    for nested in message.nested_type:
+        _append_message_shapes(result, f"{message_name}.", nested)
+
+
+def _change(
+    source_kind: SourceKind,
+    source_key: str,
+    change_type: ChangeType,
+    severity: ChangeSeverity,
+    label: str,
+    detail: str,
+    before: JsonValue = None,
+    after: JsonValue = None,
+    *,
+    discriminator: str = "",
+) -> ChangeItem:
+    digest = hashlib.sha256(
+        f"{source_kind.value}|{source_key}|{change_type.value}|{discriminator}|{detail}".encode()
+    ).hexdigest()[:20]
+    return ChangeItem(
+        key=digest,
+        source_kind=source_kind,
+        source_key=source_key,
+        change_type=change_type,
+        severity=severity,
+        label=label,
+        detail=detail,
+        before=before,
+        after=after,
+    )
+
+
+def _bounded_changes(changes: list[ChangeItem]) -> tuple[ChangeItem, ...]:
+    if len(changes) > MAX_CHANGE_ITEMS:
+        raise ImpactInputError("Schema Diff 变更项超过 5000 上限")
+    return tuple(changes)
+
+
+def _operation_signature(operation: Any) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    return operation.request_signature, operation.response_signature
+
+
+def _asset_category(target_type: TargetType) -> str:
+    if target_type == TargetType.TEST_CASE:
+        return "case"
+    if target_type in {TargetType.OPENAPI_CONTRACT, TargetType.PACT_CONTRACT}:
+        return "contract"
+    return target_type.value
+
+
+def _risk_label(severity: ChangeSeverity) -> str:
+    return {
+        ChangeSeverity.BREAKING: "high",
+        ChangeSeverity.WARNING: "medium",
+        ChangeSeverity.INFO: "normal",
+    }[severity]
+
+
+def _severity_rank(severity: ChangeSeverity) -> int:
+    return {
+        ChangeSeverity.INFO: 1,
+        ChangeSeverity.WARNING: 2,
+        ChangeSeverity.BREAKING: 3,
+    }[severity]
+
+
+def _maximum_severity(left: ChangeSeverity, right: ChangeSeverity) -> ChangeSeverity:
+    return left if _severity_rank(left) >= _severity_rank(right) else right
+
+
+def _matrix_row(
+    change: ChangeItem,
+    targets: set[tuple[TargetType, str]],
+    selected: dict[tuple[TargetType, str], _SelectedAsset],
+) -> dict[str, JsonValue]:
+    counts = {"case": 0, "workflow": 0, "contract": 0, "performance": 0}
+    for target in targets:
+        category = _asset_category(selected[target].mapping.target_type)
+        counts[category] += 1
+    return {
+        "change_key": change.key,
+        "source_kind": change.source_kind.value,
+        "source_key": change.source_key,
+        "label": change.label,
+        "severity": change.severity.value,
+        "case_count": counts["case"],
+        "workflow_count": counts["workflow"],
+        "contract_count": counts["contract"],
+        "performance_count": counts["performance"],
+        "covered": bool(targets),
+    }

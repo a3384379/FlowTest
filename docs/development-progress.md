@@ -1,18 +1,55 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S26 已合并并发布 `v3.0.0-beta.1`；S27 契约中心在 `bbd3f13` 上通过本地与 GitHub 五项退出门槛，待 PR #30 最终文档提交复验后合并。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S27 已合并并发布 `v3.0.0-beta.2`；S28 变更影响引擎已通过本地代码、迁移、真实 ARM64 Compose、Playwright 与 Draft PR #31 五项 CI 退出门槛，正在提交最终验收记录并复验最新提交。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@2434db3`，S26 PR #29 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s27-contract-matrix`；S27 Draft PR #30 在 `bbd3f13` 上五项 CI 全绿，正在提交最终验收记录。
+- 当前基线：`main@83375d20a2726c1088d1afaa6c660863246fed5f`，S27 PR #30 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s28-impact-intelligence`；S28 实现提交 `54a4061`、本地验收文档提交 `a464fa2`
+  和 PR 记录提交 `5f3f7d4` 已推送。Draft PR #31 在 `5f3f7d4` 上五项 CI 全绿，正在提交最终远端验收记录。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
-  `v3.0.0-beta.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
+  `v3.0.0-beta.1`、`v3.0.0-beta.2`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 本地验收完成：S27 Pact 契约中心与发布兼容矩阵
+## 本地验收完成：S28 变更影响引擎与确定性测试选择
+
+1. 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类受控变更源；领域解析器不访问外部
+   Git、不接收仓库凭据或脚本，只处理有界文本和已登记 Schema，限制 2 MB、500 文件、100,000 行与
+   5,000 个规范化变更。
+2. 新增项目级显式 Asset Mapping，将精确或尾部 `*` Source Selector 映射到现有 Test Case、Workflow、
+   OpenAPI Contract、Pact Contract 或 Performance Scenario；拒绝跨项目、未知目标和超过 2,000 条映射。
+3. `explicit_mapping_v1` 选择器按稳定键排序并去重，不使用不可解释启发式推断；未命中的变更保留为
+   Coverage Gap，不会被虚构为已有测试覆盖。
+4. 每次 Impact Run 持久化规范 Changes、Change→Impacted→Recommended 图、选择原因、Coverage Matrix、
+   Gap、摘要与 SHA-256 Fingerprint，并独立保存 Test Selection 与 Coverage Snapshot，支持历史审计。
+5. 中文“变更影响分析”提供 Mapping 管理、四类 Diff 输入、三列影响图、证据原因、Coverage Matrix、
+   Gap 与历史下钻；S28 只给出推荐集合，不自动执行测试或改变既有发布门禁。
+6. 新增双向迁移 `20260812_0025`；真实 PostgreSQL 已完成 `0024 → 0025 → 0024 → 0025`，最终
+   `alembic check` 无漂移。
+7. 后端 Ruff format/check、mypy strict、依赖边界及 278 passed/3 skipped 通过，总覆盖率 90.58%，
+   Impact Domain 98%；Python 依赖审计和 Ruff 安全规则无已知问题。
+8. 前端格式、ESLint、TypeScript strict、142 项测试与生产构建通过；Statements 86.70%、Branches
+   80.50%、Functions 84.89%、Lines 88.72%。前端生产依赖审计无已知高危漏洞。
+9. 真实 ARM64 Compose 冒烟完成四类 Diff、显式映射、确定性去重、100% Coverage、四条解释边和
+   PostgreSQL 持久化；项目 `34869b0f-a790-4c73-a57b-3f2c4e868c97` 的 Impact Run
+   `f44a2916-289c-46a8-982b-4da2cfc9d027` 指纹为
+   `09af485bf9b86debe1febcd5a1e42970201fd58d865e73f4060d97d812b1e6d2`。
+10. 真实 Chromium 已完成“创建 Mapping → Git Diff 分析 → 三列图与原因 → Coverage Matrix → 历史”
+    1/1，场景耗时 8.9 秒、总耗时 11.1 秒；过程中修复 Ant Select Portal 与成功提示造成的选择器歧义，
+    最终复跑通过。
+11. 实现提交 `54a4061` 与本地验收文档提交 `a464fa2` 已推送并创建 Draft PR #31，架构边界记录于
+    `ADR 0024`。本地没有 Grype/Trivy 二进制，因此 Backend/Frontend 镜像交由 Draft PR 的 Security
+    Source/Images 使用既有 High/Critical 门槛扫描；结果见下一项。在最新提交五项 CI 全绿前不合并、
+    不创建 `v3.0.0-beta.3`，也不开始 S29。
+12. Draft PR #31 的提交 `5f3f7d4` 已通过 Backend Test（2 分 12 秒，run `31597011115`）、Backend
+    Integration（1 分 13 秒，同一 run）、Frontend Build（7 分 28 秒，run `31597011124`）、Security
+    Source/Images（9 分 43 秒，run `31597011152`）和 Compose Smoke（14 分 47 秒，run
+    `31597011135`）。Compose 同一提交完成 S3–S28、Apache Kafka 兼容、API/Workflow 容量、1000 任务
+    持久队列和隔离卷备份恢复；最终验收文档提交仍须复跑全部 CI。
+
+## 已完成：S27 Pact 契约中心与发布兼容矩阵
 
 1. 新增项目服务目录、不可变 Pact Contract Version、Provider Verification 和 Deployment
    Compatibility Check；Pact 导入自动登记 Consumer/Provider，使用规范 JSON SHA-256 去重。
@@ -40,17 +77,17 @@
 11. Python 与前端依赖审计无已知漏洞；本轮重建的 Backend/Frontend 镜像使用 CI 相同
     Grype 0.116.1、`only-fixed` High/Critical 门槛通过，无新增漏洞豁免。
 12. 架构边界已记录于 `ADR 0023`；实现提交为 `8ec92a3`，本地验收文档提交为
-    `f9ba039`，均已推送到 `agent/s27-contract-matrix`。Draft PR #30 在修复提交 `bbd3f13` 上的
-    Backend Test（2 分 18 秒，run `31589161831`）、Backend Integration（1 分 18 秒，同一 run）、
-    Frontend Build（7 分 16 秒，run `31589161860`）、Security Source/Images（9 分 26 秒，run
-    `31589161858`）和 Compose Smoke（18 分 4 秒，run `31589161838`）五项全部通过；Compose
-    同一提交完成 S3–S27 回归、Apache Kafka 兼容性、API/Workflow 容量、1000 任务持久队列和
-    隔离卷备份恢复。最终文档提交仍须复跑全部 CI；在 PR 最新提交五项全绿前不开始 S28，也不创建
-    `v3.0.0-beta.2` 标签。
+    `f9ba039`。最终文档提交 `0daab31` 的 Backend Test（2 分 16 秒）、Backend Integration（1 分
+    4 秒）、Frontend Build（7 分 32 秒）、Security Source/Images（10 分）和 Compose Smoke（18 分
+    32 秒）五项全部通过；Compose 同一提交完成 S3–S27 回归、Apache Kafka 兼容性、API/Workflow 容量、
+    1000 任务持久队列和隔离卷备份恢复。
 13. PR #30 首轮 Backend Test 在测试前的 Ruff format 门槛失败：本地从仓库根目录格式化
     `scripts/smoke_s27.py` 时未套用 `backend/pyproject.toml` 的 100 字符配置，CI 在 `backend` 工作目录使用
     项目配置后识别出差异。已使用 CI 的精确命令重新格式化，并在本地通过对全部 Backend 与
     `scripts/*.py` 的 Ruff format/check、mypy 以及依赖边界检查；该失败是真实格式门槛，不归因于计费或容量。
+14. PR #30 标记 Ready 后已 squash 合并至 `main@83375d20a2726c1088d1afaa6c660863246fed5f`，远端
+    `agent/s27-contract-matrix` 已删除；合并后的 main 工作流全绿，annotated tag
+    `v3.0.0-beta.2` 已固定到同一提交并推送。
 
 ## 本地验收完成：S26 签名环境实验室
 
@@ -256,11 +293,10 @@
 
 ## 下一步
 
-1. 提交并推送 Draft PR #30 的最终验收记录，等待最新提交的 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 和 Compose Smoke 全部通过；若有真实失败，读取日志并最小修复。
-2. PR #30 最新提交五项 CI 全绿才标记 Ready 并 squash 合并，然后同步 `main`、创建
-   `agent/s28-impact-intelligence`。S28–S31 继续遵循相同顺序，
-   不跨迭代提前开发。
+1. 提交并推送 Draft PR #31 的最终远端验收记录，等待 Backend Test、Backend Integration、
+   Frontend Build、Security Source/Images 和 Compose Smoke 在最新提交全部通过；若有真实失败，读取日志并最小修复。
+2. PR #31 最新提交五项 CI 全绿后才标记 Ready 并 squash 合并；同步并验证 `main` 后，只有 S28 发布
+   门槛全部满足才创建 `v3.0.0-beta.3`，随后才能创建独立 `agent/s29-worker-plane` 开始 S29。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

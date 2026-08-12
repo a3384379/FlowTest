@@ -33,6 +33,7 @@ from app.models.environment_lab import (
 )
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
+from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
@@ -60,6 +61,7 @@ __all__ = [
     "Base",
     "Capability",
     "ContractRun",
+    "CoverageSnapshot",
     "Credential",
     "DeploymentCompatibilityCheck",
     "Environment",
@@ -71,6 +73,8 @@ __all__ = [
     "Folder",
     "GeneratedContractCase",
     "IdempotencyRecord",
+    "ImpactAssetMapping",
+    "ImpactRun",
     "ImportRun",
     "MockRequestLog",
     "MockRoute",
@@ -104,6 +108,7 @@ __all__ = [
     "TestPlanItem",
     "TestPlanRun",
     "TestPlanRunItem",
+    "TestSelection",
     "TestSuite",
     "TestSuiteVersion",
     "TestSuiteVersionItem",

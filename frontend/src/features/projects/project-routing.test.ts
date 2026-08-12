@@ -10,6 +10,7 @@ describe('project routing', () => {
     expect(projectPath('project-1', 'assets')).toBe('/projects/project-1/assets')
     expect(projectPath('project-1', 'quality')).toBe('/projects/project-1/quality')
     expect(projectPath('project-1', 'environments')).toBe('/projects/project-1/environments')
+    expect(projectPath('project-1', 'impact')).toBe('/projects/project-1/impact')
     expect(projectPath('project-1', 'ai')).toBe('/projects/project-1/ai')
   })
 
@@ -18,6 +19,7 @@ describe('project routing', () => {
     expect(sectionFromPath('/projects/project-1/quality')).toBe('quality')
     expect(sectionFromPath('/projects/project-1/ai')).toBe('ai')
     expect(sectionFromPath('/projects/project-1/environments')).toBe('environments')
+    expect(sectionFromPath('/projects/project-1/impact')).toBe('impact')
     expect(sectionFromPath('/unexpected')).toBe('dashboard')
   })
 })

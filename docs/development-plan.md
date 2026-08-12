@@ -126,8 +126,8 @@ V3 各自的真实验收门槛。
 | S24 | Kafka、WebSocket 与 Exchange | 已完成；PR #27 的 5 项 CI 全绿并 squash 合并 |
 | S25 | 声明式 k6 性能实验室 | 已完成；PR #28 的 5 项 CI 全绿并 squash 合并 |
 | S26 | 签名环境模板、Provision/Cleanup/TTL | 已完成；PR #29 与 main CI 全绿，发布 `v3.0.0-beta.1` |
-| S27 | Pact、契约矩阵、Service Graph、Deployment Check | 本地退出门槛已通过；待 Draft PR 与全量 CI |
-| S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
+| S27 | Pact、契约矩阵、Service Graph、Deployment Check | 已完成；PR #30 与 main CI 全绿，发布 `v3.0.0-beta.2` |
+| S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 本地退出门槛已通过；待 Draft PR 与全量 CI |
 | S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
 | S30 | Failure Cluster、Release Risk、AI Change Set | 未开始 |
 | S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | 未开始 |
@@ -137,7 +137,8 @@ S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.
 [`ADR 0020`](adr/0020-event-protocols-and-session-boundary.md)，S25 性能执行边界见
 [`ADR 0021`](adr/0021-declarative-performance-runner.md)，S26 环境 Runner 边界见
 [`ADR 0022`](adr/0022-signed-environment-runner.md)，S27 Pact 与发布证据边界见
-[`ADR 0023`](adr/0023-pact-contract-hub-and-release-evidence.md)，视觉源见
+[`ADR 0023`](adr/0023-pact-contract-hub-and-release-evidence.md)，S28 变更影响与确定性选择边界见
+[`ADR 0024`](adr/0024-change-impact-and-deterministic-selection.md)，视觉源见
 [`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
 开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
 
@@ -158,6 +159,21 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
    消息重投和 Runner 重启；清理任务可安全重复执行。
 6. 中文环境实验室提供模板、版本、Provision、端点、Seed/隔离证据和 Cleanup 状态；迁移、后端、前端、
    真实 Compose、Playwright 和镜像安全门槛纳入 S26 Draft PR 的退出条件。
+
+## S28 完成清单
+
+1. Git Unified Diff、OpenAPI、GraphQL SDL 和 gRPC Proto 统一规范化为有界 Change；平台不拉取外部
+   Git、不接收仓库凭据，也不执行用户脚本。
+2. 项目显式 Mapping 只接受精确或尾部 `*` Selector，并绑定现有平台测试资产；所有目标继续执行项目
+   授权、类型和存在性检查。
+3. `explicit_mapping_v1` 使用确定性排序和去重生成 Recommended Tests；没有证据的变更明确列为
+   Coverage Gap，不以启发式猜测制造覆盖。
+4. Impact Run、Test Selection 和 Coverage Snapshot 持久化 Changes、解释边、矩阵、Gap、摘要及
+   Fingerprint，历史结果不依赖瞬时 UI 状态。
+5. 中文变更影响页面覆盖 Mapping、四类 Diff、Change→Impacted→Recommended 三列图、原因、Coverage
+   Matrix、Gap 与历史；S28 只推荐测试，不自动执行或修改发布门禁。
+6. `20260812_0025` 双向迁移、后端/前端全量质量门槛、真实 Compose 四源冒烟和 Playwright 中文主路径
+   已在本地通过；镜像扫描及完整回归仍须在 S28 Draft PR 五项 CI 中通过。
 
 ## S13 完成清单
 
