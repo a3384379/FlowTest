@@ -1,12 +1,12 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S26 已合并并发布 `v3.0.0-beta.1`；S27 契约中心已通过本地退出门槛，待创建 Draft PR 并运行全量 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S26 已合并并发布 `v3.0.0-beta.1`；S27 契约中心在 `bbd3f13` 上通过本地与 GitHub 五项退出门槛，待 PR #30 最终文档提交复验后合并。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@2434db3`，S26 PR #29 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s27-contract-matrix`；S27 Draft PR #30 已创建，五项 CI 正在执行。
+- 当前分支：`agent/s27-contract-matrix`；S27 Draft PR #30 在 `bbd3f13` 上五项 CI 全绿，正在提交最终验收记录。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -40,9 +40,13 @@
 11. Python 与前端依赖审计无已知漏洞；本轮重建的 Backend/Frontend 镜像使用 CI 相同
     Grype 0.116.1、`only-fixed` High/Critical 门槛通过，无新增漏洞豁免。
 12. 架构边界已记录于 `ADR 0023`；实现提交为 `8ec92a3`，本地验收文档提交为
-    `f9ba039`，均已推送到 `agent/s27-contract-matrix`。Draft PR #30 已创建；Backend Test、
-    Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 已全部触发且正在执行。
-    在五项全绿前不开始 S28，也不创建 `v3.0.0-beta.2` 标签。
+    `f9ba039`，均已推送到 `agent/s27-contract-matrix`。Draft PR #30 在修复提交 `bbd3f13` 上的
+    Backend Test（2 分 18 秒，run `31589161831`）、Backend Integration（1 分 18 秒，同一 run）、
+    Frontend Build（7 分 16 秒，run `31589161860`）、Security Source/Images（9 分 26 秒，run
+    `31589161858`）和 Compose Smoke（18 分 4 秒，run `31589161838`）五项全部通过；Compose
+    同一提交完成 S3–S27 回归、Apache Kafka 兼容性、API/Workflow 容量、1000 任务持久队列和
+    隔离卷备份恢复。最终文档提交仍须复跑全部 CI；在 PR 最新提交五项全绿前不开始 S28，也不创建
+    `v3.0.0-beta.2` 标签。
 13. PR #30 首轮 Backend Test 在测试前的 Ruff format 门槛失败：本地从仓库根目录格式化
     `scripts/smoke_s27.py` 时未套用 `backend/pyproject.toml` 的 100 字符配置，CI 在 `backend` 工作目录使用
     项目配置后识别出差异。已使用 CI 的精确命令重新格式化，并在本地通过对全部 Backend 与
@@ -252,9 +256,9 @@
 
 ## 下一步
 
-1. 等待 Draft PR #30 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和
-   Compose Smoke；若有真实失败，读取日志并最小修复后重跑全部门槛。
-2. PR #30 五项 CI 全绿才标记 Ready 并 squash 合并，然后同步 `main`、创建
+1. 提交并推送 Draft PR #30 的最终验收记录，等待最新提交的 Backend Test、Backend Integration、
+   Frontend Build、Security Source/Images 和 Compose Smoke 全部通过；若有真实失败，读取日志并最小修复。
+2. PR #30 最新提交五项 CI 全绿才标记 Ready 并 squash 合并，然后同步 `main`、创建
    `agent/s28-impact-intelligence`。S28–S31 继续遵循相同顺序，
    不跨迭代提前开发。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
