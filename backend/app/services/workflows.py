@@ -13,6 +13,7 @@ from pydantic import JsonValue, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
@@ -24,6 +25,7 @@ from app.domain.data_nodes import (
 )
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
 from app.domain.test_assets import VersionChange, version_changes
+from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
     ApiNodeConfig,
     AssertNodeConfig,
@@ -152,7 +154,7 @@ class WorkflowService:
             folder_id=folder_id,
             name=normalized_name,
             description=description.strip(),
-            draft_definition=definition.model_dump(mode="json"),
+            draft_definition=definition.model_dump(mode="json", exclude_none=True),
             draft_revision=1,
             current_version=None,
             created_by_id=actor.id,
@@ -210,7 +212,7 @@ class WorkflowService:
             await self._validate_folder(project_id, folder_id)
             workflow.folder_id = folder_id
         if definition is not None:
-            workflow.draft_definition = definition.model_dump(mode="json")
+            workflow.draft_definition = definition.model_dump(mode="json", exclude_none=True)
         workflow.draft_revision += 1
         self._audit.record(
             actor_user_id=actor.id,
@@ -230,7 +232,7 @@ class WorkflowService:
         definition = self._load_definition(workflow.draft_definition)
         await self._validate_publishable(project_id, workflow.id, definition)
         next_version = (workflow.current_version or 0) + 1
-        serialized = definition.model_dump(mode="json")
+        serialized = definition.model_dump(mode="json", exclude_none=True)
         published = WorkflowVersion(
             workflow_id=workflow.id,
             version=next_version,
@@ -612,7 +614,13 @@ class WorkflowService:
         return WorkflowRunResult(
             status=result.status,
             records=tuple(
-                replace(record, output=cast(JsonValue, redact(record.output)))
+                replace(
+                    record,
+                    output=cast(JsonValue, redact(record.output)),
+                    result=record.result.model_copy(
+                        update={"output": cast(JsonValue, redact(record.result.output))}
+                    ),
+                )
                 for record in result.records
             ),
             context=cast(dict[str, JsonValue], redact(result.context)),
@@ -756,7 +764,10 @@ class WorkflowService:
         for edge in definition.edges:
             for mapping in edge.mappings:
                 self._validate_jmespath(mapping.source.path, edge.id)
-        if any(node.type is NodeType.DATASET for node in definition.nodes):
+        if any(
+            legacy_node_adapter.as_legacy_node(node).type is NodeType.DATASET
+            for node in definition.nodes
+        ):
             await self._datasets.prepare(project_id=project_id, definition=definition)
         await self._validate_subflow_graph(
             project_id=project_id,
@@ -771,7 +782,21 @@ class WorkflowService:
         node: WorkflowNode,
     ) -> None:
         try:
-            config = parse_node_config(node)
+            if node.type is NodeType.CAPABILITY:
+                if not settings.feature_capability_sdk_enabled:
+                    raise AppError(
+                        code="CAPABILITY_SDK_DISABLED",
+                        message="V3 Capability SDK 尚未启用",
+                        status_code=409,
+                    )
+                invocation = legacy_node_adapter.compile(node)
+                builtin_capability_registry.require(
+                    invocation.capability_id,
+                    invocation.capability_version,
+                )
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
+        except AppError:
+            raise
         except (ValidationError, ValueError) as error:
             raise AppError(
                 code="INVALID_NODE_CONFIG",
@@ -882,7 +907,7 @@ class WorkflowService:
         workflow_path: tuple[UUID, ...],
     ) -> None:
         for node in definition.nodes:
-            config = parse_node_config(node)
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
                 continue
             if config.workflow_id in workflow_path:
@@ -906,7 +931,10 @@ class WorkflowService:
                 )
             version = await self._load_subflow_version(project_id, config)
             nested = self._load_definition(version.definition)
-            if any(item.type is NodeType.DATASET for item in nested.nodes):
+            if any(
+                legacy_node_adapter.as_legacy_node(item).type is NodeType.DATASET
+                for item in nested.nodes
+            ):
                 raise AppError(
                     code="SUBFLOW_DATASET_NOT_SUPPORTED",
                     message="子流程暂不支持 Dataset 节点",
@@ -1223,6 +1251,10 @@ class WorkflowService:
                 status=record.status.value,
                 attempts=record.attempts,
                 output=cast(JsonValue, redact(record.output)),
+                result=cast(
+                    dict[str, JsonValue],
+                    redact(record.result.model_dump(mode="json")),
+                ),
                 error_code=record.error_code,
                 error_message=record.error_message,
                 started_at=record.started_at,

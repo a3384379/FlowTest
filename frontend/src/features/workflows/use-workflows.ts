@@ -213,7 +213,11 @@ export function useWorkflows() {
   }
 
   function handleExecutionEvent(event: ExecutionEvent) {
-    if (event.type === 'node.status' && event.node_id && event.node_status) {
+    if (
+      (event.type === 'node.status' || event.type === 'node.result') &&
+      event.node_id &&
+      event.node_status
+    ) {
       const nodeId = event.node_id
       const status = event.node_status
       setNodeStatuses((current) => ({ ...current, [nodeId]: status }))

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.domain.assertions import ComparisonOperator
+from app.domain.capabilities import CapabilityId, SemanticVersion
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
@@ -21,7 +22,24 @@ class NodeType(StrEnum):
     FOR_EACH = "for_each"
     SQL = "sql"
     REDIS = "redis"
+    CAPABILITY = "capability"
     END = "end"
+
+
+CAPABILITY_LEGACY_NODE_TYPES: dict[tuple[str, str], NodeType] = {
+    ("flow.start", "2.0.0"): NodeType.START,
+    ("http.request", "2.0.0"): NodeType.API,
+    ("data.extract", "2.0.0"): NodeType.EXTRACT,
+    ("assertion.evaluate", "2.0.0"): NodeType.ASSERT,
+    ("flow.condition", "2.0.0"): NodeType.CONDITION,
+    ("flow.delay", "2.0.0"): NodeType.DELAY,
+    ("data.dataset", "2.0.0"): NodeType.DATASET,
+    ("flow.subflow", "2.0.0"): NodeType.SUBFLOW,
+    ("flow.foreach", "2.0.0"): NodeType.FOR_EACH,
+    ("sql.query", "2.0.0"): NodeType.SQL,
+    ("redis.read", "2.0.0"): NodeType.REDIS,
+    ("flow.end", "2.0.0"): NodeType.END,
+}
 
 
 class NodeStatus(StrEnum):
@@ -105,6 +123,13 @@ class FieldMapping(BaseModel):
     target: MappingTarget
 
 
+class CapabilityBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)
+    expression: str = Field(min_length=1, max_length=2000)
+
+
 class WorkflowNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -113,6 +138,47 @@ class WorkflowNode(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     position: Position
     config: dict[str, JsonValue] = Field(default_factory=dict)
+    capability_id: CapabilityId | None = None
+    capability_version: SemanticVersion | None = None
+    configuration: dict[str, JsonValue] | None = None
+    bindings: list[CapabilityBinding] | None = None
+
+    @model_validator(mode="after")
+    def validate_capability_contract(self) -> "WorkflowNode":
+        capability_fields = (
+            self.capability_id,
+            self.capability_version,
+            self.configuration,
+            self.bindings,
+        )
+        if self.type is NodeType.CAPABILITY:
+            if self.capability_id is None or self.capability_version is None:
+                raise ValueError("Capability node must pin capability ID and version")
+            if self.configuration is None or self.bindings is None:
+                raise ValueError("Capability node must declare configuration and bindings")
+            if self.config:
+                raise ValueError("Capability node cannot use the legacy config field")
+            inputs = [binding.input for binding in self.bindings]
+            if len(inputs) != len(set(inputs)):
+                raise ValueError("Capability binding inputs must be unique")
+        elif any(value is not None for value in capability_fields):
+            raise ValueError("Legacy node cannot declare V3 capability fields")
+        return self
+
+    @property
+    def effective_type(self) -> NodeType:
+        if self.type is not NodeType.CAPABILITY:
+            return self.type
+        if self.capability_id is None or self.capability_version is None:
+            return NodeType.CAPABILITY
+        return CAPABILITY_LEGACY_NODE_TYPES.get(
+            (self.capability_id, self.capability_version),
+            NodeType.CAPABILITY,
+        )
+
+    @property
+    def effective_config(self) -> dict[str, JsonValue]:
+        return self.config if self.type is not NodeType.CAPABILITY else self.configuration or {}
 
 
 class WorkflowEdge(BaseModel):
@@ -246,13 +312,13 @@ class WorkflowDefinition(BaseModel):
         if len(edge_ids) != len(set(edge_ids)):
             raise ValueError("Workflow edge IDs must be unique")
 
-        starts = [node for node in self.nodes if node.type is NodeType.START]
-        ends = [node for node in self.nodes if node.type is NodeType.END]
+        starts = [node for node in self.nodes if node.effective_type is NodeType.START]
+        ends = [node for node in self.nodes if node.effective_type is NodeType.END]
         if len(starts) != 1:
             raise ValueError("Workflow must contain exactly one start node")
         if not ends:
             raise ValueError("Workflow must contain at least one end node")
-        datasets = [node for node in self.nodes if node.type is NodeType.DATASET]
+        datasets = [node for node in self.nodes if node.effective_type is NodeType.DATASET]
         if len(datasets) > 1:
             raise ValueError("Workflow can contain at most one dataset node")
 
@@ -274,7 +340,7 @@ class WorkflowDefinition(BaseModel):
     def _validate_edge(edge: WorkflowEdge, nodes: dict[str, WorkflowNode]) -> None:
         source = nodes[edge.source]
         if edge.condition is not None:
-            if source.type is not NodeType.CONDITION:
+            if source.effective_type is not NodeType.CONDITION:
                 raise ValueError(f"Edge {edge.id} condition requires a condition source node")
             if edge.condition not in {"true", "false"}:
                 raise ValueError(f"Edge {edge.id} condition must be true or false")
@@ -284,7 +350,7 @@ class WorkflowDefinition(BaseModel):
 
     def _validate_condition_branches(self, nodes: dict[str, WorkflowNode]) -> None:
         for node in nodes.values():
-            if node.type is not NodeType.CONDITION:
+            if node.effective_type is not NodeType.CONDITION:
                 continue
             outgoing = [edge for edge in self.edges if edge.source == node.id]
             conditions = [edge.condition for edge in outgoing]
@@ -343,9 +409,9 @@ class WorkflowDefinition(BaseModel):
 
 
 def parse_api_node_config(node: WorkflowNode) -> ApiNodeConfig:
-    if node.type is not NodeType.API:
+    if node.effective_type is not NodeType.API:
         raise ValueError(f"Node {node.id} is not an API node")
-    return ApiNodeConfig.model_validate(node.config)
+    return ApiNodeConfig.model_validate(node.effective_config)
 
 
 NodeConfig = (
@@ -378,10 +444,10 @@ _NODE_CONFIG_MODELS: dict[NodeType, type[BaseModel]] = {
 
 
 def parse_node_config(node: WorkflowNode) -> NodeConfig:
-    model = _NODE_CONFIG_MODELS.get(node.type)
+    model = _NODE_CONFIG_MODELS.get(node.effective_type)
     if model is not None:
-        return cast(NodeConfig, model.model_validate(node.config))
-    if node.config:
+        return cast(NodeConfig, model.model_validate(node.effective_config))
+    if node.effective_config:
         raise ValueError(f"Node {node.id} does not accept configuration")
     return None
 

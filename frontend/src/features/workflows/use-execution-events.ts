@@ -51,7 +51,9 @@ export function parseExecutionEvent(value: unknown): ExecutionEvent | null {
 }
 
 function isEventType(value: unknown): boolean {
-  return ['execution.started', 'node.status', 'execution.completed'].includes(String(value))
+  return ['execution.started', 'node.status', 'node.result', 'execution.completed'].includes(
+    String(value),
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

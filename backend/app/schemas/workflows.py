@@ -107,6 +107,7 @@ class WorkflowNodeExecutionResponse(BaseModel):
     status: NodeStatus
     attempts: int
     output: JsonValue
+    result: dict[str, JsonValue] | None
     error_code: str | None
     error_message: str | None
     started_at: datetime | None
@@ -126,6 +127,7 @@ class WorkflowDebugNodeResponse(BaseModel):
     status: NodeStatus
     attempts: int
     output: JsonValue
+    result: dict[str, JsonValue]
     error_code: str | None
     error_message: str | None
     started_at: datetime | None

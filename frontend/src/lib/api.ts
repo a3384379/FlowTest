@@ -375,10 +375,15 @@ export type WorkflowNode = {
     | 'for_each'
     | 'sql'
     | 'redis'
+    | 'capability'
     | 'end'
   name: string
   position: { x: number; y: number }
   config: Record<string, unknown>
+  capability_id?: string
+  capability_version?: string
+  configuration?: Record<string, unknown>
+  bindings?: Array<{ input: string; expression: string }>
 }
 
 export type WorkflowFieldMapping = {
@@ -451,6 +456,7 @@ export type WorkflowDebugResult = {
     status: WorkflowNodeExecution['status']
     attempts: number
     output: unknown
+    result: Record<string, unknown>
     error_code: string | null
     error_message: string | null
     started_at: string | null
@@ -477,6 +483,34 @@ export type WorkflowExecution = {
   completed_at: string | null
 }
 
+export type NodeResult = {
+  status: 'passed' | 'failed' | 'skipped' | 'cancelled'
+  output: unknown
+  assertions: Array<{
+    name: string
+    passed: boolean
+    expected: unknown
+    actual: unknown
+    message: string
+  }>
+  metrics: Array<{ name: string; value: number; unit: string; labels: Record<string, string> }>
+  artifacts: Array<{
+    artifact_id: string
+    name: string
+    content_type: string
+    size_bytes: number
+    sha256: string
+  }>
+  trace: { trace_id: string; span_id: string } | null
+  redacted_paths: string[]
+  error: {
+    code: string
+    message: string
+    details: Record<string, unknown>
+    retryable: boolean
+  } | null
+}
+
 export type WorkflowNodeExecution = {
   id: string
   node_id: string
@@ -485,6 +519,7 @@ export type WorkflowNodeExecution = {
   status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled'
   attempts: number
   output: unknown
+  result?: NodeResult | null
   error_code: string | null
   error_message: string | null
 }
@@ -777,13 +812,14 @@ export type NotificationDelivery = {
 
 export type ExecutionEvent = {
   sequence: number
-  type: 'execution.started' | 'node.status' | 'execution.completed'
+  type: 'execution.started' | 'node.status' | 'node.result' | 'execution.completed'
   execution_id: string
   emitted_at: string
   node_id: string | null
   node_name: string | null
   node_type: string | null
   node_status: WorkflowNodeExecution['status'] | null
+  result?: NodeResult | null
   attempts: number
   error_code: string | null
   error_message: string | null

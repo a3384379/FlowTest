@@ -18,6 +18,7 @@ from app.engine.contracts import (
     WorkflowNode,
     WorkflowRunStatus,
 )
+from app.engine.results import NodeResult, normalize_node_result
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,7 @@ class NodeRunRecord:
     status: NodeStatus
     attempts: int
     output: JsonValue
+    result: NodeResult
     error_code: str | None
     error_message: str | None
     started_at: datetime | None
@@ -61,6 +63,7 @@ class NodeStatusUpdate:
     attempts: int
     error_code: str | None
     error_message: str | None
+    result: NodeResult | None
     occurred_at: datetime
 
 
@@ -136,7 +139,9 @@ class ExecutionContext:
 
 
 class NodeExecutor(Protocol):
-    async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue: ...
+    async def execute(
+        self, node: WorkflowNode, context: ExecutionContext
+    ) -> NodeResult | JsonValue: ...
 
 
 class CancellationToken:
@@ -256,12 +261,16 @@ class WorkflowScheduler:
             failure: NodeExecutionError
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
-                    output = await self._executor.execute(node, context)
+                    result = normalize_node_result(await self._executor.execute(node, context))
+                error = result.error
                 return _record(
                     node,
-                    NodeStatus.PASSED,
+                    result.status,
                     attempts=attempts,
-                    output=output,
+                    output=result.output,
+                    result=result,
+                    error_code=error.code if error else None,
+                    error_message=error.message if error else None,
                     started_at=started_at,
                 )
             except TimeoutError:
@@ -300,16 +309,16 @@ class _ExecutionPolicy:
 
 
 def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _ExecutionPolicy:
-    if node.type is NodeType.API:
-        config = ApiNodeConfig.model_validate(node.config)
+    if node.effective_type is NodeType.API:
+        config = ApiNodeConfig.model_validate(node.effective_config)
         return _ExecutionPolicy(
             timeout_seconds=config.timeout_seconds or default_timeout_seconds,
             max_retries=config.max_retries,
             retry_on=frozenset(config.retry_on),
             retry_delay_seconds=config.retry_delay_seconds,
         )
-    if node.type is NodeType.DELAY:
-        delay = DelayNodeConfig.model_validate(node.config)
+    if node.effective_type is NodeType.DELAY:
+        delay = DelayNodeConfig.model_validate(node.effective_config)
         return _ExecutionPolicy(
             timeout_seconds=delay.seconds + 1,
             max_retries=0,
@@ -495,6 +504,12 @@ def _failed_record(
         output=error.output,
         error_code=error.code,
         error_message=error.message,
+        result=NodeResult.failed(
+            code=error.code,
+            message=error.message,
+            output=error.output,
+            retryable=error.category is not None,
+        ),
         started_at=started_at,
     )
 
@@ -505,6 +520,7 @@ def _record(
     *,
     attempts: int = 0,
     output: JsonValue = None,
+    result: NodeResult | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
     started_at: datetime | None = None,
@@ -516,6 +532,20 @@ def _record(
         status=status,
         attempts=attempts,
         output=output,
+        result=result
+        or NodeResult(
+            status=status,
+            output=output,
+            error=(
+                None
+                if error_code is None or error_message is None
+                else {
+                    "code": error_code,
+                    "message": error_message,
+                    "retryable": False,
+                }
+            ),
+        ),
         error_code=error_code,
         error_message=error_message,
         started_at=started_at,
@@ -553,6 +583,7 @@ async def _notify_status_changes(
                 attempts=record.attempts if record else 0,
                 error_code=record.error_code if record else None,
                 error_message=record.error_message if record else None,
+                result=record.result if record else None,
                 occurred_at=record.completed_at if record else datetime.now(UTC),
             )
         )

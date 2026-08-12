@@ -113,6 +113,29 @@ V2.0 保持 `/api/v1` 兼容和单组织 Compose 部署，以 Feature Flag 隔�
 | S20 | 企业与可观测性 | OIDC PKCE、团队授权、Vault KV v2、OpenTelemetry、Grafana、可选 PITR | 已完成 |
 | S21 | v2.0.0 AI 助手与发布 | 可审核 AI 建议、脱敏/审计/评测、全量试点与发布 | 功能与 CI 完成；`v2.0.0-rc.1` 已固定，真实 RC 观察待执行 |
 
+## V3.0 迭代路线
+
+V3 以 Capability、Runner、Service/Change/Impact/Test Selection/Risk/Release Gate 为主线；
+控制面继续使用 Compose，Kubernetes 仅作为可选 Worker Plane。正式发布版本仍须满足 V2 RC 与
+V3 各自的真实验收门槛。
+
+| 迭代 | 主要交付 | 状态 |
+|---|---|---|
+| S22 | Capability SDK V3、Legacy Adapter、NodeResult/Event、Runner/Plugin 边界、V3 原型与 Token | 开发中；本地全量、迁移、Compose、浏览器及单/四 Worker 基线已通过，Draft PR/CI 待验证 |
+| S23 | GraphQL、gRPC 与多协议工作台 | 未开始 |
+| S24 | Kafka、WebSocket 与 Exchange | 未开始 |
+| S25 | 声明式 k6 性能实验室 | 未开始 |
+| S26 | 签名环境模板、Provision/Cleanup/TTL | 未开始 |
+| S27 | Pact、契约矩阵、Service Graph、Deployment Check | 未开始 |
+| S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
+| S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
+| S30 | Failure Cluster、Release Risk、AI Change Set | 未开始 |
+| S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | 未开始 |
+
+S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.md)，视觉源见
+[`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
+开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
+
 S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
 [`docs/operations/soak-observation.md`](operations/soak-observation.md)。
 

@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   ScheduleOutlined,
   SafetyCertificateOutlined,
+  ToolOutlined,
   RobotOutlined,
   UserOutlined,
 } from '@ant-design/icons'
@@ -45,6 +46,7 @@ const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const DataMockPage = lazy(() => import('./pages/DataMockPage'))
+const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -59,6 +61,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   quality: '质量中心',
   ai: 'AI 助手',
   reports: '测试报告',
+  platform: '平台管理',
 }
 
 export default function App() {
@@ -108,6 +111,9 @@ function AuthenticatedShell() {
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
+            ...(user?.is_system_admin
+              ? [navigationItem('platform', <ToolOutlined />, '/platform')]
+              : []),
           ]}
         />
       </Sider>
@@ -167,6 +173,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
+      <Route path="/platform" element={<PlatformCapabilitiesPage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
       {(
         [

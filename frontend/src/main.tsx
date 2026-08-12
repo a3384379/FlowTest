@@ -20,9 +20,11 @@ createRoot(document.getElementById('root')!).render(
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#2563eb',
-          borderRadius: 8,
+          colorPrimary: '#5b5cf0',
+          borderRadius: 10,
           colorBgLayout: '#f5f7fb',
+          colorText: '#172033',
+          colorBorder: '#dce2ec',
         },
       }}
     >

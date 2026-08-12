@@ -25,6 +25,18 @@ describe('workflow execution events', () => {
     )
 
     expect(event).toMatchObject({ sequence: 4, node_id: 'api', node_status: 'running' })
+    expect(
+      parseExecutionEvent(
+        JSON.stringify({
+          sequence: 5,
+          type: 'node.result',
+          execution_id: 'execution-id',
+          node_id: 'api',
+          node_status: 'passed',
+          result: { status: 'passed', output: { ok: true } },
+        }),
+      ),
+    ).toMatchObject({ type: 'node.result', node_status: 'passed' })
     expect(parseExecutionEvent('not-json')).toBeNull()
     expect(parseExecutionEvent('{}')).toBeNull()
     expect(
