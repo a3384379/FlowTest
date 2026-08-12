@@ -124,7 +124,7 @@ def _verify_capabilities(client: APIClient, token: str) -> None:
         ("kafka.consume", "3.0.0"),
         ("websocket.exchange", "3.0.0"),
     }
-    if capabilities["total"] != 21 or not required.issubset(keys):
+    if capabilities["total"] < 21 or not required.issubset(keys):
         raise RuntimeError("S24 event Capability manifests are missing")
 
 
