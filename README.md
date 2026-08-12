@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S26 已合并并发布 v3.0.0-beta.1，S27 契约中心已通过本地退出门槛、待 Draft PR 与全量 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 S27 已合并并发布 v3.0.0-beta.2，S28 变更影响引擎已通过本地退出门槛、待 Draft PR 与全量 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -170,6 +170,13 @@ S27 新增服务目录、不可变 Pact 版本、可选固定 Pact Broker、Prov
 Exact Matcher，不执行用户 Matching Rule、Generator、Plugin 或脚本。架构边界见
 [`ADR 0023`](docs/adr/0023-pact-contract-hub-and-release-evidence.md)。
 
+S28 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类有界变更解析、项目级显式
+Asset Mapping、Change→Impacted→Recommended 影响图、确定性 Test Selection 和 Coverage Matrix。
+平台不访问外部 Git、不接收仓库凭据或脚本；`explicit_mapping_v1` 只按已登记证据选择并解释测试，
+未匹配项明确列为 Gap。Impact Run、选择结果、覆盖快照与 Fingerprint 均持久化。Web“变更影响分析”
+提供 Mapping、四类 Diff、三列图、原因、矩阵与历史。架构边界见
+[`ADR 0024`](docs/adr/0024-change-impact-and-deterministic-selection.md)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -218,6 +225,10 @@ Environment Worker 停止、队列清理和恢复后的幂等回收。
 启用 `FLOWTEST_FEATURE_CONTRACT_HUB_ENABLED=true` 后，运行
 `uv run --project backend python scripts/smoke_s27.py` 可在 Compose 中验证 Pact 导入、真实 Provider
 请求、Exact Matcher 失败证据、OpenAPI 绑定、兼容矩阵与 safe/unsafe 发布判断。
+
+启用 `FLOWTEST_FEATURE_IMPACT_ENGINE_ENABLED=true` 后，运行
+`uv run --project backend python scripts/smoke_s28.py` 可在 Compose 中验证 Git/OpenAPI/GraphQL/Proto
+四类 Diff、显式 Mapping、确定性去重、解释边、Coverage Matrix、Gap 与历史证据持久化。
 
 执行全部本地质量门槛使用 `./scripts/check.sh`。
 

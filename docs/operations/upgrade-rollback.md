@@ -46,3 +46,12 @@ S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到
 - 升级会为 Project 增加默认关闭的样本共享开关，并创建 AI Job 与 Suggestion 表；现有 V1/V2 资产、执行、CI Token、Snapshot 和报告不变。
 - 回滚到 `20260811_0017` 会删除全部 AI Job、Suggestion、Token 用量和审核结果；先导出审计证据并停止 AI Worker。
 - AI 默认关闭，因此数据库升级本身不会向任何外部网关发送数据。回滚应用代码前应先关闭 Feature Flag，防止旧 Worker 在迁移窗口领取任务。
+
+## S28 / 0025 特别说明
+
+- 升级会创建 `impact_asset_mappings`、`impact_runs`、`test_selections` 和 `coverage_snapshots`；现有测试
+  资产、契约、性能场景、执行和报告不变，Feature Flag 默认关闭。
+- 回滚前先关闭 `FLOWTEST_FEATURE_IMPACT_ENGINE_ENABLED` 并停止新分析。降级到 `20260812_0024`
+  会删除全部 Mapping、Impact Run、Test Selection、Coverage Snapshot、解释边、Gap 与 Fingerprint。
+- 若这些影响分析证据必须保留，降级前应导出对应项目的运行结果；需要数据库级无损恢复时使用升级前
+  PostgreSQL + MinIO 恢复点，而不是执行 destructive downgrade。
