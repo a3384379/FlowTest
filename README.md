@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 路线 S23 多协议能力已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 路线 S24 事件协议能力已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -141,6 +141,13 @@ Query/Mutation、gRPC Proto/Protoset/Reflection 与 Unary/Server Streaming、TLS
 不可变协议 Snapshot 和 REST→GraphQL/gRPC 结构化绑定。Web“多协议工作台”可完成导入、调试与
 版本审阅；协议节点可直接加入 React Flow 工作流。架构边界见
 [`ADR 0019`](docs/adr/0019-multi-protocol-schema-snapshots.md)。
+
+S24 新增不可变 Kafka/WebSocket 事件源、Avro/JSON Schema/Protobuf 消息 Schema、兼容 Schema
+Registry 导入，以及 Kafka Produce/Consume 和 WebSocket Connect/Send/Await/Close/Exchange
+Capability。Kafka 客户端禁用 Admin、自动 Topic 创建和 Offset 自动提交，消费与 WebSocket 等待均有
+条数和时间上限；Workflow Snapshot 固定事件源与消息 Schema 哈希。Compose 使用 Redpanda
+`v26.2.1`，CI 额外验证 Apache Kafka `4.3.1`。架构边界见
+[`ADR 0020`](docs/adr/0020-event-protocols-and-session-boundary.md)。
 
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目

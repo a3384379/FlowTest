@@ -24,3 +24,4 @@ class FeatureFlagsResponse(BaseModel):
     oidc: bool
     ai: bool
     multi_protocol: bool
+    event_protocols: bool

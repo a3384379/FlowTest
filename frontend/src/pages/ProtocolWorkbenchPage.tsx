@@ -31,6 +31,9 @@ import { Link } from 'react-router-dom'
 import { getV3FeatureFlags } from '../features/capabilities/capability-service'
 import { listCredentials } from '../features/data-sources/data-source-service'
 import { useProjectContext } from '../features/projects/use-project-context'
+import EventProtocolWorkspace, {
+  type EventProtocolMode,
+} from '../features/protocols/EventProtocolWorkspace'
 import {
   createGraphQLSchema,
   createGrpcDescriptor,
@@ -46,7 +49,8 @@ import type { Credential } from '../lib/api'
 
 const { TextArea } = Input
 
-type ProtocolMode = 'graphql' | 'grpc'
+type SchemaProtocolMode = 'graphql' | 'grpc'
+type ProtocolMode = SchemaProtocolMode | EventProtocolMode
 type ImportMode =
   | 'graphql_sdl'
   | 'graphql_introspection'
@@ -82,19 +86,21 @@ export default function ProtocolWorkbenchPage() {
 
 function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
   const [mode, setMode] = useState<ProtocolMode>('graphql')
-  const [selection, setSelection] = useState<{ mode: ProtocolMode; id: string } | null>(null)
+  const [selection, setSelection] = useState<{ mode: SchemaProtocolMode; id: string } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const inventory = useProtocolInventory(projectId, mode)
+  const schemaMode: SchemaProtocolMode = mode === 'grpc' ? 'grpc' : 'graphql'
+  const inventory = useProtocolInventory(projectId, schemaMode)
   const credentials = useQuery({
     queryKey: ['credentials', projectId],
     queryFn: () => listCredentials(projectId),
   })
-  const selected = useSelectedAsset(inventory.items, selectionId(selection, mode))
+  const selected = useSelectedAsset(inventory.items, selectionId(selection, schemaMode))
+  const eventMode = mode === 'kafka' || mode === 'websocket'
 
   return (
     <div className="protocol-page">
-      <ProtocolHeading onImport={() => setImportOpen(true)} />
-      <ProtocolFeatureAlert enabled={inventory.enabled} />
+      <ProtocolHeading onImport={eventMode ? undefined : () => setImportOpen(true)} />
+      {!eventMode && <ProtocolFeatureAlert enabled={inventory.enabled} />}
       <ProtocolSummary graphql={inventory.graphqlTotal} grpc={inventory.grpcTotal} />
       <Card className="protocol-workspace">
         <Segmented<ProtocolMode>
@@ -102,30 +108,40 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
           options={[
             { label: 'GraphQL', value: 'graphql' },
             { label: 'gRPC', value: 'grpc' },
+            { label: 'Kafka', value: 'kafka' },
+            { label: 'WebSocket', value: 'websocket' },
           ]}
           onChange={setMode}
         />
-        <div className="protocol-workspace-grid">
-          <SchemaInventory
-            mode={mode}
-            items={inventory.items}
-            loading={inventory.loading}
-            selectedId={assetId(selected)}
-            onSelect={(item) => setSelection({ mode, id: item.id })}
-          />
-          <ProtocolEditor
-            mode={mode}
+        {eventMode ? (
+          <EventProtocolWorkspace
             projectId={projectId}
-            selected={selected}
-            enabled={inventory.enabled}
-            credentials={credentials.data ?? []}
+            mode={mode}
+            enabled={inventory.eventProtocolsEnabled}
           />
-          <SchemaInspector asset={selected} />
-        </div>
+        ) : (
+          <div className="protocol-workspace-grid">
+            <SchemaInventory
+              mode={schemaMode}
+              items={inventory.items}
+              loading={inventory.loading}
+              selectedId={assetId(selected)}
+              onSelect={(item) => setSelection({ mode: schemaMode, id: item.id })}
+            />
+            <ProtocolEditor
+              mode={schemaMode}
+              projectId={projectId}
+              selected={selected}
+              enabled={inventory.enabled}
+              credentials={credentials.data ?? []}
+            />
+            <SchemaInspector asset={selected} />
+          </div>
+        )}
       </Card>
       <SchemaImportDialog
         open={importOpen}
-        mode={mode}
+        mode={schemaMode}
         projectId={projectId}
         onClose={() => setImportOpen(false)}
         credentials={credentials.data ?? []}
@@ -134,7 +150,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
   )
 }
 
-function useProtocolInventory(projectId: string, mode: ProtocolMode) {
+function useProtocolInventory(projectId: string, mode: SchemaProtocolMode) {
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
   const graphql = useQuery({
     queryKey: ['graphql-schemas', projectId],
@@ -146,6 +162,7 @@ function useProtocolInventory(projectId: string, mode: ProtocolMode) {
   })
   return {
     enabled: flags.data?.multi_protocol === true,
+    eventProtocolsEnabled: flags.data?.event_protocols === true,
     items: protocolItems(mode, pageItems(graphql.data), pageItems(grpc.data)),
     graphqlTotal: pageTotal(graphql.data),
     grpcTotal: pageTotal(grpc.data),
@@ -166,25 +183,27 @@ function ProtocolFeatureAlert({ enabled }: { enabled: boolean }) {
   )
 }
 
-function ProtocolHeading({ onImport }: { onImport: () => void }) {
+function ProtocolHeading({ onImport }: { onImport?: () => void }) {
   return (
     <div className="page-heading">
       <div>
         <Space align="center">
           <Typography.Title level={2}>多协议接口工作台</Typography.Title>
-          <Tag color="purple">V3 · S23</Tag>
+          <Tag color="purple">V3 · S24</Tag>
         </Space>
         <Typography.Text type="secondary">
-          在同一工作台管理 GraphQL Schema、gRPC Descriptor，并将协议版本固定到执行 Snapshot。
+          统一管理 GraphQL、gRPC、Kafka 与 WebSocket，并将协议资产版本固定到执行 Snapshot。
         </Typography.Text>
       </div>
       <Space>
         <Link to="../apis">
           <Button icon={<ApiOutlined />}>REST 工作台</Button>
         </Link>
-        <Button type="primary" icon={<ImportOutlined />} onClick={onImport}>
-          导入协议 Schema
-        </Button>
+        {onImport && (
+          <Button type="primary" icon={<ImportOutlined />} onClick={onImport}>
+            导入协议 Schema
+          </Button>
+        )}
       </Space>
     </div>
   )
@@ -222,7 +241,7 @@ function SchemaInventory({
   selectedId,
   onSelect,
 }: {
-  mode: ProtocolMode
+  mode: SchemaProtocolMode
   items: SchemaArtifact[]
   loading: boolean
   selectedId: string | null
@@ -265,7 +284,7 @@ function ProtocolEditor({
   enabled,
   credentials,
 }: {
-  mode: ProtocolMode
+  mode: SchemaProtocolMode
   projectId: string
   selected: SchemaArtifact | null
   enabled: boolean
@@ -509,7 +528,7 @@ function SchemaImportDialog({
   credentials,
 }: {
   open: boolean
-  mode: ProtocolMode
+  mode: SchemaProtocolMode
   projectId: string
   onClose: () => void
   credentials: Credential[]
@@ -671,7 +690,7 @@ function useSelectedAsset(items: SchemaArtifact[], selectedId: string | null) {
 }
 
 function protocolItems(
-  mode: ProtocolMode,
+  mode: SchemaProtocolMode,
   graphql: SchemaArtifact[],
   grpc: SchemaArtifact[],
 ): SchemaArtifact[] {
@@ -690,8 +709,8 @@ function pageTotal(page: { total: number } | undefined): number {
 }
 
 function selectionId(
-  selection: { mode: ProtocolMode; id: string } | null,
-  mode: ProtocolMode,
+  selection: { mode: SchemaProtocolMode; id: string } | null,
+  mode: SchemaProtocolMode,
 ): string | null {
   if (selection?.mode === mode) return selection.id
   return null

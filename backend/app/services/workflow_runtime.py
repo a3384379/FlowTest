@@ -31,6 +31,17 @@ from app.engine.contracts import (
     parse_node_config,
 )
 from app.engine.control_nodes import execute_control_node
+from app.engine.event_nodes import (
+    KafkaConsumeCapabilityConfig,
+    KafkaProduceCapabilityConfig,
+    PreparedEventNode,
+    WebSocketAwaitCapabilityConfig,
+    WebSocketCloseCapabilityConfig,
+    WebSocketConnectCapabilityConfig,
+    WebSocketExchangeCapabilityConfig,
+    WebSocketSendCapabilityConfig,
+    resolve_event_config,
+)
 from app.engine.mappings import MappingResolutionError, ResolvedFieldMapping, resolve_field_mappings
 from app.engine.node_sdk import NodeHandlerRegistration, NodeHandlerRegistry
 from app.engine.protocol_nodes import (
@@ -50,6 +61,7 @@ from app.services.data_nodes import (
     InfrastructureDataNodeRunner,
     PreparedDataNode,
 )
+from app.services.event_runtime import EventProtocolRunner
 from app.services.executions import (
     PreparedMultipart,
     _response_body,
@@ -79,6 +91,7 @@ class PreparedSubflow:
     snapshot: dict[str, JsonValue]
     data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
     protocol_nodes: dict[str, PreparedProtocolNode] = dataclass_field(default_factory=dict)
+    event_nodes: dict[str, PreparedEventNode] = dataclass_field(default_factory=dict)
 
 
 class WorkflowNodeExecutor:
@@ -93,6 +106,7 @@ class WorkflowNodeExecutor:
         data_nodes: dict[str, PreparedDataNode] | None = None,
         data_runner: DataNodeRunner | None = None,
         protocol_nodes: dict[str, PreparedProtocolNode] | None = None,
+        event_nodes: dict[str, PreparedEventNode] | None = None,
     ) -> None:
         self._client = client
         self._requests = requests
@@ -102,8 +116,13 @@ class WorkflowNodeExecutor:
         self._data_nodes = data_nodes or {}
         self._outbound_guard = outbound_guard
         self._protocol_nodes = protocol_nodes or {}
+        self._event_nodes = event_nodes or {}
         self._protocol_runner = ProtocolRunner(
             client,
+            network_policy,
+            outbound_guard=outbound_guard,
+        )
+        self._event_runner = EventProtocolRunner(
             network_policy,
             outbound_guard=outbound_guard,
         )
@@ -137,6 +156,9 @@ class WorkflowNodeExecutor:
     async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         return await self._handlers.execute(node, context)
 
+    async def close(self) -> None:
+        await self._event_runner.close_all()
+
     async def _execute_capability(
         self,
         node: WorkflowNode,
@@ -144,6 +166,8 @@ class WorkflowNodeExecutor:
     ) -> JsonValue:
         if node.capability_id in {"graphql.request", "grpc.call"}:
             return await self._execute_protocol(node, context)
+        if node.capability_id and node.capability_id.startswith(("kafka.", "websocket.")):
+            return await self._execute_event_protocol(node, context)
         try:
             legacy_node = legacy_node_adapter.as_legacy_node(node)
         except ValueError as error:
@@ -172,6 +196,56 @@ class WorkflowNodeExecutor:
         if isinstance(result.output, dict):
             return {**result.output, "duration_ms": result.duration_ms}
         return result.output
+
+    async def _execute_event_protocol(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+    ) -> JsonValue:
+        config = resolve_event_config(node, context)
+        prepared = self._event_nodes.get(node.id)
+        if isinstance(config, KafkaProduceCapabilityConfig):
+            result = await self._event_runner.execute_kafka_produce(
+                self._require_event_snapshot(node, prepared), config
+            )
+        elif isinstance(config, KafkaConsumeCapabilityConfig):
+            result = await self._event_runner.execute_kafka_consume(
+                self._require_event_snapshot(node, prepared), config
+            )
+        elif isinstance(config, WebSocketConnectCapabilityConfig):
+            result = await self._event_runner.execute_websocket_connect(
+                self._require_event_snapshot(node, prepared), config
+            )
+        elif isinstance(config, WebSocketSendCapabilityConfig):
+            result = await self._event_runner.execute_websocket_send(config)
+        elif isinstance(config, WebSocketAwaitCapabilityConfig):
+            result = await self._event_runner.execute_websocket_await(config)
+        elif isinstance(config, WebSocketCloseCapabilityConfig):
+            result = await self._event_runner.execute_websocket_close(config)
+        elif isinstance(config, WebSocketExchangeCapabilityConfig):
+            result = await self._event_runner.execute_websocket_exchange(
+                self._require_event_snapshot(node, prepared), config
+            )
+        else:
+            raise NodeExecutionError(
+                code="CAPABILITY_RUNTIME_UNAVAILABLE",
+                message="当前 Runner 不支持该事件能力版本",
+            )
+        if isinstance(result.output, dict):
+            return {**result.output, "duration_ms": result.duration_ms}
+        return result.output
+
+    @staticmethod
+    def _require_event_snapshot(
+        node: WorkflowNode,
+        prepared: PreparedEventNode | None,
+    ) -> PreparedEventNode:
+        if prepared is None:
+            raise NodeExecutionError(
+                code="EVENT_SOURCE_SNAPSHOT_MISSING",
+                message=f"节点 {node.name} 缺少固定事件源 Snapshot",
+            )
+        return prepared
 
     async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         prepared = self._requests[node.id]
@@ -352,14 +426,18 @@ class WorkflowNodeExecutor:
             data_nodes=prepared.data_nodes,
             data_runner=self._data_runner,
             protocol_nodes=prepared.protocol_nodes,
+            event_nodes=prepared.event_nodes,
         )
-        return await WorkflowScheduler(executor).run(
-            prepared.definition,
-            context=ExecutionContext(
-                workflow_variables=dict(prepared.definition.variables),
-                runtime_variables=runtime_variables,
-            ),
-        )
+        try:
+            return await WorkflowScheduler(executor).run(
+                prepared.definition,
+                context=ExecutionContext(
+                    workflow_variables=dict(prepared.definition.variables),
+                    runtime_variables=runtime_variables,
+                ),
+            )
+        finally:
+            await executor.close()
 
     def _prepared_subflow(self, node: WorkflowNode) -> PreparedSubflow:
         prepared = self._subflows.get(node.id)

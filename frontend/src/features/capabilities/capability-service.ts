@@ -5,6 +5,7 @@ export type V3FeatureFlags = {
   plugin_registry: boolean
   runner_fabric: boolean
   multi_protocol: boolean
+  event_protocols: boolean
 }
 
 export type CapabilityManifest = {

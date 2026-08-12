@@ -200,6 +200,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         credentials={resources.credentials}
         graphqlSchemas={resources.graphqlSchemas}
         grpcDescriptors={resources.grpcDescriptors}
+        eventSources={resources.eventSources}
         statuses={state.nodeStatuses}
         editable={!state.activeExecutionId}
         onChange={state.setDraftDefinition}
@@ -217,6 +218,7 @@ function workflowDesignerResources(state: WorkflowState, workflowId: string) {
     credentials: listItems(state.credentials.data),
     graphqlSchemas: pageItems(state.graphqlSchemas.data),
     grpcDescriptors: pageItems(state.grpcDescriptors.data),
+    eventSources: pageItems(state.eventSources.data),
   }
 }
 

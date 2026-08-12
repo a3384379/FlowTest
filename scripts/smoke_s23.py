@@ -104,7 +104,7 @@ def _verify_capabilities(client: APIClient, token: str) -> None:
     capabilities = client.json("GET", "/capabilities?page=1&page_size=100", token=token)
     keys = {(item["id"], item["version"]) for item in capabilities["items"]}
     required = {("graphql.request", "3.0.0"), ("grpc.call", "3.0.0")}
-    if capabilities["total"] != 14 or not required.issubset(keys):
+    if capabilities["total"] < 14 or not required.issubset(keys):
         raise RuntimeError("S23 protocol Capability manifests are missing")
 
 

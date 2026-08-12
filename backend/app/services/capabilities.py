@@ -119,6 +119,12 @@ class CapabilityService:
 
 
 def _builtin_enabled(manifest: CapabilityManifest) -> bool:
+    if manifest.version == "3.0.0" and manifest.id.startswith(("kafka.", "websocket.")):
+        return (
+            settings.feature_capability_sdk_enabled
+            and settings.feature_multi_protocol_enabled
+            and settings.feature_event_protocols_enabled
+        )
     if manifest.version == "3.0.0" and manifest.id in {"graphql.request", "grpc.call"}:
         return settings.feature_capability_sdk_enabled and settings.feature_multi_protocol_enabled
     return settings.feature_capability_sdk_enabled

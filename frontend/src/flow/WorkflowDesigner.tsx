@@ -43,10 +43,11 @@ import type {
   WorkflowDefinition,
   WorkflowNode,
 } from '../lib/api'
-import type { SchemaArtifact } from '../features/protocols/protocol-service'
+import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import {
   addApiNode,
+  addEventProtocolNode,
   addProtocolNode,
   addTypedNode,
   autoLayoutWorkflow,
@@ -63,6 +64,7 @@ type DesignerProps = {
   credentials: Credential[]
   graphqlSchemas?: SchemaArtifact[]
   grpcDescriptors?: SchemaArtifact[]
+  eventSources?: EventSource[]
   statuses: Record<string, string>
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
@@ -87,6 +89,7 @@ export default function WorkflowDesigner(props: DesignerProps) {
       workflows={props.workflows ?? []}
       graphqlSchemas={props.graphqlSchemas ?? []}
       grpcDescriptors={props.grpcDescriptors ?? []}
+      eventSources={props.eventSources ?? []}
     />
   )
 }
@@ -95,6 +98,7 @@ type ReadyDesignerProps = DesignerProps & {
   workflows: Workflow[]
   graphqlSchemas: SchemaArtifact[]
   grpcDescriptors: SchemaArtifact[]
+  eventSources: EventSource[]
 }
 
 function WorkflowDesignerReady({
@@ -105,6 +109,7 @@ function WorkflowDesignerReady({
   credentials,
   graphqlSchemas,
   grpcDescriptors,
+  eventSources,
   statuses,
   editable,
   onChange,
@@ -115,6 +120,14 @@ function WorkflowDesignerReady({
     graphqlSchemas.at(0)?.id,
   )
   const [grpcSelection, setGrpcSelection] = useState<string | undefined>(grpcDescriptors.at(0)?.id)
+  const kafkaSources = eventSources.filter((source) => source.kind === 'kafka')
+  const websocketSources = eventSources.filter((source) => source.kind === 'websocket')
+  const [kafkaSelection, setKafkaSelection] = useState<string | undefined>(
+    firstResourceId(kafkaSources),
+  )
+  const [websocketSelection, setWebsocketSelection] = useState<string | undefined>(
+    firstResourceId(websocketSources),
+  )
   const publishedWorkflows = workflows.filter((workflow) => workflow.current_version)
   const [subflowSelection, setSubflowSelection] = useState<string | undefined>(
     publishedWorkflows.at(0)?.id,
@@ -173,6 +186,20 @@ function WorkflowDesignerReady({
     if (asset) applyChange(addProtocolNode(definition, protocol, asset))
   }
 
+  function addSelectedEvent(
+    capabilityId: 'kafka.produce' | 'kafka.consume' | 'websocket.exchange',
+  ) {
+    applyChange(
+      addSelectedEventNode(
+        definition,
+        eventSources,
+        capabilityId,
+        kafkaSelection,
+        websocketSelection,
+      ),
+    )
+  }
+
   function addPaletteNode(type: PaletteNodeType) {
     applyChange(
       addTypedNode(
@@ -201,8 +228,12 @@ function WorkflowDesignerReady({
         apis={apis}
         graphqlSchemas={graphqlSchemas}
         grpcDescriptors={grpcDescriptors}
+        kafkaSources={kafkaSources}
+        websocketSources={websocketSources}
         graphqlSelection={selectedGraphql?.id}
         grpcSelection={selectedGrpc?.id}
+        kafkaSelection={kafkaSelection}
+        websocketSelection={websocketSelection}
         subflowSelection={selectedSubflow?.id}
         subflows={publishedWorkflows}
         editable={editable}
@@ -213,10 +244,15 @@ function WorkflowDesignerReady({
         onApiSelection={setApiSelection}
         onGraphqlSelection={setGraphqlSelection}
         onGrpcSelection={setGrpcSelection}
+        onKafkaSelection={setKafkaSelection}
+        onWebsocketSelection={setWebsocketSelection}
         onSubflowSelection={setSubflowSelection}
         onAddApi={addSelectedApi}
         onAddGraphql={() => addSelectedProtocol('graphql')}
         onAddGrpc={() => addSelectedProtocol('grpc')}
+        onAddKafkaProduce={() => addSelectedEvent('kafka.produce')}
+        onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
+        onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
         onAddNode={addPaletteNode}
         canCopy={Boolean(selected)}
         canPaste={Boolean(clipboard)}
@@ -264,6 +300,7 @@ function WorkflowDesignerReady({
           credentials={credentials}
           graphqlSchemas={graphqlSchemas}
           grpcDescriptors={grpcDescriptors}
+          eventSources={eventSources}
           editable={editable}
           onChange={applyChange}
           onDelete={() => {
@@ -275,6 +312,23 @@ function WorkflowDesignerReady({
       </div>
     </div>
   )
+}
+
+function addSelectedEventNode(
+  definition: WorkflowDefinition,
+  sources: EventSource[],
+  capabilityId: 'kafka.produce' | 'kafka.consume' | 'websocket.exchange',
+  kafkaSelection: string | undefined,
+  websocketSelection: string | undefined,
+): WorkflowDefinition {
+  const sourceId = capabilityId.startsWith('kafka') ? kafkaSelection : websocketSelection
+  const source = sources.find((item) => item.id === sourceId)
+  if (!source) return definition
+  return addEventProtocolNode(definition, capabilityId, source)
+}
+
+function firstResourceId(items: Array<{ id: string }>): string | undefined {
+  return items.at(0)?.id
 }
 
 function selectedNode(definition: WorkflowDefinition, selectedId: string | null) {
@@ -321,6 +375,10 @@ function DesignerToolbar({
   graphqlSchemas,
   grpcSelection,
   grpcDescriptors,
+  kafkaSelection,
+  kafkaSources,
+  websocketSelection,
+  websocketSources,
   subflowSelection,
   subflows,
   editable,
@@ -331,10 +389,15 @@ function DesignerToolbar({
   onApiSelection,
   onGraphqlSelection,
   onGrpcSelection,
+  onKafkaSelection,
+  onWebsocketSelection,
   onSubflowSelection,
   onAddApi,
   onAddGraphql,
   onAddGrpc,
+  onAddKafkaProduce,
+  onAddKafkaConsume,
+  onAddWebsocketExchange,
   onAddNode,
   canCopy,
   canPaste,
@@ -352,6 +415,10 @@ function DesignerToolbar({
   graphqlSchemas: SchemaArtifact[]
   grpcSelection?: string
   grpcDescriptors: SchemaArtifact[]
+  kafkaSelection?: string
+  kafkaSources: EventSource[]
+  websocketSelection?: string
+  websocketSources: EventSource[]
   subflowSelection?: string
   subflows: Workflow[]
   editable: boolean
@@ -362,10 +429,15 @@ function DesignerToolbar({
   onApiSelection: (value: string) => void
   onGraphqlSelection: (value: string) => void
   onGrpcSelection: (value: string) => void
+  onKafkaSelection: (value: string) => void
+  onWebsocketSelection: (value: string) => void
   onSubflowSelection: (value: string) => void
   onAddApi: () => void
   onAddGraphql: () => void
   onAddGrpc: () => void
+  onAddKafkaProduce: () => void
+  onAddKafkaConsume: () => void
+  onAddWebsocketExchange: () => void
   onAddNode: (type: PaletteNodeType) => void
   canCopy: boolean
   canPaste: boolean
@@ -436,6 +508,51 @@ function DesignerToolbar({
           onClick={onAddGrpc}
         >
           gRPC
+        </Button>
+        <Select
+          aria-label="待添加 Kafka 事件源"
+          value={kafkaSelection}
+          disabled={!editable}
+          placeholder="选择 Kafka 事件源"
+          className="workflow-api-select"
+          options={kafkaSources.map((source) => ({
+            label: `${source.name} · v${source.version}`,
+            value: source.id,
+          }))}
+          onChange={onKafkaSelection}
+        />
+        <Button
+          icon={<DatabaseOutlined />}
+          disabled={isControlDisabled(editable, Boolean(kafkaSelection))}
+          onClick={onAddKafkaProduce}
+        >
+          Kafka Produce
+        </Button>
+        <Button
+          icon={<DatabaseOutlined />}
+          disabled={isControlDisabled(editable, Boolean(kafkaSelection))}
+          onClick={onAddKafkaConsume}
+        >
+          Kafka Consume
+        </Button>
+        <Select
+          aria-label="待添加 WebSocket 事件源"
+          value={websocketSelection}
+          disabled={!editable}
+          placeholder="选择 WebSocket 事件源"
+          className="workflow-api-select"
+          options={websocketSources.map((source) => ({
+            label: `${source.name} · v${source.version}`,
+            value: source.id,
+          }))}
+          onChange={onWebsocketSelection}
+        />
+        <Button
+          icon={<ApiOutlined />}
+          disabled={isControlDisabled(editable, Boolean(websocketSelection))}
+          onClick={onAddWebsocketExchange}
+        >
+          WebSocket Exchange
         </Button>
         <Button icon={<ExportOutlined />} disabled={!editable} onClick={() => onAddNode('extract')}>
           提取

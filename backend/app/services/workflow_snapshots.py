@@ -11,6 +11,7 @@ from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
 from app.domain.data_nodes import CredentialKind
+from app.domain.event_protocols import EventSourceKind
 from app.domain.protocols import ProtocolKind
 from app.engine.capabilities import (
     builtin_capability_registry,
@@ -26,6 +27,14 @@ from app.engine.contracts import (
     WorkflowDefinition,
     parse_api_node_config,
     parse_node_config,
+)
+from app.engine.event_nodes import (
+    KafkaConsumeCapabilityConfig,
+    KafkaProduceCapabilityConfig,
+    PreparedEventNode,
+    WebSocketConnectCapabilityConfig,
+    WebSocketExchangeCapabilityConfig,
+    parse_event_config,
 )
 from app.engine.protocol_nodes import (
     GraphQLCapabilityConfig,
@@ -49,6 +58,7 @@ from app.services.credentials import (
 )
 from app.services.data_nodes import PreparedDataNode
 from app.services.datasets import WorkflowDatasetService
+from app.services.event_sources import EventSourceService
 from app.services.executions import PreparedMultipart, PreparedUpload
 from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
@@ -62,6 +72,7 @@ class PreparedExecution:
     subflows: dict[str, PreparedSubflow] = dataclass_field(default_factory=dict)
     data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
     protocol_nodes: dict[str, PreparedProtocolNode] = dataclass_field(default_factory=dict)
+    event_nodes: dict[str, PreparedEventNode] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +95,7 @@ class WorkflowSnapshotBuilder:
         self._datasets = WorkflowDatasetService(session)
         self._credentials = CredentialService(session, external_secrets=external_secrets)
         self._protocol_assets = ProtocolAssetService(session)
+        self._event_sources = EventSourceService(session)
 
     async def prepare(
         self,
@@ -131,6 +143,10 @@ class WorkflowSnapshotBuilder:
                 project_id=project_id,
                 definition=definition,
             )
+            event_nodes = await self._prepare_event_nodes(
+                project_id=project_id,
+                definition=definition,
+            )
             runs.append(
                 PreparedExecution(
                     snapshot=_snapshot(
@@ -141,6 +157,7 @@ class WorkflowSnapshotBuilder:
                         subflows=subflows,
                         data_nodes=data_nodes,
                         protocol_nodes=protocol_nodes,
+                        event_nodes=event_nodes,
                         dataset=(
                             dataset.snapshot(
                                 row_index=row_index,
@@ -156,6 +173,7 @@ class WorkflowSnapshotBuilder:
                     subflows=subflows,
                     data_nodes=data_nodes,
                     protocol_nodes=protocol_nodes,
+                    event_nodes=event_nodes,
                     dataset_variables=dict(row),
                 )
             )
@@ -227,6 +245,10 @@ class WorkflowSnapshotBuilder:
                 project_id=project_id,
                 definition=nested_definition,
             )
+            event_nodes = await self._prepare_event_nodes(
+                project_id=project_id,
+                definition=nested_definition,
+            )
             children = await self._prepare_subflows(
                 actor=actor,
                 project_id=project_id,
@@ -244,6 +266,7 @@ class WorkflowSnapshotBuilder:
                 subflows=children,
                 data_nodes=data_nodes,
                 protocol_nodes=protocol_nodes,
+                event_nodes=event_nodes,
             )
             prepared[node.id] = PreparedSubflow(
                 workflow_id=workflow.id,
@@ -255,6 +278,84 @@ class WorkflowSnapshotBuilder:
                 snapshot=snapshot,
                 data_nodes=data_nodes,
                 protocol_nodes=protocol_nodes,
+                event_nodes=event_nodes,
+            )
+        return prepared
+
+    async def _prepare_event_nodes(
+        self,
+        *,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+    ) -> dict[str, PreparedEventNode]:
+        prepared: dict[str, PreparedEventNode] = {}
+        for node in definition.nodes:
+            if node.type is not NodeType.CAPABILITY or node.capability_id not in {
+                "kafka.produce",
+                "kafka.consume",
+                "websocket.connect",
+                "websocket.exchange",
+            }:
+                continue
+            try:
+                config = parse_event_config(node)
+            except ValueError as error:
+                raise AppError(
+                    code="INVALID_EVENT_CONFIG",
+                    message=f"节点 {node.name} 的事件协议配置无效",
+                    status_code=422,
+                ) from error
+            if not isinstance(
+                config,
+                (
+                    KafkaProduceCapabilityConfig,
+                    KafkaConsumeCapabilityConfig,
+                    WebSocketConnectCapabilityConfig,
+                    WebSocketExchangeCapabilityConfig,
+                ),
+            ):
+                raise AppError(
+                    code="INVALID_EVENT_CONFIG",
+                    message=f"节点 {node.name} 缺少事件源配置",
+                    status_code=422,
+                )
+            source = await self._event_sources.load(
+                project_id=project_id,
+                source_id=config.source_id,
+                kind=(
+                    EventSourceKind.KAFKA
+                    if isinstance(
+                        config, (KafkaProduceCapabilityConfig, KafkaConsumeCapabilityConfig)
+                    )
+                    else EventSourceKind.WEBSOCKET
+                ),
+            )
+            schema_id = (
+                config.schema_id
+                if isinstance(config, (KafkaProduceCapabilityConfig, KafkaConsumeCapabilityConfig))
+                else None
+            )
+            artifact = None
+            if schema_id is not None:
+                artifact = await self._protocol_assets.load(
+                    project_id=project_id,
+                    artifact_id=schema_id,
+                    protocol=ProtocolKind.KAFKA,
+                )
+            prepared[node.id] = PreparedEventNode(
+                source_id=source.id,
+                source_kind=EventSourceKind(source.kind),
+                endpoints=tuple(source.endpoints),
+                schema_registry_url=source.schema_registry_url,
+                source_version=source.version,
+                source_hash=source.config_sha256,
+                schema_id=artifact.id if artifact is not None else None,
+                schema_version=artifact.version if artifact is not None else None,
+                schema_hash=artifact.content_sha256 if artifact is not None else None,
+                schema_content=artifact.canonical_content if artifact is not None else None,
+                schema_summary=(
+                    cast(dict[str, JsonValue], artifact.summary) if artifact is not None else None
+                ),
             )
         return prepared
 
@@ -479,6 +580,7 @@ def _snapshot(
     subflows: dict[str, PreparedSubflow],
     data_nodes: dict[str, PreparedDataNode],
     protocol_nodes: dict[str, PreparedProtocolNode],
+    event_nodes: dict[str, PreparedEventNode],
     dataset: JsonValue,
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
@@ -497,6 +599,7 @@ def _snapshot(
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
         "protocol_nodes": _protocol_node_snapshots(protocol_nodes),
+        "event_nodes": _event_node_snapshots(event_nodes),
         "capabilities": _capability_snapshots(version.definition),
         "dataset": dataset,
         "runtime": cast(
@@ -514,6 +617,7 @@ def _nested_snapshot(
     subflows: dict[str, PreparedSubflow],
     data_nodes: dict[str, PreparedDataNode],
     protocol_nodes: dict[str, PreparedProtocolNode],
+    event_nodes: dict[str, PreparedEventNode],
 ) -> dict[str, JsonValue]:
     return {
         "workflow": {
@@ -527,6 +631,7 @@ def _nested_snapshot(
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
         "protocol_nodes": _protocol_node_snapshots(protocol_nodes),
+        "event_nodes": _event_node_snapshots(event_nodes),
         "capabilities": _capability_snapshots(version.definition),
     }
 
@@ -563,6 +668,23 @@ def _protocol_node_snapshots(
             ),
         }
         for node_id, prepared in protocol_nodes.items()
+    }
+
+
+def _event_node_snapshots(
+    event_nodes: dict[str, PreparedEventNode],
+) -> dict[str, JsonValue]:
+    return {
+        node_id: {
+            "source_id": str(prepared.source_id),
+            "source_kind": prepared.source_kind.value,
+            "source_version": prepared.source_version,
+            "source_hash": prepared.source_hash,
+            "schema_id": str(prepared.schema_id) if prepared.schema_id is not None else None,
+            "schema_version": prepared.schema_version,
+            "schema_hash": prepared.schema_hash,
+        }
+        for node_id, prepared in event_nodes.items()
     }
 
 

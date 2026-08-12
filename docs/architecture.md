@@ -55,6 +55,7 @@ frontend/src/
 - Report：执行汇总、步骤详情、失败分类和趋势。
 - Data Source：加密 Credential、只读 SQL/Redis 适配器及出站网络策略。
 - Mock：无脚本的请求规则、模板响应与脱敏请求日志。
+- Protocol：GraphQL/gRPC Schema、Kafka/WebSocket 事件源与不可变协议 Snapshot。
 
 ## 4. 必须前置冻结的契约
 

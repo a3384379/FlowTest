@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import WorkflowDesigner from './WorkflowDesigner'
 import {
+  addEventProtocolNode,
   addProtocolNode,
   addTypedNode,
   autoLayoutWorkflow,
@@ -13,7 +14,7 @@ import {
 } from './workflow-graph'
 import { apiDefinition, workflow, workflowDefinition } from '../test/fixtures'
 import type { Artifact, Credential, WorkflowDefinition } from '../lib/api'
-import type { SchemaArtifact } from '../features/protocols/protocol-service'
+import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 
 describe('WorkflowDesigner', () => {
   it('locks the published execution snapshot while a run is active', () => {
@@ -109,6 +110,41 @@ describe('WorkflowDesigner', () => {
     const dataset = addTypedNode(workflowDefinition, 'dataset', datasetArtifact.id)
     expect(dataset.nodes.at(-1)?.config.artifact_id).toBe(datasetArtifact.id)
     expect(addTypedNode(workflowDefinition, 'end', null).nodes.at(-1)?.type).toBe('end')
+  })
+
+  it('adds bounded Kafka and WebSocket capabilities with pinned event sources', async () => {
+    const produced = addEventProtocolNode(workflowDefinition, 'kafka.produce', kafkaSource)
+    expect(produced.nodes.at(-1)).toMatchObject({
+      capability_id: 'kafka.produce',
+      capability_version: '3.0.0',
+      configuration: { source_id: kafkaSource.id, topic: 'flowtest.orders' },
+    })
+    const consumed = addEventProtocolNode(workflowDefinition, 'kafka.consume', kafkaSource)
+    expect(consumed.nodes.at(-1)?.configuration).toMatchObject({
+      maximum_messages: 10,
+      timeout_seconds: 30,
+    })
+    const exchanged = addEventProtocolNode(
+      workflowDefinition,
+      'websocket.exchange',
+      websocketSource,
+    )
+    expect(exchanged.nodes.at(-1)?.configuration).toMatchObject({
+      source_id: websocketSource.id,
+      maximum_messages: 10,
+    })
+
+    const browser = userEvent.setup()
+    render(
+      <DesignerHarness
+        initial={workflowDefinition}
+        eventSources={[kafkaSource, websocketSource]}
+      />,
+    )
+    await browser.click(screen.getByRole('button', { name: /Kafka Produce/ }))
+    fireEvent.click(screen.getByText('Kafka Produce', { selector: '.flow-node strong' }))
+    expect(screen.getByDisplayValue('flowtest.orders')).toBeVisible()
+    expect(screen.getAllByText('订单 Kafka · v1').length).toBeGreaterThanOrEqual(2)
   })
 
   it('adds version-pinned SubFlow and bounded ForEach nodes', () => {
@@ -320,11 +356,13 @@ function DesignerHarness({
   credentials = [],
   graphqlSchemas = [],
   grpcDescriptors = [],
+  eventSources = [],
 }: {
   initial: WorkflowDefinition
   credentials?: Credential[]
   graphqlSchemas?: SchemaArtifact[]
   grpcDescriptors?: SchemaArtifact[]
+  eventSources?: EventSource[]
 }) {
   const [definition, setDefinition] = useState(initial)
   return (
@@ -336,6 +374,7 @@ function DesignerHarness({
       credentials={credentials}
       graphqlSchemas={graphqlSchemas}
       grpcDescriptors={grpcDescriptors}
+      eventSources={eventSources}
       statuses={{}}
       editable
       onChange={setDefinition}
@@ -374,6 +413,30 @@ const grpcDescriptor: SchemaArtifact = {
       },
     ],
   },
+}
+
+const kafkaSource: EventSource = {
+  id: '00000000-0000-4000-8000-000000000805',
+  project_id: apiDefinition.project_id,
+  kind: 'kafka',
+  name: '订单 Kafka',
+  description: '',
+  version: 1,
+  endpoints: ['redpanda:9092'],
+  schema_registry_url: 'http://redpanda:8081',
+  config_sha256: 'c'.repeat(64),
+  created_by_id: '00000000-0000-4000-8000-000000000001',
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+}
+
+const websocketSource: EventSource = {
+  ...kafkaSource,
+  id: '00000000-0000-4000-8000-000000000806',
+  kind: 'websocket',
+  name: '订单 WebSocket',
+  endpoints: ['ws://mock-target:8080/ws/echo'],
+  schema_registry_url: null,
 }
 
 const grpcCredential: Credential = {
