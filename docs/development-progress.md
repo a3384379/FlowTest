@@ -6,7 +6,7 @@
 ## 当前恢复点
 
 - 当前基线：`main@2434db3`，S26 PR #29 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s27-contract-matrix`；S27 尚未创建 Draft PR。
+- 当前分支：`agent/s27-contract-matrix`；S27 Draft PR #30 已创建，五项 CI 正在执行。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -39,9 +39,10 @@
     精确 Combobox 定位并复跑通过。
 11. Python 与前端依赖审计无已知漏洞；本轮重建的 Backend/Frontend 镜像使用 CI 相同
     Grype 0.116.1、`only-fixed` High/Critical 门槛通过，无新增漏洞豁免。
-12. 架构边界已记录于 `ADR 0023`；实现提交为 `8ec92a3`，当前仍在
-    `agent/s27-contract-matrix`。未创建 Draft PR，未运行本轮 GitHub 五项 CI，因此不开始 S28，
-    也不创建 `v3.0.0-beta.2` 标签。
+12. 架构边界已记录于 `ADR 0023`；实现提交为 `8ec92a3`，本地验收文档提交为
+    `f9ba039`，均已推送到 `agent/s27-contract-matrix`。Draft PR #30 已创建；Backend Test、
+    Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 已全部触发且正在执行。
+    在五项全绿前不开始 S28，也不创建 `v3.0.0-beta.2` 标签。
 
 ## 本地验收完成：S26 签名环境实验室
 
@@ -247,10 +248,10 @@
 
 ## 下一步
 
-1. 对 S27 当前完整工作区执行最终 diff 复核，提交并推送 `agent/s27-contract-matrix`，然后创建
-   独立 Draft PR。
-2. 在 Draft PR 上运行 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和
-   Compose Smoke；五项 CI 全绿才标记 Ready 并 squash 合并。S28–S31 继续遵循相同顺序，
+1. 等待 Draft PR #30 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和
+   Compose Smoke；若有真实失败，读取日志并最小修复后重跑全部门槛。
+2. PR #30 五项 CI 全绿才标记 Ready 并 squash 合并，然后同步 `main`、创建
+   `agent/s28-impact-intelligence`。S28–S31 继续遵循相同顺序，
    不跨迭代提前开发。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
