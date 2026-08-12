@@ -3,7 +3,8 @@
 最后更新：2026-08-13（Asia/Shanghai）
 状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
 真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
-首轮 Backend、Integration、Frontend、Security 通过，Compose 的真实功能开关编排失败正在做最小修复。
+首轮 Backend、Integration、Frontend、Security 通过；Compose 的功能开关编排已修复，第二轮发现
+S22 浏览器空表假设与 S29 持久 Pool 冲突，正在做最小验收修复。
 `v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
@@ -67,7 +68,17 @@
     但 S29 Runner 尚未注册，因而执行一直处于 queued。最小修复将 S29 功能开关限制在 S29
     Smoke、浏览器和容量窗口，并在其余回归中恢复 Celery；为保证 Backend 重建后不丢失 S18–S28
     功能开关，这些既有开关提升为 Job 级环境。修复后必须重跑五项 CI。
-    未合并、未开始 S30，也未创建任何新 V3 标签。
+19. 编排修复提交 `7e40dfc` 的 Backend Test（2 分 18 秒）与 Integration（1 分 10 秒，run
+    `31616461170`）、Frontend Build（8 分 20 秒，run `31616461166`）和 Security Source/Images
+    （10 分 36 秒，run `31616461286`）通过。Compose（run `31616461215`）已通过 S3–S11、S29
+    Smoke 与 S29 浏览器、Runner→Celery 恢复，但 S22 浏览器用例仍假设 Runner Pool 为空；S29
+    Smoke 已按设计持久化 Pool，因此旧空表文案不存在。S23 在 CI 首次选择器超时、重试通过，本机
+    资源抖动下又耗尽 90 秒场景预算，后端未收到 Reflection POST；将真实 GraphQL+gRPC 双链路预算
+    调整为 180 秒，并把可见“明文”分段定位限定到具体 Dialog/Tab。S22 最小修复改为验证 Runner
+    清单列结构；两处均保留请求成功和 S29 真实 Pool/Runner/Fence 的原有业务断言。本机保留 S29
+    Pool 的 Celery 栈上 S22 通过（13.6 秒）；S23 复跑期间 Docker Desktop 全局失去调度，`/live`
+    同步超时且安全策略请求由 Nginx 返回 504，不能记作通过，最终以全新 Linux CI Runner 为准。
+    修复后仍须重跑完整五项 CI。未合并、未开始 S30，也未创建任何新 V3 标签。
 
 ## 已完成：S28 变更影响引擎与确定性测试选择
 

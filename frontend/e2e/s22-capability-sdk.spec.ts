@@ -25,5 +25,6 @@ test('S22 能力版本、安全边界与平台深链接主路径', async ({ page
   await page.getByTitle('插件').click()
   await expect(page.getByText('尚未安装管理员签名插件')).toBeVisible()
   await page.getByTitle('Runner').click()
-  await expect(page.getByText('Runner Fabric 尚未启用')).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '池名称' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '网络区' })).toBeVisible()
 })
