@@ -568,6 +568,81 @@ body {
   margin: 24px 0;
 }
 
+.protocol-summary {
+  margin-bottom: 16px;
+}
+
+.protocol-summary .ant-card-body {
+  min-height: 104px;
+}
+
+.protocol-summary .ant-typography {
+  margin: 6px 0 0;
+}
+
+.protocol-workspace > .ant-card-body {
+  padding: 16px;
+}
+
+.protocol-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(480px, 1.7fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  margin-top: 16px;
+  min-height: 620px;
+}
+
+.protocol-inventory,
+.protocol-editor,
+.protocol-inspector {
+  min-width: 0;
+  border: 1px solid var(--border-color, #dce2ec);
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+
+.protocol-inventory .ant-table-row,
+.protocol-inventory .ant-table-cell {
+  cursor: pointer;
+}
+
+.protocol-form {
+  display: flex;
+  width: 100%;
+}
+
+.protocol-form .ant-select,
+.protocol-form .ant-input-affix-wrapper {
+  width: 100%;
+}
+
+.protocol-result {
+  max-height: 480px;
+  overflow: auto;
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 10px;
+  background: #101936;
+  color: #dce7ff;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.protocol-inspector .ant-descriptions {
+  margin: 18px 0;
+}
+
+@media (max-width: 1500px) {
+  .protocol-workspace-grid {
+    grid-template-columns: 260px minmax(440px, 1fr);
+  }
+
+  .protocol-inspector {
+    grid-column: 1 / -1;
+  }
+}
+
 .v3-capability-details .ant-descriptions-item-label {
   color: #64748b;
 }

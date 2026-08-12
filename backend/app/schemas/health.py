@@ -23,3 +23,4 @@ class FeatureFlagsResponse(BaseModel):
     quality_center: bool
     oidc: bool
     ai: bool
+    multi_protocol: bool

@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
-from app.domain.data_nodes import CredentialKind, CredentialSecretProvider
+from app.domain.data_nodes import (
+    CredentialKind,
+    CredentialSecretProvider,
+    DataNodeValidationError,
+    validate_grpc_mtls_secret,
+)
 from app.models.access import User
 from app.models.data_sources import Credential
 from app.repositories.data_sources import DataSourceRepository
@@ -72,11 +77,12 @@ class CredentialService:
         normalized_name = name.strip()
         await self._ensure_unique_name(project_id, normalized_name)
         credential_id = uuid4()
+        validated_secret = _validated_secret(kind, secret)
         ciphertext, nonce, provider_reference = await self._store_new_secret(
             credential_id=credential_id,
             project_id=project_id,
             provider=secret_provider,
-            secret=secret,
+            secret=validated_secret,
         )
         credential = Credential(
             id=credential_id,
@@ -144,7 +150,10 @@ class CredentialService:
         if tls_enabled is not None:
             credential.tls_enabled = tls_enabled
         if secret is not None:
-            await self._replace_secret(credential, secret)
+            await self._replace_secret(
+                credential,
+                _validated_secret(CredentialKind(credential.kind), secret),
+            )
         self._record(actor, credential, "credential.updated")
         await self._session.commit()
         await self._session.refresh(credential)
@@ -299,6 +308,7 @@ def _default_port(kind: CredentialKind) -> int:
         CredentialKind.POSTGRESQL: 5432,
         CredentialKind.MYSQL: 3306,
         CredentialKind.REDIS: 6379,
+        CredentialKind.GRPC_MTLS: 443,
     }[kind]
 
 
@@ -308,7 +318,7 @@ def _normalize_host(host: str) -> str:
 
 def _normalize_database_name(kind: CredentialKind, database_name: str) -> str:
     normalized = database_name.strip()
-    if kind is not CredentialKind.REDIS and not normalized:
+    if kind in {CredentialKind.POSTGRESQL, CredentialKind.MYSQL} and not normalized:
         raise AppError(
             code="INVALID_CREDENTIAL_DATABASE",
             message="PostgreSQL/MySQL Credential 必须配置数据库名",
@@ -331,3 +341,16 @@ def _invalid_storage() -> AppError:
         message="Credential 存储状态无效",
         status_code=500,
     )
+
+
+def _validated_secret(kind: CredentialKind, secret: str) -> str:
+    if kind is not CredentialKind.GRPC_MTLS:
+        return secret
+    try:
+        return validate_grpc_mtls_secret(secret)
+    except DataNodeValidationError as error:
+        raise AppError(
+            code="INVALID_GRPC_MTLS_CREDENTIAL",
+            message=str(error),
+            status_code=422,
+        ) from error

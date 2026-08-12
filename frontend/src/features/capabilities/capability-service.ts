@@ -4,6 +4,7 @@ export type V3FeatureFlags = {
   capability_sdk: boolean
   plugin_registry: boolean
   runner_fabric: boolean
+  multi_protocol: boolean
 }
 
 export type CapabilityManifest = {

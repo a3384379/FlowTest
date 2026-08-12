@@ -34,6 +34,12 @@ describe('WorkflowsPage', () => {
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get('/api/v1/credentials', () => HttpResponse.json([])),
+      http.get('/api/v1/graphql/schemas', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get('/api/v1/grpc/descriptors', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
         HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
       ),
@@ -129,6 +135,12 @@ describe('WorkflowsPage', () => {
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get('/api/v1/credentials', () => HttpResponse.json([])),
+      http.get('/api/v1/graphql/schemas', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get('/api/v1/grpc/descriptors', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
         HttpResponse.json({ items: [versionedWorkflow], total: 1, page: 1, page_size: 100 }),
       ),

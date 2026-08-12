@@ -1,12 +1,16 @@
 import csv
 import json
 from io import BytesIO, StringIO
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from openpyxl import Workbook
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.datasets import DATASET_ROW_LIMIT, DatasetParseError, parse_dataset
-from app.engine.contracts import DatasetFormat
+from app.engine.contracts import DatasetFormat, WorkflowDefinition
+from app.services.datasets import WorkflowDatasetService
 
 
 def test_csv_dataset_preserves_columns_and_blank_values() -> None:
@@ -75,3 +79,55 @@ def test_dataset_rejects_unknown_extension() -> None:
             content=b"legacy",
             requested_format=DatasetFormat.AUTO,
         )
+
+
+@pytest.mark.asyncio
+async def test_dataset_preparation_ignores_native_v3_capabilities() -> None:
+    definition = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "1.0",
+            "variables": {},
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "name": "开始",
+                    "position": {"x": 0, "y": 0},
+                    "config": {},
+                },
+                {
+                    "id": "graphql",
+                    "type": "capability",
+                    "name": "查询用户",
+                    "position": {"x": 0, "y": 0},
+                    "capability_id": "graphql.request",
+                    "capability_version": "3.0.0",
+                    "configuration": {
+                        "schema_id": str(uuid4()),
+                        "endpoint": "https://api.example.com/graphql",
+                        "operation": "query { users { id } }",
+                    },
+                    "bindings": [],
+                },
+                {
+                    "id": "end",
+                    "type": "end",
+                    "name": "结束",
+                    "position": {"x": 400, "y": 0},
+                    "config": {},
+                },
+            ],
+            "edges": [
+                {"id": "start-graphql", "source": "start", "target": "graphql"},
+                {"id": "graphql-end", "source": "graphql", "target": "end"},
+            ],
+        }
+    )
+    session = AsyncMock(spec=AsyncSession)
+
+    prepared = await WorkflowDatasetService(session).prepare(
+        project_id=uuid4(),
+        definition=definition,
+    )
+
+    assert prepared is None

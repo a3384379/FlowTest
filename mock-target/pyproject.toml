@@ -8,6 +8,9 @@ version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "fastapi>=0.141,<1",
+  "grpcio>=1.78,<2",
+  "grpcio-reflection>=1.78,<2",
+  "protobuf>=6.30,<7",
   "python-multipart>=0.0.22,<1",
   "uvicorn[standard]>=0.52,<1",
 ]

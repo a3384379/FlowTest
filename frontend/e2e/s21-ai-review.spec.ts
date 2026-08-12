@@ -4,6 +4,7 @@ import { authenticate } from './support/auth'
 
 test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
   test.setTimeout(60_000)
+  const acceptedWorkflowName = `S21 AI 人工审核工作流 ${Date.now()}`
 
   await page.goto('/')
   await authenticate(page)
@@ -28,6 +29,10 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
   await expect(suggestionRow).toContainText('pending', { timeout: 30_000 })
   await suggestionRow.getByRole('button', { name: /接受/ }).click()
   const reviewDialog = page.getByRole('dialog', { name: '接受并生成草稿' })
+  const contentEditor = reviewDialog.getByLabel('建议内容')
+  const content = JSON.parse(await contentEditor.inputValue()) as Record<string, unknown>
+  content.name = acceptedWorkflowName
+  await contentEditor.fill(JSON.stringify(content, null, 2))
   await reviewDialog.getByLabel('审核备注').fill('Playwright 人工确认')
   const accepted = page.waitForResponse(
     (response) => response.url().endsWith('/accept') && response.request().method() === 'POST',

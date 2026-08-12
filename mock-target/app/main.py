@@ -27,10 +27,8 @@ async def health() -> dict[str, str]:
 
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
-    if payload.username != "tester" or payload.password != "flowtest":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-        )
+    if payload.username != "tester" or payload.password != "flowtest":  # noqa: S105
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return {"code": 0, "data": {"token": "mock-token", "user_id": "user-001"}}
 
 
@@ -39,9 +37,7 @@ async def current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     return {"code": 0, "data": {"id": "user-001", "name": "测试用户"}}
 
 
@@ -51,9 +47,7 @@ async def create_order(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     return {"code": 0, "data": {"id": str(uuid4()), **payload.model_dump()}}
 
 
@@ -92,6 +86,34 @@ async def echo(payload: dict[str, object]) -> dict[str, object]:
     return payload
 
 
+@app.post("/graphql")
+async def graphql(request: Request) -> dict[str, object]:
+    payload = await request.json()
+    query = payload.get("query")
+    variables = payload.get("variables", {})
+    if not isinstance(query, str) or not isinstance(variables, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad GraphQL request"
+        )
+    if "renameUser" in query:
+        return {
+            "data": {
+                "renameUser": {
+                    "id": str(variables.get("id", "user-001")),
+                    "name": str(variables.get("name", "测试用户")),
+                }
+            }
+        }
+    return {
+        "data": {
+            "user": {
+                "id": str(variables.get("id", "user-001")),
+                "name": "测试用户",
+            }
+        }
+    }
+
+
 @app.post("/notifications/flowtest", status_code=status.HTTP_204_NO_CONTENT)
 async def receive_flowtest_notification(request: Request) -> Response:
     app.state.last_notification = {
@@ -107,9 +129,7 @@ async def receive_flowtest_notification(request: Request) -> Response:
 async def last_flowtest_notification() -> dict[str, object]:
     notification = getattr(app.state, "last_notification", None)
     if not isinstance(notification, dict):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No notification"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notification")
     return notification
 
 
@@ -119,22 +139,14 @@ async def openai_compatible_completion(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer flowtest-mock-ai-key":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key")
     payload = await request.json()
     messages = payload.get("messages")
     if not isinstance(messages, list) or len(messages) < 2:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt"
-        )
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt")
     user_message = messages[-1]
-    if not isinstance(user_message, dict) or not isinstance(
-        user_message.get("content"), str
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt"
-        )
+    if not isinstance(user_message, dict) or not isinstance(user_message.get("content"), str):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt")
     prompt = json.loads(user_message["content"])
     encoded_prompt = json.dumps(prompt, ensure_ascii=False)
     if "must-not-reach-ai" in encoded_prompt:
@@ -173,17 +185,13 @@ async def openai_compatible_completion(
                                 "config": {},
                             },
                         ],
-                        "edges": [
-                            {"id": "start-end", "source": "start", "target": "end"}
-                        ],
+                        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
                     },
                 },
             }
         ]
     }
     return {
-        "choices": [
-            {"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}
-        ],
+        "choices": [{"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}],
         "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
     }

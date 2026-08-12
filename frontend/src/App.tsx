@@ -2,6 +2,7 @@ import {
   ApiOutlined,
   ApartmentOutlined,
   BarChartOutlined,
+  CodeOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   FolderOpenOutlined,
@@ -47,6 +48,7 @@ const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
+const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -54,6 +56,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '首页',
   settings: '项目管理',
   apis: '接口管理',
+  protocols: '多协议工作台',
   assets: '测试资产',
   workflows: '流程编排',
   data: '数据与 Mock',
@@ -104,6 +107,7 @@ function AuthenticatedShell() {
             navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
             navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
+            navigationItem('protocols', <CodeOutlined />, pathFor('protocols')),
             navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
             navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
             navigationItem('data', <DatabaseOutlined />, pathFor('data')),
@@ -166,6 +170,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
+      <Route path="/projects/:projectId/protocols" element={<ProtocolWorkbenchPage />} />
       <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
       <Route path="/projects/:projectId/workflows" element={<WorkflowsPage />} />
       <Route path="/projects/:projectId/data" element={<DataMockPage />} />
@@ -179,6 +184,7 @@ function ApplicationRoutes() {
         [
           'settings',
           'apis',
+          'protocols',
           'assets',
           'workflows',
           'data',

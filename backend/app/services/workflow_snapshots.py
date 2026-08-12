@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
+from app.domain.data_nodes import CredentialKind
+from app.domain.protocols import ProtocolKind
 from app.engine.capabilities import (
     builtin_capability_registry,
     capability_snapshot,
@@ -24,6 +26,13 @@ from app.engine.contracts import (
     WorkflowDefinition,
     parse_api_node_config,
     parse_node_config,
+)
+from app.engine.protocol_nodes import (
+    GraphQLCapabilityConfig,
+    GrpcCapabilityConfig,
+    PreparedProtocolNode,
+    ProtocolCredentialMaterial,
+    parse_protocol_config,
 )
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
@@ -41,6 +50,7 @@ from app.services.credentials import (
 from app.services.data_nodes import PreparedDataNode
 from app.services.datasets import WorkflowDatasetService
 from app.services.executions import PreparedMultipart, PreparedUpload
+from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import PreparedSubflow, PreparedWorkflowRequest
 
 
@@ -51,6 +61,7 @@ class PreparedExecution:
     dataset_variables: dict[str, JsonValue]
     subflows: dict[str, PreparedSubflow] = dataclass_field(default_factory=dict)
     data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
+    protocol_nodes: dict[str, PreparedProtocolNode] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +83,7 @@ class WorkflowSnapshotBuilder:
         self._artifacts = ArtifactService(session)
         self._datasets = WorkflowDatasetService(session)
         self._credentials = CredentialService(session, external_secrets=external_secrets)
+        self._protocol_assets = ProtocolAssetService(session)
 
     async def prepare(
         self,
@@ -115,6 +127,10 @@ class WorkflowSnapshotBuilder:
                 project_id=project_id,
                 definition=definition,
             )
+            protocol_nodes = await self._prepare_protocol_nodes(
+                project_id=project_id,
+                definition=definition,
+            )
             runs.append(
                 PreparedExecution(
                     snapshot=_snapshot(
@@ -124,6 +140,7 @@ class WorkflowSnapshotBuilder:
                         apis=api_snapshots,
                         subflows=subflows,
                         data_nodes=data_nodes,
+                        protocol_nodes=protocol_nodes,
                         dataset=(
                             dataset.snapshot(
                                 row_index=row_index,
@@ -138,6 +155,7 @@ class WorkflowSnapshotBuilder:
                     requests=requests,
                     subflows=subflows,
                     data_nodes=data_nodes,
+                    protocol_nodes=protocol_nodes,
                     dataset_variables=dict(row),
                 )
             )
@@ -163,6 +181,8 @@ class WorkflowSnapshotBuilder:
     ) -> dict[str, PreparedSubflow]:
         prepared: dict[str, PreparedSubflow] = {}
         for node in definition.nodes:
+            if node.effective_type not in {NodeType.SUBFLOW, NodeType.FOR_EACH}:
+                continue
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
                 continue
@@ -203,6 +223,10 @@ class WorkflowSnapshotBuilder:
                 project_id=project_id,
                 definition=nested_definition,
             )
+            protocol_nodes = await self._prepare_protocol_nodes(
+                project_id=project_id,
+                definition=nested_definition,
+            )
             children = await self._prepare_subflows(
                 actor=actor,
                 project_id=project_id,
@@ -219,6 +243,7 @@ class WorkflowSnapshotBuilder:
                 apis=api_snapshots,
                 subflows=children,
                 data_nodes=data_nodes,
+                protocol_nodes=protocol_nodes,
             )
             prepared[node.id] = PreparedSubflow(
                 workflow_id=workflow.id,
@@ -229,6 +254,7 @@ class WorkflowSnapshotBuilder:
                 subflows=children,
                 snapshot=snapshot,
                 data_nodes=data_nodes,
+                protocol_nodes=protocol_nodes,
             )
         return prepared
 
@@ -240,6 +266,8 @@ class WorkflowSnapshotBuilder:
     ) -> dict[str, PreparedDataNode]:
         prepared: dict[str, PreparedDataNode] = {}
         for node in definition.nodes:
+            if node.effective_type not in {NodeType.SQL, NodeType.REDIS}:
+                continue
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
                 continue
@@ -249,6 +277,80 @@ class WorkflowSnapshotBuilder:
             )
             prepared[node.id] = PreparedDataNode(credential=material)
         return prepared
+
+    async def _prepare_protocol_nodes(
+        self,
+        *,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+    ) -> dict[str, PreparedProtocolNode]:
+        prepared: dict[str, PreparedProtocolNode] = {}
+        for node in definition.nodes:
+            if node.type is not NodeType.CAPABILITY or node.capability_id not in {
+                "graphql.request",
+                "grpc.call",
+            }:
+                continue
+            try:
+                config = parse_protocol_config(node)
+            except ValueError as error:
+                raise AppError(
+                    code="INVALID_PROTOCOL_CONFIG",
+                    message=f"节点 {node.name} 的协议配置无效",
+                    status_code=422,
+                ) from error
+            protocol = (
+                ProtocolKind.GRAPHQL
+                if node.capability_id == "graphql.request"
+                else ProtocolKind.GRPC
+            )
+            artifact_id = (
+                config.schema_id
+                if isinstance(config, GraphQLCapabilityConfig)
+                else config.descriptor_id
+            )
+            artifact = await self._protocol_assets.load(
+                project_id=project_id,
+                artifact_id=artifact_id,
+                protocol=protocol,
+            )
+            credential = await self._prepare_protocol_credential(project_id, config)
+            prepared[node.id] = PreparedProtocolNode(
+                protocol=protocol,
+                schema_id=artifact.id,
+                schema_version=artifact.version,
+                schema_hash=artifact.content_sha256,
+                canonical_content=artifact.canonical_content,
+                credential=credential,
+            )
+        return prepared
+
+    async def _prepare_protocol_credential(
+        self,
+        project_id: UUID,
+        config: object,
+    ) -> ProtocolCredentialMaterial | None:
+        if not isinstance(config, GrpcCapabilityConfig) or config.credential_id is None:
+            return None
+        material = await self._credentials.load_material(
+            project_id=project_id,
+            credential_id=config.credential_id,
+        )
+        if material.kind is not CredentialKind.GRPC_MTLS:
+            raise AppError(
+                code="GRPC_MTLS_CREDENTIAL_REQUIRED",
+                message="gRPC mTLS 节点必须使用对应类型的 Credential",
+                status_code=422,
+            )
+        return ProtocolCredentialMaterial(
+            id=material.id,
+            project_id=material.project_id,
+            name=material.name,
+            kind=material.kind,
+            host=material.host,
+            port=material.port,
+            secret=material.secret,
+        )
 
     async def _prepare_api_nodes(
         self,
@@ -264,9 +366,9 @@ class WorkflowSnapshotBuilder:
         requests: dict[str, PreparedWorkflowRequest] = {}
         api_snapshots: dict[str, JsonValue] = {}
         for node in definition.nodes:
-            legacy_node = legacy_node_adapter.as_legacy_node(node)
-            if legacy_node.type is not NodeType.API:
+            if node.effective_type is not NodeType.API:
                 continue
+            legacy_node = legacy_node_adapter.as_legacy_node(node)
             config = parse_api_node_config(legacy_node)
             api_definition, api_version = await self._api_assets.get_detail(
                 actor=actor,
@@ -376,6 +478,7 @@ def _snapshot(
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
     data_nodes: dict[str, PreparedDataNode],
+    protocol_nodes: dict[str, PreparedProtocolNode],
     dataset: JsonValue,
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
@@ -393,6 +496,7 @@ def _snapshot(
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
+        "protocol_nodes": _protocol_node_snapshots(protocol_nodes),
         "capabilities": _capability_snapshots(version.definition),
         "dataset": dataset,
         "runtime": cast(
@@ -409,6 +513,7 @@ def _nested_snapshot(
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
     data_nodes: dict[str, PreparedDataNode],
+    protocol_nodes: dict[str, PreparedProtocolNode],
 ) -> dict[str, JsonValue]:
     return {
         "workflow": {
@@ -421,6 +526,7 @@ def _nested_snapshot(
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
+        "protocol_nodes": _protocol_node_snapshots(protocol_nodes),
         "capabilities": _capability_snapshots(version.definition),
     }
 
@@ -440,6 +546,23 @@ def _data_node_snapshots(data_nodes: dict[str, PreparedDataNode]) -> dict[str, J
     return {
         node_id: _credential_snapshot(prepared.credential)
         for node_id, prepared in data_nodes.items()
+    }
+
+
+def _protocol_node_snapshots(
+    protocol_nodes: dict[str, PreparedProtocolNode],
+) -> dict[str, JsonValue]:
+    return {
+        node_id: {
+            "protocol": prepared.protocol.value,
+            "schema_id": str(prepared.schema_id),
+            "schema_version": prepared.schema_version,
+            "schema_hash": prepared.schema_hash,
+            "credential_id": (
+                str(prepared.credential.id) if prepared.credential is not None else None
+            ),
+        }
+        for node_id, prepared in protocol_nodes.items()
     }
 
 

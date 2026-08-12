@@ -35,7 +35,7 @@ class CapabilityService:
             CapabilityView(
                 manifest=manifest,
                 source="builtin",
-                enabled=settings.feature_capability_sdk_enabled,
+                enabled=_builtin_enabled(manifest),
             )
             for manifest in builtin_capability_registry.list()
         )
@@ -116,3 +116,9 @@ class CapabilityService:
                 message="需要系统管理员权限",
                 status_code=403,
             )
+
+
+def _builtin_enabled(manifest: CapabilityManifest) -> bool:
+    if manifest.version == "3.0.0" and manifest.id in {"graphql.request", "grpc.call"}:
+        return settings.feature_capability_sdk_enabled and settings.feature_multi_protocol_enabled
+    return settings.feature_capability_sdk_enabled

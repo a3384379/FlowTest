@@ -6,8 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.data_nodes import CredentialKind
+from app.domain.protocols import ProtocolKind
 from app.domain.scopes import HeaderScope, VariableScope
 from app.engine.contracts import WorkflowDefinition
+from app.engine.protocol_nodes import PreparedProtocolNode, ProtocolCredentialMaterial
 from app.services.api_assets import PreparedHeader, PreparedRequest, PreparedVariable
 from app.services.credentials import CredentialMaterial
 from app.services.data_nodes import PreparedDataNode
@@ -71,6 +73,27 @@ class StoredCredentialMaterial(BaseModel):
     tls_enabled: bool
 
 
+class StoredProtocolCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    project_id: UUID
+    name: str
+    kind: CredentialKind
+    host: str
+    port: int
+    secret: str
+
+
+class StoredProtocolNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    protocol: ProtocolKind
+    schema_id: UUID
+    schema_version: int
+    schema_hash: str
+    canonical_content_base64: str
+    credential: StoredProtocolCredential | None = None
+
+
 class StoredPreparedExecution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     snapshot: dict[str, JsonValue]
@@ -78,6 +101,7 @@ class StoredPreparedExecution(BaseModel):
     dataset_variables: dict[str, JsonValue]
     subflows: dict[str, "StoredPreparedSubflow"] = Field(default_factory=dict)
     data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
+    protocol_nodes: dict[str, StoredProtocolNode] = Field(default_factory=dict)
 
 
 class StoredPreparedSubflow(BaseModel):
@@ -90,6 +114,7 @@ class StoredPreparedSubflow(BaseModel):
     subflows: dict[str, "StoredPreparedSubflow"]
     snapshot: dict[str, JsonValue]
     data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
+    protocol_nodes: dict[str, StoredProtocolNode] = Field(default_factory=dict)
 
 
 class StoredRunPlan(BaseModel):
@@ -168,6 +193,10 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
                 node_id: _store_credential(value.credential)
                 for node_id, value in plan.prepared.data_nodes.items()
             },
+            protocol_nodes={
+                node_id: _store_protocol_node(value)
+                for node_id, value in plan.prepared.protocol_nodes.items()
+            },
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
@@ -205,6 +234,10 @@ def _store_subflow(prepared: PreparedSubflow) -> StoredPreparedSubflow:
         data_nodes={
             node_id: _store_credential(value.credential)
             for node_id, value in prepared.data_nodes.items()
+        },
+        protocol_nodes={
+            node_id: _store_protocol_node(value)
+            for node_id, value in prepared.protocol_nodes.items()
         },
     )
 
@@ -250,6 +283,10 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
                 node_id: PreparedDataNode(credential=_load_credential(value))
                 for node_id, value in stored.prepared.data_nodes.items()
             },
+            protocol_nodes={
+                node_id: _load_protocol_node(value)
+                for node_id, value in stored.prepared.protocol_nodes.items()
+            },
         ),
         runtime_variables=stored.runtime_variables,
     )
@@ -293,11 +330,46 @@ def _load_subflow(stored: StoredPreparedSubflow) -> PreparedSubflow:
             node_id: PreparedDataNode(credential=_load_credential(value))
             for node_id, value in stored.data_nodes.items()
         },
+        protocol_nodes={
+            node_id: _load_protocol_node(value) for node_id, value in stored.protocol_nodes.items()
+        },
     )
 
 
 def _load_credential(value: StoredCredentialMaterial) -> CredentialMaterial:
     return CredentialMaterial(**value.model_dump())
+
+
+def _store_protocol_node(value: PreparedProtocolNode) -> StoredProtocolNode:
+    credential = (
+        StoredProtocolCredential.model_validate(value.credential, from_attributes=True)
+        if value.credential is not None
+        else None
+    )
+    return StoredProtocolNode(
+        protocol=value.protocol,
+        schema_id=value.schema_id,
+        schema_version=value.schema_version,
+        schema_hash=value.schema_hash,
+        canonical_content_base64=base64.b64encode(value.canonical_content).decode(),
+        credential=credential,
+    )
+
+
+def _load_protocol_node(value: StoredProtocolNode) -> PreparedProtocolNode:
+    credential = (
+        ProtocolCredentialMaterial(**value.credential.model_dump())
+        if value.credential is not None
+        else None
+    )
+    return PreparedProtocolNode(
+        protocol=value.protocol,
+        schema_id=value.schema_id,
+        schema_version=value.schema_version,
+        schema_hash=value.schema_hash,
+        canonical_content=base64.b64decode(value.canonical_content_base64, validate=True),
+        credential=credential,
+    )
 
 
 def _load_multipart(value: StoredMultipart | None) -> PreparedMultipart | None:

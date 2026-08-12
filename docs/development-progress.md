@@ -1,17 +1,42 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V2 功能基线已固定；按用户明确指令从该基线启动 V3 S22。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V3 S22 已合并，S23 多协议能力已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@79d399a`，S21 PR #23 与发布候选记录 PR #24 均已合并。
-- 当前分支：`agent/s22-capability-sdk`，开发版本 `3.0.0-dev.22`。
+- 当前基线：`main@3eac7ec`，S22 Draft PR #25 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s23-multi-protocol`，开发版本 `3.0.0-alpha.1-dev.23`。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`；不得提前创建 `v2.0.0`。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 进行中：S22 Capability SDK V3
+## 本地验收完成：S23 GraphQL、gRPC 与多协议工作台
+
+1. 新增不可变 `SchemaArtifact` 与 `20260812_0020` 增量迁移，支持 GraphQL SDL/Introspection、
+   Proto/Protoset 和受 SSRF 策略约束的 gRPC Server Reflection；同内容按 SHA-256 去重。
+2. 新增 `graphql.request@3.0.0` 与 `grpc.call@3.0.0` Capability，GraphQL 支持 Query/Mutation，gRPC
+   支持 Unary/Server Streaming、TLS/mTLS，明确拒绝 Subscription、Client/Bidi Streaming 和超限消息。
+3. Workflow 发布与加密执行计划固定 Schema/Descriptor ID、版本、哈希和规范内容；mTLS Credential
+   只写、加密且绑定目标，公开 Snapshot 只保存 Credential ID。
+4. 结构化绑定只允许 REST/上游输出写入 GraphQL `variables.*` 或 gRPC `request.*`，不能动态改变
+   Endpoint、方法、TLS 或 Credential。
+5. Web 新增中文“多协议工作台”，提供版本清单、导入、GraphQL/gRPC 真实调试、Context Inspector；
+   React Flow 可创建和配置协议节点、mTLS 与结构化绑定。
+6. Compose 新增确定性 GraphQL 与带 Reflection 的 gRPC 目标服务；`smoke_s23.py` 覆盖导入、调试、
+   REST→GraphQL/gRPC 并行绑定及 Snapshot 固定，Playwright 覆盖真实中文工作台主路径。
+7. 后端 Ruff、mypy strict、依赖边界和 236 passed/3 skipped 通过，总覆盖率 90.53%；
+   `protocol_nodes.py` 96%，`protocol_runtime.py` 95%。Python 与前端生产依赖审计无已知漏洞。
+8. 前端格式、Lint、TypeScript、118 项 Vitest 与生产构建通过；Statements 85.35%、
+   Branches 80.01%、Functions 83.17%、Lines 87.46%，多协议工作台 Branches 92%。
+9. 真实 PostgreSQL 已完成 `0019 → 0020 → 0019 → 0020`，`alembic check` 无漂移；运行中
+   应用会持有 DDL 锁，因此回滚演练明确要求维护窗口内停止 API/Worker。
+10. Compose 全栈健康，S3–S11、S18、S19、S21–S23 共 14 个真实冒烟链路通过；
+    Playwright 在重复数据卷上 10/10 通过，并修复 S14 异步保存、S15 资产前置与 S21 名称冲突的测试隔离问题。
+11. 待完成 Draft PR 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
+    和 Compose Smoke 远程验证后，才可 squash 合并并创建 `v3.0.0-alpha.1`。
+
+## 已完成：S22 Capability SDK V3
 
 1. 已建立不可变 `CapabilityManifest`、12 个 V2 内置 Manifest、Legacy Adapter、显式 Capability
    节点契约和 Schema SHA-256；旧 Workflow 不修改存量数据。
@@ -35,7 +60,8 @@
     P95 3.442 秒/27.44 execution/s 与 P95 3.100 秒/31.47 execution/s，测试后恢复单 Worker。
 11. 全量回归曾发现 5 项失败均源于 `skipped` NodeResult 原因码被误判为非法错误；契约调整为
     `passed` 禁止错误、`failed` 必须有错误、`skipped/cancelled` 可携带解释原因，5 项回归现全部通过。
-12. GitHub Draft PR 与 5 项远程 CI 尚待提交后验证；未通过前不开始 S23。
+12. Draft PR #25 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和
+    Compose Smoke 共 5 项全部通过，随后 squash 合并至 `main@3eac7ec`。
 
 ## 已完成：S20 企业与可观测性
 
@@ -86,7 +112,7 @@
 
 ## 下一步
 
-1. 提交 `agent/s22-capability-sdk` 并创建 Draft PR，等待 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 与 Compose Smoke 全绿；S22 退出门槛通过后再开始 S23。
+1. 提交 S23 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并并创建 `v3.0.0-alpha.1`。
 2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-3. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建 `v2.0.0` 正式标签。
+3. 未通过 S23 退出门槛不开始 S24；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
+   `v2.0.0` 正式标签。

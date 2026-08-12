@@ -43,9 +43,11 @@ import type {
   WorkflowDefinition,
   WorkflowNode,
 } from '../lib/api'
+import type { SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import {
   addApiNode,
+  addProtocolNode,
   addTypedNode,
   autoLayoutWorkflow,
   connectNodes,
@@ -59,6 +61,8 @@ type DesignerProps = {
   artifacts: Artifact[]
   workflows?: Workflow[]
   credentials: Credential[]
+  graphqlSchemas?: SchemaArtifact[]
+  grpcDescriptors?: SchemaArtifact[]
   statuses: Record<string, string>
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
@@ -76,18 +80,41 @@ const nodeTypes = { workflowNode: WorkflowNodeCard }
 const NODE_INITIAL_WIDTH = 190
 const NODE_INITIAL_HEIGHT = 64
 
-export default function WorkflowDesigner({
+export default function WorkflowDesigner(props: DesignerProps) {
+  return (
+    <WorkflowDesignerReady
+      {...props}
+      workflows={props.workflows ?? []}
+      graphqlSchemas={props.graphqlSchemas ?? []}
+      grpcDescriptors={props.grpcDescriptors ?? []}
+    />
+  )
+}
+
+type ReadyDesignerProps = DesignerProps & {
+  workflows: Workflow[]
+  graphqlSchemas: SchemaArtifact[]
+  grpcDescriptors: SchemaArtifact[]
+}
+
+function WorkflowDesignerReady({
   definition,
   apis,
   artifacts,
-  workflows = [],
+  workflows,
   credentials,
+  graphqlSchemas,
+  grpcDescriptors,
   statuses,
   editable,
   onChange,
-}: DesignerProps) {
+}: ReadyDesignerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | undefined>(apis.at(0)?.id)
+  const [graphqlSelection, setGraphqlSelection] = useState<string | undefined>(
+    graphqlSchemas.at(0)?.id,
+  )
+  const [grpcSelection, setGrpcSelection] = useState<string | undefined>(grpcDescriptors.at(0)?.id)
   const publishedWorkflows = workflows.filter((workflow) => workflow.current_version)
   const [subflowSelection, setSubflowSelection] = useState<string | undefined>(
     publishedWorkflows.at(0)?.id,
@@ -102,11 +129,11 @@ export default function WorkflowDesigner({
     [definition.nodes, statuses],
   )
   const edges = useMemo(() => definition.edges.map(toCanvasEdge), [definition.edges])
-  const selected = definition.nodes.find((node) => node.id === selectedId) ?? null
-  const selectedApiId = apiSelection ?? apis.at(0)?.id
-  const selectedSubflow =
-    publishedWorkflows.find((workflow) => workflow.id === subflowSelection) ??
-    publishedWorkflows.at(0)
+  const selected = selectedNode(definition, selectedId)
+  const selectedApiId = selectedResourceId(apiSelection, apis)
+  const selectedGraphql = selectedSchema(graphqlSelection, graphqlSchemas)
+  const selectedGrpc = selectedSchema(grpcSelection, grpcDescriptors)
+  const selectedSubflow = selectedWorkflow(subflowSelection, publishedWorkflows)
 
   function applyChange(next: WorkflowDefinition) {
     if (next === definition) return
@@ -137,44 +164,66 @@ export default function WorkflowDesigner({
     onChange(next)
   }
 
+  function addSelectedApi() {
+    if (selectedApiId) applyChange(addApiNode(definition, selectedApiId))
+  }
+
+  function addSelectedProtocol(protocol: 'graphql' | 'grpc') {
+    const asset = protocol === 'graphql' ? selectedGraphql : selectedGrpc
+    if (asset) applyChange(addProtocolNode(definition, protocol, asset))
+  }
+
+  function addPaletteNode(type: PaletteNodeType) {
+    applyChange(
+      addTypedNode(
+        definition,
+        type,
+        firstArtifactId(artifacts),
+        workflowReference(selectedSubflow),
+        credentials,
+      ),
+    )
+  }
+
+  function copySelectedNode() {
+    if (selected) setClipboard(structuredClone(selected))
+  }
+
+  function pasteCopiedNode() {
+    if (clipboard) applyChange(pasteNode(definition, clipboard))
+  }
+
   if (!definition.nodes.length) return <Empty description="请选择工作流" />
   return (
     <div className="workflow-designer">
       <DesignerToolbar
         apiSelection={selectedApiId}
         apis={apis}
+        graphqlSchemas={graphqlSchemas}
+        grpcDescriptors={grpcDescriptors}
+        graphqlSelection={selectedGraphql?.id}
+        grpcSelection={selectedGrpc?.id}
         subflowSelection={selectedSubflow?.id}
         subflows={publishedWorkflows}
         editable={editable}
         hasArtifacts={artifacts.length > 0}
         hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
-        hasSqlCredential={credentials.some((item) => item.kind !== 'redis')}
+        hasSqlCredential={credentials.some((item) => ['postgresql', 'mysql'].includes(item.kind))}
         hasRedisCredential={credentials.some((item) => item.kind === 'redis')}
         onApiSelection={setApiSelection}
+        onGraphqlSelection={setGraphqlSelection}
+        onGrpcSelection={setGrpcSelection}
         onSubflowSelection={setSubflowSelection}
-        onAddApi={() => selectedApiId && applyChange(addApiNode(definition, selectedApiId))}
-        onAddNode={(type) =>
-          applyChange(
-            addTypedNode(
-              definition,
-              type,
-              artifacts.at(0)?.id ?? null,
-              selectedSubflow?.current_version
-                ? {
-                    workflowId: selectedSubflow.id,
-                    workflowVersion: selectedSubflow.current_version,
-                  }
-                : null,
-              credentials,
-            ),
-          )
-        }
+        onAddApi={addSelectedApi}
+        onAddGraphql={() => addSelectedProtocol('graphql')}
+        onAddGrpc={() => addSelectedProtocol('grpc')}
+        onAddNode={addPaletteNode}
         canCopy={Boolean(selected)}
         canPaste={Boolean(clipboard)}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
-        onCopy={() => selected && setClipboard(structuredClone(selected))}
-        onPaste={() => clipboard && applyChange(pasteNode(definition, clipboard))}
+        onCopy={copySelectedNode}
+        onPaste={pasteCopiedNode}
         onUndo={undo}
         onRedo={redo}
         onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
@@ -213,6 +262,8 @@ export default function WorkflowDesigner({
           artifacts={artifacts}
           workflows={publishedWorkflows}
           credentials={credentials}
+          graphqlSchemas={graphqlSchemas}
+          grpcDescriptors={grpcDescriptors}
           editable={editable}
           onChange={applyChange}
           onDelete={() => {
@@ -226,9 +277,50 @@ export default function WorkflowDesigner({
   )
 }
 
+function selectedNode(definition: WorkflowDefinition, selectedId: string | null) {
+  if (!selectedId) return null
+  return definition.nodes.find((node) => node.id === selectedId) ?? null
+}
+
+function selectedResourceId(
+  selection: string | undefined,
+  resources: Array<{ id: string }>,
+): string | undefined {
+  return selection ?? resources.at(0)?.id
+}
+
+function selectedSchema(selection: string | undefined, schemas: SchemaArtifact[]) {
+  if (selection) {
+    const selected = schemas.find((schema) => schema.id === selection)
+    if (selected) return selected
+  }
+  return schemas.at(0)
+}
+
+function selectedWorkflow(selection: string | undefined, workflows: Workflow[]) {
+  if (selection) {
+    const selected = workflows.find((workflow) => workflow.id === selection)
+    if (selected) return selected
+  }
+  return workflows.at(0)
+}
+
+function firstArtifactId(artifacts: Artifact[]): string | null {
+  return artifacts.at(0)?.id ?? null
+}
+
+function workflowReference(workflow: Workflow | undefined) {
+  if (!workflow?.current_version) return null
+  return { workflowId: workflow.id, workflowVersion: workflow.current_version }
+}
+
 function DesignerToolbar({
   apiSelection,
   apis,
+  graphqlSelection,
+  graphqlSchemas,
+  grpcSelection,
+  grpcDescriptors,
   subflowSelection,
   subflows,
   editable,
@@ -237,8 +329,12 @@ function DesignerToolbar({
   hasSqlCredential,
   hasRedisCredential,
   onApiSelection,
+  onGraphqlSelection,
+  onGrpcSelection,
   onSubflowSelection,
   onAddApi,
+  onAddGraphql,
+  onAddGrpc,
   onAddNode,
   canCopy,
   canPaste,
@@ -252,6 +348,10 @@ function DesignerToolbar({
 }: {
   apiSelection?: string
   apis: ApiDefinition[]
+  graphqlSelection?: string
+  graphqlSchemas: SchemaArtifact[]
+  grpcSelection?: string
+  grpcDescriptors: SchemaArtifact[]
   subflowSelection?: string
   subflows: Workflow[]
   editable: boolean
@@ -260,8 +360,12 @@ function DesignerToolbar({
   hasSqlCredential: boolean
   hasRedisCredential: boolean
   onApiSelection: (value: string) => void
+  onGraphqlSelection: (value: string) => void
+  onGrpcSelection: (value: string) => void
   onSubflowSelection: (value: string) => void
   onAddApi: () => void
+  onAddGraphql: () => void
+  onAddGrpc: () => void
   onAddNode: (type: PaletteNodeType) => void
   canCopy: boolean
   canPaste: boolean
@@ -288,8 +392,50 @@ function DesignerToolbar({
           options={apis.map((api) => ({ label: api.name, value: api.id }))}
           onChange={onApiSelection}
         />
-        <Button icon={<PlusOutlined />} disabled={!editable || !apiSelection} onClick={onAddApi}>
+        <Button
+          icon={<PlusOutlined />}
+          disabled={isControlDisabled(editable, Boolean(apiSelection))}
+          onClick={onAddApi}
+        >
           添加接口节点
+        </Button>
+        <Select
+          aria-label="待添加 GraphQL Schema"
+          value={graphqlSelection}
+          disabled={!editable}
+          placeholder="选择 GraphQL Schema"
+          className="workflow-api-select"
+          options={graphqlSchemas.map((schema) => ({
+            label: `${schema.name} · v${schema.version}`,
+            value: schema.id,
+          }))}
+          onChange={onGraphqlSelection}
+        />
+        <Button
+          icon={<ApiOutlined />}
+          disabled={isControlDisabled(editable, Boolean(graphqlSelection))}
+          onClick={onAddGraphql}
+        >
+          GraphQL
+        </Button>
+        <Select
+          aria-label="待添加 gRPC Descriptor"
+          value={grpcSelection}
+          disabled={!editable}
+          placeholder="选择 gRPC Descriptor"
+          className="workflow-api-select"
+          options={grpcDescriptors.map((descriptor) => ({
+            label: `${descriptor.name} · v${descriptor.version}`,
+            value: descriptor.id,
+          }))}
+          onChange={onGrpcSelection}
+        />
+        <Button
+          icon={<ApiOutlined />}
+          disabled={isControlDisabled(editable, Boolean(grpcSelection))}
+          onClick={onAddGrpc}
+        >
+          gRPC
         </Button>
         <Button icon={<ExportOutlined />} disabled={!editable} onClick={() => onAddNode('extract')}>
           提取
@@ -317,7 +463,7 @@ function DesignerToolbar({
         </Button>
         <Button
           icon={<DatabaseOutlined />}
-          disabled={!editable || hasDataset || !hasArtifacts}
+          disabled={isDatasetDisabled(editable, hasDataset, hasArtifacts)}
           onClick={() => onAddNode('dataset')}
         >
           数据集
@@ -350,14 +496,14 @@ function DesignerToolbar({
         />
         <Button
           icon={<ApartmentOutlined />}
-          disabled={!editable || !subflowSelection}
+          disabled={isControlDisabled(editable, Boolean(subflowSelection))}
           onClick={() => onAddNode('subflow')}
         >
           子流程
         </Button>
         <Button
           icon={<RetweetOutlined />}
-          disabled={!editable || !subflowSelection}
+          disabled={isControlDisabled(editable, Boolean(subflowSelection))}
           onClick={() => onAddNode('for_each')}
         >
           ForEach
@@ -365,16 +511,32 @@ function DesignerToolbar({
         <Button icon={<FlagOutlined />} disabled={!editable} onClick={() => onAddNode('end')}>
           添加结束节点
         </Button>
-        <Button icon={<CopyOutlined />} disabled={!editable || !canCopy} onClick={onCopy}>
+        <Button
+          icon={<CopyOutlined />}
+          disabled={isControlDisabled(editable, canCopy)}
+          onClick={onCopy}
+        >
           复制
         </Button>
-        <Button icon={<SnippetsOutlined />} disabled={!editable || !canPaste} onClick={onPaste}>
+        <Button
+          icon={<SnippetsOutlined />}
+          disabled={isControlDisabled(editable, canPaste)}
+          onClick={onPaste}
+        >
           粘贴
         </Button>
-        <Button icon={<UndoOutlined />} disabled={!editable || !canUndo} onClick={onUndo}>
+        <Button
+          icon={<UndoOutlined />}
+          disabled={isControlDisabled(editable, canUndo)}
+          onClick={onUndo}
+        >
           撤销
         </Button>
-        <Button icon={<RedoOutlined />} disabled={!editable || !canRedo} onClick={onRedo}>
+        <Button
+          icon={<RedoOutlined />}
+          disabled={isControlDisabled(editable, canRedo)}
+          onClick={onRedo}
+        >
           重做
         </Button>
         <Button icon={<ApartmentOutlined />} disabled={!editable} onClick={onAutoLayout}>
@@ -503,6 +665,14 @@ const nodeIcons: Partial<Record<WorkflowNode['type'], ReactNode>> = {
 
 function isDataNodeDisabled(editable: boolean, hasCredential: boolean): boolean {
   return !editable || !hasCredential
+}
+
+function isControlDisabled(editable: boolean, available: boolean): boolean {
+  return !editable || !available
+}
+
+function isDatasetDisabled(editable: boolean, hasDataset: boolean, hasArtifacts: boolean): boolean {
+  return !editable || hasDataset || !hasArtifacts
 }
 
 function statusLabel(status: string): string {

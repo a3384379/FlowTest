@@ -1,12 +1,19 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import WorkflowDesigner from './WorkflowDesigner'
-import { addTypedNode, autoLayoutWorkflow, connectNodes, pasteNode } from './workflow-graph'
+import {
+  addProtocolNode,
+  addTypedNode,
+  autoLayoutWorkflow,
+  connectNodes,
+  pasteNode,
+} from './workflow-graph'
 import { apiDefinition, workflow, workflowDefinition } from '../test/fixtures'
 import type { Artifact, Credential, WorkflowDefinition } from '../lib/api'
+import type { SchemaArtifact } from '../features/protocols/protocol-service'
 
 describe('WorkflowDesigner', () => {
   it('locks the published execution snapshot while a run is active', () => {
@@ -122,6 +129,88 @@ describe('WorkflowDesigner', () => {
     })
   })
 
+  it('adds version-pinned GraphQL and gRPC capability nodes with isolated bindings', () => {
+    const graphql = addProtocolNode(workflowDefinition, 'graphql', graphqlSchema)
+    const grpc = addProtocolNode(graphql, 'grpc', grpcDescriptor)
+    const graphqlNode = graphql.nodes.at(-1)
+    const grpcNode = grpc.nodes.at(-1)
+
+    expect(graphqlNode).toMatchObject({
+      type: 'capability',
+      capability_id: 'graphql.request',
+      capability_version: '3.0.0',
+      configuration: { schema_id: graphqlSchema.id },
+    })
+    expect(grpcNode).toMatchObject({
+      capability_id: 'grpc.call',
+      configuration: {
+        descriptor_id: grpcDescriptor.id,
+        service: 'flowtest.user.v1.UserService',
+        method: 'GetUser',
+      },
+    })
+    const copied = pasteNode(grpc, {
+      ...grpcNode!,
+      bindings: [{ input: 'request.id', expression: 'node_outputs.api.body.id' }],
+    })
+    expect(copied.nodes.at(-1)?.bindings).toEqual([
+      { input: 'request.id', expression: 'node_outputs.api.body.id' },
+    ])
+    expect(copied.nodes.at(-1)?.bindings).not.toBe(grpcNode?.bindings)
+  })
+
+  it('edits protocol capability configuration, mTLS, and upstream bindings', async () => {
+    const browser = userEvent.setup()
+    const graphqlDefinition = protocolGraph('graphql')
+    const graphqlView = render(
+      <DesignerHarness
+        initial={graphqlDefinition}
+        graphqlSchemas={[graphqlSchema]}
+        grpcDescriptors={[grpcDescriptor]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('rf__node-graphql-4'))
+    expect(screen.getByDisplayValue('https://api.example.com/graphql')).toBeVisible()
+    await browser.clear(screen.getByLabelText('GraphQL Endpoint'))
+    await browser.type(screen.getByLabelText('GraphQL Endpoint'), 'https://graphql.example.com')
+    fireEvent.blur(screen.getByLabelText('Variables（JSON）'), {
+      target: { value: '{"id":"initial"}' },
+    })
+    await browser.click(screen.getByRole('button', { name: 'plus 添加' }))
+    expect(screen.getByLabelText('Capability 绑定源')).toHaveValue('node_outputs.api.body')
+    await browser.type(screen.getByLabelText('Capability 绑定源'), '.id')
+    await browser.clear(screen.getByLabelText('Capability 绑定目标'))
+    await browser.type(screen.getByLabelText('Capability 绑定目标'), 'variables.id')
+    graphqlView.unmount()
+
+    render(
+      <DesignerHarness
+        initial={protocolGraph('grpc')}
+        credentials={[grpcCredential]}
+        graphqlSchemas={[graphqlSchema]}
+        grpcDescriptors={[grpcDescriptor]}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-grpc-4'))
+    expect(screen.getByText(/flowtest\.user\.v1\.UserService/)).toBeVisible()
+    const transportField = screen.getByText('传输安全').closest('label')
+    if (!transportField) throw new Error('Transport security field was not rendered')
+    await browser.click(within(transportField).getByRole('combobox'))
+    await browser.click(screen.getByText('mTLS', { exact: true }))
+    await browser.click(screen.getByLabelText('mTLS Credential'))
+    await browser.click(screen.getByText(grpcCredential.name))
+    fireEvent.blur(screen.getByLabelText('Request（JSON）'), {
+      target: { value: '{"id":"42"}' },
+    })
+    fireEvent.blur(screen.getByLabelText('Metadata（JSON）'), {
+      target: { value: '{"x-trace":"trace"}' },
+    })
+    await browser.click(screen.getByRole('button', { name: 'plus 添加' }))
+    await browser.click(screen.getByRole('button', { name: '删除 Capability 绑定' }))
+    expect(screen.queryByLabelText('Capability 绑定源')).not.toBeInTheDocument()
+  })
+
   it('adds and configures credential-bound SQL and Redis nodes', () => {
     render(<DesignerHarness initial={workflowDefinition} credentials={dataCredentials} />)
 
@@ -229,9 +318,13 @@ describe('WorkflowDesigner', () => {
 function DesignerHarness({
   initial,
   credentials = [],
+  graphqlSchemas = [],
+  grpcDescriptors = [],
 }: {
   initial: WorkflowDefinition
   credentials?: Credential[]
+  graphqlSchemas?: SchemaArtifact[]
+  grpcDescriptors?: SchemaArtifact[]
 }) {
   const [definition, setDefinition] = useState(initial)
   return (
@@ -241,11 +334,80 @@ function DesignerHarness({
       artifacts={[datasetArtifact]}
       workflows={[workflow]}
       credentials={credentials}
+      graphqlSchemas={graphqlSchemas}
+      grpcDescriptors={grpcDescriptors}
       statuses={{}}
       editable
       onChange={setDefinition}
     />
   )
+}
+
+const graphqlSchema: SchemaArtifact = {
+  id: '00000000-0000-4000-8000-000000000801',
+  project_id: apiDefinition.project_id,
+  protocol: 'graphql',
+  name: '用户 GraphQL',
+  description: '',
+  version: 1,
+  source_format: 'graphql_sdl',
+  content_sha256: 'a'.repeat(64),
+  summary: { type_count: 3 },
+  created_by_id: '00000000-0000-4000-8000-000000000001',
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+}
+
+const grpcDescriptor: SchemaArtifact = {
+  ...graphqlSchema,
+  id: '00000000-0000-4000-8000-000000000802',
+  protocol: 'grpc',
+  name: '用户 gRPC',
+  source_format: 'proto_source',
+  content_sha256: 'b'.repeat(64),
+  summary: {
+    service_count: 1,
+    services: [
+      {
+        name: 'flowtest.user.v1.UserService',
+        methods: [{ name: 'GetUser', call_type: 'unary' }],
+      },
+    ],
+  },
+}
+
+const grpcCredential: Credential = {
+  id: '00000000-0000-4000-8000-000000000803',
+  project_id: apiDefinition.project_id,
+  name: '用户服务 mTLS',
+  kind: 'grpc_mtls',
+  host: 'grpc.example.com',
+  port: 443,
+  database_name: '',
+  username: '',
+  secret_provider: 'local',
+  tls_enabled: true,
+  created_by_id: '00000000-0000-4000-8000-000000000001',
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+}
+
+function protocolGraph(protocol: 'graphql' | 'grpc'): WorkflowDefinition {
+  const definition = addProtocolNode(
+    workflowDefinition,
+    protocol,
+    protocol === 'graphql' ? graphqlSchema : grpcDescriptor,
+  )
+  const node = definition.nodes.at(-1)
+  if (!node) throw new Error('Protocol node was not created')
+  return {
+    ...definition,
+    edges: [
+      definition.edges[0],
+      { id: 'api-protocol', source: 'api', target: node.id, condition: null, mappings: [] },
+      { id: 'protocol-end', source: node.id, target: 'end', condition: null, mappings: [] },
+    ],
+  }
 }
 
 function connection(source: string, target: string) {

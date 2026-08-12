@@ -10,6 +10,7 @@ class V3FeatureFlagsResponse(BaseModel):
     capability_sdk: bool
     plugin_registry: bool
     runner_fabric: bool
+    multi_protocol: bool
 
 
 class CapabilityResponse(BaseModel):

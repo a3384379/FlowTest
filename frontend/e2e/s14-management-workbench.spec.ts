@@ -99,8 +99,16 @@ async function updateProjectConfiguration(page: import('@playwright/test').Page,
   await page.getByRole('tab', { name: '项目变量与 Header' }).click()
   await page.getByLabel('项目变量（JSON）').fill(`{"s14":"${suffix}"}`)
   await page.getByLabel('项目 Header（JSON）').fill('{"X-FlowTest":"s14"}')
-  await page.getByRole('button', { name: '保存项目配置' }).click()
-  await expect(page.getByText('测试资产配置已保存').last()).toBeVisible()
+  const saveButton = page.getByRole('button', { name: '保存项目配置' })
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      response.url().endsWith('/configuration') &&
+      response.ok(),
+  )
+  await saveButton.click()
+  expect((await saved).ok()).toBeTruthy()
+  await expect(saveButton).toBeEnabled()
 }
 
 async function writeSecret(page: import('@playwright/test').Page, name: string, value: string) {

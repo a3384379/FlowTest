@@ -33,6 +33,11 @@ from app.engine.contracts import (
 from app.engine.control_nodes import execute_control_node
 from app.engine.mappings import MappingResolutionError, ResolvedFieldMapping, resolve_field_mappings
 from app.engine.node_sdk import NodeHandlerRegistration, NodeHandlerRegistry
+from app.engine.protocol_nodes import (
+    GraphQLCapabilityConfig,
+    PreparedProtocolNode,
+    resolve_protocol_config,
+)
 from app.engine.scheduler import (
     ExecutionContext,
     NodeExecutionError,
@@ -51,6 +56,7 @@ from app.services.executions import (
     _send_request,
 )
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
+from app.services.protocol_runtime import ProtocolRunner
 
 _DATA_VARIABLE = re.compile(r"^\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\}\}$")
 
@@ -72,6 +78,7 @@ class PreparedSubflow:
     subflows: dict[str, "PreparedSubflow"]
     snapshot: dict[str, JsonValue]
     data_nodes: dict[str, PreparedDataNode] = dataclass_field(default_factory=dict)
+    protocol_nodes: dict[str, PreparedProtocolNode] = dataclass_field(default_factory=dict)
 
 
 class WorkflowNodeExecutor:
@@ -85,6 +92,7 @@ class WorkflowNodeExecutor:
         outbound_guard: OutboundRequestGuard = outbound_request_guard,
         data_nodes: dict[str, PreparedDataNode] | None = None,
         data_runner: DataNodeRunner | None = None,
+        protocol_nodes: dict[str, PreparedProtocolNode] | None = None,
     ) -> None:
         self._client = client
         self._requests = requests
@@ -93,6 +101,12 @@ class WorkflowNodeExecutor:
         self._subflows = subflows or {}
         self._data_nodes = data_nodes or {}
         self._outbound_guard = outbound_guard
+        self._protocol_nodes = protocol_nodes or {}
+        self._protocol_runner = ProtocolRunner(
+            client,
+            network_policy,
+            outbound_guard=outbound_guard,
+        )
         self._data_runner = data_runner or InfrastructureDataNodeRunner(
             network_policy,
             outbound_guard=outbound_guard,
@@ -128,6 +142,8 @@ class WorkflowNodeExecutor:
         node: WorkflowNode,
         context: ExecutionContext,
     ) -> JsonValue:
+        if node.capability_id in {"graphql.request", "grpc.call"}:
+            return await self._execute_protocol(node, context)
         try:
             legacy_node = legacy_node_adapter.as_legacy_node(node)
         except ValueError as error:
@@ -136,6 +152,26 @@ class WorkflowNodeExecutor:
                 message="当前 Runner 不支持该能力版本",
             ) from error
         return await self._handlers.execute(legacy_node, context)
+
+    async def _execute_protocol(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+    ) -> JsonValue:
+        prepared = self._protocol_nodes.get(node.id)
+        if prepared is None:
+            raise NodeExecutionError(
+                code="PROTOCOL_SNAPSHOT_MISSING",
+                message=f"节点 {node.name} 缺少固定协议 Schema 快照",
+            )
+        config = resolve_protocol_config(node, context)
+        if isinstance(config, GraphQLCapabilityConfig):
+            result = await self._protocol_runner.execute_graphql(prepared, config)
+        else:
+            result = await self._protocol_runner.execute_grpc(prepared, config)
+        if isinstance(result.output, dict):
+            return {**result.output, "duration_ms": result.duration_ms}
+        return result.output
 
     async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         prepared = self._requests[node.id]
@@ -315,6 +351,7 @@ class WorkflowNodeExecutor:
             outbound_guard=self._outbound_guard,
             data_nodes=prepared.data_nodes,
             data_runner=self._data_runner,
+            protocol_nodes=prepared.protocol_nodes,
         )
         return await WorkflowScheduler(executor).run(
             prepared.definition,

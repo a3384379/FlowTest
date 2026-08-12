@@ -37,6 +37,7 @@ async def feature_flags() -> FeatureFlagsResponse:
         quality_center=settings.feature_quality_center_enabled,
         oidc=settings.feature_oidc_enabled,
         ai=settings.feature_ai_enabled,
+        multi_protocol=settings.feature_multi_protocol_enabled,
     )
 
 
