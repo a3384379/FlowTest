@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V3 S24 已合并；S25 Draft PR #28 已完成实现、本地全量验收和远端缺陷修复，最新 CI 受 GitHub Actions 账户计费阻断。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V3 S24 已合并；S25 Draft PR #28 已完成实现、本地全量验收和远端缺陷修复，2026-08-12 再次重跑的 CI 仍受 GitHub Actions 账户计费阻断。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
@@ -47,6 +47,11 @@
 15. `3438f4a` 推送后的五项 GitHub Actions 均在 3–4 秒内、执行任何步骤前终止；Check Annotation 明确
     指向账户付款失败或 Actions spending limit。该问题需要仓库所有者在 GitHub Billing & plans 处理，
     处理后重跑 PR #28 全部检查；全绿并 squash 合并前不开始 S26。
+16. 2026-08-12 14:45（Asia/Shanghai）已对 `9eab87d` 的 Backend `31569796643`、Frontend
+    `31569796638`、Security `31569796687` 和 Compose `31569796736` 执行重跑；五个新 Job
+    `94033432944`、`94033432935`、`94033432495`、`94033431994`、`94033432684` 均在约 3 秒内失败，
+    新 Check Annotation 仍明确提示近期账户付款失败或 Actions spending limit 需要提高，且无任何步骤日志。
+    这仍是外部计费阻塞，不是代码失败；PR 保持 Draft，不合并、不开始 S26。
 
 ## 已完成：S24 Kafka、WebSocket 与 Exchange
 
@@ -175,7 +180,9 @@
 
 ## 下一步
 
-1. 提交 S25 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并，再开始 S26。
+1. 仓库所有者先在 GitHub Billing & plans 处理付款或 Actions spending limit；恢复后重跑 PR #28 的
+   Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke。
+   只有五项全部真实通过后才将 PR 标记 Ready、squash 合并并开始 S26。
 2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 3. 未通过 S25 退出门槛不开始 S26；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。
