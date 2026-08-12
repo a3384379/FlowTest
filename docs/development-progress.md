@@ -17,7 +17,7 @@
    支持 REST 与纯 HTTP Workflow 目标、固定 VU 和阶梯升压。
 2. 固定 `K6ScenarioCompiler` 只接受带类型结构化配置，确定性生成 k6 程序与 SHA-256；拒绝用户脚本，
    关闭重定向并默认丢弃响应体。
-3. 新增独立 Celery `performance` 队列和固定 digest 的 k6 2.1.0 Runner；容器以 UID/GID 65532
+3. 新增独立 Celery `performance` 队列和固定 digest 的 k6 2.2.0 Runner；容器以 UID/GID 65532
    非 root 运行，根文件系统只读，移除全部 Capability 并启用 `no-new-privileges`。
 4. Runner 执行前重新编译并校验 Snapshot 哈希，再次执行 SSRF/DNS/CIDR 策略；超时、Runner 缺失、
    非法汇总、超限指标和阈值失败均返回稳定错误码；敏感 Header/Query/Body 在进入 Snapshot 前拒绝。
@@ -35,6 +35,9 @@
     误拒绝和中文展开按钮选择器；所有对应门槛已重跑通过。
 11. 待提交 Draft PR 并完成 Backend、Integration、Frontend、Security 和 Compose 五项远程 CI；
     全绿并 squash 合并前不开始 S26。
+12. PR #28 首轮 Security CI 发现 k6 2.1.0 二进制的 `golang.org/x/text` 和 gRPC 高危依赖已有
+    上游修复版本；已升级至官方 k6 2.2.0 多架构 digest，不添加漏洞豁免。相同 Grype 0.116.1 高危
+    扫描已通过，ARM64 固定编译产物完成真实 HTTP 负载兼容验证。
 
 ## 已完成：S24 Kafka、WebSocket 与 Exchange
 

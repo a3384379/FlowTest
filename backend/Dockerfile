@@ -1,5 +1,5 @@
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
-FROM grafana/k6:2.1.0@sha256:65c920dc067d5e2e00befbf982af6ad6ad0117034e8b1c65817c7975c52d4669 AS k6
+FROM grafana/k6:2.2.0@sha256:9bd01d6941fca969cb61bb57d2da5ee9b385fe2aa8881df3798c196564d6ace6 AS k6
 FROM debian:trixie-slim AS python-runtime
 
 ENV PATH="/usr/local/bin:$PATH" \

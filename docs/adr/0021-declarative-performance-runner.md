@@ -21,7 +21,7 @@ V3 需要把性能结果纳入基线和发布门禁，但允许用户上传 k6 J
    S25 不接受敏感 Header、敏感 Query 参数、Secret 形态值或敏感 Body 字段；认证性能场景须待
    Credential Broker 接入后开放，Secret 不进入场景、编译产物和原始指标。
 4. 性能任务只进入 Celery `performance` 队列。Compose 使用独立的 `performance-runtime` 镜像，固定
-   `grafana/k6:2.1.0` 多架构 digest，以非 root 用户、只读根文件系统、`cap-drop ALL`、
+   `grafana/k6:2.2.0` 多架构 digest，以非 root 用户、只读根文件系统、`cap-drop ALL`、
    `no-new-privileges` 和受限 `/tmp` 运行。
 5. k6 原始 NDJSON 指标保存到 MinIO，数据库仅保存 Artifact 元数据、聚合指标、阈值证据和标准错误；
    单个原始指标产物上限 50 MB。上一条同场景成功运行自动成为回归基线。
