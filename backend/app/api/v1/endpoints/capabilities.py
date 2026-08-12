@@ -29,6 +29,7 @@ async def get_v3_feature_flags(current_user: CurrentUser) -> V3FeatureFlagsRespo
         performance_lab=settings.feature_performance_lab_enabled,
         environment_lab=settings.feature_environment_lab_enabled,
         contract_hub=settings.feature_contract_hub_enabled,
+        impact_engine=settings.feature_impact_engine_enabled,
         pact_broker=bool(settings.pact_broker_base_url),
     )
 

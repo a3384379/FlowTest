@@ -10,6 +10,7 @@ export type ProjectSection =
   | 'performance'
   | 'environments'
   | 'contracts'
+  | 'impact'
   | 'quality'
   | 'ai'
   | 'reports'
@@ -42,6 +43,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'performance',
     'environments',
     'contracts',
+    'impact',
     'quality',
     'ai',
     'reports',

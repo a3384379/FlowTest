@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "3.0.0-beta.1-dev.27"
+    app_version: str = "3.0.0-beta.2-dev.28"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     feature_performance_lab_enabled: bool = False
     feature_environment_lab_enabled: bool = False
     feature_contract_hub_enabled: bool = False
+    feature_impact_engine_enabled: bool = False
     performance_max_vus: int = Field(default=100, ge=1, le=1000)
     performance_max_duration_seconds: int = Field(default=1800, ge=1, le=3600)
     performance_runner_timeout_seconds: int = Field(default=2100, ge=60, le=3900)

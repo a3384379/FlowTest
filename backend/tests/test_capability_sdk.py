@@ -381,6 +381,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         "performance_lab": False,
         "environment_lab": False,
         "contract_hub": False,
+        "impact_engine": False,
         "pact_broker": False,
     }
 

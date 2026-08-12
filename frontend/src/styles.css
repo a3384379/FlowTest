@@ -291,6 +291,74 @@ body {
   padding: 8px 16px;
 }
 
+.impact-workspace {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.impact-column {
+  min-width: 0;
+  background: #f8fafc;
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.impact-column-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #eef2ff;
+  border-bottom: 1px solid #dbe4f0;
+}
+
+.impact-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.impact-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: white;
+  border: 1px solid #dbe4f0;
+  border-left: 4px solid #7c3aed;
+  border-radius: 8px;
+}
+
+.impact-item-breaking {
+  border-left-color: #e5484d;
+}
+
+.impact-item-warning {
+  border-left-color: #f59e0b;
+}
+
+.impact-item-info {
+  border-left-color: #3b82f6;
+}
+
+.impact-gap-alert,
+.impact-schema-selectors {
+  margin-top: 16px;
+}
+
+.impact-run-selected > td {
+  background: #eef2ff !important;
+}
+
+.impact-run-selected {
+  cursor: pointer;
+}
+
 .quality-runs-card {
   margin-top: 16px;
 }
