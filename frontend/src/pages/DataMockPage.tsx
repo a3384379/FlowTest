@@ -204,16 +204,29 @@ function CredentialForm({
           <InputNumber min={1} max={65535} placeholder={String(defaultPort(kind))} />
         </Form.Item>
       </Space>
-      {kind !== 'redis' && (
+      {(kind === 'postgresql' || kind === 'mysql') && (
         <Form.Item name="database_name" label="数据库" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
       )}
-      <Form.Item name="username" label="用户名">
-        <Input />
-      </Form.Item>
-      <Form.Item name="secret" label="密码/访问密钥" rules={[{ required: true }]}>
-        <Input.Password autoComplete="new-password" />
+      {kind !== 'grpc_mtls' && (
+        <Form.Item name="username" label="用户名">
+          <Input />
+        </Form.Item>
+      )}
+      <Form.Item
+        name="secret"
+        label={kind === 'grpc_mtls' ? 'mTLS 材料（JSON）' : '密码/访问密钥'}
+        rules={[{ required: true }]}
+      >
+        {kind === 'grpc_mtls' ? (
+          <Input.TextArea
+            rows={6}
+            placeholder='{"private_key_pem":"...","certificate_chain_pem":"..."}'
+          />
+        ) : (
+          <Input.Password autoComplete="new-password" />
+        )}
       </Form.Item>
       <Form.Item name="tls_enabled" label="TLS" valuePropName="checked">
         <Switch />
@@ -599,6 +612,7 @@ const credentialKindOptions = [
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'mysql', label: 'MySQL' },
   { value: 'redis', label: 'Redis' },
+  { value: 'grpc_mtls', label: 'gRPC mTLS' },
 ]
 const httpMethodOptions = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((value) => ({
   value,
@@ -610,5 +624,5 @@ function credentialKindLabel(kind: Credential['kind']) {
 }
 
 function defaultPort(kind: Credential['kind']): number {
-  return { postgresql: 5432, mysql: 3306, redis: 6379 }[kind]
+  return { postgresql: 5432, mysql: 3306, redis: 6379, grpc_mtls: 443 }[kind]
 }

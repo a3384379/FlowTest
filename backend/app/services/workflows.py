@@ -24,6 +24,12 @@ from app.domain.data_nodes import (
     validate_redis_read,
 )
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
+from app.domain.protocols import (
+    GrpcCallType,
+    ProtocolKind,
+    ProtocolSchemaError,
+    validate_graphql_operation,
+)
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
@@ -40,6 +46,11 @@ from app.engine.contracts import (
     WorkflowDefinition,
     WorkflowNode,
     parse_node_config,
+)
+from app.engine.protocol_nodes import (
+    GraphQLCapabilityConfig,
+    GrpcCapabilityConfig,
+    parse_protocol_config,
 )
 from app.engine.scheduler import (
     CancellationToken,
@@ -64,6 +75,7 @@ from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
 from app.services.projects import ProjectService
+from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import WorkflowNodeExecutor
 from app.services.workflow_snapshots import (
     PreparedExecution,
@@ -122,6 +134,7 @@ class WorkflowService:
         self._snapshots = WorkflowSnapshotBuilder(session, external_secrets=external_secrets)
         self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
+        self._protocol_assets = ProtocolAssetService(session)
         self._audit = AuditService(session)
         self._secrets = secrets
 
@@ -539,6 +552,7 @@ class WorkflowService:
                         network_policy,
                         subflows=plan.prepared.subflows,
                         data_nodes=plan.prepared.data_nodes,
+                        protocol_nodes=plan.prepared.protocol_nodes,
                     )
                 )
             )
@@ -600,6 +614,7 @@ class WorkflowService:
                         network_policy,
                         subflows=prepared.subflows,
                         data_nodes=prepared.data_nodes,
+                        protocol_nodes=prepared.protocol_nodes,
                     )
                 )
             ).run(
@@ -764,10 +779,7 @@ class WorkflowService:
         for edge in definition.edges:
             for mapping in edge.mappings:
                 self._validate_jmespath(mapping.source.path, edge.id)
-        if any(
-            legacy_node_adapter.as_legacy_node(node).type is NodeType.DATASET
-            for node in definition.nodes
-        ):
+        if any(node.effective_type is NodeType.DATASET for node in definition.nodes):
             await self._datasets.prepare(project_id=project_id, definition=definition)
         await self._validate_subflow_graph(
             project_id=project_id,
@@ -794,6 +806,16 @@ class WorkflowService:
                     invocation.capability_id,
                     invocation.capability_version,
                 )
+                if node.capability_id in {"graphql.request", "grpc.call"}:
+                    if not settings.feature_multi_protocol_enabled:
+                        raise AppError(
+                            code="MULTI_PROTOCOL_DISABLED",
+                            message="多协议执行能力尚未启用",
+                            status_code=409,
+                        )
+                    protocol_config = parse_protocol_config(node)
+                    await self._validate_protocol_node(project_id, node, protocol_config)
+                    return
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
         except AppError:
             raise
@@ -808,6 +830,41 @@ class WorkflowService:
         self._validate_control_node(definition, node, config)
         if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
             await self._load_subflow_version(project_id, config)
+
+    async def _validate_protocol_node(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: GraphQLCapabilityConfig | GrpcCapabilityConfig,
+    ) -> None:
+        if isinstance(config, GraphQLCapabilityConfig):
+            artifact = await self._protocol_assets.load(
+                project_id=project_id,
+                artifact_id=config.schema_id,
+                protocol=ProtocolKind.GRAPHQL,
+            )
+            try:
+                validate_graphql_operation(artifact.canonical_content, config.operation)
+            except ProtocolSchemaError as error:
+                raise AppError(
+                    code="INVALID_GRAPHQL_OPERATION",
+                    message=str(error),
+                    status_code=422,
+                    details={"node_id": node.id},
+                ) from error
+            return
+        artifact = await self._protocol_assets.load(
+            project_id=project_id,
+            artifact_id=config.descriptor_id,
+            protocol=ProtocolKind.GRPC,
+        )
+        if not _grpc_method_matches(artifact.summary, config):
+            raise AppError(
+                code="GRPC_METHOD_NOT_FOUND",
+                message="gRPC 方法不存在或调用类型与 Descriptor 不一致",
+                status_code=422,
+                details={"node_id": node.id},
+            )
 
     async def _validate_resource_node(
         self,
@@ -884,8 +941,8 @@ class WorkflowService:
         kind = CredentialKind(credential.kind)
         try:
             if isinstance(config, SqlNodeConfig):
-                if kind is CredentialKind.REDIS:
-                    raise DataNodeValidationError("SQL 节点不能使用 Redis Credential")
+                if kind not in {CredentialKind.POSTGRESQL, CredentialKind.MYSQL}:
+                    raise DataNodeValidationError("SQL 节点必须使用 PostgreSQL/MySQL Credential")
                 validate_read_only_sql(config.query, kind)
             else:
                 if kind is not CredentialKind.REDIS:
@@ -907,6 +964,8 @@ class WorkflowService:
         workflow_path: tuple[UUID, ...],
     ) -> None:
         for node in definition.nodes:
+            if node.effective_type not in {NodeType.SUBFLOW, NodeType.FOR_EACH}:
+                continue
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
             if not isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
                 continue
@@ -931,10 +990,7 @@ class WorkflowService:
                 )
             version = await self._load_subflow_version(project_id, config)
             nested = self._load_definition(version.definition)
-            if any(
-                legacy_node_adapter.as_legacy_node(item).type is NodeType.DATASET
-                for item in nested.nodes
-            ):
+            if any(item.effective_type is NodeType.DATASET for item in nested.nodes):
                 raise AppError(
                     code="SUBFLOW_DATASET_NOT_SUPPORTED",
                     message="子流程暂不支持 Dataset 节点",
@@ -1267,6 +1323,33 @@ class WorkflowService:
 def _fingerprint(definition: dict[str, object]) -> str:
     canonical = json.dumps(definition, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _grpc_method_matches(
+    summary: dict[str, object],
+    config: GrpcCapabilityConfig,
+) -> bool:
+    services = summary.get("services")
+    if not isinstance(services, list):
+        return False
+    expected = (
+        GrpcCallType.SERVER_STREAMING.value
+        if config.call_type is GrpcCallType.SERVER_STREAMING
+        else GrpcCallType.UNARY.value
+    )
+    for service in services:
+        if not isinstance(service, dict) or service.get("name") != config.service:
+            continue
+        methods = service.get("methods")
+        if not isinstance(methods, list):
+            return False
+        return any(
+            isinstance(method, dict)
+            and method.get("name") == config.method
+            and method.get("call_type") == expected
+            for method in methods
+        )
+    return False
 
 
 def _execution_plan_associated_data(execution_id: UUID) -> bytes:

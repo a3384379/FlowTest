@@ -154,6 +154,7 @@ function installHandlers({
         capability_sdk: capabilitySdk,
         plugin_registry: false,
         runner_fabric: false,
+        multi_protocol: false,
       }),
     ),
     http.get('/api/v1/capabilities', () =>

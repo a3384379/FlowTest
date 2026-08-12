@@ -184,6 +184,7 @@ function DraftActions({ state }: { state: WorkflowState }) {
 function DraftEditor({ state }: { state: WorkflowState }) {
   const workflow = state.selectedWorkflow
   if (!workflow) return <Empty description="请选择或新建工作流" />
+  const resources = workflowDesignerResources(state, workflow.id)
   return (
     <>
       <Space className="workflow-meta" wrap>
@@ -193,16 +194,40 @@ function DraftEditor({ state }: { state: WorkflowState }) {
       <WorkflowDesigner
         key={workflow.id}
         definition={state.designerDefinition}
-        apis={state.apis.data?.items ?? []}
-        artifacts={state.artifacts.data?.items ?? []}
-        workflows={(state.workflows.data?.items ?? []).filter((item) => item.id !== workflow.id)}
-        credentials={state.credentials.data ?? []}
+        apis={resources.apis}
+        artifacts={resources.artifacts}
+        workflows={resources.workflows}
+        credentials={resources.credentials}
+        graphqlSchemas={resources.graphqlSchemas}
+        grpcDescriptors={resources.grpcDescriptors}
         statuses={state.nodeStatuses}
         editable={!state.activeExecutionId}
         onChange={state.setDraftDefinition}
       />
     </>
   )
+}
+
+function workflowDesignerResources(state: WorkflowState, workflowId: string) {
+  const workflows = pageItems(state.workflows.data)
+  return {
+    apis: pageItems(state.apis.data),
+    artifacts: pageItems(state.artifacts.data),
+    workflows: workflows.filter((item) => item.id !== workflowId),
+    credentials: listItems(state.credentials.data),
+    graphqlSchemas: pageItems(state.graphqlSchemas.data),
+    grpcDescriptors: pageItems(state.grpcDescriptors.data),
+  }
+}
+
+function pageItems<T>(page: { items: T[] } | undefined): T[] {
+  if (page) return page.items
+  return []
+}
+
+function listItems<T>(items: T[] | undefined): T[] {
+  if (items) return items
+  return []
 }
 
 function PublishedTag({ version }: { version: number | null }) {

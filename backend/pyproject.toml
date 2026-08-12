@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowtest-backend"
-version = "3.0.0.dev22"
+version = "3.0.0a1.dev23"
 description = "FlowTest API automation platform backend"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -18,6 +18,10 @@ dependencies = [
   "email-validator>=2.3,<3",
   "fastapi>=0.141,<1",
   "httpx>=0.28,<1",
+  "graphql-core>=3.2.7,<4",
+  "grpcio>=1.78,<2",
+  "grpcio-reflection>=1.78,<2",
+  "grpcio-tools>=1.78,<2",
   "jmespath>=1.1,<2",
   "jsonpath-ng>=1.8,<2",
   "jsonschema>=4.26,<5",
@@ -98,6 +102,10 @@ ignore_missing_imports = true
 module = ["celery.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["grpc.*", "grpc_tools.*", "grpc_reflection.*"]
+ignore_missing_imports = true
+
 [tool.coverage.run]
 concurrency = ["greenlet", "thread"]
 source = ["app"]
@@ -119,4 +127,5 @@ forbidden_modules = ["app.api", "app.models", "app.repositories"]
 dev = [
     "types-croniter>=6,<7",
     "types-openpyxl>=3.1.5,<4",
+    "types-protobuf>=6.30,<7",
 ]

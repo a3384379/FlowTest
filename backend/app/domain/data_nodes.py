@@ -1,3 +1,4 @@
+import json
 from enum import StrEnum
 
 from sqlglot import exp, parse
@@ -12,6 +13,7 @@ class CredentialKind(StrEnum):
     POSTGRESQL = "postgresql"
     MYSQL = "mysql"
     REDIS = "redis"
+    GRPC_MTLS = "grpc_mtls"
 
 
 class CredentialSecretProvider(StrEnum):
@@ -28,6 +30,24 @@ class RedisReadCommand(StrEnum):
     ZRANGE = "ZRANGE"
     EXISTS = "EXISTS"
     TTL = "TTL"
+
+
+def validate_grpc_mtls_secret(secret: str) -> str:
+    try:
+        material = json.loads(secret)
+    except json.JSONDecodeError as error:
+        raise DataNodeValidationError("gRPC mTLS 材料必须是 JSON 对象") from error
+    if not isinstance(material, dict):
+        raise DataNodeValidationError("gRPC mTLS 材料必须是 JSON 对象")
+    required = ("private_key_pem", "certificate_chain_pem")
+    if any(
+        not isinstance(material.get(name), str) or not material[name].strip() for name in required
+    ):
+        raise DataNodeValidationError("gRPC mTLS 材料缺少私钥或证书链")
+    root = material.get("root_certificate_pem")
+    if root is not None and (not isinstance(root, str) or not root.strip()):
+        raise DataNodeValidationError("gRPC mTLS 根证书格式无效")
+    return json.dumps(material, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 _FORBIDDEN_SQL_EXPRESSIONS = (

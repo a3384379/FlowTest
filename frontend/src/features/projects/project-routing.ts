@@ -2,6 +2,7 @@ export type ProjectSection =
   | 'dashboard'
   | 'settings'
   | 'apis'
+  | 'protocols'
   | 'assets'
   | 'workflows'
   | 'data'
@@ -30,6 +31,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'dashboard',
     'settings',
     'apis',
+    'protocols',
     'assets',
     'workflows',
     'data',

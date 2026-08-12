@@ -68,7 +68,7 @@ class InfrastructureDataNodeRunner:
         parameters: Mapping[str, JsonValue],
         timeout_seconds: int,
     ) -> JsonValue:
-        if credential.kind is CredentialKind.REDIS:
+        if credential.kind not in {CredentialKind.POSTGRESQL, CredentialKind.MYSQL}:
             raise NodeExecutionError(
                 code="CREDENTIAL_KIND_MISMATCH",
                 message="SQL 节点必须使用 PostgreSQL 或 MySQL Credential",

@@ -21,7 +21,10 @@ class Credential(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "credentials"
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_credentials_project_name"),
-        CheckConstraint("kind IN ('postgresql', 'mysql', 'redis')", name="credential_kind"),
+        CheckConstraint(
+            "kind IN ('postgresql', 'mysql', 'redis', 'grpc_mtls')",
+            name="credential_kind",
+        ),
         CheckConstraint("port >= 1 AND port <= 65535", name="credential_port"),
         CheckConstraint(
             "(secret_provider = 'local' AND ciphertext IS NOT NULL "

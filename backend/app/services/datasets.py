@@ -47,11 +47,7 @@ class WorkflowDatasetService:
         definition: WorkflowDefinition,
     ) -> PreparedDataset | None:
         dataset_node = next(
-            (
-                node
-                for node in definition.nodes
-                if legacy_node_adapter.as_legacy_node(node).type is NodeType.DATASET
-            ),
+            (node for node in definition.nodes if node.effective_type is NodeType.DATASET),
             None,
         )
         if dataset_node is None:

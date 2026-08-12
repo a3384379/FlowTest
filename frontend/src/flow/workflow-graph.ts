@@ -1,6 +1,7 @@
 import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
 import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
+import type { SchemaArtifact } from '../features/protocols/protocol-service'
 
 export type PaletteNodeType = Exclude<WorkflowNode['type'], 'start' | 'api' | 'capability'>
 
@@ -38,6 +39,32 @@ export function addApiNode(definition: WorkflowDefinition, apiId: string): Workf
         name: `接口请求 ${definition.nodes.filter((node) => node.type === 'api').length + 1}`,
         position: nextPosition(definition),
         config: { api_definition_id: apiId, max_retries: 0, retry_on: ['network_error', '5xx'] },
+      },
+    ],
+  }
+}
+
+export function addProtocolNode(
+  definition: WorkflowDefinition,
+  protocol: 'graphql' | 'grpc',
+  asset: SchemaArtifact,
+): WorkflowDefinition {
+  const id = uniqueNodeId(definition, protocol)
+  const capabilityId = protocol === 'graphql' ? 'graphql.request' : 'grpc.call'
+  return {
+    ...definition,
+    nodes: [
+      ...definition.nodes,
+      {
+        id,
+        type: 'capability',
+        name: protocol === 'graphql' ? 'GraphQL 请求' : 'gRPC 调用',
+        position: nextPosition(definition),
+        config: {},
+        capability_id: capabilityId,
+        capability_version: '3.0.0',
+        configuration: protocolConfiguration(protocol, asset),
+        bindings: [],
       },
     ],
   }
@@ -136,7 +163,8 @@ function leafNodeConfig(
   if (type === 'dataset') return { artifact_id: artifactId ?? '', format: 'auto' }
   if (type === 'sql') {
     return {
-      credential_id: credentials.find((item) => item.kind !== 'redis')?.id ?? '',
+      credential_id:
+        credentials.find((item) => item.kind === 'postgresql' || item.kind === 'mysql')?.id ?? '',
       query: 'SELECT 1 AS healthy',
       parameters: {},
       timeout_seconds: 30,
@@ -225,9 +253,55 @@ export function pasteNode(
         name: `${copied.name} 副本`,
         position: { x: copied.position.x + 40, y: copied.position.y + 40 },
         config: structuredClone(copied.config),
+        configuration: copied.configuration ? structuredClone(copied.configuration) : undefined,
+        bindings: copied.bindings ? structuredClone(copied.bindings) : undefined,
       },
     ],
   }
+}
+
+function protocolConfiguration(
+  protocol: 'graphql' | 'grpc',
+  asset: SchemaArtifact,
+): Record<string, unknown> {
+  if (protocol === 'graphql') {
+    return {
+      schema_id: asset.id,
+      endpoint: 'https://api.example.com/graphql',
+      operation: 'query FlowTest { __typename }',
+      variables: {},
+      headers: {},
+      timeout_seconds: 30,
+    }
+  }
+  const method = firstGrpcMethod(asset)
+  return {
+    descriptor_id: asset.id,
+    endpoint: 'grpc.example.com:443',
+    service: method.service,
+    method: method.method,
+    request: {},
+    metadata: {},
+    call_type: method.callType,
+    tls_mode: 'tls',
+    timeout_seconds: 30,
+  }
+}
+
+function firstGrpcMethod(asset: SchemaArtifact) {
+  const services = Array.isArray(asset.summary.services) ? asset.summary.services : []
+  const service = services.find(isRecord)
+  const methods = service && Array.isArray(service.methods) ? service.methods : []
+  const method = methods.find(isRecord)
+  return {
+    service: typeof service?.name === 'string' ? service.name : '',
+    method: typeof method?.name === 'string' ? method.name : '',
+    callType: method?.call_type === 'server_streaming' ? 'server_streaming' : 'unary',
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function autoLayoutWorkflow(definition: WorkflowDefinition): WorkflowDefinition {

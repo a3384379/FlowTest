@@ -135,6 +135,23 @@ describe('DataMockPage', () => {
     await waitFor(() => expect(screen.queryByLabelText('数据库')).not.toBeInTheDocument())
   })
 
+  it('uses a write-only JSON editor for gRPC mTLS credentials', async () => {
+    server.use(http.get('/api/v1/credentials', () => HttpResponse.json([])))
+    renderCredentialPanel(true)
+
+    fireEvent.mouseDown(screen.getByLabelText('类型'))
+    fireEvent.click(
+      await screen.findByText('gRPC mTLS', { selector: '.ant-select-item-option-content' }),
+    )
+
+    await waitFor(() => expect(screen.queryByLabelText('数据库')).not.toBeInTheDocument())
+    expect(screen.queryByLabelText('用户名')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('mTLS 材料（JSON）')).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('private_key_pem'),
+    )
+  })
+
   it('offers activation for a disabled mock service to editors', async () => {
     installMockHandlers(undefined, { ...mockService, is_enabled: false })
     renderMockPanel(true)

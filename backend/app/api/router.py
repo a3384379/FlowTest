@@ -15,6 +15,7 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
 from app.api.v1.endpoints.projects import router as projects_router
+from app.api.v1.endpoints.protocols import router as protocols_router
 from app.api.v1.endpoints.quality import router as quality_router
 from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.tasking import router as tasking_router
@@ -43,6 +44,7 @@ api_router.include_router(api_assets_router, tags=["api-assets"])
 api_router.include_router(api_exports_router, tags=["api-exports"])
 api_router.include_router(users_router, tags=["users"])
 api_router.include_router(projects_router, tags=["projects"])
+api_router.include_router(protocols_router, tags=["protocols"])
 api_router.include_router(quality_router, tags=["quality"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])

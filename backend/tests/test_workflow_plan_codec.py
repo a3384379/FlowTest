@@ -1,7 +1,9 @@
 import json
 from uuid import UUID
 
+from app.domain.protocols import ProtocolKind
 from app.engine.contracts import WorkflowDefinition
+from app.engine.protocol_nodes import PreparedProtocolNode
 from app.services.workflow_plan_codec import decode_execution_plan, encode_execution_plan
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution
@@ -62,6 +64,40 @@ def test_v1_execution_plan_without_subflows_remains_decodable() -> None:
 
     assert isinstance(restored, WorkflowRunPlan)
     assert restored.prepared.subflows == {}
+
+
+def test_execution_plan_round_trip_preserves_pinned_protocol_schema() -> None:
+    schema_id = UUID("00000000-0000-0000-0000-000000000205")
+    plan = WorkflowRunPlan(
+        execution_id=EXECUTION_ID,
+        actor_id=ACTOR_ID,
+        project_id=PROJECT_ID,
+        workflow_version=1,
+        definition=_definition(),
+        prepared=PreparedExecution(
+            snapshot={},
+            requests={},
+            dataset_variables={},
+            protocol_nodes={
+                "graphql": PreparedProtocolNode(
+                    protocol=ProtocolKind.GRAPHQL,
+                    schema_id=schema_id,
+                    schema_version=4,
+                    schema_hash="a" * 64,
+                    canonical_content=b"type Query { healthy: Boolean! }",
+                )
+            },
+        ),
+        runtime_variables={},
+    )
+
+    restored = decode_execution_plan(encode_execution_plan(plan))
+
+    assert isinstance(restored, WorkflowRunPlan)
+    protocol = restored.prepared.protocol_nodes["graphql"]
+    assert protocol.schema_id == schema_id
+    assert protocol.schema_version == 4
+    assert protocol.canonical_content == b"type Query { healthy: Boolean! }"
 
 
 def _definition() -> WorkflowDefinition:

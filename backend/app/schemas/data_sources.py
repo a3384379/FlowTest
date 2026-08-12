@@ -24,7 +24,10 @@ class CredentialCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_kind_fields(self) -> "CredentialCreate":
-        if self.kind is not CredentialKind.REDIS and not self.database_name.strip():
+        if (
+            self.kind in {CredentialKind.POSTGRESQL, CredentialKind.MYSQL}
+            and not self.database_name.strip()
+        ):
             raise ValueError("PostgreSQL/MySQL Credential 必须配置数据库名")
         return self
 

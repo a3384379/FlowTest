@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V2.0 路线 S17 数据与 Mock 已完成`；S12 真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 路线 S23 多协议能力已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -43,6 +43,7 @@ docker compose up --build
 - 健康检查：<http://localhost:8000/api/v1/health>
 - Readiness：<http://localhost:8000/api/v1/ready>
 - Mock 目标服务：<http://localhost:8080/docs>
+- gRPC/Reflection 目标服务：`localhost:50051`
 - MinIO Console：<http://localhost:9001>
 
 本地初始管理员为 `admin@flowtest.dev`，密码由
@@ -134,6 +135,13 @@ S17 已提供项目级加密 Credential、PostgreSQL/MySQL 单条只读 SQL 节�
 路径、Query/Header 条件、场景、状态码、延迟和安全 JSON 模板，不执行任意脚本；公开调度统一限流，请求日志脱敏并
 纳入项目保留策略。Web“数据与 Mock”页面和 React Flow 属性面板可完成配置与只读节点编排。
 
+S22 已提供 Capability SDK V3、全部 V2 节点的 Legacy Adapter、统一 NodeResult/ExecutionEvent、
+Runner/Plugin 安全契约以及 V3 中文设计基线。S23 在此基础上提供 GraphQL SDL/Introspection 与
+Query/Mutation、gRPC Proto/Protoset/Reflection 与 Unary/Server Streaming、TLS/mTLS Credential、
+不可变协议 Snapshot 和 REST→GraphQL/gRPC 结构化绑定。Web“多协议工作台”可完成导入、调试与
+版本审阅；协议节点可直接加入 React Flow 工作流。架构边界见
+[`ADR 0019`](docs/adr/0019-multi-protocol-schema-snapshots.md)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -178,6 +186,9 @@ Compose 冒烟产生 S11 验收数据后，可执行可重复的 Playwright 中�
 pnpm --dir frontend e2e:setup
 pnpm --dir frontend e2e
 ```
+
+全量浏览器验收会为每个隔离场景重新登录；启动验收专用 Compose 栈时应设置
+`FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE=100`。生产默认值仍为 10，不应为测试放宽生产限流。
 
 不使用 Docker 时可分别进入 `backend` 和 `frontend`，按照各自 README 启动。前端统一使用 pnpm，并提交 `pnpm-lock.yaml` 保证依赖可复现。
 

@@ -28,6 +28,7 @@ from app.engine.contracts import (
     SubFlowNodeConfig,
     WorkflowNode,
 )
+from app.engine.protocol_nodes import GraphQLCapabilityConfig, GrpcCapabilityConfig
 
 _LEGACY_CAPABILITIES: dict[NodeType, tuple[str, str]] = {
     NodeType.START: ("flow.start", "2.0.0"),
@@ -195,6 +196,44 @@ def _manifest(
     )
 
 
+def _v3_protocol_manifest(
+    capability_id: str,
+    display_name: str,
+    config_model: type[object],
+    *,
+    protocols: tuple[str, ...],
+    credential_types: tuple[str, ...] = (),
+    sensitive_paths: tuple[str, ...] = (),
+) -> CapabilityManifest:
+    return CapabilityManifest(
+        id=capability_id,
+        version="3.0.0",
+        category=CapabilityCategory.PROTOCOL,
+        display_name=display_name,
+        description="FlowTest V3 多协议工作台内置能力",
+        input_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": True,
+        },
+        output_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "required": ["protocol", "schema_version", "schema_hash"],
+        },
+        configuration_schema=_schema(config_model),
+        credential_types=credential_types,
+        network_policy=NetworkPolicy(
+            access=NetworkAccess.PROJECT_ALLOWLIST,
+            protocols=protocols,
+        ),
+        runner_type=RunnerType.PROTOCOL,
+        timeout_policy=TimeoutPolicy(),
+        snapshot_policy=SnapshotPolicy(),
+        redaction_policy=RedactionPolicy(sensitive_paths=sensitive_paths),
+    )
+
+
 BUILTIN_CAPABILITY_MANIFESTS = (
     _manifest("flow.start", "开始", CapabilityCategory.CONTROL, None),
     _manifest(
@@ -247,6 +286,21 @@ BUILTIN_CAPABILITY_MANIFESTS = (
         sensitive_paths=("credential",),
     ),
     _manifest("flow.end", "结束", CapabilityCategory.CONTROL, None),
+    _v3_protocol_manifest(
+        "graphql.request",
+        "GraphQL Query / Mutation",
+        GraphQLCapabilityConfig,
+        protocols=("http", "https"),
+        sensitive_paths=("headers.authorization", "headers.cookie"),
+    ),
+    _v3_protocol_manifest(
+        "grpc.call",
+        "gRPC Unary / Server Streaming",
+        GrpcCapabilityConfig,
+        protocols=("grpc", "grpcs"),
+        credential_types=("grpc_mtls",),
+        sensitive_paths=("metadata.authorization", "credential"),
+    ),
 )
 
 builtin_capability_registry = CapabilityRegistry(BUILTIN_CAPABILITY_MANIFESTS)

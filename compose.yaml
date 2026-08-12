@@ -54,6 +54,7 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_OTEL_EXPORT_TIMEOUT_SECONDS: ${FLOWTEST_OTEL_EXPORT_TIMEOUT_SECONDS:-10}
   FLOWTEST_FEATURE_AI_ENABLED: ${FLOWTEST_FEATURE_AI_ENABLED:-false}
   FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED: ${FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED:-false}
+  FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: ${FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED:-false}
   FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED: ${FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED:-false}
   FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: ${FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED:-false}
   FLOWTEST_AI_BASE_URL: ${FLOWTEST_AI_BASE_URL:-}
@@ -153,6 +154,29 @@ services:
           "python",
           "-c",
           "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
+
+  grpc-target:
+    build:
+      context: ./mock-target
+    command: ["python", "-m", "app.grpc_server"]
+    ports:
+      - "50051:50051"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=3)",
         ]
       interval: 5s
       timeout: 5s

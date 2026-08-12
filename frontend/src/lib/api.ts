@@ -259,7 +259,7 @@ export type Credential = {
   id: string
   project_id: string
   name: string
-  kind: 'postgresql' | 'mysql' | 'redis'
+  kind: 'postgresql' | 'mysql' | 'redis' | 'grpc_mtls'
   host: string
   port: number
   database_name: string

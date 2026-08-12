@@ -32,10 +32,14 @@ def main() -> None:
 
 def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[str, str]:
     flags = client.json("GET", "/v3/features", token=token)
-    if flags != {"capability_sdk": True, "plugin_registry": False, "runner_fabric": False}:
+    if (
+        not flags.get("capability_sdk")
+        or flags.get("plugin_registry")
+        or flags.get("runner_fabric")
+    ):
         raise RuntimeError(f"unexpected S22 feature boundary: {flags}")
     capabilities = client.json("GET", "/capabilities?page=1&page_size=100", token=token)
-    if capabilities["total"] != 12:
+    if capabilities["total"] < 12:
         raise RuntimeError("V2 built-in nodes were not fully adapted to Capability manifests")
     keys = {(item["id"], item["version"]) for item in capabilities["items"]}
     if ("flow.delay", "2.0.0") not in keys or ("http.request", "2.0.0") not in keys:

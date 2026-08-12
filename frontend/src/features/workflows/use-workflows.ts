@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '../auth/auth-store'
 import { useProjectContext } from '../projects/use-project-context'
 import { listCredentials } from '../data-sources/data-source-service'
+import { listGraphQLSchemas, listGrpcDescriptors } from '../protocols/protocol-service'
 import { useExecutionEvents } from './use-execution-events'
 import {
   createWorkflow,
@@ -77,6 +78,16 @@ export function useWorkflows() {
   const credentials = useQuery({
     queryKey: ['credentials', projectId],
     queryFn: () => listCredentials(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const graphqlSchemas = useQuery({
+    queryKey: ['graphql-schemas', projectId],
+    queryFn: () => listGraphQLSchemas(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const grpcDescriptors = useQuery({
+    queryKey: ['grpc-descriptors', projectId],
+    queryFn: () => listGrpcDescriptors(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
   const workflowId = selectedOrFirst(workflowSelection, workflows.data?.items)
@@ -271,6 +282,8 @@ export function useWorkflows() {
     artifacts,
     workflows,
     credentials,
+    graphqlSchemas,
+    grpcDescriptors,
     workflowId,
     setWorkflowSelection,
     selectedWorkflow,

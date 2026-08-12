@@ -14,7 +14,7 @@ async def test_health_check() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "FlowTest API",
-        "version": "3.0.0-dev.22",
+        "version": "3.0.0-alpha.1-dev.23",
     }
 
 
@@ -34,6 +34,7 @@ async def test_v2_features_are_disabled_by_default() -> None:
         "quality_center": False,
         "oidc": False,
         "ai": False,
+        "multi_protocol": False,
     }
 
 

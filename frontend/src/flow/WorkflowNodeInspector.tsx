@@ -12,6 +12,7 @@ import type {
   WorkflowFieldMapping,
   WorkflowNode,
 } from '../lib/api'
+import type { SchemaArtifact } from '../features/protocols/protocol-service'
 
 type InspectorProps = {
   node: WorkflowNode | null
@@ -20,6 +21,8 @@ type InspectorProps = {
   artifacts: Artifact[]
   workflows?: Workflow[]
   credentials: Credential[]
+  graphqlSchemas?: SchemaArtifact[]
+  grpcDescriptors?: SchemaArtifact[]
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
   onDelete: () => void
@@ -32,6 +35,8 @@ export default function WorkflowNodeInspector({
   artifacts,
   workflows = [],
   credentials,
+  graphqlSchemas = [],
+  grpcDescriptors = [],
   editable,
   onChange,
   onDelete,
@@ -48,7 +53,17 @@ export default function WorkflowNodeInspector({
           onChange={(event) => updateNode({ ...node, name: event.target.value })}
         />
       </Field>
-      {node.type === 'sql' || node.type === 'redis' ? (
+      {isProtocolCapability(node) ? (
+        <ProtocolCapabilityFields
+          node={node}
+          definition={definition}
+          graphqlSchemas={graphqlSchemas}
+          grpcDescriptors={grpcDescriptors}
+          credentials={credentials}
+          editable={editable}
+          onUpdate={updateNode}
+        />
+      ) : node.type === 'sql' || node.type === 'redis' ? (
         <DataNodeFields
           node={node}
           credentials={credentials}
@@ -301,7 +316,9 @@ function DataNodeFields({
   onUpdate: (node: WorkflowNode) => void
 }) {
   const compatible = credentials.filter((credential) =>
-    node.type === 'redis' ? credential.kind === 'redis' : credential.kind !== 'redis',
+    node.type === 'redis'
+      ? credential.kind === 'redis'
+      : credential.kind === 'postgresql' || credential.kind === 'mysql',
   )
   return (
     <>
@@ -380,6 +397,505 @@ function DataNodeFields({
       </Typography.Paragraph>
     </>
   )
+}
+
+function ProtocolCapabilityFields({
+  node,
+  definition,
+  graphqlSchemas,
+  grpcDescriptors,
+  credentials,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+  graphqlSchemas: SchemaArtifact[]
+  grpcDescriptors: SchemaArtifact[]
+  credentials: Credential[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <>
+      {node.capability_id === 'graphql.request' ? (
+        <GraphQLCapabilityFields
+          node={node}
+          schemas={graphqlSchemas}
+          editable={editable}
+          onUpdate={onUpdate}
+        />
+      ) : (
+        <GrpcCapabilityFields
+          node={node}
+          descriptors={grpcDescriptors}
+          credentials={credentials}
+          editable={editable}
+          onUpdate={onUpdate}
+        />
+      )}
+      <CapabilityBindingFields
+        node={node}
+        definition={definition}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    </>
+  )
+}
+
+function GraphQLCapabilityFields({
+  node,
+  schemas,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  schemas: SchemaArtifact[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <>
+      <Field label="固定 Schema 版本">
+        <Select
+          disabled={!editable}
+          value={capabilityString(node, 'schema_id') || undefined}
+          options={schemas.map((schema) => ({
+            value: schema.id,
+            label: `${schema.name} · v${schema.version}`,
+          }))}
+          onChange={(value) => onUpdate(updateCapabilityConfig(node, 'schema_id', value))}
+        />
+      </Field>
+      <CapabilityText
+        label="GraphQL Endpoint"
+        configKey="endpoint"
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <CapabilityTextArea
+        label="Query / Mutation"
+        configKey="operation"
+        rows={8}
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <CapabilityJson
+        label="Variables（JSON）"
+        configKey="variables"
+        fallback={{}}
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <CapabilityJson
+        label="Headers（JSON）"
+        configKey="headers"
+        fallback={{}}
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <CapabilityTimeout node={node} editable={editable} onUpdate={onUpdate} />
+    </>
+  )
+}
+
+function GrpcCapabilityFields({
+  node,
+  descriptors,
+  credentials,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  descriptors: SchemaArtifact[]
+  credentials: Credential[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const descriptor = descriptors.find((item) => item.id === capabilityString(node, 'descriptor_id'))
+  const methods = grpcMethods(descriptor)
+  const tlsMode = capabilityString(node, 'tls_mode', 'plaintext')
+  return (
+    <>
+      <Field label="固定 Descriptor 版本">
+        <Select
+          disabled={!editable}
+          value={descriptor?.id}
+          options={descriptors.map((item) => ({
+            value: item.id,
+            label: `${item.name} · v${item.version}`,
+          }))}
+          onChange={(value) => onUpdate(selectGrpcDescriptor(node, descriptors, value))}
+        />
+      </Field>
+      <CapabilityText
+        label="gRPC Endpoint"
+        configKey="endpoint"
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <Field label="Service / Method">
+        <Select
+          showSearch
+          optionFilterProp="label"
+          disabled={!editable}
+          value={grpcMethodValue(node)}
+          options={methods.map((method) => ({
+            value: `${method.service}/${method.method}`,
+            label: `${method.service} / ${method.method} · ${method.callType}`,
+          }))}
+          onChange={(value) => onUpdate(selectGrpcMethod(node, methods, value))}
+        />
+      </Field>
+      <CapabilityJson
+        label="Request（JSON）"
+        configKey="request"
+        fallback={{}}
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <CapabilityJson
+        label="Metadata（JSON）"
+        configKey="metadata"
+        fallback={{}}
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <Field label="传输安全">
+        <Select
+          disabled={!editable}
+          value={tlsMode}
+          options={[
+            { value: 'plaintext', label: 'Plaintext' },
+            { value: 'tls', label: 'TLS' },
+            { value: 'mtls', label: 'mTLS' },
+          ]}
+          onChange={(value) => onUpdate(updateGrpcTls(node, value))}
+        />
+      </Field>
+      {tlsMode === 'mtls' && (
+        <Field label="mTLS Credential">
+          <Select
+            disabled={!editable}
+            value={capabilityString(node, 'credential_id') || undefined}
+            options={credentials
+              .filter((credential) => credential.kind === 'grpc_mtls')
+              .map((credential) => ({ value: credential.id, label: credential.name }))}
+            onChange={(value) => onUpdate(updateCapabilityConfig(node, 'credential_id', value))}
+          />
+        </Field>
+      )}
+      <CapabilityTimeout node={node} editable={editable} onUpdate={onUpdate} />
+    </>
+  )
+}
+
+function CapabilityBindingFields({
+  node,
+  definition,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const bindings = node.bindings ?? []
+  const sources = upstreamNodes(definition, node.id)
+  const defaultTarget =
+    node.capability_id === 'graphql.request' ? 'variables.value' : 'request.value'
+  return (
+    <section className="mapping-section">
+      <Space className="mapping-heading">
+        <Typography.Text strong>结构化数据绑定</Typography.Text>
+        <Button
+          size="small"
+          type="text"
+          icon={<PlusOutlined />}
+          disabled={!editable || sources.length === 0}
+          onClick={() =>
+            onUpdate({
+              ...node,
+              bindings: [
+                ...bindings,
+                {
+                  input: defaultTarget,
+                  expression: `node_outputs.${sources.at(-1)?.id ?? 'source'}.body`,
+                },
+              ],
+            })
+          }
+        >
+          添加
+        </Button>
+      </Space>
+      {bindings.map((binding, index) => (
+        <div className="mapping-editor" key={`${node.id}-binding-${index}`}>
+          <Input
+            aria-label="Capability 绑定源"
+            disabled={!editable}
+            value={binding.expression}
+            placeholder="node_outputs.login.body.token"
+            onChange={(event) =>
+              onUpdate(replaceCapabilityBinding(node, index, 'expression', event.target.value))
+            }
+          />
+          <Input
+            aria-label="Capability 绑定目标"
+            disabled={!editable}
+            value={binding.input}
+            placeholder={defaultTarget}
+            onChange={(event) =>
+              onUpdate(replaceCapabilityBinding(node, index, 'input', event.target.value))
+            }
+          />
+          <Button
+            danger
+            type="text"
+            aria-label="删除 Capability 绑定"
+            icon={<MinusCircleOutlined />}
+            disabled={!editable}
+            onClick={() =>
+              onUpdate({
+                ...node,
+                bindings: bindings.filter((_item, itemIndex) => itemIndex !== index),
+              })
+            }
+          />
+        </div>
+      ))}
+      {!bindings.length && (
+        <Typography.Text type="secondary">连接上游节点后可绑定响应字段</Typography.Text>
+      )}
+    </section>
+  )
+}
+
+function CapabilityText({
+  label,
+  configKey,
+  node,
+  editable,
+  onUpdate,
+}: {
+  label: string
+  configKey: string
+  node: WorkflowNode
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <Field label={label}>
+      <Input
+        disabled={!editable}
+        value={capabilityString(node, configKey)}
+        onChange={(event) => onUpdate(updateCapabilityConfig(node, configKey, event.target.value))}
+      />
+    </Field>
+  )
+}
+
+function CapabilityTextArea({
+  label,
+  configKey,
+  rows,
+  node,
+  editable,
+  onUpdate,
+}: {
+  label: string
+  configKey: string
+  rows: number
+  node: WorkflowNode
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <Field label={label}>
+      <Input.TextArea
+        className="code-input"
+        rows={rows}
+        disabled={!editable}
+        value={capabilityString(node, configKey)}
+        onChange={(event) => onUpdate(updateCapabilityConfig(node, configKey, event.target.value))}
+      />
+    </Field>
+  )
+}
+
+function CapabilityJson({
+  label,
+  configKey,
+  fallback,
+  node,
+  editable,
+  onUpdate,
+}: {
+  label: string
+  configKey: string
+  fallback: unknown
+  node: WorkflowNode
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const value = node.configuration?.[configKey] ?? fallback
+  return (
+    <Field label={label}>
+      <Input.TextArea
+        key={`${node.id}-${configKey}-${JSON.stringify(value)}`}
+        className="code-input"
+        rows={3}
+        disabled={!editable}
+        defaultValue={JSON.stringify(value, null, 2)}
+        onBlur={(event) => {
+          const parsed = parseJsonInput(event.target.value)
+          if (parsed !== undefined) onUpdate(updateCapabilityConfig(node, configKey, parsed))
+        }}
+      />
+    </Field>
+  )
+}
+
+function CapabilityTimeout({
+  node,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <Field label="超时（秒）">
+      <InputNumber
+        disabled={!editable}
+        min={1}
+        max={300}
+        value={capabilityNumber(node, 'timeout_seconds', 30)}
+        onChange={(value) => onUpdate(updateCapabilityConfig(node, 'timeout_seconds', value ?? 30))}
+      />
+    </Field>
+  )
+}
+
+type GrpcMethodOption = {
+  service: string
+  method: string
+  callType: 'unary' | 'server_streaming'
+}
+
+function grpcMethods(descriptor: SchemaArtifact | undefined): GrpcMethodOption[] {
+  const services = Array.isArray(descriptor?.summary.services) ? descriptor.summary.services : []
+  return services.flatMap((service) => {
+    if (!isRecord(service) || typeof service.name !== 'string' || !Array.isArray(service.methods)) {
+      return []
+    }
+    return service.methods.flatMap((method) =>
+      isRecord(method) && typeof method.name === 'string'
+        ? [
+            {
+              service: service.name as string,
+              method: method.name,
+              callType: method.call_type === 'server_streaming' ? 'server_streaming' : 'unary',
+            } satisfies GrpcMethodOption,
+          ]
+        : [],
+    )
+  })
+}
+
+function selectGrpcDescriptor(
+  node: WorkflowNode,
+  descriptors: SchemaArtifact[],
+  descriptorId: string,
+): WorkflowNode {
+  const method = grpcMethods(descriptors.find((item) => item.id === descriptorId)).at(0)
+  return updateCapabilityConfigs(node, {
+    descriptor_id: descriptorId,
+    service: method?.service ?? '',
+    method: method?.method ?? '',
+    call_type: method?.callType ?? 'unary',
+  })
+}
+
+function selectGrpcMethod(
+  node: WorkflowNode,
+  methods: GrpcMethodOption[],
+  value: string,
+): WorkflowNode {
+  const method = methods.find((item) => `${item.service}/${item.method}` === value)
+  return updateCapabilityConfigs(node, {
+    service: method?.service ?? '',
+    method: method?.method ?? '',
+    call_type: method?.callType ?? 'unary',
+  })
+}
+
+function grpcMethodValue(node: WorkflowNode): string | undefined {
+  const service = capabilityString(node, 'service')
+  const method = capabilityString(node, 'method')
+  return service && method ? `${service}/${method}` : undefined
+}
+
+function updateGrpcTls(node: WorkflowNode, tlsMode: string): WorkflowNode {
+  const values: Record<string, unknown> = { tls_mode: tlsMode }
+  if (tlsMode !== 'mtls') values.credential_id = undefined
+  return updateCapabilityConfigs(node, values)
+}
+
+function replaceCapabilityBinding(
+  node: WorkflowNode,
+  index: number,
+  key: 'input' | 'expression',
+  value: string,
+): WorkflowNode {
+  return {
+    ...node,
+    bindings: (node.bindings ?? []).map((binding, itemIndex) =>
+      itemIndex === index ? { ...binding, [key]: value } : binding,
+    ),
+  }
+}
+
+function isProtocolCapability(node: WorkflowNode): boolean {
+  return (
+    node.type === 'capability' &&
+    (node.capability_id === 'graphql.request' || node.capability_id === 'grpc.call')
+  )
+}
+
+function capabilityString(node: WorkflowNode, key: string, fallback = ''): string {
+  const value = node.configuration?.[key]
+  return typeof value === 'string' ? value : fallback
+}
+
+function capabilityNumber(node: WorkflowNode, key: string, fallback: number): number {
+  const value = node.configuration?.[key]
+  return typeof value === 'number' ? value : fallback
+}
+
+function updateCapabilityConfig(node: WorkflowNode, key: string, value: unknown): WorkflowNode {
+  return { ...node, configuration: { ...node.configuration, [key]: value } }
+}
+
+function updateCapabilityConfigs(
+  node: WorkflowNode,
+  values: Record<string, unknown>,
+): WorkflowNode {
+  return { ...node, configuration: { ...node.configuration, ...values } }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function JsonConfig({
