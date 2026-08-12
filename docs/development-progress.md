@@ -1,15 +1,16 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-12（Asia/Shanghai）
+最后更新：2026-08-13（Asia/Shanghai）
 状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
-真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过，Draft PR 待创建。
+真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
+首轮 Backend、Integration、Frontend、Security 通过，Compose 的真实功能开关编排失败正在做最小修复。
 `v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s29-worker-plane`；从 S28 合并提交创建，当前实现与本地退出证据待提交，
-  Draft PR 尚未创建。
+- 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、本地验收文档提交 `a1c2814` 已推送，
+  Draft PR #32 已创建，Compose CI 最小编排修复待提交。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -57,7 +58,16 @@
 15. Ruff 安全规则、Python/前端依赖审计和 `flowtest-runner:ci` Grype v0.116.1
     High/only-fixed 门槛通过；只使用现有 CPython 3.13.15 精确误报台账，本轮没有新增例外。
 16. S29 决策记录为 `ADR 0025`，架构、部署、监控/容量、升级/回滚和威胁模型已同步。
-    未创建 Draft PR、未合并、未开始 S30，也未创建任何新 V3 标签。
+17. 实现提交 `030ed2a` 与本地验收文档提交 `a1c2814` 已推送并创建 Draft PR #32。首轮
+    Backend Test（2 分 22 秒）与 Integration（1 分 17 秒，run `31614733014`）、Frontend Build
+    （8 分 22 秒，run `31614732898`）和 Security Source/Images（9 分 8 秒，run
+    `31614732960`）通过。
+18. 首轮 Compose Smoke（run `31614733061`）实际启动并在 S5 失败，不是账户计费阻塞：Job 级
+    `FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED=true` 使旧 S5 Workflow 进入 PostgreSQL Runner Queue，
+    但 S29 Runner 尚未注册，因而执行一直处于 queued。最小修复将 S29 功能开关限制在 S29
+    Smoke、浏览器和容量窗口，并在其余回归中恢复 Celery；为保证 Backend 重建后不丢失 S18–S28
+    功能开关，这些既有开关提升为 Job 级环境。修复后必须重跑五项 CI。
+    未合并、未开始 S30，也未创建任何新 V3 标签。
 
 ## 已完成：S28 变更影响引擎与确定性测试选择
 
@@ -348,9 +358,9 @@
 
 ## 下一步
 
-1. 提交当前 S29 实现与验收文档，推送 `agent/s29-worker-plane`，创建 Draft PR，并确认
-   Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 五项检查。
-2. 如有真实 CI 失败，只做最小修复并重跑全部五项；全绿后才可 Ready、squash 合并、删除远程分支并创建
+1. 提交并推送 S29 Compose 功能开关编排修复，重跑 Backend Test、Backend Integration、
+   Frontend Build、Security Source/Images 和 Compose Smoke 五项检查。
+2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；全绿后才可 Ready、squash 合并、删除远程分支并创建
    `agent/s30-failure-intelligence`。在此之前不开始 S30。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
