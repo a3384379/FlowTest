@@ -1,13 +1,13 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S27 已合并并发布 `v3.0.0-beta.2`；S28 变更影响引擎已通过本地代码、迁移、真实 ARM64 Compose 与 Playwright 退出门槛，正在创建 Draft PR 并等待完整 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S27 已合并并发布 `v3.0.0-beta.2`；S28 变更影响引擎已通过本地代码、迁移、真实 ARM64 Compose、Playwright 与 Draft PR #31 五项 CI 退出门槛，正在提交最终验收记录并复验最新提交。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@83375d20a2726c1088d1afaa6c660863246fed5f`，S27 PR #30 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s28-impact-intelligence`；S28 实现提交 `54a4061` 与本地验收文档提交 `a464fa2`
-  已推送，Draft PR #31 正在等待最新提交的完整 CI。
+- 当前分支：`agent/s28-impact-intelligence`；S28 实现提交 `54a4061`、本地验收文档提交 `a464fa2`
+  和 PR 记录提交 `5f3f7d4` 已推送。Draft PR #31 在 `5f3f7d4` 上五项 CI 全绿，正在提交最终远端验收记录。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -40,9 +40,14 @@
     1/1，场景耗时 8.9 秒、总耗时 11.1 秒；过程中修复 Ant Select Portal 与成功提示造成的选择器歧义，
     最终复跑通过。
 11. 实现提交 `54a4061` 与本地验收文档提交 `a464fa2` 已推送并创建 Draft PR #31，架构边界记录于
-    `ADR 0024`。本地没有 Grype/Trivy 二进制，Backend/Frontend 镜像仍须由 Draft PR
-    的 Security Source/Images 使用既有 High/Critical 门槛扫描；在五项 CI 全绿前不合并、不创建
-    `v3.0.0-beta.3`，也不开始 S29。
+    `ADR 0024`。本地没有 Grype/Trivy 二进制，因此 Backend/Frontend 镜像交由 Draft PR 的 Security
+    Source/Images 使用既有 High/Critical 门槛扫描；结果见下一项。在最新提交五项 CI 全绿前不合并、
+    不创建 `v3.0.0-beta.3`，也不开始 S29。
+12. Draft PR #31 的提交 `5f3f7d4` 已通过 Backend Test（2 分 12 秒，run `31597011115`）、Backend
+    Integration（1 分 13 秒，同一 run）、Frontend Build（7 分 28 秒，run `31597011124`）、Security
+    Source/Images（9 分 43 秒，run `31597011152`）和 Compose Smoke（14 分 47 秒，run
+    `31597011135`）。Compose 同一提交完成 S3–S28、Apache Kafka 兼容、API/Workflow 容量、1000 任务
+    持久队列和隔离卷备份恢复；最终验收文档提交仍须复跑全部 CI。
 
 ## 已完成：S27 Pact 契约中心与发布兼容矩阵
 
@@ -288,9 +293,9 @@
 
 ## 下一步
 
-1. 提交并推送 S28 实现与本地验收记录，创建 Draft PR，等待 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 和 Compose Smoke 全部通过；若有真实失败，读取日志并最小修复。
-2. S28 PR 最新提交五项 CI 全绿后才标记 Ready 并 squash 合并；同步并验证 `main` 后，只有 S28 发布
+1. 提交并推送 Draft PR #31 的最终远端验收记录，等待 Backend Test、Backend Integration、
+   Frontend Build、Security Source/Images 和 Compose Smoke 在最新提交全部通过；若有真实失败，读取日志并最小修复。
+2. PR #31 最新提交五项 CI 全绿后才标记 Ready 并 squash 合并；同步并验证 `main` 后，只有 S28 发布
    门槛全部满足才创建 `v3.0.0-beta.3`，随后才能创建独立 `agent/s29-worker-plane` 开始 S29。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
