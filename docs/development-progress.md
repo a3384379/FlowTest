@@ -1,19 +1,18 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S27 已合并并发布 `v3.0.0-beta.2`；S28 变更影响引擎已通过本地代码、迁移、真实 ARM64 Compose、Playwright 与 Draft PR #31 五项 CI 退出门槛，正在提交最终验收记录并复验最新提交。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 已在独立分支开始盘点 Runner Pool、PostgreSQL Lease/Fencing 与受控远程 Worker 边界。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@83375d20a2726c1088d1afaa6c660863246fed5f`，S27 PR #30 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s28-impact-intelligence`；S28 实现提交 `54a4061`、本地验收文档提交 `a464fa2`
-  和 PR 记录提交 `5f3f7d4` 已推送。Draft PR #31 在 `5f3f7d4` 上五项 CI 全绿，正在提交最终远端验收记录。
+- 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s29-worker-plane`；从 S28 合并提交创建，尚未产生 S29 实现提交或 PR。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
-  `v3.0.0-beta.1`、`v3.0.0-beta.2`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
+  `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 本地验收完成：S28 变更影响引擎与确定性测试选择
+## 已完成：S28 变更影响引擎与确定性测试选择
 
 1. 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类受控变更源；领域解析器不访问外部
    Git、不接收仓库凭据或脚本，只处理有界文本和已登记 Schema，限制 2 MB、500 文件、100,000 行与
@@ -48,6 +47,15 @@
     Source/Images（9 分 43 秒，run `31597011152`）和 Compose Smoke（14 分 47 秒，run
     `31597011135`）。Compose 同一提交完成 S3–S28、Apache Kafka 兼容、API/Workflow 容量、1000 任务
     持久队列和隔离卷备份恢复；最终验收文档提交仍须复跑全部 CI。
+13. 最终文档提交 `5f5da5a` 的 Backend Test（2 分 10 秒）与 Integration（1 分 9 秒，run
+    `31598296375`）、Frontend Build（5 分 39 秒，run `31598296441`）、Security Source/Images
+    （9 分 57 秒，run `31598296383`）和 Compose Smoke（17 分 54 秒，run `31598296388`）五项全绿。
+    PR #31 随后标记 Ready 并 squash 合并至 `main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，
+    远端 `agent/s28-impact-intelligence` 已删除。
+14. 合并提交触发的 Backend（run `31599845096`）、Frontend（run `31599845036`）、Security（run
+    `31599844926`）和 Compose（18 分 47 秒，run `31599844971`）全部成功；Compose 再次通过 S3–S28、
+    Kafka、容量与隔离恢复。S15 浏览器用例首次未找到新建行，Playwright 自动重试后通过，工作流留下
+    flaky 注解但最终 14 passed。满足门槛后，annotated `v3.0.0-beta.3` 已固定到 `05e7cc3` 并推送。
 
 ## 已完成：S27 Pact 契约中心与发布兼容矩阵
 
@@ -293,10 +301,10 @@
 
 ## 下一步
 
-1. 提交并推送 Draft PR #31 的最终远端验收记录，等待 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 和 Compose Smoke 在最新提交全部通过；若有真实失败，读取日志并最小修复。
-2. PR #31 最新提交五项 CI 全绿后才标记 Ready 并 squash 合并；同步并验证 `main` 后，只有 S28 发布
-   门槛全部满足才创建 `v3.0.0-beta.3`，随后才能创建独立 `agent/s29-worker-plane` 开始 S29。
+1. 在 `agent/s29-worker-plane` 完成 Runner Pool、PostgreSQL Lease/Fencing、受控远程 Docker/Kubernetes
+   Worker、心跳/Drain/失联恢复、重复消息隔离及对应中文 UI、迁移与测试；不接收用户任意命令或凭据。
+2. S29 必须通过后端、前端、双向迁移、真实 Compose、Playwright、安全、容量与故障恢复门槛后才创建
+   Draft PR；最新提交五项 CI 全绿才可 Ready、squash 合并并开始 S30。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。
