@@ -3,15 +3,14 @@
 最后更新：2026-08-13（Asia/Shanghai）
 状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
 真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
-首轮 Backend、Integration、Frontend、Security 通过；Compose 的功能开关编排已修复，第二轮发现
-S22 浏览器空表假设与 S29 持久 Pool 冲突，正在做最小验收修复。
+最新功能提交 `e8ef455` 的五项 CI 已全绿；精确验收证据已确认，最终文档提交待复跑完整 CI。
 `v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、本地验收文档提交 `a1c2814` 已推送，
-  Draft PR #32 已创建，Compose CI 最小编排修复待提交。
+- 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、Compose 编排修复 `7e40dfc` 和浏览器
+  稳定性修复 `e8ef455` 已推送，Draft PR #32 保持 Draft；最终验收文档待提交。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -78,7 +77,17 @@ S22 浏览器空表假设与 S29 持久 Pool 冲突，正在做最小验收修�
     清单列结构；两处均保留请求成功和 S29 真实 Pool/Runner/Fence 的原有业务断言。本机保留 S29
     Pool 的 Celery 栈上 S22 通过（13.6 秒）；S23 复跑期间 Docker Desktop 全局失去调度，`/live`
     同步超时且安全策略请求由 Nginx 返回 504，不能记作通过，最终以全新 Linux CI Runner 为准。
-    修复后仍须重跑完整五项 CI。未合并、未开始 S30，也未创建任何新 V3 标签。
+20. 浏览器稳定性修复提交 `e8ef455` 的 Backend Test（2 分 19 秒）与 Integration（1 分 7 秒，run
+    `31620507777`）、Frontend Build（8 分 1 秒，run `31620507771`）和 Security Source/Images
+    （9 分 39 秒，run `31620507745`）通过。Compose run `31620507971` 首次在构建 PostgreSQL
+    镜像时从 GitHub Release 下载固定校验和 WAL-G 遇到 `curl (56) Connection died`，属于外部下载
+    瞬断；同一提交只重跑失败 Workflow 后 attempt 2 在 27 分 58 秒内通过。
+21. Compose attempt 2 完成 S3–S29 冒烟、S29 Runner→Celery 双向切换、S29 浏览器 1 passed 和
+    非 S29 浏览器 15 passed（1.9 分钟，无 flaky）、Kafka 兼容、API/Workflow/1000 任务容量与隔离卷
+    备份恢复。S29 CI 容量项目 `6d4554fc-8009-47ed-8aac-d260998e6a02` 完成 5000 个唯一排队执行与
+    加密计划、500/500 Workflow 和 Task、1000 个唯一终态节点、0 重复、0 Active Lease、0 制品
+    冲突、2 个实际 Worker；提交 P95 3.376032 秒，总耗时 218.597 秒。最终文档提交仍须重跑五项
+    CI；未合并、未开始 S30，也未创建任何新 V3 标签。
 
 ## 已完成：S28 变更影响引擎与确定性测试选择
 
@@ -369,9 +378,9 @@ S22 浏览器空表假设与 S29 持久 Pool 冲突，正在做最小验收修�
 
 ## 下一步
 
-1. 提交并推送 S29 Compose 功能开关编排修复，重跑 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 和 Compose Smoke 五项检查。
-2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；全绿后才可 Ready、squash 合并、删除远程分支并创建
+1. 提交并推送本轮最终验收文档，重跑 Backend Test、Backend Integration、Frontend Build、
+   Security Source/Images 和 Compose Smoke 五项检查。
+2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；最终提交全绿后才可 Ready、squash 合并、删除远程分支并创建
    `agent/s30-failure-intelligence`。在此之前不开始 S30。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
