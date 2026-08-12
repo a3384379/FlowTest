@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 路线 S24 事件协议能力已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 路线 S25 声明式性能实验室已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -149,6 +149,13 @@ Capability。Kafka 客户端禁用 Admin、自动 Topic 创建和 Offset 自动�
 `v26.2.1`，CI 额外验证 Apache Kafka `4.3.1`。架构边界见
 [`ADR 0020`](docs/adr/0020-event-protocols-and-session-boundary.md)。
 
+S25 新增声明式 Performance Scenario、不可变发布版本、独立 `performance` 队列和固定 digest 的
+k6 Runner。平台只编译结构化的固定 VU/阶梯升压、HTTP 步骤与 Threshold，不接收用户 JavaScript；
+运行前重新校验 Snapshot 哈希及项目 SSRF 白名单。聚合指标、阈值结果和 P95 回归写入 PostgreSQL，
+原始 NDJSON 指标写入 MinIO，并与现有 Quality Gate 形成发布证据。Web“性能实验室”支持场景创建、
+发布、运行、基线和门禁下钻。架构边界见
+[`ADR 0021`](docs/adr/0021-declarative-performance-runner.md)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -184,6 +191,9 @@ uv run --project backend python scripts/capacity_workflow.py
 scripts/backup.sh /absolute/path/to/backup
 scripts/verify_restore.sh /absolute/path/to/backup
 ```
+
+运行 `uv run --project backend python scripts/smoke_s25.py` 可在 Compose 中执行两次真实 k6 场景，
+验证独立队列、阈值、MinIO 原始指标、自动基线和 Quality Gate 证据。
 
 执行全部本地质量门槛使用 `./scripts/check.sh`。
 

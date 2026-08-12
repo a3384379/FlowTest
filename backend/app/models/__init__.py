@@ -22,6 +22,7 @@ from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockS
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
+from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
 from app.models.reporting import NotificationDelivery, NotificationWebhook
@@ -61,6 +62,9 @@ __all__ = [
     "NotificationDelivery",
     "NotificationWebhook",
     "OIDCLoginTransaction",
+    "PerformanceGateEvaluation",
+    "PerformanceRun",
+    "PerformanceScenario",
     "Plugin",
     "Project",
     "ProjectMember",

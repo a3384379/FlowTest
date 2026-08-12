@@ -1,17 +1,42 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V3 S23 已合并并发布 `v3.0.0-alpha.1`，S24 事件协议能力已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V3 S24 已合并，S25 声明式性能实验室已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@ff3931b`，S23 Draft PR #26 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s24-kafka-websocket`，开发版本 `3.0.0-alpha.1-dev.24`。
+- 当前基线：`main@bad2b51`，S24 Draft PR #27 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s25-performance-lab`，开发版本 `3.0.0-alpha.1-dev.25`。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 本地验收完成：S24 Kafka、WebSocket 与 Exchange
+## 本地验收完成：S25 声明式性能实验室
+
+1. 新增 `PerformanceScenario` 不可变版本、`PerformanceRun`、门禁评价和 `20260812_0022` 增量迁移；
+   支持 REST 与纯 HTTP Workflow 目标、固定 VU 和阶梯升压。
+2. 固定 `K6ScenarioCompiler` 只接受带类型结构化配置，确定性生成 k6 程序与 SHA-256；拒绝用户脚本，
+   关闭重定向并默认丢弃响应体。
+3. 新增独立 Celery `performance` 队列和固定 digest 的 k6 2.1.0 Runner；容器以 UID/GID 65532
+   非 root 运行，根文件系统只读，移除全部 Capability 并启用 `no-new-privileges`。
+4. Runner 执行前重新编译并校验 Snapshot 哈希，再次执行 SSRF/DNS/CIDR 策略；超时、Runner 缺失、
+   非法汇总、超限指标和阈值失败均返回稳定错误码；敏感 Header/Query/Body 在进入 Snapshot 前拒绝。
+5. 原始 k6 NDJSON 指标以 Artifact 写入 MinIO，P95、失败率、请求率和计数写入 PostgreSQL；同场景
+   上一次成功运行自动成为基线，并把 P95 回归与阈值证据写入现有 Quality Gate。
+6. Web 新增中文“性能实验室”深链接，提供声明式场景、发布、运行、基线、阈值、门禁和 Artifact 下钻；
+   内部 Compose 主机 URL 与公网 URL 均可在前端校验后交由后端安全策略处理。
+7. 后端 262 passed/3 skipped，总覆盖率 90.07%，k6 编译器和进程边界均为 100%；Ruff、mypy strict、
+   依赖边界通过。前端 130 项全量测试通过，语句 85.78%、分支 80.15%，生产构建通过。
+8. 真实 PostgreSQL 完成 `0021 → 0022 → 0021 → 0022`，`alembic check` 无漂移；演练发现并修复
+   PostgreSQL 63 字节约束名截断问题。
+9. 真实 ARM64 Compose 两次 k6 验收均通过，第二次固定第一次基线，原始指标进入 MinIO；真实 Chromium
+   完成“创建 → 发布 → 独立队列运行 → 阈值与产物下钻”1/1。
+10. 本轮共修复五项门槛问题：前端分支覆盖率、PostgreSQL 约束名漂移、歧义 VU 选择器、内部主机 URL
+    误拒绝和中文展开按钮选择器；所有对应门槛已重跑通过。
+11. 待提交 Draft PR 并完成 Backend、Integration、Frontend、Security 和 Compose 五项远程 CI；
+    全绿并 squash 合并前不开始 S26。
+
+## 已完成：S24 Kafka、WebSocket 与 Exchange
 
 1. 新增不可变 `EventSource`、`20260812_0021` 增量迁移和 `EVENT_PROTOCOLS` Feature Flag，Kafka
    固定 Bootstrap/Registry，WebSocket 固定 URL，配置 SHA-256 随 Workflow Snapshot 保存。
@@ -34,8 +59,8 @@
    包含 gRPC Service、损坏 Avro 泄漏底层异常三项真实缺陷。
 10. 真实 PostgreSQL 已完成 `0020 → 0021 → 0020 → 0021` 和 `alembic check`；首次演练发现并修复
     Kafka Schema 阻断旧约束恢复的 downgrade 顺序缺陷。Python 与前端生产依赖审计无已知漏洞。
-11. 待完成固定 digest Apache Kafka `4.3.1` 兼容验证和 Draft PR 的 5 项远程 CI；本机 Docker Hub
-    TLS 当前中断，该项交由同一提交的 Compose CI 执行；全绿并 squash 合并前不开始 S25。
+11. 固定 digest Apache Kafka `4.3.1` 兼容验证、Draft PR #27 的 5 项远程 CI 均通过，随后 squash
+    合并至 `main@bad2b51`。
 
 ## 已完成：S23 GraphQL、gRPC 与多协议工作台
 
@@ -138,7 +163,7 @@
 
 ## 下一步
 
-1. 提交 S24 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并，再开始 S25。
+1. 提交 S25 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并，再开始 S26。
 2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-3. 未通过 S24 退出门槛不开始 S25；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
+3. 未通过 S25 退出门槛不开始 S26；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

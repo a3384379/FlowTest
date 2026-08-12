@@ -216,6 +216,21 @@ body {
   gap: 16px;
 }
 
+.performance-overview {
+  margin-bottom: 16px;
+}
+
+.performance-card {
+  margin-bottom: 16px;
+}
+
+.performance-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 16px;
+}
+
 .quality-runs-card {
   margin-top: 16px;
 }

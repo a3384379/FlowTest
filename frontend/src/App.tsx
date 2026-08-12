@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
+  ExperimentOutlined,
   LogoutOutlined,
   ScheduleOutlined,
   SafetyCertificateOutlined,
@@ -42,6 +43,7 @@ const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const TestAssetsPage = lazy(() => import('./pages/TestAssetsPage'))
 const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
+const PerformanceLabPage = lazy(() => import('./pages/PerformanceLabPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
@@ -61,6 +63,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   workflows: '流程编排',
   data: '数据与 Mock',
   tasks: '任务执行',
+  performance: '性能实验室',
   quality: '质量中心',
   ai: 'AI 助手',
   reports: '测试报告',
@@ -112,6 +115,7 @@ function AuthenticatedShell() {
             navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
             navigationItem('data', <DatabaseOutlined />, pathFor('data')),
             navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
+            navigationItem('performance', <ExperimentOutlined />, pathFor('performance')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
@@ -175,6 +179,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/workflows" element={<WorkflowsPage />} />
       <Route path="/projects/:projectId/data" element={<DataMockPage />} />
       <Route path="/projects/:projectId/tasks" element={<TestPlansPage />} />
+      <Route path="/projects/:projectId/performance" element={<PerformanceLabPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
@@ -189,6 +194,7 @@ function ApplicationRoutes() {
           'workflows',
           'data',
           'tasks',
+          'performance',
           'quality',
           'ai',
           'reports',

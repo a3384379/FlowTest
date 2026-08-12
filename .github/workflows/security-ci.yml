@@ -43,6 +43,7 @@ jobs:
       - name: Build release images
         run: |
           docker build -t flowtest-backend:ci backend
+          docker build --target performance-runtime -t flowtest-performance:ci backend
           docker build -t flowtest-frontend:ci frontend
           docker build -t flowtest-mock-target:ci mock-target
       - name: Scan backend image
@@ -58,6 +59,15 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           image: flowtest-frontend:ci
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
+      - name: Scan performance runner image
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: flowtest-performance:ci
           severity-cutoff: high
           only-fixed: true
           output-format: table

@@ -378,6 +378,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         "runner_fabric": False,
         "multi_protocol": False,
         "event_protocols": False,
+        "performance_lab": False,
     }
 
     capabilities = await capability_client.get(

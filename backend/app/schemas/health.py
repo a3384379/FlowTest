@@ -25,3 +25,4 @@ class FeatureFlagsResponse(BaseModel):
     ai: bool
     multi_protocol: bool
     event_protocols: bool
+    performance_lab: bool

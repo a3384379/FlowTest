@@ -9,11 +9,13 @@ from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.database import close_database, session_factory
-from app.core.storage import ensure_storage_bucket
+from app.core.storage import ensure_storage_bucket, object_storage
 from app.http.ai import OpenAICompatibleConfiguration, OpenAICompatibleProvider
+from app.runner.k6 import K6ProcessRunner
 from app.services.ai import AIJobRunner
 from app.services.execution_events import RedisExecutionEventBus
 from app.services.notifications import NotificationDeliveryService
+from app.services.performance import PerformanceRunCoordinator
 from app.services.retention import RetentionCleanupService
 from app.services.tasking import TestPlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator
@@ -106,6 +108,20 @@ async def _run_ai_job(job_id: UUID) -> None:
     )
     async with session_factory() as session:
         await AIJobRunner(session, provider).run(job_id)
+
+
+@celery_app.task(name="flowtest.run_performance")  # type: ignore[untyped-decorator]
+def run_performance(run_id: str) -> None:
+    _run_async(lambda: _run_performance(UUID(run_id)))
+
+
+async def _run_performance(run_id: UUID) -> None:
+    await ensure_storage_bucket()
+    await PerformanceRunCoordinator(
+        session_factory,
+        K6ProcessRunner(raw_metrics_limit_bytes=settings.artifact_limit_bytes),
+        object_storage,
+    ).run(run_id)
 
 
 def _run_async(operation: Callable[[], Coroutine[Any, Any, None]]) -> None:

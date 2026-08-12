@@ -42,6 +42,7 @@ celery_app.conf.update(
         "flowtest.run_test_plan": {"queue": "general"},
         "flowtest.*data*": {"queue": "data"},
         "flowtest.*ai*": {"queue": "ai"},
+        "flowtest.run_performance": {"queue": "performance"},
     },
     beat_schedule={
         "enqueue-due-test-plans": {

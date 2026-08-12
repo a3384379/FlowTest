@@ -13,7 +13,12 @@ from app.http.oidc import HttpOIDCProvider
 from app.models.access import User
 from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
-from app.tasking.dispatch import AIJobDispatcher, TestPlanDispatcher, WorkflowDispatcher
+from app.tasking.dispatch import (
+    AIJobDispatcher,
+    PerformanceRunDispatcher,
+    TestPlanDispatcher,
+    WorkflowDispatcher,
+)
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -109,3 +114,17 @@ def get_ai_job_dispatcher(request: Request) -> AIJobDispatcher:
 
 
 AIJobQueue = Annotated[AIJobDispatcher, Depends(get_ai_job_dispatcher)]
+
+
+def get_performance_dispatcher(request: Request) -> PerformanceRunDispatcher:
+    dispatcher = getattr(request.app.state, "performance_dispatcher", None)
+    if dispatcher is None or not callable(getattr(dispatcher, "start_performance_run", None)):
+        raise AppError(
+            code="PERFORMANCE_QUEUE_UNAVAILABLE",
+            message="性能任务队列尚未就绪",
+            status_code=503,
+        )
+    return cast(PerformanceRunDispatcher, dispatcher)
+
+
+PerformanceQueue = Annotated[PerformanceRunDispatcher, Depends(get_performance_dispatcher)]
