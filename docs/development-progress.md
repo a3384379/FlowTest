@@ -1,12 +1,12 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S25 PR #28 的五项 CI 全绿并 squash 合并；S26 签名环境实验室已完成实现和本地全部退出门槛，Draft PR 尚未创建。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S25 PR #28 的五项 CI 全绿并 squash 合并；S26 签名环境实验室已完成实现和本地全部退出门槛，Draft PR #29 的远端 CI 正在执行。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@eb2f0c8`，S25 PR #28 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s26-environment-lab`；S26 Draft PR 尚未创建。
+- 当前分支：`agent/s26-environment-lab`，实现提交 `5c68bdf`，Draft PR #29。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
@@ -37,8 +37,9 @@
    最终复跑完成“注册 → 新版本 → Provision → Ready/证据 → Cleanup”1/1，耗时 27.5 秒。
 10. Python 与前端依赖审计通过。Environment Runner、定制 Docker 29.7.2/containerd v2.3.3 daemon
     和固定 nginx fixture 均通过既有 Grype `only-fixed` High/Critical 门槛；没有新增漏洞豁免。
-11. Draft PR、远端五项 CI 和 squash 合并尚未执行；`v3.0.0-beta.1` 只有在这些退出门槛全部真实通过后
-    才可创建。
+11. 实现提交 `5c68bdf` 已推送，Draft PR #29 已创建；远端 Backend Test、Backend Integration、
+    Frontend Build、Security Source/Images 和 Compose Smoke 正在执行。五项全绿并 squash 合并前保持
+    Draft，`v3.0.0-beta.1` 只有在这些退出门槛全部真实通过后才可创建。
 
 ## 本地验收完成：S25 声明式性能实验室
 
@@ -211,9 +212,8 @@
 
 ## 下一步
 
-1. 提交并推送 `agent/s26-environment-lab`，创建 S26 Draft PR，等待 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images
-   和 Compose Smoke 全部通过；真实失败只做最小修复并重新执行完整 CI。五项全绿后标记 Ready、squash
+1. 观察 S26 Draft PR #29 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
+   和 Compose Smoke；真实失败只做最小修复并重新执行完整 CI。五项全绿后标记 Ready、squash
    合并并删除远端迭代分支。
 2. 仅在 S26 退出门槛全部满足后创建 `v3.0.0-beta.1`，然后从同步后的 `main` 创建独立 S27 分支；
    S27–S31 继续遵循每迭代 Draft PR、完整 CI、squash 合并的顺序。

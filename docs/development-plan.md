@@ -125,7 +125,7 @@ V3 各自的真实验收门槛。
 | S23 | GraphQL、gRPC 与多协议工作台 | 已完成；PR #26 全绿并 squash 合并，发布 `v3.0.0-alpha.1` |
 | S24 | Kafka、WebSocket 与 Exchange | 已完成；PR #27 的 5 项 CI 全绿并 squash 合并 |
 | S25 | 声明式 k6 性能实验室 | 已完成；PR #28 的 5 项 CI 全绿并 squash 合并 |
-| S26 | 签名环境模板、Provision/Cleanup/TTL | 实现与本地全部退出门槛完成；Draft PR 和远端 CI 待完成 |
+| S26 | 签名环境模板、Provision/Cleanup/TTL | 实现与本地全部退出门槛完成；Draft PR #29 远端 CI 执行中 |
 | S27 | Pact、契约矩阵、Service Graph、Deployment Check | 未开始 |
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
 | S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
