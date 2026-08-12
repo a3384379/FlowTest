@@ -1,7 +1,7 @@
 import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
 import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
-import type { SchemaArtifact } from '../features/protocols/protocol-service'
+import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 
 export type PaletteNodeType = Exclude<WorkflowNode['type'], 'start' | 'api' | 'capability'>
 
@@ -67,6 +67,71 @@ export function addProtocolNode(
         bindings: [],
       },
     ],
+  }
+}
+
+export function addEventProtocolNode(
+  definition: WorkflowDefinition,
+  capabilityId: 'kafka.produce' | 'kafka.consume' | 'websocket.exchange',
+  source: EventSource,
+): WorkflowDefinition {
+  const id = uniqueNodeId(definition, capabilityId.replace('.', '-'))
+  return {
+    ...definition,
+    nodes: [
+      ...definition.nodes,
+      {
+        id,
+        type: 'capability',
+        name: eventCapabilityName(capabilityId),
+        position: nextPosition(definition),
+        config: {},
+        capability_id: capabilityId,
+        capability_version: '3.0.0',
+        configuration: eventCapabilityConfiguration(capabilityId, source.id),
+        bindings: [],
+      },
+    ],
+  }
+}
+
+function eventCapabilityName(
+  capabilityId: 'kafka.produce' | 'kafka.consume' | 'websocket.exchange',
+): string {
+  return {
+    'kafka.produce': 'Kafka Produce',
+    'kafka.consume': 'Kafka Consume',
+    'websocket.exchange': 'WebSocket Exchange',
+  }[capabilityId]
+}
+
+function eventCapabilityConfiguration(
+  capabilityId: 'kafka.produce' | 'kafka.consume' | 'websocket.exchange',
+  sourceId: string,
+): Record<string, unknown> {
+  if (capabilityId === 'kafka.produce') {
+    return {
+      source_id: sourceId,
+      topic: 'flowtest.orders',
+      value: { id: 'order-42' },
+      timeout_seconds: 30,
+    }
+  }
+  if (capabilityId === 'kafka.consume') {
+    return {
+      source_id: sourceId,
+      topic: 'flowtest.orders',
+      offset: 'latest',
+      maximum_messages: 10,
+      timeout_seconds: 30,
+    }
+  }
+  return {
+    source_id: sourceId,
+    payload_kind: 'json',
+    message: { id: 'order-42' },
+    maximum_messages: 10,
+    timeout_seconds: 30,
   }
 }
 

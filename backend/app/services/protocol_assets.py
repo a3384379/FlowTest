@@ -86,7 +86,7 @@ class ProtocolAssetService:
         page_size: int,
     ) -> tuple[list[SchemaArtifact], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
-        return await self._repository.list(
+        return await self._repository.list_artifacts(
             project_id=project_id,
             protocol=protocol.value,
             offset=(page - 1) * page_size,

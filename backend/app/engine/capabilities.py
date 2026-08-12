@@ -28,6 +28,15 @@ from app.engine.contracts import (
     SubFlowNodeConfig,
     WorkflowNode,
 )
+from app.engine.event_nodes import (
+    KafkaConsumeCapabilityConfig,
+    KafkaProduceCapabilityConfig,
+    WebSocketAwaitCapabilityConfig,
+    WebSocketCloseCapabilityConfig,
+    WebSocketConnectCapabilityConfig,
+    WebSocketExchangeCapabilityConfig,
+    WebSocketSendCapabilityConfig,
+)
 from app.engine.protocol_nodes import GraphQLCapabilityConfig, GrpcCapabilityConfig
 
 _LEGACY_CAPABILITIES: dict[NodeType, tuple[str, str]] = {
@@ -234,6 +243,42 @@ def _v3_protocol_manifest(
     )
 
 
+def _v3_event_manifest(
+    capability_id: str,
+    display_name: str,
+    config_model: type[object],
+    *,
+    protocols: tuple[str, ...],
+    sensitive_paths: tuple[str, ...] = (),
+) -> CapabilityManifest:
+    return CapabilityManifest(
+        id=capability_id,
+        version="3.0.0",
+        category=CapabilityCategory.PROTOCOL,
+        display_name=display_name,
+        description="FlowTest V3 有界事件协议内置能力",
+        input_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": True,
+        },
+        output_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "required": ["protocol", "operation"],
+        },
+        configuration_schema=_schema(config_model),
+        network_policy=NetworkPolicy(
+            access=NetworkAccess.PROJECT_ALLOWLIST,
+            protocols=protocols,
+        ),
+        runner_type=RunnerType.PROTOCOL,
+        timeout_policy=TimeoutPolicy(),
+        snapshot_policy=SnapshotPolicy(),
+        redaction_policy=RedactionPolicy(sensitive_paths=sensitive_paths),
+    )
+
+
 BUILTIN_CAPABILITY_MANIFESTS = (
     _manifest("flow.start", "开始", CapabilityCategory.CONTROL, None),
     _manifest(
@@ -300,6 +345,51 @@ BUILTIN_CAPABILITY_MANIFESTS = (
         protocols=("grpc", "grpcs"),
         credential_types=("grpc_mtls",),
         sensitive_paths=("metadata.authorization", "credential"),
+    ),
+    _v3_event_manifest(
+        "kafka.produce",
+        "Kafka Produce",
+        KafkaProduceCapabilityConfig,
+        protocols=("kafka",),
+        sensitive_paths=("headers.authorization", "headers.token"),
+    ),
+    _v3_event_manifest(
+        "kafka.consume",
+        "Kafka Consume",
+        KafkaConsumeCapabilityConfig,
+        protocols=("kafka",),
+    ),
+    _v3_event_manifest(
+        "websocket.connect",
+        "WebSocket Connect",
+        WebSocketConnectCapabilityConfig,
+        protocols=("ws", "wss"),
+        sensitive_paths=("headers.authorization", "headers.cookie"),
+    ),
+    _v3_event_manifest(
+        "websocket.send",
+        "WebSocket Send",
+        WebSocketSendCapabilityConfig,
+        protocols=("ws", "wss"),
+    ),
+    _v3_event_manifest(
+        "websocket.await",
+        "WebSocket Await",
+        WebSocketAwaitCapabilityConfig,
+        protocols=("ws", "wss"),
+    ),
+    _v3_event_manifest(
+        "websocket.close",
+        "WebSocket Close",
+        WebSocketCloseCapabilityConfig,
+        protocols=("ws", "wss"),
+    ),
+    _v3_event_manifest(
+        "websocket.exchange",
+        "WebSocket Exchange",
+        WebSocketExchangeCapabilityConfig,
+        protocols=("ws", "wss"),
+        sensitive_paths=("headers.authorization", "headers.cookie"),
     ),
 )
 

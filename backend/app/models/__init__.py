@@ -22,7 +22,7 @@ from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockS
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
-from app.models.protocols import SchemaArtifact
+from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
 from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
@@ -49,6 +49,7 @@ __all__ = [
     "ContractRun",
     "Credential",
     "Environment",
+    "EventSource",
     "FlakyRecord",
     "Folder",
     "GeneratedContractCase",

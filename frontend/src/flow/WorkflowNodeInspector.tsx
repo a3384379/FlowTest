@@ -12,7 +12,7 @@ import type {
   WorkflowFieldMapping,
   WorkflowNode,
 } from '../lib/api'
-import type { SchemaArtifact } from '../features/protocols/protocol-service'
+import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 
 type InspectorProps = {
   node: WorkflowNode | null
@@ -23,6 +23,7 @@ type InspectorProps = {
   credentials: Credential[]
   graphqlSchemas?: SchemaArtifact[]
   grpcDescriptors?: SchemaArtifact[]
+  eventSources?: EventSource[]
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
   onDelete: () => void
@@ -37,6 +38,7 @@ export default function WorkflowNodeInspector({
   credentials,
   graphqlSchemas = [],
   grpcDescriptors = [],
+  eventSources = [],
   editable,
   onChange,
   onDelete,
@@ -53,34 +55,19 @@ export default function WorkflowNodeInspector({
           onChange={(event) => updateNode({ ...node, name: event.target.value })}
         />
       </Field>
-      {isProtocolCapability(node) ? (
-        <ProtocolCapabilityFields
-          node={node}
-          definition={definition}
-          graphqlSchemas={graphqlSchemas}
-          grpcDescriptors={grpcDescriptors}
-          credentials={credentials}
-          editable={editable}
-          onUpdate={updateNode}
-        />
-      ) : node.type === 'sql' || node.type === 'redis' ? (
-        <DataNodeFields
-          node={node}
-          credentials={credentials}
-          editable={editable}
-          onUpdate={updateNode}
-        />
-      ) : (
-        <NodeTypeFields
-          node={node}
-          definition={definition}
-          apis={apis}
-          artifacts={artifacts}
-          workflows={workflows}
-          editable={editable}
-          onUpdate={updateNode}
-        />
-      )}
+      <InspectorNodeFields
+        node={node}
+        definition={definition}
+        apis={apis}
+        artifacts={artifacts}
+        workflows={workflows}
+        credentials={credentials}
+        graphqlSchemas={graphqlSchemas}
+        grpcDescriptors={grpcDescriptors}
+        eventSources={eventSources}
+        editable={editable}
+        onUpdate={updateNode}
+      />
       {node.type === 'api' && (
         <MappingFields
           node={node}
@@ -98,6 +85,73 @@ export default function WorkflowNodeInspector({
         删除节点
       </Button>
     </aside>
+  )
+}
+
+function InspectorNodeFields({
+  node,
+  definition,
+  apis,
+  artifacts,
+  workflows,
+  credentials,
+  graphqlSchemas,
+  grpcDescriptors,
+  eventSources,
+  editable,
+  onUpdate,
+}: Omit<InspectorProps, 'node' | 'onChange' | 'onDelete'> & {
+  node: WorkflowNode
+  workflows: Workflow[]
+  graphqlSchemas: SchemaArtifact[]
+  grpcDescriptors: SchemaArtifact[]
+  eventSources: EventSource[]
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  if (isEventCapability(node)) {
+    return (
+      <EventCapabilityFields
+        node={node}
+        definition={definition}
+        eventSources={eventSources}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    )
+  }
+  if (isProtocolCapability(node)) {
+    return (
+      <ProtocolCapabilityFields
+        node={node}
+        definition={definition}
+        graphqlSchemas={graphqlSchemas}
+        grpcDescriptors={grpcDescriptors}
+        credentials={credentials}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    )
+  }
+  if (node.type === 'sql' || node.type === 'redis') {
+    return (
+      <DataNodeFields
+        node={node}
+        credentials={credentials}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    )
+  }
+  return (
+    <NodeTypeFields
+      node={node}
+      definition={definition}
+      apis={apis}
+      artifacts={artifacts}
+      workflows={workflows}
+      editable={editable}
+      onUpdate={onUpdate}
+    />
   )
 }
 
@@ -444,6 +498,129 @@ function ProtocolCapabilityFields({
   )
 }
 
+function EventCapabilityFields({
+  node,
+  definition,
+  eventSources,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+  eventSources: EventSource[]
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const kafka = node.capability_id?.startsWith('kafka.') === true
+  const compatibleSources = eventSources.filter((source) =>
+    kafka ? source.kind === 'kafka' : source.kind === 'websocket',
+  )
+  return (
+    <>
+      <Field label="固定事件源版本">
+        <Select
+          disabled={!editable}
+          value={capabilityString(node, 'source_id') || undefined}
+          options={compatibleSources.map((source) => ({
+            value: source.id,
+            label: `${source.name} · v${source.version}`,
+          }))}
+          onChange={(value) => onUpdate(updateCapabilityConfig(node, 'source_id', value))}
+        />
+      </Field>
+      {kafka ? (
+        <>
+          <CapabilityText
+            label="Topic"
+            configKey="topic"
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+          {node.capability_id === 'kafka.produce' ? (
+            <CapabilityJson
+              label="Message（JSON）"
+              configKey="value"
+              fallback={{}}
+              node={node}
+              editable={editable}
+              onUpdate={onUpdate}
+            />
+          ) : (
+            <>
+              <Field label="起始 Offset">
+                <Select
+                  disabled={!editable}
+                  value={capabilityString(node, 'offset', 'latest')}
+                  options={[
+                    { value: 'latest', label: 'Latest' },
+                    { value: 'earliest', label: 'Earliest' },
+                  ]}
+                  onChange={(value) => onUpdate(updateCapabilityConfig(node, 'offset', value))}
+                />
+              </Field>
+              <Field label="最多消费消息">
+                <InputNumber
+                  disabled={!editable}
+                  min={1}
+                  max={1000}
+                  value={capabilityNumber(node, 'maximum_messages', 10)}
+                  onChange={(value) =>
+                    onUpdate(updateCapabilityConfig(node, 'maximum_messages', value ?? 1))
+                  }
+                />
+              </Field>
+            </>
+          )}
+          <CapabilityText
+            label="固定 Schema ID（可选）"
+            configKey="schema_id"
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+        </>
+      ) : (
+        <>
+          <Field label="Payload 类型">
+            <Select
+              disabled={!editable}
+              value={capabilityString(node, 'payload_kind', 'json')}
+              options={[
+                { value: 'json', label: 'JSON' },
+                { value: 'text', label: 'Text' },
+              ]}
+              onChange={(value) => onUpdate(updateCapabilityConfig(node, 'payload_kind', value))}
+            />
+          </Field>
+          <CapabilityJson
+            label="Message（JSON）"
+            configKey="message"
+            fallback={{}}
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+          <CapabilityText
+            label="Correlation JMESPath（可选）"
+            configKey="correlation_expression"
+            node={node}
+            editable={editable}
+            onUpdate={onUpdate}
+          />
+        </>
+      )}
+      <CapabilityTimeout node={node} editable={editable} onUpdate={onUpdate} />
+      <CapabilityBindingFields
+        node={node}
+        definition={definition}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    </>
+  )
+}
+
 function GraphQLCapabilityFields({
   node,
   schemas,
@@ -611,8 +788,7 @@ function CapabilityBindingFields({
 }) {
   const bindings = node.bindings ?? []
   const sources = upstreamNodes(definition, node.id)
-  const defaultTarget =
-    node.capability_id === 'graphql.request' ? 'variables.value' : 'request.value'
+  const defaultTarget = capabilityBindingTarget(node.capability_id)
   return (
     <section className="mapping-section">
       <Space className="mapping-heading">
@@ -678,6 +854,14 @@ function CapabilityBindingFields({
       )}
     </section>
   )
+}
+
+function capabilityBindingTarget(capabilityId: string | null | undefined): string {
+  if (capabilityId === 'graphql.request') return 'variables.value'
+  if (capabilityId === 'kafka.produce') return 'value.id'
+  if (capabilityId === 'kafka.consume') return 'correlation_id'
+  if (capabilityId?.startsWith('websocket.')) return 'message.id'
+  return 'request.value'
 }
 
 function CapabilityText({
@@ -870,6 +1054,21 @@ function isProtocolCapability(node: WorkflowNode): boolean {
   return (
     node.type === 'capability' &&
     (node.capability_id === 'graphql.request' || node.capability_id === 'grpc.call')
+  )
+}
+
+function isEventCapability(node: WorkflowNode): boolean {
+  return (
+    node.type === 'capability' &&
+    [
+      'kafka.produce',
+      'kafka.consume',
+      'websocket.connect',
+      'websocket.send',
+      'websocket.await',
+      'websocket.close',
+      'websocket.exchange',
+    ].includes(node.capability_id ?? '')
   )
 }
 

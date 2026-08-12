@@ -3,7 +3,17 @@ import json
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import (
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -84,6 +94,25 @@ async def failure() -> None:
 @app.post("/echo")
 async def echo(payload: dict[str, object]) -> dict[str, object]:
     return payload
+
+
+@app.websocket("/ws/echo")
+async def websocket_echo(websocket: WebSocket) -> None:
+    requested_protocols = websocket.headers.get("sec-websocket-protocol", "")
+    selected_protocol = next(
+        (item.strip() for item in requested_protocols.split(",") if item.strip()),
+        None,
+    )
+    await websocket.accept(subprotocol=selected_protocol)
+    try:
+        while True:
+            message = await websocket.receive()
+            if text_payload := message.get("text"):
+                await websocket.send_text(text_payload)
+            elif binary_payload := message.get("bytes"):
+                await websocket.send_bytes(binary_payload)
+    except WebSocketDisconnect:
+        return
 
 
 @app.post("/graphql")

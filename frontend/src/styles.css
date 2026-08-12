@@ -592,6 +592,20 @@ body {
   min-height: 620px;
 }
 
+.event-protocol-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color, #dce2ec);
+}
+
+.event-protocol-grid {
+  margin-top: 12px;
+}
+
 .protocol-inventory,
 .protocol-editor,
 .protocol-inspector {

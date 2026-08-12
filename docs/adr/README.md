@@ -19,3 +19,6 @@
 15. Cron 调度、质量门禁与持久队列容量
 16. 企业身份、外部密钥、分布式追踪与时间点恢复
 17. AI 建议、人工审核与数据边界
+18. Capability SDK、Legacy Adapter 与 Runner 安全边界
+19. 多协议 Schema、执行边界与 Snapshot
+20. 事件协议、消息 Schema 与 WebSocket 会话边界

@@ -81,7 +81,7 @@ class SchemaArtifactResponse(BaseModel):
 
     id: UUID
     project_id: UUID
-    protocol: Literal["graphql", "grpc"]
+    protocol: Literal["graphql", "grpc", "kafka"]
     name: str
     description: str
     version: int

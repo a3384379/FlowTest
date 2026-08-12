@@ -1,17 +1,43 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V3 S22 已合并，S23 多协议能力已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V3 S23 已合并并发布 `v3.0.0-alpha.1`，S24 事件协议能力已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@3eac7ec`，S22 Draft PR #25 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s23-multi-protocol`，开发版本 `3.0.0-alpha.1-dev.23`。
-- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`；不得提前创建 `v2.0.0`。
+- 当前基线：`main@ff3931b`，S23 Draft PR #26 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s24-kafka-websocket`，开发版本 `3.0.0-alpha.1-dev.24`。
+- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 本地验收完成：S23 GraphQL、gRPC 与多协议工作台
+## 本地验收完成：S24 Kafka、WebSocket 与 Exchange
+
+1. 新增不可变 `EventSource`、`20260812_0021` 增量迁移和 `EVENT_PROTOCOLS` Feature Flag，Kafka
+   固定 Bootstrap/Registry，WebSocket 固定 URL，配置 SHA-256 随 Workflow Snapshot 保存。
+2. 新增 Avro、JSON Schema 2020-12、Protobuf 消息 Schema 与兼容 Registry 导入；编码/解码支持
+   Confluent Wire Format，并拒绝 Schema ID 不匹配、损坏消息和超过 4 MB 的负载。
+3. 新增 `kafka.produce/consume` 与 `websocket.connect/send/await/close/exchange` 七个 Capability；
+   REST 输出可结构化绑定到 Kafka 消息/Correlation 和 WebSocket 消息，Endpoint/Topic/Schema 不可动态改变。
+4. Kafka 使用 `confluent-kafka`，禁用 Admin、Topic 自动创建、自动提交和 Offset Store；Consume 最多
+   1000 条/300 秒，Correlation 命中立即返回。WebSocket Session 固定在单次 Runner，结束无条件清理，
+   连接丢失统一返回 `SESSION_LOST`。
+5. 中文多协议工作台新增 Kafka Registry、Produce/Consume、WebSocket Exchange、事件源版本和 Context
+   Inspector；React Flow 支持创建和配置三个常用事件节点。
+6. Compose 新增固定 digest 的 Redpanda `v26.2.1`、Schema Registry 与 WebSocket Echo Mock；CI 另用
+   固定 digest 的 Apache Kafka `4.3.1` 验证稳定客户端兼容性。
+7. `smoke_s24.py` 已在真实 Compose 完成 Registry 导入、调试、REST→Kafka/WebSocket 混合 Workflow、
+   结构化绑定及事件源/Schema Snapshot 校验；真实 Chromium 主路径 2/2 通过。
+8. 后端 236 passed/3 skipped，总覆盖率 90.11%，事件运行时 95%；Ruff、mypy strict 和依赖边界通过。
+   前端全量覆盖率 Statements 85.58%、Branches 80.35%、Functions 83.27%、Lines 87.75%，生产构建通过。
+9. 冒烟过程中发现并修复 Kafka 命中 Correlation 后仍等待完整超时，以及纯消息 Protobuf 被错误要求
+   包含 gRPC Service、损坏 Avro 泄漏底层异常三项真实缺陷。
+10. 真实 PostgreSQL 已完成 `0020 → 0021 → 0020 → 0021` 和 `alembic check`；首次演练发现并修复
+    Kafka Schema 阻断旧约束恢复的 downgrade 顺序缺陷。Python 与前端生产依赖审计无已知漏洞。
+11. 待完成固定 digest Apache Kafka `4.3.1` 兼容验证和 Draft PR 的 5 项远程 CI；本机 Docker Hub
+    TLS 当前中断，该项交由同一提交的 Compose CI 执行；全绿并 squash 合并前不开始 S25。
+
+## 已完成：S23 GraphQL、gRPC 与多协议工作台
 
 1. 新增不可变 `SchemaArtifact` 与 `20260812_0020` 增量迁移，支持 GraphQL SDL/Introspection、
    Proto/Protoset 和受 SSRF 策略约束的 gRPC Server Reflection；同内容按 SHA-256 去重。
@@ -33,8 +59,8 @@
    应用会持有 DDL 锁，因此回滚演练明确要求维护窗口内停止 API/Worker。
 10. Compose 全栈健康，S3–S11、S18、S19、S21–S23 共 14 个真实冒烟链路通过；
     Playwright 在重复数据卷上 10/10 通过，并修复 S14 异步保存、S15 资产前置与 S21 名称冲突的测试隔离问题。
-11. 待完成 Draft PR 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
-    和 Compose Smoke 远程验证后，才可 squash 合并并创建 `v3.0.0-alpha.1`。
+11. Draft PR #26 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
+    和 Compose Smoke 全绿后已 squash 合并，并创建 `v3.0.0-alpha.1`。
 
 ## 已完成：S22 Capability SDK V3
 
@@ -112,7 +138,7 @@
 
 ## 下一步
 
-1. 提交 S23 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并并创建 `v3.0.0-alpha.1`。
+1. 提交 S24 Draft PR 并完成远程 5 项 CI；全绿后 squash 合并，再开始 S25。
 2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-3. 未通过 S23 退出门槛不开始 S24；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
+3. 未通过 S24 退出门槛不开始 S25；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

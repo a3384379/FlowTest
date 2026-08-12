@@ -25,6 +25,7 @@ async def get_v3_feature_flags(current_user: CurrentUser) -> V3FeatureFlagsRespo
         plugin_registry=settings.feature_plugin_registry_enabled,
         runner_fabric=settings.feature_runner_fabric_enabled,
         multi_protocol=settings.feature_multi_protocol_enabled,
+        event_protocols=settings.feature_event_protocols_enabled,
     )
 
 

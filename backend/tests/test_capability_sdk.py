@@ -128,7 +128,7 @@ def test_plugin_manifest_enforces_digest_ownership_and_sandbox() -> None:
 
 def test_registry_and_legacy_adapter_pin_every_v2_node() -> None:
     manifests = builtin_capability_registry.list()
-    assert len(manifests) == 14
+    assert len(manifests) == 21
     assert builtin_capability_registry.require("http.request", "2.0.0").runner_type == "general"
     with pytest.raises(ValueError, match="Unknown capability"):
         builtin_capability_registry.require("grpc.unary", "3.0.0")
@@ -377,6 +377,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         "plugin_registry": False,
         "runner_fabric": False,
         "multi_protocol": False,
+        "event_protocols": False,
     }
 
     capabilities = await capability_client.get(
@@ -384,7 +385,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         headers=user_headers,
     )
     assert capabilities.status_code == 200
-    assert capabilities.json()["total"] == 14
+    assert capabilities.json()["total"] == 21
     assert len(capabilities.json()["items"]) == 5
     first = capabilities.json()["items"][0]
     detail = await capability_client.get(

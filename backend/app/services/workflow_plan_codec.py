@@ -6,9 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.data_nodes import CredentialKind
+from app.domain.event_protocols import EventSourceKind
 from app.domain.protocols import ProtocolKind
 from app.domain.scopes import HeaderScope, VariableScope
 from app.engine.contracts import WorkflowDefinition
+from app.engine.event_nodes import PreparedEventNode
 from app.engine.protocol_nodes import PreparedProtocolNode, ProtocolCredentialMaterial
 from app.services.api_assets import PreparedHeader, PreparedRequest, PreparedVariable
 from app.services.credentials import CredentialMaterial
@@ -94,6 +96,21 @@ class StoredProtocolNode(BaseModel):
     credential: StoredProtocolCredential | None = None
 
 
+class StoredEventNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_id: UUID
+    source_kind: EventSourceKind
+    endpoints: list[str]
+    schema_registry_url: str | None
+    source_version: int
+    source_hash: str
+    schema_id: UUID | None = None
+    schema_version: int | None = None
+    schema_hash: str | None = None
+    schema_content_base64: str | None = None
+    schema_summary: dict[str, JsonValue] | None = None
+
+
 class StoredPreparedExecution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     snapshot: dict[str, JsonValue]
@@ -102,6 +119,7 @@ class StoredPreparedExecution(BaseModel):
     subflows: dict[str, "StoredPreparedSubflow"] = Field(default_factory=dict)
     data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
     protocol_nodes: dict[str, StoredProtocolNode] = Field(default_factory=dict)
+    event_nodes: dict[str, StoredEventNode] = Field(default_factory=dict)
 
 
 class StoredPreparedSubflow(BaseModel):
@@ -115,6 +133,7 @@ class StoredPreparedSubflow(BaseModel):
     snapshot: dict[str, JsonValue]
     data_nodes: dict[str, StoredCredentialMaterial] = Field(default_factory=dict)
     protocol_nodes: dict[str, StoredProtocolNode] = Field(default_factory=dict)
+    event_nodes: dict[str, StoredEventNode] = Field(default_factory=dict)
 
 
 class StoredRunPlan(BaseModel):
@@ -197,6 +216,10 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
                 node_id: _store_protocol_node(value)
                 for node_id, value in plan.prepared.protocol_nodes.items()
             },
+            event_nodes={
+                node_id: _store_event_node(value)
+                for node_id, value in plan.prepared.event_nodes.items()
+            },
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
@@ -238,6 +261,9 @@ def _store_subflow(prepared: PreparedSubflow) -> StoredPreparedSubflow:
         protocol_nodes={
             node_id: _store_protocol_node(value)
             for node_id, value in prepared.protocol_nodes.items()
+        },
+        event_nodes={
+            node_id: _store_event_node(value) for node_id, value in prepared.event_nodes.items()
         },
     )
 
@@ -287,6 +313,10 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
                 node_id: _load_protocol_node(value)
                 for node_id, value in stored.prepared.protocol_nodes.items()
             },
+            event_nodes={
+                node_id: _load_event_node(value)
+                for node_id, value in stored.prepared.event_nodes.items()
+            },
         ),
         runtime_variables=stored.runtime_variables,
     )
@@ -333,6 +363,9 @@ def _load_subflow(stored: StoredPreparedSubflow) -> PreparedSubflow:
         protocol_nodes={
             node_id: _load_protocol_node(value) for node_id, value in stored.protocol_nodes.items()
         },
+        event_nodes={
+            node_id: _load_event_node(value) for node_id, value in stored.event_nodes.items()
+        },
     )
 
 
@@ -369,6 +402,46 @@ def _load_protocol_node(value: StoredProtocolNode) -> PreparedProtocolNode:
         schema_hash=value.schema_hash,
         canonical_content=base64.b64decode(value.canonical_content_base64, validate=True),
         credential=credential,
+    )
+
+
+def _store_event_node(value: PreparedEventNode) -> StoredEventNode:
+    return StoredEventNode(
+        source_id=value.source_id,
+        source_kind=value.source_kind,
+        endpoints=list(value.endpoints),
+        schema_registry_url=value.schema_registry_url,
+        source_version=value.source_version,
+        source_hash=value.source_hash,
+        schema_id=value.schema_id,
+        schema_version=value.schema_version,
+        schema_hash=value.schema_hash,
+        schema_content_base64=(
+            base64.b64encode(value.schema_content).decode()
+            if value.schema_content is not None
+            else None
+        ),
+        schema_summary=value.schema_summary,
+    )
+
+
+def _load_event_node(value: StoredEventNode) -> PreparedEventNode:
+    return PreparedEventNode(
+        source_id=value.source_id,
+        source_kind=value.source_kind,
+        endpoints=tuple(value.endpoints),
+        schema_registry_url=value.schema_registry_url,
+        source_version=value.source_version,
+        source_hash=value.source_hash,
+        schema_id=value.schema_id,
+        schema_version=value.schema_version,
+        schema_hash=value.schema_hash,
+        schema_content=(
+            base64.b64decode(value.schema_content_base64, validate=True)
+            if value.schema_content_base64 is not None
+            else None
+        ),
+        schema_summary=value.schema_summary,
     )
 
 

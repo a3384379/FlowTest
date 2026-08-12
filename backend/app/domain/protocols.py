@@ -41,6 +41,7 @@ _PROTO_PACKAGE_ROOT = Path(protoc.__file__).resolve().parent / "_proto"
 class ProtocolKind(StrEnum):
     GRAPHQL = "graphql"
     GRPC = "grpc"
+    KAFKA = "kafka"
 
 
 class SchemaSourceFormat(StrEnum):
@@ -49,6 +50,9 @@ class SchemaSourceFormat(StrEnum):
     PROTO_SOURCE = "proto_source"
     PROTO_DESCRIPTOR_SET = "proto_descriptor_set"
     GRPC_REFLECTION = "grpc_reflection"
+    EVENT_AVRO = "event_avro"
+    EVENT_JSON_SCHEMA = "event_json_schema"
+    EVENT_PROTOBUF = "event_protobuf"
 
 
 class GrpcCallType(StrEnum):
@@ -159,6 +163,7 @@ def compile_proto_sources(
     files: Iterable[ProtoSourceFile],
     *,
     entrypoint: str,
+    require_service: bool = True,
 ) -> ValidatedSchema:
     source_files = tuple(files)
     if not 1 <= len(source_files) <= MAX_PROTO_FILES:
@@ -191,7 +196,7 @@ def compile_proto_sources(
         if protoc.main(arguments) != 0:
             raise ProtocolSchemaError("Proto 编译失败")
         descriptor = descriptor_path.read_bytes()
-    summary = describe_descriptor_set(descriptor)
+    summary = describe_descriptor_set(descriptor, require_service=require_service)
     source_bundle = json.dumps(
         {"entrypoint": entry, "files": normalized},
         ensure_ascii=False,
@@ -235,7 +240,11 @@ def validate_reflection_descriptor_set(content: bytes, source_content: bytes) ->
     )
 
 
-def describe_descriptor_set(content: bytes) -> dict[str, JsonValue]:
+def describe_descriptor_set(
+    content: bytes,
+    *,
+    require_service: bool = True,
+) -> dict[str, JsonValue]:
     descriptor_set = descriptor_pb2.FileDescriptorSet()
     try:
         descriptor_set.ParseFromString(content)
@@ -271,7 +280,7 @@ def describe_descriptor_set(content: bytes) -> dict[str, JsonValue]:
                     "methods": cast(JsonValue, methods),
                 }
             )
-    if not services:
+    if require_service and not services:
         raise ProtocolSchemaError("Descriptor Set 必须包含至少一个 gRPC Service")
     if len(services) > 1_000 or message_count > 10_000:
         raise ProtocolSchemaError("Descriptor Set 结构超过平台上限")

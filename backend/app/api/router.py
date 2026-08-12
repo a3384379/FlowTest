@@ -10,6 +10,7 @@ from app.api.v1.endpoints.contracts import router as contracts_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.data_sources import mock_dispatch_router
 from app.api.v1.endpoints.data_sources import router as data_sources_router
+from app.api.v1.endpoints.event_protocols import router as event_protocols_router
 from app.api.v1.endpoints.executions import router as executions_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.imports import router as imports_router
@@ -37,6 +38,7 @@ api_router.include_router(mock_dispatch_router, tags=["mock-dispatch"])
 api_router.include_router(workflows_router, tags=["workflows"])
 api_router.include_router(workflow_events_router, tags=["workflow-events"])
 api_router.include_router(executions_router, tags=["executions"])
+api_router.include_router(event_protocols_router, tags=["event-protocols"])
 api_router.include_router(imports_router, tags=["imports"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
 api_router.include_router(artifacts_router, tags=["files"])

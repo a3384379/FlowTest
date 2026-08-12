@@ -55,6 +55,7 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_FEATURE_AI_ENABLED: ${FLOWTEST_FEATURE_AI_ENABLED:-false}
   FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED: ${FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED:-false}
   FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: ${FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED:-false}
+  FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: ${FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED:-false}
   FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED: ${FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED:-false}
   FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: ${FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED:-false}
   FLOWTEST_AI_BASE_URL: ${FLOWTEST_AI_BASE_URL:-}
@@ -119,6 +120,79 @@ services:
         limits:
           cpus: "0.25"
           memory: 256M
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr
+      - 0.0.0.0:8081
+    ports:
+      - "19092:19092"
+      - "8081:8081"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "rpk cluster health --exit-when-healthy",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
+
+  kafka-compat:
+    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    profiles: ["kafka-compat"]
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-compat:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    ports:
+      - "29092:29092"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
 
   minio:
     image: minio/minio:RELEASE.2025-07-23T15-54-02Z
@@ -450,6 +524,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  redpanda_data:
   minio_data:
   tempo_data:
   prometheus_data:

@@ -5,7 +5,7 @@ import { App as AntdApp } from 'antd'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 
-import type { SchemaArtifact } from '../features/protocols/protocol-service'
+import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import type { Credential } from '../lib/api'
 import { project, user } from '../test/fixtures'
 import ProjectTestProvider from '../test/ProjectTestProvider'
@@ -49,6 +49,31 @@ const grpcDescriptor: SchemaArtifact = {
   },
 }
 
+const kafkaSource: EventSource = {
+  id: '00000000-0000-4000-8000-000000000805',
+  project_id: project.id,
+  kind: 'kafka',
+  name: '订单 Kafka',
+  description: '',
+  version: 1,
+  endpoints: ['redpanda:9092'],
+  schema_registry_url: 'http://redpanda:8081',
+  config_sha256: 'c'.repeat(64),
+  created_by_id: user.id,
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+}
+
+const websocketSource: EventSource = {
+  ...kafkaSource,
+  id: '00000000-0000-4000-8000-000000000806',
+  kind: 'websocket',
+  name: '订单 WebSocket',
+  endpoints: ['ws://mock-target:8080/ws/echo'],
+  schema_registry_url: null,
+  config_sha256: 'd'.repeat(64),
+}
+
 describe('ProtocolWorkbenchPage', () => {
   it('executes GraphQL and gRPC against pinned schema versions', async () => {
     installHandlers()
@@ -68,6 +93,174 @@ describe('ProtocolWorkbenchPage', () => {
     await browser.click(screen.getByRole('button', { name: /执行 gRPC/ }))
     await browser.click(screen.getByText('响应流'))
     expect(await screen.findByText(/grpc-user/)).toBeVisible()
+  })
+
+  it('produces and consumes Kafka messages and runs a bounded WebSocket exchange', async () => {
+    installHandlers()
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('Kafka', { exact: true }))
+    expect(await screen.findByText('订单 Kafka')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /Produce/ }))
+    await browser.click(screen.getByText('Exchange'))
+    expect(await screen.findByText(/partition/)).toBeVisible()
+
+    await browser.click(screen.getByText('消息'))
+    await browser.click(screen.getByRole('button', { name: /Consume/ }))
+    await browser.click(screen.getByText('Exchange'))
+    expect(await screen.findByText(/message_count/)).toBeVisible()
+
+    await browser.click(screen.getByText('WebSocket', { exact: true }))
+    expect(await screen.findByText('订单 WebSocket')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /Connect → Send/ }))
+    await browser.click(screen.getByText('Exchange'))
+    expect(await screen.findByText(/"operation": "exchange"/)).toBeVisible()
+  })
+
+  it('creates a versioned event source without embedding credentials', async () => {
+    let created: Record<string, unknown> | null = null
+    installHandlers()
+    server.use(
+      http.post('/api/v1/event-sources', async ({ request }) => {
+        created = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(kafkaSource, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('Kafka', { exact: true }))
+    await browser.click(screen.getByRole('button', { name: /新建事件源/ }))
+    await browser.type(screen.getByLabelText('名称'), '订单集群')
+    await browser.type(screen.getByLabelText('Bootstrap Servers'), 'redpanda:9092')
+    await browser.click(screen.getByRole('button', { name: /保存事件源/ }))
+
+    await waitFor(() => expect(created).toMatchObject({ kind: 'kafka' }))
+    expect(created).not.toHaveProperty('password')
+  })
+
+  it('creates a WebSocket source and keeps protocol-specific fields separate', async () => {
+    let created: Record<string, unknown> | null = null
+    installHandlers()
+    server.use(
+      http.post('/api/v1/event-sources', async ({ request }) => {
+        created = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(websocketSource, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('WebSocket', { exact: true }))
+    await browser.click(screen.getByRole('button', { name: /新建事件源/ }))
+    await browser.type(screen.getByLabelText('名称'), '订单 Echo')
+    await browser.type(screen.getByLabelText('WebSocket URL'), 'ws://mock-target:8080/ws/echo')
+    await browser.click(screen.getByRole('button', { name: /保存事件源/ }))
+
+    await waitFor(() => expect(created).toMatchObject({ kind: 'websocket' }))
+    expect(created).not.toHaveProperty('bootstrap_servers')
+    expect(created).not.toHaveProperty('schema_registry_url')
+  })
+
+  it('imports Registry and manual Kafka schemas as immutable versions', async () => {
+    const imports: string[] = []
+    installHandlers()
+    server.use(
+      http.post('/api/v1/event-sources/:sourceId/schemas/import', async ({ request }) => {
+        const payload = (await request.json()) as Record<string, unknown>
+        imports.push(String(payload.subject))
+        return HttpResponse.json(
+          {
+            ...graphqlSchema,
+            id: 'registry-schema',
+            protocol: 'kafka',
+            source_format: 'json_schema',
+          },
+          { status: 201 },
+        )
+      }),
+      http.post('/api/v1/event-sources/:sourceId/schemas', async ({ request }) => {
+        const payload = (await request.json()) as Record<string, unknown>
+        imports.push(String(payload.schema_format))
+        return HttpResponse.json(
+          { ...graphqlSchema, id: 'manual-schema', protocol: 'kafka', source_format: 'avro' },
+          { status: 201 },
+        )
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('Kafka', { exact: true }))
+    await browser.click(screen.getByRole('button', { name: /导入消息 Schema/ }))
+    await browser.type(screen.getByLabelText('名称'), 'Registry 订单')
+    await browser.type(screen.getByLabelText('Subject'), 'flowtest.orders-value')
+    await browser.click(screen.getByRole('button', { name: '校验并保存' }))
+    await waitFor(() => expect(imports).toEqual(['flowtest.orders-value']))
+
+    await browser.click(screen.getByRole('button', { name: /导入消息 Schema/ }))
+    await browser.click(screen.getByLabelText('来源'))
+    await browser.click(screen.getByText('Avro Schema'))
+    await browser.type(screen.getByLabelText('名称'), 'Avro 订单')
+    fireEvent.change(screen.getByLabelText('Schema 内容'), {
+      target: { value: '{"type":"record","name":"Order","fields":[]}' },
+    })
+    await browser.click(screen.getByRole('button', { name: '校验并保存' }))
+    await waitFor(() => expect(imports).toEqual(['flowtest.orders-value', 'avro']))
+  })
+
+  it('supports text WebSocket exchange without a correlation expression', async () => {
+    let exchanged: Record<string, unknown> | null = null
+    installHandlers()
+    server.use(
+      http.post('/api/v1/event-sources/:sourceId/websocket/exchange', async ({ request }) => {
+        exchanged = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          output: { operation: 'exchange', message_count: 1, messages: ['plain-message'] },
+          duration_ms: 4,
+        })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('WebSocket', { exact: true }))
+    await browser.click(screen.getByText('Text', { selector: '.ant-segmented-item-label' }))
+    fireEvent.change(screen.getByLabelText('WebSocket Message'), {
+      target: { value: 'plain-message' },
+    })
+    await browser.clear(screen.getByLabelText('Correlation Expression'))
+    await browser.click(screen.getByRole('button', { name: /Connect → Send/ }))
+
+    await waitFor(() => expect(exchanged).toMatchObject({ payload_kind: 'text' }))
+    expect(exchanged).not.toHaveProperty('correlation_expression')
+    expect(exchanged).not.toHaveProperty('correlation_value')
+  })
+
+  it('rejects an invalid Kafka JSON message before transport', async () => {
+    let produced = false
+    installHandlers()
+    server.use(
+      http.post('/api/v1/event-sources/:sourceId/kafka/produce', () => {
+        produced = true
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    await screen.findByText('用户 GraphQL')
+    await browser.click(screen.getByText('Kafka', { exact: true }))
+    fireEvent.change(screen.getByLabelText('Kafka Message'), { target: { value: '{bad' } })
+    await browser.click(screen.getByRole('button', { name: /Produce/ }))
+
+    await waitFor(() => expect(produced).toBe(false))
   })
 
   it('imports a validated immutable schema version', async () => {
@@ -347,6 +540,7 @@ function installHandlers(enabled = true, credentials: Credential[] = []) {
         plugin_registry: false,
         runner_fabric: false,
         multi_protocol: enabled,
+        event_protocols: enabled,
       }),
     ),
     http.get('/api/v1/graphql/schemas', () =>
@@ -354,6 +548,19 @@ function installHandlers(enabled = true, credentials: Credential[] = []) {
     ),
     http.get('/api/v1/grpc/descriptors', () =>
       HttpResponse.json({ items: [grpcDescriptor], total: 1, page: 1, page_size: 100 }),
+    ),
+    http.get('/api/v1/event-sources', ({ request }) => {
+      const kind = new URL(request.url).searchParams.get('kind')
+      const items = kind === 'websocket' ? [websocketSource] : [kafkaSource]
+      return HttpResponse.json({ items, total: 1, page: 1, page_size: 100 })
+    }),
+    http.get('/api/v1/event-sources/:sourceId/schemas', () =>
+      HttpResponse.json({
+        items: [{ ...graphqlSchema, id: 'kafka-schema', protocol: 'kafka' }],
+        total: 1,
+        page: 1,
+        page_size: 100,
+      }),
     ),
     http.get('/api/v1/credentials', () => HttpResponse.json(credentials)),
     http.post('/api/v1/graphql/execute', () =>
@@ -372,6 +579,24 @@ function installHandlers(enabled = true, credentials: Credential[] = []) {
         schema_version: 1,
         schema_hash: grpcDescriptor.content_sha256,
         duration_ms: 12,
+      }),
+    ),
+    http.post('/api/v1/event-sources/:sourceId/kafka/produce', () =>
+      HttpResponse.json({
+        output: { operation: 'produce', topic: 'flowtest.orders', partition: 0, offset: 1 },
+        duration_ms: 8,
+      }),
+    ),
+    http.post('/api/v1/event-sources/:sourceId/kafka/consume', () =>
+      HttpResponse.json({
+        output: { operation: 'consume', message_count: 1, messages: [{ id: 'order-42' }] },
+        duration_ms: 12,
+      }),
+    ),
+    http.post('/api/v1/event-sources/:sourceId/websocket/exchange', () =>
+      HttpResponse.json({
+        output: { operation: 'exchange', message_count: 1, messages: [{ id: 'order-42' }] },
+        duration_ms: 10,
       }),
     ),
   )

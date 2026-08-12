@@ -23,6 +23,7 @@ from app.domain.data_nodes import (
     validate_read_only_sql,
     validate_redis_read,
 )
+from app.domain.event_protocols import EventSourceKind
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
 from app.domain.protocols import (
     GrpcCallType,
@@ -46,6 +47,16 @@ from app.engine.contracts import (
     WorkflowDefinition,
     WorkflowNode,
     parse_node_config,
+)
+from app.engine.event_nodes import (
+    KafkaConsumeCapabilityConfig,
+    KafkaProduceCapabilityConfig,
+    WebSocketAwaitCapabilityConfig,
+    WebSocketCloseCapabilityConfig,
+    WebSocketConnectCapabilityConfig,
+    WebSocketExchangeCapabilityConfig,
+    WebSocketSendCapabilityConfig,
+    parse_event_config,
 )
 from app.engine.protocol_nodes import (
     GraphQLCapabilityConfig,
@@ -74,6 +85,7 @@ from app.repositories.workflows import WorkflowRepository
 from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
+from app.services.event_sources import EventSourceService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import WorkflowNodeExecutor
@@ -135,6 +147,7 @@ class WorkflowService:
         self._datasets = WorkflowDatasetService(session)
         self._projects = ProjectService(session)
         self._protocol_assets = ProtocolAssetService(session)
+        self._event_sources = EventSourceService(session)
         self._audit = AuditService(session)
         self._secrets = secrets
 
@@ -543,34 +556,35 @@ class WorkflowService:
             token.cancel()
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            scheduler = WorkflowScheduler(
-                TracingNodeExecutor(
-                    WorkflowNodeExecutor(
-                        client,
-                        plan.prepared.requests,
-                        plan.definition,
-                        network_policy,
-                        subflows=plan.prepared.subflows,
-                        data_nodes=plan.prepared.data_nodes,
-                        protocol_nodes=plan.prepared.protocol_nodes,
-                    )
-                )
+            node_executor = WorkflowNodeExecutor(
+                client,
+                plan.prepared.requests,
+                plan.definition,
+                network_policy,
+                subflows=plan.prepared.subflows,
+                data_nodes=plan.prepared.data_nodes,
+                protocol_nodes=plan.prepared.protocol_nodes,
+                event_nodes=plan.prepared.event_nodes,
             )
-            with workflow_span(
-                execution_id=execution.id,
-                project_id=plan.project_id,
-                workflow_version=plan.workflow_version,
-            ):
-                result = await self._run_with_cancellation_poll(
-                    scheduler=scheduler,
-                    definition=plan.definition,
-                    execution=execution,
-                    token=token,
-                    workflow_variables=plan.definition.variables,
-                    dataset_variables=plan.prepared.dataset_variables,
-                    runtime_variables=plan.runtime_variables,
-                    on_node_status=on_node_status,
-                )
+            scheduler = WorkflowScheduler(TracingNodeExecutor(node_executor))
+            try:
+                with workflow_span(
+                    execution_id=execution.id,
+                    project_id=plan.project_id,
+                    workflow_version=plan.workflow_version,
+                ):
+                    result = await self._run_with_cancellation_poll(
+                        scheduler=scheduler,
+                        definition=plan.definition,
+                        execution=execution,
+                        token=token,
+                        workflow_variables=plan.definition.variables,
+                        dataset_variables=plan.prepared.dataset_variables,
+                        runtime_variables=plan.runtime_variables,
+                        on_node_status=on_node_status,
+                    )
+            finally:
+                await node_executor.close()
         nodes = self._node_models(execution.id, result)
         self._workflows.add_all(nodes)
         execution.status = result.status.value
@@ -605,27 +619,28 @@ class WorkflowService:
     ) -> WorkflowRunResult:
         network_policy = await self._projects.load_runtime_security_policy(project_id)
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            result = await WorkflowScheduler(
-                TracingNodeExecutor(
-                    WorkflowNodeExecutor(
-                        client,
-                        prepared.requests,
-                        definition,
-                        network_policy,
-                        subflows=prepared.subflows,
-                        data_nodes=prepared.data_nodes,
-                        protocol_nodes=prepared.protocol_nodes,
-                    )
-                )
-            ).run(
+            node_executor = WorkflowNodeExecutor(
+                client,
+                prepared.requests,
                 definition,
-                context=ExecutionContext(
-                    workflow_variables=cast(dict[str, JsonValue], definition.variables),
-                    dataset_variables=prepared.dataset_variables,
-                    runtime_variables=cast(dict[str, JsonValue], runtime_variables),
-                ),
-                selected_node_ids=selected_node_ids,
+                network_policy,
+                subflows=prepared.subflows,
+                data_nodes=prepared.data_nodes,
+                protocol_nodes=prepared.protocol_nodes,
+                event_nodes=prepared.event_nodes,
             )
+            try:
+                result = await WorkflowScheduler(TracingNodeExecutor(node_executor)).run(
+                    definition,
+                    context=ExecutionContext(
+                        workflow_variables=cast(dict[str, JsonValue], definition.variables),
+                        dataset_variables=prepared.dataset_variables,
+                        runtime_variables=cast(dict[str, JsonValue], runtime_variables),
+                    ),
+                    selected_node_ids=selected_node_ids,
+                )
+            finally:
+                await node_executor.close()
         return WorkflowRunResult(
             status=result.status,
             records=tuple(
@@ -776,6 +791,7 @@ class WorkflowService:
             )
         for node in definition.nodes:
             await self._validate_publishable_node(project_id, definition, node)
+        self._validate_websocket_session_graph(definition)
         for edge in definition.edges:
             for mapping in edge.mappings:
                 self._validate_jmespath(mapping.source.path, edge.id)
@@ -815,6 +831,16 @@ class WorkflowService:
                         )
                     protocol_config = parse_protocol_config(node)
                     await self._validate_protocol_node(project_id, node, protocol_config)
+                    return
+                if node.capability_id and node.capability_id.startswith(("kafka.", "websocket.")):
+                    if not settings.feature_event_protocols_enabled:
+                        raise AppError(
+                            code="EVENT_PROTOCOLS_DISABLED",
+                            message="Kafka 与 WebSocket 执行能力尚未启用",
+                            status_code=409,
+                        )
+                    event_config = parse_event_config(node)
+                    await self._validate_event_node(project_id, node, event_config)
                     return
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
         except AppError:
@@ -865,6 +891,122 @@ class WorkflowService:
                 status_code=422,
                 details={"node_id": node.id},
             )
+
+    async def _validate_event_node(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: object,
+    ) -> None:
+        if isinstance(config, (KafkaProduceCapabilityConfig, KafkaConsumeCapabilityConfig)):
+            await self._event_sources.load(
+                project_id=project_id,
+                source_id=config.source_id,
+                kind=EventSourceKind.KAFKA,
+            )
+            if config.schema_id is not None:
+                artifact = await self._protocol_assets.load(
+                    project_id=project_id,
+                    artifact_id=config.schema_id,
+                    protocol=ProtocolKind.KAFKA,
+                )
+                if (
+                    artifact.summary.get("event_schema_format") == "protobuf"
+                    and not config.message_type
+                ):
+                    raise AppError(
+                        code="PROTOBUF_MESSAGE_TYPE_REQUIRED",
+                        message="Protobuf Kafka 节点必须指定 Message Type",
+                        status_code=422,
+                        details={"node_id": node.id},
+                    )
+            return
+        if isinstance(
+            config, (WebSocketConnectCapabilityConfig, WebSocketExchangeCapabilityConfig)
+        ):
+            await self._event_sources.load(
+                project_id=project_id,
+                source_id=config.source_id,
+                kind=EventSourceKind.WEBSOCKET,
+            )
+        if (
+            isinstance(
+                config,
+                (WebSocketAwaitCapabilityConfig, WebSocketExchangeCapabilityConfig),
+            )
+            and config.correlation_expression is not None
+        ):
+            try:
+                validate_safe_expression(config.correlation_expression)
+            except SafeExpressionError as error:
+                raise AppError(
+                    code=error.code,
+                    message=error.message,
+                    status_code=422,
+                    details={"node_id": node.id},
+                ) from error
+
+    @staticmethod
+    def _validate_websocket_session_graph(definition: WorkflowDefinition) -> None:
+        session_nodes: dict[str, list[tuple[WorkflowNode, object]]] = {}
+        for node in definition.nodes:
+            if node.type is not NodeType.CAPABILITY or node.capability_id not in {
+                "websocket.connect",
+                "websocket.send",
+                "websocket.await",
+                "websocket.close",
+            }:
+                continue
+            config = parse_event_config(node)
+            if not isinstance(
+                config,
+                (
+                    WebSocketConnectCapabilityConfig,
+                    WebSocketSendCapabilityConfig,
+                    WebSocketAwaitCapabilityConfig,
+                    WebSocketCloseCapabilityConfig,
+                ),
+            ):
+                continue
+            session_key = config.session_key
+            session_nodes.setdefault(session_key, []).append((node, config))
+        for session_key, entries in session_nodes.items():
+            connects = [
+                item for item in entries if isinstance(item[1], WebSocketConnectCapabilityConfig)
+            ]
+            closes = [
+                item for item in entries if isinstance(item[1], WebSocketCloseCapabilityConfig)
+            ]
+            if len(connects) != 1 or len(closes) != 1:
+                raise AppError(
+                    code="INVALID_WEBSOCKET_SESSION_GRAPH",
+                    message="每个 WebSocket Session 必须包含一个 Connect 和一个 Close",
+                    status_code=422,
+                    details={"session_key": session_key},
+                )
+            connect_node = connects[0][0]
+            close_node = closes[0][0]
+            close_scope = _upstream_node_ids(definition, close_node.id, include_target=True)
+            if connect_node.id not in close_scope or any(
+                node.id not in close_scope for node, _config in entries
+            ):
+                raise AppError(
+                    code="INVALID_WEBSOCKET_SESSION_GRAPH",
+                    message="WebSocket Session 节点必须位于 Connect 到 Close 的同一依赖链",
+                    status_code=422,
+                    details={"session_key": session_key},
+                )
+            for node, session_config in entries:
+                if isinstance(session_config, WebSocketConnectCapabilityConfig):
+                    continue
+                upstream = _upstream_node_ids(definition, node.id, include_target=False)
+                if connect_node.id not in upstream:
+                    raise AppError(
+                        code="INVALID_WEBSOCKET_SESSION_GRAPH",
+                        message="WebSocket 操作必须依赖对应的 Connect 节点",
+                        status_code=422,
+                        details={"session_key": session_key, "node_id": node.id},
+                    )
 
     async def _validate_resource_node(
         self,
