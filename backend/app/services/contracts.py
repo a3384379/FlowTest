@@ -25,6 +25,7 @@ from app.domain.contracts import (
 from app.importers.contracts import sanitize_imported_json
 from app.models.access import User
 from app.models.contracts import ContractRun, GeneratedContractCase
+from app.repositories.contract_hub import ContractHubRepository
 from app.repositories.contracts import ContractRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
@@ -47,8 +48,15 @@ class ContractService:
         source_name: str,
         content: bytes,
         baseline_run_id: UUID | None,
+        provider_service_id: UUID | None = None,
+        provider_version: str | None = None,
     ) -> ContractRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        await self._validate_provider_binding(
+            project_id=project_id,
+            provider_service_id=provider_service_id,
+            provider_version=provider_version,
+        )
         document = _load_document(content)
         try:
             operations = contract_operations(document)
@@ -83,6 +91,8 @@ class ContractService:
             coverage=schema_coverage(operations),
             generated_case_count=0,
             created_by_id=actor.id,
+            provider_service_id=provider_service_id,
+            provider_version=provider_version.strip() if provider_version else None,
         )
         self._contracts.add_run(run)
         await self._session.flush()
@@ -191,6 +201,35 @@ class ContractService:
         await self._session.commit()
         await self._session.refresh(model)
         return model
+
+    async def _validate_provider_binding(
+        self,
+        *,
+        project_id: UUID,
+        provider_service_id: UUID | None,
+        provider_version: str | None,
+    ) -> None:
+        if (provider_service_id is None) != (provider_version is None):
+            raise AppError(
+                code="CONTRACT_PROVIDER_BINDING_INVALID",
+                message="Provider 服务与版本必须同时提供",
+                status_code=422,
+            )
+        if provider_version is not None and not provider_version.strip():
+            raise AppError(
+                code="CONTRACT_PROVIDER_BINDING_INVALID",
+                message="Provider 版本不能为空",
+                status_code=422,
+            )
+        if provider_service_id is None:
+            return
+        provider = await ContractHubRepository(self._session).get_service(provider_service_id)
+        if provider is None or provider.project_id != project_id:
+            raise AppError(
+                code="SERVICE_CATALOG_ENTRY_NOT_FOUND",
+                message="Provider 服务不存在",
+                status_code=404,
+            )
 
     async def _resolve_baseline(
         self, *, project_id: UUID, source_name: str, baseline_run_id: UUID | None

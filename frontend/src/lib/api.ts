@@ -643,6 +643,8 @@ export type ContractRun = {
     schema_coverage_percent: number
   }
   generated_case_count: number
+  provider_service_id: string | null
+  provider_version: string | null
   created_by_id: string
   created_at: string
   updated_at: string

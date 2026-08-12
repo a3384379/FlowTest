@@ -11,11 +11,16 @@ export async function createContractRun(
   projectId: string,
   file: File,
   baselineRunId: string | null,
+  provider?: { providerServiceId: string; providerVersion: string },
 ): Promise<ContractRun> {
   const form = new FormData()
   form.append('document', file)
   form.append('source_name', file.name)
   if (baselineRunId) form.append('baseline_run_id', baselineRunId)
+  if (provider) {
+    form.append('provider_service_id', provider.providerServiceId)
+    form.append('provider_version', provider.providerVersion)
+  }
   const response = await apiClient.post<ContractRun>(`/projects/${projectId}/contract-runs`, form)
   return response.data
 }

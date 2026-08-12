@@ -1,15 +1,46 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S25 PR #28 的五项 CI 全绿并 squash 合并；S26 签名环境实验室已完成实现和本地全部退出门槛，Draft PR #29 的远端 CI 正在执行。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S26 已合并并发布 `v3.0.0-beta.1`；S27 契约中心已通过本地退出门槛，待创建 Draft PR 并运行全量 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@eb2f0c8`，S25 PR #28 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s26-environment-lab`，实现提交 `5c68bdf`，Draft PR #29。
-- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
+- 当前基线：`main@2434db3`，S26 PR #29 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s27-contract-matrix`；S27 尚未创建 Draft PR。
+- 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
+  `v3.0.0-beta.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 本地验收完成：S27 Pact 契约中心与发布兼容矩阵
+
+1. 新增项目服务目录、不可变 Pact Contract Version、Provider Verification 和 Deployment
+   Compatibility Check；Pact 导入自动登记 Consumer/Provider，使用规范 JSON SHA-256 去重。
+2. 领域解析器仅支持有界 HTTP Exact Matcher，拒绝 Message Pact、Matching Rule、Generator、
+   Plugin、认证/Cookie/Secret、超大文档和过深结构；解析后的类型 Snapshot 不保存原始敏感内容。
+3. Provider 验证只接受无凭据、Query、Fragment 和 Path 的 HTTP/HTTPS Origin，关闭重定向和
+   系统代理，每个 Interaction 执行项目出站策略；Provider State 只能请求同 Origin 固定路径。
+4. 可选 Pact Broker 的 Origin 和 Token 只由部署配置，用户坐标经路径编码，Token 不持久化或回传；
+   Broker 和 Provider 出站拒绝均转换为稳定、可审计错误证据。
+5. OpenAPI Contract Run 可绑定服务和 Provider 版本。Deployment Check 聚合指定版本的最新 Pact
+   验证和 OpenAPI Breaking Change：阻断证据为 `unsafe`，证据缺失为 `unknown`，全部通过才为 `safe`。
+6. 中文“契约中心”统一展示 OpenAPI/Pact 资产、服务依赖图、动态 Provider 兼容矩阵、
+   验证失败证据和持久化发布判断；页面允许合法 Compose 内部 HTTP Origin。
+7. 新增双向迁移 `20260812_0024`；真实 PostgreSQL 完成 `0023 → 0024 → 0023 → 0024`，
+   `alembic check` 无漂移。
+8. 后端全量 273 passed、3 skipped，总覆盖率 90.28%，Pact Domain 99%；Ruff format/check、mypy
+   strict、依赖边界和 Bandit 规则通过。前端 139 passed，Statements 86.34%、Branches 80.49%、
+   Functions 84.37%、Lines 88.39%，格式、ESLint、TypeScript strict 和生产构建通过。
+9. 真实 ARM64 Compose 冒烟已请求 `mock-target` Provider，验证 Pact 成功、Exact Body Mismatch、
+   OpenAPI 绑定、兼容矩阵以及 safe/unsafe 判断；项目
+   `5205f2c2-a239-4b61-bda4-cc9e236bff60` 的两条发布判断证据均已持久化。
+10. 真实 Chromium 完成“Pact 导入 → Provider 验证 → OpenAPI 绑定 → 矩阵 → 安全发布判断 →
+    统一资产” 1/1，最终耗时 5.0 秒；首轮检出 Ant Modal Portal 选择器歧义，已改为可见 Modal/
+    精确 Combobox 定位并复跑通过。
+11. Python 与前端依赖审计无已知漏洞；本轮重建的 Backend/Frontend 镜像使用 CI 相同
+    Grype 0.116.1、`only-fixed` High/Critical 门槛通过，无新增漏洞豁免。
+12. 架构边界已记录于 `ADR 0023`；当前仍在 `agent/s27-contract-matrix@2434db3`，未创建
+    Draft PR，未运行本轮 GitHub 五项 CI，因此不开始 S28，也不创建 `v3.0.0-beta.2` 标签。
 
 ## 本地验收完成：S26 签名环境实验室
 
@@ -37,9 +68,12 @@
    最终复跑完成“注册 → 新版本 → Provision → Ready/证据 → Cleanup”1/1，耗时 27.5 秒。
 10. Python 与前端依赖审计通过。Environment Runner、定制 Docker 29.7.2/containerd v2.3.3 daemon
     和固定 nginx fixture 均通过既有 Grype `only-fixed` High/Critical 门槛；没有新增漏洞豁免。
-11. 实现提交 `5c68bdf` 已推送，Draft PR #29 已创建；远端 Backend Test、Backend Integration、
-    Frontend Build、Security Source/Images 和 Compose Smoke 正在执行。五项全绿并 squash 合并前保持
-    Draft，`v3.0.0-beta.1` 只有在这些退出门槛全部真实通过后才可创建。
+11. 实现提交 `5c68bdf` 已推送并创建 Draft PR #29；最新提交 `2455da3` 的 Backend Test、Backend
+    Integration、Frontend Build、Security Source/Images 和 Compose Smoke 全部通过，PR 随后标记 Ready
+    并 squash 合并至 `main@2434db3`。GitHub 已自动删除远端 S26 分支。
+12. 合并提交触发的 Backend、Frontend、Security 与 Compose 主分支工作流全部通过；Compose 再次完成
+    S3–S26、Kafka 兼容、API/Workflow 容量、1000 任务持久队列和隔离备份恢复。满足发布门槛后，annotated
+    tag `v3.0.0-beta.1` 已固定到 `2434db3` 并推送。
 
 ## 本地验收完成：S25 声明式性能实验室
 
@@ -212,11 +246,11 @@
 
 ## 下一步
 
-1. 观察 S26 Draft PR #29 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
-   和 Compose Smoke；真实失败只做最小修复并重新执行完整 CI。五项全绿后标记 Ready、squash
-   合并并删除远端迭代分支。
-2. 仅在 S26 退出门槛全部满足后创建 `v3.0.0-beta.1`，然后从同步后的 `main` 创建独立 S27 分支；
-   S27–S31 继续遵循每迭代 Draft PR、完整 CI、squash 合并的顺序。
+1. 对 S27 当前完整工作区执行最终 diff 复核，提交并推送 `agent/s27-contract-matrix`，然后创建
+   独立 Draft PR。
+2. 在 Draft PR 上运行 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和
+   Compose Smoke；五项 CI 全绿才标记 Ready 并 squash 合并。S28–S31 继续遵循相同顺序，
+   不跨迭代提前开发。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

@@ -224,6 +224,66 @@ body {
   margin-bottom: 16px;
 }
 
+.contract-provider-select {
+  min-width: 220px;
+}
+
+.contract-release-check {
+  margin-top: 18px;
+}
+
+.contract-release-check .ant-input {
+  width: 230px;
+}
+
+.contract-hub-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: 16px;
+}
+
+.contract-graph {
+  display: grid;
+  gap: 12px;
+}
+
+.contract-graph-edge {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 36px minmax(150px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #dbe4f0;
+  border-left: 4px solid #f59e0b;
+  border-radius: 10px;
+}
+
+.contract-graph-edge-passed {
+  border-left-color: #22a06b;
+}
+
+.contract-graph-edge-failed {
+  border-left-color: #e5484d;
+}
+
+.contract-graph-node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contract-graph-node span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.contract-graph-arrow {
+  color: #64748b;
+  font-size: 22px;
+  text-align: center;
+}
+
 .performance-evidence {
   display: flex;
   flex-direction: column;

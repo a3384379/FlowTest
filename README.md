@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 路线 S25 已合并，S26 签名环境实验室 Draft PR #29 正在执行远端 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 S26 已合并并发布 v3.0.0-beta.1，S27 契约中心已通过本地退出门槛、待 Draft PR 与全量 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -164,6 +164,12 @@ S26 新增管理员注册、平台签名、不可变版本化的 Environment Tem
 超时、取消、消息重投及 Runner 重启后可幂等清理。Web“环境实验室”展示模板版本、端点、Seed/隔离证据
 和 Cleanup 状态。架构边界见 [`ADR 0022`](docs/adr/0022-signed-environment-runner.md)。
 
+S27 新增服务目录、不可变 Pact 版本、可选固定 Pact Broker、Provider 验证、服务依赖图和
+部署兼容矩阵。契约中心统一展示 OpenAPI 与 Consumer-Driven Contract，只有指定 Provider
+版本的 Pact 验证和 OpenAPI 破坏性证据都通过时才记录“可安全发布”。Pact 仅支持有界 HTTP
+Exact Matcher，不执行用户 Matching Rule、Generator、Plugin 或脚本。架构边界见
+[`ADR 0023`](docs/adr/0023-pact-contract-hub-and-release-evidence.md)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -208,6 +214,10 @@ scripts/verify_restore.sh /absolute/path/to/backup
 `uv run --project backend python scripts/smoke_s26.py` 可验证管理员签名模板、版本、独立队列
 Provision、Health、Seed、TTL 证据与重复 Cleanup；设置 `FLOWTEST_S26_RESTART_WORKER=1` 时还会验证
 Environment Worker 停止、队列清理和恢复后的幂等回收。
+
+启用 `FLOWTEST_FEATURE_CONTRACT_HUB_ENABLED=true` 后，运行
+`uv run --project backend python scripts/smoke_s27.py` 可在 Compose 中验证 Pact 导入、真实 Provider
+请求、Exact Matcher 失败证据、OpenAPI 绑定、兼容矩阵与 safe/unsafe 发布判断。
 
 执行全部本地质量门槛使用 `./scripts/check.sh`。
 

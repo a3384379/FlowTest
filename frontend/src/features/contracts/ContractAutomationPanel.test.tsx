@@ -184,6 +184,8 @@ const contractRun: ContractRun = {
     schema_coverage_percent: 100,
   },
   generated_case_count: 12,
+  provider_service_id: null,
+  provider_version: null,
   created_by_id: 'user-1',
   created_at: timestamp,
   updated_at: timestamp,

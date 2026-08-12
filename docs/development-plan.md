@@ -125,8 +125,8 @@ V3 各自的真实验收门槛。
 | S23 | GraphQL、gRPC 与多协议工作台 | 已完成；PR #26 全绿并 squash 合并，发布 `v3.0.0-alpha.1` |
 | S24 | Kafka、WebSocket 与 Exchange | 已完成；PR #27 的 5 项 CI 全绿并 squash 合并 |
 | S25 | 声明式 k6 性能实验室 | 已完成；PR #28 的 5 项 CI 全绿并 squash 合并 |
-| S26 | 签名环境模板、Provision/Cleanup/TTL | 实现与本地全部退出门槛完成；Draft PR #29 远端 CI 执行中 |
-| S27 | Pact、契约矩阵、Service Graph、Deployment Check | 未开始 |
+| S26 | 签名环境模板、Provision/Cleanup/TTL | 已完成；PR #29 与 main CI 全绿，发布 `v3.0.0-beta.1` |
+| S27 | Pact、契约矩阵、Service Graph、Deployment Check | 本地退出门槛已通过；待 Draft PR 与全量 CI |
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
 | S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
 | S30 | Failure Cluster、Release Risk、AI Change Set | 未开始 |
@@ -136,7 +136,8 @@ S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.
 [`ADR 0019`](adr/0019-multi-protocol-schema-snapshots.md)，S24 事件协议边界见
 [`ADR 0020`](adr/0020-event-protocols-and-session-boundary.md)，S25 性能执行边界见
 [`ADR 0021`](adr/0021-declarative-performance-runner.md)，S26 环境 Runner 边界见
-[`ADR 0022`](adr/0022-signed-environment-runner.md)，视觉源见
+[`ADR 0022`](adr/0022-signed-environment-runner.md)，S27 Pact 与发布证据边界见
+[`ADR 0023`](adr/0023-pact-contract-hub-and-release-evidence.md)，视觉源见
 [`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
 开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
 

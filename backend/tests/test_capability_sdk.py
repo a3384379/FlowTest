@@ -380,6 +380,8 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         "event_protocols": False,
         "performance_lab": False,
         "environment_lab": False,
+        "contract_hub": False,
+        "pact_broker": False,
     }
 
     capabilities = await capability_client.get(

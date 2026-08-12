@@ -23,6 +23,8 @@ class ContractRunResponse(BaseModel):
     coverage: dict[str, JsonValue]
     generated_case_count: int
     created_by_id: UUID
+    provider_service_id: UUID | None
+    provider_version: str | None
     created_at: datetime
     updated_at: datetime
 

@@ -59,6 +59,7 @@ frontend/src/
 - Protocol：GraphQL/gRPC Schema、Kafka/WebSocket 事件源与不可变协议 Snapshot。
 - Performance：声明式负载、固定 k6 编译结果、运行基线、阈值证据和质量门禁。
 - Environment Lab：管理员签名的不可变模板版本、受控 Provision、健康检查、Seed、TTL 与幂等清理。
+- Contract Hub：服务目录、不可变 Pact、Provider 验证、OpenAPI 绑定与发布兼容证据。
 
 ## 4. 必须前置冻结的契约
 
@@ -79,6 +80,8 @@ frontend/src/
 - 生产配置拒绝示例密钥、示例管理员密码和不安全 Cookie。
 - 运行时响应只在内存中供字段映射使用，进入数据库、日志和报告前统一脱敏。
 - 环境实验室不接受用户 Compose、命令、脚本、Secret 或卷；镜像必须是管理员白名单中的精确 Digest。
+- Pact 仅接受有界 HTTP Exact Contract；拒绝 Secret、Matching Rule、Generator 和 Plugin，Provider/Broker
+  请求使用固定 Origin、禁止重定向并执行项目出站策略。
 
 ## 6. 质量策略
 

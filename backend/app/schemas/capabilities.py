@@ -14,6 +14,8 @@ class V3FeatureFlagsResponse(BaseModel):
     event_protocols: bool
     performance_lab: bool
     environment_lab: bool
+    contract_hub: bool
+    pact_broker: bool
 
 
 class CapabilityResponse(BaseModel):
