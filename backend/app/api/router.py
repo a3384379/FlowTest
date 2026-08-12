@@ -23,6 +23,8 @@ from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
 from app.api.v1.endpoints.quality import router as quality_router
 from app.api.v1.endpoints.reporting import router as reporting_router
+from app.api.v1.endpoints.runner_fabric import admin_router as runner_fabric_admin_router
+from app.api.v1.endpoints.runner_fabric import runner_router as runner_control_router
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
 from app.api.v1.endpoints.test_assets import router as test_assets_router
@@ -60,3 +62,5 @@ api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])
 api_router.include_router(reporting_router, tags=["reports"])
+api_router.include_router(runner_fabric_admin_router, tags=["runner-fabric"])
+api_router.include_router(runner_control_router, tags=["runner-control"])

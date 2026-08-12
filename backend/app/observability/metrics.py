@@ -7,7 +7,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.capabilities import Runner
 from app.models.executions import APICallExecution
+from app.models.runner_fabric import RunnerLeaseRecord, RunnerTask
 from app.models.tasking import TestPlanRun
 from app.models.workflows import WorkflowExecution
 from app.observability.task_metrics import TaskMetricsReader
@@ -104,6 +106,7 @@ async def render_metrics(
             for status, count in sorted(rows):
                 labels = _labels(kind=kind, status=str(status))
                 lines.append(f"flowtest_execution_records{{{labels}}} {int(count)}")
+        await _append_runner_metrics(lines, session)
     except (OSError, SQLAlchemyError):
         lines.extend(
             [
@@ -123,6 +126,45 @@ async def render_metrics(
     if task_metrics is not None:
         await _append_task_metrics(lines, task_metrics)
     return "\n".join(lines) + "\n"
+
+
+async def _append_runner_metrics(lines: list[str], session: AsyncSession) -> None:
+    lines.extend(
+        [
+            "# HELP flowtest_runner_records Runners by current lifecycle status.",
+            "# TYPE flowtest_runner_records gauge",
+        ]
+    )
+    for status, count in sorted(
+        (await session.execute(select(Runner.status, func.count()).group_by(Runner.status))).all()
+    ):
+        lines.append(f'flowtest_runner_records{{status="{_escape(str(status))}"}} {int(count)}')
+    lines.extend(
+        [
+            "# HELP flowtest_runner_tasks Runner Fabric tasks by state.",
+            "# TYPE flowtest_runner_tasks gauge",
+        ]
+    )
+    for status, count in sorted(
+        (
+            await session.execute(
+                select(RunnerTask.status, func.count()).group_by(RunnerTask.status)
+            )
+        ).all()
+    ):
+        lines.append(f'flowtest_runner_tasks{{status="{_escape(str(status))}"}} {int(count)}')
+    active_leases = await session.scalar(
+        select(func.count())
+        .select_from(RunnerLeaseRecord)
+        .where(RunnerLeaseRecord.status == "active")
+    )
+    lines.extend(
+        [
+            "# HELP flowtest_runner_active_leases Active PostgreSQL execution leases.",
+            "# TYPE flowtest_runner_active_leases gauge",
+            f"flowtest_runner_active_leases {int(active_leases or 0)}",
+        ]
+    )
 
 
 async def _append_task_metrics(lines: list[str], reader: TaskMetricsReader) -> None:

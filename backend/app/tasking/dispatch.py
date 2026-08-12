@@ -2,13 +2,16 @@ from typing import Protocol
 from uuid import UUID
 
 from celery import Celery
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.observability.tracing import current_trace_headers
+from app.services.runner_fabric import RunnerFabricService
 from app.services.workflows import WorkflowExecutionPlan
 
 
 class WorkflowDispatcher(Protocol):
-    def start(self, plan: WorkflowExecutionPlan) -> None: ...
+    async def start(self, plan: WorkflowExecutionPlan) -> None: ...
 
 
 class TestPlanDispatcher(Protocol):
@@ -33,7 +36,7 @@ class CeleryTaskDispatcher:
     def __init__(self, celery: Celery) -> None:
         self._celery = celery
 
-    def start(self, plan: WorkflowExecutionPlan) -> None:
+    async def start(self, plan: WorkflowExecutionPlan) -> None:
         queue_name = _workflow_queue(plan)
         self._celery.send_task(
             "flowtest.run_workflow",
@@ -87,6 +90,18 @@ class CeleryTaskDispatcher:
             priority=9,
             headers=current_trace_headers(),
         )
+
+
+class RunnerFabricDispatcher:
+    def __init__(self, session: AsyncSession) -> None:
+        self._service = RunnerFabricService(session, enabled=True)
+
+    async def start(self, plan: WorkflowExecutionPlan) -> None:
+        try:
+            await self._service.enqueue(plan)
+        except AppError:
+            await self._service.fail_enqueue(plan.execution_id)
+            raise
 
 
 def _workflow_queue(plan: WorkflowExecutionPlan) -> str:

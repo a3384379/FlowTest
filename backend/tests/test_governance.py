@@ -83,6 +83,28 @@ def test_public_mock_dispatch_is_rate_limited_for_every_http_method() -> None:
         )
 
 
+def test_runner_control_plane_uses_dedicated_rate_limit() -> None:
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/api/v1/runner-control/leases/claim",
+            "raw_path": b"/api/v1/runner-control/leases/claim",
+            "query_string": b"",
+            "headers": [(b"authorization", b"Bearer runner-token")],
+            "client": ("203.0.113.1", 50000),
+            "server": ("flowtest.example.com", 443),
+        }
+    )
+
+    assert rate_limit_middleware._rule(request) == (
+        "runner-control",
+        settings.runner_control_rate_limit_per_minute,
+    )
+
+
 @pytest.mark.asyncio
 async def test_outbound_policy_blocks_ssrf_and_allows_explicit_private_cidr() -> None:
     async def public(_host: str, _port: int) -> tuple[str, ...]:

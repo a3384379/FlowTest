@@ -72,6 +72,7 @@ from app.engine.scheduler import (
 )
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
+from app.models.runner_fabric import RunnerTask
 from app.models.workflows import (
     Workflow,
     WorkflowExecution,
@@ -82,6 +83,11 @@ from app.observability.tracing import TracingNodeExecutor, workflow_span
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.data_sources import DataSourceRepository
 from app.repositories.workflows import WorkflowRepository
+from app.runner.results import (
+    RunnerBatchExecutionResult,
+    RunnerExecutionResult,
+    RunnerSingleExecutionResult,
+)
 from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
@@ -585,6 +591,71 @@ class WorkflowService:
                     )
             finally:
                 await node_executor.close()
+        nodes = self._stage_run_result(execution=execution, plan=plan, result=result)
+        await self._session.commit()
+        await self._session.refresh(execution)
+        return execution, nodes
+
+    async def stage_remote_result(
+        self,
+        *,
+        plan: WorkflowExecutionPlan,
+        submitted: RunnerExecutionResult,
+    ) -> WorkflowExecution:
+        """Stage a fenced runner result in the caller's database transaction."""
+        if isinstance(plan, WorkflowRunPlan) and isinstance(submitted, RunnerSingleExecutionResult):
+            self._validate_remote_execution_id(plan.execution_id, submitted.execution_id)
+            execution = await self.load_execution_for_run(plan.execution_id)
+            self._stage_run_result(
+                execution=execution,
+                plan=plan,
+                result=submitted.result.to_domain(),
+            )
+            return execution
+        if isinstance(plan, WorkflowBatchPlan) and isinstance(
+            submitted, RunnerBatchExecutionResult
+        ):
+            return await self._stage_remote_batch(plan, submitted)
+        raise AppError(
+            code="RUNNER_RESULT_PLAN_MISMATCH",
+            message="Runner 结果类型与执行计划不匹配",
+            status_code=409,
+        )
+
+    async def _stage_remote_batch(
+        self,
+        plan: WorkflowBatchPlan,
+        submitted: RunnerBatchExecutionResult,
+    ) -> WorkflowExecution:
+        self._validate_remote_execution_id(plan.execution_id, submitted.execution_id)
+        expected = {child.execution_id: child for child in plan.children}
+        received = {child.execution_id: child for child in submitted.children}
+        if expected.keys() != received.keys():
+            raise AppError(
+                code="RUNNER_BATCH_RESULT_INCOMPLETE",
+                message="Runner 数据集结果与计划子执行不一致",
+                status_code=409,
+            )
+        children: list[WorkflowExecution] = []
+        for execution_id, child_plan in expected.items():
+            execution = await self.load_execution_for_run(execution_id)
+            self._stage_run_result(
+                execution=execution,
+                plan=child_plan,
+                result=received[execution_id].result.to_domain(),
+            )
+            children.append(execution)
+        parent = await self.load_execution_for_run(plan.execution_id)
+        self._stage_batch_completion(parent, children)
+        return parent
+
+    def _stage_run_result(
+        self,
+        *,
+        execution: WorkflowExecution,
+        plan: WorkflowRunPlan,
+        result: WorkflowRunResult,
+    ) -> list[WorkflowNodeExecution]:
         nodes = self._node_models(execution.id, result)
         self._workflows.add_all(nodes)
         execution.status = result.status.value
@@ -604,9 +675,16 @@ class WorkflowService:
             resource_id=execution.id,
             details={"status": result.status.value, "workflow_version": plan.workflow_version},
         )
-        await self._session.commit()
-        await self._session.refresh(execution)
-        return execution, nodes
+        return nodes
+
+    @staticmethod
+    def _validate_remote_execution_id(expected: UUID, received: UUID) -> None:
+        if expected != received:
+            raise AppError(
+                code="RUNNER_RESULT_EXECUTION_MISMATCH",
+                message="Runner 结果不属于当前执行",
+                status_code=409,
+            )
 
     async def _run_scoped(
         self,
@@ -667,20 +745,42 @@ class WorkflowService:
         return execution
 
     async def mark_runtime_failed(self, execution_id: UUID) -> WorkflowExecution:
-        execution = await self.load_execution_for_run(execution_id)
-        execution.status = "failed"
-        execution.error_code = "WORKFLOW_RUNTIME_ERROR"
-        execution.error_message = "工作流运行服务发生内部错误"
-        execution.completed_at = datetime.now(UTC)
+        execution = await self.stage_runtime_failed(
+            execution_id,
+            error_code="WORKFLOW_RUNTIME_ERROR",
+            error_message="工作流运行服务发生内部错误",
+        )
         await self._session.commit()
         await self._session.refresh(execution)
+        return execution
+
+    async def stage_runtime_failed(
+        self,
+        execution_id: UUID,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> WorkflowExecution:
+        execution = await self.load_execution_for_run(execution_id)
+        execution.status = "failed"
+        execution.error_code = error_code
+        execution.error_message = error_message
+        execution.completed_at = datetime.now(UTC)
+        children = await self._workflows.list_child_executions(execution_id)
+        for child in children:
+            if child.status not in {"queued", "running"}:
+                continue
+            child.status = "cancelled"
+            child.error_code = error_code
+            child.error_message = error_message
+            child.completed_at = execution.completed_at
         return execution
 
     async def cancel_incomplete_batch(self, execution_id: UUID) -> None:
         children = await self._workflows.list_child_executions(execution_id)
         completed_at = datetime.now(UTC)
         for child in children:
-            if child.status != "running":
+            if child.status not in {"queued", "running"}:
                 continue
             child.status = "cancelled"
             child.error_code = "DATASET_RUNNER_STOPPED"
@@ -694,7 +794,7 @@ class WorkflowService:
     ) -> WorkflowExecution:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         execution = await self._get_execution(project_id, execution_id)
-        if execution.status != "running":
+        if execution.status not in {"queued", "running"}:
             raise AppError(
                 code="WORKFLOW_EXECUTION_FINISHED",
                 message="工作流执行已结束, 不能取消",
@@ -704,6 +804,25 @@ class WorkflowService:
             requested_at = datetime.now(UTC)
             execution.cancel_requested_at = requested_at
             await self._workflows.request_child_cancellation(execution.id, requested_at)
+            for child in await self._workflows.list_child_executions(execution.id):
+                if child.status != "queued":
+                    continue
+                child.status = "cancelled"
+                child.error_code = "WORKFLOW_CANCELLED"
+                child.error_message = "数据集子执行在排队期间被取消"
+                child.cancel_requested_at = requested_at
+                child.completed_at = requested_at
+            if execution.status == "queued":
+                execution.status = "cancelled"
+                execution.error_code = "WORKFLOW_CANCELLED"
+                execution.error_message = "工作流在排队期间被取消"
+                execution.completed_at = requested_at
+                task = await self._session.scalar(
+                    select(RunnerTask).where(RunnerTask.execution_id == execution.id)
+                )
+                if task is not None and task.status == "queued":
+                    task.status = "cancelled"
+                    task.completed_at = requested_at
             await self._session.commit()
             await self._session.refresh(execution)
         return execution
@@ -734,12 +853,20 @@ class WorkflowService:
     async def complete_batch(self, execution_id: UUID) -> WorkflowExecution:
         execution = await self.load_execution_for_run(execution_id)
         children = await self._workflows.list_child_executions(execution_id)
-        if not children or any(child.status == "running" for child in children):
+        if not children or any(child.status in {"queued", "running"} for child in children):
             raise AppError(
                 code="DATASET_EXECUTION_INCOMPLETE",
                 message="数据集子执行尚未全部完成",
                 status_code=409,
             )
+        self._stage_batch_completion(execution, children)
+        await self._session.commit()
+        await self._session.refresh(execution)
+        return execution
+
+    def _stage_batch_completion(
+        self, execution: WorkflowExecution, children: list[WorkflowExecution]
+    ) -> None:
         counts = {
             status: sum(child.status == status for child in children)
             for status in ("passed", "failed", "cancelled")
@@ -769,9 +896,6 @@ class WorkflowService:
             resource_id=execution.id,
             details=cast(dict[str, JsonValue], execution.context["dataset_summary"]),
         )
-        await self._session.commit()
-        await self._session.refresh(execution)
-        return execution
 
     async def _validate_publishable(
         self,

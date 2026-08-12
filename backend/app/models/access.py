@@ -76,7 +76,7 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("retention_days BETWEEN 1 AND 3650", name="retention_days"),
         CheckConstraint(
-            "execution_concurrency_limit BETWEEN 1 AND 100",
+            "execution_concurrency_limit BETWEEN 1 AND 500",
             name="project_execution_concurrency_limit",
         ),
         CheckConstraint(

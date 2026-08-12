@@ -153,7 +153,7 @@ class NotificationDeliveryService:
 
     async def deliver_workflow(self, execution_id: UUID) -> None:
         execution = await self._reports.get_execution(execution_id)
-        if execution is None or execution.status == "running":
+        if execution is None or execution.status in {"queued", "running"}:
             return
         await self._deliver(
             project_id=execution.project_id,

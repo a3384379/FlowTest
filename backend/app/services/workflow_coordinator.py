@@ -33,7 +33,7 @@ class WorkflowRunCoordinator:
         self._events = events
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
-    def start(self, plan: WorkflowExecutionPlan) -> None:
+    async def start(self, plan: WorkflowExecutionPlan) -> None:
         task = asyncio.create_task(self._run(plan), name=f"workflow-{plan.execution_id}")
         self._tasks[plan.execution_id] = task
         task.add_done_callback(lambda _completed: self._tasks.pop(plan.execution_id, None))

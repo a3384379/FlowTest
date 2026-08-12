@@ -13,6 +13,7 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE: ${FLOWTEST_AUTH_RATE_LIMIT_PER_MINUTE:-10}
   FLOWTEST_EXECUTION_RATE_LIMIT_PER_MINUTE: ${FLOWTEST_EXECUTION_RATE_LIMIT_PER_MINUTE:-30}
   FLOWTEST_WRITE_RATE_LIMIT_PER_MINUTE: "120"
+  FLOWTEST_RUNNER_CONTROL_RATE_LIMIT_PER_MINUTE: ${FLOWTEST_RUNNER_CONTROL_RATE_LIMIT_PER_MINUTE:-5000}
   FLOWTEST_CELERY_BROKER_URL: redis://redis:6379/1
   FLOWTEST_CELERY_RESULT_BACKEND: redis://redis:6379/2
   FLOWTEST_RETENTION_CLEANUP_INTERVAL_SECONDS: "86400"
@@ -76,6 +77,10 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_PACT_PROVIDER_REQUEST_TIMEOUT_SECONDS: ${FLOWTEST_PACT_PROVIDER_REQUEST_TIMEOUT_SECONDS:-10}
   FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED: ${FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED:-false}
   FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: ${FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED:-false}
+  FLOWTEST_RUNNER_MAX_ATTEMPTS: ${FLOWTEST_RUNNER_MAX_ATTEMPTS:-3}
+  FLOWTEST_RUNNER_RESULT_LIMIT_BYTES: ${FLOWTEST_RUNNER_RESULT_LIMIT_BYTES:-8388608}
+  FLOWTEST_RUNNER_REGISTRATION_TTL_SECONDS: ${FLOWTEST_RUNNER_REGISTRATION_TTL_SECONDS:-900}
+  FLOWTEST_RUNNER_RECONCILE_INTERVAL_SECONDS: ${FLOWTEST_RUNNER_RECONCILE_INTERVAL_SECONDS:-5}
   FLOWTEST_AI_BASE_URL: ${FLOWTEST_AI_BASE_URL:-}
   FLOWTEST_AI_MODEL: ${FLOWTEST_AI_MODEL:-}
   FLOWTEST_AI_API_KEY: ${FLOWTEST_AI_API_KEY:-}
@@ -375,6 +380,80 @@ services:
           cpus: "1.00"
           memory: 768M
 
+  runner-agent-a:
+    profiles: ["runner-fabric"]
+    build:
+      context: ./backend
+      target: runner-runtime
+    environment:
+      FLOWTEST_ENVIRONMENT: local
+      FLOWTEST_LOG_LEVEL: INFO
+      FLOWTEST_RUNNER_CONTROL_PLANE_URL: http://backend:8000
+      FLOWTEST_RUNNER_REGISTRATION_TOKEN: ${FLOWTEST_RUNNER_A_REGISTRATION_TOKEN:-}
+      FLOWTEST_RUNNER_TOKEN: ${FLOWTEST_RUNNER_A_TOKEN:-}
+      FLOWTEST_RUNNER_TOKEN_FILE: /var/lib/flowtest-runner/identity-token
+      FLOWTEST_RUNNER_NAME: compose-runner-a
+      FLOWTEST_RUNNER_INSTANCE_ID: ${FLOWTEST_RUNNER_A_INSTANCE_ID:-compose-runner-a-instance}
+      FLOWTEST_RUNNER_RUNTIME: docker
+      FLOWTEST_RUNNER_AGENT_VERSION: 3.0.0-beta.3
+      FLOWTEST_RUNNER_ARCHITECTURE: ${FLOWTEST_RUNNER_ARCHITECTURE:-arm64}
+      FLOWTEST_RUNNER_CAPABILITIES: flow.workflow
+      FLOWTEST_RUNNER_MAX_CONCURRENCY: ${FLOWTEST_RUNNER_CONCURRENCY:-2}
+      FLOWTEST_RUNNER_POLL_SECONDS: ${FLOWTEST_RUNNER_POLL_SECONDS:-1}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - runner_a_state:/var/lib/flowtest-runner
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+
+  runner-agent-b:
+    profiles: ["runner-fabric"]
+    build:
+      context: ./backend
+      target: runner-runtime
+    environment:
+      FLOWTEST_ENVIRONMENT: local
+      FLOWTEST_LOG_LEVEL: INFO
+      FLOWTEST_RUNNER_CONTROL_PLANE_URL: http://backend:8000
+      FLOWTEST_RUNNER_REGISTRATION_TOKEN: ${FLOWTEST_RUNNER_B_REGISTRATION_TOKEN:-}
+      FLOWTEST_RUNNER_TOKEN: ${FLOWTEST_RUNNER_B_TOKEN:-}
+      FLOWTEST_RUNNER_TOKEN_FILE: /var/lib/flowtest-runner/identity-token
+      FLOWTEST_RUNNER_NAME: compose-runner-b
+      FLOWTEST_RUNNER_INSTANCE_ID: ${FLOWTEST_RUNNER_B_INSTANCE_ID:-compose-runner-b-instance}
+      FLOWTEST_RUNNER_RUNTIME: docker
+      FLOWTEST_RUNNER_AGENT_VERSION: 3.0.0-beta.3
+      FLOWTEST_RUNNER_ARCHITECTURE: ${FLOWTEST_RUNNER_ARCHITECTURE:-arm64}
+      FLOWTEST_RUNNER_CAPABILITIES: flow.workflow
+      FLOWTEST_RUNNER_MAX_CONCURRENCY: ${FLOWTEST_RUNNER_CONCURRENCY:-2}
+      FLOWTEST_RUNNER_POLL_SECONDS: ${FLOWTEST_RUNNER_POLL_SECONDS:-1}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - runner_b_state:/var/lib/flowtest-runner
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+
   worker-ai:
     build:
       context: ./backend
@@ -660,6 +739,8 @@ volumes:
   prometheus_data:
   grafana_data:
   environment_docker_data:
+  runner_a_state:
+  runner_b_state:
 
 networks:
   environment-control:

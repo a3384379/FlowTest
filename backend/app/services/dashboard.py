@@ -102,7 +102,7 @@ def _trend_point(
 ) -> DashboardTrendPoint:
     executions = grouped.get(day, [])
     passed = sum(item.status == "passed" for item in executions)
-    running = sum(item.status == "running" for item in executions)
+    running = sum(item.status in {"queued", "running"} for item in executions)
     failed = len(executions) - passed - running
     return DashboardTrendPoint(
         date=day,

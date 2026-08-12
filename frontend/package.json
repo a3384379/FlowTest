@@ -1,7 +1,7 @@
 {
   "name": "flowtest-frontend",
   "private": true,
-  "version": "3.0.0-alpha.1-dev.25",
+  "version": "3.0.0-beta.3-dev.29",
   "type": "module",
   "packageManager": "pnpm@11.16.0",
   "engines": {

@@ -359,6 +359,41 @@ body {
   cursor: pointer;
 }
 
+.execution-fabric-overview {
+  margin-bottom: 16px;
+}
+
+.execution-fabric-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.6fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.execution-pool-actions {
+  margin-bottom: 14px;
+}
+
+.execution-queue-list {
+  width: 100%;
+}
+
+.execution-queue-list .ant-card {
+  width: 100%;
+  background: #f8fafc;
+}
+
+.registration-token-value {
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .execution-fabric-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .quality-runs-card {
   margin-top: 16px;
 }

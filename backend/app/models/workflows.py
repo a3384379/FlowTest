@@ -56,7 +56,7 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "workflow_executions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('running', 'passed', 'failed', 'cancelled')",
+            "status IN ('queued', 'running', 'passed', 'failed', 'cancelled')",
             name="workflow_execution_status",
         ),
         CheckConstraint(
