@@ -1,8 +1,15 @@
+import re
 from functools import lru_cache
 from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENVIRONMENT_IMAGE_DIGEST = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?/"
+    r"[a-z0-9]+(?:[._/-][a-z0-9]+)*"
+    r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}$"
+)
 
 
 class Settings(BaseSettings):
@@ -14,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "3.0.0-alpha.1-dev.25"
+    app_version: str = "3.0.0-alpha.1-dev.26"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -63,9 +70,17 @@ class Settings(BaseSettings):
     feature_multi_protocol_enabled: bool = False
     feature_event_protocols_enabled: bool = False
     feature_performance_lab_enabled: bool = False
+    feature_environment_lab_enabled: bool = False
     performance_max_vus: int = Field(default=100, ge=1, le=1000)
     performance_max_duration_seconds: int = Field(default=1800, ge=1, le=3600)
     performance_runner_timeout_seconds: int = Field(default=2100, ge=60, le=3900)
+    environment_image_allowlist: list[str] = Field(default_factory=list)
+    environment_runtime_host: str = "environment-docker"
+    environment_max_ttl_seconds: int = Field(default=86400, ge=60, le=86400)
+    environment_provision_timeout_seconds: int = Field(default=300, ge=30, le=1800)
+    environment_cleanup_timeout_seconds: int = Field(default=120, ge=10, le=600)
+    environment_health_request_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    environment_reconcile_interval_seconds: int = Field(default=30, ge=10, le=300)
     ai_base_url: str = ""
     ai_model: str = ""
     ai_api_key: str = ""
@@ -105,8 +120,20 @@ class Settings(BaseSettings):
         self._validate_oidc()
         self._validate_vault()
         self._validate_ai()
+        self._validate_environment_lab()
         self._validate_production()
         return self
+
+    def _validate_environment_lab(self) -> None:
+        if not self.feature_environment_lab_enabled:
+            return
+        if not self.environment_image_allowlist:
+            raise ValueError("启用环境实验室时必须配置镜像白名单")
+        if any(
+            _ENVIRONMENT_IMAGE_DIGEST.fullmatch(image) is None
+            for image in self.environment_image_allowlist
+        ):
+            raise ValueError("环境实验室镜像白名单必须固定 OCI Digest")
 
     def _validate_ai(self) -> None:
         if not self.feature_ai_enabled:

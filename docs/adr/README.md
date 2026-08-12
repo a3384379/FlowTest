@@ -23,3 +23,4 @@
 19. 多协议 Schema、执行边界与 Snapshot
 20. 事件协议、消息 Schema 与 WebSocket 会话边界
 21. 声明式性能场景、固定 k6 编译器与隔离 Runner
+22. 管理员签名环境模板、镜像白名单与幂等隔离 Provision Runner

@@ -7,6 +7,7 @@ export type V3FeatureFlags = {
   multi_protocol: boolean
   event_protocols: boolean
   performance_lab: boolean
+  environment_lab: boolean
 }
 
 export type CapabilityManifest = {

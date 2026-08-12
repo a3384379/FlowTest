@@ -43,6 +43,9 @@ celery_app.conf.update(
         "flowtest.*data*": {"queue": "data"},
         "flowtest.*ai*": {"queue": "ai"},
         "flowtest.run_performance": {"queue": "performance"},
+        "flowtest.provision_environment": {"queue": "environment"},
+        "flowtest.cleanup_environment": {"queue": "environment"},
+        "flowtest.reconcile_environments": {"queue": "environment"},
     },
     beat_schedule={
         "enqueue-due-test-plans": {
@@ -52,6 +55,10 @@ celery_app.conf.update(
         "cleanup-retention": {
             "task": "flowtest.cleanup_retention",
             "schedule": settings.retention_cleanup_interval_seconds,
+        },
+        "reconcile-environments": {
+            "task": "flowtest.reconcile_environments",
+            "schedule": settings.environment_reconcile_interval_seconds,
         },
     },
 )

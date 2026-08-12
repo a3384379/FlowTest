@@ -13,6 +13,7 @@ class V3FeatureFlagsResponse(BaseModel):
     multi_protocol: bool
     event_protocols: bool
     performance_lab: bool
+    environment_lab: bool
 
 
 class CapabilityResponse(BaseModel):

@@ -23,6 +23,12 @@ class PerformanceRunDispatcher(Protocol):
     def start_performance_run(self, run_id: UUID) -> None: ...
 
 
+class EnvironmentTaskDispatcher(Protocol):
+    def start_environment_provision(self, instance_id: UUID) -> None: ...
+
+    def start_environment_cleanup(self, instance_id: UUID) -> None: ...
+
+
 class CeleryTaskDispatcher:
     def __init__(self, celery: Celery) -> None:
         self._celery = celery
@@ -61,6 +67,24 @@ class CeleryTaskDispatcher:
             args=[str(run_id)],
             queue="performance",
             priority=5,
+            headers=current_trace_headers(),
+        )
+
+    def start_environment_provision(self, instance_id: UUID) -> None:
+        self._celery.send_task(
+            "flowtest.provision_environment",
+            args=[str(instance_id)],
+            queue="environment",
+            priority=5,
+            headers=current_trace_headers(),
+        )
+
+    def start_environment_cleanup(self, instance_id: UUID) -> None:
+        self._celery.send_task(
+            "flowtest.cleanup_environment",
+            args=[str(instance_id)],
+            queue="environment",
+            priority=9,
             headers=current_trace_headers(),
         )
 

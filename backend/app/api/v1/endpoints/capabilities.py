@@ -27,6 +27,7 @@ async def get_v3_feature_flags(current_user: CurrentUser) -> V3FeatureFlagsRespo
         multi_protocol=settings.feature_multi_protocol_enabled,
         event_protocols=settings.feature_event_protocols_enabled,
         performance_lab=settings.feature_performance_lab_enabled,
+        environment_lab=settings.feature_environment_lab_enabled,
     )
 
 
