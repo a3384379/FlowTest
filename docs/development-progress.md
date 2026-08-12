@@ -1,12 +1,12 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V3 S24 已合并，S25 声明式性能实验室已通过本地全量验收，等待 Draft PR 远程 CI。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：V3 S24 已合并；S25 Draft PR #28 已完成实现、本地全量验收和远端缺陷修复，最新 CI 受 GitHub Actions 账户计费阻断。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@bad2b51`，S24 Draft PR #27 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s25-performance-lab`，开发版本 `3.0.0-alpha.1-dev.25`。
+- 当前分支：`agent/s25-performance-lab`，Draft PR #28，开发版本 `3.0.0-alpha.1-dev.25`。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
@@ -33,8 +33,8 @@
    完成“创建 → 发布 → 独立队列运行 → 阈值与产物下钻”1/1。
 10. 本轮共修复五项门槛问题：前端分支覆盖率、PostgreSQL 约束名漂移、歧义 VU 选择器、内部主机 URL
     误拒绝和中文展开按钮选择器；所有对应门槛已重跑通过。
-11. 待提交 Draft PR 并完成 Backend、Integration、Frontend、Security 和 Compose 五项远程 CI；
-    全绿并 squash 合并前不开始 S26。
+11. Draft PR #28 已创建。第二轮远端 Backend、Integration、Frontend 和 Security 全绿；Compose 已通过
+    S3–S25 功能、Kafka 兼容和 API 容量，在 Workflow 容量边界失败，随后完成 CI 抖动容差修复。
 12. PR #28 首轮 Security CI 发现 k6 2.1.0 二进制的 `golang.org/x/text` 和 gRPC 高危依赖已有
     上游修复版本；已升级至官方 k6 2.2.0 多架构 digest，不添加漏洞豁免。相同 Grype 0.116.1 高危
     扫描已通过，ARM64 固定编译产物完成真实 HTTP 负载兼容验证。
@@ -44,6 +44,9 @@
 14. 修复后 Compose 的 100 个真实 Workflow 全部通过且无丢失，P95 60.069 秒仅超过旧 CI 门槛
     68 毫秒；保留 100 并发与零失败条件，将两核共享宿主的 Workflow P95 抖动容差校准为 75 秒，
     正式参考机的 100/1000 门槛不变。
+15. `3438f4a` 推送后的五项 GitHub Actions 均在 3–4 秒内、执行任何步骤前终止；Check Annotation 明确
+    指向账户付款失败或 Actions spending limit。该问题需要仓库所有者在 GitHub Billing & plans 处理，
+    处理后重跑 PR #28 全部检查；全绿并 squash 合并前不开始 S26。
 
 ## 已完成：S24 Kafka、WebSocket 与 Exchange
 
