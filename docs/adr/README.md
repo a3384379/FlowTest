@@ -22,3 +22,4 @@
 18. Capability SDK、Legacy Adapter 与 Runner 安全边界
 19. 多协议 Schema、执行边界与 Snapshot
 20. 事件协议、消息 Schema 与 WebSocket 会话边界
+21. 声明式性能场景、固定 k6 编译器与隔离 Runner

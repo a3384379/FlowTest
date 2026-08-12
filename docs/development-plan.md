@@ -123,8 +123,8 @@ V3 各自的真实验收门槛。
 |---|---|---|
 | S22 | Capability SDK V3、Legacy Adapter、NodeResult/Event、Runner/Plugin 边界、V3 原型与 Token | 已完成；PR #25 全绿并 squash 合并 |
 | S23 | GraphQL、gRPC 与多协议工作台 | 已完成；PR #26 全绿并 squash 合并，发布 `v3.0.0-alpha.1` |
-| S24 | Kafka、WebSocket 与 Exchange | 实现与本地全量门槛已完成；等待 Draft PR 远程 CI |
-| S25 | 声明式 k6 性能实验室 | 未开始 |
+| S24 | Kafka、WebSocket 与 Exchange | 已完成；PR #27 的 5 项 CI 全绿并 squash 合并 |
+| S25 | 声明式 k6 性能实验室 | 实现与本地全量门槛已完成；等待 Draft PR 远程 CI |
 | S26 | 签名环境模板、Provision/Cleanup/TTL | 未开始 |
 | S27 | Pact、契约矩阵、Service Graph、Deployment Check | 未开始 |
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
@@ -134,7 +134,8 @@ V3 各自的真实验收门槛。
 
 S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.md)，S23 多协议边界见
 [`ADR 0019`](adr/0019-multi-protocol-schema-snapshots.md)，S24 事件协议边界见
-[`ADR 0020`](adr/0020-event-protocols-and-session-boundary.md)，视觉源见
+[`ADR 0020`](adr/0020-event-protocols-and-session-boundary.md)，S25 性能执行边界见
+[`ADR 0021`](adr/0021-declarative-performance-runner.md)，视觉源见
 [`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
 开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
 

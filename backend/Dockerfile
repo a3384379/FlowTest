@@ -1,4 +1,5 @@
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
+FROM grafana/k6:2.2.0@sha256:9bd01d6941fca969cb61bb57d2da5ee9b385fe2aa8881df3798c196564d6ace6 AS k6
 FROM debian:trixie-slim AS python-runtime
 
 ENV PATH="/usr/local/bin:$PATH" \
@@ -108,3 +109,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+
+FROM python-runtime AS performance-runtime
+COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
+RUN set -eux; \
+    groupadd --gid 65532 flowtest; \
+    useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
+        --shell /usr/sbin/nologin flowtest
+ENV HOME=/tmp
+USER flowtest
+
+FROM python-runtime AS application-runtime

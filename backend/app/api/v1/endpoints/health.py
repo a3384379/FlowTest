@@ -39,6 +39,7 @@ async def feature_flags() -> FeatureFlagsResponse:
         ai=settings.feature_ai_enabled,
         multi_protocol=settings.feature_multi_protocol_enabled,
         event_protocols=settings.feature_event_protocols_enabled,
+        performance_lab=settings.feature_performance_lab_enabled,
     )
 
 

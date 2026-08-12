@@ -56,6 +56,7 @@ frontend/src/
 - Data Source：加密 Credential、只读 SQL/Redis 适配器及出站网络策略。
 - Mock：无脚本的请求规则、模板响应与脱敏请求日志。
 - Protocol：GraphQL/gRPC Schema、Kafka/WebSocket 事件源与不可变协议 Snapshot。
+- Performance：声明式负载、固定 k6 编译结果、运行基线、阈值证据和质量门禁。
 
 ## 4. 必须前置冻结的契约
 
@@ -87,6 +88,7 @@ frontend/src/
 ## 7. 运行与恢复边界
 
 - API、Worker 与 Beat 共享 PostgreSQL、Redis 和 MinIO，但执行引擎不依赖 Celery。
+- Performance Worker 使用独立 `performance` 队列和非 root、只读 k6 镜像；用户定义不能包含脚本。
 - Beat 每日执行项目保留期清理；运行中执行与审计记录不会被项目清理任务删除。
 - `/api/v1/metrics` 暴露 HTTP 延迟/计数与持久化执行状态，不把 UUID 作为标签。
 - PostgreSQL 与 MinIO 作为一个恢复点备份；数据加密密钥必须由部署方在备份系统外安全托管。

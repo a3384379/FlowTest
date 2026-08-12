@@ -15,6 +15,7 @@ from app.api.v1.endpoints.executions import router as executions_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
+from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
 from app.api.v1.endpoints.quality import router as quality_router
@@ -41,6 +42,7 @@ api_router.include_router(executions_router, tags=["executions"])
 api_router.include_router(event_protocols_router, tags=["event-protocols"])
 api_router.include_router(imports_router, tags=["imports"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
+api_router.include_router(performance_router, tags=["performance"])
 api_router.include_router(artifacts_router, tags=["files"])
 api_router.include_router(api_assets_router, tags=["api-assets"])
 api_router.include_router(api_exports_router, tags=["api-exports"])

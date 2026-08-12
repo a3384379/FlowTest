@@ -156,6 +156,7 @@ function installHandlers({
         runner_fabric: false,
         multi_protocol: false,
         event_protocols: false,
+        performance_lab: false,
       }),
     ),
     http.get('/api/v1/capabilities', () =>

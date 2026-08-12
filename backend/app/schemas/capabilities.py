@@ -12,6 +12,7 @@ class V3FeatureFlagsResponse(BaseModel):
     runner_fabric: bool
     multi_protocol: bool
     event_protocols: bool
+    performance_lab: bool
 
 
 class CapabilityResponse(BaseModel):

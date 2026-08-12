@@ -7,6 +7,7 @@ export type ProjectSection =
   | 'workflows'
   | 'data'
   | 'tasks'
+  | 'performance'
   | 'quality'
   | 'ai'
   | 'reports'
@@ -36,6 +37,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'workflows',
     'data',
     'tasks',
+    'performance',
     'quality',
     'ai',
     'reports',

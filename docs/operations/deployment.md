@@ -28,14 +28,18 @@
 ## 资源与扩容
 
 Compose 已为数据库、缓存、对象存储、API、Worker、Beat 和 Web 设置 CPU/内存上限。
-`FLOWTEST_WORKER_CONCURRENCY` 默认 4；Data 与 AI 使用独立 Worker/队列。调整后应重新运行容量门槛。V2.0 正式部署仍为单机 Compose，不支持跨主机调度或 Kubernetes。
+`FLOWTEST_WORKER_CONCURRENCY` 默认 4；Data、AI 与 Performance 使用独立 Worker/队列。
+`FLOWTEST_PERFORMANCE_WORKER_CONCURRENCY` 默认 1，单场景 VU 和持续时间分别受
+`FLOWTEST_PERFORMANCE_MAX_VUS`、`FLOWTEST_PERFORMANCE_MAX_DURATION_SECONDS` 限制。Performance
+Worker 以非 root、只读文件系统运行固定 k6，不应挂载 Docker Socket。调整后应重新运行容量门槛。
+V2.0 正式部署仍为单机 Compose，不支持跨主机调度或 Kubernetes。
 
 ## 启停
 
 ```bash
 docker compose up -d --wait
 docker compose ps
-docker compose logs --tail=200 backend worker worker-data worker-ai beat
+docker compose logs --tail=200 backend worker worker-data worker-ai worker-performance beat
 docker compose stop
 ```
 
