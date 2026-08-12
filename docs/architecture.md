@@ -10,11 +10,13 @@ React Web
 FastAPI Control Plane
     ├── Project / API / Environment / Workflow / Plan / Report
     ├── PostgreSQL
-    └── Redis / Task Queue
-              │
+    ├── Redis / Celery Task Queue
+    └── PostgreSQL Runner Task / Lease / Fence / Event
+              │ HTTPS Runner Control Plane
         Execution Plane
         HTTPX + asyncio + DAG
-        Performance / Environment Runner
+        General / Data / Performance / Environment Runner
+        Remote Docker / Kubernetes Runner Agent
               │
           Target APIs
 ```
@@ -61,6 +63,8 @@ frontend/src/
 - Environment Lab：管理员签名的不可变模板版本、受控 Provision、健康检查、Seed、TTL 与幂等清理。
 - Contract Hub：服务目录、不可变 Pact、Provider 验证、OpenAPI 绑定与发布兼容证据。
 - Change Impact：有界多源 Diff、显式资产映射、确定性 Test Selection、影响图与覆盖快照。
+- Runner Fabric：管理员 Worker Pool、一次性注册、身份心跳、PostgreSQL Lease/Fencing、
+  Drain、失联接管和可审计事件。
 
 ## 4. 必须前置冻结的契约
 
@@ -85,6 +89,10 @@ frontend/src/
   请求使用固定 Origin、禁止重定向并执行项目出站策略。
 - Change Impact 只接收有界 Unified Diff 或已登记 Schema 文本，不拉取外部 Git、不接收仓库凭据和
   任意脚本；推荐结果只能来自项目内显式 Mapping，无证据项必须保留为 Coverage Gap。
+- Runner 注册与身份 Token 只保存哈希，生产控制面强制 HTTPS；远程 Agent 不接收用户
+  Compose、Shell、插件代码、宿主凭据或 Kubernetes ServiceAccount Token。
+- Runner 只恢复加密的平台 Workflow Snapshot，校验计划 SHA-256 与结果 Schema，并重新执行
+  项目 Host/CIDR 出站策略。过期 Fence 不能写入节点或终态。
 
 ## 6. 质量策略
 
@@ -104,6 +112,12 @@ frontend/src/
   Beat Reconciler 使失败、超时、取消、到期、重投和 Runner 重启共享同一幂等清理路径。
 - Impact Run、Test Selection 与 Coverage Snapshot 以 PostgreSQL 为事实源，保存规范变更、解释边、
   选择原因、Gap 和 Fingerprint；S28 不自动执行推荐测试，也不改变现有发布门禁。
+- Runner Task、Lease、递增 Fence 和 Event 以 PostgreSQL 为事实源；Pool、Runner 和 Project
+  容量通过分命名空间的事务 advisory lock 决策，Task 通过 `SKIP LOCKED` 唯一认领。
+- 远程 Runner Agent 可部署在 Docker 或 Kubernetes，每个 Token 只对应一个身份。Compose Agent
+  使用非 root、只读根文件系统和 Drop ALL；Kubernetes 同时禁用 ServiceAccount Token。
+- Beat Reconciler 定期处理过期 Lease 和失联 Runner；Agent 对短暂传输、429 和 5xx 保持存活，
+  任务由有界尝试次数和 Fence 阻止重复终态。
 - Beat 每日执行项目保留期清理；运行中执行与审计记录不会被项目清理任务删除。
 - `/api/v1/metrics` 暴露 HTTP 延迟/计数与持久化执行状态，不把 UUID 作为标签。
 - PostgreSQL 与 MinIO 作为一个恢复点备份；数据加密密钥必须由部署方在备份系统外安全托管。

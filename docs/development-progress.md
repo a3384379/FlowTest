@@ -1,16 +1,63 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 已在独立分支开始盘点 Runner Pool、PostgreSQL Lease/Fencing 与受控远程 Worker 边界。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
+真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过，Draft PR 待创建。
+`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s29-worker-plane`；从 S28 合并提交创建，尚未产生 S29 实现提交或 PR。
+- 当前分支：`agent/s29-worker-plane`；从 S28 合并提交创建，当前实现与本地退出证据待提交，
+  Draft PR 尚未创建。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
+
+1. 新增管理员 Worker Pool、一次性注册令牌、Runner 身份/心跳、Drain/Resume/Disable、Task、
+   Lease、Fence 和 Event API；高熵 Token 只保存 SHA-256 查找哈希，明文只返回一次。
+2. `20260812_0026` 扩展 Pool/Runner/Project 容量字段，并创建 Registration Token、
+   Runner Task、Lease 和 Event；唯一约束、检查约束、索引和降级路径完整。
+3. Workflow 在 Runner Fabric Flag 开启时将加密 Snapshot 固定到 PostgreSQL Task；Claim 通过
+   `SKIP LOCKED` 认领并原子递增 Fence，Complete/Fail/Renew/Progress 必须同时匹配
+   Runner、Lease、Task 和 Fence，旧 Worker 无法重复写入终态。
+4. 高并发实测曾发现 Runner/Pool/Project 行锁与 Event 外键 Key Share 的反向锁链；最终改为
+   分命名空间的 PostgreSQL 事务 advisory lock，并把 Progress 续租与 Event 合并为同一事务。
+   修复后最终容量时间窗无 `deadlock detected`、429 或 500。
+5. Runner 控制面使用独立的按 Token 限流桶，默认 5000/分钟；通用用户写接口仍保持
+   120/分钟，没有为容量测试放宽业务安全门槛。
+6. 独立 Async Runner Agent 在执行前校验计划 SHA-256，运行现有 Workflow Engine 与 Host/CIDR
+   出站策略，对 408/425/429/5xx 和传输错误保持存活；结果类型、节点唯一性和 8 MiB
+   上限由控制面再验证。
+7. Docker Runner 以 UID/GID 65532、只读根文件系统、Drop ALL 和 `no-new-privileges`
+   运行；Kubernetes 参考 Deployment 还禁用 ServiceAccount Token、开启 RuntimeDefault seccomp、
+   设置资源上限并规定每 Token 单副本。S29 不接收用户 Compose、Shell、Plugin 或宿主凭据。
+8. 中文“执行面”页面展示 PostgreSQL 事实源摘要、Pool/Runner/Task/Lease/Fence/Event，支持
+   Pool/注册令牌创建、Drain/恢复/停用和事件详情；空状态、错误、分页与中文选择器均有测试。
+9. 后端全量 Ruff format/check、mypy 264 个源文件、依赖边界与 pytest 通过：293 passed、
+   3 skipped，总覆盖率 90.57%，Runner Fabric Service 96%、Repository 99%、Domain 96%。
+10. 前端格式、ESLint、TypeScript strict、145 项测试、覆盖率和生产构建通过：Statements
+    86.92%、Branches 80.72%、Functions 85.06%、Lines 88.90%；执行面页 Statements 92.37%。
+11. 真实 PostgreSQL 17 在一次性容器中完成 `0025 → 0026 → 0025 → 0026` 与
+    `alembic check`；PostgreSQL/Redis/MinIO 集成测试 3 passed。
+12. 最终 ARM64 Compose 容量夹具 `df313b29-5827-496d-b0db-ca81fc48ea74` 确认
+    5000 个唯一排队任务和加密计划，500/500 Workflow、500/500 Task、1000 个唯一节点终态、
+    0 重复、0 Active Lease、0 制品冲突、2 个实际 Worker；提交 P95 2.141591 秒，总耗时
+    144.893 秒。
+13. 最终故障转移夹具项目 `521b8519-96b3-4867-83ad-5fe7e07f8c38`：Agent A 认领后中断，
+    Agent B 以 Fence 2 完成第 2 次尝试，Workflow passed 且只有 3 条预期节点终态。Playwright
+    在真实 Compose 中 1/1 通过，覆盖真实登录、侧栏、事实告警、expired/terminal Event、
+    Drain/恢复、详情、Pool 与注册令牌。
+14. 整套 Compose 从最终代码重建后 Backend、Frontend、General/Data/AI/Performance/Environment Worker、
+    Beat、PostgreSQL、Redis、MinIO、Redpanda 和目标服务全部健康；Dockerfile 默认最终阶段已恢复
+    Application Runtime，Beat/AI Worker 不再误用 Runner Entrypoint。
+15. Ruff 安全规则、Python/前端依赖审计和 `flowtest-runner:ci` Grype v0.116.1
+    High/only-fixed 门槛通过；只使用现有 CPython 3.13.15 精确误报台账，本轮没有新增例外。
+16. S29 决策记录为 `ADR 0025`，架构、部署、监控/容量、升级/回滚和威胁模型已同步。
+    未创建 Draft PR、未合并、未开始 S30，也未创建任何新 V3 标签。
 
 ## 已完成：S28 变更影响引擎与确定性测试选择
 
@@ -301,10 +348,10 @@
 
 ## 下一步
 
-1. 在 `agent/s29-worker-plane` 完成 Runner Pool、PostgreSQL Lease/Fencing、受控远程 Docker/Kubernetes
-   Worker、心跳/Drain/失联恢复、重复消息隔离及对应中文 UI、迁移与测试；不接收用户任意命令或凭据。
-2. S29 必须通过后端、前端、双向迁移、真实 Compose、Playwright、安全、容量与故障恢复门槛后才创建
-   Draft PR；最新提交五项 CI 全绿才可 Ready、squash 合并并开始 S30。
+1. 提交当前 S29 实现与验收文档，推送 `agent/s29-worker-plane`，创建 Draft PR，并确认
+   Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke 五项检查。
+2. 如有真实 CI 失败，只做最小修复并重跑全部五项；全绿后才可 Ready、squash 合并、删除远程分支并创建
+   `agent/s30-failure-intelligence`。在此之前不开始 S30。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

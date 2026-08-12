@@ -24,3 +24,6 @@
 20. 事件协议、消息 Schema 与 WebSocket 会话边界
 21. 声明式性能场景、固定 k6 编译器与隔离 Runner
 22. 管理员签名环境模板、镜像白名单与幂等隔离 Provision Runner
+23. Pact 契约仓、Service Graph 与发布证据
+24. 多源变更影响与确定性测试选择
+25. PostgreSQL Lease/Fencing 与隔离 Runner 执行面
