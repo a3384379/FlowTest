@@ -15,6 +15,7 @@ from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.tasking.dispatch import (
     AIJobDispatcher,
+    EnvironmentTaskDispatcher,
     PerformanceRunDispatcher,
     TestPlanDispatcher,
     WorkflowDispatcher,
@@ -128,3 +129,20 @@ def get_performance_dispatcher(request: Request) -> PerformanceRunDispatcher:
 
 
 PerformanceQueue = Annotated[PerformanceRunDispatcher, Depends(get_performance_dispatcher)]
+
+
+def get_environment_dispatcher(request: Request) -> EnvironmentTaskDispatcher:
+    dispatcher = getattr(request.app.state, "environment_dispatcher", None)
+    required = callable(getattr(dispatcher, "start_environment_provision", None)) and callable(
+        getattr(dispatcher, "start_environment_cleanup", None)
+    )
+    if not required:
+        raise AppError(
+            code="ENVIRONMENT_QUEUE_UNAVAILABLE",
+            message="环境任务队列尚未就绪",
+            status_code=503,
+        )
+    return cast(EnvironmentTaskDispatcher, dispatcher)
+
+
+EnvironmentQueue = Annotated[EnvironmentTaskDispatcher, Depends(get_environment_dispatcher)]

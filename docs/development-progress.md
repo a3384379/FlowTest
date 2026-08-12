@@ -1,15 +1,45 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-12（Asia/Shanghai）
-状态：V3 S24 已合并；S25 Draft PR #28 已完成实现、本地全量验收和远端缺陷修复，2026-08-12 再次重跑的 CI 仍受 GitHub Actions 账户计费阻断。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+状态：仓库已公开；S25 PR #28 的五项 CI 全绿并 squash 合并；S26 签名环境实验室已完成实现和本地全部退出门槛，Draft PR #29 的远端 CI 正在执行。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@bad2b51`，S24 Draft PR #27 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s25-performance-lab`，Draft PR #28，开发版本 `3.0.0-alpha.1-dev.25`。
+- 当前基线：`main@eb2f0c8`，S25 PR #28 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s26-environment-lab`，实现提交 `5c68bdf`，Draft PR #29。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 本地验收完成：S26 签名环境实验室
+
+1. 新增管理员注册、创建版本和停用的 `EnvironmentTemplate`，版本保存规范 JSON、SHA-256 与平台
+   HMAC-SHA256-v1 签名；普通项目成员只能 Provision 已启用的签名版本。
+2. 声明式契约只允许固定 Digest 镜像、依赖顺序、受限环境变量、HTTP/TCP Health Check、资源上限、
+   TTL 和平台内置 `HTTP_GET_V1` Seed；不接收 Compose、命令、Entrypoint、脚本、Secret、设备或卷。
+3. 镜像同时受 OCI Digest 校验和部署级精确白名单约束。独立 `environment` Celery 队列由 UID/GID 65532、
+   只读根文件系统、Drop ALL 和 `no-new-privileges` 的 Worker 消费，不挂载宿主 Docker Socket。
+4. 独立 DinD daemon 不发布宿主端口；Runner 将签名契约翻译为固定 Docker CLI 参数数组，创建隔离 bridge、
+   非 root/只读/无 Capability 容器、随机宿主端口及 CPU、内存、PID 上限，不经过 Shell。
+5. `EnvironmentInstance` 保存模板 Snapshot、签名、Fencing Token、端点、Seed 证据、TTL 和 Cleanup 状态；
+   Idempotency-Key、Label 枚举、Beat Reconciler 与同一清理任务覆盖失败、超时、取消、TTL、消息重投和
+   Runner 重启后的幂等回收。
+6. 新增中文“环境实验室”深链接，覆盖模板注册、版本、停用、项目 Provision、状态、端点、Seed/隔离
+   证据和清理；页面没有任意 Compose 或脚本入口。
+7. 新增双向迁移 `20260812_0023`；真实 PostgreSQL 已完成 `0022 → 0023 → 0022 → 0023`，最终
+   `alembic check` 无漂移。
+8. 后端最终全量为 270 passed、3 skipped、总覆盖率 90.05%；Ruff、mypy strict、依赖边界和
+   Python 依赖审计通过。镜像白名单启动校验已收紧为完整 OCI Digest 格式并有回归测试。前端 133 项通过，
+   Statements 85.99%、Branches 80.14%、Functions 84.00%、Lines 88.15%，格式、Lint、TypeScript
+   strict 与生产构建通过。
+9. 真实 ARM64 Compose 已完成模板 v2、独立队列 Provision、Health、Seed、端点、Worker 停止/恢复、
+   队列清理和重复 Cleanup；最终实例 `f61af547-4813-4529-bda3-2499da147ea1` 已清理。真实 Chromium
+   最终复跑完成“注册 → 新版本 → Provision → Ready/证据 → Cleanup”1/1，耗时 27.5 秒。
+10. Python 与前端依赖审计通过。Environment Runner、定制 Docker 29.7.2/containerd v2.3.3 daemon
+    和固定 nginx fixture 均通过既有 Grype `only-fixed` High/Critical 门槛；没有新增漏洞豁免。
+11. 实现提交 `5c68bdf` 已推送，Draft PR #29 已创建；远端 Backend Test、Backend Integration、
+    Frontend Build、Security Source/Images 和 Compose Smoke 正在执行。五项全绿并 squash 合并前保持
+    Draft，`v3.0.0-beta.1` 只有在这些退出门槛全部真实通过后才可创建。
 
 ## 本地验收完成：S25 声明式性能实验室
 
@@ -45,13 +75,15 @@
     68 毫秒；保留 100 并发与零失败条件，将两核共享宿主的 Workflow P95 抖动容差校准为 75 秒，
     正式参考机的 100/1000 门槛不变。
 15. `3438f4a` 推送后的五项 GitHub Actions 均在 3–4 秒内、执行任何步骤前终止；Check Annotation 明确
-    指向账户付款失败或 Actions spending limit。该问题需要仓库所有者在 GitHub Billing & plans 处理，
-    处理后重跑 PR #28 全部检查；全绿并 squash 合并前不开始 S26。
+    指向账户付款失败或 Actions spending limit。该次结果被正确记录为外部计费阻塞，而不是代码失败。
 16. 2026-08-12 14:45（Asia/Shanghai）已对 `9eab87d` 的 Backend `31569796643`、Frontend
     `31569796638`、Security `31569796687` 和 Compose `31569796736` 执行重跑；五个新 Job
     `94033432944`、`94033432935`、`94033432495`、`94033431994`、`94033432684` 均在约 3 秒内失败，
     新 Check Annotation 仍明确提示近期账户付款失败或 Actions spending limit 需要提高，且无任何步骤日志。
-    这仍是外部计费阻塞，不是代码失败；PR 保持 Draft，不合并、不开始 S26。
+    这仍是外部计费阻塞，不是代码失败。
+17. 仓库公开后，PR #28 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
+    和 Compose Smoke 已全部重新执行并通过；PR 随后标记 Ready、squash 合并至 `main@eb2f0c8`，远端
+    `agent/s25-performance-lab` 分支已删除。公开仓库已开启 Secret Scanning 和 Push Protection。
 
 ## 已完成：S24 Kafka、WebSocket 与 Exchange
 
@@ -180,9 +212,11 @@
 
 ## 下一步
 
-1. 仓库所有者先在 GitHub Billing & plans 处理付款或 Actions spending limit；恢复后重跑 PR #28 的
-   Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose Smoke。
-   只有五项全部真实通过后才将 PR 标记 Ready、squash 合并并开始 S26。
-2. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-3. 未通过 S25 退出门槛不开始 S26；只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
+1. 观察 S26 Draft PR #29 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images
+   和 Compose Smoke；真实失败只做最小修复并重新执行完整 CI。五项全绿后标记 Ready、squash
+   合并并删除远端迭代分支。
+2. 仅在 S26 退出门槛全部满足后创建 `v3.0.0-beta.1`，然后从同步后的 `main` 创建独立 S27 分支；
+   S27–S31 继续遵循每迭代 Draft PR、完整 CI、squash 合并的顺序。
+3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
+4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

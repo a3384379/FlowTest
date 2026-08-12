@@ -42,6 +42,25 @@ def test_retention_default_does_not_exceed_system_limit() -> None:
         Settings(_env_file=None, retention_default_days=31, retention_max_days=30)
 
 
+def test_environment_lab_requires_exact_digest_allowlist() -> None:
+    with pytest.raises(ValidationError, match="镜像白名单"):
+        Settings(_env_file=None, feature_environment_lab_enabled=True)
+    with pytest.raises(ValidationError, match="OCI Digest"):
+        Settings(
+            _env_file=None,
+            feature_environment_lab_enabled=True,
+            environment_image_allowlist=["registry.example/fixture@sha256:not-a-digest"],
+        )
+
+    image = f"registry.example/fixture@sha256:{'a' * 64}"
+    configured = Settings(
+        _env_file=None,
+        feature_environment_lab_enabled=True,
+        environment_image_allowlist=[image],
+    )
+    assert configured.environment_image_allowlist == [image]
+
+
 def test_public_mock_dispatch_is_rate_limited_for_every_http_method() -> None:
     for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         request = Request(

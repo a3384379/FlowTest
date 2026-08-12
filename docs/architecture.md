@@ -14,6 +14,7 @@ FastAPI Control Plane
               │
         Execution Plane
         HTTPX + asyncio + DAG
+        Performance / Environment Runner
               │
           Target APIs
 ```
@@ -57,6 +58,7 @@ frontend/src/
 - Mock：无脚本的请求规则、模板响应与脱敏请求日志。
 - Protocol：GraphQL/gRPC Schema、Kafka/WebSocket 事件源与不可变协议 Snapshot。
 - Performance：声明式负载、固定 k6 编译结果、运行基线、阈值证据和质量门禁。
+- Environment Lab：管理员签名的不可变模板版本、受控 Provision、健康检查、Seed、TTL 与幂等清理。
 
 ## 4. 必须前置冻结的契约
 
@@ -76,6 +78,7 @@ frontend/src/
 - 生产环境运行需要明显标识、权限控制和审计记录。
 - 生产配置拒绝示例密钥、示例管理员密码和不安全 Cookie。
 - 运行时响应只在内存中供字段映射使用，进入数据库、日志和报告前统一脱敏。
+- 环境实验室不接受用户 Compose、命令、脚本、Secret 或卷；镜像必须是管理员白名单中的精确 Digest。
 
 ## 6. 质量策略
 
@@ -89,6 +92,10 @@ frontend/src/
 
 - API、Worker 与 Beat 共享 PostgreSQL、Redis 和 MinIO，但执行引擎不依赖 Celery。
 - Performance Worker 使用独立 `performance` 队列和非 root、只读 k6 镜像；用户定义不能包含脚本。
+- Environment Worker 使用独立 `environment` 队列和非 root、只读镜像；它不挂载宿主 Docker
+  Socket，只通过内部网络访问不对宿主暴露的独立 daemon。
+- Environment Instance 以 PostgreSQL 中的 Snapshot、签名、Fencing Token、TTL 和 Cleanup 状态为事实源；
+  Beat Reconciler 使失败、超时、取消、到期、重投和 Runner 重启共享同一幂等清理路径。
 - Beat 每日执行项目保留期清理；运行中执行与审计记录不会被项目清理任务删除。
 - `/api/v1/metrics` 暴露 HTTP 延迟/计数与持久化执行状态，不把 UUID 作为标签。
 - PostgreSQL 与 MinIO 作为一个恢复点备份；数据加密密钥必须由部署方在备份系统外安全托管。

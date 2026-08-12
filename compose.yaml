@@ -57,9 +57,17 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: ${FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED:-false}
   FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: ${FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED:-false}
   FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED: ${FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED:-false}
+  FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED: ${FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED:-false}
   FLOWTEST_PERFORMANCE_MAX_VUS: ${FLOWTEST_PERFORMANCE_MAX_VUS:-100}
   FLOWTEST_PERFORMANCE_MAX_DURATION_SECONDS: ${FLOWTEST_PERFORMANCE_MAX_DURATION_SECONDS:-1800}
   FLOWTEST_PERFORMANCE_RUNNER_TIMEOUT_SECONDS: ${FLOWTEST_PERFORMANCE_RUNNER_TIMEOUT_SECONDS:-2100}
+  FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '${FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST:-[]}'
+  FLOWTEST_ENVIRONMENT_RUNTIME_HOST: ${FLOWTEST_ENVIRONMENT_RUNTIME_HOST:-environment-docker}
+  FLOWTEST_ENVIRONMENT_MAX_TTL_SECONDS: ${FLOWTEST_ENVIRONMENT_MAX_TTL_SECONDS:-86400}
+  FLOWTEST_ENVIRONMENT_PROVISION_TIMEOUT_SECONDS: ${FLOWTEST_ENVIRONMENT_PROVISION_TIMEOUT_SECONDS:-300}
+  FLOWTEST_ENVIRONMENT_CLEANUP_TIMEOUT_SECONDS: ${FLOWTEST_ENVIRONMENT_CLEANUP_TIMEOUT_SECONDS:-120}
+  FLOWTEST_ENVIRONMENT_HEALTH_REQUEST_TIMEOUT_SECONDS: ${FLOWTEST_ENVIRONMENT_HEALTH_REQUEST_TIMEOUT_SECONDS:-5}
+  FLOWTEST_ENVIRONMENT_RECONCILE_INTERVAL_SECONDS: ${FLOWTEST_ENVIRONMENT_RECONCILE_INTERVAL_SECONDS:-30}
   FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED: ${FLOWTEST_FEATURE_PLUGIN_REGISTRY_ENABLED:-false}
   FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: ${FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED:-false}
   FLOWTEST_AI_BASE_URL: ${FLOWTEST_AI_BASE_URL:-}
@@ -434,6 +442,78 @@ services:
           cpus: "2.00"
           memory: 1G
 
+  environment-docker:
+    build:
+      context: ./backend
+      target: environment-daemon
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    expose:
+      - "2375"
+    volumes:
+      - environment_docker_data:/var/lib/docker
+    networks:
+      - environment-control
+      - environment-egress
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 2G
+
+  worker-environment:
+    build:
+      context: ./backend
+      target: environment-runtime
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasking.celery_app.celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=1",
+        "--queues=environment",
+        "--hostname=worker-environment@%h",
+      ]
+    environment:
+      <<: *flowtest-environment
+      DOCKER_HOST: tcp://environment-docker:2375
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+      - environment-control
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery --broker \"$$FLOWTEST_CELERY_BROKER_URL\" inspect ping --destination worker-environment@$$HOSTNAME --timeout 5 | grep -q pong && docker info >/dev/null",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    depends_on:
+      backend:
+        condition: service_healthy
+      environment-docker:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
   beat:
     build:
       context: ./backend
@@ -573,3 +653,9 @@ volumes:
   tempo_data:
   prometheus_data:
   grafana_data:
+  environment_docker_data:
+
+networks:
+  environment-control:
+    internal: true
+  environment-egress:

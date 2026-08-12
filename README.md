@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 路线 S25 声明式性能实验室已完成本地验收，等待 Draft PR 远程 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
+当前状态：`V3.0 路线 S25 已合并，S26 签名环境实验室 Draft PR #29 正在执行远端 CI`；V2 RC 的真实两周试点仍按观察窗口持续记录。
 
 ## 技术栈
 
@@ -156,6 +156,14 @@ k6 Runner。平台只编译结构化的固定 VU/阶梯升压、HTTP 步骤与 T
 发布、运行、基线和门禁下钻。架构边界见
 [`ADR 0021`](docs/adr/0021-declarative-performance-runner.md)。
 
+S26 新增管理员注册、平台签名、不可变版本化的 Environment Template，以及独立 `environment` 队列。
+模板只允许白名单中的固定 Digest 镜像、类型化 Health Check、资源上限、TTL 和预定义 Seed，不接收
+任意 Compose、命令、脚本、Secret、设备或卷。Environment Worker 不挂载宿主 Docker Socket，而是通过
+内部 Control Network 使用不对宿主发布端口的独立 daemon；固定 Docker CLI 参数强制非 root、只读、
+无 Capability 和资源隔离。实例以 Idempotency-Key、Fencing Token、Label、TTL 和 Reconciler 保证失败、
+超时、取消、消息重投及 Runner 重启后可幂等清理。Web“环境实验室”展示模板版本、端点、Seed/隔离证据
+和 Cleanup 状态。架构边界见 [`ADR 0022`](docs/adr/0022-signed-environment-runner.md)。
+
 全栈启动后可运行 `backend/.venv/bin/python scripts/smoke_s3.py`，自动验收登录、项目、
 环境、API 请求、六类断言、执行历史和敏感请求体脱敏。脚本会注销测试会话；创建的验收项目
 保留供人工查看，在一次性 CI 卷中会随 Compose 环境销毁。
@@ -194,6 +202,12 @@ scripts/verify_restore.sh /absolute/path/to/backup
 
 运行 `uv run --project backend python scripts/smoke_s25.py` 可在 Compose 中执行两次真实 k6 场景，
 验证独立队列、阈值、MinIO 原始指标、自动基线和 Quality Gate 证据。
+
+启用 `FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED=true` 并将固定 Digest fixture 写入
+`FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST` 后，运行
+`uv run --project backend python scripts/smoke_s26.py` 可验证管理员签名模板、版本、独立队列
+Provision、Health、Seed、TTL 证据与重复 Cleanup；设置 `FLOWTEST_S26_RESTART_WORKER=1` 时还会验证
+Environment Worker 停止、队列清理和恢复后的幂等回收。
 
 执行全部本地质量门槛使用 `./scripts/check.sh`。
 

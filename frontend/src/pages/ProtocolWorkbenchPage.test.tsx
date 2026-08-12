@@ -542,6 +542,7 @@ function installHandlers(enabled = true, credentials: Credential[] = []) {
         multi_protocol: enabled,
         event_protocols: enabled,
         performance_lab: false,
+        environment_lab: false,
       }),
     ),
     http.get('/api/v1/graphql/schemas', () =>

@@ -11,8 +11,13 @@ from app.core.config import settings
 from app.core.database import close_database, session_factory
 from app.core.storage import ensure_storage_bucket, object_storage
 from app.http.ai import OpenAICompatibleConfiguration, OpenAICompatibleProvider
+from app.runner.environment import ControlledDockerEnvironmentRuntime
 from app.runner.k6 import K6ProcessRunner
 from app.services.ai import AIJobRunner
+from app.services.environment_lab import (
+    EnvironmentReconciliationService,
+    EnvironmentRunCoordinator,
+)
 from app.services.execution_events import RedisExecutionEventBus
 from app.services.notifications import NotificationDeliveryService
 from app.services.performance import PerformanceRunCoordinator
@@ -22,6 +27,7 @@ from app.services.test_plan_runner import TestPlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflows import WorkflowService
 from app.tasking.celery_app import celery_app
+from app.tasking.dispatch import CeleryTaskDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +128,44 @@ async def _run_performance(run_id: UUID) -> None:
         K6ProcessRunner(raw_metrics_limit_bytes=settings.artifact_limit_bytes),
         object_storage,
     ).run(run_id)
+
+
+@celery_app.task(name="flowtest.provision_environment")  # type: ignore[untyped-decorator]
+def provision_environment(instance_id: str) -> None:
+    _run_async(lambda: _provision_environment(UUID(instance_id)))
+
+
+async def _provision_environment(instance_id: UUID) -> None:
+    await EnvironmentRunCoordinator(
+        session_factory,
+        ControlledDockerEnvironmentRuntime(),
+    ).provision(instance_id)
+
+
+@celery_app.task(name="flowtest.cleanup_environment")  # type: ignore[untyped-decorator]
+def cleanup_environment(instance_id: str) -> None:
+    _run_async(lambda: _cleanup_environment(UUID(instance_id)))
+
+
+async def _cleanup_environment(instance_id: UUID) -> None:
+    await EnvironmentRunCoordinator(
+        session_factory,
+        ControlledDockerEnvironmentRuntime(),
+    ).cleanup(instance_id)
+
+
+@celery_app.task(name="flowtest.reconcile_environments")  # type: ignore[untyped-decorator]
+def reconcile_environments() -> None:
+    _run_async(_reconcile_environments)
+
+
+async def _reconcile_environments() -> None:
+    async with session_factory() as session:
+        count = await EnvironmentReconciliationService(session).dispatch_due(
+            CeleryTaskDispatcher(celery_app)
+        )
+    if count:
+        logger.info("Environment reconciliation dispatched %s operations", count)
 
 
 def _run_async(operation: Callable[[], Coroutine[Any, Any, None]]) -> None:

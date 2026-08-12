@@ -124,8 +124,8 @@ V3 各自的真实验收门槛。
 | S22 | Capability SDK V3、Legacy Adapter、NodeResult/Event、Runner/Plugin 边界、V3 原型与 Token | 已完成；PR #25 全绿并 squash 合并 |
 | S23 | GraphQL、gRPC 与多协议工作台 | 已完成；PR #26 全绿并 squash 合并，发布 `v3.0.0-alpha.1` |
 | S24 | Kafka、WebSocket 与 Exchange | 已完成；PR #27 的 5 项 CI 全绿并 squash 合并 |
-| S25 | 声明式 k6 性能实验室 | 实现与本地全量门槛已完成；等待 Draft PR 远程 CI |
-| S26 | 签名环境模板、Provision/Cleanup/TTL | 未开始 |
+| S25 | 声明式 k6 性能实验室 | 已完成；PR #28 的 5 项 CI 全绿并 squash 合并 |
+| S26 | 签名环境模板、Provision/Cleanup/TTL | 实现与本地全部退出门槛完成；Draft PR #29 远端 CI 执行中 |
 | S27 | Pact、契约矩阵、Service Graph、Deployment Check | 未开始 |
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 未开始 |
 | S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
@@ -135,12 +135,28 @@ V3 各自的真实验收门槛。
 S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.md)，S23 多协议边界见
 [`ADR 0019`](adr/0019-multi-protocol-schema-snapshots.md)，S24 事件协议边界见
 [`ADR 0020`](adr/0020-event-protocols-and-session-boundary.md)，S25 性能执行边界见
-[`ADR 0021`](adr/0021-declarative-performance-runner.md)，视觉源见
+[`ADR 0021`](adr/0021-declarative-performance-runner.md)，S26 环境 Runner 边界见
+[`ADR 0022`](adr/0022-signed-environment-runner.md)，视觉源见
 [`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
 开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
 
 S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
 [`docs/operations/soak-observation.md`](operations/soak-observation.md)。
+
+## S26 完成清单
+
+1. Environment Template 只由系统管理员注册、创建不可变版本和停用；版本保存规范 JSON、SHA-256 与
+   平台签名，Provision 和 Runner 执行前都会重新验证。
+2. 类型契约仅允许固定 Digest 镜像、依赖、受限环境变量、HTTP/TCP Health Check、资源上限、TTL 与
+   预定义 Seed，明确不提供任意 Compose、命令、脚本、Secret、设备和卷。
+3. 镜像必须精确命中部署白名单；独立 Environment Worker 不挂载宿主 Docker Socket，只能通过内部
+   Control Network 访问不对宿主发布端口的 DinD daemon。
+4. Runner 使用参数数组生成固定 Docker CLI 调用，强制非 root、只读根文件系统、Drop ALL、
+   `no-new-privileges`、CPU/内存/PID 上限、随机端口、隔离 bridge 和实例 Label。
+5. Idempotency-Key、Fencing Token、TTL、Beat Reconciler 与 Label 枚举清理共同覆盖失败、超时、取消、
+   消息重投和 Runner 重启；清理任务可安全重复执行。
+6. 中文环境实验室提供模板、版本、Provision、端点、Seed/隔离证据和 Cleanup 状态；迁移、后端、前端、
+   真实 Compose、Playwright 和镜像安全门槛纳入 S26 Draft PR 的退出条件。
 
 ## S13 完成清单
 

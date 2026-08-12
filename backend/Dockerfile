@@ -1,5 +1,36 @@
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
 FROM grafana/k6:2.2.0@sha256:9bd01d6941fca969cb61bb57d2da5ee9b385fe2aa8881df3798c196564d6ace6 AS k6
+FROM docker:29.7.2-cli@sha256:000bb62ff495f986c9f5578eb67cc2cb98b91138eda81d7762d5371eb8a497fe AS docker-cli
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS containerd-builder
+
+RUN apk add --no-cache git make
+WORKDIR /src/containerd
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    set -eux; \
+    git init; \
+    git remote add origin https://github.com/containerd/containerd.git; \
+    git fetch --depth 1 origin aad11006b869517fcd3009450b6f82da282e1a9b; \
+    git checkout --detach FETCH_HEAD; \
+    test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
+    git tag v2.3.3; \
+    go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1; \
+    go mod vendor; \
+    make \
+        VERSION=v2.3.3 \
+        REVISION=aad11006b869517fcd3009450b6f82da282e1a9b \
+        bin/containerd bin/ctr
+
+FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon
+COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
+COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
+RUN set -eux; \
+    rm -f \
+        /usr/local/libexec/docker/cli-plugins/docker-buildx \
+        /usr/local/libexec/docker/cli-plugins/docker-compose; \
+    containerd --version; \
+    ctr --version
+
 FROM debian:trixie-slim AS python-runtime
 
 ENV PATH="/usr/local/bin:$PATH" \
@@ -116,6 +147,16 @@ RUN set -eux; \
     groupadd --gid 65532 flowtest; \
     useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
         --shell /usr/sbin/nologin flowtest
+ENV HOME=/tmp
+USER flowtest
+
+FROM python-runtime AS environment-runtime
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN set -eux; \
+    groupadd --gid 65532 flowtest; \
+    useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
+        --shell /usr/sbin/nologin flowtest; \
+    docker --version
 ENV HOME=/tmp
 USER flowtest
 

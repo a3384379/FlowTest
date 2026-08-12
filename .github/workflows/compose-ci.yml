@@ -23,6 +23,7 @@ on:
       - "scripts/smoke_s23.py"
       - "scripts/smoke_s24.py"
       - "scripts/smoke_s25.py"
+      - "scripts/smoke_s26.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -54,6 +55,7 @@ on:
       - "scripts/smoke_s23.py"
       - "scripts/smoke_s24.py"
       - "scripts/smoke_s25.py"
+      - "scripts/smoke_s26.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -112,6 +114,8 @@ jobs:
           FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: "true"
           FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: "true"
           FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED: "true"
+          FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED: "true"
+          FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '["nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3"]'
           FLOWTEST_AI_BASE_URL: http://mock-target:8080/v1
           FLOWTEST_AI_MODEL: flowtest-compose-model
           FLOWTEST_AI_API_KEY: flowtest-mock-ai-key
@@ -162,6 +166,10 @@ jobs:
         run: python3 scripts/smoke_s24.py
       - name: Verify S25 declarative performance, baseline, artifact, and gate flow
         run: python3 scripts/smoke_s25.py
+      - name: Verify S26 signed environment, Seed, and restart-safe cleanup flow
+        env:
+          FLOWTEST_S26_RESTART_WORKER: "1"
+        run: python3 scripts/smoke_s26.py
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |
           docker compose stop redpanda

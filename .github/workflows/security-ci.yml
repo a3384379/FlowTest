@@ -11,7 +11,7 @@ permissions:
 jobs:
   source-and-images:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -44,8 +44,12 @@ jobs:
         run: |
           docker build -t flowtest-backend:ci backend
           docker build --target performance-runtime -t flowtest-performance:ci backend
+          docker build --target environment-runtime -t flowtest-environment:ci backend
+          docker build --target environment-daemon -t flowtest-environment-daemon:ci backend
           docker build -t flowtest-frontend:ci frontend
           docker build -t flowtest-mock-target:ci mock-target
+          docker pull nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3
+          docker tag nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3 flowtest-environment-fixture:ci
       - name: Scan backend image
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
@@ -68,6 +72,33 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           image: flowtest-performance:ci
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
+      - name: Scan environment runner image
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: flowtest-environment:ci
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
+      - name: Scan environment daemon image
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: flowtest-environment-daemon:ci
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
+      - name: Scan environment fixture image
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: flowtest-environment-fixture:ci
           severity-cutoff: high
           only-fixed: true
           output-format: table

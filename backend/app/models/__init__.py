@@ -19,6 +19,11 @@ from app.models.base import Base
 from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
 from app.models.contracts import ContractRun, GeneratedContractCase
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
+from app.models.environment_lab import (
+    EnvironmentInstance,
+    EnvironmentTemplate,
+    EnvironmentTemplateVersion,
+)
 from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
 from app.models.imports import ImportRun
@@ -50,6 +55,9 @@ __all__ = [
     "ContractRun",
     "Credential",
     "Environment",
+    "EnvironmentInstance",
+    "EnvironmentTemplate",
+    "EnvironmentTemplateVersion",
     "EventSource",
     "FlakyRecord",
     "Folder",
