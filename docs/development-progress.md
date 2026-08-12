@@ -39,8 +39,9 @@
     精确 Combobox 定位并复跑通过。
 11. Python 与前端依赖审计无已知漏洞；本轮重建的 Backend/Frontend 镜像使用 CI 相同
     Grype 0.116.1、`only-fixed` High/Critical 门槛通过，无新增漏洞豁免。
-12. 架构边界已记录于 `ADR 0023`；当前仍在 `agent/s27-contract-matrix@2434db3`，未创建
-    Draft PR，未运行本轮 GitHub 五项 CI，因此不开始 S28，也不创建 `v3.0.0-beta.2` 标签。
+12. 架构边界已记录于 `ADR 0023`；实现提交为 `8ec92a3`，当前仍在
+    `agent/s27-contract-matrix`。未创建 Draft PR，未运行本轮 GitHub 五项 CI，因此不开始 S28，
+    也不创建 `v3.0.0-beta.2` 标签。
 
 ## 本地验收完成：S26 签名环境实验室
 
