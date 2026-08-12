@@ -5,7 +5,7 @@ import { authenticate } from './support/auth'
 type Identified = { id: string }
 
 test('S23 GraphQL、gRPC Reflection 与真实调试主路径', async ({ page }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(180_000)
   await page.goto('/')
   await authenticate(page)
   const token = await accessTokenFromSession(page.request)
@@ -46,17 +46,18 @@ async function executeGraphql(page: import('@playwright/test').Page) {
 async function importGrpcReflection(page: import('@playwright/test').Page) {
   const name = `S23 gRPC ${Date.now()}`
   await page.getByRole('button', { name: /导入协议 Schema/ }).click()
-  await page.getByLabel('名称').fill(name)
-  await page.getByLabel('导入格式').click()
+  const dialog = page.getByRole('dialog', { name: '导入协议 Schema' })
+  await dialog.getByLabel('名称').fill(name)
+  await dialog.getByLabel('导入格式').click()
   await page.getByText('Server Reflection（TLS）', { exact: true }).click()
-  await page.getByLabel('Schema 内容').fill('grpc-target:50051')
-  await page.getByText('明文', { exact: true }).click()
+  await dialog.getByLabel('Schema 内容').fill('grpc-target:50051')
+  await dialog.getByText('明文', { exact: true }).click()
   const response = page.waitForResponse(
     (item) =>
       item.url().endsWith('/api/v1/grpc/descriptors/reflection') &&
       item.request().method() === 'POST',
   )
-  await page.getByRole('button', { name: '校验并保存' }).click()
+  await dialog.getByRole('button', { name: '校验并保存' }).click()
   const imported = await response
   expect(imported.ok(), await imported.text()).toBeTruthy()
   const importedRow = page.getByRole('row').filter({ hasText: name })

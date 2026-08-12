@@ -46,6 +46,7 @@ celery_app.conf.update(
         "flowtest.provision_environment": {"queue": "environment"},
         "flowtest.cleanup_environment": {"queue": "environment"},
         "flowtest.reconcile_environments": {"queue": "environment"},
+        "flowtest.reconcile_runner_fabric": {"queue": "general"},
     },
     beat_schedule={
         "enqueue-due-test-plans": {
@@ -59,6 +60,10 @@ celery_app.conf.update(
         "reconcile-environments": {
             "task": "flowtest.reconcile_environments",
             "schedule": settings.environment_reconcile_interval_seconds,
+        },
+        "reconcile-runner-fabric": {
+            "task": "flowtest.reconcile_runner_fabric",
+            "schedule": settings.runner_reconcile_interval_seconds,
         },
     },
 )

@@ -1,19 +1,106 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-12（Asia/Shanghai）
-状态：仓库已公开；S27 已合并并发布 `v3.0.0-beta.2`；S28 变更影响引擎已通过本地代码、迁移、真实 ARM64 Compose、Playwright 与 Draft PR #31 五项 CI 退出门槛，正在提交最终验收记录并复验最新提交。`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+最后更新：2026-08-13（Asia/Shanghai）
+状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
+真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
+功能提交 `e8ef455` 的五项 CI 已全绿；最终文档提交 `113458a` 四项通过，Compose 暴露 S15
+旧选择器与重试名称复用问题，正在做最小测试稳定性修复。
+`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@83375d20a2726c1088d1afaa6c660863246fed5f`，S27 PR #30 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s28-impact-intelligence`；S28 实现提交 `54a4061`、本地验收文档提交 `a464fa2`
-  和 PR 记录提交 `5f3f7d4` 已推送。Draft PR #31 在 `5f3f7d4` 上五项 CI 全绿，正在提交最终远端验收记录。
+- 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、Compose 编排修复 `7e40dfc` 和浏览器
+  稳定性修复 `e8ef455`、验收文档 `113458a` 已推送，Draft PR #32 保持 Draft；S15 最小修复待提交。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
-  `v3.0.0-beta.1`、`v3.0.0-beta.2`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
+  `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 本地验收完成：S28 变更影响引擎与确定性测试选择
+## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
+
+1. 新增管理员 Worker Pool、一次性注册令牌、Runner 身份/心跳、Drain/Resume/Disable、Task、
+   Lease、Fence 和 Event API；高熵 Token 只保存 SHA-256 查找哈希，明文只返回一次。
+2. `20260812_0026` 扩展 Pool/Runner/Project 容量字段，并创建 Registration Token、
+   Runner Task、Lease 和 Event；唯一约束、检查约束、索引和降级路径完整。
+3. Workflow 在 Runner Fabric Flag 开启时将加密 Snapshot 固定到 PostgreSQL Task；Claim 通过
+   `SKIP LOCKED` 认领并原子递增 Fence，Complete/Fail/Renew/Progress 必须同时匹配
+   Runner、Lease、Task 和 Fence，旧 Worker 无法重复写入终态。
+4. 高并发实测曾发现 Runner/Pool/Project 行锁与 Event 外键 Key Share 的反向锁链；最终改为
+   分命名空间的 PostgreSQL 事务 advisory lock，并把 Progress 续租与 Event 合并为同一事务。
+   修复后最终容量时间窗无 `deadlock detected`、429 或 500。
+5. Runner 控制面使用独立的按 Token 限流桶，默认 5000/分钟；通用用户写接口仍保持
+   120/分钟，没有为容量测试放宽业务安全门槛。
+6. 独立 Async Runner Agent 在执行前校验计划 SHA-256，运行现有 Workflow Engine 与 Host/CIDR
+   出站策略，对 408/425/429/5xx 和传输错误保持存活；结果类型、节点唯一性和 8 MiB
+   上限由控制面再验证。
+7. Docker Runner 以 UID/GID 65532、只读根文件系统、Drop ALL 和 `no-new-privileges`
+   运行；Kubernetes 参考 Deployment 还禁用 ServiceAccount Token、开启 RuntimeDefault seccomp、
+   设置资源上限并规定每 Token 单副本。S29 不接收用户 Compose、Shell、Plugin 或宿主凭据。
+8. 中文“执行面”页面展示 PostgreSQL 事实源摘要、Pool/Runner/Task/Lease/Fence/Event，支持
+   Pool/注册令牌创建、Drain/恢复/停用和事件详情；空状态、错误、分页与中文选择器均有测试。
+9. 后端全量 Ruff format/check、mypy 264 个源文件、依赖边界与 pytest 通过：293 passed、
+   3 skipped，总覆盖率 90.57%，Runner Fabric Service 96%、Repository 99%、Domain 96%。
+10. 前端格式、ESLint、TypeScript strict、145 项测试、覆盖率和生产构建通过：Statements
+    86.92%、Branches 80.72%、Functions 85.06%、Lines 88.90%；执行面页 Statements 92.37%。
+11. 真实 PostgreSQL 17 在一次性容器中完成 `0025 → 0026 → 0025 → 0026` 与
+    `alembic check`；PostgreSQL/Redis/MinIO 集成测试 3 passed。
+12. 最终 ARM64 Compose 容量夹具 `df313b29-5827-496d-b0db-ca81fc48ea74` 确认
+    5000 个唯一排队任务和加密计划，500/500 Workflow、500/500 Task、1000 个唯一节点终态、
+    0 重复、0 Active Lease、0 制品冲突、2 个实际 Worker；提交 P95 2.141591 秒，总耗时
+    144.893 秒。
+13. 最终故障转移夹具项目 `521b8519-96b3-4867-83ad-5fe7e07f8c38`：Agent A 认领后中断，
+    Agent B 以 Fence 2 完成第 2 次尝试，Workflow passed 且只有 3 条预期节点终态。Playwright
+    在真实 Compose 中 1/1 通过，覆盖真实登录、侧栏、事实告警、expired/terminal Event、
+    Drain/恢复、详情、Pool 与注册令牌。
+14. 整套 Compose 从最终代码重建后 Backend、Frontend、General/Data/AI/Performance/Environment Worker、
+    Beat、PostgreSQL、Redis、MinIO、Redpanda 和目标服务全部健康；Dockerfile 默认最终阶段已恢复
+    Application Runtime，Beat/AI Worker 不再误用 Runner Entrypoint。
+15. Ruff 安全规则、Python/前端依赖审计和 `flowtest-runner:ci` Grype v0.116.1
+    High/only-fixed 门槛通过；只使用现有 CPython 3.13.15 精确误报台账，本轮没有新增例外。
+16. S29 决策记录为 `ADR 0025`，架构、部署、监控/容量、升级/回滚和威胁模型已同步。
+17. 实现提交 `030ed2a` 与本地验收文档提交 `a1c2814` 已推送并创建 Draft PR #32。首轮
+    Backend Test（2 分 22 秒）与 Integration（1 分 17 秒，run `31614733014`）、Frontend Build
+    （8 分 22 秒，run `31614732898`）和 Security Source/Images（9 分 8 秒，run
+    `31614732960`）通过。
+18. 首轮 Compose Smoke（run `31614733061`）实际启动并在 S5 失败，不是账户计费阻塞：Job 级
+    `FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED=true` 使旧 S5 Workflow 进入 PostgreSQL Runner Queue，
+    但 S29 Runner 尚未注册，因而执行一直处于 queued。最小修复将 S29 功能开关限制在 S29
+    Smoke、浏览器和容量窗口，并在其余回归中恢复 Celery；为保证 Backend 重建后不丢失 S18–S28
+    功能开关，这些既有开关提升为 Job 级环境。修复后必须重跑五项 CI。
+19. 编排修复提交 `7e40dfc` 的 Backend Test（2 分 18 秒）与 Integration（1 分 10 秒，run
+    `31616461170`）、Frontend Build（8 分 20 秒，run `31616461166`）和 Security Source/Images
+    （10 分 36 秒，run `31616461286`）通过。Compose（run `31616461215`）已通过 S3–S11、S29
+    Smoke 与 S29 浏览器、Runner→Celery 恢复，但 S22 浏览器用例仍假设 Runner Pool 为空；S29
+    Smoke 已按设计持久化 Pool，因此旧空表文案不存在。S23 在 CI 首次选择器超时、重试通过，本机
+    资源抖动下又耗尽 90 秒场景预算，后端未收到 Reflection POST；将真实 GraphQL+gRPC 双链路预算
+    调整为 180 秒，并把可见“明文”分段定位限定到具体 Dialog/Tab。S22 最小修复改为验证 Runner
+    清单列结构；两处均保留请求成功和 S29 真实 Pool/Runner/Fence 的原有业务断言。本机保留 S29
+    Pool 的 Celery 栈上 S22 通过（13.6 秒）；S23 复跑期间 Docker Desktop 全局失去调度，`/live`
+    同步超时且安全策略请求由 Nginx 返回 504，不能记作通过，最终以全新 Linux CI Runner 为准。
+20. 浏览器稳定性修复提交 `e8ef455` 的 Backend Test（2 分 19 秒）与 Integration（1 分 7 秒，run
+    `31620507777`）、Frontend Build（8 分 1 秒，run `31620507771`）和 Security Source/Images
+    （9 分 39 秒，run `31620507745`）通过。Compose run `31620507971` 首次在构建 PostgreSQL
+    镜像时从 GitHub Release 下载固定校验和 WAL-G 遇到 `curl (56) Connection died`，属于外部下载
+    瞬断；同一提交只重跑失败 Workflow 后 attempt 2 在 27 分 58 秒内通过。
+21. Compose attempt 2 完成 S3–S29 冒烟、S29 Runner→Celery 双向切换、S29 浏览器 1 passed 和
+    非 S29 浏览器 15 passed（1.9 分钟，无 flaky）、Kafka 兼容、API/Workflow/1000 任务容量与隔离卷
+    备份恢复。S29 CI 容量项目 `6d4554fc-8009-47ed-8aac-d260998e6a02` 完成 5000 个唯一排队执行与
+    加密计划、500/500 Workflow 和 Task、1000 个唯一终态节点、0 重复、0 Active Lease、0 制品
+    冲突、2 个实际 Worker；提交 P95 3.376032 秒，总耗时 218.597 秒。最终文档提交仍须重跑五项
+    CI；未合并、未开始 S30，也未创建任何新 V3 标签。
+22. 最终文档提交 `113458a` 的 Backend Test（2 分 22 秒）与 Integration（58 秒，run
+    `31623263953`）、Frontend Build（8 分 5 秒，run `31623263861`）和 Security Source/Images
+    （8 分 35 秒，run `31623263885`）通过。Compose run `31623263871` 已通过 S3–S11、S29 Smoke、
+    S29 浏览器与 Runner→Celery 恢复，但 S15 首次运行通过资产创建后，计划资产类型用无作用域文本
+    点击且未等待条件字段，耗尽 90 秒；Playwright 重试又复用同一名称，创建请求未被显式验证。
+    最小修复为每次重试加入唯一后缀，所有 UI 创建操作等待并验证对应 POST 2xx 和 Dialog 关闭，
+    Ant Select 使用可见 Dropdown 作用域，并将完整 S15 真实链路预算调整为 180 秒。修复后必须重跑
+    完整五项 CI。本机缩减非必要服务后的真实 Compose 栈 S15 1/1 通过，场景 18.2 秒；前端
+    145 项覆盖率、格式、ESLint、TypeScript strict 与生产构建再次通过。未合并、未开始 S30，
+    也未创建任何新 V3 标签。
+
+## 已完成：S28 变更影响引擎与确定性测试选择
 
 1. 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类受控变更源；领域解析器不访问外部
    Git、不接收仓库凭据或脚本，只处理有界文本和已登记 Schema，限制 2 MB、500 文件、100,000 行与
@@ -48,6 +135,15 @@
     Source/Images（9 分 43 秒，run `31597011152`）和 Compose Smoke（14 分 47 秒，run
     `31597011135`）。Compose 同一提交完成 S3–S28、Apache Kafka 兼容、API/Workflow 容量、1000 任务
     持久队列和隔离卷备份恢复；最终验收文档提交仍须复跑全部 CI。
+13. 最终文档提交 `5f5da5a` 的 Backend Test（2 分 10 秒）与 Integration（1 分 9 秒，run
+    `31598296375`）、Frontend Build（5 分 39 秒，run `31598296441`）、Security Source/Images
+    （9 分 57 秒，run `31598296383`）和 Compose Smoke（17 分 54 秒，run `31598296388`）五项全绿。
+    PR #31 随后标记 Ready 并 squash 合并至 `main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，
+    远端 `agent/s28-impact-intelligence` 已删除。
+14. 合并提交触发的 Backend（run `31599845096`）、Frontend（run `31599845036`）、Security（run
+    `31599844926`）和 Compose（18 分 47 秒，run `31599844971`）全部成功；Compose 再次通过 S3–S28、
+    Kafka、容量与隔离恢复。S15 浏览器用例首次未找到新建行，Playwright 自动重试后通过，工作流留下
+    flaky 注解但最终 14 passed。满足门槛后，annotated `v3.0.0-beta.3` 已固定到 `05e7cc3` 并推送。
 
 ## 已完成：S27 Pact 契约中心与发布兼容矩阵
 
@@ -293,10 +389,10 @@
 
 ## 下一步
 
-1. 提交并推送 Draft PR #31 的最终远端验收记录，等待 Backend Test、Backend Integration、
-   Frontend Build、Security Source/Images 和 Compose Smoke 在最新提交全部通过；若有真实失败，读取日志并最小修复。
-2. PR #31 最新提交五项 CI 全绿后才标记 Ready 并 squash 合并；同步并验证 `main` 后，只有 S28 发布
-   门槛全部满足才创建 `v3.0.0-beta.3`，随后才能创建独立 `agent/s29-worker-plane` 开始 S29。
+1. 提交并推送 S15 浏览器稳定性与验收文档修复，重跑 Backend Test、Backend Integration、Frontend Build、
+   Security Source/Images 和 Compose Smoke 五项检查。
+2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；最终提交全绿后才可 Ready、squash 合并、删除远程分支并创建
+   `agent/s30-failure-intelligence`。在此之前不开始 S30。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。

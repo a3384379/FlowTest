@@ -13,9 +13,14 @@ Prometheus 抓取 `/api/v1/metrics`：
 - `flowtest_celery_workers_active`：60 秒内持续上报心跳的 Worker 数。
 - `flowtest_celery_tasks_total`：按 succeeded、failed、retried 统计的 Worker 任务结果。
 - `flowtest_celery_metrics_available`：Redis 队列与 Worker 指标是否可采集。
+- `flowtest_runner_records`：按 online、offline、draining、disabled 统计的远程 Runner 数。
+- `flowtest_runner_tasks`：按 queued、leased、completed、failed 统计的 PostgreSQL Runner Task。
+- `flowtest_runner_active_leases`：当前 Active Lease 数，无 UUID、Token 或用户输入标签。
 
 建议告警：readiness 连续 2 分钟失败、5xx 比例 5 分钟超过 2%、P95 超过 1 秒、
 失败执行持续升高、执行指标不可用、Worker 健康检查失败、磁盘使用率超过 80%。
+Runner Fabric 还应告警：Pool 有排队但 2 分钟内无 online Runner、Active Lease 长时间超过
+Pool 并发上限、expired/failed Event 突增、单个 Runner 心跳超时以及控制面 409/429/5xx 突增。
 
 ## 分布式追踪与 Grafana
 
@@ -41,6 +46,7 @@ FLOWTEST_OTEL_ENABLED=true docker compose --profile observability up -d --build 
 uv run --project backend python scripts/capacity_s11.py
 uv run --project backend python scripts/capacity_workflow.py
 uv run --project backend python scripts/capacity_s19.py
+uv run --project backend python scripts/capacity_s29.py
 ```
 
 默认先用 30 个请求预热 HTTP 连接池，再对 `/api/v1/live` 发出 300 个请求、并发 30，
@@ -95,6 +101,25 @@ Execution 唯一终态，测试结束后恢复默认单 Worker：
 
 该结果验证 S22 Legacy Adapter、Capability Snapshot 和统一 NodeResult 未破坏单机吞吐，并形成
 四 Worker 的早期对照基线；它不是 S29 远程 Runner Lease/Fencing 的 500/5000 分布式容量承诺。
+
+## V3 S29 Runner Fabric 容量与故障门槛
+
+`capacity_s29.py` 固定以 10 个服务 Token 提交 5000 个唯一 Workflow Execution，在 Runner
+启动前由 PostgreSQL 确认 5000 个 queued Task、5000 个唯一 Execution ID 和 5000 份加密计划。
+脚本随后只删除本次夹具的 4500 个 Execution，保留 500 个样本交由两个独立身份、各 250
+并发的 Runner 完成。退出条件是：500/500 Workflow/Task 通过、1000 个唯一节点终态、0 重复、
+0 Active Lease、0 Artifact 冲突且两个 Worker 都被实际使用。任何 PostgreSQL deadlock、控制面
+429/5xx 或 Runner 拒绝日志都使本轮证据无效，必须用新夹具重跑。
+
+2026-08-12 在 ARM64 Docker Desktop 29.6.2 上通过最终门槛：宿主机 10 核/16 GiB，Docker VM
+10 核/约 7.75 GiB；5000 个唯一持久任务和加密计划完整，提交 P95 2.141591 秒；
+500 个 Workflow 在 144.893 秒内全部通过，1000 个节点终态0 重复、0 Active Lease、0 制品冲突，
+两个 Worker 均承担任务；从最终镜像启动到结束无 deadlock、429、500 或 Runner 内部失败。
+
+`smoke_s29.py` 是独立故障门槛：Agent A 认领后被强制停止，Lease 过期后 Agent B 必须以
+更高 Fence 接管，最终只允许一组节点终态。本次结果为 2 次尝试、Fence 2、Workflow passed、
+3 条预期节点终态。这两项本地结果是 S29 Compose 参考证据，不代替生产网络、TLS、异构
+Kubernetes 或长时间 RC 观察。
 
 容量结果必须同时记录 Control Plane 与 Worker 的 CPU/内存规格、Docker 版本和宿主架构。
 单机 Compose 门槛是兼容性承诺，不等价于 V3 四 Worker Plane 的分布式容量目标。

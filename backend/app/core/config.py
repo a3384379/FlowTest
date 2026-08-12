@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "FlowTest API"
-    app_version: str = "3.0.0-beta.2-dev.28"
+    app_version: str = "3.0.0-beta.3-dev.29"
     environment: str = "local"
     debug: bool = False
     log_level: str = "INFO"
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     auth_rate_limit_per_minute: int = Field(default=10, ge=1, le=1000)
     execution_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
     write_rate_limit_per_minute: int = Field(default=120, ge=1, le=5000)
+    runner_control_rate_limit_per_minute: int = Field(default=5000, ge=100, le=50_000)
     workflow_event_retention_seconds: int = Field(default=86_400, ge=60, le=604_800)
     secret_key: str = "change-me-before-production-at-least-32-bytes"  # noqa: S105
     access_token_minutes: int = Field(default=15, ge=1, le=60)
@@ -73,6 +74,11 @@ class Settings(BaseSettings):
     feature_environment_lab_enabled: bool = False
     feature_contract_hub_enabled: bool = False
     feature_impact_engine_enabled: bool = False
+    runner_max_attempts: int = Field(default=3, ge=1, le=10)
+    runner_result_limit_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
+    runner_registration_ttl_seconds: int = Field(default=900, ge=60, le=86400)
+    runner_poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
+    runner_reconcile_interval_seconds: int = Field(default=5, ge=5, le=300)
     performance_max_vus: int = Field(default=100, ge=1, le=1000)
     performance_max_duration_seconds: int = Field(default=1800, ge=1, le=3600)
     performance_runner_timeout_seconds: int = Field(default=2100, ge=60, le=3900)

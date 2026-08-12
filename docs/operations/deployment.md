@@ -17,6 +17,8 @@
    启用 V3 Environment Lab 时，将 `FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED=true`，并把管理员审核过的
    `repository@sha256:...` 精确列表写入 `FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST`；空白名单或非 Digest
    条目会阻止应用启动。不要加入包含 Shell、调试工具、特权 Entrypoint 或不受维护的镜像。
+   启用 V3 Runner Fabric 时还要设置 `FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED=true`，根据经审批
+   Runner 规模设置 `FLOWTEST_RUNNER_CONTROL_RATE_LIMIT_PER_MINUTE`，生产默认建议保留 5000。
 4. 运行 `docker compose config --quiet`，确认插值结果中没有空凭据。
 5. 运行 `docker compose up -d --build --wait`。
 6. 验证 `/api/v1/live`、`/api/v1/ready`、`/api/v1/metrics` 和 Web 首页。
@@ -41,7 +43,25 @@ Control Network 连接独立 `environment-docker` daemon。daemon 因 DinD 需�
 `FLOWTEST_ENVIRONMENT_MAX_TTL_SECONDS` 限制；Provision、Cleanup、Health 和 Reconcile 超时分别由
 对应 `FLOWTEST_ENVIRONMENT_*` 配置约束。修改镜像白名单、daemon 网络或这些上限后，应重新执行 S26
 真实 Compose 冒烟、Playwright 和三类环境镜像扫描。
-V2.0 正式部署仍为单机 Compose，不支持跨主机调度或 Kubernetes。
+V2.0 正式部署仍为单机 Compose；V3 控制面仍使用 Compose，Runner Fabric 可选将
+Worker Plane 部署在 Kubernetes。
+
+## V3 Runner Fabric
+
+1. 先在管理员“执行面”中创建 Worker Pool，固定 Runner 类型、运行时、网络区、标签、能力、
+   Pool 并发、Lease 时长和心跳超时。只为已审批的 Worker 生成一次性注册令牌，令牌到期或
+   使用后不能重放。
+2. Compose 调试可把注册令牌或已注册 Runner Token 通过
+   `FLOWTEST_RUNNER_A_*` / `FLOWTEST_RUNNER_B_*` 注入，再运行
+   `docker compose --profile runner-fabric up -d --wait runner-agent-a runner-agent-b`。持久卷中的
+   Identity Token 文件权限是 `0600`，不应复制到日志、镜像或备份。
+3. Kubernetes 参考 [`deploy/kubernetes/runner-agent.yaml`](../../deploy/kubernetes/runner-agent.yaml)。生产 Overlay
+   必须把本地 Tag 替换为已审批的不变 Digest，将 Control Plane URL 设为 HTTPS，并为每个
+   Deployment/Token 保持 `replicas: 1`。水平扩容必须新建 Runner 身份，不能共享 Token。
+4. 滚动维护前先对 Runner 执行 Drain，等待 `current_load=0` 和无 Active Lease 后停止实例。
+   意外中断时不手工改任务表；Lease 过期后 Reconciler 会重排，旧 Worker 由 Fence 拒绝写入。
+5. Runner 容器不挂载宿主 Docker Socket，不注入项目 Secret、云凭据或 Kubernetes
+   ServiceAccount。S29 不提供任意 Compose、命令、Shell 或用户 Plugin 入口。
 
 ## 启停
 
@@ -49,6 +69,7 @@ V2.0 正式部署仍为单机 Compose，不支持跨主机调度或 Kubernetes�
 docker compose up -d --wait
 docker compose ps
 docker compose logs --tail=200 backend worker worker-data worker-ai worker-performance worker-environment environment-docker beat
+docker compose --profile runner-fabric logs --tail=200 runner-agent-a runner-agent-b
 docker compose stop
 ```
 

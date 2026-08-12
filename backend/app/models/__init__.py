@@ -39,6 +39,12 @@ from app.models.performance import PerformanceGateEvaluation, PerformanceRun, Pe
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
 from app.models.reporting import NotificationDelivery, NotificationWebhook
+from app.models.runner_fabric import (
+    RunnerEvent,
+    RunnerLeaseRecord,
+    RunnerRegistrationToken,
+    RunnerTask,
+)
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import (
     TestCase,
@@ -95,7 +101,11 @@ __all__ = [
     "QualityGateEvaluation",
     "RefreshSession",
     "Runner",
+    "RunnerEvent",
+    "RunnerLeaseRecord",
     "RunnerPool",
+    "RunnerRegistrationToken",
+    "RunnerTask",
     "SchemaArtifact",
     "Secret",
     "ServiceCatalogEntry",

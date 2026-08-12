@@ -56,6 +56,7 @@ const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
+const ExecutionFabricPage = lazy(() => import('./pages/ExecutionFabricPage'))
 const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage'))
 
 const { Header, Content, Sider } = Layout
@@ -77,6 +78,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   ai: 'AI 助手',
   reports: '测试报告',
   platform: '平台管理',
+  fabric: '分布式执行面',
 }
 
 export default function App() {
@@ -132,7 +134,10 @@ function AuthenticatedShell() {
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
             ...(user?.is_system_admin
-              ? [navigationItem('platform', <ToolOutlined />, '/platform')]
+              ? [
+                  navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'),
+                  navigationItem('platform', <ToolOutlined />, '/platform'),
+                ]
               : []),
           ]}
         />
@@ -199,6 +204,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/platform" element={<PlatformCapabilitiesPage />} />
+      <Route path="/execution-fabric" element={<ExecutionFabricPage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
       {(
         [

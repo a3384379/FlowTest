@@ -22,6 +22,7 @@ from app.services.execution_events import RedisExecutionEventBus
 from app.services.notifications import NotificationDeliveryService
 from app.services.performance import PerformanceRunCoordinator
 from app.services.retention import RetentionCleanupService
+from app.services.runner_fabric import RunnerFabricService
 from app.services.tasking import TestPlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -96,6 +97,20 @@ async def _cleanup_retention() -> None:
     async with session_factory() as session:
         summary = await RetentionCleanupService(session).cleanup()
     logger.info("Retention cleanup completed: %s", summary)
+
+
+@celery_app.task(name="flowtest.reconcile_runner_fabric")  # type: ignore[untyped-decorator]
+def reconcile_runner_fabric() -> None:
+    _run_async(_reconcile_runner_fabric)
+
+
+async def _reconcile_runner_fabric() -> None:
+    if not settings.feature_runner_fabric_enabled:
+        return
+    async with session_factory() as session:
+        reconciled = await RunnerFabricService(session, enabled=True).reconcile()
+    if reconciled:
+        logger.info("Runner Fabric reconciled records: %s", reconciled)
 
 
 @celery_app.task(name="flowtest.run_ai_job")  # type: ignore[untyped-decorator]

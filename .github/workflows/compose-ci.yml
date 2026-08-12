@@ -26,11 +26,13 @@ on:
       - "scripts/smoke_s26.py"
       - "scripts/smoke_s27.py"
       - "scripts/smoke_s28.py"
+      - "scripts/smoke_s29.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
       - "scripts/capacity_workflow.py"
       - "scripts/capacity_s19.py"
+      - "scripts/capacity_s29.py"
       - "scripts/backup.sh"
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
@@ -60,11 +62,13 @@ on:
       - "scripts/smoke_s26.py"
       - "scripts/smoke_s27.py"
       - "scripts/smoke_s28.py"
+      - "scripts/smoke_s29.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
       - "scripts/capacity_workflow.py"
       - "scripts/capacity_s19.py"
+      - "scripts/capacity_s29.py"
       - "scripts/backup.sh"
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
@@ -89,6 +93,16 @@ jobs:
       FLOWTEST_S19_API_CONCURRENCY: "10"
       FLOWTEST_FEATURE_CONTRACT_HUB_ENABLED: "true"
       FLOWTEST_FEATURE_IMPACT_ENGINE_ENABLED: "true"
+      FLOWTEST_FEATURE_AI_ENABLED: "true"
+      FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED: "true"
+      FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: "true"
+      FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: "true"
+      FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED: "true"
+      FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED: "true"
+      FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '["nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3"]'
+      FLOWTEST_AI_BASE_URL: http://mock-target:8080/v1
+      FLOWTEST_AI_MODEL: flowtest-compose-model
+      FLOWTEST_AI_API_KEY: flowtest-mock-ai-key
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -114,17 +128,6 @@ jobs:
       - name: Validate Compose configuration
         run: docker compose config --quiet
       - name: Start FlowTest stack
-        env:
-          FLOWTEST_FEATURE_AI_ENABLED: "true"
-          FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED: "true"
-          FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: "true"
-          FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: "true"
-          FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED: "true"
-          FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED: "true"
-          FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '["nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3"]'
-          FLOWTEST_AI_BASE_URL: http://mock-target:8080/v1
-          FLOWTEST_AI_MODEL: flowtest-compose-model
-          FLOWTEST_AI_API_KEY: flowtest-mock-ai-key
         run: docker compose up -d --build --wait
       - name: Verify public endpoints
         run: |
@@ -156,8 +159,28 @@ jobs:
         run: python3 scripts/smoke_s10.py
       - name: Verify S11 V1.0 complete business and operations flow
         run: python3 scripts/smoke_s11.py
-      - name: Verify V1.0 browser acceptance flow
-        run: pnpm --dir frontend e2e
+      - name: Enable S29 Runner Fabric
+        env:
+          FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
+        run: |
+          docker compose --profile runner-fabric build runner-agent-a runner-agent-b
+          docker compose up -d --force-recreate --wait backend worker beat
+      - name: Verify S29 Worker lease, fencing, recovery, and drain flow
+        env:
+          FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
+        run: uv run --project backend python scripts/smoke_s29.py
+      - name: Verify S29 browser acceptance flow
+        run: >-
+          pnpm --dir frontend exec playwright test
+          e2e/s29-execution-fabric.spec.ts --project=chromium --no-deps
+      - name: Restore Celery workflow execution
+        run: |
+          docker compose --profile runner-fabric stop runner-agent-a runner-agent-b
+          docker compose up -d --force-recreate --wait backend worker beat
+      - name: Verify non-S29 browser acceptance flow
+        run: >-
+          pnpm --dir frontend exec playwright test --project=chromium --no-deps
+          --grep-invert "S29 Worker"
       - name: Verify S18 contract generation and review flow
         run: python3 scripts/smoke_s18.py
       - name: Verify S19 scheduling, quality gate, Flaky, and JUnit flow
@@ -194,6 +217,14 @@ jobs:
         run: uv run --project backend python scripts/capacity_workflow.py
       - name: Run durable 1000-task queue capacity gate
         run: uv run --project backend python scripts/capacity_s19.py
+      - name: Enable S29 Runner Fabric capacity plane
+        env:
+          FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
+        run: docker compose up -d --force-recreate --wait backend worker beat
+      - name: Run S29 5000-queue and 500-workflow multi-Worker capacity gate
+        env:
+          FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
+        run: uv run --project backend python scripts/capacity_s29.py
       - name: Verify backup recovery in isolated volumes
         run: |
           backup_directory="$(mktemp -d)"

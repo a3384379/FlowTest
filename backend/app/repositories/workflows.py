@@ -140,7 +140,7 @@ class WorkflowRepository:
             update(WorkflowExecution)
             .where(
                 WorkflowExecution.parent_execution_id == execution_id,
-                WorkflowExecution.status == "running",
+                WorkflowExecution.status.in_(("queued", "running")),
                 WorkflowExecution.cancel_requested_at.is_(None),
             )
             .values(cancel_requested_at=requested_at)

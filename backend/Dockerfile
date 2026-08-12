@@ -160,4 +160,14 @@ RUN set -eux; \
 ENV HOME=/tmp
 USER flowtest
 
+FROM python-runtime AS runner-runtime
+RUN set -eux; \
+    groupadd --gid 65532 flowtest; \
+    useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
+        --shell /usr/sbin/nologin flowtest; \
+    install --directory --owner=65532 --group=65532 --mode=0700 /var/lib/flowtest-runner
+ENV HOME=/tmp
+USER flowtest
+ENTRYPOINT ["python", "-m", "app.runner.agent"]
+
 FROM python-runtime AS application-runtime

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowtest-runner
+  labels:
+    app.kubernetes.io/name: flowtest-runner
+spec:
+  # Each runner token identifies one immutable Runner. Use a separate Deployment
+  # and Secret per additional replica so leases remain attributable and fenced.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flowtest-runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flowtest-runner
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          # Production overlays must replace this local tag with an approved immutable digest.
+          image: flowtest-runner:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: FLOWTEST_ENVIRONMENT
+              value: production
+            - name: FLOWTEST_RUNNER_CONTROL_PLANE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: flowtest-runner
+                  key: control-plane-url
+            - name: FLOWTEST_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: flowtest-runner
+                  key: runner-token
+            - name: FLOWTEST_RUNNER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FLOWTEST_RUNNER_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: FLOWTEST_RUNNER_RUNTIME
+              value: kubernetes
+            - name: FLOWTEST_RUNNER_AGENT_VERSION
+              value: 3.0.0-beta.3
+            - name: FLOWTEST_RUNNER_ARCHITECTURE
+              value: arm64
+            - name: FLOWTEST_RUNNER_CAPABILITIES
+              value: flow.workflow
+            - name: FLOWTEST_RUNNER_MAX_CONCURRENCY
+              value: "4"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      terminationGracePeriodSeconds: 30

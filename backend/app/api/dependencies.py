@@ -19,6 +19,7 @@ from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
     PerformanceRunDispatcher,
+    RunnerFabricDispatcher,
     TestPlanDispatcher,
     WorkflowDispatcher,
 )
@@ -102,7 +103,9 @@ async def require_system_admin(current_user: CurrentUser) -> User:
 SystemAdministrator = Annotated[User, Depends(require_system_admin)]
 
 
-def get_workflow_coordinator(request: Request) -> WorkflowDispatcher:
+def get_workflow_coordinator(request: Request, session: SessionDependency) -> WorkflowDispatcher:
+    if settings.feature_runner_fabric_enabled:
+        return RunnerFabricDispatcher(session)
     coordinator = getattr(request.app.state, "workflow_run_coordinator", None)
     if coordinator is None or not callable(getattr(coordinator, "start", None)):
         raise AppError(

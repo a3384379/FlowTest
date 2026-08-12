@@ -56,6 +56,7 @@ class NodeStatus(StrEnum):
 
 
 class WorkflowRunStatus(StrEnum):
+    QUEUED = "queued"
     RUNNING = "running"
     PASSED = "passed"
     FAILED = "failed"

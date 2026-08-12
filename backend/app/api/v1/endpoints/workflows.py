@@ -214,7 +214,7 @@ async def execute_workflow(
             runtime_variables=payload.runtime_variables,
             runtime_headers=payload.runtime_headers,
         )
-        coordinator.start(plan)
+        await coordinator.start(plan)
         return WorkflowExecutionResponse.model_validate(execution)
 
     response = await IdempotencyService(session).run(

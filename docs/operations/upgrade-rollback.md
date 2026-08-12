@@ -55,3 +55,19 @@ S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到
   会删除全部 Mapping、Impact Run、Test Selection、Coverage Snapshot、解释边、Gap 与 Fingerprint。
 - 若这些影响分析证据必须保留，降级前应导出对应项目的运行结果；需要数据库级无损恢复时使用升级前
   PostgreSQL + MinIO 恢复点，而不是执行 destructive downgrade。
+
+## S29 / 0026 特别说明
+
+- 升级会扩展 `runner_pools` / `runners` Profile，为 Project 增加执行并发和排队上限，并创建
+  `runner_registration_tokens`、`runner_tasks`、`runner_leases` 和 `runner_events`。现有项目、
+  Workflow、Execution 和 Celery 执行保持兼容，Runner Fabric Feature Flag 默认关闭。
+- 启用 Feature Flag 前先完成 `alembic upgrade 20260812_0026` 与 `alembic check`，再创建 Pool、
+  注册 Runner。从 Celery 执行切换时应先停止新 Workflow 投递，等旧 Worker 在途执行终态后
+  再开启 Flag，避免在切换窗口人工重复发起同一业务测试。
+- 应用镜像回滚前先 Drain 所有 Runner，等待 `flowtest_runner_active_leases=0`，然后关闭
+  `FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED` 并停止 Agent 与 Beat。不得在 Active Lease 存在时直接降级。
+- 降级到 `20260812_0025` 会删除全部 Runner 注册、Task、Lease、Fence 和 Event 证据，并移除
+  Runner Token Hash 与 Project 容量字段。降级前必须导出审计事件，并吊销所有远程明文
+  Token；旧 Token 不得在回升后复用。
+- 若需保留分布式执行审计或当时仍有排队任务，不执行 destructive downgrade；使用升级前已验证的
+  PostgreSQL + MinIO 恢复点，并重新签发所有 Runner 身份。

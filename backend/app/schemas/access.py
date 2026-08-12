@@ -107,7 +107,7 @@ class ProjectRetentionUpdate(BaseModel):
 
 
 class ProjectCapacityPolicy(BaseModel):
-    execution_concurrency_limit: int = Field(ge=1, le=100)
+    execution_concurrency_limit: int = Field(ge=1, le=500)
     queued_run_limit: int = Field(ge=1, le=5000)
 
 

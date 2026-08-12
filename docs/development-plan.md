@@ -127,8 +127,8 @@ V3 各自的真实验收门槛。
 | S25 | 声明式 k6 性能实验室 | 已完成；PR #28 的 5 项 CI 全绿并 squash 合并 |
 | S26 | 签名环境模板、Provision/Cleanup/TTL | 已完成；PR #29 与 main CI 全绿，发布 `v3.0.0-beta.1` |
 | S27 | Pact、契约矩阵、Service Graph、Deployment Check | 已完成；PR #30 与 main CI 全绿，发布 `v3.0.0-beta.2` |
-| S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 本地退出门槛已通过；待 Draft PR 与全量 CI |
-| S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 未开始 |
+| S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 已完成；PR #31 与 main CI 全绿，发布 `v3.0.0-beta.3` |
+| S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 实现与本地退出门槛已通过；Draft PR 待创建 |
 | S30 | Failure Cluster、Release Risk、AI Change Set | 未开始 |
 | S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | 未开始 |
 
@@ -138,7 +138,8 @@ S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.
 [`ADR 0021`](adr/0021-declarative-performance-runner.md)，S26 环境 Runner 边界见
 [`ADR 0022`](adr/0022-signed-environment-runner.md)，S27 Pact 与发布证据边界见
 [`ADR 0023`](adr/0023-pact-contract-hub-and-release-evidence.md)，S28 变更影响与确定性选择边界见
-[`ADR 0024`](adr/0024-change-impact-and-deterministic-selection.md)，视觉源见
+[`ADR 0024`](adr/0024-change-impact-and-deterministic-selection.md)，S29 分布式执行面见
+[`ADR 0025`](adr/0025-postgresql-runner-fabric.md)，视觉源见
 [`FlowTest_V3_UI_CN_HD`](../FlowTest_V3_UI_CN_HD/README.md)。用户要求已授权 S22 在 V2 正式标签前
 开始开发，但不得将该授权记录为 `v2.0.0` 发布证据。
 
@@ -172,8 +173,32 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
    Fingerprint，历史结果不依赖瞬时 UI 状态。
 5. 中文变更影响页面覆盖 Mapping、四类 Diff、Change→Impacted→Recommended 三列图、原因、Coverage
    Matrix、Gap 与历史；S28 只推荐测试，不自动执行或修改发布门禁。
-6. `20260812_0025` 双向迁移、后端/前端全量质量门槛、真实 Compose 四源冒烟和 Playwright 中文主路径
-   已在本地通过；镜像扫描及完整回归仍须在 S28 Draft PR 五项 CI 中通过。
+6. `20260812_0025` 双向迁移、后端/前端全量质量门槛、真实 Compose 四源冒烟、Playwright 中文主路径、
+   PR #31 五项 CI 与 main 完整回归均已通过；annotated `v3.0.0-beta.3` 固定到 S28 合并提交。
+
+## S29 本地退出清单
+
+1. 系统管理员可创建和更新 Worker Pool，固定 Runner 类型、Docker/Kubernetes 运行时、
+   网络区、标签、能力、并发上限、Lease 与心跳超时；一次性注册令牌和 Runner Token
+   只保存哈希，明文只在创建响应出现一次。
+2. PostgreSQL 持久 Task、Lease、递增 Fence 和事件；Pool、Runner、Project 容量使用事务
+   advisory lock，Task 使用 `SKIP LOCKED`，过期 Lease 有界重排，旧 Fence 不能重复写入节点或终态。
+3. 独立 Runner Agent 恢复已加密的 Workflow Snapshot，校验 SHA-256、结果 Schema/大小和项目
+   Host/CIDR 出站策略；不接收用户 Compose、Shell、Plugin、宿主凭据或 Kubernetes
+   ServiceAccount。Docker/Kubernetes 部署均使用非 root、只读根文件系统和最小权限。
+4. 心跳、Drain/Resume/Disable、失联 Offline、故障转移、取消和 Agent 短暂网络失败共享幂等
+   状态机；Runner 控制面使用独立按 Token 限流桶，不放宽通用用户写接口门槛。
+5. 中文“执行面”页面展示 PostgreSQL 事实源摘要、Pool、Runner、Task、Lease、Fence 和 Event，
+   支持创建 Pool/注册令牌、Drain/恢复/停用与事件详情；Playwright 真实登录和主路径通过。
+6. `20260812_0026` 在真实 PostgreSQL 17 完成 `0025→0026→0025→0026` 往返与
+   Alembic 无漂移；后端 293 passed/3 skipped、90.57%，前端 145 passed、Statements 86.92% /
+   Branches 80.72%，生产构建与真实基础设施集成测试通过。
+7. ARM64 Compose 容量门槛确认 5000 个唯一排队任务/加密计划、500/500 Workflow、
+   1000 条唯一节点终态、0 重复、0 Active Lease、0 制品冲突和两个实际 Worker；最终时间窗
+   无 deadlock、429、500 或 Runner 内部失败。故障门槛确认 Agent A 中断后 Agent B 以 Fence 2
+   完成第 2 次尝试并且只有一组终态。
+8. Python/前端依赖审计和新 Runner 镜像 Grype High/only-fixed 门槛通过，没有新增漏洞豁免。
+   S29 只有在 Draft PR 五项 CI 全绿、Ready 并 squash 合并后才转为已完成，在此前不开始 S30。
 
 ## S13 完成清单
 

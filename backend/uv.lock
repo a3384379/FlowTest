@@ -612,7 +612,7 @@ wheels = [
 
 [[package]]
 name = "flowtest-backend"
-version = "3.0.0b2.dev28"
+version = "3.0.0b3.dev29"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
