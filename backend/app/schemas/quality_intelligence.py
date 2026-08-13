@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.quality_intelligence import RiskFactor
+
 
 class ReleaseRiskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -56,7 +58,7 @@ class ReleaseRiskDetailResponse(ReleaseRiskSummaryResponse):
     window_ended_at: datetime
     baseline_started_at: datetime
     baseline_ended_at: datetime
-    factors: list[dict[str, Any]]
+    factors: list[RiskFactor]
     evidence_snapshot: dict[str, Any]
     quality_trend: list[dict[str, Any]]
     recommended_tests: list[dict[str, Any]]

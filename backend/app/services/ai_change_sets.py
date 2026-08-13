@@ -156,13 +156,17 @@ class AIChangeSetService:
         note: str,
     ) -> tuple[AIChangeSet, AIChangeItem]:
         _require_enabled()
+        change_set = await self._repository.get_change_set_for_update(change_set_id)
+        if change_set is None:
+            raise AppError(
+                code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
+            )
+        await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=True)
         item = await self._repository.get_item_for_update(item_id)
         if item is None or item.change_set_id != change_set_id:
             raise AppError(
                 code="AI_CHANGE_ITEM_NOT_FOUND", message="AI 变更项不存在", status_code=404
             )
-        change_set = await self._get_change_set(change_set_id)
-        await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=True)
         if item.review_status != "pending":
             raise AppError(
                 code="AI_CHANGE_ITEM_ALREADY_REVIEWED",

@@ -22,6 +22,13 @@ class AIChangeSetRepository:
     async def get_change_set(self, change_set_id: UUID) -> AIChangeSet | None:
         return await self._session.get(AIChangeSet, change_set_id)
 
+    async def get_change_set_for_update(self, change_set_id: UUID) -> AIChangeSet | None:
+        return (
+            await self._session.execute(
+                select(AIChangeSet).where(AIChangeSet.id == change_set_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+
     async def get_change_set_by_job_for_update(self, job_id: UUID) -> AIChangeSet | None:
         return (
             await self._session.execute(

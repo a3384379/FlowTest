@@ -16,6 +16,8 @@ from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.impact import ImpactRunBundle
 
+_TERMINAL_EXECUTION_STATUSES = ("passed", "failed", "cancelled")
+
 
 class QualityIntelligenceRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -85,20 +87,31 @@ class QualityIntelligenceRepository:
                     WorkflowExecution.started_at < ended_at,
                 )
                 .order_by(WorkflowExecution.started_at.desc())
-                .limit(5_000)
             )
         ).all()
-        execution_ids = [row[0].id for row in rows]
         first_failed_nodes: dict[UUID, WorkflowNodeExecution] = {}
-        if execution_ids:
+        if rows:
             nodes = (
                 await self._session.scalars(
                     select(WorkflowNodeExecution)
+                    .join(
+                        WorkflowExecution,
+                        WorkflowExecution.id == WorkflowNodeExecution.workflow_execution_id,
+                    )
                     .where(
-                        WorkflowNodeExecution.workflow_execution_id.in_(execution_ids),
+                        WorkflowExecution.project_id == project_id,
+                        WorkflowExecution.parent_execution_id.is_(None),
+                        WorkflowExecution.status == "failed",
+                        WorkflowExecution.started_at >= started_at,
+                        WorkflowExecution.started_at < ended_at,
                         WorkflowNodeExecution.status == "failed",
                     )
-                    .order_by(WorkflowNodeExecution.created_at)
+                    .order_by(
+                        WorkflowNodeExecution.workflow_execution_id,
+                        WorkflowNodeExecution.started_at.asc().nulls_last(),
+                        WorkflowNodeExecution.completed_at,
+                        WorkflowNodeExecution.id,
+                    )
                 )
             ).all()
             for node in nodes:
@@ -128,6 +141,7 @@ class QualityIntelligenceRepository:
             WorkflowExecution.parent_execution_id.is_(None),
             WorkflowExecution.started_at >= started_at,
             WorkflowExecution.started_at < ended_at,
+            WorkflowExecution.status.in_(_TERMINAL_EXECUTION_STATUSES),
         )
         total = await self._session.scalar(
             select(func.count()).select_from(WorkflowExecution).where(*condition)
@@ -150,6 +164,7 @@ class QualityIntelligenceRepository:
                         WorkflowExecution.parent_execution_id.is_(None),
                         WorkflowExecution.started_at >= started_at,
                         WorkflowExecution.started_at < ended_at,
+                        WorkflowExecution.status.in_(_TERMINAL_EXECUTION_STATUSES),
                     )
                 )
             ).all()

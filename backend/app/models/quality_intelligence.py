@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.domain.quality_intelligence import RiskFactor
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
 
@@ -39,7 +40,7 @@ class ReleaseRisk(UuidPrimaryKeyMixin, TimestampMixin, Base):
     score: Mapped[float] = mapped_column(Float, index=True)
     quality_score: Mapped[float] = mapped_column(Float)
     risk_level: Mapped[str] = mapped_column(String(16), index=True)
-    factors: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    factors: Mapped[list[RiskFactor]] = mapped_column(JSON)
     evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
     quality_trend: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     recommended_tests: Mapped[list[dict[str, Any]]] = mapped_column(JSON)

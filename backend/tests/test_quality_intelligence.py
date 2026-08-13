@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -31,6 +32,8 @@ from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
 from app.models.workflows import Workflow, WorkflowExecution
+from app.repositories.ai_change_sets import AIChangeSetRepository
+from app.repositories.quality_intelligence import QualityIntelligenceRepository
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import _validate_assertion_workflow_change
 from app.services.quality_intelligence import _quality_trend
@@ -411,12 +414,31 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
         await original_commit(session)
 
     monkeypatch.setattr(AsyncSession, "commit", tracked_commit)
+    lock_order: list[str] = []
+    original_parent_lock = AIChangeSetRepository.get_change_set_for_update
+    original_item_lock = AIChangeSetRepository.get_item_for_update
+
+    async def tracked_parent_lock(
+        repository: AIChangeSetRepository, target_change_set_id: UUID
+    ) -> AIChangeSet | None:
+        lock_order.append("change_set")
+        return await original_parent_lock(repository, target_change_set_id)
+
+    async def tracked_item_lock(
+        repository: AIChangeSetRepository, target_item_id: UUID
+    ) -> AIChangeItem | None:
+        lock_order.append("item")
+        return await original_item_lock(repository, target_item_id)
+
+    monkeypatch.setattr(AIChangeSetRepository, "get_change_set_for_update", tracked_parent_lock)
+    monkeypatch.setattr(AIChangeSetRepository, "get_item_for_update", tracked_item_lock)
     accepted = await quality_context.client.post(
         f"/api/v1/ai/change-sets/{change_set_id}/items/{item['id']}/accept",
         headers=headers,
         json={"content": item["proposed_content"], "note": "人工核对后接受"},
     )
     assert accepted.status_code == 200, accepted.text
+    assert lock_order == ["change_set", "item"]
     assert commit_count == 1
     assert accepted.json()["materialized_resource_type"] == "workflow"
     async with quality_context.sessions() as session:
@@ -708,6 +730,66 @@ async def test_ai_assertion_change_requires_complete_workflow_definition(
         assert workflow.draft_revision == 1
         assert item is not None
         assert item.review_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_quality_repository_uses_complete_terminal_failure_population() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    empty_rows = MagicMock()
+    empty_rows.all.return_value = []
+    session.execute.return_value = empty_rows
+    repository = QualityIntelligenceRepository(session)
+    ended_at = datetime.now(UTC)
+    started_at = ended_at - timedelta(days=7)
+
+    observations = await repository.failure_observations(
+        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+    )
+
+    assert observations == ()
+    observation_query = str(session.execute.await_args.args[0])
+    assert " LIMIT " not in observation_query.upper()
+
+    session.scalar.reset_mock()
+    session.scalar.side_effect = [2, 1]
+    counts = await repository.execution_counts(
+        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+    )
+
+    assert counts == (2, 1)
+    count_queries = [str(call.args[0]) for call in session.scalar.await_args_list]
+    assert all("workflow_executions.status IN" in query for query in count_queries)
+
+
+@pytest.mark.asyncio
+async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    execution = WorkflowExecution(
+        id=uuid4(),
+        workflow_id=uuid4(),
+        status="failed",
+        error_code="EXECUTION_FAILED",
+        started_at=datetime.now(UTC),
+    )
+    execution_rows = MagicMock()
+    execution_rows.all.return_value = [(execution, "确定性失败流程")]
+    session.execute.return_value = execution_rows
+    failed_nodes = MagicMock()
+    failed_nodes.all.return_value = []
+    session.scalars.return_value = failed_nodes
+    repository = QualityIntelligenceRepository(session)
+
+    await repository.failure_observations(
+        project_id=uuid4(),
+        started_at=execution.started_at - timedelta(hours=1),
+        ended_at=execution.started_at + timedelta(hours=1),
+    )
+
+    node_query = str(session.scalars.await_args.args[0])
+    order_clause = node_query.split("ORDER BY", maxsplit=1)[1]
+    assert "workflow_node_executions.started_at ASC NULLS LAST" in order_clause
+    assert "workflow_node_executions.completed_at" in order_clause
+    assert "workflow_node_executions.id" in order_clause
 
 
 async def _login(

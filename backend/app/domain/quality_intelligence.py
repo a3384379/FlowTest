@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import TypedDict
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -61,12 +62,20 @@ class RiskInput:
     flaky_assets: int
 
 
+class RiskFactor(TypedDict):
+    code: str
+    label: str
+    score: float
+    max_score: int
+    value: JsonValue
+
+
 @dataclass(frozen=True, slots=True)
 class RiskResult:
     score: float
     level: RiskLevel
     quality_score: float
-    factors: tuple[dict[str, JsonValue], ...]
+    factors: tuple[RiskFactor, ...]
 
 
 def cluster_failures(
@@ -250,7 +259,7 @@ def _factor(
     score: float,
     maximum: int,
     value: JsonValue,
-) -> dict[str, JsonValue]:
+) -> RiskFactor:
     return {
         "code": code,
         "label": label,
