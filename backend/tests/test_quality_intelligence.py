@@ -481,9 +481,12 @@ def test_quality_trend_includes_current_day_executions() -> None:
 def test_assertion_change_must_modify_typed_assertion_nodes() -> None:
     current_definition = _workflow_definition_with_assertion(start_name="开始", expected=200)
     target = Workflow(draft_definition=current_definition)
-    metadata_only_change = WorkflowDefinition.model_validate(
-        _workflow_definition_with_assertion(start_name="更名开始", expected=200)
-    )
+    metadata_only_definition = deepcopy(current_definition)
+    metadata_nodes = cast(list[dict[str, JsonValue]], metadata_only_definition["nodes"])
+    assertion_node = next(node for node in metadata_nodes if node["id"] == "assert-status")
+    assertion_node["name"] = "更名后的状态码断言"
+    assertion_node["position"] = {"x": 200, "y": 80}
+    metadata_only_change = WorkflowDefinition.model_validate(metadata_only_definition)
 
     with pytest.raises(AppError) as unchanged:
         _validate_assertion_workflow_change(target, metadata_only_change)

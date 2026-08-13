@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.ai import REDACTED, AIInputError, sanitize_ai_input
-from app.engine.contracts import NodeType, WorkflowDefinition
+from app.engine.contracts import AssertNodeConfig, NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
 from app.models.quality_intelligence import ReleaseRisk
@@ -41,6 +42,16 @@ MAX_CHANGE_SET_ITEMS = 50
 MAX_REVIEW_CONTENT_BYTES = 256 * 1024
 _CONTROL_FIELDS = frozenset({"action", "target_id", "target_type"})
 _MISSING_REDACTED_SOURCE = object()
+
+
+@dataclass(frozen=True, slots=True)
+class AssertionSemantics:
+    node_id: str
+    source_node_id: str
+    expression: str
+    operator: str
+    expected: JsonValue
+    bindings: tuple[tuple[str, str], ...]
 
 
 class AIChangeSetService:
@@ -773,7 +784,14 @@ async def _update_workflow(
 def _validate_assertion_workflow_change(
     target: Workflow, definition: WorkflowDefinition | None
 ) -> None:
-    proposed_assertions = _assertion_nodes(definition) if definition is not None else []
+    try:
+        proposed_assertions = _assertion_semantics(definition) if definition is not None else []
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_ASSERTION_DRAFT_INVALID",
+            message="AI Assertion 变更包含无效的断言配置",
+            status_code=422,
+        ) from error
     if not proposed_assertions:
         raise AppError(
             code="AI_ASSERTION_DRAFT_INVALID",
@@ -782,13 +800,14 @@ def _validate_assertion_workflow_change(
         )
     try:
         current = WorkflowDefinition.model_validate(target.draft_definition)
+        current_assertions = _assertion_semantics(current)
     except (TypeError, ValueError) as error:
         raise AppError(
             code="AI_WORKFLOW_DRAFT_INVALID",
             message="现有 Workflow 草稿格式无效",
             status_code=409,
         ) from error
-    if proposed_assertions == _assertion_nodes(current):
+    if proposed_assertions == current_assertions:
         raise AppError(
             code="AI_ASSERTION_DRAFT_INVALID",
             message="AI Assertion 变更必须实际修改断言节点",
@@ -796,13 +815,25 @@ def _validate_assertion_workflow_change(
         )
 
 
-def _assertion_nodes(definition: WorkflowDefinition) -> list[dict[str, Any]]:
-    nodes = [
-        node.model_dump(mode="json")
-        for node in definition.nodes
-        if node.effective_type is NodeType.ASSERT
-    ]
-    return sorted(nodes, key=lambda node: str(node["id"]))
+def _assertion_semantics(definition: WorkflowDefinition) -> list[AssertionSemantics]:
+    assertions = []
+    for node in definition.nodes:
+        if node.effective_type is not NodeType.ASSERT:
+            continue
+        config = AssertNodeConfig.model_validate(node.effective_config)
+        assertions.append(
+            AssertionSemantics(
+                node_id=node.id,
+                source_node_id=config.source_node_id,
+                expression=config.expression,
+                operator=config.operator.value,
+                expected=config.expected,
+                bindings=tuple(
+                    sorted((binding.input, binding.expression) for binding in node.bindings or [])
+                ),
+            )
+        )
+    return sorted(assertions, key=lambda assertion: assertion.node_id)
 
 
 def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDraftCreate:
