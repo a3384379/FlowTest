@@ -35,7 +35,7 @@ from app.models.workflows import Workflow, WorkflowExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.quality_intelligence import QualityIntelligenceRepository
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
-from app.services.ai_change_sets import _validate_assertion_workflow_change
+from app.services.ai_change_sets import _test_case_update, _validate_assertion_workflow_change
 from app.services.quality_intelligence import _quality_trend
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
@@ -176,6 +176,47 @@ class AssertionOnlyProvider:
                 ]
             },
             token_usage={"input_tokens": 20, "output_tokens": 10},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateUpdateProvider:
+    workflow_id: str
+
+    async def generate(
+        self,
+        *,
+        job_type: str,
+        sanitized_input: dict[str, JsonValue],
+        output_schema: dict[str, JsonValue],
+    ) -> AIProviderResult:
+        assert job_type == "change_set"
+        return AIProviderResult(
+            payload={
+                "suggestions": [
+                    {
+                        "type": "workflow",
+                        "title": "更新流程草稿",
+                        "content": {
+                            "action": "update",
+                            "target_id": self.workflow_id,
+                            "name": "AI 更名流程",
+                        },
+                    },
+                    {
+                        "type": "assertion",
+                        "title": "更新同一流程断言",
+                        "content": {
+                            "action": "update",
+                            "target_id": self.workflow_id,
+                            "definition": _workflow_definition_with_assertion(
+                                start_name="开始", expected=201
+                            ),
+                        },
+                    },
+                ]
+            },
+            token_usage={"input_tokens": 20, "output_tokens": 20},
         )
 
 
@@ -321,6 +362,16 @@ def test_assertion_change_must_modify_typed_assertion_nodes() -> None:
         _workflow_definition_with_assertion(start_name="开始", expected=201)
     )
     _validate_assertion_workflow_change(target, changed_assertion)
+
+
+def test_test_case_update_rejects_unsupported_or_empty_content() -> None:
+    for content in ({}, {"unexpected": True}, {"name": None}):
+        with pytest.raises(AppError) as invalid:
+            _test_case_update(cast(dict[str, JsonValue], content))
+        assert invalid.value.code == "AI_TEST_CASE_DRAFT_INVALID"
+
+    update = _test_case_update({"description": "人工确认后清空描述"})
+    assert update.description == "人工确认后清空描述"
 
 
 @pytest.mark.asyncio
@@ -583,6 +634,55 @@ async def test_ai_change_set_rejects_forbidden_asset_types_without_materializati
         )
         assert (
             await session.scalar(select(Workflow).where(Workflow.project_id == UUID(project_id)))
+            is None
+        )
+
+
+@pytest.mark.asyncio
+async def test_ai_change_set_rejects_duplicate_update_targets(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 重复更新项目")
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "重复更新目标", "definition": _workflow_definition()},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = workflow_response.json()["id"]
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "重复更新风险", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+    created = await quality_context.client.post(
+        "/api/v1/ai/change-sets",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "impact_run_id": impact_run_id,
+            "release_risk_id": risk_response.json()["id"],
+            "title": "拒绝重复更新",
+        },
+    )
+    assert created.status_code == 202, created.text
+
+    async with quality_context.sessions() as session:
+        job = await session.get(AIJob, quality_context.queue.job_ids[-1])
+        assert job is not None
+        failed = await AIJobRunner(session, DuplicateUpdateProvider(workflow_id)).run(job.id)
+        assert failed.status == "failed"
+        assert failed.error_code == "AI_RESPONSE_INVALID"
+        change_set = await session.get(AIChangeSet, UUID(created.json()["id"]))
+        assert change_set is not None
+        assert change_set.status == "failed"
+        assert (
+            await session.scalar(
+                select(AIChangeItem).where(AIChangeItem.change_set_id == change_set.id)
+            )
             is None
         )
 

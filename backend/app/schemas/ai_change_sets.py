@@ -4,6 +4,26 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from app.engine.contracts import WorkflowDefinition
+from app.schemas.test_assets import AssetName, TagName, TestCaseDefinitionInput
+
+
+class AITestCaseDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: AssetName | None = None
+    description: str | None = Field(default=None, max_length=4000)
+    tags: list[TagName] | None = Field(default=None, max_length=20)
+    definition: TestCaseDefinitionInput | None = None
+
+
+class AIWorkflowDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    definition: WorkflowDefinition | None = None
+
 
 class AIChangeSetCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")

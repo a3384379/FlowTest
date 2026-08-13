@@ -21,7 +21,11 @@ from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.impact import ImpactRepository
-from app.schemas.ai_change_sets import AIChangeSetCreate
+from app.schemas.ai_change_sets import (
+    AIChangeSetCreate,
+    AITestCaseDraftUpdate,
+    AIWorkflowDraftUpdate,
+)
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.ai import AIJobDispatcher
 from app.services.audit import AuditService
@@ -362,6 +366,7 @@ async def materialize_change_set_items(
         raise ValueError("change set contains too many items")
     allowed_targets = _allowed_targets(change_set)
     items = []
+    update_targets: set[tuple[str, UUID]] = set()
     for suggestion in suggestions:
         content = cast(dict[str, JsonValue], suggestion.content)
         action = content.get("action")
@@ -377,6 +382,10 @@ async def materialize_change_set_items(
         target_key = (expected_type, target_id) if target_id is not None else None
         if action == "update" and (target_key is None or target_key not in allowed_targets):
             raise ValueError("update target is not an allowed impacted asset")
+        if action == "update" and target_key in update_targets:
+            raise ValueError("change set contains duplicate update targets")
+        if action == "update" and target_key is not None:
+            update_targets.add(target_key)
         target_hash = allowed_targets[target_key] if target_key is not None else None
         proposal = {key: value for key, value in content.items() if key not in _CONTROL_FIELDS}
         items.append(
@@ -515,19 +524,18 @@ async def _create_test_case(
 async def _update_test_case(
     session: AsyncSession, actor: User, target: TestCase, content: dict[str, JsonValue]
 ) -> TestCase:
-    definition = _test_case_definition(content) if content.get("definition") is not None else None
-    tags = _tags(content["tags"]) if "tags" in content else None
+    update = _test_case_update(content)
     return await TestCaseService(session).update(
         actor=actor,
         project_id=target.project_id,
         case_id=target.id,
-        name=_optional_string(content, "name"),
-        description=_optional_string(content, "description"),
+        name=update.name,
+        description=update.description,
         folder_id=None,
         change_folder=False,
-        tags=tags,
+        tags=update.tags,
         is_template=None,
-        definition=definition,
+        definition=update.definition,
         commit=False,
     )
 
@@ -558,19 +566,25 @@ async def _update_workflow(
     *,
     require_assertion_change: bool = False,
 ) -> Workflow:
-    definition = _workflow_definition(content) if content.get("definition") is not None else None
+    if require_assertion_change and content.get("definition") is None:
+        raise AppError(
+            code="AI_ASSERTION_DRAFT_INVALID",
+            message="AI Assertion 变更必须提供包含断言节点的完整 Workflow 草稿",
+            status_code=422,
+        )
+    update = _workflow_update(content)
     if require_assertion_change:
-        _validate_assertion_workflow_change(target, definition)
+        _validate_assertion_workflow_change(target, update.definition)
     return await WorkflowService(session).update_draft(
         actor=actor,
         project_id=target.project_id,
         workflow_id=target.id,
         expected_revision=target.draft_revision,
-        name=_optional_string(content, "name"),
-        description=_optional_string(content, "description"),
+        name=update.name,
+        description=update.description,
         folder_id=None,
         change_folder=False,
-        definition=definition,
+        definition=update.definition,
         commit=False,
     )
 
@@ -628,23 +642,51 @@ def _workflow_definition(content: dict[str, JsonValue]) -> WorkflowDefinition:
         ) from error
 
 
+def _test_case_update(content: dict[str, JsonValue]) -> AITestCaseDraftUpdate:
+    try:
+        update = AITestCaseDraftUpdate.model_validate(content)
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_TEST_CASE_DRAFT_INVALID",
+            message="AI Test Case 更新必须符合受支持的草稿字段",
+            status_code=422,
+        ) from error
+    if not any(
+        value is not None
+        for value in (update.name, update.description, update.tags, update.definition)
+    ):
+        raise AppError(
+            code="AI_TEST_CASE_DRAFT_INVALID",
+            message="AI Test Case 更新必须至少修改一个草稿字段",
+            status_code=422,
+        )
+    return update
+
+
+def _workflow_update(content: dict[str, JsonValue]) -> AIWorkflowDraftUpdate:
+    try:
+        update = AIWorkflowDraftUpdate.model_validate(content)
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_WORKFLOW_DRAFT_INVALID",
+            message="AI Workflow 更新必须符合受支持的草稿字段",
+            status_code=422,
+        ) from error
+    if not any(value is not None for value in (update.name, update.description, update.definition)):
+        raise AppError(
+            code="AI_WORKFLOW_DRAFT_INVALID",
+            message="AI Workflow 更新必须至少修改一个草稿字段",
+            status_code=422,
+        )
+    return update
+
+
 def _tags(value: JsonValue) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise AppError(
             code="AI_TEST_CASE_DRAFT_INVALID", message="AI Test Case 标签格式无效", status_code=422
         )
     return cast(list[str], value)
-
-
-def _optional_string(content: dict[str, JsonValue], key: str) -> str | None:
-    value = content.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise AppError(
-            code="AI_CHANGE_ITEM_INVALID", message="AI 变更项字段格式无效", status_code=422
-        )
-    return value
 
 
 def _review_status(items: list[AIChangeItem]) -> str:

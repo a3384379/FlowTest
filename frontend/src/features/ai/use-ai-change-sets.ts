@@ -26,11 +26,14 @@ export function useAIChangeSets() {
     refetchInterval: (query) =>
       query.state.data?.items.some((item) => item.status === 'generating') ? 1_000 : false,
   })
-  const activeId = selectedId ?? changeSets.data?.items.at(0)?.id ?? null
+  const currentItems = changeSets.data?.items.filter((item) => item.project_id === projectId) ?? []
+  const activeId = currentItems.some((item) => item.id === selectedId)
+    ? selectedId
+    : (currentItems.at(0)?.id ?? null)
   const detail = useQuery({
-    queryKey: ['ai-change-set', activeId],
+    queryKey: ['ai-change-set', projectId, activeId],
     queryFn: () => getAIChangeSet(required(activeId)),
-    enabled: Boolean(activeId),
+    enabled: Boolean(projectId && activeId),
     refetchInterval: (query) => (query.state.data?.status === 'generating' ? 1_000 : false),
   })
   const impacts = useQuery({
@@ -80,7 +83,7 @@ export function useAIChangeSets() {
     try {
       await review.mutateAsync({ itemId, decision, content, note })
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['ai-change-set', activeId] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-change-set', projectId, activeId] }),
         queryClient.invalidateQueries({ queryKey: ['ai-change-sets', projectId] }),
       ])
       void message.success(decision === 'accept' ? '变更项已接受并生成草稿' : '变更项已拒绝')
