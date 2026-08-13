@@ -1453,7 +1453,7 @@ async def test_quality_repository_uses_complete_terminal_failure_population() ->
 
 
 @pytest.mark.asyncio
-async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
+async def test_failure_node_selection_orders_by_completion_then_deterministic_ties() -> None:
     session = AsyncMock(spec=AsyncSession)
     execution = WorkflowExecution(
         id=uuid4(),
@@ -1477,9 +1477,13 @@ async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
 
     node_query = str(session.execute.await_args_list[1].args[0])
     order_clause = node_query.split("ORDER BY", maxsplit=1)[1]
-    assert "workflow_executions.parent_execution_id IS NOT NULL" in order_clause
+    completion_position = order_clause.index(
+        "coalesce(workflow_node_executions.completed_at, workflow_executions.completed_at)"
+    )
+    execution_start_position = order_clause.index("workflow_executions.started_at")
+    assert completion_position < execution_start_position
+    assert "ASC NULLS LAST" in order_clause
     assert "workflow_node_executions.started_at ASC NULLS LAST" in order_clause
-    assert "workflow_node_executions.completed_at" in order_clause
     assert "workflow_node_executions.id" in order_clause
 
 
@@ -1561,7 +1565,7 @@ async def test_failure_observation_counts_dataset_root_and_uses_child_node_evide
 
 
 @pytest.mark.asyncio
-async def test_failure_observation_uses_earliest_dataset_child_before_node_detail(
+async def test_failure_observation_uses_first_completed_dataset_failure(
     quality_context: QualityContext,
 ) -> None:
     headers = await _login(quality_context.client)
@@ -1588,6 +1592,7 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
             row_index: int | None,
             error_code: str,
             started_at: datetime,
+            completed_at: datetime,
         ) -> WorkflowExecution:
             return WorkflowExecution(
                 id=execution_id,
@@ -1603,10 +1608,11 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
                 context={},
                 error_code=error_code,
                 started_at=started_at,
-                completed_at=started_at,
+                completed_at=completed_at,
             )
 
-        later_at = occurred_at + timedelta(seconds=1)
+        later_started_at = occurred_at + timedelta(seconds=1)
+        assertion_failed_at = occurred_at + timedelta(seconds=2)
         session.add_all(
             [
                 execution(
@@ -1615,6 +1621,7 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
                     row_index=None,
                     error_code="DATASET_ROWS_FAILED",
                     started_at=occurred_at,
+                    completed_at=occurred_at + timedelta(seconds=5),
                 ),
                 execution(
                     execution_id=first_child_id,
@@ -1622,13 +1629,15 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
                     row_index=0,
                     error_code="NETWORK_FAILED",
                     started_at=occurred_at,
+                    completed_at=occurred_at + timedelta(seconds=4),
                 ),
                 execution(
                     execution_id=later_child_id,
                     parent_execution_id=root_id,
                     row_index=1,
                     error_code="WORKFLOW_NODE_FAILED",
-                    started_at=later_at,
+                    started_at=later_started_at,
+                    completed_at=occurred_at + timedelta(seconds=3),
                 ),
                 WorkflowNodeExecution(
                     workflow_execution_id=later_child_id,
@@ -1641,8 +1650,8 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
                     result=None,
                     error_code="ASSERTION_FAILED",
                     error_message="状态码不符合预期",
-                    started_at=later_at,
-                    completed_at=later_at,
+                    started_at=later_started_at,
+                    completed_at=assertion_failed_at,
                 ),
             ]
         )
@@ -1650,14 +1659,14 @@ async def test_failure_observation_uses_earliest_dataset_child_before_node_detai
         observations = await QualityIntelligenceRepository(session).failure_observations(
             project_id=UUID(project_id),
             started_at=occurred_at - timedelta(minutes=1),
-            ended_at=later_at + timedelta(minutes=1),
+            ended_at=occurred_at + timedelta(minutes=1),
         )
 
     assert len(observations) == 1
     assert observations[0].execution_id == root_id
-    assert observations[0].error_code == "NETWORK_FAILED"
-    assert observations[0].node_type is None
-    assert observations[0].category == "network"
+    assert observations[0].error_code == "ASSERTION_FAILED"
+    assert observations[0].node_type == "assert"
+    assert observations[0].category == "assertion"
 
 
 @pytest.mark.asyncio

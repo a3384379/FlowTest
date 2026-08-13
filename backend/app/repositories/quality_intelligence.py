@@ -99,6 +99,9 @@ class QualityIntelligenceRepository:
             evidence_root_id = func.coalesce(
                 WorkflowExecution.parent_execution_id, WorkflowExecution.id
             )
+            failure_completed_at = func.coalesce(
+                WorkflowNodeExecution.completed_at, WorkflowExecution.completed_at
+            )
             evidence_rows = (
                 await self._session.execute(
                     select(WorkflowExecution, WorkflowNodeExecution)
@@ -116,14 +119,10 @@ class QualityIntelligenceRepository:
                     )
                     .order_by(
                         evidence_root_id,
-                        case(
-                            (WorkflowExecution.parent_execution_id.is_not(None), 0),
-                            else_=1,
-                        ),
+                        failure_completed_at.asc().nulls_last(),
+                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
                         WorkflowExecution.started_at,
                         WorkflowNodeExecution.started_at.asc().nulls_last(),
-                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
-                        WorkflowNodeExecution.completed_at,
                         WorkflowNodeExecution.id,
                         WorkflowExecution.id,
                     )
