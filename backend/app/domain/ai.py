@@ -123,6 +123,168 @@ def suggestion_output_schema(max_suggestions: int) -> dict[str, JsonValue]:
     }
 
 
+def change_set_output_schema(max_suggestions: int) -> dict[str, JsonValue]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["suggestions"],
+        "properties": {
+            "suggestions": {
+                "type": "array",
+                "maxItems": max_suggestions,
+                "items": {
+                    "anyOf": [
+                        _change_set_suggestion("test_case", _test_case_create_content()),
+                        _change_set_suggestion("test_case", _test_case_update_content()),
+                        _change_set_suggestion("workflow", _workflow_create_content()),
+                        _change_set_suggestion("workflow", _workflow_update_content()),
+                        _change_set_suggestion("assertion", _assertion_update_content()),
+                    ]
+                },
+            }
+        },
+    }
+
+
+def _change_set_suggestion(
+    suggestion_type: str, content_schema: dict[str, JsonValue]
+) -> dict[str, JsonValue]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["type", "title", "content"],
+        "properties": {
+            "type": {"const": suggestion_type},
+            "title": {"type": "string", "minLength": 1, "maxLength": 200},
+            "content": content_schema,
+        },
+    }
+
+
+def _test_case_create_content() -> dict[str, JsonValue]:
+    return _draft_content_schema(
+        action="create",
+        required=["action", "name", "description", "tags", "definition"],
+        properties={
+            "name": _asset_name_schema(nullable=False),
+            "description": _description_schema(nullable=False),
+            "tags": _tags_schema(nullable=False),
+            "definition": _definition_schema(nullable=False),
+        },
+    )
+
+
+def _test_case_update_content() -> dict[str, JsonValue]:
+    return _draft_content_schema(
+        action="update",
+        required=[
+            "action",
+            "target_id",
+            "name",
+            "description",
+            "tags",
+            "definition",
+        ],
+        properties={
+            "target_id": _target_id_schema(),
+            "name": _asset_name_schema(nullable=True),
+            "description": _description_schema(nullable=True),
+            "tags": _tags_schema(nullable=True),
+            "definition": _definition_schema(nullable=True),
+        },
+    )
+
+
+def _workflow_create_content() -> dict[str, JsonValue]:
+    return _draft_content_schema(
+        action="create",
+        required=["action", "name", "description", "definition"],
+        properties={
+            "name": _asset_name_schema(nullable=False),
+            "description": _description_schema(nullable=False),
+            "definition": _definition_schema(nullable=False),
+        },
+    )
+
+
+def _workflow_update_content() -> dict[str, JsonValue]:
+    return _draft_content_schema(
+        action="update",
+        required=["action", "target_id", "name", "description", "definition"],
+        properties={
+            "target_id": _target_id_schema(),
+            "name": _asset_name_schema(nullable=True),
+            "description": _description_schema(nullable=True),
+            "definition": _definition_schema(nullable=True),
+        },
+    )
+
+
+def _assertion_update_content() -> dict[str, JsonValue]:
+    return _draft_content_schema(
+        action="update",
+        required=["action", "target_id", "name", "description", "definition"],
+        properties={
+            "target_id": _target_id_schema(),
+            "name": _asset_name_schema(nullable=True),
+            "description": _description_schema(nullable=True),
+            "definition": _definition_schema(nullable=False),
+        },
+    )
+
+
+def _draft_content_schema(
+    *, action: str, required: list[JsonValue], properties: dict[str, JsonValue]
+) -> dict[str, JsonValue]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required,
+        "properties": {"action": {"const": action}, **properties},
+    }
+
+
+def _asset_name_schema(*, nullable: bool) -> dict[str, JsonValue]:
+    return {
+        "type": ["string", "null"] if nullable else "string",
+        "minLength": 1,
+        "maxLength": 200,
+    }
+
+
+def _description_schema(*, nullable: bool) -> dict[str, JsonValue]:
+    return {
+        "type": ["string", "null"] if nullable else "string",
+        "maxLength": 4000,
+    }
+
+
+def _tags_schema(*, nullable: bool) -> dict[str, JsonValue]:
+    return {
+        "type": ["array", "null"] if nullable else "array",
+        "maxItems": 20,
+        "items": {"type": "string", "minLength": 1, "maxLength": 50},
+    }
+
+
+def _definition_schema(*, nullable: bool) -> dict[str, JsonValue]:
+    return {
+        "type": ["object", "null"] if nullable else "object",
+        "minProperties": 1,
+    }
+
+
+def _target_id_schema() -> dict[str, JsonValue]:
+    return {
+        "type": "string",
+        "pattern": (
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+            "[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        ),
+    }
+
+
 def _sanitize_value(
     value: JsonValue,
     *,

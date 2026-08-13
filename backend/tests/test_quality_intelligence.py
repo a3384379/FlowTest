@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import JsonValue
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -19,7 +21,7 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
 from app.domain.access import ProjectRole
-from app.domain.ai import REDACTED
+from app.domain.ai import REDACTED, change_set_output_schema
 from app.domain.quality_intelligence import (
     FailureClusterEvidence,
     FailureObservation,
@@ -48,6 +50,7 @@ from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInp
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
     MAX_CHANGE_SET_ITEMS,
+    MAX_REVIEW_CONTENT_BYTES,
     AIChangeSetService,
     _ensure_test_case_draft_change,
     _ensure_workflow_draft_change,
@@ -111,6 +114,12 @@ class ChangeSetProvider:
             "max_items": 50,
         }
         assert output_schema["type"] == "object"
+        suggestions_schema = cast(
+            dict[str, JsonValue],
+            cast(dict[str, JsonValue], output_schema["properties"])["suggestions"],
+        )
+        item_schema = cast(dict[str, JsonValue], suggestions_schema["items"])
+        assert len(cast(list[JsonValue], item_schema["anyOf"])) == 5
         return AIProviderResult(
             payload={
                 "suggestions": [
@@ -175,6 +184,7 @@ class UpdateWorkflowProvider:
                             "action": "update",
                             "target_id": self.workflow_id,
                             "name": "AI 建议名称",
+                            "description": None,
                             "definition": _workflow_definition(),
                         },
                     }
@@ -244,6 +254,8 @@ class RedactedAssertionUpdateProvider:
                         "content": {
                             "action": "update",
                             "target_id": self.workflow_id,
+                            "name": None,
+                            "description": None,
                             "definition": definition,
                         },
                     }
@@ -275,6 +287,8 @@ class DuplicateUpdateProvider:
                             "action": "update",
                             "target_id": self.workflow_id,
                             "name": "AI 更名流程",
+                            "description": None,
+                            "definition": None,
                         },
                     },
                     {
@@ -283,6 +297,8 @@ class DuplicateUpdateProvider:
                         "content": {
                             "action": "update",
                             "target_id": self.workflow_id,
+                            "name": None,
+                            "description": None,
                             "definition": _workflow_definition_with_assertion(
                                 start_name="开始", expected=201
                             ),
@@ -291,6 +307,39 @@ class DuplicateUpdateProvider:
                 ]
             },
             token_usage={"input_tokens": 20, "output_tokens": 20},
+        )
+
+
+class LargeWorkflowProposalProvider:
+    async def generate(
+        self,
+        *,
+        job_type: str,
+        sanitized_input: dict[str, JsonValue],
+        output_schema: dict[str, JsonValue],
+    ) -> AIProviderResult:
+        assert job_type == "change_set"
+        definition = _workflow_definition()
+        nodes = cast(list[dict[str, JsonValue]], definition["nodes"])
+        nodes[0]["config"] = {"generated_payload": "x" * (MAX_REVIEW_CONTENT_BYTES + 1)}
+        payload: dict[str, JsonValue] = {
+            "suggestions": [
+                {
+                    "type": "workflow",
+                    "title": "大型 Workflow 草稿",
+                    "content": {
+                        "action": "create",
+                        "name": "大型 Workflow 草稿",
+                        "description": "只拒绝。不写入资产",
+                        "definition": definition,
+                    },
+                }
+            ]
+        }
+        Draft202012Validator(output_schema).validate(payload)
+        return AIProviderResult(
+            payload=payload,
+            token_usage={"input_tokens": 20, "output_tokens": 200},
         )
 
 
@@ -529,6 +578,55 @@ def test_review_content_rejects_secret_rotation_before_redaction() -> None:
         "definition": {"runtime_variables": {"password": REDACTED}}
     }
     assert _review_content(redacted_placeholder) == redacted_placeholder
+
+
+def test_change_set_provider_schema_requires_action_target_and_typed_drafts() -> None:
+    schema = change_set_output_schema(MAX_CHANGE_SET_ITEMS)
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    target_id = str(uuid4())
+    valid_update: dict[str, JsonValue] = {
+        "suggestions": [
+            {
+                "type": "workflow",
+                "title": "更新 Workflow 草稿",
+                "content": {
+                    "action": "update",
+                    "target_id": target_id,
+                    "name": "更新后的 Workflow",
+                    "description": None,
+                    "definition": _workflow_definition(),
+                },
+            }
+        ]
+    }
+    validator.validate(valid_update)
+
+    missing_action = deepcopy(valid_update)
+    cast(
+        dict[str, JsonValue],
+        cast(list[dict[str, JsonValue]], missing_action["suggestions"])[0]["content"],
+    ).pop("action")
+    with pytest.raises(JsonSchemaValidationError):
+        validator.validate(missing_action)
+
+    missing_target = deepcopy(valid_update)
+    cast(
+        dict[str, JsonValue],
+        cast(list[dict[str, JsonValue]], missing_target["suggestions"])[0]["content"],
+    ).pop("target_id")
+    with pytest.raises(JsonSchemaValidationError):
+        validator.validate(missing_target)
+
+    incomplete_assertion = deepcopy(valid_update)
+    suggestion = cast(
+        dict[str, JsonValue],
+        cast(list[dict[str, JsonValue]], incomplete_assertion["suggestions"])[0],
+    )
+    suggestion["type"] = "assertion"
+    cast(dict[str, JsonValue], suggestion["content"]).pop("definition")
+    with pytest.raises(JsonSchemaValidationError):
+        validator.validate(incomplete_assertion)
 
 
 def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
@@ -922,6 +1020,46 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     )
     assert repeated.status_code == 409
     assert repeated.json()["error"]["code"] == "AI_CHANGE_ITEM_ALREADY_REVIEWED"
+
+
+@pytest.mark.asyncio
+async def test_ai_change_set_can_reject_large_persisted_proposal(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 大型提案项目")
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "大型提案风险", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+    change_set_id, item_id = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=project_id,
+        impact_run_id=impact_run_id,
+        risk_id=risk_response.json()["id"],
+        provider=LargeWorkflowProposalProvider(),
+    )
+
+    rejected = await quality_context.client.post(
+        f"/api/v1/ai/change-sets/{change_set_id}/items/{item_id}/reject",
+        headers=headers,
+        json={"note": "提案过大且不符合当前需求"},
+    )
+
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["review_status"] == "rejected"
+    async with quality_context.sessions() as session:
+        change_set = await session.get(AIChangeSet, UUID(change_set_id))
+        assert change_set is not None
+        assert change_set.status == "rejected"
+        assert (
+            await session.scalar(select(Workflow).where(Workflow.project_id == UUID(project_id)))
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -1456,29 +1594,33 @@ async def test_ai_assertion_change_requires_complete_workflow_definition(
         json={"impact_run_id": impact_run_id, "title": "断言风险证据", "window_days": 7},
     )
     assert risk_response.status_code == 201, risk_response.text
-    change_set_id, item_id = await _generate_change_set(
-        quality_context,
+    created = await quality_context.client.post(
+        "/api/v1/ai/change-sets",
         headers=headers,
-        project_id=project_id,
-        impact_run_id=impact_run_id,
-        risk_id=risk_response.json()["id"],
-        provider=AssertionOnlyProvider(workflow_id),
+        json={
+            "project_id": project_id,
+            "impact_run_id": impact_run_id,
+            "release_risk_id": risk_response.json()["id"],
+            "title": "缺少完整断言草稿",
+        },
     )
-
-    rejected = await quality_context.client.post(
-        f"/api/v1/ai/change-sets/{change_set_id}/items/{item_id}/accept",
-        headers=headers,
-        json={"note": "缺少完整 Workflow Definition"},
-    )
-    assert rejected.status_code == 422, rejected.text
-    assert rejected.json()["error"]["code"] == "AI_ASSERTION_DRAFT_INVALID"
+    assert created.status_code == 202, created.text
     async with quality_context.sessions() as session:
+        job = await session.get(AIJob, quality_context.queue.job_ids[-1])
+        assert job is not None
+        failed = await AIJobRunner(session, AssertionOnlyProvider(workflow_id)).run(job.id)
         workflow = await session.get(Workflow, UUID(workflow_id))
-        item = await session.get(AIChangeItem, item_id)
+        item = await session.scalar(
+            select(AIChangeItem).where(AIChangeItem.change_set_id == UUID(created.json()["id"]))
+        )
+        change_set = await session.get(AIChangeSet, UUID(created.json()["id"]))
+        assert failed.status == "failed"
+        assert failed.error_code == "AI_RESPONSE_INVALID"
         assert workflow is not None
         assert workflow.draft_revision == 1
-        assert item is not None
-        assert item.review_status == "pending"
+        assert item is None
+        assert change_set is not None
+        assert change_set.status == "failed"
 
 
 @pytest.mark.asyncio

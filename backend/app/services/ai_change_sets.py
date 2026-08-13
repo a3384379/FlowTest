@@ -195,8 +195,8 @@ class AIChangeSetService:
             raise AppError(
                 code="AI_REJECT_EDIT_FORBIDDEN", message="拒绝变更项时不能修改内容", status_code=422
             )
-        content = _review_content(
-            edited_content
+        content = (
+            _review_content(edited_content)
             if edited_content is not None
             else cast(dict[str, JsonValue], item.proposed_content)
         )

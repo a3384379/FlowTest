@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.access import ProjectCapability, ProjectRole
-from app.domain.ai import AIInputError, sanitize_ai_input, suggestion_output_schema
+from app.domain.ai import (
+    AIInputError,
+    change_set_output_schema,
+    sanitize_ai_input,
+    suggestion_output_schema,
+)
 from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIJob, AISuggestion
@@ -290,7 +295,7 @@ class AIJobRunner:
             result = await self._provider.generate(
                 job_type=job.job_type,
                 sanitized_input=cast(dict[str, JsonValue], job.sanitized_input),
-                output_schema=suggestion_output_schema(settings.ai_max_suggestions),
+                output_schema=_output_schema(job.job_type),
             )
             suggestions = _validated_suggestions(job, result.payload)
             if job.job_type == "change_set":
@@ -376,7 +381,7 @@ def _authorize_sample(
 
 
 def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AISuggestion]:
-    schema = suggestion_output_schema(settings.ai_max_suggestions)
+    schema = _output_schema(job.job_type)
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(payload)
     raw_suggestions = payload.get("suggestions")
@@ -405,6 +410,12 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
             )
         )
     return suggestions
+
+
+def _output_schema(job_type: str) -> dict[str, JsonValue]:
+    if job_type == "change_set":
+        return change_set_output_schema(settings.ai_max_suggestions)
+    return suggestion_output_schema(settings.ai_max_suggestions)
 
 
 def _validate_pending_suggestion(suggestion: AISuggestion, job: AIJob) -> None:
