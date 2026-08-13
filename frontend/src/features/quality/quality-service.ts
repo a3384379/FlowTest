@@ -88,7 +88,7 @@ export type ReleaseRiskDetail = ReleaseRiskSummary & {
     total: number
     passed: number
     failed: number
-    pass_rate: number
+    pass_rate: number | null
   }>
   recommended_tests: Array<{
     target_type: string

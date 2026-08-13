@@ -332,7 +332,7 @@ def _quality_trend(
                 "total": total,
                 "passed": passed,
                 "failed": failed,
-                "pass_rate": round(passed / total * 100, 2) if total else 100.0,
+                "pass_rate": round(passed / total * 100, 2) if total else None,
             }
         )
     return points

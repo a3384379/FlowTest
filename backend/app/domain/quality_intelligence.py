@@ -120,7 +120,7 @@ class QualityTrendPoint(TypedDict):
     total: int
     passed: int
     failed: int
-    pass_rate: float
+    pass_rate: float | None
 
 
 class RecommendedTest(TypedDict):

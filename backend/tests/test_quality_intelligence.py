@@ -455,6 +455,13 @@ def test_quality_trend_includes_current_day_executions() -> None:
         "failed": 0,
         "pass_rate": 100.0,
     }
+    assert trend[0] == {
+        "date": started_on.isoformat(),
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "pass_rate": None,
+    }
 
 
 def test_assertion_change_must_modify_typed_assertion_nodes() -> None:
