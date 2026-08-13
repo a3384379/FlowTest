@@ -13,8 +13,11 @@ from app.domain.quality_intelligence import (
     FailureClusterEvidence,
     QualityTrendPoint,
     RecommendedTest,
+    RiskClusterFingerprint,
     RiskEvidenceSnapshot,
+    RiskFingerprintPayload,
     RiskInput,
+    RiskResult,
     calculate_release_risk,
     cluster_failures,
     evidence_fingerprint,
@@ -105,11 +108,26 @@ class QualityIntelligenceService:
         executions = await self._repository.executions_for_trend(
             project_id=project_id, started_at=started_at, ended_at=ended_at
         )
+        algorithm_version = "release_risk_v1"
+        quality_trend = _quality_trend(executions, started_at.date(), payload.window_days)
+        recommended_tests = _recommended_tests(impact.selection.selected_assets, cluster_evidence)
+        fingerprint_payload = _risk_fingerprint_payload(
+            algorithm_version=algorithm_version,
+            started_at=started_at,
+            ended_at=ended_at,
+            baseline_started_at=baseline_started_at,
+            baseline_ended_at=baseline_ended_at,
+            risk_result=risk_result,
+            evidence=evidence,
+            clusters=cluster_evidence,
+            quality_trend=quality_trend,
+            recommended_tests=recommended_tests,
+        )
         risk = ReleaseRisk(
             project_id=project_id,
             impact_run_id=impact.run.id,
             title=payload.title.strip(),
-            algorithm_version="release_risk_v1",
+            algorithm_version=algorithm_version,
             window_days=payload.window_days,
             window_started_at=started_at,
             window_ended_at=ended_at,
@@ -120,11 +138,9 @@ class QualityIntelligenceService:
             risk_level=risk_result.level.value,
             factors=list(risk_result.factors),
             evidence_snapshot=evidence,
-            quality_trend=_quality_trend(executions, started_at.date(), payload.window_days),
-            recommended_tests=_recommended_tests(
-                impact.selection.selected_assets, cluster_evidence
-            ),
-            fingerprint=evidence_fingerprint(evidence),
+            quality_trend=quality_trend,
+            recommended_tests=recommended_tests,
+            fingerprint=evidence_fingerprint(fingerprint_payload),
             created_by_id=actor.id,
         )
         self._session.add(risk)
@@ -242,6 +258,58 @@ def _evidence_snapshot(
             "p95_regression_percent": round(performance_regression, 2),
         },
         "flaky_assets": flaky_assets,
+    }
+
+
+def _risk_fingerprint_payload(
+    *,
+    algorithm_version: str,
+    started_at: datetime,
+    ended_at: datetime,
+    baseline_started_at: datetime,
+    baseline_ended_at: datetime,
+    risk_result: RiskResult,
+    evidence: RiskEvidenceSnapshot,
+    clusters: tuple[FailureClusterEvidence, ...],
+    quality_trend: list[QualityTrendPoint],
+    recommended_tests: list[RecommendedTest],
+) -> RiskFingerprintPayload:
+    return {
+        "algorithm_version": algorithm_version,
+        "window": {
+            "current_started_at": started_at.isoformat(),
+            "current_ended_at": ended_at.isoformat(),
+            "baseline_started_at": baseline_started_at.isoformat(),
+            "baseline_ended_at": baseline_ended_at.isoformat(),
+        },
+        "score": {
+            "score": risk_result.score,
+            "quality_score": risk_result.quality_score,
+            "risk_level": risk_result.level.value,
+            "factors": list(risk_result.factors),
+        },
+        "evidence": evidence,
+        "failure_clusters": [_cluster_fingerprint(cluster) for cluster in clusters],
+        "quality_trend": quality_trend,
+        "recommended_tests": recommended_tests,
+    }
+
+
+def _cluster_fingerprint(cluster: FailureClusterEvidence) -> RiskClusterFingerprint:
+    return {
+        "fingerprint": cluster.fingerprint,
+        "title": cluster.title,
+        "category": cluster.category,
+        "error_code": cluster.error_code,
+        "node_type": cluster.node_type,
+        "occurrence_count": cluster.occurrence_count,
+        "baseline_count": cluster.baseline_count,
+        "affected_workflow_ids": sorted(cluster.affected_workflow_ids),
+        "affected_workflow_names": sorted(cluster.affected_workflow_names),
+        "sample_execution_ids": sorted(cluster.sample_execution_ids),
+        "confidence": cluster.confidence,
+        "regression_percent": cluster.regression_percent,
+        "recommendation": cluster.recommendation,
     }
 
 

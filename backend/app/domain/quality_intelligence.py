@@ -133,6 +133,46 @@ class RecommendedTest(TypedDict):
     change_keys: list[str]
 
 
+class RiskWindowFingerprint(TypedDict):
+    current_started_at: str
+    current_ended_at: str
+    baseline_started_at: str
+    baseline_ended_at: str
+
+
+class RiskScoreFingerprint(TypedDict):
+    score: float
+    quality_score: float
+    risk_level: str
+    factors: list[RiskFactor]
+
+
+class RiskClusterFingerprint(TypedDict):
+    fingerprint: str
+    title: str
+    category: str
+    error_code: str | None
+    node_type: str | None
+    occurrence_count: int
+    baseline_count: int
+    affected_workflow_ids: list[str]
+    affected_workflow_names: list[str]
+    sample_execution_ids: list[str]
+    confidence: float
+    regression_percent: float | None
+    recommendation: str
+
+
+class RiskFingerprintPayload(TypedDict):
+    algorithm_version: str
+    window: RiskWindowFingerprint
+    score: RiskScoreFingerprint
+    evidence: RiskEvidenceSnapshot
+    failure_clusters: list[RiskClusterFingerprint]
+    quality_trend: list[QualityTrendPoint]
+    recommended_tests: list[RecommendedTest]
+
+
 @dataclass(frozen=True, slots=True)
 class RiskResult:
     score: float
@@ -219,7 +259,7 @@ def calculate_release_risk(value: RiskInput) -> RiskResult:
     )
 
 
-def evidence_fingerprint(value: RiskEvidenceSnapshot) -> str:
+def evidence_fingerprint(value: RiskFingerprintPayload) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
 

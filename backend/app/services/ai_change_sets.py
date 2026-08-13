@@ -38,6 +38,7 @@ PROMPT_TEMPLATE_VERSION = "s30-change-set-v1"
 MAX_CHANGE_SET_ITEMS = 50
 MAX_REVIEW_CONTENT_BYTES = 256 * 1024
 _CONTROL_FIELDS = frozenset({"action", "target_id", "target_type"})
+_MISSING_REDACTED_SOURCE = object()
 
 
 class AIChangeSetService:
@@ -510,6 +511,98 @@ def _redact_runtime_structure(value: JsonValue) -> JsonValue:
     return REDACTED
 
 
+def _rehydrate_test_case_definition(
+    definition: TestCaseDefinitionInput | None, current_definition: dict[str, Any]
+) -> TestCaseDefinitionInput | None:
+    if definition is None:
+        return None
+    proposed = cast(dict[str, JsonValue], definition.model_dump(mode="json", exclude_none=True))
+    try:
+        current = cast(
+            dict[str, JsonValue],
+            TestCaseDefinitionInput.model_validate(current_definition).model_dump(
+                mode="json", exclude_none=True
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_TEST_CASE_DRAFT_INVALID",
+            message="现有 Test Case 草稿格式无效",
+            status_code=409,
+        ) from error
+    for field in ("runtime_variables", "runtime_headers"):
+        proposed[field] = _restore_redacted_value(proposed[field], current[field])
+    return TestCaseDefinitionInput.model_validate(proposed)
+
+
+def _rehydrate_workflow_definition(
+    definition: WorkflowDefinition | None, current_definition: dict[str, Any]
+) -> WorkflowDefinition | None:
+    if definition is None:
+        return None
+    proposed = cast(dict[str, JsonValue], definition.model_dump(mode="json", exclude_none=True))
+    try:
+        current = cast(
+            dict[str, JsonValue],
+            WorkflowDefinition.model_validate(current_definition).model_dump(
+                mode="json", exclude_none=True
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_WORKFLOW_DRAFT_INVALID",
+            message="现有 Workflow 草稿格式无效",
+            status_code=409,
+        ) from error
+    proposed["variables"] = _restore_redacted_value(
+        proposed.get("variables", {}), current.get("variables", {})
+    )
+    current_nodes = {
+        str(node.get("id")): node
+        for node in cast(list[dict[str, JsonValue]], current.get("nodes", []))
+    }
+    proposed_nodes = cast(list[dict[str, JsonValue]], proposed.get("nodes", []))
+    for node in proposed_nodes:
+        current_node = current_nodes.get(str(node.get("id")), {})
+        for field in ("config", "configuration"):
+            if field in node:
+                node[field] = _restore_redacted_value(
+                    node[field], current_node.get(field, _MISSING_REDACTED_SOURCE)
+                )
+    return WorkflowDefinition.model_validate(proposed)
+
+
+def _restore_redacted_value(
+    proposed: JsonValue, current: JsonValue | object = _MISSING_REDACTED_SOURCE
+) -> JsonValue:
+    if proposed == REDACTED:
+        if current is _MISSING_REDACTED_SOURCE:
+            raise AppError(
+                code="AI_REDACTED_VALUE_INVALID",
+                message="AI 草稿包含无法从当前目标恢复的脱敏值",
+                status_code=422,
+            )
+        return cast(JsonValue, current)
+    if isinstance(proposed, dict):
+        current_mapping = current if isinstance(current, dict) else {}
+        return {
+            str(key): _restore_redacted_value(
+                value, current_mapping.get(str(key), _MISSING_REDACTED_SOURCE)
+            )
+            for key, value in proposed.items()
+        }
+    if isinstance(proposed, list):
+        current_items = current if isinstance(current, list) else []
+        return [
+            _restore_redacted_value(
+                value,
+                current_items[index] if index < len(current_items) else _MISSING_REDACTED_SOURCE,
+            )
+            for index, value in enumerate(proposed)
+        ]
+    return proposed
+
+
 def _ensure_target(
     target: TestCase | Workflow | None, project_id: UUID, expected_hash: str | None
 ) -> None:
@@ -566,6 +659,7 @@ async def _update_test_case(
     session: AsyncSession, actor: User, target: TestCase, content: dict[str, JsonValue]
 ) -> TestCase:
     update = _test_case_update(content)
+    definition = _rehydrate_test_case_definition(update.definition, target.draft_definition)
     return await TestCaseService(session).update(
         actor=actor,
         project_id=target.project_id,
@@ -576,7 +670,7 @@ async def _update_test_case(
         change_folder=False,
         tags=update.tags,
         is_template=None,
-        definition=update.definition,
+        definition=definition,
         commit=False,
     )
 
@@ -614,8 +708,9 @@ async def _update_workflow(
             status_code=422,
         )
     update = _workflow_update(content)
+    definition = _rehydrate_workflow_definition(update.definition, target.draft_definition)
     if require_assertion_change:
-        _validate_assertion_workflow_change(target, update.definition)
+        _validate_assertion_workflow_change(target, definition)
     return await WorkflowService(session).update_draft(
         actor=actor,
         project_id=target.project_id,
@@ -625,7 +720,7 @@ async def _update_workflow(
         description=update.description,
         folder_id=None,
         change_folder=False,
-        definition=update.definition,
+        definition=definition,
         commit=False,
     )
 

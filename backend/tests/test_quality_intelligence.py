@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -20,10 +21,13 @@ from app.core.security import password_service
 from app.domain.access import ProjectRole
 from app.domain.ai import REDACTED
 from app.domain.quality_intelligence import (
+    FailureClusterEvidence,
     FailureObservation,
+    RiskEvidenceSnapshot,
     RiskInput,
     calculate_release_risk,
     cluster_failures,
+    evidence_fingerprint,
 )
 from app.engine.contracts import WorkflowDefinition
 from app.main import app
@@ -35,13 +39,15 @@ from app.models.impact import TestSelection as ImpactTestSelection
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.quality_intelligence import QualityIntelligenceRepository
+from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInput
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
+    _rehydrate_test_case_definition,
     _target_definition_for_ai,
     _test_case_update,
     _validate_assertion_workflow_change,
 )
-from app.services.quality_intelligence import _quality_trend
+from app.services.quality_intelligence import _quality_trend, _risk_fingerprint_payload
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
 ADMIN_PASSWORD = "quality-intelligence-password-123!"
@@ -181,6 +187,45 @@ class AssertionOnlyProvider:
                 ]
             },
             token_usage={"input_tokens": 20, "output_tokens": 10},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RedactedAssertionUpdateProvider:
+    workflow_id: str
+
+    async def generate(
+        self,
+        *,
+        job_type: str,
+        sanitized_input: dict[str, JsonValue],
+        output_schema: dict[str, JsonValue],
+    ) -> AIProviderResult:
+        assert job_type == "change_set"
+        metadata = cast(dict[str, JsonValue], sanitized_input["metadata"])
+        allowed_targets = cast(list[dict[str, JsonValue]], metadata["allowed_targets"])
+        definition = deepcopy(cast(dict[str, JsonValue], allowed_targets[0]["draft_definition"]))
+        nodes = cast(list[dict[str, JsonValue]], definition["nodes"])
+        assertion = next(node for node in nodes if node["id"] == "assert-status")
+        config = cast(dict[str, JsonValue], assertion["config"])
+        assert config["source_node_id"] == REDACTED
+        assert config["expression"] == REDACTED
+        config["expected"] = 201
+        return AIProviderResult(
+            payload={
+                "suggestions": [
+                    {
+                        "type": "assertion",
+                        "title": "更新状态码断言",
+                        "content": {
+                            "action": "update",
+                            "target_id": self.workflow_id,
+                            "definition": definition,
+                        },
+                    }
+                ]
+            },
+            token_usage={"input_tokens": 30, "output_tokens": 20},
         )
 
 
@@ -333,6 +378,63 @@ def test_release_risk_score_is_bounded_and_explainable() -> None:
         "flaky_assets",
     ]
     assert sum(float(cast(float, factor["score"])) for factor in result.factors) == result.score
+
+
+def test_release_risk_fingerprint_binds_window_and_cluster_contents() -> None:
+    ended_at = datetime.now(UTC)
+    started_at = ended_at - timedelta(days=7)
+    cluster = FailureClusterEvidence(
+        fingerprint="a" * 64,
+        title="ASSERTION_FAILED · assert",
+        category="assertion",
+        error_code="ASSERTION_FAILED",
+        node_type="assert",
+        occurrence_count=1,
+        baseline_count=0,
+        affected_workflow_ids=(str(uuid4()),),
+        affected_workflow_names=("支付流程",),
+        sample_execution_ids=(str(uuid4()),),
+        confidence=0.638,
+        regression_percent=100.0,
+        recommendation="核对断言。",
+    )
+    risk_result = calculate_release_risk(
+        RiskInput(
+            coverage_percent=100,
+            breaking_changes=0,
+            current_total=1,
+            current_failures=1,
+            baseline_total=0,
+            baseline_failures=0,
+            regressed_clusters=1,
+            unsafe_contracts=0,
+            unknown_contracts=0,
+            performance_regression_percent=0,
+            flaky_assets=0,
+        )
+    )
+    common = {
+        "algorithm_version": "release_risk_v1",
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "baseline_started_at": started_at - timedelta(days=7),
+        "baseline_ended_at": started_at,
+        "risk_result": risk_result,
+        "evidence": cast(RiskEvidenceSnapshot, {}),
+        "quality_trend": [],
+        "recommended_tests": [],
+    }
+    original = _risk_fingerprint_payload(clusters=(cluster,), **common)
+    changed_cluster = _risk_fingerprint_payload(
+        clusters=(replace(cluster, error_code="HTTP_TIMEOUT"),), **common
+    )
+    changed_window = _risk_fingerprint_payload(
+        clusters=(cluster,),
+        **{**common, "ended_at": ended_at + timedelta(seconds=1)},
+    )
+
+    assert evidence_fingerprint(original) != evidence_fingerprint(changed_cluster)
+    assert evidence_fingerprint(original) != evidence_fingerprint(changed_window)
 
 
 def test_quality_trend_includes_current_day_executions() -> None:
@@ -606,6 +708,34 @@ def test_ai_target_snapshot_redacts_test_case_runtime_maps_without_mutating_sour
     assert safe_definition["runtime_headers"] == {"X-Session": REDACTED}
     assert definition["runtime_variables"] == {"session_id": "opaque-value"}
     assert definition["runtime_headers"] == {"X-Session": "opaque-header"}
+
+
+def test_ai_test_case_update_restores_only_known_redacted_runtime_values() -> None:
+    workflow_id = uuid4()
+    environment_id = uuid4()
+    current = {
+        "workflow_id": str(workflow_id),
+        "environment_id": str(environment_id),
+        "runtime_variables": {"session_id": "opaque-value"},
+        "runtime_headers": {"X-Session": "opaque-header"},
+    }
+    proposed = CaseDefinitionInput.model_validate(
+        {
+            **current,
+            "runtime_variables": {"session_id": REDACTED},
+            "runtime_headers": {"X-Session": REDACTED},
+        }
+    )
+
+    restored = _rehydrate_test_case_definition(proposed, current)
+
+    assert restored is not None
+    assert restored.runtime_variables == {"session_id": "opaque-value"}
+    assert restored.runtime_headers == {"X-Session": "opaque-header"}
+    unknown_placeholder = proposed.model_copy(update={"runtime_variables": {"new_value": REDACTED}})
+    with pytest.raises(AppError) as invalid:
+        _rehydrate_test_case_definition(unknown_placeholder, current)
+    assert invalid.value.code == "AI_REDACTED_VALUE_INVALID"
 
 
 @pytest.mark.asyncio
@@ -931,6 +1061,67 @@ async def test_ai_assertion_change_requires_complete_workflow_definition(
         assert workflow.draft_revision == 1
         assert item is not None
         assert item.review_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_ai_workflow_update_restores_redacted_values_before_writing_draft(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 脱敏值恢复项目")
+    definition = _workflow_definition_with_assertion(start_name="开始", expected=200)
+    definition["variables"] = {"session_id": "opaque-session-material"}
+    definition["nodes"][0]["config"] = {
+        "headers": {"X-Session": "opaque-node-secret"},
+        "retries": [1, 2],
+    }
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "脱敏恢复流程", "definition": definition},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = workflow_response.json()["id"]
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "脱敏恢复风险", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+    change_set_id, item_id = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=project_id,
+        impact_run_id=impact_run_id,
+        risk_id=risk_response.json()["id"],
+        provider=RedactedAssertionUpdateProvider(workflow_id),
+    )
+
+    accepted = await quality_context.client.post(
+        f"/api/v1/ai/change-sets/{change_set_id}/items/{item_id}/accept",
+        headers=headers,
+        json={"note": "确认断言变更并恢复脱敏字段"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    async with quality_context.sessions() as session:
+        workflow = await session.get(Workflow, UUID(workflow_id))
+        assert workflow is not None
+        assert workflow.draft_definition["variables"] == {"session_id": "opaque-session-material"}
+        nodes = cast(list[dict[str, JsonValue]], workflow.draft_definition["nodes"])
+        start = next(node for node in nodes if node["id"] == "start")
+        assertion = next(node for node in nodes if node["id"] == "assert-status")
+        assert start["config"] == {
+            "headers": {"X-Session": "opaque-node-secret"},
+            "retries": [1, 2],
+        }
+        assert assertion["config"] == {
+            "source_node_id": "start",
+            "expression": "$.status_code",
+            "operator": "equals",
+            "expected": 201,
+        }
+        assert REDACTED not in str(workflow.draft_definition)
 
 
 @pytest.mark.asyncio
