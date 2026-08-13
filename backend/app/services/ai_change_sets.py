@@ -722,6 +722,7 @@ async def _update_test_case(
 ) -> TestCase:
     update = _test_case_update(content)
     definition = _rehydrate_test_case_definition(update.definition, target.draft_definition)
+    _ensure_test_case_draft_change(target, update, definition)
     return await TestCaseService(session).update(
         actor=actor,
         project_id=target.project_id,
@@ -848,6 +849,37 @@ def _ensure_workflow_draft_change(
     raise AppError(
         code="AI_WORKFLOW_DRAFT_UNCHANGED",
         message="AI Workflow 更新未改变当前草稿",
+        status_code=422,
+    )
+
+
+def _ensure_test_case_draft_change(
+    target: TestCase,
+    update: AITestCaseDraftUpdate,
+    definition: TestCaseDefinitionInput | None,
+) -> None:
+    if update.name is not None and update.name != target.name:
+        return
+    if update.description is not None and update.description.strip() != target.description:
+        return
+    if update.tags is not None:
+        normalized_tags = sorted({tag.strip() for tag in update.tags if tag.strip()})
+        if normalized_tags != target.tags:
+            return
+    if definition is not None:
+        try:
+            current_definition = TestCaseDefinitionInput.model_validate(target.draft_definition)
+        except (TypeError, ValueError) as error:
+            raise AppError(
+                code="AI_TEST_CASE_DRAFT_INVALID",
+                message="现有 Test Case 草稿格式无效",
+                status_code=409,
+            ) from error
+        if definition.model_dump(mode="json") != current_definition.model_dump(mode="json"):
+            return
+    raise AppError(
+        code="AI_TEST_CASE_DRAFT_UNCHANGED",
+        message="AI Test Case 更新未改变当前草稿",
         status_code=422,
     )
 

@@ -49,6 +49,7 @@ from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
     MAX_CHANGE_SET_ITEMS,
     AIChangeSetService,
+    _ensure_test_case_draft_change,
     _ensure_workflow_draft_change,
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
@@ -550,6 +551,34 @@ def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
     create = _test_case_create("默认草稿名称", {"definition": definition})
     assert create.name == "默认草稿名称"
     assert create.tags == []
+
+
+def test_test_case_update_rejects_normalized_noop() -> None:
+    current_definition: dict[str, JsonValue] = {
+        "workflow_id": str(uuid4()),
+        "environment_id": str(uuid4()),
+    }
+    target = CaseModel(
+        name="当前 Test Case",
+        description="当前描述",
+        tags=["api", "smoke"],
+        draft_definition=current_definition,
+    )
+    noop_contents: tuple[dict[str, JsonValue], ...] = (
+        {"name": "  当前 Test Case  "},
+        {"description": "  当前描述  "},
+        {"tags": [" smoke ", "api", "api"]},
+        {"definition": current_definition},
+    )
+    for content in noop_contents:
+        update = _test_case_update(content)
+        definition = _rehydrate_test_case_definition(update.definition, current_definition)
+        with pytest.raises(AppError) as unchanged:
+            _ensure_test_case_draft_change(target, update, definition)
+        assert unchanged.value.code == "AI_TEST_CASE_DRAFT_UNCHANGED"
+
+    changed = _test_case_update({"tags": ["api", "regression"]})
+    _ensure_test_case_draft_change(target, changed, None)
 
 
 def test_workflow_create_and_update_enforce_draft_metadata_constraints() -> None:
