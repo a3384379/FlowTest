@@ -87,6 +87,29 @@ describe('AIChangeSetsPage', () => {
     )
   })
 
+  it('omits unchanged proposal content when accepting the original item', async () => {
+    let accepted: Record<string, unknown> | null = null
+    handlers(detail)
+    server.use(
+      http.post(
+        `/api/v1/ai/change-sets/${changeSetId}/items/${item.id}/accept`,
+        async ({ request }) => {
+          accepted = (await request.json()) as Record<string, unknown>
+          return HttpResponse.json({ ...item, review_status: 'accepted' })
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText('新增异常流程')
+
+    await browser.click(screen.getByRole('button', { name: '审核并接受' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑并接受变更项' })
+    await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
+
+    await waitFor(() => expect(accepted).toEqual({ note: '' }))
+  })
+
   it('blocks malformed review JSON and rejects without sending edited content', async () => {
     let rejected: Record<string, unknown> | null = null
     handlers(detail)

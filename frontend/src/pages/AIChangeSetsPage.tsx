@@ -292,6 +292,7 @@ function ReviewChangeItemDialogContent({
     note: string,
   ) => Promise<void>
 }) {
+  const originalContent = JSON.stringify(value.item.proposed_content)
   const [content, setContent] = useState(() => JSON.stringify(value.item.proposed_content, null, 2))
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
@@ -309,7 +310,10 @@ function ReviewChangeItemDialogContent({
             if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
               throw new Error('内容必须是 JSON 对象')
             }
-            parsed = candidate as Record<string, unknown>
+            parsed =
+              JSON.stringify(candidate) === originalContent
+                ? undefined
+                : (candidate as Record<string, unknown>)
           } catch (parseError) {
             setError(parseError instanceof Error ? parseError.message : 'JSON 格式无效')
             return
