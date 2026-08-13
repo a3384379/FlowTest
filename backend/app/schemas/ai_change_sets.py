@@ -8,6 +8,15 @@ from app.engine.contracts import WorkflowDefinition
 from app.schemas.test_assets import AssetName, TagName, TestCaseDefinitionInput
 
 
+class AITestCaseDraftCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: AssetName
+    description: str = Field(max_length=4000)
+    tags: list[TagName] = Field(default_factory=list, max_length=20)
+    definition: TestCaseDefinitionInput
+
+
 class AITestCaseDraftUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

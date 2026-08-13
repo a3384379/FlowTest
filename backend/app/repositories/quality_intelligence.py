@@ -5,7 +5,6 @@ from uuid import UUID
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.domain.quality_intelligence import FailureObservation
 from app.domain.reporting import classify_failure
@@ -18,6 +17,7 @@ from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecut
 from app.repositories.impact import ImpactRunBundle
 
 _OUTCOME_EXECUTION_STATUSES = ("passed", "failed")
+TerminalExecutionSnapshot = tuple[tuple[WorkflowExecution, str], ...]
 
 
 class QualityIntelligenceRepository:
@@ -74,34 +74,34 @@ class QualityIntelligenceRepository:
         )
 
     async def failure_observations(
-        self, *, project_id: UUID, started_at: datetime, ended_at: datetime
+        self,
+        *,
+        project_id: UUID,
+        started_at: datetime,
+        ended_at: datetime,
+        terminal_executions: TerminalExecutionSnapshot | None = None,
     ) -> tuple[FailureObservation, ...]:
         rows = (
-            await self._session.execute(
-                select(WorkflowExecution, Workflow.name)
-                .join(Workflow, Workflow.id == WorkflowExecution.workflow_id)
-                .where(
-                    WorkflowExecution.project_id == project_id,
-                    WorkflowExecution.parent_execution_id.is_(None),
-                    WorkflowExecution.status == "failed",
-                    WorkflowExecution.started_at >= started_at,
-                    WorkflowExecution.started_at < ended_at,
-                )
-                .order_by(WorkflowExecution.started_at.desc())
+            terminal_executions
+            if terminal_executions is not None
+            else await self.terminal_execution_snapshot(
+                project_id=project_id, started_at=started_at, ended_at=ended_at
             )
-        ).all()
+        )
+        failed_rows = [
+            (execution, name) for execution, name in rows if execution.status == "failed"
+        ]
         first_failure_evidence: dict[
             UUID, tuple[WorkflowExecution, WorkflowNodeExecution | None]
         ] = {}
-        if rows:
-            root_execution = aliased(WorkflowExecution)
+        if failed_rows:
+            root_ids = [execution.id for execution, _name in failed_rows]
             evidence_root_id = func.coalesce(
                 WorkflowExecution.parent_execution_id, WorkflowExecution.id
             )
             evidence_rows = (
                 await self._session.execute(
                     select(WorkflowExecution, WorkflowNodeExecution)
-                    .join(root_execution, root_execution.id == evidence_root_id)
                     .outerjoin(
                         WorkflowNodeExecution,
                         (WorkflowNodeExecution.workflow_execution_id == WorkflowExecution.id)
@@ -110,11 +110,9 @@ class QualityIntelligenceRepository:
                     .where(
                         WorkflowExecution.project_id == project_id,
                         WorkflowExecution.status == "failed",
-                        root_execution.project_id == project_id,
-                        root_execution.parent_execution_id.is_(None),
-                        root_execution.status == "failed",
-                        root_execution.started_at >= started_at,
-                        root_execution.started_at < ended_at,
+                        WorkflowExecution.completed_at.is_not(None),
+                        WorkflowExecution.completed_at <= ended_at,
+                        evidence_root_id.in_(root_ids),
                     )
                     .order_by(
                         evidence_root_id,
@@ -135,7 +133,7 @@ class QualityIntelligenceRepository:
                 evidence_root_id = evidence_execution.parent_execution_id or evidence_execution.id
                 first_failure_evidence.setdefault(evidence_root_id, (evidence_execution, node))
         observations = []
-        for execution, workflow_name in rows:
+        for execution, workflow_name in failed_rows:
             evidence_execution, failed_node = first_failure_evidence.get(
                 execution.id, (execution, None)
             )
@@ -155,42 +153,24 @@ class QualityIntelligenceRepository:
             )
         return tuple(observations)
 
-    async def execution_counts(
+    async def terminal_execution_snapshot(
         self, *, project_id: UUID, started_at: datetime, ended_at: datetime
-    ) -> tuple[int, int]:
-        condition = (
-            WorkflowExecution.project_id == project_id,
-            WorkflowExecution.parent_execution_id.is_(None),
-            WorkflowExecution.started_at >= started_at,
-            WorkflowExecution.started_at < ended_at,
-            WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
+    ) -> TerminalExecutionSnapshot:
+        rows = await self._session.execute(
+            select(WorkflowExecution, Workflow.name)
+            .join(Workflow, Workflow.id == WorkflowExecution.workflow_id)
+            .where(
+                WorkflowExecution.project_id == project_id,
+                WorkflowExecution.parent_execution_id.is_(None),
+                WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
+                WorkflowExecution.started_at >= started_at,
+                WorkflowExecution.started_at < ended_at,
+                WorkflowExecution.completed_at.is_not(None),
+                WorkflowExecution.completed_at <= ended_at,
+            )
+            .order_by(WorkflowExecution.started_at.desc())
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(WorkflowExecution).where(*condition)
-        )
-        failed = await self._session.scalar(
-            select(func.count())
-            .select_from(WorkflowExecution)
-            .where(*condition, WorkflowExecution.status == "failed")
-        )
-        return int(total or 0), int(failed or 0)
-
-    async def executions_for_trend(
-        self, *, project_id: UUID, started_at: datetime, ended_at: datetime
-    ) -> list[WorkflowExecution]:
-        return list(
-            (
-                await self._session.scalars(
-                    select(WorkflowExecution).where(
-                        WorkflowExecution.project_id == project_id,
-                        WorkflowExecution.parent_execution_id.is_(None),
-                        WorkflowExecution.started_at >= started_at,
-                        WorkflowExecution.started_at < ended_at,
-                        WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
-                    )
-                )
-            ).all()
-        )
+        return tuple(rows.tuples().all())
 
     async def deployment_decisions(self, project_id: UUID) -> list[str]:
         ranked = (

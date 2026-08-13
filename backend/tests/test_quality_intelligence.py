@@ -48,10 +48,15 @@ from app.services.ai_change_sets import (
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
     _target_definition_for_ai,
+    _test_case_create,
     _test_case_update,
     _validate_assertion_workflow_change,
 )
-from app.services.quality_intelligence import _quality_trend, _risk_fingerprint_payload
+from app.services.quality_intelligence import (
+    _execution_counts,
+    _quality_trend,
+    _risk_fingerprint_payload,
+)
 from app.services.test_assets import TestCaseService as CaseService
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
@@ -495,6 +500,28 @@ def test_test_case_update_rejects_unsupported_or_empty_content() -> None:
 
     update = _test_case_update({"description": "人工确认后清空描述"})
     assert update.description == "人工确认后清空描述"
+
+
+def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
+    definition: dict[str, JsonValue] = {
+        "workflow_id": str(uuid4()),
+        "environment_id": str(uuid4()),
+    }
+    invalid_contents = (
+        {"name": "   ", "definition": definition},
+        {"name": 123, "definition": definition},
+        {"tags": [f"tag-{index}" for index in range(21)], "definition": definition},
+        {"tags": ["x" * 51], "definition": definition},
+        {"unexpected": True, "definition": definition},
+    )
+    for content in invalid_contents:
+        with pytest.raises(AppError) as invalid:
+            _test_case_create("合法草稿名称", cast(dict[str, JsonValue], content))
+        assert invalid.value.code == "AI_TEST_CASE_DRAFT_INVALID"
+
+    create = _test_case_create("默认草稿名称", {"definition": definition})
+    assert create.name == "默认草稿名称"
+    assert create.tags == []
 
 
 @pytest.mark.asyncio
@@ -1272,45 +1299,38 @@ async def test_ai_workflow_update_restores_redacted_values_before_writing_draft(
 async def test_quality_repository_uses_complete_terminal_failure_population() -> None:
     session = AsyncMock(spec=AsyncSession)
     empty_rows = MagicMock()
-    empty_rows.all.return_value = []
+    empty_rows.tuples.return_value.all.return_value = []
     session.execute.return_value = empty_rows
     repository = QualityIntelligenceRepository(session)
     ended_at = datetime.now(UTC)
     started_at = ended_at - timedelta(days=7)
 
+    terminal = await repository.terminal_execution_snapshot(
+        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+    )
+
+    assert terminal == ()
+    terminal_statement = session.execute.await_args.args[0]
+    terminal_query = str(terminal_statement)
+    assert " LIMIT " not in terminal_query.upper()
+    assert "workflow_executions.completed_at IS NOT NULL" in terminal_query
+    assert "workflow_executions.completed_at <=" in terminal_query
+    assert ["passed", "failed"] in terminal_statement.compile().params.values()
+
     observations = await repository.failure_observations(
-        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+        project_id=uuid4(),
+        started_at=started_at,
+        ended_at=ended_at,
+        terminal_executions=terminal,
     )
-
     assert observations == ()
-    observation_query = str(session.execute.await_args.args[0])
-    assert " LIMIT " not in observation_query.upper()
+    assert session.execute.await_count == 1
 
-    session.scalar.reset_mock()
-    session.scalar.side_effect = [2, 1]
-    counts = await repository.execution_counts(
-        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+    executions = (
+        (WorkflowExecution(status="passed"), "成功流程"),
+        (WorkflowExecution(status="failed"), "失败流程"),
     )
-
-    assert counts == (2, 1)
-    count_statements = [call.args[0] for call in session.scalar.await_args_list]
-    count_queries = [str(statement) for statement in count_statements]
-    assert all("workflow_executions.status IN" in query for query in count_queries)
-    assert all(
-        ["passed", "failed"] in statement.compile().params.values()
-        for statement in count_statements
-    )
-
-    session.scalars.reset_mock()
-    trend_rows = MagicMock()
-    trend_rows.all.return_value = []
-    session.scalars.return_value = trend_rows
-    trend = await repository.executions_for_trend(
-        project_id=uuid4(), started_at=started_at, ended_at=ended_at
-    )
-    assert trend == []
-    trend_statement = session.scalars.await_args.args[0]
-    assert ["passed", "failed"] in trend_statement.compile().params.values()
+    assert _execution_counts(executions) == (2, 1)
 
 
 @pytest.mark.asyncio
@@ -1324,7 +1344,7 @@ async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
         started_at=datetime.now(UTC),
     )
     execution_rows = MagicMock()
-    execution_rows.all.return_value = [(execution, "确定性失败流程")]
+    execution_rows.tuples.return_value.all.return_value = [(execution, "确定性失败流程")]
     evidence_rows = MagicMock()
     evidence_rows.all.return_value = []
     session.execute.side_effect = [execution_rows, evidence_rows]

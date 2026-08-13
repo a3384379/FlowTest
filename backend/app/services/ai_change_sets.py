@@ -23,6 +23,7 @@ from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.impact import ImpactRepository
 from app.schemas.ai_change_sets import (
     AIChangeSetCreate,
+    AITestCaseDraftCreate,
     AITestCaseDraftUpdate,
     AIWorkflowDraftUpdate,
 )
@@ -681,17 +682,16 @@ async def _create_test_case(
     title: str,
     content: dict[str, JsonValue],
 ) -> TestCase:
-    definition = _test_case_definition(content)
-    tags = _tags(content.get("tags", []))
+    create = _test_case_create(title, content)
     return await TestCaseService(session).create(
         actor=actor,
         project_id=project_id,
-        name=str(content.get("name") or title)[:200],
-        description=str(content.get("description") or "由 AI Change Set 生成。待人工复核"),
+        name=create.name,
+        description=create.description,
         folder_id=None,
-        tags=tags,
+        tags=create.tags,
         is_template=False,
-        definition=definition,
+        definition=create.definition,
         commit=False,
     )
 
@@ -801,12 +801,21 @@ def _assertion_nodes(definition: WorkflowDefinition) -> list[dict[str, Any]]:
     return sorted(nodes, key=lambda node: str(node["id"]))
 
 
-def _test_case_definition(content: dict[str, JsonValue]) -> TestCaseDefinitionInput:
+def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDraftCreate:
     try:
-        return TestCaseDefinitionInput.model_validate(content.get("definition"))
+        return AITestCaseDraftCreate.model_validate(
+            {
+                "name": title,
+                "description": "由 AI Change Set 生成。待人工复核",
+                "tags": [],
+                **content,
+            }
+        )
     except (TypeError, ValueError) as error:
         raise AppError(
-            code="AI_TEST_CASE_DRAFT_INVALID", message="AI Test Case 草稿格式无效", status_code=422
+            code="AI_TEST_CASE_DRAFT_INVALID",
+            message="AI Test Case 创建内容必须符合受支持的草稿字段",
+            status_code=422,
         ) from error
 
 
@@ -856,14 +865,6 @@ def _workflow_update(content: dict[str, JsonValue]) -> AIWorkflowDraftUpdate:
             status_code=422,
         )
     return update
-
-
-def _tags(value: JsonValue) -> list[str]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise AppError(
-            code="AI_TEST_CASE_DRAFT_INVALID", message="AI Test Case 标签格式无效", status_code=422
-        )
-    return cast(list[str], value)
 
 
 def _review_status(items: list[AIChangeItem]) -> str:

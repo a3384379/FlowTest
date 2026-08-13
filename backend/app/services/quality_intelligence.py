@@ -26,7 +26,10 @@ from app.models.access import User
 from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.workflows import WorkflowExecution
 from app.repositories.impact import ImpactRunBundle
-from app.repositories.quality_intelligence import QualityIntelligenceRepository
+from app.repositories.quality_intelligence import (
+    QualityIntelligenceRepository,
+    TerminalExecutionSnapshot,
+)
 from app.schemas.quality_intelligence import ReleaseRiskCreate
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
@@ -49,23 +52,29 @@ class QualityIntelligenceService:
         started_at = ended_at - timedelta(days=payload.window_days)
         baseline_ended_at = started_at
         baseline_started_at = baseline_ended_at - timedelta(days=payload.window_days)
-        current_observations = await self._repository.failure_observations(
+        current_executions = await self._repository.terminal_execution_snapshot(
             project_id=project_id, started_at=started_at, ended_at=ended_at
+        )
+        baseline_executions = await self._repository.terminal_execution_snapshot(
+            project_id=project_id,
+            started_at=baseline_started_at,
+            ended_at=baseline_ended_at,
+        )
+        current_observations = await self._repository.failure_observations(
+            project_id=project_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            terminal_executions=current_executions,
         )
         baseline_observations = await self._repository.failure_observations(
             project_id=project_id,
             started_at=baseline_started_at,
             ended_at=baseline_ended_at,
+            terminal_executions=baseline_executions,
         )
         cluster_evidence = cluster_failures(current_observations, baseline_observations)
-        current_total, current_failures = await self._repository.execution_counts(
-            project_id=project_id, started_at=started_at, ended_at=ended_at
-        )
-        baseline_total, baseline_failures = await self._repository.execution_counts(
-            project_id=project_id,
-            started_at=baseline_started_at,
-            ended_at=baseline_ended_at,
-        )
+        current_total, current_failures = _execution_counts(current_executions)
+        baseline_total, baseline_failures = _execution_counts(baseline_executions)
         decisions = await self._repository.deployment_decisions(project_id)
         (
             performance_run_id,
@@ -105,11 +114,12 @@ class QualityIntelligenceService:
             performance_regression=performance_regression,
             flaky_assets=flaky_assets,
         )
-        executions = await self._repository.executions_for_trend(
-            project_id=project_id, started_at=started_at, ended_at=ended_at
-        )
         algorithm_version = "release_risk_v1"
-        quality_trend = _quality_trend(executions, started_at.date(), payload.window_days)
+        quality_trend = _quality_trend(
+            [execution for execution, _workflow_name in current_executions],
+            started_at.date(),
+            payload.window_days,
+        )
         recommended_tests = _recommended_tests(impact.selection.selected_assets, cluster_evidence)
         fingerprint_payload = _risk_fingerprint_payload(
             algorithm_version=algorithm_version,
@@ -311,6 +321,12 @@ def _cluster_fingerprint(cluster: FailureClusterEvidence) -> RiskClusterFingerpr
         "regression_percent": cluster.regression_percent,
         "recommendation": cluster.recommendation,
     }
+
+
+def _execution_counts(executions: TerminalExecutionSnapshot) -> tuple[int, int]:
+    return len(executions), sum(
+        execution.status == "failed" for execution, _workflow_name in executions
+    )
 
 
 def _quality_trend(
