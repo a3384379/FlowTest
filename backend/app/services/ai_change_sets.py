@@ -531,7 +531,11 @@ def _rehydrate_test_case_definition(
             status_code=409,
         ) from error
     for field in ("runtime_variables", "runtime_headers"):
-        proposed[field] = _restore_redacted_value(proposed[field], current[field])
+        proposed[field] = (
+            _restore_redacted_value(proposed[field], current[field])
+            if field in definition.model_fields_set
+            else current[field]
+        )
     return TestCaseDefinitionInput.model_validate(proposed)
 
 
@@ -554,18 +558,25 @@ def _rehydrate_workflow_definition(
             message="现有 Workflow 草稿格式无效",
             status_code=409,
         ) from error
-    proposed["variables"] = _restore_redacted_value(
-        proposed.get("variables", {}), current.get("variables", {})
+    proposed["variables"] = (
+        _restore_redacted_value(proposed.get("variables", {}), current.get("variables", {}))
+        if "variables" in definition.model_fields_set
+        else current.get("variables", {})
     )
     current_nodes = {
         str(node.get("id")): node
         for node in cast(list[dict[str, JsonValue]], current.get("nodes", []))
     }
     proposed_nodes = cast(list[dict[str, JsonValue]], proposed.get("nodes", []))
+    model_nodes = {node.id: node for node in definition.nodes}
     for node in proposed_nodes:
         current_node = current_nodes.get(str(node.get("id")), {})
+        model_node = model_nodes.get(str(node.get("id")))
         for field in ("config", "configuration"):
-            if field in node:
+            if model_node is not None and field not in model_node.model_fields_set:
+                if field in current_node:
+                    node[field] = current_node[field]
+            elif field in node:
                 node[field] = _restore_redacted_value(
                     node[field], current_node.get(field, _MISSING_REDACTED_SOURCE)
                 )

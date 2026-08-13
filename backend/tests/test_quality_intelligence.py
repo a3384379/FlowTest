@@ -43,6 +43,7 @@ from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInp
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
     _rehydrate_test_case_definition,
+    _rehydrate_workflow_definition,
     _target_definition_for_ai,
     _test_case_update,
     _validate_assertion_workflow_change,
@@ -732,10 +733,53 @@ def test_ai_test_case_update_restores_only_known_redacted_runtime_values() -> No
     assert restored is not None
     assert restored.runtime_variables == {"session_id": "opaque-value"}
     assert restored.runtime_headers == {"X-Session": "opaque-header"}
+    omitted = CaseDefinitionInput.model_validate(
+        {"workflow_id": str(workflow_id), "environment_id": str(environment_id)}
+    )
+    restored_omitted = _rehydrate_test_case_definition(omitted, current)
+    assert restored_omitted is not None
+    assert restored_omitted.runtime_variables == {"session_id": "opaque-value"}
+    assert restored_omitted.runtime_headers == {"X-Session": "opaque-header"}
+    explicit_empty = CaseDefinitionInput.model_validate(
+        {
+            "workflow_id": str(workflow_id),
+            "environment_id": str(environment_id),
+            "runtime_variables": {},
+            "runtime_headers": {},
+        }
+    )
+    restored_empty = _rehydrate_test_case_definition(explicit_empty, current)
+    assert restored_empty is not None
+    assert restored_empty.runtime_variables == {}
+    assert restored_empty.runtime_headers == {}
     unknown_placeholder = proposed.model_copy(update={"runtime_variables": {"new_value": REDACTED}})
     with pytest.raises(AppError) as invalid:
         _rehydrate_test_case_definition(unknown_placeholder, current)
     assert invalid.value.code == "AI_REDACTED_VALUE_INVALID"
+
+
+def test_ai_workflow_update_preserves_omitted_runtime_fields_but_allows_explicit_empty() -> None:
+    current = _workflow_definition()
+    current["variables"] = {"session_id": "opaque-session"}
+    current["nodes"][0]["config"] = {"headers": {"X-Session": "opaque-header"}}
+    omitted_raw = deepcopy(current)
+    omitted_raw.pop("variables")
+    omitted_raw["nodes"][0].pop("config")
+    omitted = WorkflowDefinition.model_validate(omitted_raw)
+
+    restored = _rehydrate_workflow_definition(omitted, current)
+
+    assert restored is not None
+    assert restored.variables == {"session_id": "opaque-session"}
+    assert restored.nodes[0].config == {"headers": {"X-Session": "opaque-header"}}
+    explicit_empty_raw = deepcopy(omitted_raw)
+    explicit_empty_raw["variables"] = {}
+    explicit_empty_raw["nodes"][0]["config"] = {}
+    explicit_empty = WorkflowDefinition.model_validate(explicit_empty_raw)
+    restored_empty = _rehydrate_workflow_definition(explicit_empty, current)
+    assert restored_empty is not None
+    assert restored_empty.variables == {}
+    assert restored_empty.nodes[0].config == {}
 
 
 @pytest.mark.asyncio
