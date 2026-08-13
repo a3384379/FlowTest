@@ -3,6 +3,8 @@ from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -691,6 +693,29 @@ def test_change_set_provider_schema_requires_action_target_and_typed_drafts() ->
     content["definition"] = {"unexpected": True}
     with pytest.raises(JsonSchemaValidationError):
         validator.validate(invalid_definition)
+
+
+def test_compose_mock_change_set_response_matches_provider_schema() -> None:
+    source_path = Path(__file__).resolve().parents[2] / "mock-target" / "app" / "main.py"
+    spec = spec_from_file_location("flowtest_mock_target_main", source_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    response = cast(dict[str, JsonValue], module._ai_suggestions("change_set"))
+    Draft202012Validator(change_set_output_schema(MAX_CHANGE_SET_ITEMS)).validate(response)
+
+    suggestion = cast(list[dict[str, JsonValue]], response["suggestions"])[0]
+    content = cast(dict[str, JsonValue], suggestion["content"])
+    decoded = decode_change_set_content("workflow", content)
+    definition = cast(dict[str, JsonValue], decoded["definition"])
+    assert definition["variables"] == {}
+    assert definition["settings"] == {
+        "fail_fast": True,
+        "concurrency": 20,
+        "default_timeout_seconds": 30,
+    }
 
 
 def _assert_schema_objects_closed(value: JsonValue) -> None:

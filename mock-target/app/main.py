@@ -244,6 +244,7 @@ def _ai_suggestions(job_type: str) -> dict[str, object]:
         content["action"] = "create"
         content["name"] = "S30 AI 变更集草稿工作流"
         content["description"] = "逐项人工审核后只生成草稿"
+        content["definition"] = _change_set_workflow_definition()
     return {
         "suggestions": [
             {
@@ -256,4 +257,49 @@ def _ai_suggestions(job_type: str) -> dict[str, object]:
                 "content": content,
             }
         ]
+    }
+
+
+def _change_set_workflow_definition() -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "variables": [],
+        "nodes": [
+            _change_set_workflow_node("start", "start", "开始", x=0),
+            _change_set_workflow_node("end", "end", "结束", x=240),
+        ],
+        "edges": [
+            {
+                "id": "start-end",
+                "source": "start",
+                "target": "end",
+                "condition": None,
+                "mappings": [],
+            }
+        ],
+        "settings": {
+            "fail_fast": True,
+            "concurrency": 20,
+            "default_timeout_seconds": 30,
+        },
+    }
+
+
+def _change_set_workflow_node(
+    node_id: str,
+    node_type: str,
+    name: str,
+    *,
+    x: int,
+) -> dict[str, object]:
+    return {
+        "id": node_id,
+        "type": node_type,
+        "name": name,
+        "position": {"x": x, "y": 0},
+        "config_json": "{}",
+        "capability_id": None,
+        "capability_version": None,
+        "configuration_json": None,
+        "bindings": None,
     }
