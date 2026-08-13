@@ -26,10 +26,18 @@ class AITestCaseDraftUpdate(BaseModel):
     definition: TestCaseDefinitionInput | None = None
 
 
+class AIWorkflowDraftCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: AssetName
+    description: str = Field(max_length=4000)
+    definition: WorkflowDefinition
+
+
 class AIWorkflowDraftUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: AssetName | None = None
     description: str | None = Field(default=None, max_length=4000)
     definition: WorkflowDefinition | None = None
 

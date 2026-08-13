@@ -25,6 +25,7 @@ from app.schemas.ai_change_sets import (
     AIChangeSetCreate,
     AITestCaseDraftCreate,
     AITestCaseDraftUpdate,
+    AIWorkflowDraftCreate,
     AIWorkflowDraftUpdate,
 )
 from app.schemas.test_assets import TestCaseDefinitionInput
@@ -237,6 +238,7 @@ class AIChangeSetService:
             risk.id, limit=MAX_CHANGE_SET_ITEMS
         )
         targets = []
+        editable_recommendations = []
         target_keys: set[tuple[str, UUID]] = set()
         for recommended in risk.recommended_tests:
             target_type = recommended.get("target_type")
@@ -253,6 +255,7 @@ class AIChangeSetService:
             target = await self._target_snapshot(target_type, target_id, risk.project_id)
             if target is not None:
                 targets.append(target)
+                editable_recommendations.append(recommended)
                 target_keys.add(target_key)
                 if len(targets) == MAX_CHANGE_SET_ITEMS:
                     break
@@ -288,7 +291,7 @@ class AIChangeSetService:
                         for cluster in failure_clusters
                     ],
                 ),
-                "recommended_tests": cast(JsonValue, risk.recommended_tests[:200]),
+                "recommended_tests": cast(JsonValue, editable_recommendations),
             },
             "allowed_targets": cast(JsonValue, targets),
             "review_policy": {
@@ -723,13 +726,14 @@ async def _create_workflow(
     title: str,
     content: dict[str, JsonValue],
 ) -> Workflow:
+    create = _workflow_create(title, content)
     return await WorkflowService(session).create(
         actor=actor,
         project_id=project_id,
-        name=str(content.get("name") or title)[:200],
-        description=str(content.get("description") or "由 AI Change Set 生成。待人工复核"),
+        name=create.name,
+        description=create.description,
         folder_id=None,
-        definition=_workflow_definition(content),
+        definition=create.definition,
         commit=False,
     )
 
@@ -819,12 +823,20 @@ def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDr
         ) from error
 
 
-def _workflow_definition(content: dict[str, JsonValue]) -> WorkflowDefinition:
+def _workflow_create(title: str, content: dict[str, JsonValue]) -> AIWorkflowDraftCreate:
     try:
-        return WorkflowDefinition.model_validate(content.get("definition"))
+        return AIWorkflowDraftCreate.model_validate(
+            {
+                "name": title,
+                "description": "由 AI Change Set 生成。待人工复核",
+                **content,
+            }
+        )
     except (TypeError, ValueError) as error:
         raise AppError(
-            code="AI_WORKFLOW_DRAFT_INVALID", message="AI Workflow 草稿格式无效", status_code=422
+            code="AI_WORKFLOW_DRAFT_INVALID",
+            message="AI Workflow 创建内容必须符合受支持的草稿字段",
+            status_code=422,
         ) from error
 
 

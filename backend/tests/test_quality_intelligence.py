@@ -36,7 +36,7 @@ from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
-from app.models.quality_intelligence import FailureCluster
+from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
@@ -45,12 +45,15 @@ from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInp
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
     MAX_CHANGE_SET_ITEMS,
+    AIChangeSetService,
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
     _target_definition_for_ai,
     _test_case_create,
     _test_case_update,
     _validate_assertion_workflow_change,
+    _workflow_create,
+    _workflow_update,
 )
 from app.services.quality_intelligence import (
     _execution_counts,
@@ -524,6 +527,77 @@ def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
     assert create.tags == []
 
 
+def test_workflow_create_and_update_enforce_draft_metadata_constraints() -> None:
+    definition = _workflow_definition()
+    invalid_contents = (
+        {"name": "   ", "definition": definition},
+        {"name": {"value": "x"}, "definition": definition},
+        {"description": "x" * 4001, "definition": definition},
+        {"unexpected": True, "definition": definition},
+    )
+    for content in invalid_contents:
+        with pytest.raises(AppError) as invalid:
+            _workflow_create("合法 Workflow 草稿", cast(dict[str, JsonValue], content))
+        assert invalid.value.code == "AI_WORKFLOW_DRAFT_INVALID"
+
+    create = _workflow_create("默认 Workflow 草稿", {"definition": definition})
+    assert create.name == "默认 Workflow 草稿"
+    with pytest.raises(AppError) as invalid_update:
+        _workflow_update({"name": "   "})
+    assert invalid_update.value.code == "AI_WORKFLOW_DRAFT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_change_set_prompt_recommendations_match_capped_allowed_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = AsyncMock(spec=AsyncSession)
+    service = AIChangeSetService(session)
+    service._repository.list_failure_clusters = AsyncMock(return_value=[])
+    project_id = uuid4()
+    recommendations = [
+        {
+            "target_type": "workflow",
+            "target_id": str(uuid4()),
+            "name": f"Workflow {index}",
+        }
+        for index in range(MAX_CHANGE_SET_ITEMS + 1)
+    ]
+    risk = ReleaseRisk(
+        id=uuid4(),
+        project_id=project_id,
+        impact_run_id=uuid4(),
+        score=10.0,
+        risk_level="low",
+        factors=[],
+        evidence_snapshot={},
+        recommended_tests=recommendations,
+    )
+
+    async def target_snapshot(
+        target_type: str, target_id: UUID, target_project_id: UUID
+    ) -> dict[str, JsonValue]:
+        assert target_project_id == project_id
+        return {
+            "target_type": target_type,
+            "target_id": str(target_id),
+            "snapshot_sha256": "a" * 64,
+        }
+
+    monkeypatch.setattr(service, "_target_snapshot", target_snapshot)
+    metadata = await service._source_metadata(risk, [])
+    allowed_targets = cast(list[dict[str, JsonValue]], metadata["allowed_targets"])
+    advertised = cast(
+        list[dict[str, JsonValue]],
+        cast(dict[str, JsonValue], metadata["release_risk"])["recommended_tests"],
+    )
+
+    assert len(allowed_targets) == len(advertised) == MAX_CHANGE_SET_ITEMS
+    assert [item["target_id"] for item in advertised] == [
+        item["target_id"] for item in allowed_targets
+    ]
+
+
 @pytest.mark.asyncio
 async def test_release_risk_api_persists_evidence_and_enforces_project_scope(
     quality_context: QualityContext,
@@ -768,6 +842,9 @@ async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
         assert job is not None
         assert change_set is not None
         allowed_targets = job.sanitized_input["metadata"]["allowed_targets"]
+        recommended_tests = job.sanitized_input["metadata"]["release_risk"]["recommended_tests"]
+        assert len(recommended_tests) == len(allowed_targets) == 1
+        assert recommended_tests[0]["target_id"] == workflow_id
         target = allowed_targets[0]
         assert target["draft_definition"]["variables"] == {
             "session_id": REDACTED,
