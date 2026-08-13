@@ -686,7 +686,14 @@ def _review_content(content: dict[str, JsonValue]) -> dict[str, JsonValue]:
         raise AppError(code="AI_REVIEW_INVALID", message=str(error), status_code=422) from error
     if not isinstance(sanitized, dict) or not isinstance(sanitized.get("content"), dict):
         raise AppError(code="AI_REVIEW_INVALID", message="审核内容格式无效", status_code=422)
-    return cast(dict[str, JsonValue], sanitized["content"])
+    sanitized_content = cast(dict[str, JsonValue], sanitized["content"])
+    if sanitized_content != content:
+        raise AppError(
+            code="AI_REVIEW_SECRET_EDIT_FORBIDDEN",
+            message="AI 变更审核不允许写入敏感值。请使用专用 Credential 接口",
+            status_code=422,
+        )
+    return sanitized_content
 
 
 async def _create_test_case(

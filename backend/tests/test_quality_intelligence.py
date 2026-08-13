@@ -48,6 +48,7 @@ from app.services.ai_change_sets import (
     AIChangeSetService,
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
+    _review_content,
     _target_definition_for_ai,
     _test_case_create,
     _test_case_update,
@@ -507,6 +508,22 @@ def test_test_case_update_rejects_unsupported_or_empty_content() -> None:
 
     update = _test_case_update({"description": "人工确认后清空描述"})
     assert update.description == "人工确认后清空描述"
+
+
+def test_review_content_rejects_secret_rotation_before_redaction() -> None:
+    secret_edit: dict[str, JsonValue] = {
+        "definition": {
+            "runtime_variables": {"password": "rotated-secret-material"},
+        }
+    }
+    with pytest.raises(AppError) as forbidden:
+        _review_content(secret_edit)
+    assert forbidden.value.code == "AI_REVIEW_SECRET_EDIT_FORBIDDEN"
+
+    redacted_placeholder: dict[str, JsonValue] = {
+        "definition": {"runtime_variables": {"password": REDACTED}}
+    }
+    assert _review_content(redacted_placeholder) == redacted_placeholder
 
 
 def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
