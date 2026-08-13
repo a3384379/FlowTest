@@ -123,7 +123,7 @@ class TestCaseService:
         commit: bool = True,
     ) -> TestCase:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        model = await self._get_project_case(project_id, case_id)
+        model = await self._get_project_case_for_update(project_id, case_id)
         if name is not None:
             normalized_name = name.strip()
             await self._ensure_unique_name(project_id, normalized_name, excluding_id=model.id)

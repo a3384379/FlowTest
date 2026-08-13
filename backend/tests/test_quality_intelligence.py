@@ -36,6 +36,7 @@ from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
+from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.quality_intelligence import QualityIntelligenceRepository
@@ -49,6 +50,7 @@ from app.services.ai_change_sets import (
     _validate_assertion_workflow_change,
 )
 from app.services.quality_intelligence import _quality_trend, _risk_fingerprint_payload
+from app.services.test_assets import TestCaseService as CaseService
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
 ADMIN_PASSWORD = "quality-intelligence-password-123!"
@@ -780,6 +782,44 @@ def test_ai_workflow_update_preserves_omitted_runtime_fields_but_allows_explicit
     assert restored_empty is not None
     assert restored_empty.variables == {}
     assert restored_empty.nodes[0].config == {}
+
+
+@pytest.mark.asyncio
+async def test_regular_test_case_update_takes_same_row_lock_as_ai_acceptance() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    project_id = uuid4()
+    case_id = uuid4()
+    actor = User(id=uuid4(), email="editor@example.com", display_name="Editor")
+    model = CaseModel(
+        id=case_id,
+        project_id=project_id,
+        name="并发更新用例",
+        description="原描述",
+        tags=[],
+        is_template=False,
+        draft_definition={},
+        current_version=None,
+        created_by_id=actor.id,
+    )
+    service = CaseService(session)
+    service._projects.authorize = AsyncMock()
+    service._assets.get_case_for_update = AsyncMock(return_value=model)
+
+    updated = await service.update(
+        actor=actor,
+        project_id=project_id,
+        case_id=case_id,
+        name=None,
+        description="人工更新",
+        folder_id=None,
+        change_folder=False,
+        tags=None,
+        is_template=None,
+        definition=None,
+    )
+
+    service._assets.get_case_for_update.assert_awaited_once_with(case_id)
+    assert updated.description == "人工更新"
 
 
 @pytest.mark.asyncio
