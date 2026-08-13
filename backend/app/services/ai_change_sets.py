@@ -449,7 +449,7 @@ async def materialize_change_set_items(
             )
         )
     repository.add_items(items)
-    change_set.status = "draft"
+    change_set.status = _review_status(items)
 
 
 async def mark_change_set_failed(session: AsyncSession, job_id: UUID) -> None:

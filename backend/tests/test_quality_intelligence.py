@@ -54,6 +54,7 @@ from app.services.ai_change_sets import (
     _validate_assertion_workflow_change,
     _workflow_create,
     _workflow_update,
+    materialize_change_set_items,
 )
 from app.services.quality_intelligence import (
     _execution_counts,
@@ -599,6 +600,27 @@ async def test_change_set_prompt_recommendations_match_capped_allowed_targets(
     assert [item["target_id"] for item in advertised] == [
         item["target_id"] for item in allowed_targets
     ]
+
+
+@pytest.mark.asyncio
+async def test_empty_generated_change_set_is_terminally_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = AsyncMock(spec=AsyncSession)
+    change_set = AIChangeSet(status="generating", source_snapshot={})
+
+    async def locked_change_set(_repository: AIChangeSetRepository, _job_id: UUID) -> AIChangeSet:
+        return change_set
+
+    monkeypatch.setattr(
+        AIChangeSetRepository,
+        "get_change_set_by_job_for_update",
+        locked_change_set,
+    )
+
+    await materialize_change_set_items(session, AIJob(id=uuid4()), [])
+
+    assert change_set.status == "rejected"
 
 
 @pytest.mark.asyncio
