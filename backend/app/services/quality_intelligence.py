@@ -250,7 +250,7 @@ def _quality_trend(
     for execution in executions:
         by_day[execution.started_at.astimezone(UTC).date()].append(execution)
     points = []
-    for offset in range(days):
+    for offset in range(days + 1):
         day = started_on + timedelta(days=offset)
         values = by_day.get(day, [])
         passed = sum(item.status == "passed" for item in values)

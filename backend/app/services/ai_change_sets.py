@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.ai import AIInputError, sanitize_ai_input
-from app.engine.contracts import WorkflowDefinition
+from app.engine.contracts import NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
 from app.models.quality_intelligence import ReleaseRisk
@@ -327,7 +327,13 @@ class AIChangeSetService:
         _ensure_target(workflow, change_set.project_id, item.target_snapshot_sha256)
         if workflow is None:
             raise RuntimeError("validated workflow target is missing")
-        updated_workflow = await _update_workflow(self._session, actor, workflow, content)
+        updated_workflow = await _update_workflow(
+            self._session,
+            actor,
+            workflow,
+            content,
+            require_assertion_change=item.item_type == "assertion",
+        )
         return "workflow", updated_workflow.id
 
     async def _get_change_set(self, change_set_id: UUID) -> AIChangeSet:
@@ -362,15 +368,10 @@ async def materialize_change_set_items(
         expected_type = "workflow" if item_type == "assertion" else item_type
         if action == "create" and (target_id is not None or item_type == "assertion"):
             raise ValueError("create change item target is invalid")
-        if action == "update" and (
-            target_id is None or (expected_type, target_id) not in allowed_targets
-        ):
+        target_key = (expected_type, target_id) if target_id is not None else None
+        if action == "update" and (target_key is None or target_key not in allowed_targets):
             raise ValueError("update target is not an allowed impacted asset")
-        target_hash = (
-            await _target_hash_by_id(repository, expected_type, target_id)
-            if target_id is not None
-            else None
-        )
+        target_hash = allowed_targets[target_key] if target_key is not None else None
         proposal = {key: value for key, value in content.items() if key not in _CONTROL_FIELDS}
         items.append(
             AIChangeItem(
@@ -405,10 +406,10 @@ def _require_enabled() -> None:
         raise AppError(code="AI_DISABLED", message="AI 助手未启用", status_code=503)
 
 
-def _allowed_targets(change_set: AIChangeSet) -> set[tuple[str, UUID]]:
+def _allowed_targets(change_set: AIChangeSet) -> dict[tuple[str, UUID], str]:
     metadata = change_set.source_snapshot.get("metadata")
     raw_targets = metadata.get("allowed_targets") if isinstance(metadata, dict) else None
-    allowed: set[tuple[str, UUID]] = set()
+    allowed: dict[tuple[str, UUID], str] = {}
     if not isinstance(raw_targets, list):
         return allowed
     for target in raw_targets:
@@ -416,8 +417,14 @@ def _allowed_targets(change_set: AIChangeSet) -> set[tuple[str, UUID]]:
             continue
         target_type = target.get("target_type")
         target_id = _change_target_id(target.get("target_id"))
-        if target_type in {"test_case", "workflow"} and target_id is not None:
-            allowed.add((target_type, target_id))
+        snapshot_sha256 = target.get("snapshot_sha256")
+        if (
+            target_type in {"test_case", "workflow"}
+            and target_id is not None
+            and isinstance(snapshot_sha256, str)
+            and len(snapshot_sha256) == 64
+        ):
+            allowed[(target_type, target_id)] = snapshot_sha256
     return allowed
 
 
@@ -428,19 +435,6 @@ def _change_target_id(value: JsonValue | None) -> UUID | None:
         return UUID(str(value))
     except ValueError as error:
         raise ValueError("change item target id is invalid") from error
-
-
-async def _target_hash_by_id(
-    repository: AIChangeSetRepository, target_type: str, target_id: UUID
-) -> str:
-    target = (
-        await repository.get_test_case(target_id)
-        if target_type == "test_case"
-        else await repository.get_workflow(target_id)
-    )
-    if target is None:
-        raise ValueError("change item target no longer exists")
-    return _target_hash(target)
 
 
 def _target_hash(target: TestCase | Workflow) -> str:
@@ -551,9 +545,16 @@ async def _create_workflow(
 
 
 async def _update_workflow(
-    session: AsyncSession, actor: User, target: Workflow, content: dict[str, JsonValue]
+    session: AsyncSession,
+    actor: User,
+    target: Workflow,
+    content: dict[str, JsonValue],
+    *,
+    require_assertion_change: bool = False,
 ) -> Workflow:
     definition = _workflow_definition(content) if content.get("definition") is not None else None
+    if require_assertion_change:
+        _validate_assertion_workflow_change(target, definition)
     return await WorkflowService(session).update_draft(
         actor=actor,
         project_id=target.project_id,
@@ -566,6 +567,41 @@ async def _update_workflow(
         definition=definition,
         commit=False,
     )
+
+
+def _validate_assertion_workflow_change(
+    target: Workflow, definition: WorkflowDefinition | None
+) -> None:
+    proposed_assertions = _assertion_nodes(definition) if definition is not None else []
+    if not proposed_assertions:
+        raise AppError(
+            code="AI_ASSERTION_DRAFT_INVALID",
+            message="AI Assertion 变更必须提供包含断言节点的完整 Workflow 草稿",
+            status_code=422,
+        )
+    try:
+        current = WorkflowDefinition.model_validate(target.draft_definition)
+    except (TypeError, ValueError) as error:
+        raise AppError(
+            code="AI_WORKFLOW_DRAFT_INVALID",
+            message="现有 Workflow 草稿格式无效",
+            status_code=409,
+        ) from error
+    if proposed_assertions == _assertion_nodes(current):
+        raise AppError(
+            code="AI_ASSERTION_DRAFT_INVALID",
+            message="AI Assertion 变更必须实际修改断言节点",
+            status_code=422,
+        )
+
+
+def _assertion_nodes(definition: WorkflowDefinition) -> list[dict[str, Any]]:
+    nodes = [
+        node.model_dump(mode="json")
+        for node in definition.nodes
+        if node.effective_type is NodeType.ASSERT
+    ]
+    return sorted(nodes, key=lambda node: str(node["id"]))
 
 
 def _test_case_definition(content: dict[str, JsonValue]) -> TestCaseDefinitionInput:

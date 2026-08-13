@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.dependencies import get_ai_job_dispatcher
 from app.core.config import settings
 from app.core.database import get_session
+from app.core.errors import AppError
 from app.core.security import password_service
 from app.domain.access import ProjectRole
 from app.domain.quality_intelligence import (
@@ -22,14 +23,17 @@ from app.domain.quality_intelligence import (
     calculate_release_risk,
     cluster_failures,
 )
+from app.engine.contracts import WorkflowDefinition
 from app.main import app
 from app.models import Base
 from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
-from app.models.workflows import Workflow
+from app.models.workflows import Workflow, WorkflowExecution
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
+from app.services.ai_change_sets import _validate_assertion_workflow_change
+from app.services.quality_intelligence import _quality_trend
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
 ADMIN_PASSWORD = "quality-intelligence-password-123!"
@@ -139,6 +143,36 @@ class UpdateWorkflowProvider:
                 ]
             },
             token_usage={"input_tokens": 20, "output_tokens": 20},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AssertionOnlyProvider:
+    workflow_id: str
+
+    async def generate(
+        self,
+        *,
+        job_type: str,
+        sanitized_input: dict[str, JsonValue],
+        output_schema: dict[str, JsonValue],
+    ) -> AIProviderResult:
+        assert job_type == "change_set"
+        return AIProviderResult(
+            payload={
+                "suggestions": [
+                    {
+                        "type": "assertion",
+                        "title": "补充状态码断言",
+                        "content": {
+                            "action": "update",
+                            "target_id": self.workflow_id,
+                            "status_code": 200,
+                        },
+                    }
+                ]
+            },
+            token_usage={"input_tokens": 20, "output_tokens": 10},
         )
 
 
@@ -252,6 +286,40 @@ def test_release_risk_score_is_bounded_and_explainable() -> None:
     assert sum(float(cast(float, factor["score"])) for factor in result.factors) == result.score
 
 
+def test_quality_trend_includes_current_day_executions() -> None:
+    ended_at = datetime.now(UTC)
+    started_on = (ended_at - timedelta(days=7)).date()
+    execution = WorkflowExecution(started_at=ended_at, status="passed")
+
+    trend = _quality_trend([execution], started_on, 7)
+
+    assert len(trend) == 8
+    assert trend[-1] == {
+        "date": ended_at.date().isoformat(),
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "pass_rate": 100.0,
+    }
+
+
+def test_assertion_change_must_modify_typed_assertion_nodes() -> None:
+    current_definition = _workflow_definition_with_assertion(start_name="开始", expected=200)
+    target = Workflow(draft_definition=current_definition)
+    metadata_only_change = WorkflowDefinition.model_validate(
+        _workflow_definition_with_assertion(start_name="更名开始", expected=200)
+    )
+
+    with pytest.raises(AppError) as unchanged:
+        _validate_assertion_workflow_change(target, metadata_only_change)
+
+    assert unchanged.value.code == "AI_ASSERTION_DRAFT_INVALID"
+    changed_assertion = WorkflowDefinition.model_validate(
+        _workflow_definition_with_assertion(start_name="开始", expected=201)
+    )
+    _validate_assertion_workflow_change(target, changed_assertion)
+
+
 @pytest.mark.asyncio
 async def test_release_risk_api_persists_evidence_and_enforces_project_scope(
     quality_context: QualityContext,
@@ -273,7 +341,8 @@ async def test_release_risk_api_persists_evidence_and_enforces_project_scope(
     assert risk["evidence_snapshot"]["impact"]["breaking_change_count"] == 1
     assert risk["recommended_tests"][0]["target_id"] == "workflow-target"
     assert risk["failure_clusters"] == []
-    assert len(risk["quality_trend"]) == 30
+    assert len(risk["quality_trend"]) == 31
+    assert risk["quality_trend"][-1]["date"] == risk["window_ended_at"][:10]
 
     listed = await quality_context.client.get(
         f"/api/v1/projects/{project_id}/release-risks", headers=headers
@@ -537,6 +606,110 @@ async def test_ai_change_set_detects_changed_target_before_applying_update(
         assert workflow.draft_revision == 2
 
 
+@pytest.mark.asyncio
+async def test_ai_change_set_preserves_target_snapshot_captured_before_generation(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 生成期目标漂移项目")
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "生成期人工维护流程",
+            "description": "AI Provider 返回前发生变化",
+            "definition": _workflow_definition(),
+        },
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = workflow_response.json()["id"]
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "生成期漂移证据", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+    created = await quality_context.client.post(
+        "/api/v1/ai/change-sets",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "impact_run_id": impact_run_id,
+            "release_risk_id": risk_response.json()["id"],
+            "title": "生成期漂移变更集",
+        },
+    )
+    assert created.status_code == 202, created.text
+
+    async with quality_context.sessions() as session:
+        workflow = await session.get(Workflow, UUID(workflow_id))
+        assert workflow is not None
+        workflow.draft_revision += 1
+        await session.commit()
+        job = await session.get(AIJob, quality_context.queue.job_ids[-1])
+        assert job is not None
+        completed = await AIJobRunner(session, UpdateWorkflowProvider(workflow_id)).run(job.id)
+        assert completed.status == "completed"
+        item = await session.scalar(
+            select(AIChangeItem).where(AIChangeItem.change_set_id == UUID(created.json()["id"]))
+        )
+        assert item is not None
+
+    conflicted = await quality_context.client.post(
+        f"/api/v1/ai/change-sets/{created.json()['id']}/items/{item.id}/accept",
+        headers=headers,
+        json={"note": "生成期间的人工修改不得被覆盖"},
+    )
+    assert conflicted.status_code == 409, conflicted.text
+    assert conflicted.json()["error"]["code"] == "AI_CHANGE_TARGET_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_ai_assertion_change_requires_complete_workflow_definition(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 断言变更项目")
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "断言目标流程", "definition": _workflow_definition()},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = workflow_response.json()["id"]
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "断言风险证据", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+    change_set_id, item_id = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=project_id,
+        impact_run_id=impact_run_id,
+        risk_id=risk_response.json()["id"],
+        provider=AssertionOnlyProvider(workflow_id),
+    )
+
+    rejected = await quality_context.client.post(
+        f"/api/v1/ai/change-sets/{change_set_id}/items/{item_id}/accept",
+        headers=headers,
+        json={"note": "缺少完整 Workflow Definition"},
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "AI_ASSERTION_DRAFT_INVALID"
+    async with quality_context.sessions() as session:
+        workflow = await session.get(Workflow, UUID(workflow_id))
+        item = await session.get(AIChangeItem, item_id)
+        assert workflow is not None
+        assert workflow.draft_revision == 1
+        assert item is not None
+        assert item.review_status == "pending"
+
+
 async def _login(
     client: AsyncClient, *, email: str = ADMIN_EMAIL, password: str = ADMIN_PASSWORD
 ) -> dict[str, str]:
@@ -703,4 +876,42 @@ def _workflow_definition() -> dict[str, JsonValue]:
             },
         ],
         "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+    }
+
+
+def _workflow_definition_with_assertion(*, start_name: str, expected: int) -> dict[str, JsonValue]:
+    return {
+        "schema_version": "1.0",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": start_name,
+                "position": {"x": 0, "y": 0},
+                "config": {},
+            },
+            {
+                "id": "assert-status",
+                "type": "assert",
+                "name": "状态码断言",
+                "position": {"x": 160, "y": 0},
+                "config": {
+                    "source_node_id": "start",
+                    "expression": "$.status_code",
+                    "operator": "equals",
+                    "expected": expected,
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "结束",
+                "position": {"x": 320, "y": 0},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "start-assert", "source": "start", "target": "assert-status"},
+            {"id": "assert-end", "source": "assert-status", "target": "end"},
+        ],
     }
