@@ -118,13 +118,13 @@ class QualityIntelligenceRepository:
                     )
                     .order_by(
                         evidence_root_id,
-                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
                         case(
                             (WorkflowExecution.parent_execution_id.is_not(None), 0),
                             else_=1,
                         ),
-                        WorkflowNodeExecution.started_at.asc().nulls_last(),
                         WorkflowExecution.started_at,
+                        WorkflowNodeExecution.started_at.asc().nulls_last(),
+                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
                         WorkflowNodeExecution.completed_at,
                         WorkflowNodeExecution.id,
                         WorkflowExecution.id,

@@ -1369,6 +1369,106 @@ async def test_failure_observation_counts_dataset_root_and_uses_child_node_evide
 
 
 @pytest.mark.asyncio
+async def test_failure_observation_uses_earliest_dataset_child_before_node_detail(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "Dataset 首次失败项目")
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "Dataset 首次失败流程", "definition": _workflow_definition()},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = UUID(workflow_response.json()["id"])
+    occurred_at = datetime.now(UTC)
+    root_id = uuid4()
+    first_child_id = uuid4()
+    later_child_id = uuid4()
+    async with quality_context.sessions() as session:
+        actor_id = await session.scalar(select(User.id).where(User.email == ADMIN_EMAIL))
+        assert actor_id is not None
+
+        def execution(
+            *,
+            execution_id: UUID,
+            parent_execution_id: UUID | None,
+            row_index: int | None,
+            error_code: str,
+            started_at: datetime,
+        ) -> WorkflowExecution:
+            return WorkflowExecution(
+                id=execution_id,
+                project_id=UUID(project_id),
+                workflow_id=workflow_id,
+                workflow_version_id=uuid4(),
+                environment_id=uuid4(),
+                triggered_by_id=actor_id,
+                parent_execution_id=parent_execution_id,
+                dataset_row_index=row_index,
+                status="failed",
+                snapshot={},
+                context={},
+                error_code=error_code,
+                started_at=started_at,
+                completed_at=started_at,
+            )
+
+        later_at = occurred_at + timedelta(seconds=1)
+        session.add_all(
+            [
+                execution(
+                    execution_id=root_id,
+                    parent_execution_id=None,
+                    row_index=None,
+                    error_code="DATASET_ROWS_FAILED",
+                    started_at=occurred_at,
+                ),
+                execution(
+                    execution_id=first_child_id,
+                    parent_execution_id=root_id,
+                    row_index=0,
+                    error_code="NETWORK_FAILED",
+                    started_at=occurred_at,
+                ),
+                execution(
+                    execution_id=later_child_id,
+                    parent_execution_id=root_id,
+                    row_index=1,
+                    error_code="WORKFLOW_NODE_FAILED",
+                    started_at=later_at,
+                ),
+                WorkflowNodeExecution(
+                    workflow_execution_id=later_child_id,
+                    node_id="assert-status",
+                    node_type="assert",
+                    name="校验状态码",
+                    status="failed",
+                    attempts=1,
+                    output=None,
+                    result=None,
+                    error_code="ASSERTION_FAILED",
+                    error_message="状态码不符合预期",
+                    started_at=later_at,
+                    completed_at=later_at,
+                ),
+            ]
+        )
+        await session.commit()
+        observations = await QualityIntelligenceRepository(session).failure_observations(
+            project_id=UUID(project_id),
+            started_at=occurred_at - timedelta(minutes=1),
+            ended_at=later_at + timedelta(minutes=1),
+        )
+
+    assert len(observations) == 1
+    assert observations[0].execution_id == root_id
+    assert observations[0].error_code == "NETWORK_FAILED"
+    assert observations[0].node_type is None
+    assert observations[0].category == "network"
+
+
+@pytest.mark.asyncio
 async def test_deployment_decisions_select_latest_record_per_service_without_limit() -> None:
     session = AsyncMock(spec=AsyncSession)
     decision_rows = MagicMock()
