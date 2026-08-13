@@ -32,7 +32,7 @@ from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
-from app.models.workflows import Workflow, WorkflowExecution
+from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.quality_intelligence import QualityIntelligenceRepository
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
@@ -538,6 +538,11 @@ async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
         "session_id": "opaque-session-material",
         "region": "cn-north-1",
     }
+    workflow_definition["nodes"][0]["config"] = {
+        "headers": {"X-Session": "opaque-node-secret"},
+        "body": {"customer": {"reference": "opaque-reference"}},
+        "attempt": 3,
+    }
     workflow_response = await quality_context.client.post(
         f"/api/v1/projects/{project_id}/workflows",
         headers=headers,
@@ -576,7 +581,14 @@ async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
             "session_id": REDACTED,
             "region": REDACTED,
         }
+        assert target["draft_definition"]["nodes"][0]["config"] == {
+            "headers": {"X-Session": REDACTED},
+            "body": {"customer": {"reference": REDACTED}},
+            "attempt": REDACTED,
+        }
         assert "opaque-session-material" not in str(job.sanitized_input)
+        assert "opaque-node-secret" not in str(job.sanitized_input)
+        assert "opaque-reference" not in str(job.sanitized_input)
         assert "cn-north-1" not in str(change_set.source_snapshot)
 
 
@@ -978,10 +990,9 @@ async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
     )
     execution_rows = MagicMock()
     execution_rows.all.return_value = [(execution, "确定性失败流程")]
-    session.execute.return_value = execution_rows
-    failed_nodes = MagicMock()
-    failed_nodes.all.return_value = []
-    session.scalars.return_value = failed_nodes
+    evidence_rows = MagicMock()
+    evidence_rows.all.return_value = []
+    session.execute.side_effect = [execution_rows, evidence_rows]
     repository = QualityIntelligenceRepository(session)
 
     await repository.failure_observations(
@@ -990,11 +1001,89 @@ async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
         ended_at=execution.started_at + timedelta(hours=1),
     )
 
-    node_query = str(session.scalars.await_args.args[0])
+    node_query = str(session.execute.await_args_list[1].args[0])
     order_clause = node_query.split("ORDER BY", maxsplit=1)[1]
+    assert "workflow_executions.parent_execution_id IS NOT NULL" in order_clause
     assert "workflow_node_executions.started_at ASC NULLS LAST" in order_clause
     assert "workflow_node_executions.completed_at" in order_clause
     assert "workflow_node_executions.id" in order_clause
+
+
+@pytest.mark.asyncio
+async def test_failure_observation_counts_dataset_root_and_uses_child_node_evidence(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "Dataset 失败聚类项目")
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "Dataset 根因流程", "definition": _workflow_definition()},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = UUID(workflow_response.json()["id"])
+    occurred_at = datetime.now(UTC)
+    root_id = uuid4()
+    child_id = uuid4()
+    async with quality_context.sessions() as session:
+        actor_id = await session.scalar(select(User.id).where(User.email == ADMIN_EMAIL))
+        assert actor_id is not None
+        common = {
+            "project_id": UUID(project_id),
+            "workflow_id": workflow_id,
+            "workflow_version_id": uuid4(),
+            "environment_id": uuid4(),
+            "triggered_by_id": actor_id,
+            "status": "failed",
+            "snapshot": {},
+            "context": {},
+            "started_at": occurred_at,
+            "completed_at": occurred_at,
+        }
+        session.add_all(
+            [
+                WorkflowExecution(
+                    id=root_id,
+                    parent_execution_id=None,
+                    dataset_row_index=None,
+                    error_code="DATASET_ROWS_FAILED",
+                    **common,
+                ),
+                WorkflowExecution(
+                    id=child_id,
+                    parent_execution_id=root_id,
+                    dataset_row_index=0,
+                    error_code="WORKFLOW_NODE_FAILED",
+                    **common,
+                ),
+                WorkflowNodeExecution(
+                    workflow_execution_id=child_id,
+                    node_id="assert-status",
+                    node_type="assert",
+                    name="校验状态码",
+                    status="failed",
+                    attempts=1,
+                    output=None,
+                    result=None,
+                    error_code="ASSERTION_FAILED",
+                    error_message="状态码不符合预期",
+                    started_at=occurred_at,
+                    completed_at=occurred_at,
+                ),
+            ]
+        )
+        await session.commit()
+        observations = await QualityIntelligenceRepository(session).failure_observations(
+            project_id=UUID(project_id),
+            started_at=occurred_at - timedelta(minutes=1),
+            ended_at=occurred_at + timedelta(minutes=1),
+        )
+
+    assert len(observations) == 1
+    assert observations[0].execution_id == root_id
+    assert observations[0].error_code == "ASSERTION_FAILED"
+    assert observations[0].node_type == "assert"
+    assert observations[0].category == "assertion"
 
 
 @pytest.mark.asyncio

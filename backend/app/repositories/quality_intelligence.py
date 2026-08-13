@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.quality_intelligence import FailureObservation
 from app.domain.reporting import classify_failure
@@ -89,37 +90,58 @@ class QualityIntelligenceRepository:
                 .order_by(WorkflowExecution.started_at.desc())
             )
         ).all()
-        first_failed_nodes: dict[UUID, WorkflowNodeExecution] = {}
+        first_failure_evidence: dict[
+            UUID, tuple[WorkflowExecution, WorkflowNodeExecution | None]
+        ] = {}
         if rows:
-            nodes = (
-                await self._session.scalars(
-                    select(WorkflowNodeExecution)
-                    .join(
-                        WorkflowExecution,
-                        WorkflowExecution.id == WorkflowNodeExecution.workflow_execution_id,
+            root_execution = aliased(WorkflowExecution)
+            evidence_root_id = func.coalesce(
+                WorkflowExecution.parent_execution_id, WorkflowExecution.id
+            )
+            evidence_rows = (
+                await self._session.execute(
+                    select(WorkflowExecution, WorkflowNodeExecution)
+                    .join(root_execution, root_execution.id == evidence_root_id)
+                    .outerjoin(
+                        WorkflowNodeExecution,
+                        (WorkflowNodeExecution.workflow_execution_id == WorkflowExecution.id)
+                        & (WorkflowNodeExecution.status == "failed"),
                     )
                     .where(
                         WorkflowExecution.project_id == project_id,
-                        WorkflowExecution.parent_execution_id.is_(None),
                         WorkflowExecution.status == "failed",
-                        WorkflowExecution.started_at >= started_at,
-                        WorkflowExecution.started_at < ended_at,
-                        WorkflowNodeExecution.status == "failed",
+                        root_execution.project_id == project_id,
+                        root_execution.parent_execution_id.is_(None),
+                        root_execution.status == "failed",
+                        root_execution.started_at >= started_at,
+                        root_execution.started_at < ended_at,
                     )
                     .order_by(
-                        WorkflowNodeExecution.workflow_execution_id,
+                        evidence_root_id,
+                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
+                        case(
+                            (WorkflowExecution.parent_execution_id.is_not(None), 0),
+                            else_=1,
+                        ),
                         WorkflowNodeExecution.started_at.asc().nulls_last(),
+                        WorkflowExecution.started_at,
                         WorkflowNodeExecution.completed_at,
                         WorkflowNodeExecution.id,
+                        WorkflowExecution.id,
                     )
                 )
             ).all()
-            for node in nodes:
-                first_failed_nodes.setdefault(node.workflow_execution_id, node)
+            for evidence_execution, node in evidence_rows:
+                evidence_root_id = evidence_execution.parent_execution_id or evidence_execution.id
+                first_failure_evidence.setdefault(evidence_root_id, (evidence_execution, node))
         observations = []
         for execution, workflow_name in rows:
-            failed_node = first_failed_nodes.get(execution.id)
-            error_code = failed_node.error_code if failed_node is not None else execution.error_code
+            evidence_execution, failed_node = first_failure_evidence.get(
+                execution.id, (execution, None)
+            )
+            error_code = (
+                failed_node.error_code if failed_node is not None else evidence_execution.error_code
+            )
             observations.append(
                 FailureObservation(
                     execution_id=execution.id,

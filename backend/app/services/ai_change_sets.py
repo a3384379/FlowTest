@@ -473,16 +473,41 @@ def _target_definition_for_ai(
     target_type: Literal["test_case", "workflow"], definition: dict[str, Any]
 ) -> dict[str, JsonValue]:
     safe_definition = cast(dict[str, JsonValue], dict(definition))
-    protected_fields = (
-        ("runtime_variables", "runtime_headers") if target_type == "test_case" else ("variables",)
-    )
-    for field in protected_fields:
-        values = safe_definition.get(field)
-        if isinstance(values, dict):
-            safe_definition[field] = {str(key): REDACTED for key in values}
-        elif field in safe_definition:
-            safe_definition[field] = REDACTED
+    if target_type == "test_case":
+        for field in ("runtime_variables", "runtime_headers"):
+            _redact_runtime_map(safe_definition, field)
+        return safe_definition
+    _redact_runtime_map(safe_definition, "variables")
+    nodes = safe_definition.get("nodes")
+    if isinstance(nodes, list):
+        safe_definition["nodes"] = [_workflow_node_for_ai(node) for node in nodes]
     return safe_definition
+
+
+def _redact_runtime_map(container: dict[str, JsonValue], field: str) -> None:
+    values = container.get(field)
+    if isinstance(values, dict):
+        container[field] = {str(key): REDACTED for key in values}
+    elif field in container:
+        container[field] = REDACTED
+
+
+def _workflow_node_for_ai(node: JsonValue) -> JsonValue:
+    if not isinstance(node, dict):
+        return node
+    safe_node = cast(dict[str, JsonValue], dict(node))
+    for field in ("config", "configuration"):
+        if field in safe_node:
+            safe_node[field] = _redact_runtime_structure(safe_node[field])
+    return safe_node
+
+
+def _redact_runtime_structure(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {str(key): _redact_runtime_structure(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_runtime_structure(item) for item in value]
+    return REDACTED
 
 
 def _ensure_target(
