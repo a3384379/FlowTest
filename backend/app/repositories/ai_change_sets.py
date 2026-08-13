@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai import AIChangeItem, AIChangeSet
-from app.models.quality_intelligence import ReleaseRisk
+from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
 
@@ -76,6 +76,20 @@ class AIChangeSetRepository:
 
     async def get_risk(self, risk_id: UUID) -> ReleaseRisk | None:
         return await self._session.get(ReleaseRisk, risk_id)
+
+    async def list_failure_clusters(
+        self, release_risk_id: UUID, *, limit: int
+    ) -> list[FailureCluster]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(FailureCluster)
+                    .where(FailureCluster.release_risk_id == release_risk_id)
+                    .order_by(FailureCluster.occurrence_count.desc(), FailureCluster.fingerprint)
+                    .limit(limit)
+                )
+            ).all()
+        )
 
     async def get_test_case(self, resource_id: UUID) -> TestCase | None:
         return await self._session.get(TestCase, resource_id)

@@ -232,6 +232,9 @@ class AIChangeSetService:
     async def _source_metadata(
         self, risk: ReleaseRisk, raw_changes: list[dict[str, Any]]
     ) -> dict[str, JsonValue]:
+        failure_clusters = await self._repository.list_failure_clusters(
+            risk.id, limit=MAX_CHANGE_SET_ITEMS
+        )
         targets = []
         for recommended in risk.recommended_tests[:MAX_CHANGE_SET_ITEMS]:
             target_type = recommended.get("target_type")
@@ -257,6 +260,26 @@ class AIChangeSetService:
                 "risk_level": risk.risk_level,
                 "factors": cast(JsonValue, risk.factors),
                 "evidence": cast(JsonValue, risk.evidence_snapshot),
+                "failure_clusters": cast(
+                    JsonValue,
+                    [
+                        {
+                            "fingerprint": cluster.fingerprint,
+                            "title": cluster.title,
+                            "failure_category": cluster.failure_category,
+                            "error_code": cluster.error_code,
+                            "node_type": cluster.node_type,
+                            "occurrence_count": cluster.occurrence_count,
+                            "baseline_count": cluster.baseline_count,
+                            "affected_workflow_ids": cluster.affected_workflow_ids,
+                            "affected_workflow_names": cluster.affected_workflow_names,
+                            "confidence": cluster.confidence,
+                            "regression_percent": cluster.regression_percent,
+                            "recommendation": cluster.recommendation,
+                        }
+                        for cluster in failure_clusters
+                    ],
+                ),
                 "recommended_tests": cast(JsonValue, risk.recommended_tests[:200]),
             },
             "allowed_targets": cast(JsonValue, targets),

@@ -36,6 +36,7 @@ from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.impact import TestSelection as ImpactTestSelection
+from app.models.quality_intelligence import FailureCluster
 from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
@@ -73,7 +74,10 @@ class QualityContext:
     queue: FakeQueue
 
 
+@dataclass(slots=True)
 class ChangeSetProvider:
+    seen_input: dict[str, JsonValue] | None = None
+
     async def generate(
         self,
         *,
@@ -82,6 +86,7 @@ class ChangeSetProvider:
         output_schema: dict[str, JsonValue],
     ) -> AIProviderResult:
         assert job_type == "change_set"
+        self.seen_input = sanitized_input
         metadata = cast(dict[str, JsonValue], sanitized_input["metadata"])
         assert metadata["review_policy"] == {
             "automatic_execute": False,
@@ -542,6 +547,27 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     )
     assert risk_response.status_code == 201, risk_response.text
     risk_id = risk_response.json()["id"]
+    async with quality_context.sessions() as session:
+        session.add(
+            FailureCluster(
+                project_id=UUID(project_id),
+                release_risk_id=UUID(risk_id),
+                fingerprint="f" * 64,
+                title="ASSERTION_FAILED · assert",
+                failure_category="assertion",
+                error_code="ASSERTION_FAILED",
+                node_type="assert",
+                occurrence_count=3,
+                baseline_count=1,
+                affected_workflow_ids=["workflow-target"],
+                affected_workflow_names=["开票异常流程"],
+                sample_execution_ids=[str(uuid4())],
+                confidence=0.8,
+                regression_percent=200,
+                recommendation="核对响应字段后更新断言草稿",
+            )
+        )
+        await session.commit()
     created = await quality_context.client.post(
         "/api/v1/ai/change-sets",
         headers=headers,
@@ -557,11 +583,32 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     assert created.json()["status"] == "generating"
     assert len(quality_context.queue.job_ids) == 1
 
+    provider = ChangeSetProvider()
     async with quality_context.sessions() as session:
         job = await session.get(AIJob, quality_context.queue.job_ids[0])
         assert job is not None
-        completed = await AIJobRunner(session, ChangeSetProvider()).run(job.id)
+        completed = await AIJobRunner(session, provider).run(job.id)
         assert completed.status == "completed"
+    assert provider.seen_input is not None
+    provider_metadata = cast(dict[str, JsonValue], provider.seen_input["metadata"])
+    release_risk = cast(dict[str, JsonValue], provider_metadata["release_risk"])
+    failure_clusters = cast(list[dict[str, JsonValue]], release_risk["failure_clusters"])
+    assert failure_clusters == [
+        {
+            "affected_workflow_ids": ["workflow-target"],
+            "affected_workflow_names": ["开票异常流程"],
+            "baseline_count": 1,
+            "confidence": 0.8,
+            "error_code": "ASSERTION_FAILED",
+            "failure_category": "assertion",
+            "fingerprint": "f" * 64,
+            "node_type": "assert",
+            "occurrence_count": 3,
+            "recommendation": "核对响应字段后更新断言草稿",
+            "regression_percent": 200.0,
+            "title": "ASSERTION_FAILED · assert",
+        }
+    ]
 
     detail = await quality_context.client.get(
         f"/api/v1/ai/change-sets/{change_set_id}", headers=headers
