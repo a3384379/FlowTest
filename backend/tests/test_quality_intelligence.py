@@ -44,6 +44,7 @@ from app.repositories.quality_intelligence import QualityIntelligenceRepository
 from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInput
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
+    MAX_CHANGE_SET_ITEMS,
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
     _target_definition_for_ai,
@@ -709,7 +710,12 @@ async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
     )
     assert workflow_response.status_code == 201, workflow_response.text
     workflow_id = workflow_response.json()["id"]
-    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    impact_run_id = await _seed_impact(
+        quality_context.sessions,
+        project_id,
+        target_id=workflow_id,
+        unsupported_asset_count=MAX_CHANGE_SET_ITEMS,
+    )
     risk_response = await quality_context.client.post(
         f"/api/v1/projects/{project_id}/release-risks",
         headers=headers,
@@ -1616,6 +1622,7 @@ async def _seed_impact(
     project_id: str,
     *,
     target_id: str = "workflow-target",
+    unsupported_asset_count: int = 0,
 ) -> str:
     async with sessions() as session:
         actor_id = await session.scalar(select(User.id).where(User.email == ADMIN_EMAIL))
@@ -1664,6 +1671,19 @@ async def _seed_impact(
                 impact_run_id=run.id,
                 strategy="explicit_mapping_v1",
                 selected_assets=[
+                    *[
+                        {
+                            "asset_type": "openapi_contract",
+                            "target_type": "openapi_contract",
+                            "target_id": f"!contract-{index:03d}",
+                            "name": f"契约 {index}",
+                            "version": 1,
+                            "risk": "high",
+                            "change_keys": ["change-1"],
+                            "reasons": ["契约关联"],
+                        }
+                        for index in range(unsupported_asset_count)
+                    ],
                     {
                         "asset_type": "workflow",
                         "target_type": "workflow",
@@ -1673,7 +1693,7 @@ async def _seed_impact(
                         "risk": "high",
                         "change_keys": ["change-1"],
                         "reasons": ["显式 Mapping"],
-                    }
+                    },
                 ],
                 explanations=[],
                 created_by_id=actor_id,

@@ -236,7 +236,8 @@ class AIChangeSetService:
             risk.id, limit=MAX_CHANGE_SET_ITEMS
         )
         targets = []
-        for recommended in risk.recommended_tests[:MAX_CHANGE_SET_ITEMS]:
+        target_keys: set[tuple[str, UUID]] = set()
+        for recommended in risk.recommended_tests:
             target_type = recommended.get("target_type")
             target_id_value = recommended.get("target_id")
             if target_type not in {"test_case", "workflow"} or not isinstance(target_id_value, str):
@@ -245,9 +246,15 @@ class AIChangeSetService:
                 target_id = UUID(target_id_value)
             except ValueError:
                 continue
+            target_key = (target_type, target_id)
+            if target_key in target_keys:
+                continue
             target = await self._target_snapshot(target_type, target_id, risk.project_id)
             if target is not None:
                 targets.append(target)
+                target_keys.add(target_key)
+                if len(targets) == MAX_CHANGE_SET_ITEMS:
+                    break
         return {
             "task": "draft_change_set",
             "impact": {
