@@ -48,7 +48,7 @@ class AIChangeSetCreate(BaseModel):
     project_id: UUID
     impact_run_id: UUID
     release_risk_id: UUID
-    title: str = Field(min_length=1, max_length=200)
+    title: AssetName
 
 
 class AIChangeItemReview(BaseModel):

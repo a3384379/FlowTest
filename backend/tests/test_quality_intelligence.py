@@ -631,6 +631,12 @@ async def test_release_risk_api_persists_evidence_and_enforces_project_scope(
     project_id = await _project(quality_context.client, headers, "质量智能项目")
     other_project_id = await _project(quality_context.client, headers, "隔离项目")
     impact_run_id = await _seed_impact(quality_context.sessions, project_id)
+    blank_risk = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "   ", "window_days": 30},
+    )
+    assert blank_risk.status_code == 422
     created = await quality_context.client.post(
         f"/api/v1/projects/{project_id}/release-risks",
         headers=headers,
@@ -674,6 +680,17 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     )
     assert risk_response.status_code == 201, risk_response.text
     risk_id = risk_response.json()["id"]
+    blank_change_set = await quality_context.client.post(
+        "/api/v1/ai/change-sets",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "impact_run_id": impact_run_id,
+            "release_risk_id": risk_id,
+            "title": "   ",
+        },
+    )
+    assert blank_change_set.status_code == 422
     async with quality_context.sessions() as session:
         session.add(
             FailureCluster(

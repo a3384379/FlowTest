@@ -9,13 +9,14 @@ from app.domain.quality_intelligence import (
     RiskEvidenceSnapshot,
     RiskFactor,
 )
+from app.schemas.test_assets import AssetName
 
 
 class ReleaseRiskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     impact_run_id: UUID
-    title: str = Field(min_length=1, max_length=200)
+    title: AssetName
     window_days: int = Field(default=30, ge=7, le=90)
 
 
