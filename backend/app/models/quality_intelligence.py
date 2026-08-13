@@ -1,11 +1,15 @@
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.domain.quality_intelligence import RiskFactor
+from app.domain.quality_intelligence import (
+    QualityTrendPoint,
+    RecommendedTest,
+    RiskEvidenceSnapshot,
+    RiskFactor,
+)
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
 
@@ -41,9 +45,9 @@ class ReleaseRisk(UuidPrimaryKeyMixin, TimestampMixin, Base):
     quality_score: Mapped[float] = mapped_column(Float)
     risk_level: Mapped[str] = mapped_column(String(16), index=True)
     factors: Mapped[list[RiskFactor]] = mapped_column(JSON)
-    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
-    quality_trend: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
-    recommended_tests: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    evidence_snapshot: Mapped[RiskEvidenceSnapshot] = mapped_column(JSON)
+    quality_trend: Mapped[list[QualityTrendPoint]] = mapped_column(JSON)
+    recommended_tests: Mapped[list[RecommendedTest]] = mapped_column(JSON)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     created_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", name="fk_release_risk_creator", ondelete="RESTRICT")

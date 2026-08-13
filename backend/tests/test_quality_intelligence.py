@@ -405,6 +405,21 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     item = body["items"][0]
     assert item["review_status"] == "pending"
 
+    empty_edit = await quality_context.client.post(
+        f"/api/v1/ai/change-sets/{change_set_id}/items/{item['id']}/accept",
+        headers=headers,
+        json={"content": {}, "note": "显式空内容不得回退到 AI 原文"},
+    )
+    assert empty_edit.status_code == 422, empty_edit.text
+    async with quality_context.sessions() as session:
+        unchanged_item = await session.get(AIChangeItem, UUID(item["id"]))
+        assert unchanged_item is not None
+        assert unchanged_item.review_status == "pending"
+        assert (
+            await session.scalar(select(Workflow).where(Workflow.project_id == UUID(project_id)))
+            is None
+        )
+
     original_commit = AsyncSession.commit
     commit_count = 0
 
@@ -790,6 +805,25 @@ async def test_failure_node_selection_orders_by_execution_timestamps() -> None:
     assert "workflow_node_executions.started_at ASC NULLS LAST" in order_clause
     assert "workflow_node_executions.completed_at" in order_clause
     assert "workflow_node_executions.id" in order_clause
+
+
+@pytest.mark.asyncio
+async def test_deployment_decisions_select_latest_record_per_service_without_limit() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    decision_rows = MagicMock()
+    decision_rows.all.return_value = ["safe", "unsafe"]
+    session.scalars.return_value = decision_rows
+    repository = QualityIntelligenceRepository(session)
+
+    decisions = await repository.deployment_decisions(uuid4())
+
+    assert decisions == ["safe", "unsafe"]
+    query = str(session.scalars.await_args.args[0])
+    normalized = query.upper()
+    assert "ROW_NUMBER() OVER" in normalized
+    assert "PARTITION BY DEPLOYMENT_COMPATIBILITY_CHECKS.PROVIDER_SERVICE_ID" in normalized
+    assert "DECISION_RANK" in normalized
+    assert " LIMIT " not in normalized
 
 
 async def _login(

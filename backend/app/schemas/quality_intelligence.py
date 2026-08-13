@@ -1,10 +1,14 @@
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.quality_intelligence import RiskFactor
+from app.domain.quality_intelligence import (
+    QualityTrendPoint,
+    RecommendedTest,
+    RiskEvidenceSnapshot,
+    RiskFactor,
+)
 
 
 class ReleaseRiskCreate(BaseModel):
@@ -59,7 +63,7 @@ class ReleaseRiskDetailResponse(ReleaseRiskSummaryResponse):
     baseline_started_at: datetime
     baseline_ended_at: datetime
     factors: list[RiskFactor]
-    evidence_snapshot: dict[str, Any]
-    quality_trend: list[dict[str, Any]]
-    recommended_tests: list[dict[str, Any]]
+    evidence_snapshot: RiskEvidenceSnapshot
+    quality_trend: list[QualityTrendPoint]
+    recommended_tests: list[RecommendedTest]
     failure_clusters: list[FailureClusterResponse]

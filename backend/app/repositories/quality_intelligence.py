@@ -171,21 +171,32 @@ class QualityIntelligenceRepository:
         )
 
     async def deployment_decisions(self, project_id: UUID) -> list[str]:
-        rows = (
-            await self._session.execute(
-                select(
-                    DeploymentCompatibilityCheck.provider_service_id,
-                    DeploymentCompatibilityCheck.decision,
+        ranked = (
+            select(
+                DeploymentCompatibilityCheck.provider_service_id.label("provider_service_id"),
+                DeploymentCompatibilityCheck.decision.label("decision"),
+                func.row_number()
+                .over(
+                    partition_by=DeploymentCompatibilityCheck.provider_service_id,
+                    order_by=(
+                        DeploymentCompatibilityCheck.created_at.desc(),
+                        DeploymentCompatibilityCheck.id.desc(),
+                    ),
                 )
-                .where(DeploymentCompatibilityCheck.project_id == project_id)
-                .order_by(DeploymentCompatibilityCheck.created_at.desc())
-                .limit(1_000)
+                .label("decision_rank"),
             )
-        ).all()
-        latest: dict[UUID, str] = {}
-        for service_id, decision in rows:
-            latest.setdefault(service_id, decision)
-        return list(latest.values())
+            .where(DeploymentCompatibilityCheck.project_id == project_id)
+            .subquery()
+        )
+        return list(
+            (
+                await self._session.scalars(
+                    select(ranked.c.decision)
+                    .where(ranked.c.decision_rank == 1)
+                    .order_by(ranked.c.provider_service_id)
+                )
+            ).all()
+        )
 
     async def latest_performance_regression(self, project_id: UUID) -> tuple[UUID | None, float]:
         run = (

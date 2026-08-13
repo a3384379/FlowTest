@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TypedDict
+from typing import Literal, TypedDict
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -68,6 +68,69 @@ class RiskFactor(TypedDict):
     score: float
     max_score: int
     value: JsonValue
+
+
+class RiskImpactEvidence(TypedDict):
+    run_id: str
+    source_fingerprint: str
+    change_count: int
+    breaking_change_count: int
+    selection_id: str
+    selection_strategy: str
+    selected_asset_count: int
+    coverage_snapshot_id: str
+    coverage_percent: float
+    coverage_gap_count: int
+
+
+class RiskExecutionEvidence(TypedDict):
+    current_total: int
+    current_failures: int
+    baseline_total: int
+    baseline_failures: int
+
+
+class RiskFailureClusterEvidence(TypedDict):
+    count: int
+    regressed_count: int
+
+
+class RiskContractEvidence(TypedDict):
+    unsafe: int
+    unknown: int
+    safe: int
+
+
+class RiskPerformanceEvidence(TypedDict):
+    run_id: str | None
+    p95_regression_percent: float
+
+
+class RiskEvidenceSnapshot(TypedDict):
+    impact: RiskImpactEvidence
+    executions: RiskExecutionEvidence
+    failure_clusters: RiskFailureClusterEvidence
+    contracts: RiskContractEvidence
+    performance: RiskPerformanceEvidence
+    flaky_assets: int
+
+
+class QualityTrendPoint(TypedDict):
+    date: str
+    total: int
+    passed: int
+    failed: int
+    pass_rate: float
+
+
+class RecommendedTest(TypedDict):
+    target_type: str
+    target_id: str
+    name: str
+    version: str | int | None
+    priority: Literal["high", "medium"]
+    reasons: list[str]
+    change_keys: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +219,7 @@ def calculate_release_risk(value: RiskInput) -> RiskResult:
     )
 
 
-def evidence_fingerprint(value: dict[str, JsonValue]) -> str:
+def evidence_fingerprint(value: RiskEvidenceSnapshot) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
 

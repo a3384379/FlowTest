@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.quality_intelligence import (
     FailureClusterEvidence,
+    QualityTrendPoint,
+    RecommendedTest,
+    RiskEvidenceSnapshot,
     RiskInput,
     calculate_release_risk,
     cluster_failures,
@@ -122,7 +124,7 @@ class QualityIntelligenceService:
             recommended_tests=_recommended_tests(
                 impact.selection.selected_assets, cluster_evidence
             ),
-            fingerprint=evidence_fingerprint(cast(dict[str, JsonValue], evidence)),
+            fingerprint=evidence_fingerprint(evidence),
             created_by_id=actor.id,
         )
         self._session.add(risk)
@@ -206,7 +208,7 @@ def _evidence_snapshot(
     performance_run_id: UUID | None,
     performance_regression: float,
     flaky_assets: int,
-) -> dict[str, Any]:
+) -> RiskEvidenceSnapshot:
     return {
         "impact": {
             "run_id": str(impact.run.id),
@@ -245,11 +247,11 @@ def _evidence_snapshot(
 
 def _quality_trend(
     executions: list[WorkflowExecution], started_on: date, days: int
-) -> list[dict[str, Any]]:
+) -> list[QualityTrendPoint]:
     by_day: dict[date, list[WorkflowExecution]] = defaultdict(list)
     for execution in executions:
         by_day[execution.started_at.astimezone(UTC).date()].append(execution)
-    points = []
+    points: list[QualityTrendPoint] = []
     for offset in range(days + 1):
         day = started_on + timedelta(days=offset)
         values = by_day.get(day, [])
@@ -270,27 +272,34 @@ def _quality_trend(
 
 def _recommended_tests(
     selected_assets: list[dict[str, Any]], clusters: tuple[FailureClusterEvidence, ...]
-) -> list[dict[str, Any]]:
+) -> list[RecommendedTest]:
     failed_workflows = {
         workflow_id for cluster in clusters for workflow_id in cluster.affected_workflow_ids
     }
-    recommendations = []
+    recommendations: list[RecommendedTest] = []
     for asset in selected_assets:
         target_id = str(asset.get("target_id", ""))
         risk = str(asset.get("risk", "low"))
-        priority = "high" if target_id in failed_workflows or risk == "high" else "medium"
+        priority: Literal["high", "medium"] = (
+            "high" if target_id in failed_workflows or risk == "high" else "medium"
+        )
         reasons = [str(value) for value in asset.get("reasons", []) if isinstance(value, str)]
+        change_keys = [
+            str(value) for value in asset.get("change_keys", []) if isinstance(value, str)
+        ]
+        raw_version = asset.get("version")
+        version = raw_version if isinstance(raw_version, str | int) else None
         if target_id in failed_workflows:
             reasons.append("该 Workflow 在当前窗口存在失败聚类")
         recommendations.append(
             {
-                "target_type": asset.get("target_type"),
+                "target_type": str(asset.get("target_type", "")),
                 "target_id": target_id,
-                "name": asset.get("name"),
-                "version": asset.get("version"),
+                "name": str(asset.get("name", "")),
+                "version": version,
                 "priority": priority,
                 "reasons": sorted(set(reasons)),
-                "change_keys": asset.get("change_keys", []),
+                "change_keys": change_keys,
             }
         )
     priorities = {"high": 0, "medium": 1}
