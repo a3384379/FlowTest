@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.domain.ai import AIInputError, sanitize_ai_input
+from app.domain.ai import REDACTED, AIInputError, sanitize_ai_input
 from app.engine.contracts import NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
@@ -281,7 +281,7 @@ class AIChangeSetService:
                 "description": target.description,
                 "tags": cast(JsonValue, target.tags),
                 "current_version": target.current_version,
-                "draft_definition": cast(JsonValue, target.draft_definition),
+                "draft_definition": _target_definition_for_ai("test_case", target.draft_definition),
                 "snapshot_sha256": _target_hash(target),
             }
         workflow = await self._repository.get_workflow(target_id)
@@ -294,7 +294,7 @@ class AIChangeSetService:
             "description": workflow.description,
             "current_version": workflow.current_version,
             "draft_revision": workflow.draft_revision,
-            "draft_definition": cast(JsonValue, workflow.draft_definition),
+            "draft_definition": _target_definition_for_ai("workflow", workflow.draft_definition),
             "snapshot_sha256": _target_hash(workflow),
         }
 
@@ -467,6 +467,22 @@ def _target_hash(target: TestCase | Workflow) -> str:
         }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _target_definition_for_ai(
+    target_type: Literal["test_case", "workflow"], definition: dict[str, Any]
+) -> dict[str, JsonValue]:
+    safe_definition = cast(dict[str, JsonValue], dict(definition))
+    protected_fields = (
+        ("runtime_variables", "runtime_headers") if target_type == "test_case" else ("variables",)
+    )
+    for field in protected_fields:
+        values = safe_definition.get(field)
+        if isinstance(values, dict):
+            safe_definition[field] = {str(key): REDACTED for key in values}
+        elif field in safe_definition:
+            safe_definition[field] = REDACTED
+    return safe_definition
 
 
 def _ensure_target(

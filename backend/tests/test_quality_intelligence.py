@@ -18,6 +18,7 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
 from app.domain.access import ProjectRole
+from app.domain.ai import REDACTED
 from app.domain.quality_intelligence import (
     FailureObservation,
     RiskInput,
@@ -35,7 +36,11 @@ from app.models.workflows import Workflow, WorkflowExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.quality_intelligence import QualityIntelligenceRepository
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
-from app.services.ai_change_sets import _test_case_update, _validate_assertion_workflow_change
+from app.services.ai_change_sets import (
+    _target_definition_for_ai,
+    _test_case_update,
+    _validate_assertion_workflow_change,
+)
 from app.services.quality_intelligence import _quality_trend
 
 ADMIN_EMAIL = "quality-intelligence@example.com"
@@ -520,6 +525,75 @@ async def test_ai_change_set_requires_item_review_and_only_creates_draft(
     )
     assert repeated.status_code == 409
     assert repeated.json()["error"]["code"] == "AI_CHANGE_ITEM_ALREADY_REVIEWED"
+
+
+@pytest.mark.asyncio
+async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
+    quality_context: QualityContext,
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "AI 目标脱敏项目")
+    workflow_definition = _workflow_definition()
+    workflow_definition["variables"] = {
+        "session_id": "opaque-session-material",
+        "region": "cn-north-1",
+    }
+    workflow_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "含运行时变量的流程", "definition": workflow_definition},
+    )
+    assert workflow_response.status_code == 201, workflow_response.text
+    workflow_id = workflow_response.json()["id"]
+    impact_run_id = await _seed_impact(quality_context.sessions, project_id, target_id=workflow_id)
+    risk_response = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_run_id, "title": "脱敏风险证据", "window_days": 7},
+    )
+    assert risk_response.status_code == 201, risk_response.text
+
+    created = await quality_context.client.post(
+        "/api/v1/ai/change-sets",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "impact_run_id": impact_run_id,
+            "release_risk_id": risk_response.json()["id"],
+            "title": "目标脱敏变更集",
+        },
+    )
+    assert created.status_code == 202, created.text
+
+    async with quality_context.sessions() as session:
+        job = await session.get(AIJob, quality_context.queue.job_ids[-1])
+        change_set = await session.get(AIChangeSet, UUID(created.json()["id"]))
+        assert job is not None
+        assert change_set is not None
+        allowed_targets = job.sanitized_input["metadata"]["allowed_targets"]
+        target = allowed_targets[0]
+        assert target["draft_definition"]["variables"] == {
+            "session_id": REDACTED,
+            "region": REDACTED,
+        }
+        assert "opaque-session-material" not in str(job.sanitized_input)
+        assert "cn-north-1" not in str(change_set.source_snapshot)
+
+
+def test_ai_target_snapshot_redacts_test_case_runtime_maps_without_mutating_source() -> None:
+    definition = {
+        "workflow_id": str(uuid4()),
+        "environment_id": str(uuid4()),
+        "runtime_variables": {"session_id": "opaque-value"},
+        "runtime_headers": {"X-Session": "opaque-header"},
+    }
+
+    safe_definition = _target_definition_for_ai("test_case", definition)
+
+    assert safe_definition["runtime_variables"] == {"session_id": REDACTED}
+    assert safe_definition["runtime_headers"] == {"X-Session": REDACTED}
+    assert definition["runtime_variables"] == {"session_id": "opaque-value"}
+    assert definition["runtime_headers"] == {"X-Session": "opaque-header"}
 
 
 @pytest.mark.asyncio
