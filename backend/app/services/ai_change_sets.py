@@ -772,6 +772,7 @@ async def _update_workflow(
         )
     update = _workflow_update(content)
     definition = _rehydrate_workflow_definition(update.definition, target.draft_definition)
+    _ensure_workflow_draft_change(target, update, definition)
     if require_assertion_change:
         _validate_assertion_workflow_change(target, definition)
     return await WorkflowService(session).update_draft(
@@ -820,6 +821,35 @@ def _validate_assertion_workflow_change(
             message="AI Assertion 变更必须实际修改断言节点",
             status_code=422,
         )
+
+
+def _ensure_workflow_draft_change(
+    target: Workflow,
+    update: AIWorkflowDraftUpdate,
+    definition: WorkflowDefinition | None,
+) -> None:
+    if update.name is not None and update.name != target.name:
+        return
+    if update.description is not None and update.description.strip() != target.description:
+        return
+    if definition is not None:
+        try:
+            current_definition = WorkflowDefinition.model_validate(target.draft_definition)
+        except (TypeError, ValueError) as error:
+            raise AppError(
+                code="AI_WORKFLOW_DRAFT_INVALID",
+                message="现有 Workflow 草稿格式无效",
+                status_code=409,
+            ) from error
+        if definition.model_dump(mode="json", exclude_none=True) != current_definition.model_dump(
+            mode="json", exclude_none=True
+        ):
+            return
+    raise AppError(
+        code="AI_WORKFLOW_DRAFT_UNCHANGED",
+        message="AI Workflow 更新未改变当前草稿",
+        status_code=422,
+    )
 
 
 def _assertion_semantics(definition: WorkflowDefinition) -> list[AssertionSemantics]:

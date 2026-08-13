@@ -17,6 +17,7 @@ from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecut
 from app.repositories.impact import ImpactRunBundle
 
 _OUTCOME_EXECUTION_STATUSES = ("passed", "failed")
+FAILURE_EVIDENCE_BATCH_SIZE = 1_000
 TerminalExecutionSnapshot = tuple[tuple[WorkflowExecution, str], ...]
 
 
@@ -102,35 +103,37 @@ class QualityIntelligenceRepository:
             failure_completed_at = func.coalesce(
                 WorkflowNodeExecution.completed_at, WorkflowExecution.completed_at
             )
-            evidence_rows = (
-                await self._session.execute(
-                    select(WorkflowExecution, WorkflowNodeExecution)
-                    .outerjoin(
-                        WorkflowNodeExecution,
-                        (WorkflowNodeExecution.workflow_execution_id == WorkflowExecution.id)
-                        & (WorkflowNodeExecution.status == "failed"),
+            for offset in range(0, len(root_ids), FAILURE_EVIDENCE_BATCH_SIZE):
+                root_id_batch = root_ids[offset : offset + FAILURE_EVIDENCE_BATCH_SIZE]
+                evidence_rows = (
+                    await self._session.execute(
+                        select(WorkflowExecution, WorkflowNodeExecution)
+                        .outerjoin(
+                            WorkflowNodeExecution,
+                            (WorkflowNodeExecution.workflow_execution_id == WorkflowExecution.id)
+                            & (WorkflowNodeExecution.status == "failed"),
+                        )
+                        .where(
+                            WorkflowExecution.project_id == project_id,
+                            WorkflowExecution.status == "failed",
+                            WorkflowExecution.completed_at.is_not(None),
+                            WorkflowExecution.completed_at <= ended_at,
+                            evidence_root_id.in_(root_id_batch),
+                        )
+                        .order_by(
+                            evidence_root_id,
+                            failure_completed_at.asc().nulls_last(),
+                            case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
+                            WorkflowExecution.started_at,
+                            WorkflowNodeExecution.started_at.asc().nulls_last(),
+                            WorkflowNodeExecution.id,
+                            WorkflowExecution.id,
+                        )
                     )
-                    .where(
-                        WorkflowExecution.project_id == project_id,
-                        WorkflowExecution.status == "failed",
-                        WorkflowExecution.completed_at.is_not(None),
-                        WorkflowExecution.completed_at <= ended_at,
-                        evidence_root_id.in_(root_ids),
-                    )
-                    .order_by(
-                        evidence_root_id,
-                        failure_completed_at.asc().nulls_last(),
-                        case((WorkflowNodeExecution.id.is_not(None), 0), else_=1),
-                        WorkflowExecution.started_at,
-                        WorkflowNodeExecution.started_at.asc().nulls_last(),
-                        WorkflowNodeExecution.id,
-                        WorkflowExecution.id,
-                    )
-                )
-            ).all()
-            for evidence_execution, node in evidence_rows:
-                evidence_root_id = evidence_execution.parent_execution_id or evidence_execution.id
-                first_failure_evidence.setdefault(evidence_root_id, (evidence_execution, node))
+                ).all()
+                for evidence_execution, node in evidence_rows:
+                    root_id = evidence_execution.parent_execution_id or evidence_execution.id
+                    first_failure_evidence.setdefault(root_id, (evidence_execution, node))
         observations = []
         for execution, workflow_name in failed_rows:
             evidence_execution, failed_node = first_failure_evidence.get(

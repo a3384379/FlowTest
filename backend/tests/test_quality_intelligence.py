@@ -40,12 +40,16 @@ from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
-from app.repositories.quality_intelligence import QualityIntelligenceRepository
+from app.repositories.quality_intelligence import (
+    FAILURE_EVIDENCE_BATCH_SIZE,
+    QualityIntelligenceRepository,
+)
 from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInput
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
     MAX_CHANGE_SET_ITEMS,
     AIChangeSetService,
+    _ensure_workflow_draft_change,
     _rehydrate_test_case_definition,
     _rehydrate_workflow_definition,
     _review_content,
@@ -566,6 +570,29 @@ def test_workflow_create_and_update_enforce_draft_metadata_constraints() -> None
     with pytest.raises(AppError) as invalid_update:
         _workflow_update({"name": "   "})
     assert invalid_update.value.code == "AI_WORKFLOW_DRAFT_INVALID"
+
+
+def test_workflow_update_rejects_normalized_noop() -> None:
+    current_definition = _workflow_definition()
+    target = Workflow(
+        name="当前 Workflow",
+        description="当前描述",
+        draft_definition=current_definition,
+    )
+    noop_contents: tuple[dict[str, JsonValue], ...] = (
+        {"name": "  当前 Workflow  "},
+        {"description": "  当前描述  "},
+        {"definition": current_definition},
+    )
+    for content in noop_contents:
+        update = _workflow_update(content)
+        definition = _rehydrate_workflow_definition(update.definition, current_definition)
+        with pytest.raises(AppError) as unchanged:
+            _ensure_workflow_draft_change(target, update, definition)
+        assert unchanged.value.code == "AI_WORKFLOW_DRAFT_UNCHANGED"
+
+    changed = _workflow_update({"name": "新 Workflow"})
+    _ensure_workflow_draft_change(target, changed, None)
 
 
 @pytest.mark.asyncio
@@ -1502,6 +1529,45 @@ async def test_failure_node_selection_orders_by_completion_then_deterministic_ti
     assert "ASC NULLS LAST" in order_clause
     assert "workflow_node_executions.started_at ASC NULLS LAST" in order_clause
     assert "workflow_node_executions.id" in order_clause
+
+
+@pytest.mark.asyncio
+async def test_failure_evidence_queries_use_bounded_root_batches() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    empty_rows = MagicMock()
+    empty_rows.all.return_value = []
+    session.execute.return_value = empty_rows
+    repository = QualityIntelligenceRepository(session)
+    occurred_at = datetime.now(UTC)
+    executions = tuple(
+        (
+            WorkflowExecution(
+                id=uuid4(),
+                workflow_id=uuid4(),
+                status="failed",
+                error_code="EXECUTION_FAILED",
+                started_at=occurred_at,
+                completed_at=occurred_at,
+            ),
+            f"Workflow {index}",
+        )
+        for index in range(FAILURE_EVIDENCE_BATCH_SIZE + 1)
+    )
+
+    observations = await repository.failure_observations(
+        project_id=uuid4(),
+        started_at=occurred_at - timedelta(minutes=1),
+        ended_at=occurred_at + timedelta(minutes=1),
+        terminal_executions=executions,
+    )
+
+    assert len(observations) == FAILURE_EVIDENCE_BATCH_SIZE + 1
+    assert session.execute.await_count == 2
+    batch_sizes = []
+    for call in session.execute.await_args_list:
+        parameters = call.args[0].compile().params.values()
+        batch_sizes.extend(len(value) for value in parameters if isinstance(value, list))
+    assert batch_sizes == [FAILURE_EVIDENCE_BATCH_SIZE, 1]
 
 
 @pytest.mark.asyncio
