@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Literal, cast
 from uuid import UUID
@@ -101,13 +102,10 @@ class AIChangeSetDetailResponse(AIChangeSetSummaryResponse):
 
 
 def change_set_output_schema(max_suggestions: int) -> dict[str, JsonValue]:
-    test_case_ref, test_case_definitions = _strict_model_definitions(
-        TestCaseDefinitionInput, "TestCase"
-    )
-    workflow_ref, workflow_definitions = _strict_model_definitions(WorkflowDefinition, "Workflow")
+    test_case_definition = _test_case_definition_schema()
+    workflow_definition = _workflow_definition_schema()
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$defs": {**test_case_definitions, **workflow_definitions},
         "type": "object",
         "additionalProperties": False,
         "required": ["suggestions"],
@@ -119,23 +117,23 @@ def change_set_output_schema(max_suggestions: int) -> dict[str, JsonValue]:
                     "anyOf": [
                         _change_set_suggestion(
                             "test_case",
-                            _test_case_create_content(test_case_ref),
+                            _test_case_create_content(test_case_definition),
                         ),
                         _change_set_suggestion(
                             "test_case",
-                            _test_case_update_content(test_case_ref),
+                            _test_case_update_content(test_case_definition),
                         ),
                         _change_set_suggestion(
                             "workflow",
-                            _workflow_create_content(workflow_ref),
+                            _workflow_create_content(workflow_definition),
                         ),
                         _change_set_suggestion(
                             "workflow",
-                            _workflow_update_content(workflow_ref),
+                            _workflow_update_content(workflow_definition),
                         ),
                         _change_set_suggestion(
                             "assertion",
-                            _assertion_update_content(workflow_ref),
+                            _assertion_update_content(workflow_definition),
                         ),
                     ]
                 },
@@ -144,77 +142,268 @@ def change_set_output_schema(max_suggestions: int) -> dict[str, JsonValue]:
     }
 
 
-def _strict_model_definitions(
-    model: type[BaseModel], namespace: str
-) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-    raw_schema = cast(
-        dict[str, JsonValue],
-        model.model_json_schema(mode="serialization"),
-    )
-    nested = cast(dict[str, JsonValue], raw_schema.pop("$defs", {}))
-    root_name = f"{namespace}_{model.__name__}"
-    names = {name: f"{namespace}_{name}" for name in nested}
-    json_value_name = names.get("JsonValue")
-    if json_value_name is not None:
-        nested["JsonValue"] = _strict_json_value_schema(json_value_name)
-    definitions = {names[name]: _strict_schema(value, names) for name, value in nested.items()}
-    definitions[root_name] = _strict_schema(raw_schema, names)
-    return {"$ref": f"#/$defs/{root_name}"}, definitions
-
-
-def _strict_json_value_schema(definition_name: str) -> dict[str, JsonValue]:
-    reference: dict[str, JsonValue] = {"$ref": f"#/$defs/{definition_name}"}
-    return {
-        "anyOf": [
-            {"type": "string"},
-            {"type": "number"},
-            {"type": "boolean"},
-            {"type": "null"},
-            {"type": "array", "items": reference},
-            {
-                "type": "object",
-                "patternProperties": {"^.*$": reference},
-                "additionalProperties": False,
-            },
-        ]
+def decode_change_set_content(
+    suggestion_type: str, content: dict[str, JsonValue]
+) -> dict[str, JsonValue]:
+    action = content.get("action")
+    target_id = content.get("target_id")
+    proposal = {
+        str(key): value for key, value in content.items() if key not in {"action", "target_id"}
     }
-
-
-def _strict_schema(value: JsonValue, names: dict[str, str]) -> JsonValue:
-    if isinstance(value, list):
-        return [_strict_schema(item, names) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result = {
-        str(key): _strict_schema(item, names)
-        for key, item in value.items()
-        if key not in {"default", "title"}
-    }
-    reference = result.get("$ref")
-    if isinstance(reference, str) and reference.startswith("#/$defs/"):
-        original_name = reference.rsplit("/", maxsplit=1)[-1]
-        mapped_name = names.get(original_name)
-        if mapped_name is not None:
-            result["$ref"] = f"#/$defs/{mapped_name}"
-    properties = result.get("properties")
-    pattern_properties = result.get("patternProperties")
-    additional = result.get("additionalProperties")
-    is_object = (
-        result.get("type") == "object"
-        or isinstance(properties, dict)
-        or isinstance(pattern_properties, dict)
-        or isinstance(additional, dict)
-    )
-    if not is_object:
-        return result
-    if isinstance(additional, dict):
-        patterns = dict(pattern_properties) if isinstance(pattern_properties, dict) else {}
-        patterns["^.*$"] = additional
-        result["patternProperties"] = patterns
-    result["additionalProperties"] = False
-    if isinstance(properties, dict):
-        result["required"] = list(properties)
+    raw_definition = proposal.get("definition")
+    if raw_definition is not None:
+        if suggestion_type == "test_case":
+            proposal["definition"] = _decode_test_case_definition(raw_definition)
+        else:
+            proposal["definition"] = _decode_workflow_definition(raw_definition)
+    try:
+        draft_model = _draft_model(suggestion_type, action)
+        validated = draft_model.model_validate(proposal)
+    except (TypeError, ValueError) as error:
+        raise ValueError("change-set draft content is invalid") from error
+    if action == "update" and not any(
+        value is not None for value in validated.model_dump().values()
+    ):
+        raise ValueError("change-set update must modify at least one draft field")
+    if suggestion_type == "assertion" and getattr(validated, "definition", None) is None:
+        raise ValueError("assertion update requires a workflow definition")
+    result = cast(dict[str, JsonValue], validated.model_dump(mode="json"))
+    result["action"] = str(action)
+    if action == "update":
+        result["target_id"] = str(target_id)
     return result
+
+
+def _draft_model(suggestion_type: str, action: JsonValue | None) -> type[BaseModel]:
+    if suggestion_type == "test_case" and action == "create":
+        return AITestCaseDraftCreate
+    if suggestion_type == "test_case" and action == "update":
+        return AITestCaseDraftUpdate
+    if suggestion_type == "workflow" and action == "create":
+        return AIWorkflowDraftCreate
+    if suggestion_type in {"workflow", "assertion"} and action == "update":
+        return AIWorkflowDraftUpdate
+    raise ValueError("change-set suggestion type or action is invalid")
+
+
+def _decode_test_case_definition(value: JsonValue) -> dict[str, JsonValue]:
+    if not isinstance(value, dict):
+        raise ValueError("test-case definition must be an object")
+    decoded = {
+        "workflow_id": value.get("workflow_id"),
+        "workflow_version": value.get("workflow_version"),
+        "environment_id": value.get("environment_id"),
+        "runtime_variables": _decode_named_values(value.get("runtime_variables")),
+        "runtime_headers": _decode_named_values(value.get("runtime_headers")),
+    }
+    return cast(
+        dict[str, JsonValue],
+        TestCaseDefinitionInput.model_validate(decoded).model_dump(mode="json"),
+    )
+
+
+def _decode_workflow_definition(value: JsonValue) -> dict[str, JsonValue]:
+    if not isinstance(value, dict):
+        raise ValueError("workflow definition must be an object")
+    raw_nodes = value.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raise ValueError("workflow nodes must be a list")
+    nodes = []
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, dict):
+            raise ValueError("workflow node must be an object")
+        node = dict(raw_node)
+        node["config"] = _decode_json_object(raw_node.get("config_json"))
+        raw_configuration = raw_node.get("configuration_json")
+        node["configuration"] = (
+            None if raw_configuration is None else _decode_json_object(raw_configuration)
+        )
+        node.pop("config_json", None)
+        node.pop("configuration_json", None)
+        nodes.append(node)
+    decoded = {
+        **value,
+        "variables": _decode_named_values(value.get("variables")),
+        "nodes": nodes,
+    }
+    return cast(
+        dict[str, JsonValue],
+        WorkflowDefinition.model_validate(decoded).model_dump(mode="json"),
+    )
+
+
+def _decode_named_values(value: JsonValue | None) -> dict[str, str]:
+    if not isinstance(value, list):
+        raise ValueError("named values must be a list")
+    result = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("named value must be an object")
+        name = item.get("name")
+        item_value = item.get("value")
+        if not isinstance(name, str) or not isinstance(item_value, str) or name in result:
+            raise ValueError("named value is invalid or duplicated")
+        result[name] = item_value
+    return result
+
+
+def _decode_json_object(value: JsonValue | None) -> dict[str, JsonValue]:
+    if not isinstance(value, str):
+        raise ValueError("JSON object field must be encoded as a string")
+    decoded = json.loads(value)
+    if not isinstance(decoded, dict):
+        raise ValueError("encoded JSON value must be an object")
+    return cast(dict[str, JsonValue], decoded)
+
+
+def _test_case_definition_schema() -> dict[str, JsonValue]:
+    named_value = _strict_object(
+        {
+            "name": {"type": "string", "minLength": 1, "maxLength": 160},
+            "value": {"type": "string", "maxLength": 100_000},
+        }
+    )
+    named_values: dict[str, JsonValue] = {
+        "type": "array",
+        "maxItems": 500,
+        "items": named_value,
+    }
+    return _strict_object(
+        {
+            "workflow_id": _target_id_schema(),
+            "workflow_version": _nullable_schema({"type": "integer", "minimum": 1}),
+            "environment_id": _target_id_schema(),
+            "runtime_variables": named_values,
+            "runtime_headers": named_values,
+        }
+    )
+
+
+def _workflow_definition_schema() -> dict[str, JsonValue]:
+    named_value = _strict_object(
+        {
+            "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            },
+            "value": {"type": "string", "maxLength": 100_000},
+        }
+    )
+    position = _strict_object({"x": {"type": "number"}, "y": {"type": "number"}})
+    binding = _strict_object(
+        {
+            "input": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            },
+            "expression": {"type": "string", "minLength": 1, "maxLength": 2000},
+        }
+    )
+    node = _strict_object(
+        {
+            "id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "type": {
+                "type": "string",
+                "enum": [
+                    "start",
+                    "api",
+                    "extract",
+                    "assert",
+                    "condition",
+                    "delay",
+                    "dataset",
+                    "subflow",
+                    "for_each",
+                    "sql",
+                    "redis",
+                    "capability",
+                    "end",
+                ],
+            },
+            "name": {"type": "string", "minLength": 1, "maxLength": 200},
+            "position": position,
+            "config_json": {"type": "string", "minLength": 2, "maxLength": 1_000_000},
+            "capability_id": _nullable_schema({"type": "string", "minLength": 3, "maxLength": 120}),
+            "capability_version": _nullable_schema(
+                {"type": "string", "minLength": 5, "maxLength": 64}
+            ),
+            "configuration_json": _nullable_schema(
+                {"type": "string", "minLength": 2, "maxLength": 1_000_000}
+            ),
+            "bindings": _nullable_schema({"type": "array", "maxItems": 500, "items": binding}),
+        }
+    )
+    mapping_source = _strict_object(
+        {
+            "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "path": {"type": "string", "minLength": 1, "maxLength": 500},
+        }
+    )
+    mapping_transform = _strict_object(
+        {
+            "kind": {"type": "string", "enum": ["identity", "template"]},
+            "template": {"type": "string", "maxLength": 4000},
+        }
+    )
+    mapping_target = _strict_object(
+        {
+            "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "location": {
+                "type": "string",
+                "enum": ["query", "header", "body", "variable"],
+            },
+            "key": {"type": "string", "minLength": 1, "maxLength": 500},
+        }
+    )
+    mapping = _strict_object(
+        {
+            "source": mapping_source,
+            "transform": mapping_transform,
+            "target": mapping_target,
+        }
+    )
+    edge = _strict_object(
+        {
+            "id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "source": {"type": "string", "minLength": 1, "maxLength": 128},
+            "target": {"type": "string", "minLength": 1, "maxLength": 128},
+            "condition": _nullable_schema({"type": "string", "maxLength": 2000}),
+            "mappings": {"type": "array", "maxItems": 500, "items": mapping},
+        }
+    )
+    settings = _strict_object(
+        {
+            "fail_fast": {"type": "boolean"},
+            "concurrency": {"type": "integer", "minimum": 1, "maximum": 100},
+            "default_timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 300,
+            },
+        }
+    )
+    return _strict_object(
+        {
+            "schema_version": {"type": "string", "minLength": 1, "maxLength": 32},
+            "variables": {"type": "array", "maxItems": 500, "items": named_value},
+            "nodes": {"type": "array", "minItems": 2, "maxItems": 1000, "items": node},
+            "edges": {"type": "array", "maxItems": 5000, "items": edge},
+            "settings": settings,
+        }
+    )
+
+
+def _strict_object(properties: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(properties),
+        "properties": properties,
+    }
 
 
 def _change_set_suggestion(

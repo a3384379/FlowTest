@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -46,7 +47,7 @@ from app.repositories.quality_intelligence import (
     FAILURE_EVIDENCE_BATCH_SIZE,
     QualityIntelligenceRepository,
 )
-from app.schemas.ai_change_sets import change_set_output_schema
+from app.schemas.ai_change_sets import change_set_output_schema, decode_change_set_content
 from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInput
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
@@ -131,7 +132,7 @@ class ChangeSetProvider:
                             "action": "create",
                             "name": "AI 变更集草稿流程",
                             "description": "只生成草稿",
-                            "definition": _workflow_definition(),
+                            "definition": _provider_workflow_definition(_workflow_definition()),
                         },
                     }
                 ]
@@ -186,7 +187,7 @@ class UpdateWorkflowProvider:
                             "target_id": self.workflow_id,
                             "name": "AI 建议名称",
                             "description": None,
-                            "definition": _workflow_definition(),
+                            "definition": _provider_workflow_definition(_workflow_definition()),
                         },
                     }
                 ]
@@ -261,7 +262,7 @@ class RedactedAssertionUpdateProvider:
                         "target_id": self.workflow_id,
                         "name": None,
                         "description": None,
-                        "definition": definition,
+                        "definition": _provider_workflow_definition(definition),
                     },
                 }
             ]
@@ -308,8 +309,8 @@ class DuplicateUpdateProvider:
                             "target_id": self.workflow_id,
                             "name": None,
                             "description": None,
-                            "definition": _workflow_definition_with_assertion(
-                                start_name="开始", expected=201
+                            "definition": _provider_workflow_definition(
+                                _workflow_definition_with_assertion(start_name="开始", expected=201)
                             ),
                         },
                     },
@@ -340,7 +341,7 @@ class LargeWorkflowProposalProvider:
                         "action": "create",
                         "name": "大型 Workflow 草稿",
                         "description": "只拒绝。不写入资产",
-                        "definition": definition,
+                        "definition": _provider_workflow_definition(definition),
                     },
                 }
             ]
@@ -617,12 +618,21 @@ def test_change_set_provider_schema_requires_action_target_and_typed_drafts() ->
                     "target_id": target_id,
                     "name": "更新后的 Workflow",
                     "description": None,
-                    "definition": _workflow_definition(),
+                    "definition": _provider_workflow_definition(_workflow_definition()),
                 },
             }
         ]
     }
     validator.validate(valid_update)
+    valid_content = cast(
+        dict[str, JsonValue],
+        cast(list[dict[str, JsonValue]], valid_update["suggestions"])[0]["content"],
+    )
+    decoded = decode_change_set_content("workflow", valid_content)
+    decoded_definition = cast(dict[str, JsonValue], decoded["definition"])
+    decoded_nodes = cast(list[dict[str, JsonValue]], decoded_definition["nodes"])
+    assert decoded_nodes[0]["config"] == {}
+    assert "config_json" not in decoded_nodes[0]
     validator.validate(
         {
             "suggestions": [
@@ -638,8 +648,8 @@ def test_change_set_provider_schema_requires_action_target_and_typed_drafts() ->
                             "workflow_id": str(uuid4()),
                             "workflow_version": None,
                             "environment_id": str(uuid4()),
-                            "runtime_variables": {},
-                            "runtime_headers": {},
+                            "runtime_variables": [],
+                            "runtime_headers": [],
                         },
                     },
                 }
@@ -690,6 +700,7 @@ def _assert_schema_objects_closed(value: JsonValue) -> None:
         return
     if not isinstance(value, dict):
         return
+    assert "patternProperties" not in value
     if value.get("type") == "object":
         assert value.get("additionalProperties") is False
     for item in value.values():
@@ -2342,4 +2353,37 @@ def _strict_workflow_settings() -> dict[str, JsonValue]:
         "fail_fast": True,
         "concurrency": 20,
         "default_timeout_seconds": 30,
+    }
+
+
+def _provider_workflow_definition(
+    definition: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
+    canonical = cast(
+        dict[str, JsonValue],
+        WorkflowDefinition.model_validate(definition).model_dump(mode="json"),
+    )
+    variables = cast(dict[str, str], canonical["variables"])
+    nodes = []
+    for raw_node in cast(list[dict[str, JsonValue]], canonical["nodes"]):
+        node = dict(raw_node)
+        node["config_json"] = json.dumps(
+            node.pop("config"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        configuration = node.pop("configuration")
+        node["configuration_json"] = (
+            None
+            if configuration is None
+            else json.dumps(
+                configuration,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        nodes.append(node)
+    return {
+        **canonical,
+        "variables": [{"name": name, "value": value} for name, value in sorted(variables.items())],
+        "nodes": nodes,
     }

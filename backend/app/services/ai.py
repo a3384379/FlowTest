@@ -27,7 +27,7 @@ from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
 from app.repositories.ai import AIRepository
 from app.schemas.ai import AIJobCreateRequest
-from app.schemas.ai_change_sets import change_set_output_schema
+from app.schemas.ai_change_sets import change_set_output_schema, decode_change_set_content
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
@@ -392,9 +392,18 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
     for position, raw in enumerate(raw_suggestions):
         if not isinstance(raw, dict) or raw.get("type") not in allowed:
             raise ValueError("suggestion type is not allowed for this job")
+        suggestion_type = str(raw["type"])
+        raw_content = raw.get("content")
+        if not isinstance(raw_content, dict):
+            raise ValueError("suggestion content must be an object")
+        content = (
+            decode_change_set_content(suggestion_type, raw_content)
+            if job.job_type == "change_set"
+            else raw_content
+        )
         sanitized = sanitize_ai_input(
             schema_document=None,
-            metadata={"title": raw["title"], "content": raw["content"]},
+            metadata={"title": raw["title"], "content": content},
             sample=None,
         ).payload["metadata"]
         if not isinstance(sanitized, dict) or not isinstance(sanitized.get("content"), dict):
@@ -403,7 +412,7 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
             AISuggestion(
                 job_id=job.id,
                 position=position,
-                suggestion_type=str(raw["type"]),
+                suggestion_type=suggestion_type,
                 title=str(sanitized["title"])[:200],
                 content=sanitized["content"],
                 review_status="pending",
