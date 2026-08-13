@@ -649,6 +649,18 @@ def _restore_redacted_value(
         }
     if isinstance(proposed, list):
         current_items = current if isinstance(current, list) else []
+        if _contains_redacted(proposed):
+            expected = _redact_runtime_structure(current_items)
+            if proposed != expected:
+                raise AppError(
+                    code="AI_REDACTED_LIST_STRUCTURE_INVALID",
+                    message=(
+                        "包含脱敏值的 AI 列表草稿不能插入、删除、重排或部分修改。"
+                        "请保留列表结构或提供不含脱敏占位符的完整替换值"
+                    ),
+                    status_code=422,
+                )
+            return cast(JsonValue, current_items)
         return [
             _restore_redacted_value(
                 value,

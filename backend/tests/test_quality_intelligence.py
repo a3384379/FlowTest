@@ -1084,6 +1084,40 @@ def test_ai_workflow_update_preserves_omitted_runtime_fields_but_allows_explicit
     assert restored_empty.nodes[0].config == {}
 
 
+def test_ai_workflow_update_rejects_structural_edits_to_redacted_lists() -> None:
+    current = _workflow_definition()
+    current_headers = [
+        {"name": "Authorization", "value": "opaque-token"},
+        {"name": "X-Region", "value": "cn-north-1", "enabled": True},
+    ]
+    current["nodes"][0]["config"] = {"headers": current_headers}
+    redacted_headers: list[JsonValue] = [
+        {"name": REDACTED, "value": REDACTED},
+        {"name": REDACTED, "value": REDACTED, "enabled": REDACTED},
+    ]
+    unchanged_raw = deepcopy(current)
+    unchanged_raw["nodes"][0]["config"] = {"headers": redacted_headers}
+
+    restored = _rehydrate_workflow_definition(
+        WorkflowDefinition.model_validate(unchanged_raw), current
+    )
+
+    assert restored is not None
+    assert restored.nodes[0].config["headers"] == current_headers
+
+    structurally_changed_headers = (
+        redacted_headers[:1],
+        [*redacted_headers, {"name": REDACTED, "value": REDACTED}],
+        list(reversed(redacted_headers)),
+    )
+    for headers in structurally_changed_headers:
+        changed_raw = deepcopy(current)
+        changed_raw["nodes"][0]["config"] = {"headers": headers}
+        with pytest.raises(AppError) as invalid:
+            _rehydrate_workflow_definition(WorkflowDefinition.model_validate(changed_raw), current)
+        assert invalid.value.code == "AI_REDACTED_LIST_STRUCTURE_INVALID"
+
+
 @pytest.mark.asyncio
 async def test_regular_test_case_update_takes_same_row_lock_as_ai_acceptance() -> None:
     session = AsyncMock(spec=AsyncSession)
