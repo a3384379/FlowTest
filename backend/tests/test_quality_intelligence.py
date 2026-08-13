@@ -872,8 +872,24 @@ async def test_quality_repository_uses_complete_terminal_failure_population() ->
     )
 
     assert counts == (2, 1)
-    count_queries = [str(call.args[0]) for call in session.scalar.await_args_list]
+    count_statements = [call.args[0] for call in session.scalar.await_args_list]
+    count_queries = [str(statement) for statement in count_statements]
     assert all("workflow_executions.status IN" in query for query in count_queries)
+    assert all(
+        ["passed", "failed"] in statement.compile().params.values()
+        for statement in count_statements
+    )
+
+    session.scalars.reset_mock()
+    trend_rows = MagicMock()
+    trend_rows.all.return_value = []
+    session.scalars.return_value = trend_rows
+    trend = await repository.executions_for_trend(
+        project_id=uuid4(), started_at=started_at, ended_at=ended_at
+    )
+    assert trend == []
+    trend_statement = session.scalars.await_args.args[0]
+    assert ["passed", "failed"] in trend_statement.compile().params.values()
 
 
 @pytest.mark.asyncio
@@ -924,6 +940,21 @@ async def test_deployment_decisions_select_latest_record_per_service_without_lim
     assert "PARTITION BY DEPLOYMENT_COMPATIBILITY_CHECKS.PROVIDER_SERVICE_ID" in normalized
     assert "DECISION_RANK" in normalized
     assert " LIMIT " not in normalized
+
+
+@pytest.mark.asyncio
+async def test_flaky_asset_count_groups_historical_versions_by_target() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = 2
+    repository = QualityIntelligenceRepository(session)
+
+    count = await repository.flaky_asset_count(uuid4())
+
+    assert count == 2
+    query = str(session.scalar.await_args.args[0]).upper()
+    assert "GROUP BY FLAKY_RECORDS.TARGET_TYPE, FLAKY_RECORDS.TARGET_ID" in query
+    group_clause = query.split("GROUP BY", maxsplit=1)[1]
+    assert "TARGET_VERSION" not in group_clause
 
 
 async def _login(

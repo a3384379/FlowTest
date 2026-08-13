@@ -16,7 +16,7 @@ from app.models.quality_intelligence import FailureCluster, ReleaseRisk
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.impact import ImpactRunBundle
 
-_TERMINAL_EXECUTION_STATUSES = ("passed", "failed", "cancelled")
+_OUTCOME_EXECUTION_STATUSES = ("passed", "failed")
 
 
 class QualityIntelligenceRepository:
@@ -141,7 +141,7 @@ class QualityIntelligenceRepository:
             WorkflowExecution.parent_execution_id.is_(None),
             WorkflowExecution.started_at >= started_at,
             WorkflowExecution.started_at < ended_at,
-            WorkflowExecution.status.in_(_TERMINAL_EXECUTION_STATUSES),
+            WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
         )
         total = await self._session.scalar(
             select(func.count()).select_from(WorkflowExecution).where(*condition)
@@ -164,7 +164,7 @@ class QualityIntelligenceRepository:
                         WorkflowExecution.parent_execution_id.is_(None),
                         WorkflowExecution.started_at >= started_at,
                         WorkflowExecution.started_at < ended_at,
-                        WorkflowExecution.status.in_(_TERMINAL_EXECUTION_STATUSES),
+                        WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
                     )
                 )
             ).all()
@@ -216,9 +216,11 @@ class QualityIntelligenceRepository:
         return run.id, float(value) if isinstance(value, int | float) else 0.0
 
     async def flaky_asset_count(self, project_id: UUID) -> int:
-        value = await self._session.scalar(
-            select(func.count())
-            .select_from(FlakyRecord)
+        flaky_assets = (
+            select(FlakyRecord.target_type, FlakyRecord.target_id)
             .where(FlakyRecord.project_id == project_id, FlakyRecord.flaky_score > 0)
+            .group_by(FlakyRecord.target_type, FlakyRecord.target_id)
+            .subquery()
         )
+        value = await self._session.scalar(select(func.count()).select_from(flaky_assets))
         return int(value or 0)
