@@ -203,21 +203,43 @@ class QualityIntelligenceRepository:
         )
 
     async def latest_performance_regression(self, project_id: UUID) -> tuple[UUID | None, float]:
-        run = (
-            await self._session.scalars(
-                select(PerformanceRun)
-                .where(
-                    PerformanceRun.project_id == project_id,
-                    PerformanceRun.status.in_(("passed", "failed")),
+        ranked = (
+            select(
+                PerformanceRun.id.label("run_id"),
+                PerformanceRun.scenario_id.label("scenario_id"),
+                PerformanceRun.summary.label("summary"),
+                func.row_number()
+                .over(
+                    partition_by=PerformanceRun.scenario_id,
+                    order_by=(PerformanceRun.created_at.desc(), PerformanceRun.id.desc()),
                 )
-                .order_by(PerformanceRun.created_at.desc())
-                .limit(1)
+                .label("run_rank"),
             )
-        ).one_or_none()
-        if run is None:
+            .where(
+                PerformanceRun.project_id == project_id,
+                PerformanceRun.status.in_(("passed", "failed")),
+            )
+            .subquery()
+        )
+        rows = (
+            await self._session.execute(
+                select(ranked.c.run_id, ranked.c.summary)
+                .where(ranked.c.run_rank == 1)
+                .order_by(ranked.c.scenario_id)
+            )
+        ).tuples()
+        latest_runs = rows.all()
+        if not latest_runs:
             return None, 0.0
-        value = run.summary.get("p95_regression_percent")
-        return run.id, float(value) if isinstance(value, int | float) else 0.0
+        worst_run_id: UUID | None = None
+        worst_regression = float("-inf")
+        for run_id, summary in latest_runs:
+            value = summary.get("p95_regression_percent") if isinstance(summary, dict) else None
+            regression = float(value) if isinstance(value, int | float) else 0.0
+            if regression > worst_regression:
+                worst_run_id = run_id
+                worst_regression = regression
+        return worst_run_id, worst_regression
 
     async def flaky_asset_count(self, project_id: UUID) -> int:
         flaky_assets = (

@@ -552,6 +552,17 @@ def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
     assert create.name == "默认草稿名称"
     assert create.tags == []
 
+    secret_placeholder_definition = {
+        **definition,
+        "runtime_variables": {"password": REDACTED},
+    }
+    with pytest.raises(AppError) as secret_binding:
+        _test_case_create(
+            "需要重新绑定的 Test Case",
+            {"definition": secret_placeholder_definition},
+        )
+    assert secret_binding.value.code == "AI_TEST_CASE_DRAFT_SECRET_BINDING_REQUIRED"
+
 
 def test_test_case_update_rejects_normalized_noop() -> None:
     current_definition: dict[str, JsonValue] = {
@@ -596,6 +607,16 @@ def test_workflow_create_and_update_enforce_draft_metadata_constraints() -> None
 
     create = _workflow_create("默认 Workflow 草稿", {"definition": definition})
     assert create.name == "默认 Workflow 草稿"
+
+    secret_placeholder_definition = deepcopy(definition)
+    secret_placeholder_definition["variables"] = {"password": REDACTED}
+    with pytest.raises(AppError) as secret_binding:
+        _workflow_create(
+            "需要重新绑定的 Workflow",
+            {"definition": secret_placeholder_definition},
+        )
+    assert secret_binding.value.code == "AI_WORKFLOW_DRAFT_SECRET_BINDING_REQUIRED"
+
     with pytest.raises(AppError) as invalid_update:
         _workflow_update({"name": "   "})
     assert invalid_update.value.code == "AI_WORKFLOW_DRAFT_INVALID"
@@ -1798,6 +1819,32 @@ async def test_deployment_decisions_select_latest_record_per_service_without_lim
     assert "PARTITION BY DEPLOYMENT_COMPATIBILITY_CHECKS.PROVIDER_SERVICE_ID" in normalized
     assert "DECISION_RANK" in normalized
     assert " LIMIT " not in normalized
+
+
+@pytest.mark.asyncio
+async def test_performance_regression_selects_worst_latest_run_per_scenario() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    worst_run_id = uuid4()
+    healthy_run_id = uuid4()
+    result = MagicMock()
+    run_rows = MagicMock()
+    run_rows.all.return_value = [
+        (worst_run_id, {"p95_regression_percent": 42.5}),
+        (healthy_run_id, {"p95_regression_percent": 1.0}),
+    ]
+    result.tuples.return_value = run_rows
+    session.execute.return_value = result
+    repository = QualityIntelligenceRepository(session)
+
+    run_id, regression = await repository.latest_performance_regression(uuid4())
+
+    assert run_id == worst_run_id
+    assert regression == 42.5
+    query = str(session.execute.await_args.args[0]).upper()
+    assert "ROW_NUMBER() OVER" in query
+    assert "PARTITION BY PERFORMANCE_RUNS.SCENARIO_ID" in query
+    assert "RUN_RANK" in query
+    assert " LIMIT " not in query
 
 
 @pytest.mark.asyncio

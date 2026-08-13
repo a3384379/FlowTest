@@ -907,7 +907,7 @@ def _assertion_semantics(definition: WorkflowDefinition) -> list[AssertionSemant
 
 def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDraftCreate:
     try:
-        return AITestCaseDraftCreate.model_validate(
+        create = AITestCaseDraftCreate.model_validate(
             {
                 "name": title,
                 "description": "由 AI Change Set 生成。待人工复核",
@@ -921,11 +921,18 @@ def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDr
             message="AI Test Case 创建内容必须符合受支持的草稿字段",
             status_code=422,
         ) from error
+    if _contains_redacted(create.definition.model_dump(mode="json")):
+        raise AppError(
+            code="AI_TEST_CASE_DRAFT_SECRET_BINDING_REQUIRED",
+            message="AI Test Case 创建草稿不能包含脱敏占位符。请创建后重新绑定运行值",
+            status_code=422,
+        )
+    return create
 
 
 def _workflow_create(title: str, content: dict[str, JsonValue]) -> AIWorkflowDraftCreate:
     try:
-        return AIWorkflowDraftCreate.model_validate(
+        create = AIWorkflowDraftCreate.model_validate(
             {
                 "name": title,
                 "description": "由 AI Change Set 生成。待人工复核",
@@ -938,6 +945,23 @@ def _workflow_create(title: str, content: dict[str, JsonValue]) -> AIWorkflowDra
             message="AI Workflow 创建内容必须符合受支持的草稿字段",
             status_code=422,
         ) from error
+    if _contains_redacted(create.definition.model_dump(mode="json")):
+        raise AppError(
+            code="AI_WORKFLOW_DRAFT_SECRET_BINDING_REQUIRED",
+            message="AI Workflow 创建草稿不能包含脱敏占位符。请创建后重新绑定运行值",
+            status_code=422,
+        )
+    return create
+
+
+def _contains_redacted(value: JsonValue) -> bool:
+    if isinstance(value, str):
+        return REDACTED in value
+    if isinstance(value, dict):
+        return any(_contains_redacted(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_redacted(item) for item in value)
+    return False
 
 
 def _test_case_update(content: dict[str, JsonValue]) -> AITestCaseDraftUpdate:
