@@ -21,7 +21,7 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
 from app.domain.access import ProjectRole
-from app.domain.ai import REDACTED, change_set_output_schema
+from app.domain.ai import REDACTED
 from app.domain.quality_intelligence import (
     FailureClusterEvidence,
     FailureObservation,
@@ -46,6 +46,7 @@ from app.repositories.quality_intelligence import (
     FAILURE_EVIDENCE_BATCH_SIZE,
     QualityIntelligenceRepository,
 )
+from app.schemas.ai_change_sets import change_set_output_schema
 from app.schemas.test_assets import TestCaseDefinitionInput as CaseDefinitionInput
 from app.services.ai import AIJobRunner, AIProvider, AIProviderResult
 from app.services.ai_change_sets import (
@@ -238,29 +239,37 @@ class RedactedAssertionUpdateProvider:
         assert job_type == "change_set"
         metadata = cast(dict[str, JsonValue], sanitized_input["metadata"])
         allowed_targets = cast(list[dict[str, JsonValue]], metadata["allowed_targets"])
-        definition = deepcopy(cast(dict[str, JsonValue], allowed_targets[0]["draft_definition"]))
+        definition = cast(
+            dict[str, JsonValue],
+            WorkflowDefinition.model_validate(
+                deepcopy(allowed_targets[0]["draft_definition"])
+            ).model_dump(mode="json"),
+        )
         nodes = cast(list[dict[str, JsonValue]], definition["nodes"])
         assertion = next(node for node in nodes if node["id"] == "assert-status")
         config = cast(dict[str, JsonValue], assertion["config"])
         assert config["source_node_id"] == REDACTED
         assert config["expression"] == REDACTED
         config["expected"] = 201
+        payload: dict[str, JsonValue] = {
+            "suggestions": [
+                {
+                    "type": "assertion",
+                    "title": "更新状态码断言",
+                    "content": {
+                        "action": "update",
+                        "target_id": self.workflow_id,
+                        "name": None,
+                        "description": None,
+                        "definition": definition,
+                    },
+                }
+            ]
+        }
+        schema_errors = list(Draft202012Validator(output_schema).iter_errors(payload))
+        assert not schema_errors, _schema_error_messages(schema_errors)
         return AIProviderResult(
-            payload={
-                "suggestions": [
-                    {
-                        "type": "assertion",
-                        "title": "更新状态码断言",
-                        "content": {
-                            "action": "update",
-                            "target_id": self.workflow_id,
-                            "name": None,
-                            "description": None,
-                            "definition": definition,
-                        },
-                    }
-                ]
-            },
+            payload=payload,
             token_usage={"input_tokens": 30, "output_tokens": 20},
         )
 
@@ -341,6 +350,18 @@ class LargeWorkflowProposalProvider:
             payload=payload,
             token_usage={"input_tokens": 20, "output_tokens": 200},
         )
+
+
+def _schema_error_messages(errors: list[JsonSchemaValidationError]) -> list[str]:
+    messages = []
+    pending = list(errors)
+    while pending:
+        error = pending.pop()
+        if error.context:
+            pending.extend(error.context)
+        else:
+            messages.append(f"{list(error.absolute_path)}: {error.message}")
+    return messages
 
 
 @pytest.fixture
@@ -583,6 +604,7 @@ def test_review_content_rejects_secret_rotation_before_redaction() -> None:
 def test_change_set_provider_schema_requires_action_target_and_typed_drafts() -> None:
     schema = change_set_output_schema(MAX_CHANGE_SET_ITEMS)
     Draft202012Validator.check_schema(schema)
+    _assert_schema_objects_closed(schema)
     validator = Draft202012Validator(schema)
     target_id = str(uuid4())
     valid_update: dict[str, JsonValue] = {
@@ -601,6 +623,29 @@ def test_change_set_provider_schema_requires_action_target_and_typed_drafts() ->
         ]
     }
     validator.validate(valid_update)
+    validator.validate(
+        {
+            "suggestions": [
+                {
+                    "type": "test_case",
+                    "title": "创建 Test Case 草稿",
+                    "content": {
+                        "action": "create",
+                        "name": "AI Test Case",
+                        "description": "待人工复核",
+                        "tags": [],
+                        "definition": {
+                            "workflow_id": str(uuid4()),
+                            "workflow_version": None,
+                            "environment_id": str(uuid4()),
+                            "runtime_variables": {},
+                            "runtime_headers": {},
+                        },
+                    },
+                }
+            ]
+        }
+    )
 
     missing_action = deepcopy(valid_update)
     cast(
@@ -627,6 +672,28 @@ def test_change_set_provider_schema_requires_action_target_and_typed_drafts() ->
     cast(dict[str, JsonValue], suggestion["content"]).pop("definition")
     with pytest.raises(JsonSchemaValidationError):
         validator.validate(incomplete_assertion)
+
+    invalid_definition = deepcopy(valid_update)
+    content = cast(
+        dict[str, JsonValue],
+        cast(list[dict[str, JsonValue]], invalid_definition["suggestions"])[0]["content"],
+    )
+    content["definition"] = {"unexpected": True}
+    with pytest.raises(JsonSchemaValidationError):
+        validator.validate(invalid_definition)
+
+
+def _assert_schema_objects_closed(value: JsonValue) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _assert_schema_objects_closed(item)
+        return
+    if not isinstance(value, dict):
+        return
+    if value.get("type") == "object":
+        assert value.get("additionalProperties") is False
+    for item in value.values():
+        _assert_schema_objects_closed(item)
 
 
 def test_test_case_create_enforces_asset_name_and_tag_constraints() -> None:
@@ -2201,59 +2268,78 @@ async def _seed_impact(
 def _workflow_definition() -> dict[str, JsonValue]:
     return {
         "schema_version": "1.0",
+        "variables": {},
         "nodes": [
-            {
-                "id": "start",
-                "type": "start",
-                "name": "开始",
-                "position": {"x": 0, "y": 0},
-                "config": {},
-            },
-            {
-                "id": "end",
-                "type": "end",
-                "name": "结束",
-                "position": {"x": 240, "y": 0},
-                "config": {},
-            },
+            _strict_workflow_node("start", "start", "开始", x=0, config={}),
+            _strict_workflow_node("end", "end", "结束", x=240, config={}),
         ],
-        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        "edges": [_strict_workflow_edge("start-end", "start", "end")],
+        "settings": _strict_workflow_settings(),
     }
 
 
 def _workflow_definition_with_assertion(*, start_name: str, expected: int) -> dict[str, JsonValue]:
     return {
         "schema_version": "1.0",
+        "variables": {},
         "nodes": [
-            {
-                "id": "start",
-                "type": "start",
-                "name": start_name,
-                "position": {"x": 0, "y": 0},
-                "config": {},
-            },
-            {
-                "id": "assert-status",
-                "type": "assert",
-                "name": "状态码断言",
-                "position": {"x": 160, "y": 0},
-                "config": {
+            _strict_workflow_node("start", "start", start_name, x=0, config={}),
+            _strict_workflow_node(
+                "assert-status",
+                "assert",
+                "状态码断言",
+                x=160,
+                config={
                     "source_node_id": "start",
                     "expression": "$.status_code",
                     "operator": "equals",
                     "expected": expected,
                 },
-            },
-            {
-                "id": "end",
-                "type": "end",
-                "name": "结束",
-                "position": {"x": 320, "y": 0},
-                "config": {},
-            },
+            ),
+            _strict_workflow_node("end", "end", "结束", x=320, config={}),
         ],
         "edges": [
-            {"id": "start-assert", "source": "start", "target": "assert-status"},
-            {"id": "assert-end", "source": "assert-status", "target": "end"},
+            _strict_workflow_edge("start-assert", "start", "assert-status"),
+            _strict_workflow_edge("assert-end", "assert-status", "end"),
         ],
+        "settings": _strict_workflow_settings(),
+    }
+
+
+def _strict_workflow_node(
+    node_id: str,
+    node_type: str,
+    name: str,
+    *,
+    x: int,
+    config: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
+    return {
+        "id": node_id,
+        "type": node_type,
+        "name": name,
+        "position": {"x": x, "y": 0},
+        "config": config,
+        "capability_id": None,
+        "capability_version": None,
+        "configuration": None,
+        "bindings": None,
+    }
+
+
+def _strict_workflow_edge(edge_id: str, source: str, target: str) -> dict[str, JsonValue]:
+    return {
+        "id": edge_id,
+        "source": source,
+        "target": target,
+        "condition": None,
+        "mappings": [],
+    }
+
+
+def _strict_workflow_settings() -> dict[str, JsonValue]:
+    return {
+        "fail_fast": True,
+        "concurrency": 20,
+        "default_timeout_seconds": 30,
     }

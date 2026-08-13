@@ -543,7 +543,7 @@ def _workflow_node_for_ai(node: JsonValue) -> JsonValue:
         return node
     safe_node = cast(dict[str, JsonValue], dict(node))
     for field in ("config", "configuration"):
-        if field in safe_node:
+        if field in safe_node and safe_node[field] is not None:
             safe_node[field] = _redact_runtime_structure(safe_node[field])
     return safe_node
 

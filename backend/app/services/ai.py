@@ -17,7 +17,6 @@ from app.core.errors import AppError
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.ai import (
     AIInputError,
-    change_set_output_schema,
     sanitize_ai_input,
     suggestion_output_schema,
 )
@@ -28,6 +27,7 @@ from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
 from app.repositories.ai import AIRepository
 from app.schemas.ai import AIJobCreateRequest
+from app.schemas.ai_change_sets import change_set_output_schema
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
