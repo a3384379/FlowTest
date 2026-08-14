@@ -17,13 +17,12 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
     (item) => item.resource_type === 'project' && item.title.startsWith('S11 V1 Pilot '),
   )
   expect(pilotProject).toBeDefined()
+  if (!pilotProject) throw new Error('全局搜索未返回 S11 V1 Pilot 项目')
   await page
     .locator('.ant-select-dropdown:visible')
-    .getByText(pilotProject?.title ?? '', { exact: true })
+    .getByText(pilotProject.title, { exact: true })
     .click()
-  await page.waitForURL(
-    (url) => `${url.pathname}${url.search}` === (pilotProject?.path ?? '/missing'),
-  )
+  await page.waitForURL((url) => `${url.pathname}${url.search}` === pilotProject.path)
 
   await page.getByText('项目管理', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
@@ -33,11 +32,8 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await expect(page).toHaveURL(governanceUrl)
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
   await expect(
-    page
-      .getByRole('main')
-      .getByText(/^S11 V1 Pilot /)
-      .first(),
-  ).toBeVisible()
+    page.getByRole('main').getByText(pilotProject.title, { exact: true }).first(),
+  ).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('当前身份：系统管理员')).toBeVisible()
   await expect(page.getByLabel('保留天数')).toHaveValue('90')
   await expect(page.getByLabel('允许域名（每行一个）')).toHaveValue('mock-target')
