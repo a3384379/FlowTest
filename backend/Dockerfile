@@ -1,9 +1,57 @@
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
-FROM grafana/k6:2.2.0@sha256:9bd01d6941fca969cb61bb57d2da5ee9b385fe2aa8881df3798c196564d6ace6 AS k6
-FROM docker:29.7.2-cli@sha256:000bb62ff495f986c9f5578eb67cc2cb98b91138eda81d7762d5371eb8a497fe AS docker-cli
-FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS containerd-builder
+FROM golang:1.26.6-alpine3.23@sha256:5978cc992ad5ef96a7469713c8af849c1433824761ce3be2c56381403cd8d9a3 AS go-toolchain
 
 RUN apk add --no-cache git make
+ENV GOTOOLCHAIN=local
+
+FROM go-toolchain AS k6-builder
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    set -eux; \
+    GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2@v2.2.0; \
+    go version -m /out/k6 | grep -F 'go1.26.6'; \
+    /out/k6 version | grep -F 'k6 v2.2.0'
+
+FROM go-toolchain AS docker-cli-builder
+WORKDIR /go/src/github.com/docker/cli
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    set -eux; \
+    git init; \
+    git remote add origin https://github.com/docker/cli.git; \
+    git fetch --depth 1 origin a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
+    git checkout --detach FETCH_HEAD; \
+    test "$(git rev-parse HEAD)" = a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
+    SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+        VERSION=29.7.2 \
+        GITCOMMIT=a7dcaa6fdb6ed04aacbfdc76357fdae01605609e \
+        CGO_ENABLED=0 \
+        GO_STRIP=1 \
+        ./scripts/build/binary; \
+    install -D build/docker /out/docker; \
+    go version -m /out/docker | grep -F 'go1.26.6'; \
+    /out/docker --version | grep -F 'Docker version 29.7.2'
+
+FROM go-toolchain AS dockerd-builder
+RUN apk add --no-cache bash build-base libseccomp-dev libseccomp-static linux-headers pkgconf
+WORKDIR /src/moby
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    set -eux; \
+    git init; \
+    git remote add origin https://github.com/moby/moby.git; \
+    git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
+    git checkout --detach FETCH_HEAD; \
+    test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
+    SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+        VERSION=29.7.2 \
+        DOCKER_GITCOMMIT=6a43e3d5afddf4111da0f864bbc7cae5d7e95001 \
+        DOCKER_STATIC=1 \
+        BUILDFLAGS=-buildvcs=false \
+        PREFIX=/out \
+        ./hack/make.sh binary-daemon; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.6'; \
+    /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
+
+FROM go-toolchain AS containerd-builder
 WORKDIR /src/containerd
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -22,6 +70,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         bin/containerd bin/ctr
 
 FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon
+COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
+COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/dockerd
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
 RUN set -eux; \
@@ -142,16 +192,17 @@ EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
 FROM python-runtime AS performance-runtime
-COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
+COPY --from=k6-builder /out/k6 /usr/local/bin/k6
 RUN set -eux; \
     groupadd --gid 65532 flowtest; \
     useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
-        --shell /usr/sbin/nologin flowtest
+        --shell /usr/sbin/nologin flowtest; \
+    k6 version | grep -F 'k6 v2.2.0'
 ENV HOME=/tmp
 USER flowtest
 
 FROM python-runtime AS environment-runtime
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
 RUN set -eux; \
     groupadd --gid 65532 flowtest; \
     useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
