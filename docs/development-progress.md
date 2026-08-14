@@ -3,14 +3,15 @@
 最后更新：2026-08-14（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 已通过 PR #33 的五项 CI 并 squash 合并至
 `main@bfa80fd`。当前 `codex/s31-release-gate` 已从该干净基线承接 S31 Release Gate/全局搜索候选，
-完成本地全量、真实 PostgreSQL、Compose 冒烟与 Playwright CLI 验收，尚未取得本分支远程 CI 证据。
+完成本地全量、真实 PostgreSQL、Compose 冒烟与 Playwright CLI 验收；PR #34 的实现提交
+`d885610` 已取得五项远程 CI 全绿证据，当前进入最终文档复核与合并收口。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 当前基线：`main@bfa80fd1e1d935bbf7364097346c8915f2f6d3d8`，S30 PR #33 的 5 项 CI 全绿后已 squash 合并。
 - 当前分支：`codex/s31-release-gate`，从上述基线创建；工作区只包含 S31 Release Gate、全局搜索及
-  真实数据量验收中发现的首页汇总优化，不携带 S30 未提交改动。
+  真实数据量验收中发现的首页汇总优化，不携带 S30 未提交改动；对应 Draft PR #34。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -29,7 +30,7 @@
 5. PR #33 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose
    Smoke 五项检查全部通过；最终提交经评审后于 2026-08-14 squash 合并至 `main@bfa80fd`。
 
-## 本地候选实现：S31 Release Gate 与全局搜索
+## 已完成小阶段：S31 Release Gate 与全局搜索
 
 1. 新增独立 `ReleasePolicy` 与无 `updated_at` 的 `ReleaseDecision`；每次判断固定策略、质量、契约、
    Impact、Release Risk、性能和 Runner 证据快照，并保存 SHA-256 指纹与六类可解释 PASS/BLOCK 原因。
@@ -52,7 +53,11 @@
 8. 复用数据卷含 55,247 条 Workflow Execution 时，首页原实现会读取近 7 天完整 ORM/JSON 记录并阻塞
    单 Worker；现改为 PostgreSQL/SQLite 按本地日期与状态聚合。真实卷上首页汇总约 0.15 秒、搜索约
    0.11 秒，避免全局搜索被首页请求拖死。
-9. 正式 S31 仍包含 V2→V3 升级/回滚、容量、安全、备份恢复、全部页面试点签署及真实 14 天 RC；
+9. PR #34 实现提交 `d885610` 的 Backend Test（2 分 50 秒）、Backend Integration（1 分 24 秒）、
+   Frontend Build（8 分 54 秒）、Security Source/Images（10 分 19 秒）和 Compose Smoke
+   （21 分 29 秒）五项远程检查全部通过；Compose 同一提交覆盖 S31 主路径、Team 100 Workflow/
+   1000 Queue、Scale 500 Workflow/5000 Queue 和隔离备份恢复。
+10. 正式 S31 仍包含 V2→V3 升级/回滚、完整容量/安全/备份恢复演练、全部页面试点签署及真实 14 天 RC；
    上述短时自动化不替代这些门槛，当前只完成 Release Gate/全局搜索小阶段。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
@@ -427,9 +432,8 @@
 
 ## 下一步
 
-1. 将 `codex/s31-release-gate` 作为独立 Draft PR 提交，取得 Backend、Integration、Frontend、Security
-   和 Compose 五项 CI 证据；失败项必须按真实原因修复，不降低断言或门槛。
-2. 在该小阶段通过评审后，继续 S31 剩余的 16 页面产品化、V2→V3 原地升级/回滚、容量、安全、
+1. 完成 PR #34 的最终评审与 squash 合并；以 `d885610` 的五项远程 CI 和最终文档提交检查作为收口证据。
+2. 该小阶段合并后，继续 S31 剩余的 16 页面产品化、V2→V3 原地升级/回滚、容量、安全、
    备份恢复和试点文档；未完成这些门槛前不宣告 S31 或 V3 GA。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. S31 代码冻结后执行新的 V3 RC 候选连续 14 个自然日观察；任何代码修复生成新候选并重新计时。
