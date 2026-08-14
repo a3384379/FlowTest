@@ -23,10 +23,14 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
     .getByText(pilotProject.title, { exact: true })
     .click()
   await page.waitForURL((url) => `${url.pathname}${url.search}` === pilotProject.path)
+  const governancePath = new URL(pilotProject.path, page.url()).pathname
+  await expect(
+    page.getByRole('main').getByText(pilotProject.title, { exact: true }).first(),
+  ).toBeVisible()
 
-  await page.getByText('项目管理', { exact: true }).click()
+  await page.getByRole('link', { name: '项目管理' }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/settings$/)
+  await expect(page).toHaveURL((url) => url.pathname === governancePath && url.search === '')
   const governanceUrl = page.url()
   await page.reload()
   await expect(page).toHaveURL(governanceUrl)
