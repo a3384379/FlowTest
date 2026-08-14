@@ -15,7 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.access import ProjectCapability, ProjectRole
-from app.domain.ai import AIInputError, sanitize_ai_input, suggestion_output_schema
+from app.domain.ai import (
+    AIInputError,
+    sanitize_ai_input,
+    suggestion_output_schema,
+)
 from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIJob, AISuggestion
@@ -23,6 +27,7 @@ from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
 from app.repositories.ai import AIRepository
 from app.schemas.ai import AIJobCreateRequest
+from app.schemas.ai_change_sets import change_set_output_schema, decode_change_set_content
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
@@ -37,6 +42,7 @@ _ALLOWED_SUGGESTIONS = {
     "assertion_suggestions": frozenset({"assertion"}),
     "workflow_draft": frozenset({"workflow"}),
     "failure_analysis": frozenset({"failure_analysis"}),
+    "change_set": frozenset({"test_case", "assertion", "workflow"}),
 }
 
 
@@ -289,9 +295,15 @@ class AIJobRunner:
             result = await self._provider.generate(
                 job_type=job.job_type,
                 sanitized_input=cast(dict[str, JsonValue], job.sanitized_input),
-                output_schema=suggestion_output_schema(settings.ai_max_suggestions),
+                output_schema=_output_schema(job.job_type),
             )
             suggestions = _validated_suggestions(job, result.payload)
+            if job.job_type == "change_set":
+                from app.services.ai_change_sets import materialize_change_set_items
+
+                self._repository.add_suggestions(suggestions)
+                await self._session.flush()
+                await materialize_change_set_items(self._session, job, suggestions)
         except AIProviderError as error:
             return await self._fail(job, code=error.code, message=error.message)
         except (SchemaError, ValidationError, AIInputError, ValueError, TypeError):
@@ -299,7 +311,8 @@ class AIJobRunner:
             return await self._fail(
                 job, code="AI_RESPONSE_INVALID", message="AI 建议未通过结构或脱敏校验"
             )
-        self._repository.add_suggestions(suggestions)
+        if job.job_type != "change_set":
+            self._repository.add_suggestions(suggestions)
         job.status = "completed"
         job.token_usage = result.token_usage
         job.completed_at = datetime.now(UTC)
@@ -326,6 +339,10 @@ class AIJobRunner:
         job.error_code = code
         job.error_message = message[:500]
         job.completed_at = datetime.now(UTC)
+        if job.job_type == "change_set":
+            from app.services.ai_change_sets import mark_change_set_failed
+
+            await mark_change_set_failed(self._session, job.id)
         self._audit.record(
             actor_user_id=job.created_by_id,
             project_id=job.project_id,
@@ -364,7 +381,7 @@ def _authorize_sample(
 
 
 def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AISuggestion]:
-    schema = suggestion_output_schema(settings.ai_max_suggestions)
+    schema = _output_schema(job.job_type)
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(payload)
     raw_suggestions = payload.get("suggestions")
@@ -375,9 +392,18 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
     for position, raw in enumerate(raw_suggestions):
         if not isinstance(raw, dict) or raw.get("type") not in allowed:
             raise ValueError("suggestion type is not allowed for this job")
+        suggestion_type = str(raw["type"])
+        raw_content = raw.get("content")
+        if not isinstance(raw_content, dict):
+            raise ValueError("suggestion content must be an object")
+        content = (
+            decode_change_set_content(suggestion_type, raw_content)
+            if job.job_type == "change_set"
+            else raw_content
+        )
         sanitized = sanitize_ai_input(
             schema_document=None,
-            metadata={"title": raw["title"], "content": raw["content"]},
+            metadata={"title": raw["title"], "content": content},
             sample=None,
         ).payload["metadata"]
         if not isinstance(sanitized, dict) or not isinstance(sanitized.get("content"), dict):
@@ -386,7 +412,7 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
             AISuggestion(
                 job_id=job.id,
                 position=position,
-                suggestion_type=str(raw["type"]),
+                suggestion_type=suggestion_type,
                 title=str(sanitized["title"])[:200],
                 content=sanitized["content"],
                 review_status="pending",
@@ -395,9 +421,21 @@ def _validated_suggestions(job: AIJob, payload: dict[str, JsonValue]) -> list[AI
     return suggestions
 
 
+def _output_schema(job_type: str) -> dict[str, JsonValue]:
+    if job_type == "change_set":
+        return change_set_output_schema(settings.ai_max_suggestions)
+    return suggestion_output_schema(settings.ai_max_suggestions)
+
+
 def _validate_pending_suggestion(suggestion: AISuggestion, job: AIJob) -> None:
     if job.status != "completed":
         raise AppError(code="AI_JOB_NOT_COMPLETED", message="AI 任务尚未完成", status_code=409)
+    if job.job_type == "change_set":
+        raise AppError(
+            code="AI_CHANGE_SET_REVIEW_REQUIRED",
+            message="请通过 AI 变更集逐项审核",
+            status_code=409,
+        )
     if suggestion.review_status != "pending":
         raise AppError(
             code="AI_SUGGESTION_ALREADY_REVIEWED",
@@ -440,6 +478,7 @@ async def _create_workflow_draft(
         description=str(content.get("description") or "由 AI 建议生成。需人工复核"),
         folder_id=folder_id,
         definition=definition,
+        commit=False,
     )
 
 
@@ -470,6 +509,7 @@ async def _create_test_case_draft(
         tags=cast(list[str], tags_value),
         is_template=False,
         definition=definition,
+        commit=False,
     )
 
 

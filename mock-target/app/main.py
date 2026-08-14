@@ -37,8 +37,10 @@ async def health() -> dict[str, str]:
 
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
-    if payload.username != "tester" or payload.password != "flowtest":  # noqa: S105
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if payload.username != "tester" or payload.password != "flowtest":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
     return {"code": 0, "data": {"token": "mock-token", "user_id": "user-001"}}
 
 
@@ -47,7 +49,9 @@ async def current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
+        )
     return {"code": 0, "data": {"id": "user-001", "name": "测试用户"}}
 
 
@@ -57,7 +61,9 @@ async def create_order(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
+        )
     return {"code": 0, "data": {"id": str(uuid4()), **payload.model_dump()}}
 
 
@@ -122,7 +128,8 @@ async def graphql(request: Request) -> dict[str, object]:
     variables = payload.get("variables", {})
     if not isinstance(query, str) or not isinstance(variables, dict):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad GraphQL request"
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Bad GraphQL request",
         )
     if "renameUser" in query:
         return {
@@ -158,7 +165,9 @@ async def receive_flowtest_notification(request: Request) -> Response:
 async def last_flowtest_notification() -> dict[str, object]:
     notification = getattr(app.state, "last_notification", None)
     if not isinstance(notification, dict):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notification")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No notification"
+        )
     return notification
 
 
@@ -168,14 +177,22 @@ async def openai_compatible_completion(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer flowtest-mock-ai-key":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key"
+        )
     payload = await request.json()
     messages = payload.get("messages")
     if not isinstance(messages, list) or len(messages) < 2:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt"
+        )
     user_message = messages[-1]
-    if not isinstance(user_message, dict) or not isinstance(user_message.get("content"), str):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt")
+    if not isinstance(user_message, dict) or not isinstance(
+        user_message.get("content"), str
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt"
+        )
     prompt = json.loads(user_message["content"])
     encoded_prompt = json.dumps(prompt, ensure_ascii=False)
     if "must-not-reach-ai" in encoded_prompt:
@@ -183,44 +200,106 @@ async def openai_compatible_completion(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="FlowTest sent an unredacted value",
         )
-    if prompt.get("job_type") != "workflow_draft":
+    job_type = prompt.get("job_type")
+    if job_type not in {"workflow_draft", "change_set"}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Unsupported smoke job",
         )
-    suggestions = {
+    suggestions = _ai_suggestions(str(job_type))
+    return {
+        "choices": [
+            {"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}
+        ],
+        "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+    }
+
+
+def _ai_suggestions(job_type: str) -> dict[str, object]:
+    content: dict[str, object] = {
+        "name": "S21 AI 人工审核工作流",
+        "description": "仅在人工接受后创建",
+        "definition": {
+            "schema_version": "1.0",
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "name": "开始",
+                    "position": {"x": 0, "y": 0},
+                    "config": {},
+                },
+                {
+                    "id": "end",
+                    "type": "end",
+                    "name": "结束",
+                    "position": {"x": 240, "y": 0},
+                    "config": {},
+                },
+            ],
+            "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        },
+    }
+    if job_type == "change_set":
+        content["action"] = "create"
+        content["name"] = "S30 AI 变更集草稿工作流"
+        content["description"] = "逐项人工审核后只生成草稿"
+        content["definition"] = _change_set_workflow_definition()
+    return {
         "suggestions": [
             {
                 "type": "workflow",
-                "title": "S21 AI 人工审核工作流",
-                "content": {
-                    "name": "S21 AI 人工审核工作流",
-                    "description": "仅在人工接受后创建",
-                    "definition": {
-                        "schema_version": "1.0",
-                        "nodes": [
-                            {
-                                "id": "start",
-                                "type": "start",
-                                "name": "开始",
-                                "position": {"x": 0, "y": 0},
-                                "config": {},
-                            },
-                            {
-                                "id": "end",
-                                "type": "end",
-                                "name": "结束",
-                                "position": {"x": 240, "y": 0},
-                                "config": {},
-                            },
-                        ],
-                        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
-                    },
-                },
+                "title": (
+                    "S30 AI 变更集草稿工作流"
+                    if job_type == "change_set"
+                    else "S21 AI 人工审核工作流"
+                ),
+                "content": content,
             }
         ]
     }
+
+
+def _change_set_workflow_definition() -> dict[str, object]:
     return {
-        "choices": [{"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}],
-        "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        "schema_version": "1.0",
+        "variables": [],
+        "nodes": [
+            _change_set_workflow_node("start", "start", "开始", x=0),
+            _change_set_workflow_node("end", "end", "结束", x=240),
+        ],
+        "edges": [
+            {
+                "id": "start-end",
+                "source": "start",
+                "target": "end",
+                "condition": None,
+                "mappings": [],
+            }
+        ],
+        "settings": {
+            "fail_fast": True,
+            "concurrency": 20,
+            "default_timeout_seconds": 30,
+        },
+    }
+
+
+def _change_set_workflow_node(
+    node_id: str,
+    node_type: str,
+    name: str,
+    *,
+    x: int,
+) -> dict[str, object]:
+    return {
+        "id": node_id,
+        "type": node_type,
+        "name": name,
+        "position": {"x": x, "y": 0},
+        "config_json": "{}",
+        "capability_id": None,
+        "capability_version": None,
+        "configuration_json": None,
+        "bindings": None,
     }

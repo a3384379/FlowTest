@@ -176,6 +176,7 @@ class WorkflowService:
         description: str,
         folder_id: UUID | None,
         definition: WorkflowDefinition,
+        commit: bool = True,
     ) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_folder(project_id, folder_id)
@@ -200,8 +201,9 @@ class WorkflowService:
             resource_type="workflow",
             resource_id=workflow.id,
         )
-        await self._session.commit()
-        await self._session.refresh(workflow)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(workflow)
         return workflow
 
     async def get(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> Workflow:
@@ -220,6 +222,7 @@ class WorkflowService:
         folder_id: UUID | None,
         change_folder: bool,
         definition: WorkflowDefinition | None,
+        commit: bool = True,
     ) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow_for_update(project_id, workflow_id)
@@ -254,8 +257,11 @@ class WorkflowService:
             resource_id=workflow.id,
             details={"draft_revision": workflow.draft_revision},
         )
-        await self._session.commit()
-        await self._session.refresh(workflow)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(workflow)
+        else:
+            await self._session.flush()
         return workflow
 
     async def publish(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> WorkflowVersion:

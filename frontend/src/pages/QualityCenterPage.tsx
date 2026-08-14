@@ -7,7 +7,9 @@ import {
   Input,
   InputNumber,
   Modal,
+  Progress,
   Row,
+  Select,
   Space,
   Statistic,
   Switch,
@@ -17,15 +19,21 @@ import {
 } from 'antd'
 import { useState } from 'react'
 
-import type { QualityGateInput } from '../features/quality/quality-service'
+import type {
+  QualityGateInput,
+  ReleaseRiskDetail,
+  ReleaseRiskInput,
+} from '../features/quality/quality-service'
+import type { ImpactRunSummary } from '../features/impact/impact-service'
 import { useQualityCenter } from '../features/quality/use-quality-center'
 import type { TestPlanRun } from '../lib/api'
 
 export default function QualityCenterPage() {
   const state = useQualityCenter()
   const [createOpen, setCreateOpen] = useState(false)
-  const records = state.flaky.data?.items ?? []
-  const latest = state.runs.data?.items.at(0)
+  const [riskOpen, setRiskOpen] = useState(false)
+  const records = pageItems(state.flaky.data)
+  const latest = firstPageItem(state.runs.data)
   return (
     <>
       <div className="page-heading">
@@ -35,28 +43,34 @@ export default function QualityCenterPage() {
             统一管理 CI 质量门禁、Flaky 隔离、基线对比与 JUnit 产物。
           </Typography.Text>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          disabled={!state.projectId}
-          onClick={() => setCreateOpen(true)}
-        >
-          新建门禁
-        </Button>
+        <Space>
+          <Button disabled={!state.projectId} onClick={() => setRiskOpen(true)}>
+            分析发布风险
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            disabled={!state.projectId}
+            onClick={() => setCreateOpen(true)}
+          >
+            新建门禁
+          </Button>
+        </Space>
       </div>
       <QualityOverview
-        gateCount={state.gates.data?.length ?? 0}
+        gateCount={listItems(state.gates.data).length}
         flakyCount={records.filter((item) => item.flaky_score > 0).length}
         quarantinedCount={records.filter((item) => item.quarantined).length}
         latest={latest}
       />
+      <QualityInsights risk={state.risk.data} loading={state.risk.isLoading} />
       <div className="quality-grid">
         <Card title="质量门禁" loading={state.gates.isLoading}>
           <Table
             rowKey="id"
             size="small"
             pagination={false}
-            dataSource={state.gates.data ?? []}
+            dataSource={listItems(state.gates.data)}
             locale={{ emptyText: '暂无质量门禁' }}
             columns={[
               { title: '名称', dataIndex: 'name' },
@@ -122,7 +136,7 @@ export default function QualityCenterPage() {
           rowKey="id"
           size="small"
           pagination={false}
-          dataSource={state.runs.data?.items ?? []}
+          dataSource={pageItems(state.runs.data)}
           locale={{ emptyText: '暂无运行数据' }}
           columns={[
             { title: '运行 ID', dataIndex: 'id', render: (value: string) => value.slice(0, 8) },
@@ -157,7 +171,132 @@ export default function QualityCenterPage() {
           if (await state.addGate(input)) setCreateOpen(false)
         }}
       />
+      <CreateRiskDialog
+        open={riskOpen}
+        submitting={state.analyzingRisk}
+        impactRuns={pageItems(state.impactRuns.data)}
+        onClose={() => setRiskOpen(false)}
+        onCreate={async (input) => {
+          if (await state.addRisk(input)) setRiskOpen(false)
+        }}
+      />
     </>
+  )
+}
+
+function QualityInsights({
+  risk,
+  loading,
+}: {
+  risk: ReleaseRiskDetail | undefined
+  loading: boolean
+}) {
+  return (
+    <Card title="质量洞察与可解释发布风险" loading={loading} className="quality-runs-card">
+      {!risk ? (
+        <Typography.Text type="secondary">
+          选择一条影响分析生成发布风险快照，失败聚类与风险因子将固定保存。
+        </Typography.Text>
+      ) : (
+        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+          <Row gutter={16}>
+            <Col span={6}>
+              <Statistic title="质量评分" value={risk.quality_score} suffix="/ 100" />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="发布风险"
+                value={risk.score}
+                suffix={<Tag color={riskColor(risk.risk_level)}>{riskLabel(risk.risk_level)}</Tag>}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="覆盖缺口"
+                value={nestedNumber(risk.evidence_snapshot, 'impact', 'coverage_gap_count')}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic title="失败根因" value={risk.failure_clusters.length} />
+            </Col>
+          </Row>
+          <div className="quality-grid">
+            <Card size="small" title="风险因子（总分等于发布风险）">
+              {risk.factors.map((factor) => (
+                <div key={factor.code} style={{ marginBottom: 12 }}>
+                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                    <Typography.Text>{factor.label}</Typography.Text>
+                    <Typography.Text code>
+                      {factor.score} / {factor.max_score}
+                    </Typography.Text>
+                  </Space>
+                  <Progress
+                    percent={Math.round((factor.score / factor.max_score) * 100)}
+                    showInfo={false}
+                    size="small"
+                  />
+                </div>
+              ))}
+            </Card>
+            <Card size="small" title="智能测试选择建议">
+              <Table
+                rowKey={(row) => `${row.target_type}:${row.target_id}`}
+                size="small"
+                pagination={false}
+                dataSource={risk.recommended_tests}
+                locale={{ emptyText: '暂无有证据的测试建议' }}
+                columns={[
+                  { title: '资产', dataIndex: 'name' },
+                  {
+                    title: '优先级',
+                    dataIndex: 'priority',
+                    render: (value: string) => (
+                      <Tag color={value === 'high' ? 'error' : 'warning'}>
+                        {value === 'high' ? '高' : '中'}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: '证据',
+                    dataIndex: 'reasons',
+                    render: (value: string[]) => value.join('；'),
+                  },
+                ]}
+              />
+            </Card>
+          </div>
+          <Table
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={risk.failure_clusters}
+            locale={{ emptyText: '当前窗口没有失败聚类' }}
+            columns={[
+              { title: '失败聚类', dataIndex: 'title' },
+              {
+                title: '当前/基线',
+                render: (_, row) => `${row.occurrence_count}/${row.baseline_count}`,
+              },
+              {
+                title: '影响流程',
+                dataIndex: 'affected_workflow_names',
+                render: (value: string[]) => value.join('、') || '—',
+              },
+              {
+                title: '置信度',
+                dataIndex: 'confidence',
+                render: (value: number) => `${Math.round(value * 100)}%`,
+              },
+              { title: '建议', dataIndex: 'recommendation' },
+            ]}
+          />
+          <Typography.Text type="secondary">
+            算法 {risk.algorithm_version} · 证据指纹 {risk.fingerprint.slice(0, 12)} ·
+            当前窗口与等长基线均为 {risk.window_days} 天
+          </Typography.Text>
+        </Space>
+      )}
+    </Card>
   )
 }
 
@@ -264,6 +403,92 @@ function CreateGateDialog({
       </Form>
     </Modal>
   )
+}
+
+function CreateRiskDialog({
+  open,
+  submitting,
+  impactRuns,
+  onClose,
+  onCreate,
+}: {
+  open: boolean
+  submitting: boolean
+  impactRuns: ImpactRunSummary[]
+  onClose: () => void
+  onCreate: (input: ReleaseRiskInput) => Promise<void>
+}) {
+  const [form] = Form.useForm<ReleaseRiskInput>()
+  return (
+    <Modal
+      title="分析发布风险"
+      open={open}
+      confirmLoading={submitting}
+      onCancel={onClose}
+      onOk={() => form.submit()}
+      destroyOnHidden
+    >
+      <Typography.Paragraph type="secondary">
+        风险结果会固定影响覆盖、等长回归基线、失败聚类、契约、性能和 Flaky 证据。
+      </Typography.Paragraph>
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{ window_days: 30 }}
+        onFinish={(value) => void onCreate(value)}
+      >
+        <Form.Item name="title" label="候选版本" rules={[{ required: true }]}>
+          <Input maxLength={200} placeholder="例如 v3.0.0-rc.1 候选" />
+        </Form.Item>
+        <Form.Item name="impact_run_id" label="影响分析" rules={[{ required: true }]}>
+          <Select
+            placeholder="选择已持久化的影响分析"
+            options={impactRuns.map((run) => ({
+              value: run.id,
+              label: `${run.title} · ${run.change_count} 项变更`,
+            }))}
+          />
+        </Form.Item>
+        <Form.Item name="window_days" label="分析窗口" rules={[{ required: true }]}>
+          <Select
+            options={[
+              { value: 7, label: '7 天' },
+              { value: 14, label: '14 天' },
+              { value: 30, label: '30 天' },
+              { value: 90, label: '90 天' },
+            ]}
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+function nestedNumber(value: Record<string, unknown>, parent: string, child: string): number {
+  const nested = value[parent]
+  if (!nested || typeof nested !== 'object') return 0
+  const result = (nested as Record<string, unknown>)[child]
+  return typeof result === 'number' ? result : 0
+}
+
+function riskLabel(value: ReleaseRiskDetail['risk_level']): string {
+  return { low: '低风险', medium: '中风险', high: '高风险', critical: '严重风险' }[value]
+}
+
+function riskColor(value: ReleaseRiskDetail['risk_level']): string {
+  return { low: 'success', medium: 'warning', high: 'error', critical: 'error' }[value]
+}
+
+function listItems<T>(value: T[] | undefined): T[] {
+  return value ?? []
+}
+
+function pageItems<T>(value: { items: T[] } | undefined): T[] {
+  return value?.items ?? []
+}
+
+function firstPageItem<T>(value: { items: T[] } | undefined): T | undefined {
+  return value?.items.at(0)
 }
 
 function qualitySummary(value: Record<string, unknown>): string {

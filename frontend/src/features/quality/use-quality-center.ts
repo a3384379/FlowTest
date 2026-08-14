@@ -3,14 +3,19 @@ import { App } from 'antd'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { listImpactRuns } from '../impact/impact-service'
 import {
   createQualityGate,
+  createReleaseRisk,
   downloadJunit,
   listFlakyTests,
   listQualityGates,
   listQualityRuns,
+  listReleaseRisks,
+  getReleaseRisk,
   setFlakyQuarantine,
   type QualityGateInput,
+  type ReleaseRiskInput,
 } from './quality-service'
 
 export function useQualityCenter() {
@@ -32,6 +37,22 @@ export function useQualityCenter() {
     queryFn: () => listQualityRuns(required(projectId)),
     enabled: Boolean(projectId),
   })
+  const risks = useQuery({
+    queryKey: ['release-risks', projectId],
+    queryFn: () => listReleaseRisks(required(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const impactRuns = useQuery({
+    queryKey: ['impact-runs', projectId],
+    queryFn: () => listImpactRuns(required(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const activeRiskId = risks.data?.items.at(0)?.id
+  const risk = useQuery({
+    queryKey: ['release-risk', projectId, activeRiskId],
+    queryFn: () => getReleaseRisk(required(projectId), required(activeRiskId ?? null)),
+    enabled: Boolean(projectId && activeRiskId),
+  })
   const createGate = useMutation({
     mutationFn: (input: QualityGateInput) => createQualityGate(required(projectId), input),
   })
@@ -39,6 +60,21 @@ export function useQualityCenter() {
     mutationFn: ({ recordId, value }: { recordId: string; value: boolean }) =>
       setFlakyQuarantine(required(projectId), recordId, value),
   })
+  const analyzeRisk = useMutation({
+    mutationFn: (input: ReleaseRiskInput) => createReleaseRisk(required(projectId), input),
+  })
+
+  async function addRisk(input: ReleaseRiskInput) {
+    try {
+      await analyzeRisk.mutateAsync(input)
+      await queryClient.invalidateQueries({ queryKey: ['release-risks', projectId] })
+      void message.success('发布风险分析已完成')
+      return true
+    } catch (error) {
+      void message.error(apiErrorMessage(error))
+      return false
+    }
+  }
 
   async function addGate(input: QualityGateInput) {
     try {
@@ -81,11 +117,16 @@ export function useQualityCenter() {
     gates,
     flaky,
     runs,
+    risks,
+    risk,
+    impactRuns,
     addGate,
     toggleQuarantine,
     exportJunit,
+    addRisk,
     creating: createGate.isPending,
     toggling: quarantine.isPending,
+    analyzingRisk: analyzeRisk.isPending,
   }
 }
 

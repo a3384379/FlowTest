@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints.ai import router as ai_router
+from app.api.v1.endpoints.ai_change_sets import router as ai_change_sets_router
 from app.api.v1.endpoints.api_assets import router as api_assets_router
 from app.api.v1.endpoints.api_exports import router as api_exports_router
 from app.api.v1.endpoints.artifacts import router as artifacts_router
@@ -22,6 +23,7 @@ from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
 from app.api.v1.endpoints.quality import router as quality_router
+from app.api.v1.endpoints.quality_intelligence import router as quality_intelligence_router
 from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.runner_fabric import admin_router as runner_fabric_admin_router
 from app.api.v1.endpoints.runner_fabric import runner_router as runner_control_router
@@ -37,6 +39,7 @@ api_router.include_router(health_router, tags=["system"])
 api_router.include_router(auth_router, tags=["auth"])
 api_router.include_router(capabilities_router, tags=["capabilities"])
 api_router.include_router(ai_router, tags=["ai"])
+api_router.include_router(ai_change_sets_router, tags=["ai-change-sets"])
 api_router.include_router(contracts_router, tags=["contracts"])
 api_router.include_router(contract_hub_router, tags=["contract-hub"])
 api_router.include_router(dashboard_router, tags=["dashboard"])
@@ -58,6 +61,7 @@ api_router.include_router(users_router, tags=["users"])
 api_router.include_router(projects_router, tags=["projects"])
 api_router.include_router(protocols_router, tags=["protocols"])
 api_router.include_router(quality_router, tags=["quality"])
+api_router.include_router(quality_intelligence_router, tags=["quality-intelligence"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])

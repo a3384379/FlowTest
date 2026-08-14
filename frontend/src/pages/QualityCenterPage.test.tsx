@@ -3,9 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { FlakyRecord, QualityGate } from '../features/quality/quality-service'
+import type {
+  FlakyRecord,
+  QualityGate,
+  ReleaseRiskDetail,
+} from '../features/quality/quality-service'
 import type { TestPlanRun } from '../lib/api'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { project, user } from '../test/fixtures'
@@ -63,7 +67,71 @@ const run: TestPlanRun = {
   created_at: '2026-08-11T01:00:00Z',
 }
 
+const risk: ReleaseRiskDetail = {
+  id: '00000000-0000-4000-8000-000000000120',
+  project_id: project.id,
+  impact_run_id: '00000000-0000-4000-8000-000000000121',
+  title: '候选版本风险',
+  algorithm_version: 'release_risk_v1',
+  window_days: 30,
+  window_started_at: '2026-07-12T01:00:00Z',
+  window_ended_at: '2026-08-11T01:00:00Z',
+  baseline_started_at: '2026-06-12T01:00:00Z',
+  baseline_ended_at: '2026-07-12T01:00:00Z',
+  score: 42,
+  quality_score: 58,
+  risk_level: 'medium',
+  factors: [{ code: 'coverage_gap', label: '覆盖缺口', score: 10, max_score: 25, value: 60 }],
+  evidence_snapshot: { impact: { coverage_gap_count: 3 } },
+  quality_trend: [],
+  recommended_tests: [
+    {
+      target_type: 'workflow',
+      target_id: '00000000-0000-4000-8000-000000000122',
+      name: '支付流程',
+      version: 2,
+      priority: 'high',
+      reasons: ['显式 Mapping'],
+      change_keys: ['change-1'],
+    },
+  ],
+  failure_clusters: [
+    {
+      id: '00000000-0000-4000-8000-000000000123',
+      release_risk_id: '00000000-0000-4000-8000-000000000120',
+      fingerprint: 'b'.repeat(64),
+      title: 'HTTP_TIMEOUT · api',
+      failure_category: 'timeout',
+      error_code: 'HTTP_TIMEOUT',
+      node_type: 'api',
+      occurrence_count: 4,
+      baseline_count: 1,
+      affected_workflow_ids: ['00000000-0000-4000-8000-000000000122'],
+      affected_workflow_names: ['支付流程'],
+      sample_execution_ids: ['00000000-0000-4000-8000-000000000124'],
+      confidence: 0.94,
+      regression_percent: 300,
+      recommendation: '检查目标服务延迟、性能基线与 Runner 网络区。',
+      created_at: '2026-08-11T01:00:00Z',
+    },
+  ],
+  fingerprint: 'a'.repeat(64),
+  created_by_id: user.id,
+  created_at: '2026-08-11T01:00:00Z',
+}
+
 describe('QualityCenterPage', () => {
+  beforeEach(() => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+    )
+  })
+
   it('shows quality evidence and creates gates and quarantines flaky assets', async () => {
     let created = 0
     let quarantined = false
@@ -187,6 +255,71 @@ describe('QualityCenterPage', () => {
     await browser.click(screen.getByRole('button', { name: 'OK' }))
     expect(await screen.findByText('门禁配置被拒绝')).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('shows explainable risk evidence and creates a persisted risk snapshot', async () => {
+    let created = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/quality-gates`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: risk.impact_run_id,
+              project_id: project.id,
+              title: '开票影响',
+              source_ref: 'feature/invoice',
+              status: 'completed',
+              source_fingerprint: 'f'.repeat(64),
+              source_summary: {},
+              change_count: 2,
+              summary: { coverage_percent: 75 },
+              created_by_id: user.id,
+              created_at: '2026-08-11T01:00:00Z',
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () =>
+        HttpResponse.json({ items: [risk], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks/${risk.id}`, () =>
+        HttpResponse.json(risk),
+      ),
+      http.post(`/api/v1/projects/${project.id}/release-risks`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        expect(body).toEqual({
+          impact_run_id: risk.impact_run_id,
+          title: 'RC 风险',
+          window_days: 30,
+        })
+        created += 1
+        return HttpResponse.json(risk, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+
+    expect(await screen.findByText('风险因子（总分等于发布风险）')).toBeVisible()
+    expect(screen.getAllByText('支付流程').length).toBeGreaterThan(0)
+    expect(screen.getByText('HTTP_TIMEOUT · api')).toBeVisible()
+    expect(screen.getByText('94%')).toBeVisible()
+
+    await browser.click(screen.getByRole('button', { name: '分析发布风险' }))
+    await browser.type(screen.getByLabelText('候选版本'), 'RC 风险')
+    await browser.click(screen.getByLabelText('影响分析'))
+    await browser.click(await screen.findByText('开票影响 · 2 项变更'))
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(created).toBe(1))
   })
 })
 

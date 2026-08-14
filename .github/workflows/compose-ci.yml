@@ -27,6 +27,7 @@ on:
       - "scripts/smoke_s27.py"
       - "scripts/smoke_s28.py"
       - "scripts/smoke_s29.py"
+      - "scripts/smoke_s30.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -63,6 +64,7 @@ on:
       - "scripts/smoke_s27.py"
       - "scripts/smoke_s28.py"
       - "scripts/smoke_s29.py"
+      - "scripts/smoke_s30.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -93,6 +95,7 @@ jobs:
       FLOWTEST_S19_API_CONCURRENCY: "10"
       FLOWTEST_FEATURE_CONTRACT_HUB_ENABLED: "true"
       FLOWTEST_FEATURE_IMPACT_ENGINE_ENABLED: "true"
+      FLOWTEST_FEATURE_QUALITY_INTELLIGENCE_ENABLED: "true"
       FLOWTEST_FEATURE_AI_ENABLED: "true"
       FLOWTEST_FEATURE_CAPABILITY_SDK_ENABLED: "true"
       FLOWTEST_FEATURE_MULTI_PROTOCOL_ENABLED: "true"
@@ -203,6 +206,8 @@ jobs:
         run: python3 scripts/smoke_s27.py
       - name: Verify S28 multi-source impact, selection, graph, and coverage flow
         run: python3 scripts/smoke_s28.py
+      - name: Verify S30 failure intelligence and AI draft change-set flow
+        run: python3 scripts/smoke_s30.py
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |
           docker compose stop redpanda

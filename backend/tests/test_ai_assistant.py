@@ -158,8 +158,31 @@ def test_ai_redaction_evaluation_set() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generic_ai_job_rejects_change_set_type(
+    ai_environment: AIEnvironment,
+) -> None:
+    headers = await _login_headers(ai_environment.client)
+    project_id = await _create_project(ai_environment.client, headers)
+
+    response = await ai_environment.client.post(
+        "/api/v1/ai/jobs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "job_type": "change_set",
+            "metadata": {"requested_by": "generic-endpoint"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert ai_environment.queue.job_ids == []
+
+
+@pytest.mark.asyncio
 async def test_ai_job_requires_human_acceptance_before_creating_workflow(
     ai_environment: AIEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = ai_environment.client
     headers = await _login_headers(client)
@@ -199,12 +222,22 @@ async def test_ai_job_requires_human_acceptance_before_creating_workflow(
     suggestion = suggestions.json()[0]
     assert suggestion["review_status"] == "pending"
 
+    original_commit = AsyncSession.commit
+    commit_count = 0
+
+    async def tracked_commit(session: AsyncSession) -> None:
+        nonlocal commit_count
+        commit_count += 1
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", tracked_commit)
     accepted = await client.post(
         f"/api/v1/ai/suggestions/{suggestion['id']}/accept",
         headers=headers,
         json={"note": "结构已人工确认"},
     )
     assert accepted.status_code == 200, accepted.text
+    assert commit_count == 1
     reviewed = accepted.json()
     assert reviewed["review_status"] == "accepted"
     assert reviewed["accepted_resource_type"] == "workflow"
