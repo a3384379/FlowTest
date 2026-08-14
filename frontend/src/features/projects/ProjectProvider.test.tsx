@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
@@ -31,13 +31,13 @@ describe('ProjectProvider', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/dashboard'))
   })
 
-  it('resolves an accessible deep-linked project outside the first project page', async () => {
+  it('resolves an accessible deep-linked project without waiting for the first project page', async () => {
     const deepLinkedProject = {
       ...project,
       id: '00000000-0000-4000-8000-000000000099',
       name: '第 101 个项目',
     }
-    renderProvider(`/projects/${deepLinkedProject.id}/services`, deepLinkedProject)
+    renderProvider(`/projects/${deepLinkedProject.id}/services`, deepLinkedProject, 1_500)
 
     await waitFor(() =>
       expect(screen.getByTestId('current-project')).toHaveTextContent(deepLinkedProject.name),
@@ -45,7 +45,10 @@ describe('ProjectProvider', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(
       `/projects/${deepLinkedProject.id}/services`,
     )
-    expect(screen.getByTestId('project-options')).toHaveTextContent(deepLinkedProject.name)
+    await waitFor(
+      () => expect(screen.getByTestId('project-options')).toHaveTextContent(deepLinkedProject.name),
+      { timeout: 2_500 },
+    )
     expect(screen.getByTestId('reports-path')).toHaveTextContent(
       `/projects/${deepLinkedProject.id}/reports`,
     )
@@ -73,11 +76,12 @@ function ContextProbe() {
   )
 }
 
-function renderProvider(initialEntry: string, deepLinkedProject = project) {
+function renderProvider(initialEntry: string, deepLinkedProject = project, projectListDelay = 0) {
   server.use(
-    http.get('/api/v1/projects', () =>
-      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
-    ),
+    http.get('/api/v1/projects', async () => {
+      if (projectListDelay) await delay(projectListDelay)
+      return HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 })
+    }),
     http.get('/api/v1/projects/:projectId', ({ params }) => {
       if (params.projectId === deepLinkedProject.id) return HttpResponse.json(deepLinkedProject)
       return HttpResponse.json(

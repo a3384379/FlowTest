@@ -17,7 +17,7 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
   const routeProject = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => getManagedProject(requiredProjectId(projectId)),
-    enabled: projects.isSuccess && Boolean(projectId) && !listedProject,
+    enabled: Boolean(projectId),
     retry: false,
   })
   const currentProject = listedProject ?? routeProject.data ?? null
