@@ -10,6 +10,7 @@ export type V3FeatureFlags = {
   environment_lab: boolean
   contract_hub: boolean
   impact_engine: boolean
+  quality_intelligence: boolean
   pact_broker: boolean
 }
 

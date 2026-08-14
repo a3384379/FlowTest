@@ -40,6 +40,7 @@ import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
 import { projectPath, type ProjectSection } from './features/projects/project-routing'
 import { useProjectContext } from './features/projects/use-project-context'
+import GlobalSearch from './features/search/GlobalSearch'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
@@ -52,6 +53,7 @@ const ContractHubPage = lazy(() => import('./pages/ContractHubPage'))
 const ImpactAnalysisPage = lazy(() => import('./pages/ImpactAnalysisPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
+const ReleaseGatePage = lazy(() => import('./pages/ReleaseGatePage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const AIChangeSetsPage = lazy(() => import('./pages/AIChangeSetsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
@@ -76,6 +78,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   contracts: '契约中心',
   impact: '影响分析',
   quality: '质量中心',
+  release: '发布门禁',
   ai: 'AI 助手',
   'ai-changes': 'AI 变更集',
   reports: '测试报告',
@@ -133,6 +136,7 @@ function AuthenticatedShell() {
             navigationItem('contracts', <ShareAltOutlined />, pathFor('contracts')),
             navigationItem('impact', <FileSearchOutlined />, pathFor('impact')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
+            navigationItem('release', <SafetyCertificateOutlined />, pathFor('release')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
@@ -149,6 +153,7 @@ function AuthenticatedShell() {
         <Header className="topbar">
           <Space>
             <Typography.Text strong>接口自动化测试平台</Typography.Text>
+            <GlobalSearch />
             <Select
               aria-label="全局项目"
               className="global-project-select"
@@ -204,6 +209,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/contracts" element={<ContractHubPage />} />
       <Route path="/projects/:projectId/impact" element={<ImpactAnalysisPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
+      <Route path="/projects/:projectId/release" element={<ReleaseGatePage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/ai-changes" element={<AIChangeSetsPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
@@ -224,6 +230,7 @@ function ApplicationRoutes() {
           'contracts',
           'impact',
           'quality',
+          'release',
           'ai',
           'ai-changes',
           'reports',

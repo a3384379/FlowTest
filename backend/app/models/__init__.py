@@ -39,6 +39,7 @@ from app.models.performance import PerformanceGateEvaluation, PerformanceRun, Pe
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
 from app.models.quality_intelligence import FailureCluster, ReleaseRisk
+from app.models.release_gate import ReleaseDecision, ReleasePolicy
 from app.models.reporting import NotificationDelivery, NotificationWebhook
 from app.models.runner_fabric import (
     RunnerEvent,
@@ -104,6 +105,8 @@ __all__ = [
     "QualityGate",
     "QualityGateEvaluation",
     "RefreshSession",
+    "ReleaseDecision",
+    "ReleasePolicy",
     "ReleaseRisk",
     "Runner",
     "RunnerEvent",

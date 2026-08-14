@@ -1,4 +1,3 @@
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
@@ -8,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.models.access import User
-from app.repositories.dashboard import DashboardExecutionRecord, DashboardRepository
+from app.repositories.dashboard import (
+    DashboardActivityCount,
+    DashboardExecutionRecord,
+    DashboardRepository,
+)
 
 DISPLAY_TIME_ZONE = ZoneInfo("Asia/Shanghai")
 
@@ -44,10 +47,8 @@ class DashboardService:
         first_day = today - timedelta(days=6)
         since = datetime.combine(first_day, time.min, tzinfo=DISPLAY_TIME_ZONE).astimezone(UTC)
         counts = await self._dashboard.counts(project_ids)
-        activity = await self._dashboard.activity(project_ids=project_ids, since=since)
-        grouped: dict[date, list[DashboardExecutionRecord]] = defaultdict(list)
-        for execution in activity:
-            grouped[_local_date(execution.started_at)].append(execution)
+        activity = await self._dashboard.activity_counts(project_ids=project_ids, since=since)
+        grouped = _group_activity(activity)
         trend = [_trend_point(first_day + timedelta(days=offset), grouped) for offset in range(7)]
         today_point = trend[-1]
         terminal = today_point.passed + today_point.failed
@@ -92,21 +93,23 @@ class DashboardService:
         return [project_id]
 
 
-def _local_date(value: datetime) -> date:
-    source = value.replace(tzinfo=UTC) if value.tzinfo is None else value
-    return source.astimezone(DISPLAY_TIME_ZONE).date()
+def _group_activity(activity: list[DashboardActivityCount]) -> dict[date, dict[str, int]]:
+    grouped: dict[date, dict[str, int]] = {}
+    for item in activity:
+        statuses = grouped.setdefault(item.day, {})
+        statuses[item.status] = statuses.get(item.status, 0) + item.count
+    return grouped
 
 
-def _trend_point(
-    day: date, grouped: dict[date, list[DashboardExecutionRecord]]
-) -> DashboardTrendPoint:
-    executions = grouped.get(day, [])
-    passed = sum(item.status == "passed" for item in executions)
-    running = sum(item.status in {"queued", "running"} for item in executions)
-    failed = len(executions) - passed - running
+def _trend_point(day: date, grouped: dict[date, dict[str, int]]) -> DashboardTrendPoint:
+    statuses = grouped.get(day, {})
+    passed = statuses.get("passed", 0)
+    running = statuses.get("queued", 0) + statuses.get("running", 0)
+    total = sum(statuses.values())
+    failed = total - passed - running
     return DashboardTrendPoint(
         date=day,
-        total=len(executions),
+        total=total,
         passed=passed,
         failed=failed,
         running=running,

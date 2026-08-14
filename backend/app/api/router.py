@@ -24,9 +24,11 @@ from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
 from app.api.v1.endpoints.quality import router as quality_router
 from app.api.v1.endpoints.quality_intelligence import router as quality_intelligence_router
+from app.api.v1.endpoints.release_gate import router as release_gate_router
 from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.runner_fabric import admin_router as runner_fabric_admin_router
 from app.api.v1.endpoints.runner_fabric import runner_router as runner_control_router
+from app.api.v1.endpoints.search import router as search_router
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
 from app.api.v1.endpoints.test_assets import router as test_assets_router
@@ -62,6 +64,8 @@ api_router.include_router(projects_router, tags=["projects"])
 api_router.include_router(protocols_router, tags=["protocols"])
 api_router.include_router(quality_router, tags=["quality"])
 api_router.include_router(quality_intelligence_router, tags=["quality-intelligence"])
+api_router.include_router(release_gate_router, tags=["release-gate"])
+api_router.include_router(search_router, tags=["search"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])

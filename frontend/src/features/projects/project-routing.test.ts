@@ -10,6 +10,7 @@ describe('project routing', () => {
     expect(projectPath('project-1', 'workflows')).toBe('/projects/project-1/workflows')
     expect(projectPath('project-1', 'assets')).toBe('/projects/project-1/assets')
     expect(projectPath('project-1', 'quality')).toBe('/projects/project-1/quality')
+    expect(projectPath('project-1', 'release')).toBe('/projects/project-1/release')
     expect(projectPath('project-1', 'environments')).toBe('/projects/project-1/environments')
     expect(projectPath('project-1', 'impact')).toBe('/projects/project-1/impact')
     expect(projectPath('project-1', 'ai-changes')).toBe('/projects/project-1/ai-changes')
@@ -19,6 +20,7 @@ describe('project routing', () => {
   it('reads supported sections and falls back safely', () => {
     expect(sectionFromPath('/projects/project-1/reports')).toBe('reports')
     expect(sectionFromPath('/projects/project-1/quality')).toBe('quality')
+    expect(sectionFromPath('/projects/project-1/release')).toBe('release')
     expect(sectionFromPath('/projects/project-1/ai')).toBe('ai')
     expect(sectionFromPath('/projects/project-1/environments')).toBe('environments')
     expect(sectionFromPath('/projects/project-1/impact')).toBe('impact')

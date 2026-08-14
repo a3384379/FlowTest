@@ -1,21 +1,64 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-13（Asia/Shanghai）
-状态：仓库已公开；S28 已合并并发布 `v3.0.0-beta.3`；S29 Worker Plane 功能、迁移、中文 UI、
-真实 Compose、Playwright、安全、故障转移与 5000/500 容量门槛已在独立分支通过。Draft PR #32
-功能提交 `e8ef455` 的五项 CI 已全绿；最终文档提交 `113458a` 四项通过，Compose 暴露 S15
-旧选择器与重试名称复用问题，正在做最小测试稳定性修复。
-`v2.0.0` 正式标签仍受真实部署与连续 14 天 RC 观察门槛约束。
+最后更新：2026-08-14（Asia/Shanghai）
+状态：仓库已公开；S30 Failure Intelligence 已通过 PR #33 的五项 CI 并 squash 合并至
+`main@bfa80fd`。当前 `codex/s31-release-gate` 已从该干净基线承接 S31 Release Gate/全局搜索候选，
+完成本地全量、真实 PostgreSQL、Compose 冒烟与 Playwright CLI 验收；PR #34 的实现提交
+`d885610` 已取得五项远程 CI 全绿证据，当前进入最终文档复核与合并收口。
+`v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@05e7cc3eb4229b40c4c63619469879d00b1386fc`，S28 PR #31 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`agent/s29-worker-plane`；实现提交 `030ed2a`、Compose 编排修复 `7e40dfc` 和浏览器
-  稳定性修复 `e8ef455`、验收文档 `113458a` 已推送，Draft PR #32 保持 Draft；S15 最小修复待提交。
+- 当前基线：`main@bfa80fd1e1d935bbf7364097346c8915f2f6d3d8`，S30 PR #33 的 5 项 CI 全绿后已 squash 合并。
+- 当前分支：`codex/s31-release-gate`，从上述基线创建；工作区只包含 S31 Release Gate、全局搜索及
+  真实数据量验收中发现的首页汇总优化，不携带 S30 未提交改动；对应 Draft PR #34。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 已完成：S30 Failure Intelligence 与 AI Draft Change Set
+
+1. 已实现 Failure Cluster、Regression Baseline、可解释 Release Risk 与不可变证据指纹；AI Change Set
+   固定 Impact/Risk 来源，只允许逐项接受或拒绝，接受后仅生成 Test Case/Workflow 草稿。
+2. AI 不能通过旧 Suggestion 接口绕过 Change Set 审核，不能发布、执行、修改权限或创建 Credential；
+   目标草稿发生漂移时以稳定冲突错误拒绝覆盖。
+3. `20260813_0027` 已在真实 PostgreSQL 完成升级、`alembic check`、降级和再次升级；前端 3 个原失败
+   场景、MSW Handler、Ant Design 弃用 API 与异步动画竞争均已修复。
+4. 本地完整质量检查曾达到后端 300 passed/3 skipped、总覆盖率 90.43%，前端 150 passed，
+   Statements 87.12%、Lines 89.08%；独立干净 Compose 完成 S3–S30 smoke 与 Playwright 回归。
+5. PR #33 的 Backend Test、Backend Integration、Frontend Build、Security Source/Images 和 Compose
+   Smoke 五项检查全部通过；最终提交经评审后于 2026-08-14 squash 合并至 `main@bfa80fd`。
+
+## 已完成小阶段：S31 Release Gate 与全局搜索
+
+1. 新增独立 `ReleasePolicy` 与无 `updated_at` 的 `ReleaseDecision`；每次判断固定策略、质量、契约、
+   Impact、Release Risk、性能和 Runner 证据快照，并保存 SHA-256 指纹与六类可解释 PASS/BLOCK 原因。
+2. Release Decision API 只提供创建、列表与详情，不提供更新/删除；ORM 更新与删除事件也会拒绝变更。
+   策略后续修改不影响历史 Snapshot 和指纹，跨项目、证据不匹配、停用策略和未知证据均使用稳定错误码。
+3. 新增中文“发布门禁”页面，可配置阈值、绑定六类证据、生成判断并查看只读历史；页面 Statements
+   96.92%、Branches 80.43%、Lines 98.33%。禁用的 V3 证据能力按 `/v3/features` 停止查询，避免将
+   预期的 404/409/503 当作页面错误；Quality Gate 非必需策略可在不绑定 Gate 时创建。
+4. 新增受项目/团队权限约束的全局搜索，覆盖项目与 API、Workflow、Case、Suite、Plan、Environment、
+   Mock、Performance、Contract、Impact、Quality、Risk、Release Policy 等核心资产；不索引 Credential、
+   Secret、执行日志、请求体或响应体，且对 SQL LIKE 通配符进行字面量转义。
+5. `20260813_0028` 已在独立 PostgreSQL 完成全链升级、`alembic check`、降至 `0027`、再次升级和
+   `alembic check`；临时数据库已删除，原数据卷未修改。
+6. 当前全量本地证据：后端 342 passed/3 skipped、总覆盖率 90.86%；Release Gate Domain 100%、
+   Service 98%、Repository 98%、API 100%。前端 159 passed，Statements 87.36%、Branches 80.50%、
+   Functions 85.96%、Lines 89.33%，格式、Lint、TypeScript 与生产构建通过。
+7. 已增加 `smoke_s31.py`、S31 Playwright 场景和 Compose CI 入口；当前源码重建后全部服务健康，smoke
+   验证 PASS/BLOCK、快照不变、无 Decision 写入口和全局搜索，Playwright CLI 与仓库 Chromium 场景
+   1/1 均完成“搜索 → 发布门禁 → PASS → 只读证据”；除未登录时预期的 Refresh 401 外无控制台错误。
+8. 复用数据卷含 55,247 条 Workflow Execution 时，首页原实现会读取近 7 天完整 ORM/JSON 记录并阻塞
+   单 Worker；现改为 PostgreSQL/SQLite 按本地日期与状态聚合。真实卷上首页汇总约 0.15 秒、搜索约
+   0.11 秒，避免全局搜索被首页请求拖死。
+9. PR #34 实现提交 `d885610` 的 Backend Test（2 分 50 秒）、Backend Integration（1 分 24 秒）、
+   Frontend Build（8 分 54 秒）、Security Source/Images（10 分 19 秒）和 Compose Smoke
+   （21 分 29 秒）五项远程检查全部通过；Compose 同一提交覆盖 S31 主路径、Team 100 Workflow/
+   1000 Queue、Scale 500 Workflow/5000 Queue 和隔离备份恢复。
+10. 正式 S31 仍包含 V2→V3 升级/回滚、完整容量/安全/备份恢复演练、全部页面试点签署及真实 14 天 RC；
+   上述短时自动化不替代这些门槛，当前只完成 Release Gate/全局搜索小阶段。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
 
@@ -389,10 +432,10 @@
 
 ## 下一步
 
-1. 提交并推送 S15 浏览器稳定性与验收文档修复，重跑 Backend Test、Backend Integration、Frontend Build、
-   Security Source/Images 和 Compose Smoke 五项检查。
-2. 如仍有真实 CI 失败，只做最小修复并再次重跑全部五项；最终提交全绿后才可 Ready、squash 合并、删除远程分支并创建
-   `agent/s30-failure-intelligence`。在此之前不开始 S30。
+1. 完成 PR #34 的最终评审与 squash 合并；以 `d885610` 的五项远程 CI 和最终文档提交检查作为收口证据。
+2. 该小阶段合并后，继续 S31 剩余的 16 页面产品化、V2→V3 原地升级/回滚、容量、安全、
+   备份恢复和试点文档；未完成这些门槛前不宣告 S31 或 V3 GA。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-4. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
+4. S31 代码冻结后执行新的 V3 RC 候选连续 14 个自然日观察；任何代码修复生成新候选并重新计时。
+5. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
    `v2.0.0` 正式标签。
