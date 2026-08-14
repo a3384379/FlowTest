@@ -61,6 +61,7 @@ assert_revision() {
 storage_transfer() {
   action="$1"
   "${compose[@]}" --profile current run --rm --no-deps \
+    --user "$(id -u):$(id -g)" \
     --volume "${repo_root}/scripts/storage_transfer.py:/tmp/storage_transfer.py:ro" \
     --volume "${backup_root}/minio:/backup:rw" \
     current-api python /tmp/storage_transfer.py "${action}" /backup
