@@ -64,9 +64,7 @@ def main() -> None:
 
 
 def _initialize(smoke_output: Path, state_path: Path) -> None:
-    documents = [
-        line for line in smoke_output.read_text(encoding="utf-8").splitlines() if line
-    ]
+    documents = [line for line in smoke_output.read_text(encoding="utf-8").splitlines() if line]
     if not documents:
         raise RuntimeError("V2 smoke output is empty")
     result = json.loads(documents[-1])
@@ -92,9 +90,7 @@ def _verify(state_path: Path, phase: str) -> None:
     state = VerificationState.load(state_path)
     try:
         workflow_id, environment_id = _verify_assets(client, token, state)
-        execution_id = _execute(
-            client, token, state.project_id, workflow_id, environment_id
-        )
+        execution_id = _execute(client, token, state.project_id, workflow_id, environment_id)
         _verify_execution(client, token, state.project_id, execution_id)
         if phase == "v3-upgrade":
             state.release_policy_id = _create_v3_marker(client, token, state.project_id)
@@ -214,9 +210,7 @@ def _verify_execution(
         token=token,
     )
     if report.get("summary", {}).get("status") != "passed":
-        raise RuntimeError(
-            f"workflow report was not preserved as passed: {execution_id}"
-        )
+        raise RuntimeError(f"workflow report was not preserved as passed: {execution_id}")
 
 
 def _create_v3_marker(client: APIClient, token: str, project_id: str) -> str:
@@ -260,9 +254,7 @@ def _verify_v3_marker_was_rolled_back(
         isinstance(item, dict) and str(item.get("id")) == state.release_policy_id
         for item in raw_items
     ):
-        raise RuntimeError(
-            "V3-only release policy survived a destructive V3-to-V2 downgrade"
-        )
+        raise RuntimeError("V3-only release policy survived a destructive V3-to-V2 downgrade")
 
 
 if __name__ == "__main__":

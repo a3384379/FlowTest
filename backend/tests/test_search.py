@@ -14,6 +14,7 @@ from app.main import app
 from app.models import Base
 from app.models.access import Project, ProjectMember, User
 from app.models.api_assets import APIDefinition
+from app.models.contracts import ServiceCatalogEntry
 from app.models.data_sources import Credential
 from app.models.workflows import Workflow
 
@@ -110,6 +111,25 @@ async def test_global_search_escapes_wildcards_and_rejects_inaccessible_scope(
     assert blank_query.json()["error"]["trace_id"]
 
 
+@pytest.mark.asyncio
+async def test_global_search_routes_catalog_services_to_the_service_page(
+    search_context: SearchContext,
+) -> None:
+    headers = await _login(search_context.client)
+    response = await search_context.client.get(
+        "/api/v1/search", params={"q": "Catalog Orders"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    result = payload["items"][0]
+    assert result["resource_type"] == "contract_service"
+    assert result["path"].startswith(
+        f"/projects/{search_context.visible_project_id}/services?focus=contract_service:"
+    )
+
+
 async def _seed_search_data(session: AsyncSession) -> tuple[UUID, UUID]:
     viewer = User(
         email=SEARCH_EMAIL,
@@ -164,6 +184,13 @@ async def _seed_search_data(session: AsyncSession) -> tuple[UUID, UUID]:
                 name="Checkout regression",
                 description="Billing regression flow",
                 draft_definition={"schema_version": "1.0", "nodes": [], "edges": []},
+                created_by_id=viewer.id,
+            ),
+            ServiceCatalogEntry(
+                project_id=visible.id,
+                service_key="catalog-orders",
+                display_name="Catalog Orders",
+                description="Service catalog deep-link fixture",
                 created_by_id=viewer.id,
             ),
             Credential(

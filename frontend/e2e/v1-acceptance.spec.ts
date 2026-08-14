@@ -5,28 +5,39 @@ import { authenticate } from './support/auth'
 test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await page.goto('/')
   await authenticate(page)
-  await page.getByLabel('全局项目').click()
-  const pilotProject = page
-    .locator('.ant-select-dropdown:visible .ant-select-item-option')
-    .filter({ hasText: /^S11 V1 Pilot / })
-    .last()
-  await expect(pilotProject).toBeVisible()
-  await pilotProject.click()
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
+  const search = page.getByLabel('全局搜索')
+  const searchResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/v1/search?') && response.status() === 200,
+  )
+  await search.fill('S11 V1 Pilot')
+  const results = (await (await searchResponse).json()) as {
+    items: Array<{ path: string; resource_type: string; title: string }>
+  }
+  const pilotProject = results.items.find(
+    (item) => item.resource_type === 'project' && item.title.startsWith('S11 V1 Pilot '),
+  )
+  expect(pilotProject).toBeDefined()
+  if (!pilotProject) throw new Error('全局搜索未返回 S11 V1 Pilot 项目')
+  await page
+    .locator('.ant-select-dropdown:visible')
+    .getByText(pilotProject.title, { exact: true })
+    .click()
+  await page.waitForURL((url) => `${url.pathname}${url.search}` === pilotProject.path)
+  const governancePath = new URL(pilotProject.path, page.url()).pathname
+  await expect(
+    page.getByRole('main').getByText(pilotProject.title, { exact: true }).first(),
+  ).toBeVisible()
 
-  await page.getByText('项目管理', { exact: true }).click()
+  await page.getByRole('link', { name: '项目管理' }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/settings$/)
+  await expect(page).toHaveURL((url) => url.pathname === governancePath && url.search === '')
   const governanceUrl = page.url()
   await page.reload()
   await expect(page).toHaveURL(governanceUrl)
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
   await expect(
-    page
-      .getByRole('main')
-      .getByText(/^S11 V1 Pilot /)
-      .first(),
-  ).toBeVisible()
+    page.getByRole('main').getByText(pilotProject.title, { exact: true }).first(),
+  ).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('当前身份：系统管理员')).toBeVisible()
   await expect(page.getByLabel('保留天数')).toHaveValue('90')
   await expect(page.getByLabel('允许域名（每行一个）')).toHaveValue('mock-target')

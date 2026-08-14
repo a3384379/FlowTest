@@ -175,7 +175,7 @@ def _searchable_resources(query: str) -> list[Select[Any]]:
             project_id=ServiceCatalogEntry.project_id,
             title=ServiceCatalogEntry.display_name,
             description=ServiceCatalogEntry.description,
-            section="contracts",
+            section="services",
             updated_at=ServiceCatalogEntry.updated_at,
         ),
         _resource_query(

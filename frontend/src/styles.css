@@ -233,6 +233,15 @@ body {
   min-width: 220px;
 }
 
+.service-catalog-alert,
+.service-catalog-overview {
+  margin-bottom: 16px;
+}
+
+.service-catalog-row-focused > td {
+  background: #eef2ff !important;
+}
+
 .contract-release-check {
   margin-top: 18px;
 }

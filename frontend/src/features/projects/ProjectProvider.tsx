@@ -4,7 +4,7 @@ import { matchPath, useLocation, useNavigate } from 'react-router-dom'
 
 import { ProjectContext, type ProjectContextValue } from './project-context'
 import { globalPath, projectPath, sectionFromPath } from './project-routing'
-import { listManagedProjects } from './project-service'
+import { getManagedProject, listManagedProjects } from './project-service'
 
 export default function ProjectProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
@@ -13,16 +13,27 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
   const route = matchPath('/projects/:projectId/*', location.pathname)
   const projectId = route?.params.projectId ?? null
   const section = sectionFromPath(location.pathname)
-  const currentProject = projects.data?.items.find((project) => project.id === projectId) ?? null
+  const listedProject = projects.data?.items.find((project) => project.id === projectId) ?? null
+  const routeProject = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => getManagedProject(requiredProjectId(projectId)),
+    enabled: Boolean(projectId),
+    retry: false,
+  })
+  const currentProject = listedProject ?? routeProject.data ?? null
+  const availableProjects = useMemo(
+    () => includeCurrentProject(projects, currentProject),
+    [currentProject, projects],
+  )
 
   useEffect(() => {
-    if (projects.isSuccess && projectId && !currentProject)
+    if (projects.isSuccess && projectId && !listedProject && routeProject.isError)
       navigate('/dashboard', { replace: true })
-  }, [currentProject, navigate, projectId, projects.isSuccess])
+  }, [listedProject, navigate, projectId, projects.isSuccess, routeProject.isError])
 
   const value = useMemo<ProjectContextValue>(
     () => ({
-      projects,
+      projects: availableProjects,
       projectId,
       currentProject,
       section,
@@ -32,7 +43,27 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
       pathFor: (nextSection) =>
         projectId ? projectPath(projectId, nextSection) : globalPath(nextSection),
     }),
-    [currentProject, navigate, projectId, projects, section],
+    [availableProjects, currentProject, navigate, projectId, section],
   )
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+}
+
+function includeCurrentProject(
+  projects: ProjectContextValue['projects'],
+  currentProject: ProjectContextValue['currentProject'],
+): ProjectContextValue['projects'] {
+  if (!currentProject || !projects.data) return projects
+  if (projects.data.items.some((project) => project.id === currentProject.id)) return projects
+  return {
+    ...projects,
+    data: {
+      ...projects.data,
+      items: [currentProject, ...projects.data.items],
+    },
+  }
+}
+
+function requiredProjectId(projectId: string | null): string {
+  if (!projectId) throw new Error('请选择项目')
+  return projectId
 }

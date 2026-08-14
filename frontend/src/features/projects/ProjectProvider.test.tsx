@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
@@ -17,7 +17,7 @@ describe('ProjectProvider', () => {
 
     await screen.findByText('全部项目')
     await browser.click(screen.getByRole('button', { name: '选择项目' }))
-    expect(await screen.findByText(project.name)).toBeVisible()
+    expect(await screen.findByTestId('current-project')).toHaveTextContent(project.name)
     expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.id}/dashboard`)
     expect(screen.getByTestId('reports-path')).toHaveTextContent(`/projects/${project.id}/reports`)
 
@@ -30,6 +30,29 @@ describe('ProjectProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/dashboard'))
   })
+
+  it('resolves an accessible deep-linked project without waiting for the first project page', async () => {
+    const deepLinkedProject = {
+      ...project,
+      id: '00000000-0000-4000-8000-000000000099',
+      name: '第 101 个项目',
+    }
+    renderProvider(`/projects/${deepLinkedProject.id}/services`, deepLinkedProject, 1_500)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('current-project')).toHaveTextContent(deepLinkedProject.name),
+    )
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `/projects/${deepLinkedProject.id}/services`,
+    )
+    await waitFor(
+      () => expect(screen.getByTestId('project-options')).toHaveTextContent(deepLinkedProject.name),
+      { timeout: 2_500 },
+    )
+    expect(screen.getByTestId('reports-path')).toHaveTextContent(
+      `/projects/${deepLinkedProject.id}/reports`,
+    )
+  })
 })
 
 function ContextProbe() {
@@ -37,8 +60,11 @@ function ContextProbe() {
   const location = useLocation()
   return (
     <>
-      <span>{context.currentProject?.name ?? '全部项目'}</span>
+      <span data-testid="current-project">{context.currentProject?.name ?? '全部项目'}</span>
       <span data-testid="location">{location.pathname}</span>
+      <span data-testid="project-options">
+        {context.projects.data?.items.map((item) => item.name).join(',')}
+      </span>
       <span data-testid="reports-path">{context.pathFor('reports')}</span>
       <button type="button" onClick={() => context.selectProject(project.id)}>
         选择项目
@@ -50,11 +76,19 @@ function ContextProbe() {
   )
 }
 
-function renderProvider(initialEntry: string) {
+function renderProvider(initialEntry: string, deepLinkedProject = project, projectListDelay = 0) {
   server.use(
-    http.get('/api/v1/projects', () =>
-      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
-    ),
+    http.get('/api/v1/projects', async () => {
+      if (projectListDelay) await delay(projectListDelay)
+      return HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 })
+    }),
+    http.get('/api/v1/projects/:projectId', ({ params }) => {
+      if (params.projectId === deepLinkedProject.id) return HttpResponse.json(deepLinkedProject)
+      return HttpResponse.json(
+        { error: { code: 'PROJECT_NOT_FOUND', message: '项目不存在', trace_id: 'test-trace' } },
+        { status: 404 },
+      )
+    }),
   )
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
