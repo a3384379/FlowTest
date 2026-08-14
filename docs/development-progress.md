@@ -1,17 +1,18 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-14（Asia/Shanghai）
-状态：仓库已公开；S30 Failure Intelligence 已通过 PR #33 的五项 CI 并 squash 合并至
-`main@bfa80fd`。当前 `codex/s31-release-gate` 已从该干净基线承接 S31 Release Gate/全局搜索候选，
-完成本地全量、真实 PostgreSQL、Compose 冒烟与 Playwright CLI 验收；PR #34 的实现提交
-`d885610` 已取得五项远程 CI 全绿证据，当前进入最终文档复核与合并收口。
+状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+PR #33/#34 五项 CI 并 squash 合并。当前 `codex/s31-v2-v3-upgrade` 从干净
+`main@2beb2f0` 承接 V2→V3 原地升级/回滚小阶段；本地隔离演练已完成
+`0018 → 0028 → 0018 → 0028`、三阶段真实资产执行与 MinIO 哈希验证，待仓库级检查和远程 CI 收口。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@bfa80fd1e1d935bbf7364097346c8915f2f6d3d8`，S30 PR #33 的 5 项 CI 全绿后已 squash 合并。
-- 当前分支：`codex/s31-release-gate`，从上述基线创建；工作区只包含 S31 Release Gate、全局搜索及
-  真实数据量验收中发现的首页汇总优化，不携带 S30 未提交改动；对应 Draft PR #34。
+- 当前基线：`main@2beb2f026913f7bb4a65c1554698abd6140b2cdd`，S31 PR #34 五项 CI 与合并后
+  main 检查全绿后已 squash 合并。
+- 当前分支：`codex/s31-v2-v3-upgrade`，从上述干净基线创建；工作区只包含 V2→V3
+  隔离升级/回滚自动化、CI 和运维文档，不携带 PR #34 未提交改动。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -56,9 +57,26 @@
 9. PR #34 实现提交 `d885610` 的 Backend Test（2 分 50 秒）、Backend Integration（1 分 24 秒）、
    Frontend Build（8 分 54 秒）、Security Source/Images（10 分 19 秒）和 Compose Smoke
    （21 分 29 秒）五项远程检查全部通过；Compose 同一提交覆盖 S31 主路径、Team 100 Workflow/
-   1000 Queue、Scale 500 Workflow/5000 Queue 和隔离备份恢复。
-10. 正式 S31 仍包含 V2→V3 升级/回滚、完整容量/安全/备份恢复演练、全部页面试点签署及真实 14 天 RC；
-   上述短时自动化不替代这些门槛，当前只完成 Release Gate/全局搜索小阶段。
+   1000 Queue、Scale 500 Workflow/5000 Queue 和隔离备份恢复；随后已 squash 合并至
+   `main@2beb2f0`，合并后 main 五项检查亦全部通过。
+10. 正式 S31 仍包含完整容量/安全/备份恢复演练、全部页面试点签署及真实 14 天 RC；
+    短时自动化不替代这些门槛。
+
+## 已完成（本地）小阶段：V2→V3 原地升级与回滚
+
+1. 演练固定并验证 `v2.0.0-rc.1@06699d54bceee091a2efac838e426cf7ef5c9c9e`，从该 tag
+   导出干净源码并构建 V2 Backend/Mock 镜像，不使用当前脚本伪造 V2 应用行为。
+2. V2 在 `20260812_0018` 创建真实 Project、Environment、API、Workflow、Execution 和
+   Report；备份并用 `pg_restore --list` 验证 PostgreSQL custom-format dump，并对非空 MinIO
+   对象生成 SHA-256 清单。
+3. 同一数据集已完成 `0018 → 0028 → 0018 → 0028`；两次升级后 `alembic check`
+   无漂移，V3、回滚后 V2 和重新升级后 V3 均能读取旧资产、保留旧报告并完成新执行。
+4. 演练在首次升级后创建 V3-only Release Policy，并确认 destructive downgrade 会删除该
+   V3 证据，但不损坏 V2 资产；三个阶段的 MinIO 对象集和哈希均与升级前清单一致。
+5. 新增 `deploy/upgrade/compose.yaml`、`verify_v2_v3_upgrade.sh`、资产验证器和独立
+   `V2 to V3 Upgrade CI`；每次使用独立 Compose Project/卷/端口，成功或失败都清理临时资源。
+6. 2026-08-14 本地 ARM64 Docker Desktop 完整演练通过；远程 CI 尚未产生证据。该结果不等于
+   V2/V3 连续 14 天 RC，不得因此创建 `v2.0.0` 或 `v3.0.0` 正式标签。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
 
