@@ -1,6 +1,7 @@
 export type ProjectSection =
   | 'dashboard'
   | 'settings'
+  | 'services'
   | 'apis'
   | 'protocols'
   | 'assets'
@@ -39,6 +40,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
   return [
     'dashboard',
     'settings',
+    'services',
     'apis',
     'protocols',
     'assets',

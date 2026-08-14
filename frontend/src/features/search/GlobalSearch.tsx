@@ -16,7 +16,7 @@ const resourceLabels: Record<SearchResourceType, string> = {
   environment: '环境',
   mock_service: 'Mock 服务',
   performance_scenario: '性能场景',
-  contract_service: '契约服务',
+  contract_service: '服务',
   impact_run: '影响分析',
   quality_gate: '质量门禁',
   release_risk: '发布风险',

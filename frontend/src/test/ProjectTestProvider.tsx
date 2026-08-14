@@ -8,12 +8,14 @@ import { project } from './fixtures'
 export default function ProjectTestProvider({
   section,
   children,
+  initialEntry,
 }: {
   section: ProjectSection
   children: ReactNode
+  initialEntry?: string
 }) {
   return (
-    <MemoryRouter initialEntries={[projectPath(project.id, section)]}>
+    <MemoryRouter initialEntries={[initialEntry ?? projectPath(project.id, section)]}>
       <ProjectProvider>{children}</ProjectProvider>
     </MemoryRouter>
   )

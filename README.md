@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S30 与 S31 Release Gate/全局搜索已合并；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
+当前状态：`V3.0 S30、S31 Release Gate/全局搜索及独立服务目录已完成；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
 
 ## 技术栈
 
@@ -169,6 +169,9 @@ S27 新增服务目录、不可变 Pact 版本、可选固定 Pact Broker、Prov
 版本的 Pact 验证和 OpenAPI 破坏性证据都通过时才记录“可安全发布”。Pact 仅支持有界 HTTP
 Exact Matcher，不执行用户 Matching Rule、Generator、Plugin 或脚本。架构边界见
 [`ADR 0023`](docs/adr/0023-pact-contract-hub-and-release-evidence.md)。
+S31 产品化阶段将服务目录从契约中心拆分为独立项目路由和导航入口，展示真实协议类型、上下游角色、
+依赖数量及契约统计；全局搜索直接返回带稳定资产 ID 的服务目录深链。Contract Hub 未启用时保留
+稳定路由但不读取目录 API，Viewer 只读，Credential 与 Secret 不进入目录或搜索结果。
 
 S28 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类有界变更解析、项目级显式
 Asset Mapping、Change→Impacted→Recommended 影响图、确定性 Test Selection 和 Coverage Matrix。

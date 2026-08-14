@@ -109,6 +109,39 @@ describe('App authentication', () => {
       'href',
       `/projects/${project.id}/apis`,
     )
+    expect(screen.getByRole('link', { name: '服务目录' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/services`,
+    )
+  })
+
+  it('opens the project-scoped service catalog route', async () => {
+    authenticateExistingUser()
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ contract_hub: true })),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json({
+          service_count: 0,
+          openapi_contract_count: 0,
+          pact_contract_count: 0,
+          pending_verification_count: 0,
+          failed_verification_count: 0,
+          breaking_change_count: 0,
+          broker_available: false,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+        HttpResponse.json({ nodes: [], edges: [] }),
+      ),
+    )
+
+    renderApp(`/projects/${project.id}/services`)
+
+    expect(await screen.findByRole('heading', { name: '服务目录' })).toBeVisible()
+    expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
 
   it('redirects a project-free section to the first accessible project', async () => {

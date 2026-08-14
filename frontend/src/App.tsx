@@ -1,5 +1,6 @@
 import {
   ApiOutlined,
+  AppstoreOutlined,
   ApartmentOutlined,
   BarChartOutlined,
   CodeOutlined,
@@ -43,6 +44,7 @@ import { useProjectContext } from './features/projects/use-project-context'
 import GlobalSearch from './features/search/GlobalSearch'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const ServiceCatalogPage = lazy(() => import('./pages/ServiceCatalogPage'))
 const ApiConsolePage = lazy(() => import('./pages/ApiConsolePage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const TestAssetsPage = lazy(() => import('./pages/TestAssetsPage'))
@@ -67,6 +69,7 @@ const { Header, Content, Sider } = Layout
 const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '首页',
   settings: '项目管理',
+  services: '服务目录',
   apis: '接口管理',
   protocols: '多协议工作台',
   assets: '测试资产',
@@ -125,6 +128,7 @@ function AuthenticatedShell() {
           items={[
             navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
             navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
+            navigationItem('services', <AppstoreOutlined />, pathFor('services')),
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
             navigationItem('protocols', <CodeOutlined />, pathFor('protocols')),
             navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
@@ -198,6 +202,7 @@ function ApplicationRoutes() {
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
+      <Route path="/projects/:projectId/services" element={<ServiceCatalogPage />} />
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
       <Route path="/projects/:projectId/protocols" element={<ProtocolWorkbenchPage />} />
       <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
@@ -219,6 +224,7 @@ function ApplicationRoutes() {
       {(
         [
           'settings',
+          'services',
           'apis',
           'protocols',
           'assets',

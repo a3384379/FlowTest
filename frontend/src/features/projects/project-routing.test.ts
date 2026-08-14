@@ -8,6 +8,7 @@ describe('project routing', () => {
     expect(globalPath('apis')).toBe('/apis')
     expect(globalPath('fabric')).toBe('/execution-fabric')
     expect(projectPath('project-1', 'workflows')).toBe('/projects/project-1/workflows')
+    expect(projectPath('project-1', 'services')).toBe('/projects/project-1/services')
     expect(projectPath('project-1', 'assets')).toBe('/projects/project-1/assets')
     expect(projectPath('project-1', 'quality')).toBe('/projects/project-1/quality')
     expect(projectPath('project-1', 'release')).toBe('/projects/project-1/release')
@@ -19,6 +20,7 @@ describe('project routing', () => {
 
   it('reads supported sections and falls back safely', () => {
     expect(sectionFromPath('/projects/project-1/reports')).toBe('reports')
+    expect(sectionFromPath('/projects/project-1/services')).toBe('services')
     expect(sectionFromPath('/projects/project-1/quality')).toBe('quality')
     expect(sectionFromPath('/projects/project-1/release')).toBe('release')
     expect(sectionFromPath('/projects/project-1/ai')).toBe('ai')
