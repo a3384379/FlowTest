@@ -5,14 +5,25 @@ import { authenticate } from './support/auth'
 test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await page.goto('/')
   await authenticate(page)
-  await page.getByLabel('全局项目').click()
-  const pilotProject = page
-    .locator('.ant-select-dropdown:visible .ant-select-item-option')
-    .filter({ hasText: /^S11 V1 Pilot / })
-    .last()
-  await expect(pilotProject).toBeVisible()
-  await pilotProject.click()
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
+  const search = page.getByLabel('全局搜索')
+  const searchResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/v1/search?') && response.status() === 200,
+  )
+  await search.fill('S11 V1 Pilot')
+  const results = (await (await searchResponse).json()) as {
+    items: Array<{ path: string; resource_type: string; title: string }>
+  }
+  const pilotProject = results.items.find(
+    (item) => item.resource_type === 'project' && item.title.startsWith('S11 V1 Pilot '),
+  )
+  expect(pilotProject).toBeDefined()
+  await page
+    .locator('.ant-select-dropdown:visible')
+    .getByText(pilotProject?.title ?? '', { exact: true })
+    .click()
+  await page.waitForURL(
+    (url) => `${url.pathname}${url.search}` === (pilotProject?.path ?? '/missing'),
+  )
 
   await page.getByText('项目管理', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()

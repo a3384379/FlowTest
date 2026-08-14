@@ -15,6 +15,11 @@ export async function listManagedProjects(): Promise<Page<Project>> {
   return response.data
 }
 
+export async function getManagedProject(projectId: string): Promise<Project> {
+  const response = await apiClient.get<Project>(`/projects/${projectId}`)
+  return response.data
+}
+
 export async function getProjectPermission(projectId: string): Promise<ProjectPermission> {
   const response = await apiClient.get<ProjectPermission>(`/projects/${projectId}/permissions`)
   return response.data
