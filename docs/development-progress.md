@@ -3,16 +3,16 @@
 最后更新：2026-08-14（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
-MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；当前继续收口 S31 页面产品化，
-独立服务目录页面、项目导航和全局搜索深链小阶段已完成本地验收。
+MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
+项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
 - 收口基线：`main@7463256372c35f2b933e2385428fc30c41022844`，PR #35 已完成 V2→V3
   隔离升级/回滚自动化并合并。
-- 当前小阶段分支为 `codex/s31-service-catalog`，从上述干净基线创建；范围只包含独立服务目录
-  页面、项目导航、权限/Feature Flag 行为、全局搜索深链及对应测试，不进入 V4 S32。
+- S31 服务目录小阶段由 `codex/s31-service-catalog` 和 PR #36 承载，从上述干净基线创建；范围只包含
+  独立服务目录、项目导航、权限/Feature Flag 行为、全局搜索深链及对应测试，不进入 V4 S32。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -80,7 +80,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；当前继续收口 S31
 7. 上述自动化证据不等于 V2/V3 连续 14 天 RC，不得因此创建 `v2.0.0` 或
    `v3.0.0` 正式标签。
 
-## 已完成（本地）小阶段：S31 服务目录产品化
+## 已完成小阶段：S31 服务目录产品化
 
 1. 新增项目级 `/projects/{projectId}/services` 独立路由、侧栏入口和兼容跳转；页面继续复用 S27
    Contract Hub 服务接口，没有复制业务模型或建立第二套目录数据。
@@ -91,7 +91,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；当前继续收口 S31
 4. 全局搜索的 `contract_service` 结果改为服务目录路径并保留稳定 UUID `focus` 参数；真实 Compose
    Chromium 已完成“页面登记服务 → 搜索 API 返回服务目录深链 → 键盘选择 → 聚焦行 → 契约链接”验收。
 5. 本地完整门槛：后端 343 passed/3 skipped、总覆盖率 90.83%；前端 164 passed，Statements
-   87.55%、Branches 80.63%、Functions 86.20%、Lines 89.53%，服务目录页面 Lines 96.92%；格式、
+   87.53%、Branches 80.60%、Functions 86.21%、Lines 89.51%，服务目录页面 Lines 96.92%；格式、
    Lint、mypy、TypeScript 和生产构建全部通过。S31 Playwright 文件 2/2 通过，Compose 功能开关及
    既有持久卷在验收后已恢复原状态，15 个服务均健康。
 6. Draft PR #36 的 Compose CI 在新增测试项目后暴露全局项目选择器只加载首页 100 条，使旧项目
@@ -99,7 +99,12 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；当前继续收口 S31
    并在列表返回后合并到选择器；
    只有详情 API 确认不可访问才返回全局首页。含 183 个项目的复用数据卷上，V1 通过全局搜索进入旧项目与
    S31 两个 Chromium 场景合计 3/3 通过，V1 深链刷新另外连续 10/10 首次通过。
-7. 本小阶段不等于完成其余 V3 页面试点、容量/安全/备份恢复签署或 V2/V3 连续 14 天 RC；未创建
+7. PR #36 最终源码提交 `6e738e5` 的 Backend（run `31825085814`）、Frontend（run
+   `31825085872`）、V2→V3 Upgrade（run `31825085810`）、Security（run `31825085819`）和
+   Compose（run `31825085974`）五项 CI 全部通过。Compose 完成 18/18 非 S29 浏览器、S29 浏览器、
+   Team 100 Workflow/1000 Queue、Scale 500 Workflow/5000 Queue 与隔离备份恢复；Playwright 注解
+   无 flaky、Retry 或失败。
+8. 本小阶段不等于完成其余 V3 页面试点、容量/安全/备份恢复签署或 V2/V3 连续 14 天 RC；未创建
    正式标签，也未开始 V4 S32。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
