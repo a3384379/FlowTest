@@ -67,6 +67,11 @@ body {
   min-width: 190px;
 }
 
+.global-search {
+  width: min(32vw, 360px);
+  min-width: 220px;
+}
+
 .page-breadcrumb {
   margin-bottom: 16px;
 }

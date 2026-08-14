@@ -128,9 +128,9 @@ V3 各自的真实验收门槛。
 | S26 | 签名环境模板、Provision/Cleanup/TTL | 已完成；PR #29 与 main CI 全绿，发布 `v3.0.0-beta.1` |
 | S27 | Pact、契约矩阵、Service Graph、Deployment Check | 已完成；PR #30 与 main CI 全绿，发布 `v3.0.0-beta.2` |
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 已完成；PR #31 与 main CI 全绿，发布 `v3.0.0-beta.3` |
-| S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 实现与本地退出门槛已通过；Draft PR 待创建 |
-| S30 | Failure Cluster、Release Risk、AI Change Set | 未开始 |
-| S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | 未开始 |
+| S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 已完成；PR #32 五项 CI 全绿并 squash 合并 |
+| S30 | Failure Cluster、Release Risk、AI Change Set | 已完成；PR #33 五项 CI 全绿并 squash 合并至 `main@bfa80fd` |
+| S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | Release Gate 与全局搜索小阶段本地验收完成；待独立 PR/CI，剩余发布门槛未完成 |
 
 S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.md)，S23 多协议边界见
 [`ADR 0019`](adr/0019-multi-protocol-schema-snapshots.md)，S24 事件协议边界见
