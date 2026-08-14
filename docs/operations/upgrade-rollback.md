@@ -20,6 +20,33 @@ V1.0 的 `20260809_0010`、S14 的 `20260809_0011`、S15 的 `20260810_0012`、S
 
 S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到 v1.1.0 不需要执行 Alembic downgrade；停止新执行并切换镜像即可。已创建的 SubFlow/ForEach 草稿或发布版本使用旧应用无法编辑或执行，回滚前应导出这些定义，回升 v1.5.0 后可继续使用；既有 V1 Execution、Snapshot 和报告不受影响。
 
+## V2 RC ↔ V3 原地升级与回滚演练
+
+V2 基线固定为 `v2.0.0-rc.1@06699d54bceee091a2efac838e426cf7ef5c9c9e`，数据库 revision
+为 `20260812_0018`；当前 V3 S31 revision 为 `20260813_0028`。可在仓库根目录执行：
+
+```bash
+scripts/verify_v2_v3_upgrade.sh
+```
+
+脚本会校验 V2 tag 对应的精确 commit，然后在独立 Compose Project、随机本机端口和
+三个专用数据卷中自动执行：
+
+1. 使用 V2 镜像在 `0018` 创建 Project、Environment、API、Workflow、Execution 和 Report。
+2. 导出 PostgreSQL custom-format 安全检查点，并生成 MinIO SHA-256 清单。
+3. 使用当前代码原地升级到 `0028`，执行 `alembic check`，校验旧资产并再运行。
+4. 使用当前代码降级到 `0018`，切回 V2 应用，再次校验和执行。
+5. 重新升级到 `0028`，再次执行 `alembic check`、旧资产执行与 MinIO 哈希校验。
+
+每次退出都会删除该次演练的容器、卷、临时源码和临时镜像，不读写开发环境的
+PostgreSQL/MinIO 数据卷。脚本只用于 CI 和发布演练，不是生产环境的一键升级器。
+
+`0028 → 0018` 是 destructive downgrade：S22–S31 新增的 Capability、Schema、Performance、
+Environment、Contract、Impact、Runner、Failure Intelligence 和 Release Gate 数据都会被删除。
+演练会特意创建一条 V3 Release Policy，并在重新升级后确认它已被回滚删除，同时
+V2 业务资产仍完整。需保留 V3 证据时不得执行此 downgrade，应使用升级前已验证的
+PostgreSQL + MinIO 恢复点。
+
 ## S14 / 0011 特别说明
 
 - 升级会创建 `teams`、`team_members`、`project_team_grants`，并为 `api_versions` 增加提取和断言 JSON 列。
@@ -71,3 +98,10 @@ S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到
   Token；旧 Token 不得在回升后复用。
 - 若需保留分布式执行审计或当时仍有排队任务，不执行 destructive downgrade；使用升级前已验证的
   PostgreSQL + MinIO 恢复点，并重新签发所有 Runner 身份。
+
+## S30–S31 / 0027–0028 特别说明
+
+- 降级到 `20260812_0026` 会删除 Failure Cluster、Regression Baseline、Release Risk、AI Draft
+  Change Set 及其审核证据；降级前先关闭 Quality Intelligence 与 AI，并停止 AI Worker。
+- 降级到 `20260813_0027` 会删除 Release Policy 和不可变 Release Decision Snapshot。这些
+  是发布判断的历史证据，需要保留时必须使用完整恢复点，不得以当前页面重算代替。
