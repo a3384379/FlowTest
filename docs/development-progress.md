@@ -2,17 +2,17 @@
 
 最后更新：2026-08-14（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
-PR #33/#34 五项 CI 并 squash 合并。当前 `codex/s31-v2-v3-upgrade` 从干净
-`main@2beb2f0` 承接 V2→V3 原地升级/回滚小阶段；本地隔离演练已完成
-`0018 → 0028 → 0018 → 0028`、三阶段真实资产执行与 MinIO 哈希验证，待仓库级检查和远程 CI 收口。
+PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已在干净
+`main@2beb2f0` 上完成 `0018 → 0028 → 0018 → 0028`、三阶段真实资产执行、
+MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 当前基线：`main@2beb2f026913f7bb4a65c1554698abd6140b2cdd`，S31 PR #34 五项 CI 与合并后
+- 收口基线：`main@2beb2f026913f7bb4a65c1554698abd6140b2cdd`，S31 PR #34 五项 CI 与合并后
   main 检查全绿后已 squash 合并。
-- 当前分支：`codex/s31-v2-v3-upgrade`，从上述干净基线创建；工作区只包含 V2→V3
-  隔离升级/回滚自动化、CI 和运维文档，不携带 PR #34 未提交改动。
+- 小阶段实现位于 PR #35 的 `codex/s31-v2-v3-upgrade`，从上述干净基线创建；
+  范围只包含 V2→V3 隔离升级/回滚自动化、CI 和运维文档。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -62,7 +62,7 @@ PR #33/#34 五项 CI 并 squash 合并。当前 `codex/s31-v2-v3-upgrade` 从干
 10. 正式 S31 仍包含完整容量/安全/备份恢复演练、全部页面试点签署及真实 14 天 RC；
     短时自动化不替代这些门槛。
 
-## 已完成（本地）小阶段：V2→V3 原地升级与回滚
+## 已完成小阶段：V2→V3 原地升级与回滚
 
 1. 演练固定并验证 `v2.0.0-rc.1@06699d54bceee091a2efac838e426cf7ef5c9c9e`，从该 tag
    导出干净源码并构建 V2 Backend/Mock 镜像，不使用当前脚本伪造 V2 应用行为。
@@ -75,8 +75,10 @@ PR #33/#34 五项 CI 并 squash 合并。当前 `codex/s31-v2-v3-upgrade` 从干
    V3 证据，但不损坏 V2 资产；三个阶段的 MinIO 对象集和哈希均与升级前清单一致。
 5. 新增 `deploy/upgrade/compose.yaml`、`verify_v2_v3_upgrade.sh`、资产验证器和独立
    `V2 to V3 Upgrade CI`；每次使用独立 Compose Project/卷/端口，成功或失败都清理临时资源。
-6. 2026-08-14 本地 ARM64 Docker Desktop 完整演练通过；远程 CI 尚未产生证据。该结果不等于
-   V2/V3 连续 14 天 RC，不得因此创建 `v2.0.0` 或 `v3.0.0` 正式标签。
+6. 2026-08-14 本地 ARM64 Docker Desktop 完整演练通过；PR #35 实现提交
+   `3b7921a` 的 V2 to V3 Upgrade CI（7 分 52 秒）与 Security CI（13 分 26 秒）均通过。
+7. 上述自动化证据不等于 V2/V3 连续 14 天 RC，不得因此创建 `v2.0.0` 或
+   `v3.0.0` 正式标签。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
 

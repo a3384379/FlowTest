@@ -130,7 +130,7 @@ V3 各自的真实验收门槛。
 | S28 | 多源 Diff、Impact Graph、Smart Selection、Coverage Matrix | 已完成；PR #31 与 main CI 全绿，发布 `v3.0.0-beta.3` |
 | S29 | Worker Pool、PostgreSQL Lease/Fencing、远程 Docker/K8s Worker | 已完成；PR #32 五项 CI 全绿并 squash 合并 |
 | S30 | Failure Cluster、Release Risk、AI Change Set | 已完成；PR #33 五项 CI 全绿并 squash 合并至 `main@bfa80fd` |
-| S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | PR #34 已全绿并合并；V2→V3 真实资产升级/回滚自动演练已本地通过，远程 CI 与其余发布门槛未完成 |
+| S31 | 16 页面产品化、Release Gate、容量/安全/升级回滚与 14 天 RC | PR #34 已全绿并合并；V2→V3 真实资产升级/回滚自动演练已通过本地和 PR #35 远程 CI，其余发布门槛未完成 |
 
 S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.md)，S23 多协议边界见
 [`ADR 0019`](adr/0019-multi-protocol-schema-snapshots.md)，S24 事件协议边界见
