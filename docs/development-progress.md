@@ -1,18 +1,19 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-14（Asia/Shanghai）
+最后更新：2026-08-15（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
-项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收。
+项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
+PR #37 远程源码验收。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 收口基线：`main@7463256372c35f2b933e2385428fc30c41022844`，PR #35 已完成 V2→V3
-  隔离升级/回滚自动化并合并。
-- S31 服务目录小阶段由 `codex/s31-service-catalog` 和 PR #36 承载，从上述干净基线创建；范围只包含
-  独立服务目录、项目导航、权限/Feature Flag 行为、全局搜索深链及对应测试，不进入 V4 S32。
+- 收口基线：`main@7e27bd2d012ae9b963cf11e9321a17550749bd86`，PR #36 已完成 S31 服务目录、
+  项目深链和远程全量门槛并合并。
+- 当前 S31 质量指挥中心小阶段由 `codex/s31-quality-command-center` 承载，从上述干净基线创建；范围只包含
+  全局/项目质量总览、只读证据聚合、Feature Flag 行为、稳定深链及对应测试，不进入 V4 S32。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
@@ -106,6 +107,35 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
    无 flaky、Retry 或失败。
 8. 本小阶段不等于完成其余 V3 页面试点、容量/安全/备份恢复签署或 V2/V3 连续 14 天 RC；未创建
    正式标签，也未开始 V4 S32。
+
+## 已完成（本地）：S31 质量指挥中心产品化
+
+1. 将原“工作台/首页”产品化为 16 张 V3 UI 基准中的“质量指挥中心/质量总览”，保留全局
+   `/dashboard` 与项目 `/projects/{projectId}/dashboard` 深链，不改变项目上下文选择规则。
+2. 全局视图只使用现有 Dashboard 聚合接口，展示授权范围内的项目、API、Workflow、今日执行、
+   终态通过率、7 日趋势和最近运行；不向任意项目发起 Risk、Impact、Flaky 或 Release 请求。
+3. 项目视图读取真实 Dashboard Summary、最新 Release Risk/Failure Cluster/Recommended Test、
+   Impact Coverage/Gap、Flaky 资产及不可变 Release Decision；所有“最新”记录均复用服务端
+   `created_at DESC` 顺序，不在前端伪造风险、覆盖率或发布状态。
+4. `quality_intelligence` 和 `impact_engine` 关闭时停止对应 API 请求并展示明确能力状态；Flaky 与
+   Release Decision 继续使用既有项目授权接口。首页只读展示历史 Fingerprint 和阻断原因，不提供
+   重算、修改、发布或自动执行推荐测试入口。
+5. 页面提供影响分析、质量洞察和发布门禁稳定深链；导航文案同步为“质量总览”，认证 Setup、V1
+   深链及 S15 资产验收同步使用新名称。
+6. 本地门槛：后端 343 passed/3 skipped、总覆盖率 90.86%；前端 43 文件 167 passed，Statements
+   87.71%、Branches 80.74%、Functions 86.42%、Lines 89.69%，Dashboard 页面 Lines 100%、
+   Branches 90.78%；格式、Lint、mypy、TypeScript 和生产构建全部通过。
+7. 真实 Compose 使用显式开启的 Contract Hub、Impact Engine 和 Quality Intelligence 完成 S31
+   Chromium 3/3 首轮通过，其中新增“创建不可变 PASS 判断 → 质量指挥中心 → 候选版本/深链”场景
+   用时 654 ms；恢复默认关闭状态后 V1 Chromium 1/1 通过，15 个服务均健康。
+8. PR #37 源码提交 `74d76ef` 的 Frontend（run `31857200389`）、Security（run
+   `31857200448`）和 Compose（run `31857200387`）三项受影响路径 CI 全部通过；本次未修改
+   Backend、迁移或升级脚本，因此 Backend 与 V2→V3 Upgrade 工作流按 `paths` 规则不触发，后端
+   四项门槛使用上述本地结果。Compose 完成 19/19 非 S29 浏览器、S29 浏览器、Team 100 Workflow/
+   1000 Queue、Scale 500 Workflow/5000 Queue 与隔离备份恢复；Playwright 注解无 flaky、Retry
+   或失败。
+9. 本小阶段仍须完成 PR #37 最终评审与 squash 合并；它不等于其余 V3 页面试点、发布签署或
+   V2/V3 连续 14 天 RC，未创建正式标签，也未开始 V4 S32。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
 
@@ -479,9 +509,10 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 
 ## 下一步
 
-1. 完成 PR #34 的最终评审与 squash 合并；以 `d885610` 的五项远程 CI 和最终文档提交检查作为收口证据。
-2. 该小阶段合并后，继续 S31 剩余的 16 页面产品化、V2→V3 原地升级/回滚、容量、安全、
-   备份恢复和试点文档；未完成这些门槛前不宣告 S31 或 V3 GA。
+1. 完成 PR #37 最终评审和 squash 合并；其受影响路径的 Frontend、Security、Compose CI 已通过，
+   Backend 与 V2→V3 Upgrade 按路径过滤不触发，远程 Playwright 无 flaky。
+2. 该小阶段合并后，继续 S31 剩余页面产品化、容量、安全、备份恢复和试点文档；未完成这些门槛前
+   不宣告 S31 或 V3 GA。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
 4. S31 代码冻结后执行新的 V3 RC 候选连续 14 个自然日观察；任何代码修复生成新候选并重新计时。
 5. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建

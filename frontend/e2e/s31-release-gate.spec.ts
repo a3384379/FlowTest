@@ -90,6 +90,36 @@ test('S31 服务目录登记真实资产并通过全局搜索深链返回', asyn
   )
 })
 
+test('S31 质量指挥中心展示真实历史判断并保持证据深链', async ({ page }) => {
+  const token = await accessTokenFromSession(page.request)
+  const project = await createProject(page.request, token)
+  const candidateRef = `v3.0.0-rc.dashboard.${Date.now()}`
+  const policy = await createPolicy(
+    page.request,
+    token,
+    project.id,
+    `S31 指挥中心策略 ${Date.now()}`,
+  )
+  await createDecision(page.request, token, project.id, policy.id, candidateRef)
+
+  await page.goto(`/projects/${project.id}/dashboard`)
+  await expect(page.getByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+  await expect(page.getByText('最新门禁')).toBeVisible()
+  const decisionMetric = page.locator('.quality-command-metric').filter({ hasText: '最新门禁' })
+  await expect(decisionMetric).toContainText('PASS')
+  await expect(decisionMetric).toContainText(candidateRef)
+  await expect(page.getByText('暂无风险证据')).toBeVisible()
+  await expect(page.getByText('暂无影响分析证据')).toBeVisible()
+  await expect(page.getByRole('link', { name: '查看影响分析' })).toHaveAttribute(
+    'href',
+    `/projects/${project.id}/impact`,
+  )
+  await expect(page.getByRole('link', { name: '发布门禁' }).first()).toHaveAttribute(
+    'href',
+    `/projects/${project.id}/release`,
+  )
+})
+
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {
   const response = await request.post('/api/v1/auth/login', {
     data: {
@@ -115,7 +145,7 @@ async function createPolicy(
   token: string,
   projectId: string,
   name: string,
-): Promise<void> {
+): Promise<Identified> {
   const response = await request.post(`/api/v1/projects/${projectId}/release-policies`, {
     headers: { Authorization: `Bearer ${token}` },
     data: {
@@ -131,6 +161,21 @@ async function createPolicy(
       require_performance_evidence: false,
       require_runner_evidence: false,
     },
+  })
+  expect(response.status(), await response.text()).toBe(201)
+  return (await response.json()) as Identified
+}
+
+async function createDecision(
+  request: APIRequestContext,
+  token: string,
+  projectId: string,
+  policyId: string,
+  candidateRef: string,
+): Promise<void> {
+  const response = await request.post(`/api/v1/projects/${projectId}/release-decisions`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { release_policy_id: policyId, candidate_ref: candidateRef },
   })
   expect(response.status(), await response.text()).toBe(201)
 }

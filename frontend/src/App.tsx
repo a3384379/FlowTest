@@ -67,7 +67,7 @@ const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage')
 const { Header, Content, Sider } = Layout
 
 const sectionLabels: Record<ProjectSection, string> = {
-  dashboard: '首页',
+  dashboard: '质量总览',
   settings: '项目管理',
   services: '服务目录',
   apis: '接口管理',

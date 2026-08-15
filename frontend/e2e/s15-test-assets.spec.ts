@@ -76,7 +76,7 @@ async function createPublishedWorkflow(page: Page, name: string) {
 }
 
 async function selectedProjectId(page: Page): Promise<string> {
-  const dashboardLink = page.getByRole('link', { name: '首页' })
+  const dashboardLink = page.getByRole('link', { name: '质量总览' })
   await expect(dashboardLink).toHaveAttribute('href', /^\/projects\/[^/]+\/dashboard$/)
   const dashboardHref = await dashboardLink.getAttribute('href')
   const match = dashboardHref?.match(/^\/projects\/([^/]+)\/dashboard$/) ?? null
