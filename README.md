@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S30、S31 Release Gate/全局搜索及独立服务目录已完成；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
+当前状态：`V3.0 S30、S31 Release Gate/全局搜索、独立服务目录及质量指挥中心已完成；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
 
 ## 技术栈
 
@@ -172,6 +172,9 @@ Exact Matcher，不执行用户 Matching Rule、Generator、Plugin 或脚本。�
 S31 产品化阶段将服务目录从契约中心拆分为独立项目路由和导航入口，展示真实协议类型、上下游角色、
 依赖数量及契约统计；全局搜索直接返回带稳定资产 ID 的服务目录深链。Contract Hub 未启用时保留
 稳定路由但不读取目录 API，Viewer 只读，Credential 与 Secret 不进入目录或搜索结果。
+质量总览同步升级为“质量指挥中心”：全局视图汇总授权范围内的真实资产和执行趋势；项目视图按
+Feature Flag 读取最新 Release Risk、Impact、Flaky 与不可变 Release Decision，并提供质量洞察、
+影响分析和发布门禁深链。首页不重算历史发布判断，也不自动执行推荐测试。
 
 S28 新增 Git Unified Diff、OpenAPI、GraphQL SDL 与 gRPC Proto 四类有界变更解析、项目级显式
 Asset Mapping、Change→Impacted→Recommended 影响图、确定性 Test Selection 和 Coverage Matrix。
