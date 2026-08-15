@@ -7,7 +7,7 @@ export const bootstrapPassword =
 export const authenticationStatePath = '.playwright/.auth/administrator.json'
 
 export async function authenticate(page: Page): Promise<void> {
-  const dashboard = page.getByRole('heading', { name: '工作台' })
+  const dashboard = page.getByRole('heading', { name: '质量指挥中心' })
   const login = page.getByRole('heading', { name: '登录账号' })
   await expect(dashboard.or(login)).toBeVisible()
   if (await dashboard.isVisible()) return

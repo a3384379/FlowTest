@@ -39,7 +39,7 @@ describe('App authentication', () => {
     await browser.type(screen.getByLabelText('密码'), 'correct horse battery staple')
     await browser.click(screen.getByRole('button', { name: /登\s*录/ }))
 
-    expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect(screen.getByText('接口自动化测试平台')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /退出/ }))
     expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
@@ -70,7 +70,7 @@ describe('App authentication', () => {
     await browser.type(screen.getByLabelText('新密码'), 'new-password-123')
     await browser.type(screen.getByLabelText('确认新密码'), 'new-password-123')
     await browser.click(screen.getByRole('button', { name: /保\s*存并进入平台/ }))
-    expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
   })
 
   it('restores a session with refresh rotation', async () => {
@@ -83,7 +83,7 @@ describe('App authentication', () => {
 
     renderApp()
 
-    expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect(useAuthStore.getState().token).toBe('rotated-token')
   })
 
@@ -103,7 +103,7 @@ describe('App authentication', () => {
 
     renderApp(`/projects/${project.id}/dashboard`)
 
-    expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect((await screen.findAllByText(project.name)).length).toBeGreaterThanOrEqual(2)
     expect(screen.getByRole('link', { name: '接口管理' })).toHaveAttribute(
       'href',
@@ -149,7 +149,7 @@ describe('App authentication', () => {
     renderApp('/settings')
 
     expect(await screen.findByRole('heading', { name: '项目治理' })).toBeVisible()
-    expect(screen.getByRole('link', { name: '首页' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '质量总览' })).toHaveAttribute(
       'href',
       `/projects/${project.id}/dashboard`,
     )
@@ -166,7 +166,7 @@ describe('App authentication', () => {
     authenticateExistingUser()
     renderApp(`/projects/${project.id}`)
 
-    expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect(await screen.findByText(`当前查看：${project.name}`)).toBeVisible()
   })
 })
@@ -195,6 +195,19 @@ function renderApp(
     ),
     http.get('/api/v1/dashboard/recent-executions', () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 10 }),
+    ),
+    http.get('/api/v1/v3/features', () =>
+      HttpResponse.json({
+        contract_hub: true,
+        impact_engine: false,
+        quality_intelligence: false,
+      }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/release-decisions`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
     ),
     http.get(`/api/v1/projects/${project.id}/permissions`, () =>
       HttpResponse.json({ effective_role: 'owner', capabilities: [], matrix: {} }),
