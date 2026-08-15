@@ -4,7 +4,8 @@
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
-项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地验收。
+项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
+PR #37 远程源码验收。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
@@ -127,8 +128,14 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 7. 真实 Compose 使用显式开启的 Contract Hub、Impact Engine 和 Quality Intelligence 完成 S31
    Chromium 3/3 首轮通过，其中新增“创建不可变 PASS 判断 → 质量指挥中心 → 候选版本/深链”场景
    用时 654 ms；恢复默认关闭状态后 V1 Chromium 1/1 通过，15 个服务均健康。
-8. 本小阶段的远程 CI 与合并仍是退出门槛；它不等于其余 V3 页面试点、发布签署或 V2/V3 连续
-   14 天 RC，未创建正式标签，也未开始 V4 S32。
+8. PR #37 源码提交 `74d76ef` 的 Frontend（run `31857200389`）、Security（run
+   `31857200448`）和 Compose（run `31857200387`）三项受影响路径 CI 全部通过；本次未修改
+   Backend、迁移或升级脚本，因此 Backend 与 V2→V3 Upgrade 工作流按 `paths` 规则不触发，后端
+   四项门槛使用上述本地结果。Compose 完成 19/19 非 S29 浏览器、S29 浏览器、Team 100 Workflow/
+   1000 Queue、Scale 500 Workflow/5000 Queue 与隔离备份恢复；Playwright 注解无 flaky、Retry
+   或失败。
+9. 本小阶段仍须完成 PR #37 最终评审与 squash 合并；它不等于其余 V3 页面试点、发布签署或
+   V2/V3 连续 14 天 RC，未创建正式标签，也未开始 V4 S32。
 
 ## 已完成（本地）：S29 PostgreSQL Runner Fabric 与 Worker Plane
 
@@ -502,8 +509,8 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 
 ## 下一步
 
-1. 完成 `codex/s31-quality-command-center` 的远程五项 CI、评审和 squash 合并；远程 Compose 必须
-   覆盖 S31 质量指挥中心、Team/Scale 容量和隔离备份恢复，且 Playwright 不得有 flaky。
+1. 完成 PR #37 最终评审和 squash 合并；其受影响路径的 Frontend、Security、Compose CI 已通过，
+   Backend 与 V2→V3 Upgrade 按路径过滤不触发，远程 Playwright 无 flaky。
 2. 该小阶段合并后，继续 S31 剩余页面产品化、容量、安全、备份恢复和试点文档；未完成这些门槛前
    不宣告 S31 或 V3 GA。
 3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
