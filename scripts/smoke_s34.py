@@ -28,9 +28,7 @@ def _runtime_contract(profile: str) -> dict[str, Any]:
 
 def _authenticate(config: SmokeConfig) -> tuple[APIClient, str, str, bool]:
     client = APIClient(config.api_url)
-    login = client.json(
-        "POST", "/auth/login", {"email": config.email, "password": config.password}
-    )
+    login = client.json("POST", "/auth/login", {"email": config.email, "password": config.password})
     token = str(login["access_token"])
     active_password = config.password
     password_changed = bool(login["user"]["requires_password_change"])
@@ -48,9 +46,7 @@ def _verify_existing_assets(
     artifact_id: str,
     execution_id: str,
 ) -> None:
-    content = client.download(
-        f"/projects/{project_id}/files/{artifact_id}", token=token
-    )
+    content = client.download(f"/projects/{project_id}/files/{artifact_id}", token=token)
     if content != ARTIFACT_CONTENT:
         raise RuntimeError("profile switch changed Artifact content")
     execution = client.json(
@@ -70,9 +66,7 @@ def main() -> None:
     parser.add_argument("--artifact-id")
     parser.add_argument("--execution-id")
     args = parser.parse_args()
-    if args.action == "verify" and not all(
-        (args.project_id, args.artifact_id, args.execution_id)
-    ):
+    if args.action == "verify" and not all((args.project_id, args.artifact_id, args.execution_id)):
         parser.error("verify requires project, artifact, and execution IDs")
 
     config = SmokeConfig.from_environment()

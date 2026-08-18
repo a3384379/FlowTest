@@ -21,9 +21,7 @@ COMPACT_RUNTIME_CONTRACT: dict[str, Any] = {
 def main() -> None:
     config = SmokeConfig.from_environment()
     client = APIClient(config.api_url)
-    login = client.json(
-        "POST", "/auth/login", {"email": config.email, "password": config.password}
-    )
+    login = client.json("POST", "/auth/login", {"email": config.email, "password": config.password})
     token = str(login["access_token"])
     active_password = config.password
     password_changed = bool(login["user"]["requires_password_change"])
@@ -108,9 +106,7 @@ def _run_acceptance(
     api_node = next(node for node in result["nodes"] if node["node_id"] == "api")
     snapshot = result["execution"]["snapshot"]
     if api_node["status"] != "passed" or snapshot["workflow"]["version"] != 1:
-        raise RuntimeError(
-            "Compact consolidated Worker did not preserve the execution snapshot"
-        )
+        raise RuntimeError("Compact consolidated Worker did not preserve the execution snapshot")
     return {
         "project_id": project_id,
         "artifact_id": str(artifact["id"]),
