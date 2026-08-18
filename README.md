@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S30、S31 Release Gate/全局搜索、独立服务目录及质量指挥中心已完成；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
+当前状态：`V3.0 S30/S31 已完成；V4 S32～S36 的 Compact 六服务、离线分发、事务式无外网升级、资源/兼容基线、隐私安全诊断与回滚证明已进入验收`；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI，V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
 
 ## 技术栈
 
@@ -26,9 +26,39 @@ FlowTest/
 领域边界及完整目录说明见 [docs/architecture.md](docs/architecture.md)，V1/V2 实施节奏见
 [docs/development-plan.md](docs/development-plan.md)。
 
-## 本地启动
+## 公司电脑快速运行
+
+公司内网试用优先使用 V4 Compact 档位。联网电脑安装 Docker Engine/Desktop、Compose v2、
+Git、OpenSSL 和 Curl 后，可直接从 GitHub 下载并启动：
+
+```bash
+git clone --branch main --single-branch https://github.com/a3384379/FlowTest.git
+cd FlowTest
+./deploy/compact/start.sh
+./deploy/compact/verify.sh
+```
+
+首次启动会构建或下载镜像，并在 `deploy/compact/.env` 生成权限为 `0600` 的随机管理员密码和服务密钥；
+该文件已被 Git 忽略，不得提交、上传或发到聊天/工单。启动完成后访问 <http://localhost:3000>，
+管理员邮箱为 `admin@flowtest.dev`。Windows 公司电脑请在 WSL2 中执行上述命令，并启用 Docker Desktop
+的 WSL 集成。
+
+详细的系统要求、首次登录、启停、内网开放、备份、升级及完全离线安装步骤见
+[公司电脑 Compact 快速部署](docs/operations/compact-company-quickstart.md)。GitHub 源码压缩包不包含
+Docker 镜像；完全无外网电脑必须使用受信工作站生成并校验的单架构离线包。
+
+## 本地开发启动
 
 推荐安装：Python 3.13、Node.js 20.19+ 或 22.12+、Docker。
+
+Compact 只启动 6 个容器并自动生成随机密钥：
+
+```bash
+./deploy/compact/start.sh
+```
+
+完整边界和内网开放方式见 [小型化部署手册](deploy/compact/README.md)。需要全部 Worker、Redpanda、
+Mock、性能实验室和环境实验室时，继续使用下方 Full 开发栈。
 
 ```bash
 cp .env.example .env

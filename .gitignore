@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+deploy/compact/images.env
+deploy/compact/*.tar.gz
+deploy/compact/*.sha256
 
 # Python
 __pycache__/

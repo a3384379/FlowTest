@@ -41,6 +41,20 @@ async def test_v2_features_are_disabled_by_default() -> None:
 
 
 @pytest.mark.asyncio
+async def test_full_runtime_profile_is_reported_by_default() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/runtime-profile")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "profile": "full",
+        "worker_topology": "isolated",
+        "unavailable_features": [],
+    }
+
+
+@pytest.mark.asyncio
 async def test_metrics_endpoint_uses_prometheus_text_format() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

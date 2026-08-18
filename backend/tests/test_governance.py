@@ -5,6 +5,7 @@ from starlette.requests import Request
 from app.core.config import Settings, settings
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_outbound_url
+from app.domain.runtime_profiles import RuntimeProfile
 from app.middleware import rate_limit as rate_limit_middleware
 from app.services.rate_limit import RedisRateLimiter
 
@@ -59,6 +60,25 @@ def test_environment_lab_requires_exact_digest_allowlist() -> None:
         environment_image_allowlist=[image],
     )
     assert configured.environment_image_allowlist == [image]
+
+
+def test_compact_runtime_profile_rejects_missing_worker_runtimes() -> None:
+    configured = Settings(_env_file=None, runtime_profile="compact")
+    assert configured.runtime_profile is RuntimeProfile.COMPACT
+
+    with pytest.raises(ValidationError, match=r"compact.*performance_lab"):
+        Settings(
+            _env_file=None,
+            runtime_profile="compact",
+            feature_performance_lab_enabled=True,
+        )
+    with pytest.raises(ValidationError, match=r"compact.*environment_lab"):
+        Settings(
+            _env_file=None,
+            runtime_profile="compact",
+            feature_environment_lab_enabled=True,
+            environment_image_allowlist=[f"registry.example/fixture@sha256:{'a' * 64}"],
+        )
 
 
 def test_public_mock_dispatch_is_rate_limited_for_every_http_method() -> None:

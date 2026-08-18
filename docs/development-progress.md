@@ -1,23 +1,69 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-15（Asia/Shanghai）
+最后更新：2026-08-19（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
-PR #37 远程源码验收。
+PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收。远程 CI、72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
 
-- 收口基线：`main@7e27bd2d012ae9b963cf11e9321a17550749bd86`，PR #36 已完成 S31 服务目录、
-  项目深链和远程全量门槛并合并。
-- 当前 S31 质量指挥中心小阶段由 `codex/s31-quality-command-center` 承载，从上述干净基线创建；范围只包含
-  全局/项目质量总览、只读证据聚合、Feature Flag 行为、稳定深链及对应测试，不进入 V4 S32。
+- 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
+- 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
+  用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
+  事务式无外网升级、容量稳定性、Full↔Compact 兼容、隐私安全诊断和可恢复回滚验收。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 进行中：V4 S32～S36 小型化与公司可部署性
+
+1. `full` 保持现有隔离 Worker 拓扑；`compact` 显式使用合并 Worker，并公开可机器验收的
+   `/api/v1/runtime-profile` 运行契约。
+2. Compact 与 Full 共享 PostgreSQL/Alembic、Redis 和 MinIO 语义；不引入 SQLite、本地 Artifact
+   或进程内队列产品分支。
+3. Compact 基线收缩为 Web、API、合并 Worker/Beat、PostgreSQL、Redis 和 MinIO 六个容器；
+   默认容器内存上限合计约 2.6 GB，只向 Loopback 发布 Web 与 MinIO API。
+4. 配置层会拒绝 Compact 误开 Performance Lab 或 Environment Lab，避免将任务发送到缺少
+   k6/DinD 的运行时。
+5. ARM64 真实 Compose 已完成源码构建、六服务健康检查、Readiness 和 S32 业务 smoke；
+   smoke 覆盖登录、项目/API/Workflow 创建、不可变发布、合并 Worker 执行与 Snapshot。
+   空闲实测约 918 MiB，未发现 Backend/Worker ERROR、CRITICAL 或 Traceback。
+6. Docker-only 备份已对非空 PostgreSQL 和 1 个 MinIO Artifact 生成 custom dump 与 SHA-256 清单；
+   备份后项目数从 2 增加到 3，覆盖恢复后回到 2 且新项目不存在，对象集哈希相同。
+   恢复后再次执行上传、Workflow 发布和合并 Worker 验收通过。
+7. S33 已将基础 Compose 与源码构建 Overlay 分离；Backend/Worker 复用单一镜像，
+   私有仓库脚本为 5 个镜像输出 `repository@sha256` 不可变引用。
+8. ARM64 真实离线包为 353 MiB；在删除离线 Tag 后从 `images.tar` 重新导入，逐文件摘要、
+   5 个镜像 ID/架构、`--pull never --no-build` 六服务启动及 S32 业务 smoke 全部通过。
+9. 无外网升级演练先对 5 个真实 Artifact 生成一致性备份，再切换新包的 5 个镜像；
+   升级后 Readiness、Artifact 上传/下载、Workflow 发布与执行均通过。
+10. S34 实测 1000 次 Live API 在 25 并发下零失败，吞吐约 462 req/s、P95 约 154 ms；
+    24 次真实持久化 Workflow 在 6 并发下零失败，P95 约 453 ms，全部 Celery 队列归零。
+11. 短周期稳定性探针零失败、零容器重启、零队列积压；Full↔Compact 直接共享卷切换已
+    双向验证两组 Project、Artifact、Workflow Version 和 Execution Snapshot。72 小时真实试点不以短测代替。
+12. 本机回环 Registry 已真实推送 Backend、Frontend、PostgreSQL、Redis 和 MinIO 五个 ARM64 镜像，
+    输出 5 条仓库返回的 `repository@sha256` 引用；发布 Tag 带架构后缀。
+13. 当前完整门槛：后端 348 passed/3 skipped、总覆盖率 90.54%；前端 43 文件 167 passed，
+    Statements 87.71%、Branches 80.76%、Functions 86.42%、Lines 89.69%；格式、Ruff、mypy、Lint、
+    TypeScript、生产构建、Compose 解析和真实 Chromium 登录/质量总览均通过。
+14. S35 真实诊断目录含 13 个白名单文件、9 个成功探针和逐文件 SHA-256；精确扫描确认管理员口令、
+    数据加密密钥、应用密钥和 MinIO 口令均未命中，且不收集 `.env`、原始日志、对象名称/内容或业务载荷。
+15. ARM64 回滚演练对 11 个对象生成一致性备份；一次性 Project/Artifact 在首次恢复后消失，恢复后
+    再次写入成功，第二次恢复后探针再次消失且 6 服务健康。S35 离线开发包的 23 个内部文件摘要
+    全部通过并包含 5 个新运维工具；远程 CI 仍待 PR，自动化不能代替维护窗口审批。
+16. S36 使用不同离线 Tag 完成真实双版本演练并以最终脚本对 12 个对象复跑：新版本 6 服务全部健康后
+    注入失败，自动恢复旧数据、Artifact 和旧镜像，命令保持非零，证据为 `rolled_back`；失败路径未向新目录
+    复制 `.env`。随后正常升级为 `passed`，新目录以 `0600` 激活旧配置，运行镜像全部切换到 S36，
+    S32 登录、Artifact、Workflow 发布/执行及 Snapshot 业务 smoke 通过。
+17. 双版本演练发现离线主机安装 Git 但解压目录不是仓库时，旧备份脚本会因 `git rev-parse` 失败；
+    现由新升级器调用新备份工具并显式记录旧包 `SOURCE_REVISION`，普通离线备份也会回退读取包内元数据。
+    两份升级 JSON 均未命中管理员口令、数据加密密钥、应用密钥或 MinIO 口令；远程 CI 仍待 PR。
+18. GitHub 首页和公司电脑快速部署手册已补齐联网源码、Windows/WSL2、私有仓库与完全离线三条入口，
+    并明确首次登录、内网 TLS、备份、事务式升级及 Secret/业务数据不得提交 Git 的边界。
 
 ## 已完成：S30 Failure Intelligence 与 AI Draft Change Set
 
