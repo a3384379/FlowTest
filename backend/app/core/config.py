@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.domain.runtime_profiles import RuntimeFeature, RuntimeProfile, describe_runtime_profile
+
 _ENVIRONMENT_IMAGE_DIGEST = re.compile(
     r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?/"
     r"[a-z0-9]+(?:[._/-][a-z0-9]+)*"
@@ -23,6 +25,7 @@ class Settings(BaseSettings):
     app_name: str = "FlowTest API"
     app_version: str = "3.0.0-beta.3-dev.29"
     environment: str = "local"
+    runtime_profile: RuntimeProfile = RuntimeProfile.FULL
     debug: bool = False
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
@@ -134,9 +137,26 @@ class Settings(BaseSettings):
         self._validate_vault()
         self._validate_ai()
         self._validate_environment_lab()
+        self._validate_runtime_profile()
         self._validate_pact_broker()
         self._validate_production()
         return self
+
+    def _validate_runtime_profile(self) -> None:
+        profile = describe_runtime_profile(self.runtime_profile)
+        enabled_features = (
+            (RuntimeFeature.PERFORMANCE_LAB, self.feature_performance_lab_enabled),
+            (RuntimeFeature.ENVIRONMENT_LAB, self.feature_environment_lab_enabled),
+        )
+        unavailable = set(profile.unavailable_features)
+        conflicts = [
+            feature.value
+            for feature, enabled in enabled_features
+            if enabled and feature in unavailable
+        ]
+        if conflicts:
+            names = ", ".join(conflicts)
+            raise ValueError(f"{profile.profile.value} 运行档位不支持启用: {names}")
 
     def _validate_environment_lab(self) -> None:
         if not self.feature_environment_lab_enabled:
