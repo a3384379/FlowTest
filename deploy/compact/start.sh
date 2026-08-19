@@ -15,5 +15,7 @@ fi
 
 compact_source_environment
 "${compact_directory}/preflight.sh" "${environment_file}"
-compact_compose_build up --detach --build --pull never --wait
+compact_compose_build pull --policy missing postgres redis minio
+compact_compose_build build backend frontend
+compact_compose_build up --detach --no-build --pull never --wait
 "${compact_directory}/verify.sh" "${environment_file}"
