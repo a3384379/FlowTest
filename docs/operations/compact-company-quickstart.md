@@ -13,6 +13,12 @@
 
 GitHub 的 Source code ZIP/TAR 只包含源码，不包含 Docker 镜像，不能当作完全离线安装包。
 
+公司电脑不修改代码时，优先使用审批 Commit 对应的 CI 离线候选包。打开该 Commit 成功的
+`Compose Smoke Test`，在页面底部 `Artifacts` 下载名称为
+`flowtest-compact-ci-amd64-<完整 Commit SHA>` 的制品。GitHub 外层下载文件是 ZIP；解压后包含
+真正的 `flowtest-compact-ci-amd64.tar.gz` 与同名 `.sha256`。CI 制品只保留 7 天，且不是正式 Release；
+必须核对 Commit、工作流全绿和 SHA-256 后，才能通过公司批准的渠道进入试点电脑。
+
 ## 电脑要求
 
 - ARM64 或 x86_64 CPU，Docker 可用内存至少 3 GiB，建议 2 CPU、4 GB 内存和 10 GB 可用磁盘。
@@ -98,6 +104,11 @@ FLOWTEST_SECURE_COOKIES=true
 不表示升级成功。
 
 ## 完全离线交付
+
+如果使用上述 GitHub CI 候选包，公司目标电脑无需 Git，也不需要 Python、Node.js 或源码；只需
+Docker Engine/Desktop、Compose v2，以及 WSL2/Linux 已提供的 Bash、OpenSSL、Curl 和 Tar。
+CI 当前生成 `linux/amd64` 包，适用于常见 Intel/AMD Windows 与 Linux 公司电脑。ARM64 目标机仍需
+在同架构的受信发布工作站单独生成。
 
 联网且已安装 Git、Docker 的受信发布工作站，在干净的审批 Commit 上执行：
 
