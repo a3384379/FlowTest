@@ -28,6 +28,11 @@ FlowTest/
 
 ## 公司电脑快速运行
 
+如果公司 Windows 10 云桌面没有 WSL2、SLAT 或 Docker Desktop 条件，请使用
+[Standalone Windows 云桌面部署](docs/operations/standalone-company-quickstart.md)。该离线包把 Python
+运行时、依赖 wheels 和前端静态文件一起带入，云桌面不需要安装 Docker、WSL2、Node.js、uv、PostgreSQL、
+Redis 或 MinIO；解压后在 PowerShell 执行 `deploy\standalone\start.ps1` 和 `verify.ps1` 即可。
+
 公司内网试用优先使用 V4 Compact 档位。联网电脑安装 Docker Engine/Desktop、Compose v2、
 Git、OpenSSL 和 Curl 后，可直接从 GitHub 下载并启动：
 
