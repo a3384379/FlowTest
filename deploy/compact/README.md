@@ -104,6 +104,23 @@ FLOWTEST_RESTORE_CONFIRM=RESTORE \
 SHA-256；恢复后再比对远程对象集与 Readiness。备份不包含 `.env`，必须把
 `FLOWTEST_DATA_ENCRYPTION_KEY` 与备份分开托管，否则恢复后无法解密 Secret 和执行计划。
 
+### 从 Standalone 导入
+
+Standalone 使用 SQLite，不能把 `data/flowtest.db` 直接复制到 Compact。请在 Windows 云桌面先运行
+`deploy/standalone/export-to-compact.ps1` 生成 `standalone-compact-transfer-v1` 传输包，再通过公司
+批准的安全渠道复制到 Compact 主机。导入前必须将 Compact `.env` 中的
+`FLOWTEST_DATA_ENCRYPTION_KEY` 设置为 Standalone 的同一值；该密钥不进入传输包，也不要放在命令行：
+
+```bash
+FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
+  ./deploy/compact/import-standalone.sh /srv/flowtest-transfer/standalone-to-compact
+```
+
+脚本会在导入前启动 PostgreSQL/Redis/MinIO 并运行 Alembic；随后只接受 `20260821_0029`、业务表为空的
+目标数据库，先校验逐表 JSONL、外键关系和 Artifact SHA-256，再导入 PostgreSQL 并上传 MinIO。失败会回滚数据库并清理由本次导入新上传的对象；
+非空目标、版本不匹配、同名对象内容不同或传输包篡改都会拒绝。登录会话、OIDC 事务、通知重试、Runner
+租约/任务等运行状态不会迁移，导入完成后需重新登录并重新建立这些运行状态。
+
 ## S34 容量、稳定性与档位兼容
 
 源码验收工作站可生成可机器读取的 API/Workflow 容量证据和 Full↔Compact 双向资产证据：

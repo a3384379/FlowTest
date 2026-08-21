@@ -107,6 +107,32 @@ Set-ExecutionPolicy -Scope Process Bypass
 备份不包含 `.env`、管理员密码、加密密钥或日志；必须使用原来的
 `FLOWTEST_DATA_ENCRYPTION_KEY`，否则加密 Secret、凭据和执行 Snapshot 无法解密。
 
+## 迁移到 Compact
+
+Standalone 不能把 `data\flowtest.db` 直接放入 PostgreSQL。迁移时先在 Standalone 包目录停止服务，
+再生成逐表、逐 Artifact 校验的传输包；传输包不包含 `.env`、日志或任何密钥文件：
+
+```powershell
+.\deploy\standalone\export-to-compact.ps1 C:\flowtest-transfer\standalone-to-compact
+```
+
+传输包是一次性新目录，禁止覆盖旧包。它会排除登录会话、OIDC 事务、通知重试队列、Runner 租约/任务
+等临时状态；密码只保留现有密码哈希，加密字段保持密文。传输包属于敏感备份，只能通过公司批准的
+安全渠道传输。Compact 的 `FLOWTEST_DATA_ENCRYPTION_KEY` 必须设置为 Standalone `.env` 中的同一值，
+但不要把该值写入传输包或命令行。
+
+在已配置好 Compact `.env`、且允许脚本初始化空数据库的 Compact 目录执行（脚本会先启动
+PostgreSQL/Redis/MinIO 并运行 `alembic upgrade head`，不会启动业务 Web/API）：
+
+```bash
+FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
+  ./deploy/compact/import-standalone.sh /srv/flowtest-transfer/standalone-to-compact
+```
+
+导入前会先离线校验 manifest、所有表行、外键和 Artifact SHA-256；目标数据库非空或版本不匹配时会
+拒绝执行。导入在数据库事务中进行，失败会回滚数据库并清理本次新上传的对象；成功后自动启动 6 个
+Compact 服务并执行 Readiness 验收。该工具不会迁移 Standalone 的进程内事件、限流窗口或后台任务队列。
+
 Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260821_0029` 基线 Alembic revision。后续版本升级
 必须使用项目提供的升级说明和备份，不要手工删除 `flowtest.db`。
 

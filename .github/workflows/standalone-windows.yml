@@ -42,6 +42,13 @@ jobs:
           Push-Location "$env:RUNNER_TEMP\flowtest-standalone"
           try {
             Set-ExecutionPolicy -Scope Process Bypass
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              "deploy\standalone\export-to-compact.ps1", [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) { throw "export-to-compact.ps1 PowerShell 语法检查失败" }
+            & "runtime\python.exe" -m app.operations.standalone_transfer --help
             ./deploy/standalone/start.ps1
             ./deploy/standalone/verify.ps1
             ./deploy/standalone/soak.ps1 `

@@ -46,6 +46,19 @@ cd flowtest-compact-*/
 公司维护的 `current` 符号链接。失败升级不会复制 `.env`。如果自动回滚证据为
 `rollback_failed`，必须立即停止写入并按控制台路径手工恢复，不得只切换旧镜像。
 
+## 从 Windows Standalone 导入
+
+使用 Standalone 包中的 `export-to-compact.ps1` 生成传输包后，将其复制到本机并确认 Compact
+`.env` 的 `FLOWTEST_DATA_ENCRYPTION_KEY` 与源环境相同，再运行：
+
+```bash
+FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
+  ./deploy/compact/import-standalone.sh /srv/flowtest-transfer/standalone-to-compact
+```
+
+脚本会先为 PostgreSQL 初始化 Alembic Schema，目标业务表必须为空；随后校验传输包、导入 PostgreSQL、
+上传 MinIO 并执行 Readiness。登录会话、OIDC 事务、通知重试和 Runner 临时状态不会迁移。
+
 ## 长时健康观察
 
 ```bash

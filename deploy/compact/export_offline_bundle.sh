@@ -112,6 +112,7 @@ for deployment_file in \
   compose.yaml \
   drill_rollback.sh \
   generate_env.sh \
+  import-standalone.sh \
   install_offline.sh \
   preflight.sh \
   restore.sh \

@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-21（Asia/Shanghai）
+最后更新：2026-08-22（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
@@ -34,8 +34,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    Python 3.13 运行时与 wheels，公司云桌面无需 Docker、WSL2、Node.js、uv 或数据库服务。
 5. 已完成 Standalone 核心单元测试、SQLite/本地存储真实 smoke 和完整应用 lifespan smoke；
    已新增不依赖 Docker 的 Windows 长时稳定性探针 `deploy/standalone/soak.ps1`，只记录健康状态、
-   延迟和进程元数据，并在 Windows Bundle CI 中执行短窗口验证；当前仍需 Windows x64 云桌面实机
-   72 小时观察与 Standalone→Compact 数据迁移工具。
+   延迟和进程元数据，并在 Windows Bundle CI 中执行短窗口验证；已新增
+   `standalone-compact-transfer-v1` 逐表/逐 Artifact 迁移工具及 Windows/Compact 包装脚本；当前仍需
+   Windows x64 云桌面实机 72 小时真实观察与 Standalone→Compact 真实迁移演练。
 
 ## 已完成：V4 S32～S36 小型化与公司可部署性
 
