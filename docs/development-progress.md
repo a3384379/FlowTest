@@ -33,7 +33,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 4. 新增 Windows PowerShell 启动、停止、Readiness/档位验收、备份和离线包构建脚本；离线包可携带
    Python 3.13 运行时与 wheels，公司云桌面无需 Docker、WSL2、Node.js、uv 或数据库服务。
 5. 已完成 Standalone 核心单元测试、SQLite/本地存储真实 smoke 和完整应用 lifespan smoke；
-   当前仍需 Windows x64 云桌面实机验收、长时稳定性与 Standalone→Compact 数据迁移工具。
+   已新增不依赖 Docker 的 Windows 长时稳定性探针 `deploy/standalone/soak.ps1`，只记录健康状态、
+   延迟和进程元数据，并在 Windows Bundle CI 中执行短窗口验证；当前仍需 Windows x64 云桌面实机
+   72 小时观察与 Standalone→Compact 数据迁移工具。
 
 ## 已完成：V4 S32～S36 小型化与公司可部署性
 

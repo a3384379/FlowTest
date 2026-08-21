@@ -44,6 +44,10 @@ jobs:
             Set-ExecutionPolicy -Scope Process Bypass
             ./deploy/standalone/start.ps1
             ./deploy/standalone/verify.ps1
+            ./deploy/standalone/soak.ps1 `
+              -DurationSeconds 30 `
+              -IntervalSeconds 5 `
+              -OutputPath "$env:RUNNER_TEMP\standalone-soak.json"
           } finally {
             ./deploy/standalone/stop.ps1
             Remove-Item -LiteralPath .env, data, logs, .flowtest -Recurse -Force -ErrorAction SilentlyContinue

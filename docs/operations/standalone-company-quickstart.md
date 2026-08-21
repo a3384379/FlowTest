@@ -46,3 +46,15 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
 预期 `profile=standalone`、`worker_topology=in_process`，Readiness 只有 `database` 和 `storage`
 等本地检查，不应出现 `redis`。Performance Lab、Environment Lab 和 Runner Fabric 不属于公司云桌面
 轻量安装范围。
+
+若 IT 要做维护窗口稳定性观察，先保持服务运行，再执行只读探针：
+
+```powershell
+.\deploy\standalone\soak.ps1 `
+  -DurationSeconds 259200 `
+  -IntervalSeconds 30 `
+  -OutputPath C:\flowtest-evidence\standalone-soak.json
+```
+
+探针证据只包含健康状态、延迟和进程元数据，不包含业务响应、Cookie、Token 或 Secret；退出码非零时
+应保留 JSON、`logs\standalone.err.log` 和对应维护窗口记录供 IT 复核。

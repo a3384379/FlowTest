@@ -73,6 +73,22 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\deploy\standalone\stop.ps1
 ```
 
+## 长时稳定性探针
+
+探针不启动或停止服务，只读取 `/live`、`/ready`、`/runtime-profile`，并检查 Standalone PID
+是否持续存活。它只输出健康状态、延迟和进程元数据，不记录响应体、Cookie、Token、Secret 或业务载荷。
+公司维护窗口可执行 72 小时探针；证据目录应由 IT 按公司保留策略管理：
+
+```powershell
+.\deploy\standalone\soak.ps1 `
+  -DurationSeconds 259200 `
+  -IntervalSeconds 30 `
+  -OutputPath C:\flowtest-evidence\standalone-soak.json
+```
+
+退出码为 `0` 表示整个窗口没有探针失败；非 `0` 表示需要查看 JSON 中的失败代码和本机日志。
+探针不会代替真实业务试点，也不会把短时自动化结果写成 72 小时观察证据。
+
 ## 备份与恢复原则
 
 备份前会停止本机进程，目标目录必须是不存在的绝对路径：
