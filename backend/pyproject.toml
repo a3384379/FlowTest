@@ -31,6 +31,7 @@ dependencies = [
   "pydantic-settings>=2.15,<3",
   "python-multipart>=0.0.22,<1",
   "PyYAML>=6.0.3,<7",
+  "aiosqlite>=0.22,<1",
   "redis>=6.4,<6.5",
   "sqlalchemy[asyncio]>=2.0.51,<3",
   "sqlglot>=27.29,<28",
@@ -50,7 +51,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "aiosqlite>=0.22,<1",
   "boto3-stubs[s3]>=1.43,<2",
   "import-linter>=2.7,<3",
   "mypy>=2.3,<3",

@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-19（Asia/Shanghai）
+最后更新：2026-08-21（Asia/Shanghai）
 状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
@@ -14,12 +14,28 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
   用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
   事务式无外网升级、容量稳定性、Full↔Compact 兼容、隐私安全诊断和可恢复回滚验收。
+- Standalone 代码在独立 `codex/standalone-runtime` 分支继续推进，避免把仍在评审的 Compact Docker
+  PR #38 与无 Docker 运行时混在同一提交中。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
-## 进行中：V4 S32～S36 小型化与公司可部署性
+## 进行中：V4 Standalone 无 Docker 云桌面部署
+
+1. Standalone 新增独立 `standalone` 运行档位；Full/Compact 的 PostgreSQL、Redis、MinIO 和
+   Celery 拓扑保持不变，不把 SQLite 数据迁移回 Docker 档位。
+2. Standalone 使用 SQLite WAL、本地附件目录、进程内事件总线、固定窗口限流和后台调度器；
+   API、Web、工作流和测试计划在一个 Python 进程内运行，启动时自动创建当前模型基线并记录
+   `20260821_0029` Alembic revision。
+3. Performance Lab、Environment Lab、Runner Fabric 在该档位固定关闭；事件历史、限流桶和未完成
+   进程任务在重启后不恢复，业务状态、附件和加密 Snapshot 持久化到 `data\`。
+4. 新增 Windows PowerShell 启动、停止、Readiness/档位验收、备份和离线包构建脚本；离线包可携带
+   Python 3.13 运行时与 wheels，公司云桌面无需 Docker、WSL2、Node.js、uv 或数据库服务。
+5. 已完成 Standalone 核心单元测试、SQLite/本地存储真实 smoke 和完整应用 lifespan smoke；
+   当前仍需 Windows x64 云桌面实机验收、长时稳定性与 Standalone→Compact 数据迁移工具。
+
+## 已完成：V4 S32～S36 小型化与公司可部署性
 
 1. `full` 保持现有隔离 Worker 拓扑；`compact` 显式使用合并 Worker，并公开可机器验收的
    `/api/v1/runtime-profile` 运行契约。

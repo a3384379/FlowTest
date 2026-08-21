@@ -3,6 +3,9 @@
 本文描述 Full 档位。面向公司内网试用的 V4 六容器档位见
 [`deploy/compact/README.md`](../../deploy/compact/README.md)；两种档位共享数据库 Schema，
 但 Compact 不承担 Performance Lab、Environment Lab 和完整发布容量验收。
+不具备 Docker/WSL2/虚拟化能力的 Windows 云桌面请使用
+[`standalone-company-quickstart.md`](standalone-company-quickstart.md) 和
+[`deploy/standalone/README.md`](../../deploy/standalone/README.md)。
 私有仓库、离线包、无外网升级及 72 小时试点见 Compact 手册和
 [`compact-pilot.md`](compact-pilot.md)。
 需要从 GitHub 下载到公司电脑并立即试用时，从

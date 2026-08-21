@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
+    data_dir: str = ".flowtest-data"
+    frontend_dist_dir: str = ""
+    standalone_task_concurrency: int = Field(default=4, ge=1, le=32)
+    standalone_scheduler_enabled: bool = True
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
@@ -157,6 +161,8 @@ class Settings(BaseSettings):
         if conflicts:
             names = ", ".join(conflicts)
             raise ValueError(f"{profile.profile.value} 运行档位不支持启用: {names}")
+        if self.runtime_profile is RuntimeProfile.STANDALONE and self.feature_runner_fabric_enabled:
+            raise ValueError("standalone 运行档位不支持 Runner Fabric")
 
     def _validate_environment_lab(self) -> None:
         if not self.feature_environment_lab_enabled:
@@ -217,8 +223,9 @@ class Settings(BaseSettings):
             self.secret_key == "change-me-before-production-at-least-32-bytes"  # noqa: S105
             or self.bootstrap_admin_password == "FlowTest-Change-Me-123!"  # noqa: S105
             or self.data_encryption_key == "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
-            or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
         )
+        if self.runtime_profile is not RuntimeProfile.STANDALONE:
+            unsafe = unsafe or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
         if unsafe or not self.secure_cookies:
             raise ValueError("生产环境必须替换默认密钥、管理员密码并启用安全 Cookie")
         if self.feature_oidc_enabled:

@@ -5,11 +5,13 @@ from enum import StrEnum
 class RuntimeProfile(StrEnum):
     FULL = "full"
     COMPACT = "compact"
+    STANDALONE = "standalone"
 
 
 class WorkerTopology(StrEnum):
     ISOLATED = "isolated"
     CONSOLIDATED = "consolidated"
+    IN_PROCESS = "in_process"
 
 
 class RuntimeFeature(StrEnum):
@@ -29,6 +31,15 @@ def describe_runtime_profile(profile: RuntimeProfile) -> RuntimeProfileDescripti
         return RuntimeProfileDescription(
             profile=profile,
             worker_topology=WorkerTopology.CONSOLIDATED,
+            unavailable_features=(
+                RuntimeFeature.PERFORMANCE_LAB,
+                RuntimeFeature.ENVIRONMENT_LAB,
+            ),
+        )
+    if profile is RuntimeProfile.STANDALONE:
+        return RuntimeProfileDescription(
+            profile=profile,
+            worker_topology=WorkerTopology.IN_PROCESS,
             unavailable_features=(
                 RuntimeFeature.PERFORMANCE_LAB,
                 RuntimeFeature.ENVIRONMENT_LAB,

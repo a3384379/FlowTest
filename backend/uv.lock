@@ -615,6 +615,7 @@ name = "flowtest-backend"
 version = "3.0.0b3.dev29"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "alembic" },
     { name = "argon2-cffi" },
     { name = "asyncmy" },
@@ -657,7 +658,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "aiosqlite" },
     { name = "boto3-stubs", extra = ["s3"] },
     { name = "import-linter" },
     { name = "mypy" },
@@ -681,7 +681,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.22,<1" },
+    { name = "aiosqlite", specifier = ">=0.22,<1" },
     { name = "alembic", specifier = ">=1.19,<2" },
     { name = "argon2-cffi", specifier = ">=25.1,<26" },
     { name = "asyncmy", specifier = ">=0.2.11,<1" },

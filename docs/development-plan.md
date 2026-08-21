@@ -148,9 +148,10 @@ S12 的两周试点属于真实时间观察，不以短时自动化代替。记�
 
 ## V4.0 迭代路线
 
-V4 将“容易进入公司环境”提升为产品主线。小型化不另建 SQLite/本地文件/
-进程内队列分支，而是在同一份领域代码、PostgreSQL Schema、Redis 协议和 Artifact 格式上
-收缩部署拓扑。Full 继续承担完整发布门槛，Compact 优先服务部门试用和功能回归。
+V4 将“容易进入公司环境”提升为产品主线。Compact 继续在同一份 PostgreSQL Schema、Redis 协议和
+Artifact 格式上收缩 Docker 拓扑；S37 另增显式 Standalone 运行档位，复用领域服务但以 SQLite、本地
+附件和进程内队列适配没有虚拟化能力的 Windows 云桌面。Full 继续承担完整发布门槛，Compact 优先服务
+部门试用和功能回归，Standalone 只承担低并发功能验证。
 
 | 迭代 | 主要交付 | 状态 |
 |---|---|---|
@@ -159,6 +160,7 @@ V4 将“容易进入公司环境”提升为产品主线。小型化不另建 S
 | S34 | 负载资源基线、公司试点、长时运行和 Full↔Compact 升级兼容验收 | 容量/探针/双向兼容自动化完成；72 小时公司试点待执行 |
 | S35 | 隐私安全诊断包、故障交接和真实回滚证明 | ARM64 本地与 amd64 远程回滚验收完成 |
 | S36 | 事务式离线升级、自动回滚、升级证据和活动目录激活 | ARM64 本地与 amd64 远程失败/成功升级验收完成 |
+| S37 | Windows 云桌面 Standalone：SQLite、本地附件、进程内任务、PowerShell 离线包 | 核心代码与脚本已完成；待 Windows x64 实机验收 |
 
 S32～S34 的运行档位、离线供应链与兼容基线分别见
 [`ADR 0026`](adr/0026-explicit-runtime-profiles-and-compact-deployment.md)、
@@ -167,6 +169,7 @@ S32～S34 的运行档位、离线供应链与兼容基线分别见
 回滚证据边界见 [`ADR 0029`](adr/0029-privacy-safe-support-and-rollback-evidence.md)。
 S36 的离线升级状态机与目录激活边界见
 [`ADR 0030`](adr/0030-transactional-offline-upgrade-and-activation.md)。
+S37 的无 Docker 单进程边界见 [`ADR 0031`](adr/0031-standalone-no-docker-runtime.md)。
 其自动化通过不等于 V4 发布，也不豁免 V2/V3 已有的真实试点和 RC 门槛。
 
 ## S26 完成清单

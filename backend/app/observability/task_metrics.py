@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
+from threading import Lock
 from typing import Protocol, cast
 
 from redis import Redis as SyncRedis
@@ -55,6 +56,36 @@ class RedisTaskMetricsReader:
         for key in keys[1:]:
             lengths += await cast(Awaitable[int], client.llen(key))
         return int(lengths)
+
+
+class InProcessTaskMetricsReader:
+    """Task metrics for the Standalone dispatcher."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._queue_depths: dict[str, int] = {queue: 0 for queue in QUEUE_NAMES}
+        self._active_workers = 0
+        self._task_counts: dict[str, int] = {}
+
+    async def read(self) -> TaskMetricsSnapshot:
+        with self._lock:
+            return TaskMetricsSnapshot(
+                queue_depths=dict(self._queue_depths),
+                active_workers=self._active_workers,
+                task_counts=dict(self._task_counts),
+            )
+
+    def set_active_workers(self, count: int) -> None:
+        with self._lock:
+            self._active_workers = max(0, count)
+
+    def set_queue_depth(self, queue: str, depth: int) -> None:
+        with self._lock:
+            self._queue_depths[queue] = max(0, depth)
+
+    def record_task(self, status: str) -> None:
+        with self._lock:
+            self._task_counts[status] = self._task_counts.get(status, 0) + 1
 
 
 def record_worker_heartbeat(hostname: str) -> None:
