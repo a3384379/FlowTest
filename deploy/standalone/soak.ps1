@@ -169,7 +169,13 @@ try {
 } finally {
     $endedAt = [DateTime]::UtcNow
     $status = if ($script:FailureCount -gt 0) { "failed" } else { "passed" }
-    $evidence = [ordered]@{
+    $failureCounts = [ordered]@{}
+    foreach ($failureCode in $script:FailureCounts.Keys) {
+        $failureCounts[$failureCode] = [int]$script:FailureCounts[$failureCode]
+    }
+    $failureSamples = @($script:FailureSamples.ToArray())
+    $observations = @($script:Observations.ToArray())
+    $evidence = [pscustomobject]@{
         schema_version = "standalone-soak-v1"
         status = $status
         profile = "standalone"
@@ -182,12 +188,12 @@ try {
         timeout_seconds = $TimeoutSeconds
         probe_count = $script:ProbeCount
         failure_count = $script:FailureCount
-        failure_counts = $script:FailureCounts
-        failure_samples = @($script:FailureSamples)
+        failure_counts = $failureCounts
+        failure_samples = $failureSamples
         initial_process_id = $script:InitialProcessId
         max_latency_ms = $script:MaxLatencyMilliseconds
         observations_truncated = $script:ObservationsTruncated
-        observations = @($script:Observations)
+        observations = $observations
         note = "仅记录健康状态、延迟和进程元数据；不记录响应体、Cookie、Token、Secret 或业务载荷。"
     }
     $evidence | ConvertTo-Json -Depth 6 | Set-Content -Path $OutputPath -Encoding UTF8
