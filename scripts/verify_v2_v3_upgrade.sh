@@ -123,7 +123,7 @@ echo "Upgrading V2 data in place to the current V3 head..."
 "${compose[@]}" --profile v2 stop v2-api v2-worker
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic upgrade head
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic check
-assert_revision 20260813_0028
+assert_revision 20260821_0029
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-upgrade
 
@@ -139,8 +139,8 @@ echo "Re-upgrading the rolled-back data set to the current V3 head..."
 "${compose[@]}" --profile v2 stop v2-api v2-worker
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic upgrade head
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic check
-assert_revision 20260813_0028
+assert_revision 20260821_0029
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-reupgrade
 
-echo '{"status":"passed","baseline":"v2.0.0-rc.1","upgrade":"20260812_0018->20260813_0028","rollback":"20260813_0028->20260812_0018","reupgrade":"20260812_0018->20260813_0028"}'
+echo '{"status":"passed","baseline":"v2.0.0-rc.1","upgrade":"20260812_0018->20260821_0029","rollback":"20260821_0029->20260812_0018","reupgrade":"20260812_0018->20260821_0029"}'
