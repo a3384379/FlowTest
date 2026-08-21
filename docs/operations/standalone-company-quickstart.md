@@ -21,9 +21,14 @@
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 cd C:\flowtest-standalone
+.\deploy\standalone\preflight.ps1
 .\deploy\standalone\start.ps1
 .\deploy\standalone\verify.ps1
 ```
+
+`preflight.ps1` 会检查 Windows x64、内置 Python 3.13、离线依赖、前端文件、目录写入权限、磁盘空间和
+端口占用；失败时先按 JSON 输出的 `errors` 修复。它不会打印 `.env` 中的密钥，也不需要 Docker、WSL2
+或联网。
 
 浏览器打开 `http://127.0.0.1:8000`。首次密码只保存在包根目录 `.env`，登录后立即修改；安装人员
 不要把 `.env` 上传 GitHub、工单或聊天工具。

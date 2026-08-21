@@ -160,7 +160,7 @@ Artifact 格式上收缩 Docker 拓扑；S37 另增显式 Standalone 运行档�
 | S34 | 负载资源基线、公司试点、长时运行和 Full↔Compact 升级兼容验收 | 容量/探针/双向兼容自动化完成；72 小时公司试点待执行 |
 | S35 | 隐私安全诊断包、故障交接和真实回滚证明 | ARM64 本地与 amd64 远程回滚验收完成 |
 | S36 | 事务式离线升级、自动回滚、升级证据和活动目录激活 | ARM64 本地与 amd64 远程失败/成功升级验收完成 |
-| S37 | Windows 云桌面 Standalone：SQLite、本地附件、进程内任务、PowerShell 离线包 | 核心代码、离线包、启动/验收、长时探针和 Standalone→Compact 传输工具已完成；待 Windows x64 实机验收与真实迁移演练 |
+| S37 | Windows 云桌面 Standalone：SQLite、本地附件、进程内任务、PowerShell 离线包 | 核心代码、安装前检查、离线包、启动/验收、长时探针和 Standalone→Compact 传输工具已完成；待 Windows x64 实机验收与真实迁移演练 |
 
 S32～S34 的运行档位、离线供应链与兼容基线分别见
 [`ADR 0026`](adr/0026-explicit-runtime-profiles-and-compact-deployment.md)、

@@ -53,9 +53,14 @@ $expected -eq $actual
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
+.\deploy\standalone\preflight.ps1
 .\deploy\standalone\start.ps1
 .\deploy\standalone\verify.ps1
 ```
+
+`preflight.ps1` 会检查 Windows x64、内置 Python 3.13、离线依赖、前端文件、目录写入权限、磁盘空间和
+端口占用；失败时先按 JSON 输出的 `errors` 修复。它不会打印 `.env` 中的密钥，也不需要 Docker、WSL2
+或联网。首次运行如果尚未创建 `.env`，检查会给出提示，随后由 `start.ps1` 生成随机密钥。
 
 首次启动会在包根目录创建 `.env`、`data\`、`logs\` 和 `.flowtest\`，并随机生成管理员初始密码。
 密码只写入本机 `.env`，不会输出到控制台；登录后立即修改。访问 <http://127.0.0.1:8000>。
