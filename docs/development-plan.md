@@ -172,6 +172,13 @@ S36 的离线升级状态机与目录激活边界见
 S37 的无 Docker 单进程边界见 [`ADR 0031`](adr/0031-standalone-no-docker-runtime.md)。
 其自动化通过不等于 V4 发布，也不豁免 V2/V3 已有的真实试点和 RC 门槛。
 
+## V5.0 设计草案
+
+V5 以 V4 的三档运行边界为稳定底座，优先推进组织/租户隔离、可恢复 Command、HA 控制面、密钥轮换
+和插件生态；不把 Docker、Kubernetes 或云托管服务设为 Standalone 的硬前提。阶段、退出条件和兼容
+护栏见 [`docs/development-plan-v5.md`](development-plan-v5.md) 与
+[`ADR 0032`](adr/0032-v5-evolution-guardrails.md)。该草案不改变 V4 的真实试点、迁移和人工签署门槛。
+
 ## S26 完成清单
 
 1. Environment Template 只由系统管理员注册、创建不可变版本和停用；版本保存规范 JSON、SHA-256 与

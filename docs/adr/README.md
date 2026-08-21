@@ -32,3 +32,5 @@
 28. Full/Compact 数据兼容契约与 Compact 质量基线
 29. Compact 隐私安全诊断与可恢复回滚证据
 30. Compact 事务式离线升级、自动回滚与目录激活
+31. Windows 云桌面 Standalone 无 Docker 运行时
+32. V5 运行档位演进与兼容护栏（提案）
