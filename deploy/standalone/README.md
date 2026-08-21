@@ -17,6 +17,9 @@ Standalone 是不依赖 Docker、WSL2、PostgreSQL、Redis、MinIO 或虚拟化�
 - 所有业务数据位于 `data\flowtest.db` 和 `data\artifacts\`；事件历史和限流状态为进程内数据，
   重启后不会保留。业务执行状态、附件和 Snapshot 会持久化。
 
+公司 72 小时试点、责任人签署和 Standalone→Compact 迁移记录模板见
+[`docs/operations/standalone-pilot.md`](../../docs/operations/standalone-pilot.md)。
+
 ## 在个人电脑生成离线包
 
 个人电脑准备 Python 3.13、`uv`、Node.js 22 和 pnpm 11。先构建 Web，再生成包含 Python 运行时、

@@ -9,6 +9,9 @@
 完整边界、构包和备份说明见
 [`deploy/standalone/README.md`](../../deploy/standalone/README.md)。
 
+正式公司试点和迁移请同时使用
+[`standalone-pilot.md`](standalone-pilot.md) 记录 SHA-256、72 小时观察和责任人签署。
+
 ## IT 需要确认的事项
 
 - Windows 10 x64，允许执行签名/审批后的 PowerShell 脚本；不需要升级到支持 Docker 的硬件。

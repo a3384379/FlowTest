@@ -5,7 +5,7 @@
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
-PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。72 小时公司试点和人工签署待执行。
+PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
 ## 当前恢复点
@@ -35,8 +35,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 5. 已完成 Standalone 核心单元测试、SQLite/本地存储真实 smoke 和完整应用 lifespan smoke；
    已新增不依赖 Docker 的 Windows 长时稳定性探针 `deploy/standalone/soak.ps1`，只记录健康状态、
    延迟和进程元数据，并在 Windows Bundle CI 中执行短窗口验证；已新增
-   `standalone-compact-transfer-v1` 逐表/逐 Artifact 迁移工具及 Windows/Compact 包装脚本；当前仍需
-   Windows x64 云桌面实机 72 小时真实观察与 Standalone→Compact 真实迁移演练。
+   `standalone-compact-transfer-v1` 逐表/逐 Artifact 迁移工具及 Windows/Compact 包装脚本；试点与迁移
+   责任人、证据字段和签署模板见 `docs/operations/standalone-pilot.md`，当前仍需 Windows x64 云桌面
+   实机 72 小时真实观察与 Standalone→Compact 真实迁移演练。
 
 ## 已完成：V4 S32～S36 小型化与公司可部署性
 
@@ -579,10 +580,12 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 ## 下一步
 
 1. 从 PR #38 成功的 Compact CI 下载固定 Commit 的 `amd64` 离线候选包和 SHA-256，通过公司受信
-   渠道交付，在目标 Windows/WSL2 或 Linux Docker 主机完成首次安装、备份恢复和回滚演练。
+   渠道交付，在目标 Windows/WSL2 或 Linux Docker 主机完成首次安装、备份恢复和回滚演练；Standalone
+   试点按 `docs/operations/standalone-pilot.md` 记录。
 2. 在同一候选 Commit 上完成至少 72 小时公司真实试点，由业务负责人、运维和安全审批人共同签署；
    任何代码修复都生成新候选并重新开始观察。
-3. 试点通过后完成 PR #38 最终评审和合并；未完成真实试点与人工签署前不创建 V4 正式标签。
+3. 试点通过后完成 PR #38 Compact 与 PR #39 Standalone 最终评审和合并；未完成真实试点与人工签署前
+   不创建 V4 正式标签。
 4. 继续 S31 剩余页面产品化、容量、安全、备份恢复和 V3 试点；未完成这些门槛前不宣告 V3 GA。
 5. 并行推进 `v2.0.0-rc.1` 的真实试点与连续 14 个自然日观察；只有签署、恢复演练、扫描和容量证据
    全部通过后创建 `v2.0.0` 正式标签。
