@@ -80,10 +80,23 @@ $arguments = @("-m", "uvicorn", "app.main:app", "--host", $BindHost, "--port", $
 $process = Start-Process -FilePath $python -ArgumentList $arguments -WorkingDirectory $Root `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 Set-Content -Path $PidFile -Value $process.Id -Encoding ASCII -NoNewline
-Start-Sleep -Seconds 2
 if ($process.HasExited) {
     Get-Content -Tail 40 $stderr -ErrorAction SilentlyContinue
     throw "FlowTest 启动失败，详见 logs\standalone.err.log"
+}
+$ready = $false
+$deadline = [DateTime]::UtcNow.AddSeconds(60)
+while (-not $ready -and [DateTime]::UtcNow -lt $deadline) {
+    try {
+        $response = Invoke-WebRequest "http://127.0.0.1:$Port/api/v1/ready" -UseBasicParsing
+        $ready = $response.StatusCode -eq 200
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+if (-not $ready) {
+    Get-Content -Tail 60 $stderr -ErrorAction SilentlyContinue
+    throw "FlowTest 启动超时，详见 logs\standalone.err.log"
 }
 Write-Host "FlowTest Standalone 已启动：http://$BindHost`:$Port"
 Write-Host "验证命令：powershell -ExecutionPolicy Bypass -File deploy\standalone\verify.ps1 -Port $Port"
