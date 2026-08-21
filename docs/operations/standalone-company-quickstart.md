@@ -28,6 +28,14 @@ cd C:\flowtest-standalone
 浏览器打开 `http://127.0.0.1:8000`。首次密码只保存在包根目录 `.env`，登录后立即修改；安装人员
 不要把 `.env` 上传 GitHub、工单或聊天工具。
 
+从 GitHub Actions 下载离线包后，可在 PowerShell 用以下命令校验压缩包；输出必须为 `True`：
+
+```powershell
+$expected = (Get-Content .\flowtest-standalone-windows-amd64.zip.sha256 -Raw).Trim().Split()[0].ToLowerInvariant()
+$actual = (Get-FileHash .\flowtest-standalone-windows-amd64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected -eq $actual
+```
+
 ## 运行档位确认
 
 ```powershell

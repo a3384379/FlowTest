@@ -39,6 +39,14 @@ pnpm 或任何数据库/缓存服务。
 `flowtest-standalone-windows-amd64.zip` 和同名 `.sha256`。下载后先在个人电脑校验 SHA-256，再通过
 公司批准渠道传入云桌面；该 CI 制品保留 7 天，不等同于正式 Release。
 
+PowerShell 校验命令如下；输出必须为 `True`：
+
+```powershell
+$expected = (Get-Content .\flowtest-standalone-windows-amd64.zip.sha256 -Raw).Trim().Split()[0].ToLowerInvariant()
+$actual = (Get-FileHash .\flowtest-standalone-windows-amd64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected -eq $actual
+```
+
 ## 云桌面首次启动
 
 在解压目录打开 PowerShell：
@@ -55,6 +63,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ```powershell
 .\deploy\standalone\start.ps1 -BindHost 10.20.30.40 -Port 8000
+.\deploy\standalone\verify.ps1 -BindHost 10.20.30.40 -Port 8000
 ```
 
 默认只监听回环地址，不应直接暴露到公网。日志位于 `logs\standalone.out.log` 和

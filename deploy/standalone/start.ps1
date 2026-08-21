@@ -85,10 +85,12 @@ if ($process.HasExited) {
     throw "FlowTest 启动失败，详见 logs\standalone.err.log"
 }
 $ready = $false
+$probeHost = if ($BindHost -in @("0.0.0.0", "::")) { "127.0.0.1" } else { $BindHost }
+$readyUrl = "http://{0}:{1}/api/v1/ready" -f $probeHost, $Port
 $deadline = [DateTime]::UtcNow.AddSeconds(60)
 while (-not $ready -and [DateTime]::UtcNow -lt $deadline) {
     try {
-        $response = Invoke-WebRequest "http://127.0.0.1:$Port/api/v1/ready" -UseBasicParsing
+        $response = Invoke-WebRequest $readyUrl -UseBasicParsing
         $ready = $response.StatusCode -eq 200
     } catch {
         Start-Sleep -Seconds 1

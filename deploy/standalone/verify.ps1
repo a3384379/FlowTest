@@ -1,7 +1,11 @@
-param([int]$Port = 8000)
+param(
+    [string]$BindHost = "127.0.0.1",
+    [int]$Port = 8000
+)
 
 $ErrorActionPreference = "Stop"
-$base = "http://127.0.0.1:$Port"
+$probeHost = if ($BindHost -in @("0.0.0.0", "::")) { "127.0.0.1" } else { $BindHost }
+$base = "http://{0}:{1}" -f $probeHost, $Port
 $ready = Invoke-RestMethod "$base/api/v1/ready"
 $profile = Invoke-RestMethod "$base/api/v1/runtime-profile"
 $frontend = Invoke-WebRequest "$base/" -UseBasicParsing
