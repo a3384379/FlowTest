@@ -1,6 +1,9 @@
 name: Standalone Windows Bundle
 
 on:
+  push:
+    branches:
+      - codex/standalone-runtime
   workflow_dispatch:
 
 permissions:
