@@ -1,4 +1,4 @@
-"""HTTP client for the read-only FlowTest application gateway."""
+"""HTTP client for the FlowTest application gateway."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -9,6 +9,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.test_design import MCPControlledWriteEnvelope
 
 
 class MCPGatewayError(Exception):
@@ -31,11 +32,11 @@ class MCPReadGatewayClient:
         token: str | None = None,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
-        client_version: str = "flowtest-mcp-s41",
+        client_version: str = "flowtest-mcp-s42",
     ) -> None:
         self._base_url = _validate_base_url(base_url)
         self._token = token
-        self._client_version = client_version[:80] or "flowtest-mcp-s41"
+        self._client_version = client_version[:80] or "flowtest-mcp-s42"
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
@@ -137,6 +138,18 @@ class MCPReadGatewayClient:
             resource_uri=resource_uri,
         )
 
+    async def propose_test_design(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPControlledWriteEnvelope:
+        return await self._post(
+            "/api/v1/mcp/write/change-sets",
+            payload=payload,
+            token=token,
+        )
+
     async def _get(
         self,
         path: str,
@@ -163,6 +176,39 @@ class MCPReadGatewayClient:
             raise _gateway_error(response)
         try:
             return MCPReadEnvelope.model_validate(response.json())
+        except (ValueError, ValidationError) as error:
+            raise MCPGatewayError(
+                code="MCP_GATEWAY_INVALID_RESPONSE",
+                status_code=502,
+                message="MCP 应用网关返回格式无效",
+            ) from error
+
+    async def _post(
+        self,
+        path: str,
+        *,
+        payload: Mapping[str, Any],
+        token: str | None,
+    ) -> MCPControlledWriteEnvelope:
+        headers = {
+            "X-MCP-Client-Version": self._client_version,
+            "Content-Type": "application/json",
+        }
+        effective_token = token or self._token
+        if effective_token:
+            headers["Authorization"] = f"Bearer {effective_token}"
+        try:
+            response = await self._client.post(path, json=dict(payload), headers=headers)
+        except httpx.HTTPError as error:
+            raise MCPGatewayError(
+                code="MCP_GATEWAY_UNAVAILABLE",
+                status_code=503,
+                message="MCP 应用网关暂时不可用",
+            ) from error
+        if response.is_error:
+            raise _gateway_error(response)
+        try:
+            return MCPControlledWriteEnvelope.model_validate(response.json())
         except (ValueError, ValidationError) as error:
             raise MCPGatewayError(
                 code="MCP_GATEWAY_INVALID_RESPONSE",

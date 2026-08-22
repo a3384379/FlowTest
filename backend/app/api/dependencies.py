@@ -24,6 +24,7 @@ from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
 from app.models.organizations import ServiceAccount
 from app.repositories.access import UserRepository
+from app.services.mcp_controlled_write import MCP_WRITE_SCOPE
 from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.services.organizations import OrganizationContextService
 from app.services.service_accounts import ServiceAccountService
@@ -170,9 +171,48 @@ async def get_mcp_authenticated_principal(
         reset_tenant_context(context_token)
 
 
+async def get_mcp_write_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 需要服务账号令牌",
+            status_code=401,
+        )
+    account, tenant = await ServiceAccountService(session).authenticate(
+        credentials.credentials,
+        touch_last_used=False,
+    )
+    if MCP_WRITE_SCOPE not in tenant.scopes:
+        raise AppError(
+            code="MCP_SCOPE_REQUIRED",
+            message="服务账号缺少 MCP 受控写入权限",
+            status_code=403,
+        )
+    actor = await UserRepository(session).get(tenant.actor_id)
+    if actor is None or not actor.is_active:
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 服务账号关联用户不可用",
+            status_code=401,
+        )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
+    finally:
+        reset_tenant_context(context_token)
+
+
 MCPCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_authenticated_principal),
+]
+
+MCPWriteCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_write_principal),
 ]
 
 

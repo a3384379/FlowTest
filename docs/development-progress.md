@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S41 MCP Read 只读网关与协议适配已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S42 Test Design、统一 ChangeSet 与 MCP Controlled Write 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -11,7 +11,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 ## 当前恢复点
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
-  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 完成后按阶段提交并暂停。
+  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`；S42 完成后按阶段提交并暂停。
   当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
@@ -122,8 +122,33 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 5. 本阶段无数据库模型或迁移变更；临时 PostgreSQL 已完成从空库升级到 `20260822_0036`、`alembic check`、
    降级到 `20260822_0035`、再升级和再次 `check`，临时数据库已清理。未把正在运行的旧 Compact 镜像当作
    S41 证据，未声称 Windows 云桌面实机或远程 CI 验证。
-6. S41 已完成本地等价验证，提交后暂停；下一阶段 S42（TestIntent/TestCase/Test Design、Knowledge
-   Graph、State Model、Oracle、Coverage 与统一 ChangeSet）须经用户确认后开始。
+6. S41 已完成本地等价验证并提交；S42 已完成本地等价验证，提交后暂停；下一阶段 S43
+   （Durable Execution Command、Checkpoint、Idempotency、Resume、Retry 与 Fencing）须经用户确认后开始。
+
+## 已完成：V5 S42 TestIntent/TestCase/Test Design 与 MCP Controlled Write（等待用户确认）
+
+1. 新增纯 Domain Test Design 合约：TestIntent、Knowledge Graph、State Model、Oracle、Coverage 和
+   稳定 Fingerprint。图节点/边、状态/迁移和 Oracle 标识均在进入 Application Service 前完成 typed 校验；
+   Test Design 是设计聚合，不替换既有可执行 TestCase 数据模型。
+2. 新增 `TestDesign` 与 `ChangeSetApproval` 持久化模型及可回滚迁移 `20260822_0037`；统一 ChangeSet
+   继续复用 `ai_change_sets/ai_change_items` 物理表，仅扩展 `test_design` 变更项类型。MCP 提案使用
+   `source_type=mcp`、`source_ref`、`actor_type=service_account`、`actor_id`，既有 AI ChangeSet 查询
+   仍保持只显示 `source_type=ai` 的兼容行为。
+3. 新增 `/api/v1/mcp/write/change-sets` Application API 和官方 MCP SDK 的
+   `flowtest.propose_test_design` 工具。MCP 只可提交 Draft；低置信度 Oracle 强制进入 Review，高/危风险
+   写入必须先建立人工批准记录，批准后仍须逐项审核，不能自动发布、执行、修改权限或创建 Credential。
+   人工 Review 通过既有 TestCase Application Service 创建 TestCase，并在接受 Design 后落库 approved 设计。
+4. 受控写入对 Secret、凭据、Authorization、Token、Card/Email 等敏感值只返回安全路径错误，允许的运行时
+   参数使用 `secret://` 引用；响应、审计和 ChangeSet 元数据均不记录令牌或 PII。MCP 继续通过 Application
+   Service 访问，不直连 ORM/数据库；新增 `mcp:write` Service Account Scope 与独立 TenantContext 校验。
+5. Standalone SQLite 增量 Schema 会创建新表，并对旧 `ai_change_items` 进行可恢复表重建以加入 `test_design`
+   约束；Transfer 表清单由 72 增至 74，Manifest 版本保持兼容。PostgreSQL 已完成 `0036 → 0037` upgrade、
+   `alembic check`、downgrade 到 `0036`、再 upgrade 和再次 check。
+6. 本地验证：后端 Ruff format/check、mypy、pytest `399 passed / 3 skipped`，覆盖率 `90.01%`；新增
+   Domain、MCP API/SDK、人工审批、敏感信息、Standalone/Transfer 回归。前端保持既有 `50 files / 198 passed`
+   与 format、lint、coverage、build 基线；本阶段未新增 UI 业务页面。验证为本地等价环境，未声称 Windows
+   公司云桌面实机或远程 CI 证据。
+7. S42 已完成本地 Git commit 并暂停；下一阶段 S43 须经用户确认后开始。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

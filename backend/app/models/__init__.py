@@ -57,6 +57,7 @@ from app.models.test_assets import (
     TestSuiteVersion,
     TestSuiteVersionItem,
 )
+from app.models.test_design import ChangeSetApproval, TestDesign
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
 __all__ = [
@@ -72,6 +73,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "Capability",
+    "ChangeSetApproval",
     "ContractRun",
     "CoverageSnapshot",
     "Credential",
@@ -129,6 +131,7 @@ __all__ = [
     "TeamMember",
     "TestCase",
     "TestCaseVersion",
+    "TestDesign",
     "TestPlan",
     "TestPlanItem",
     "TestPlanRun",

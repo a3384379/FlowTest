@@ -1,4 +1,4 @@
-"""Command-line entry point for the FlowTest MCP read gateway."""
+"""Command-line entry point for the FlowTest MCP application gateway."""
 
 import argparse
 import os
@@ -8,7 +8,7 @@ from app.mcp.server import create_mcp_server
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="FlowTest read-only MCP gateway")
+    parser = argparse.ArgumentParser(description="FlowTest MCP application gateway")
     parser.add_argument(
         "--transport",
         choices=("stdio", "streamable-http"),

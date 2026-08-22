@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -13,16 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
-from app.core.security import password_service
+from app.core.security import password_service, token_service
 from app.domain.mcp_read import MCPReadEnvelope, input_schema_hash
 from app.main import app
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 from app.mcp.server import _request_token, create_mcp_server, parse_resource_uri
 from app.models import Base
 from app.models.access import AuditLog, Project, User
+from app.models.ai import AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.organizations import Organization, ServiceAccount
 from app.models.service_targets import Service, ServiceEndpoint
+from app.models.test_assets import TestCase as CaseModel
+from app.models.test_design import TestDesign as DesignModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 from app.services.service_accounts import ServiceAccountService
 
@@ -224,6 +227,15 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
             expires_at=None,
             metadata={"purpose": "read-only tests"},
         )
+        write_issued = await ServiceAccountService(session).create(
+            actor=actor,
+            organization_id=organization.id,
+            name="MCP writer",
+            account_key="mcp-writer",
+            scopes=["mcp:write"],
+            expires_at=None,
+            metadata={"purpose": "controlled-write tests"},
+        )
         await session.commit()
         account_id = issued.account.id
 
@@ -239,6 +251,9 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
         yield {
             "client": client,
             "token": issued.token,
+            "write_token": write_issued.token,
+            "human_token": token_service.create_access_token(actor.id),
+            "organization_id": organization.id,
             "account_id": account_id,
             "project_id": project.id,
             "other_project_id": other_project.id,
@@ -250,6 +265,166 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
         }
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+def _controlled_write_payload(context: dict[str, Any], *, objective: str) -> dict[str, Any]:
+    return {
+        "project_id": str(context["project_id"]),
+        "title": "支付 Test Design",
+        "source_ref": "mcp://controlled-writes/payment-design",
+        "confidence": 0.72,
+        "risk_level": "high",
+        "design": {
+            "intent": {
+                "key": "payment_happy_path",
+                "objective": objective,
+                "acceptance_criteria": ["返回成功状态"],
+            },
+            "knowledge_graph": {
+                "nodes": [
+                    {"id": "order", "kind": "entity", "label": "订单"},
+                    {"id": "payment", "kind": "entity", "label": "支付"},
+                ],
+                "edges": [{"source": "order", "target": "payment", "relation": "owns"}],
+            },
+            "state_model": {
+                "initial_state": "created",
+                "states": [
+                    {"id": "created", "name": "已创建"},
+                    {"id": "paid", "name": "已支付", "terminal": True},
+                ],
+                "transitions": [{"source": "created", "target": "paid", "event": "pay"}],
+            },
+            "oracles": [
+                {
+                    "id": "status",
+                    "kind": "status",
+                    "expression": "$.status",
+                    "expected": 200,
+                    "confidence": 0.6,
+                }
+            ],
+            "coverage": {
+                "entries": [
+                    {
+                        "target_ref": "payments:create",
+                        "requirement": "覆盖支付创建接口",
+                        "covered": False,
+                    }
+                ]
+            },
+        },
+        "test_cases": [
+            {
+                "name": "支付成功用例",
+                "description": "由受控 Test Design 生成",
+                "tags": ["s42"],
+                "definition": {
+                    "workflow_id": str(context["workflow_id"]),
+                    "workflow_version": 1,
+                    "environment_id": str(context["environment_id"]),
+                    "runtime_variables": {"payment_token": "secret://payments/token"},
+                    "runtime_headers": {"Authorization": "secret://payments/token"},
+                },
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_mcp_controlled_write_requires_review_approval_and_redacts(
+    mcp_context: dict[str, Any],
+) -> None:
+    client = mcp_context["client"]
+    write_headers = {"Authorization": f"Bearer {mcp_context['write_token']}"}
+    human_headers = {
+        "Authorization": f"Bearer {mcp_context['human_token']}",
+        "X-Organization-ID": str(mcp_context["organization_id"]),
+    }
+    payload = _controlled_write_payload(mcp_context, objective="验证支付成功且不泄漏凭据")
+
+    read_scope_response = await client.post(
+        "/api/v1/mcp/write/change-sets",
+        headers={"Authorization": f"Bearer {mcp_context['token']}"},
+        json=payload,
+    )
+    assert read_scope_response.status_code == 403
+    assert read_scope_response.json()["error"]["code"] == "MCP_SCOPE_REQUIRED"
+
+    proposed = await client.post(
+        "/api/v1/mcp/write/change-sets",
+        headers=write_headers,
+        json=payload,
+    )
+    assert proposed.status_code == 202, proposed.text
+    proposed_body = proposed.json()
+    change_set_id = proposed_body["data"]["id"]
+    assert proposed_body["data"]["status"] == "draft"
+    assert proposed_body["data"]["governance"]["requires_review"] is True
+    assert proposed_body["data"]["governance"]["manual_approval_required"] is True
+    assert "low_confidence_assertion_review" in proposed_body["data"]["governance"]["reason_codes"]
+    assert len(proposed_body["data"]["items"]) == 2
+    assert all(item["review_status"] == "pending" for item in proposed_body["data"]["items"])
+    assert "secret://payments/token" in proposed.text
+
+    design_item = proposed_body["data"]["items"][0]
+    blocked = await client.post(
+        f"/api/v1/mcp/write/change-sets/{change_set_id}/items/{design_item['id']}/accept",
+        headers=human_headers,
+        json={},
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["error"]["code"] == "MCP_MANUAL_APPROVAL_REQUIRED"
+
+    approved = await client.post(
+        f"/api/v1/mcp/write/change-sets/{change_set_id}/approve",
+        headers=human_headers,
+        json={"note": "人工确认高风险支付设计"},
+    )
+    assert approved.status_code == 200, approved.text
+    approval_id = approved.json()["data"]["approval"]["id"]
+
+    accepted_design = await client.post(
+        f"/api/v1/mcp/write/change-sets/{change_set_id}/items/{design_item['id']}/accept",
+        headers=human_headers,
+        json={"approval_id": approval_id, "note": "设计审核通过"},
+    )
+    assert accepted_design.status_code == 200, accepted_design.text
+    assert accepted_design.json()["data"]["status"] == "partially_reviewed"
+
+    case_item = accepted_design.json()["data"]["items"][1]
+    accepted_case = await client.post(
+        f"/api/v1/mcp/write/change-sets/{change_set_id}/items/{case_item['id']}/accept",
+        headers=human_headers,
+        json={"approval_id": approval_id, "note": "用例审核通过"},
+    )
+    assert accepted_case.status_code == 200, accepted_case.text
+    assert accepted_case.json()["data"]["status"] == "accepted"
+
+    async with mcp_context["sessions"]() as session:
+        change_set = await session.get(AIChangeSet, UUID(change_set_id))
+        assert change_set is not None
+        assert change_set.source_type == "mcp"
+        assert change_set.actor_type == "service_account"
+        design = await session.scalar(
+            select(DesignModel).where(DesignModel.project_id == change_set.project_id)
+        )
+        case = await session.scalar(select(CaseModel).where(CaseModel.name == "支付成功用例"))
+        assert design is not None
+        assert design.status == "approved"
+        assert case is not None
+        audit_text = str(list((await session.scalars(select(AuditLog))).all()))
+        assert "plain-token" not in audit_text
+        assert "alice@example.com" not in audit_text
+
+    sensitive = await client.post(
+        "/api/v1/mcp/write/change-sets",
+        headers=write_headers,
+        json=_controlled_write_payload(mcp_context, objective="联系 alice@example.com 完成支付"),
+    )
+    assert sensitive.status_code == 422
+    assert sensitive.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "alice@example.com" not in sensitive.text
 
 
 @pytest.mark.asyncio
@@ -454,6 +629,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.inspect_project",
             "flowtest.inspect_run_evidence",
             "flowtest.list_projects",
+            "flowtest.propose_test_design",
         ]
         templates = await server.list_resource_templates()
         assert [template.uri_template for template in templates] == sorted(
@@ -464,6 +640,17 @@ async def test_mcp_sdk_registration_and_transports() -> None:
 
         tool_result = await server.call_tool("flowtest.list_projects", {})
         assert tool_result.structured_content["trace_id"] == "sdk-trace"
+        write_result = await server.call_tool(
+            "flowtest.propose_test_design",
+            {
+                "project_id": "project-1",
+                "title": "Payment design",
+                "confidence": 0.9,
+                "risk_level": "low",
+                "design": {"intent": "safe-design"},
+            },
+        )
+        assert write_result.is_error is False
         for name, arguments in (
             ("flowtest.discover_services", {"project_id": "project-1", "environment_id": "env-1"}),
             (

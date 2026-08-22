@@ -11,14 +11,15 @@ from urllib.parse import unquote, urlsplit
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
-from app.domain.mcp_read import MCP_SERVER_NAME, MCP_SERVER_VERSION, MCPReadEnvelope
+from app.domain.mcp_controlled_write import MCP_CONTROLLED_WRITE_SERVER_VERSION
+from app.domain.mcp_read import MCP_SERVER_NAME
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 
 READ_ONLY_INSTRUCTIONS = (
-    "FlowTest MCP 仅提供只读项目、服务、契约、工作流草稿和执行证据。"
-    "它不会创建、修改、删除或执行任何 FlowTest 资源；任何后续写入都必须经由"
-    "受控 ChangeSet 和人工确认。输出中的请求值、认证信息、Secret、PII 和响应体"
-    "会被省略或脱敏。"
+    "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
+    "只进入待审核状态的 Test Design ChangeSet。它不会自动发布、执行、删除、修改"
+    "权限或创建 Credential；高风险写入必须由人工批准。输出中的请求值、认证信息、"
+    "Secret、PII 和响应体会被省略或脱敏。"
 )
 
 
@@ -28,7 +29,7 @@ def create_mcp_server(
     api_base_url: str | None = None,
     service_account_token: str | None = None,
 ) -> MCPServer:
-    """Create a server with stable, sorted read-only tools/resources/prompts."""
+    """Create a server with stable, sorted tools/resources/prompts."""
 
     if client is None:
         from app.core.config import settings
@@ -41,7 +42,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_SERVER_VERSION,
+        version=MCP_CONTROLLED_WRITE_SERVER_VERSION,
         instructions=READ_ONLY_INSTRUCTIONS,
     )
 
@@ -143,6 +144,35 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
                 page_size=page_size,
                 token=_request_token(ctx, client),
             )
+        )
+
+    @server.tool(
+        name="flowtest.propose_test_design",
+        description="Create a draft Test Design ChangeSet for human review; never applies it.",
+        structured_output=True,
+    )
+    async def propose_test_design(
+        project_id: str,
+        title: str,
+        confidence: float,
+        risk_level: str,
+        design: dict[str, Any],
+        test_cases: list[dict[str, Any]] | None = None,
+        source_ref: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "project_id": project_id,
+            "title": title,
+            "confidence": confidence,
+            "risk_level": risk_level,
+            "design": design,
+            "test_cases": test_cases or [],
+        }
+        if source_ref is not None:
+            payload["source_ref"] = source_ref
+        return await _tool_payload(
+            client.propose_test_design(payload, token=_request_token(ctx, client))
         )
 
 
@@ -280,12 +310,12 @@ def _register_prompts(server: MCPServer) -> None:
         )
 
 
-async def _tool_payload(client_call: Awaitable[MCPReadEnvelope]) -> dict[str, Any]:
+async def _tool_payload(client_call: Awaitable[Any]) -> dict[str, Any]:
     try:
         envelope = await client_call
     except MCPGatewayError as error:
         return _error_payload(error)
-    return envelope.model_dump(mode="json")
+    return dict(envelope.model_dump(mode="json"))
 
 
 async def _resource_payload(client_call: Any) -> str:
@@ -315,7 +345,7 @@ def _error_payload(error: MCPGatewayError) -> dict[str, Any]:
         "confidence": 0.0,
         "redactions": ["gateway_error_details"],
         "trace_id": "mcp-gateway",
-        "warnings": ["只读应用网关未返回业务数据。"],
+        "warnings": ["MCP 应用网关未返回业务数据。"],
     }
 
 
@@ -325,7 +355,7 @@ def _prompt_text(name: str, target: str, instruction: str) -> str:
         f"FlowTest MCP Prompt: {name}\n"
         f"{target_line}"
         f"{instruction}\n"
-        "本次 MCP 能力只读；所有写入、执行、重试或发布动作必须停止并请求人工确认。"
+        "本 Prompt 只读；如需写入、执行、重试或发布，必须通过受控 ChangeSet 并请求人工确认。"
     )
 
 

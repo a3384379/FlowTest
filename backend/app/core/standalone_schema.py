@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260822_0036"
+BASELINE_REVISION = "20260822_0037"
 
 
 async def initialize_standalone_database() -> None:
@@ -54,6 +54,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
 
     await _ensure_organization_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
+    await _ensure_s42_controlled_write_tables(connection)
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -97,7 +98,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
-            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035')"
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', '20260822_0036')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -105,10 +106,52 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         text(
             "UPDATE alembic_version SET version_num = :revision "
             "WHERE version_num IN "
-            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035')"
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', '20260822_0036')"
         ),
         {"revision": BASELINE_REVISION},
     )
+
+
+async def _ensure_s42_controlled_write_tables(connection: AsyncConnection) -> None:
+    """Create S42 tables and rebuild legacy SQLite item checks when needed."""
+
+    await _rebuild_s42_change_item_table_if_needed(connection)
+    from app.models.test_design import ChangeSetApproval, TestDesign
+
+    for model in (TestDesign, ChangeSetApproval):
+        table = cast(Table, model.__table__)
+        await connection.execute(CreateTable(table, if_not_exists=True))
+
+
+async def _rebuild_s42_change_item_table_if_needed(connection: AsyncConnection) -> None:
+    result = await connection.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_change_items'")
+    )
+    row = result.first()
+    table_sql = str(row[0]) if row and row[0] else ""
+    if not table_sql or "test_design" in table_sql:
+        return
+    change_item_table = cast(Table, AIChangeItem.__table__)
+    await _drop_table_indexes(connection, "ai_change_items")
+    await connection.execute(
+        text("ALTER TABLE ai_change_items RENAME TO ai_change_items_s42_legacy")
+    )
+    await connection.execute(CreateTable(change_item_table))
+    await connection.execute(
+        text(
+            "INSERT INTO ai_change_items ("
+            "change_set_id, suggestion_id, position, item_type, action, title, target_resource_id, "
+            "target_snapshot_sha256, proposed_content, review_status, review_note, reviewed_by_id, "
+            "reviewed_at, materialized_resource_type, materialized_resource_id, id, created_at, "
+            "updated_at) SELECT change_set_id, suggestion_id, position, item_type, action, title, "
+            "target_resource_id, target_snapshot_sha256, proposed_content, review_status, "
+            "review_note, reviewed_by_id, reviewed_at, materialized_resource_type, "
+            "materialized_resource_id, id, created_at, updated_at FROM ai_change_items_s42_legacy"
+        )
+    )
+    await connection.execute(text("DROP TABLE ai_change_items_s42_legacy"))
+    for index in change_item_table.indexes:
+        await connection.execute(CreateIndex(index))
 
 
 async def _ensure_organization_tables(connection: AsyncConnection) -> None:

@@ -25,6 +25,7 @@ SERVICE_ACCOUNT_SCOPES = frozenset(
         "runner:read",
         "audit:read",
         "mcp:read",
+        "mcp:write",
     }
 )
 

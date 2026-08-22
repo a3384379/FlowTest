@@ -141,7 +141,7 @@ class AIChangeItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "ai_change_items"
     __table_args__ = (
         CheckConstraint(
-            "item_type IN ('test_case', 'workflow', 'assertion')",
+            "item_type IN ('test_case', 'workflow', 'assertion', 'test_design')",
             name="ai_change_item_type",
         ),
         CheckConstraint("action IN ('create', 'update')", name="ai_change_item_action"),
