@@ -26,6 +26,10 @@ SERVICE_ACCOUNT_SCOPES = frozenset(
         "audit:read",
         "mcp:read",
         "mcp:write",
+        "org:governance",
+        "org:audit",
+        "org:key_rotate",
+        "runner:manage",
     }
 )
 

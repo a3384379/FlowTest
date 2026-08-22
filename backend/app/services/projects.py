@@ -12,12 +12,14 @@ from app.domain.access import (
     ProjectRole,
     validate_folder_parent,
 )
+from app.domain.governance import QuotaDimension
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_policy_values
 from app.domain.runtime_profiles import RuntimeProfile
 from app.domain.tenant import TenantContext
 from app.models.access import AuditLog, Folder, Project, ProjectMember, User
 from app.repositories.access import ProjectRepository, UserRepository
 from app.services.audit import AuditService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.organizations import OrganizationContextService
 
 
@@ -59,6 +61,10 @@ class ProjectService:
         organization_id: UUID | None = None,
     ) -> ProjectAccess:
         tenant = await self._tenant_for_create(actor=actor, organization_id=organization_id)
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=tenant.organization_id,
+            dimension=QuotaDimension.PROJECT_COUNT,
+        )
         project = Project(
             organization_id=tenant.organization_id,
             name=name.strip(),
@@ -275,12 +281,20 @@ class ProjectService:
     async def upsert_member(
         self, *, actor: User, project_id: UUID, user_id: UUID, role: ProjectRole
     ) -> ProjectMember:
-        await self._authorize_owner(actor=actor, project_id=project_id)
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_MEMBERS,
+        )
         target = await self._users.get(user_id)
         if target is None or not target.is_active:
             raise AppError(code="USER_NOT_FOUND", message="用户不存在", status_code=404)
         member = await self._projects.get_member(project_id=project_id, user_id=user_id)
         if member is None:
+            await OrganizationQuotaService(self._session).enforce(
+                organization_id=access.project.organization_id,
+                dimension=QuotaDimension.USER_COUNT,
+            )
             member = ProjectMember(project_id=project_id, user_id=user_id, role=role)
             self._projects.add(member)
         elif member.role == ProjectRole.OWNER and role != ProjectRole.OWNER:

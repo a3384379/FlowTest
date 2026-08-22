@@ -27,6 +27,7 @@ from app.domain.data_nodes import (
 from app.domain.durable_execution import is_resumable_checkpoint
 from app.domain.event_protocols import EventSourceKind
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
+from app.domain.governance import QuotaDimension
 from app.domain.protocols import (
     GrpcCallType,
     ProtocolKind,
@@ -97,6 +98,7 @@ from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
 from app.services.durable_execution import checkpoint_to_node_record
 from app.services.event_sources import EventSourceService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import WorkflowNodeExecutor
@@ -545,6 +547,10 @@ class WorkflowService:
                 status_code=429,
                 details={"limit": project.execution_concurrency_limit},
             )
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=project.organization_id,
+            dimension=QuotaDimension.EXECUTION_CONCURRENCY,
+        )
 
     async def load_execution_plan(self, execution_id: UUID) -> WorkflowExecutionPlan:
         from app.services.workflow_plan_codec import decode_execution_plan

@@ -191,13 +191,30 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
     assert exported == {
         "status": "exported",
         "schema_version": "standalone-compact-transfer-v1",
-        "tables": 76,
+        "tables": 78,
         "rows": 6,
         "excluded_tables": 9,
         "artifacts": 1,
     }
     assert validate_bundle(bundle)["status"] == "validated"
     payload = _load_bundle(bundle)
+    assert payload.manifest["security"]["data_classification"] == {
+        "portable": [
+            "durable_domain_records",
+            "audit_records",
+            "artifact_objects",
+            "encrypted_payloads",
+        ],
+        "reference_only": ["secret_references", "encryption_key_references"],
+        "hashed_only": ["password_hashes", "service_account_token_hashes"],
+        "excluded": [
+            "env_file",
+            "logs",
+            "encryption_key_material",
+            "plaintext_secret_values",
+            "runner_runtime_state",
+        ],
+    }
     secret = payload.rows_by_table["secrets"][0]
     assert secret["ciphertext"] == {
         "__flowtest_transfer_type__": "bytes",
@@ -358,6 +375,12 @@ async def test_standalone_transfer_rejects_source_revision_and_manifest_tamperin
     tampered["security"]["env_file"] = "included"
     manifest_path.write_text(json.dumps(tampered), encoding="utf-8")
     with pytest.raises(TransferError, match="env"):
+        validate_bundle(bundle)
+
+    tampered["security"]["env_file"] = "excluded"
+    tampered["security"]["data_classification"]["excluded"] = "invalid"
+    manifest_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(TransferError, match="数据分类"):
         validate_bundle(bundle)
     manifest_path.write_text(json.dumps(original), encoding="utf-8")
 

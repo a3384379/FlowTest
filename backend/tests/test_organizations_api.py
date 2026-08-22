@@ -302,6 +302,118 @@ async def test_service_account_authentication_is_scoped_and_revocable(
         assert invalid.value.code == "INVALID_SERVICE_ACCOUNT_TOKEN"
 
 
+@pytest.mark.asyncio
+async def test_organization_governance_quota_audit_and_key_lifecycle(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    headers = _authorization(token)
+    created = await client.post(
+        "/api/v1/organizations",
+        headers=headers,
+        json={"name": "Governed Org", "slug": "governed-org", "description": ""},
+    )
+    assert created.status_code == 201, created.text
+    organization_id = created.json()["id"]
+    scoped_headers = {**headers, "X-Organization-Id": organization_id}
+
+    initial = await client.get(
+        f"/api/v1/organizations/{organization_id}/governance", headers=scoped_headers
+    )
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["active_key_version"] == 1
+    assert initial.json()["quota_policies"]["project_count"]["mode"] == "observe"
+
+    updated = await client.patch(
+        f"/api/v1/organizations/{organization_id}/governance",
+        headers=scoped_headers,
+        json={
+            "audit_retention_days": 120,
+            "quota_policies": {
+                "project_count": {"mode": "hard_limit", "limit": 1},
+                "user_count": {"mode": "warn", "limit": 10, "warn_at": 5},
+                "runner_concurrency": {"mode": "observe"},
+                "execution_concurrency": {"mode": "observe"},
+                "ai_request_count": {"mode": "observe"},
+                "artifact_storage": {"mode": "observe"},
+            },
+            "runner_policy": {
+                "allowed_runner_types": ["general"],
+                "allowed_runtimes": ["docker"],
+                "max_pools": 2,
+                "registration_requires_approval": True,
+            },
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["audit_retention_days"] == 120
+    assert updated.json()["runner_policy"]["registration_requires_approval"] is True
+
+    first_project = await client.post(
+        "/api/v1/projects",
+        headers=scoped_headers,
+        json={"name": "Governed project", "description": ""},
+    )
+    assert first_project.status_code == 201, first_project.text
+    blocked_project = await client.post(
+        "/api/v1/projects",
+        headers=scoped_headers,
+        json={"name": "Blocked project", "description": ""},
+    )
+    assert blocked_project.status_code == 429, blocked_project.text
+    assert blocked_project.json()["error"]["code"] == "ORGANIZATION_QUOTA_EXCEEDED"
+
+    audit = await client.get(
+        f"/api/v1/organizations/{organization_id}/audit-logs",
+        headers=scoped_headers,
+        params={"action": "organization.governance_updated", "page_size": 20},
+    )
+    assert audit.status_code == 200, audit.text
+    assert audit.json()["total"] == 1
+    assert audit.json()["items"][0]["project_id"] is None
+
+    runner_summary = await client.get(
+        f"/api/v1/organizations/{organization_id}/runner-governance",
+        headers=scoped_headers,
+    )
+    assert runner_summary.status_code == 200, runner_summary.text
+    assert runner_summary.json()["pool_count"] == 0
+
+    security = await client.get(
+        f"/api/v1/organizations/{organization_id}/security", headers=scoped_headers
+    )
+    assert security.status_code == 200, security.text
+    initial_version_id = security.json()["key_versions"][0]["id"]
+    prepared = await client.post(
+        f"/api/v1/organizations/{organization_id}/security/key-rotation/prepare",
+        headers=scoped_headers,
+        json={"key_reference": "vault:flowtest/data-key-v2", "key_fingerprint": "a" * 64},
+    )
+    assert prepared.status_code == 201, prepared.text
+    prepared_version_id = prepared.json()["id"]
+    assert prepared.json()["migration_status"] == "planned"
+    applied = await client.post(
+        f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/apply",
+        headers=scoped_headers,
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["migration_status"] == "migrated"
+    rolled_back = await client.post(
+        f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/rollback",
+        headers=scoped_headers,
+    )
+    assert rolled_back.status_code == 200, rolled_back.text
+    assert rolled_back.json()["id"] == initial_version_id
+
+    support_bundle = await client.get(
+        f"/api/v1/organizations/{organization_id}/support-bundle/redaction",
+        headers=scoped_headers,
+    )
+    assert support_bundle.status_code == 200, support_bundle.text
+    assert "data_encryption_key" in support_bundle.json()["excluded_fields"]
+    assert "service_account_token" in support_bundle.json()["redacted_fields"]
+
+
 async def _login(
     client: AsyncClient,
     email: str = ADMIN_EMAIL,

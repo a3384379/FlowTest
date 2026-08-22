@@ -33,7 +33,7 @@ from app.models.environment_lab import (
     EnvironmentTemplateVersion,
 )
 from app.models.executions import APICallExecution, AssertionResult
-from app.models.governance import IdempotencyRecord
+from app.models.governance import IdempotencyRecord, OrganizationGovernance, OrganizationKeyVersion
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
 from app.models.organizations import Organization, OrganizationMember, ServiceAccount
@@ -101,6 +101,8 @@ __all__ = [
     "NotificationWebhook",
     "OIDCLoginTransaction",
     "Organization",
+    "OrganizationGovernance",
+    "OrganizationKeyVersion",
     "OrganizationMember",
     "PactContractVersion",
     "PactProviderVerification",

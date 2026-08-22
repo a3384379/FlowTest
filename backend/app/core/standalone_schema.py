@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260822_0038"
+BASELINE_REVISION = "20260822_0039"
 
 
 async def initialize_standalone_database() -> None:
@@ -53,6 +53,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     """Keep an existing offline SQLite installation bootable after an upgrade."""
 
     await _ensure_organization_tables(connection)
+    await _ensure_governance_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
     await _ensure_s42_controlled_write_tables(connection)
     await _add_column_if_missing(
@@ -99,7 +100,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037')"
+            "'20260822_0036', '20260822_0037', '20260822_0038')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -108,7 +109,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE alembic_version SET version_num = :revision "
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037')"
+            "'20260822_0036', '20260822_0037', '20260822_0038')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -167,7 +168,6 @@ async def _ensure_organization_tables(connection: AsyncConnection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
-
     await connection.execute(
         text(
             "CREATE TABLE IF NOT EXISTS organization_members ("
@@ -194,6 +194,14 @@ async def _ensure_organization_tables(connection: AsyncConnection) -> None:
             "UNIQUE (organization_id, name), UNIQUE (organization_id, account_key))"
         )
     )
+
+
+async def _ensure_governance_tables(connection: AsyncConnection) -> None:
+    from app.models.governance import OrganizationGovernance, OrganizationKeyVersion
+
+    for model in (OrganizationGovernance, OrganizationKeyVersion):
+        table = cast(Table, model.__table__)
+        await connection.execute(CreateTable(table, if_not_exists=True))
 
 
 async def _ensure_flow_spec_change_set_columns(connection: AsyncConnection) -> None:

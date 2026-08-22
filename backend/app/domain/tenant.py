@@ -14,11 +14,26 @@ class OrganizationRole(StrEnum):
     def capabilities(self) -> frozenset[str]:
         if self is OrganizationRole.OWNER:
             return frozenset(
-                {"read", "create_project", "manage_members", "manage_service_accounts"}
+                {
+                    "read",
+                    "create_project",
+                    "manage_members",
+                    "manage_service_accounts",
+                    "manage_governance",
+                    "view_audit",
+                    "rotate_keys",
+                }
             )
         if self is OrganizationRole.ADMIN:
             return frozenset(
-                {"read", "create_project", "manage_members", "manage_service_accounts"}
+                {
+                    "read",
+                    "create_project",
+                    "manage_members",
+                    "manage_service_accounts",
+                    "manage_governance",
+                    "view_audit",
+                }
             )
         if self is OrganizationRole.MEMBER:
             return frozenset({"read", "create_project"})

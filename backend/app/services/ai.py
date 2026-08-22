@@ -20,6 +20,7 @@ from app.domain.ai import (
     sanitize_ai_input,
     suggestion_output_schema,
 )
+from app.domain.governance import QuotaDimension
 from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIJob, AISuggestion
@@ -30,6 +31,7 @@ from app.schemas.ai import AIJobCreateRequest
 from app.schemas.ai_change_sets import change_set_output_schema, decode_change_set_content
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.audit import AuditService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.test_assets import TestCaseService
 from app.services.workflows import WorkflowService
@@ -113,6 +115,10 @@ class AIJobService:
         _require_ai_enabled()
         access = await self._projects.authorize(
             actor=actor, project_id=payload.project_id, editing=True
+        )
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=access.project.organization_id,
+            dimension=QuotaDimension.AI_REQUEST_COUNT,
         )
         _authorize_sample(access.role, access.project.ai_sample_sharing_enabled, payload.sample)
         try:

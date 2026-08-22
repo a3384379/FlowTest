@@ -45,7 +45,24 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from app.models import Base
 
 TRANSFER_SCHEMA_VERSION = "standalone-compact-transfer-v1"
-STANDALONE_SCHEMA_REVISION = "20260822_0038"
+STANDALONE_SCHEMA_REVISION = "20260822_0039"
+TRANSFER_DATA_CLASSIFICATION: dict[str, list[str]] = {
+    "portable": [
+        "durable_domain_records",
+        "audit_records",
+        "artifact_objects",
+        "encrypted_payloads",
+    ],
+    "reference_only": ["secret_references", "encryption_key_references"],
+    "hashed_only": ["password_hashes", "service_account_token_hashes"],
+    "excluded": [
+        "env_file",
+        "logs",
+        "encryption_key_material",
+        "plaintext_secret_values",
+        "runner_runtime_state",
+    ],
+}
 
 # These rows are process state, one-time authentication state, or unsupported
 # Standalone features.  They must not be replayed into Compact as if they were
@@ -144,6 +161,7 @@ async def export_bundle(source_data: Path, output: Path) -> dict[str, Any]:
             "passwords": "password_hashes_only",
             "ciphertexts": "preserved",
             "requires_same_data_encryption_key": True,
+            "data_classification": TRANSFER_DATA_CLASSIFICATION,
         },
     }
     (output_root / "manifest.json").write_text(
@@ -297,6 +315,7 @@ def _read_manifest(root: Path) -> dict[str, Any]:
     security = manifest.get("security")
     if not isinstance(security, dict) or security.get("env_file") != "excluded":
         raise TransferError("transfer manifest 未声明排除 .env")
+    _validate_data_classification(security.get("data_classification"))
     database = manifest.get("database")
     if not isinstance(database, dict):
         raise TransferError("transfer manifest 缺少 database")
@@ -308,6 +327,18 @@ def _read_manifest(root: Path) -> dict[str, Any]:
     if not isinstance(artifacts, dict) or not isinstance(artifacts.get("objects"), list):
         raise TransferError("transfer manifest 的 artifacts 格式无效")
     return manifest
+
+
+def _validate_data_classification(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != set(TRANSFER_DATA_CLASSIFICATION):
+        raise TransferError("transfer manifest 的数据分类格式无效")
+    if any(
+        not isinstance(values, list) or not all(isinstance(item, str) for item in values)
+        for values in value.values()
+    ):
+        raise TransferError("transfer manifest 的数据分类格式无效")
 
 
 def _load_database_rows(

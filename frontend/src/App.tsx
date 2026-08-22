@@ -17,6 +17,7 @@ import {
   ToolOutlined,
   RobotOutlined,
   ShareAltOutlined,
+  TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import {
@@ -64,6 +65,7 @@ const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilities
 const ExecutionFabricPage = lazy(() => import('./pages/ExecutionFabricPage'))
 const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage'))
 const RequestTargetsPage = lazy(() => import('./pages/RequestTargetsPage'))
+const OrganizationGovernancePage = lazy(() => import('./pages/OrganizationGovernancePage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -89,6 +91,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   reports: '测试报告',
   platform: '平台管理',
   fabric: '分布式执行面',
+  organization: '组织治理',
 }
 
 export default function App() {
@@ -149,6 +152,7 @@ function AuthenticatedShell() {
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
+            navigationItem('organization', <TeamOutlined />, '/organization'),
             ...(user?.is_system_admin
               ? [
                   navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'),
@@ -227,7 +231,7 @@ function isNoProjectView(projectCount: number | undefined, projectId: string | n
 }
 
 function isGlobalAdministrationSection(section: ProjectSection): boolean {
-  return section === 'platform' || section === 'fabric'
+  return section === 'platform' || section === 'fabric' || section === 'organization'
 }
 
 function ApplicationRoutes() {
@@ -256,6 +260,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/platform" element={<PlatformCapabilitiesPage />} />
       <Route path="/execution-fabric" element={<ExecutionFabricPage />} />
+      <Route path="/organization" element={<OrganizationGovernancePage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
       {(
         [

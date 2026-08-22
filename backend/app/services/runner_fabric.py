@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.capabilities import RunnerType
+from app.domain.governance import QuotaDimension
 from app.domain.runner_fabric import (
     RunnerEventKind,
     RunnerProfile,
@@ -48,6 +49,7 @@ from app.services.durable_execution import (
     DurableExecutionService,
     checkpoint_to_runner_resume,
 )
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
@@ -66,6 +68,11 @@ class RunnerFabricService:
 
     async def create_pool(self, *, actor: User, payload: RunnerPoolCreate) -> RunnerPool:
         self._require_admin(actor)
+        await OrganizationQuotaService(self._session).validate_runner_pool(
+            organization_id=_organization_id(),
+            runner_type=payload.runner_type,
+            runtime=payload.runtime,
+        )
         normalized_name = payload.name.strip()
         if (
             await self._repository.find_pool_by_name(
@@ -351,6 +358,10 @@ class RunnerFabricService:
             runner.last_seen_at = now
             await self._session.commit()
             return None
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=pool.organization_id,
+            dimension=QuotaDimension.RUNNER_CONCURRENCY,
+        )
         plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
         policy = await ProjectService(self._session).load_runtime_security_policy(task.project_id)
         lease = self._acquire(task=task, runner=runner, pool=pool, now=now)

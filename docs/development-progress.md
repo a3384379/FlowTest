@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S43 Durable Execution 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S44 Enterprise Collaboration 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -12,7 +12,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
   `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`，S42 已提交
-  `a2f97a7`；S43 完成后按阶段提交并暂停。
+  `a2f97a7`，S43 已提交 `969c5c2`；S44 已完成本地等价验收，本阶段提交后暂停。
   当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
@@ -179,6 +179,37 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 8. 验证运行于本地 macOS/ARM，因现有 Compact 环境占用默认端口使用隔离的高端口 Compose 项目；未将该结果
    虚构为 Windows 公司云桌面实机、72 小时试点或远程 CI 证据。当前脏 `main` 工作区未参与，未修改附件原始
    计划文件；S43 已完成本地提交后暂停，S44 等待用户确认。
+
+## 已完成：V5 S44 Enterprise Collaboration（等待用户确认）
+
+1. 新增纯 Domain 配额策略与治理决策模型，支持 `observe`、`warn`、`soft_limit`、`hard_limit` 四种模式，
+   覆盖 Project、User、Runner 并发、Execution 并发、AI 日请求和 Artifact 存储六个维度；硬限制通过统一
+   错误 envelope 返回 429，精确达到上限仍允许当前操作。治理初始化使用 PostgreSQL/SQLite 幂等插入，
+   避免组织管理页并行加载产生重复键 500。
+2. 新增 `OrganizationGovernance`、`OrganizationKeyVersion` 及可回滚迁移 `20260822_0039`。审计保留、Quota、
+   Runner Pool 类型/Runtime/注册审批策略均按组织保存；密钥生命周期支持 Prepare → Apply → Rollback，数据库
+   只保存外部引用、SHA-256 指纹和迁移状态，不保存原始密钥材料。
+3. Project、成员、Execution、AI 请求、Artifact、Runner Pool/Claim 和 Retention Cleanup 已接入组织配额；
+   审计查询支持动作、资源和时间范围过滤，审计清理遵循组织保留天数。Service Account 增加治理、审计、密钥
+   轮换和 Runner 管理 Scope，继续只在签发/轮换响应返回一次性明文令牌。
+4. 新增组织治理 API 与前端“组织治理”页面，覆盖组织角色、最小权限 Service Account、Quota/Runner Governance、
+   Audit Query、Key Rotation 和 Support Bundle Redaction。支持包明确 `internal-redacted` 分类并排除密码、密钥、
+   Token、密文和私钥字段。
+5. Standalone Schema、Compact/Full Alembic head 和 Transfer 同步到 `20260822_0039`；Transfer 表清单由 76
+   增至 78，Manifest 版本保持冻结为 `standalone-compact-transfer-v1`，新导出包以向后兼容字段声明可迁移数据、
+   仅引用/哈希数据和排除数据分类。旧 `Environment.base_url`、`/api/v1` 和三档 Runtime 业务语义保持兼容。
+6. 后端质量门槛：Ruff format/check、mypy 全部通过；pytest `410 passed / 3 skipped`，总覆盖率 `90.12%`。
+   前端 format、lint、TypeScript、production build 和 coverage 全部通过；Vitest `51 files / 202 passed`，
+   Statements `86.1%`、Branches `80.00%`、Functions `84.96%`、Lines `88.18%`。Standalone/Transfer 定向回归
+   `19 passed`，Transfer Manifest 回归 `8 passed`。
+7. 真实 PostgreSQL 临时验证栈完成空库升级至 `20260822_0039`、`alembic check`、降级到 `20260822_0038`、
+   再升级和再次 `alembic check`；最终 head 为 `20260822_0039`。独立 Compose 高端口验证栈完成 PostgreSQL、Redis、
+   MinIO、Backend、Frontend 健康检查和镜像构建；Playwright CLI 完成管理员登录、组织治理入口及组织与角色、
+   Service Account、Quota/Runner、Audit/Security 四个页签渲染，Backend 日志无 500、Traceback 或重复键异常。
+8. 空 SQLite 从最早 Alembic 链全量升级仍会在既有 `20260809_0002` 的 PostgreSQL 专用 `DEFAULT '{}'::json` 处
+   失败；这是 S44 之前的迁移兼容问题，本阶段不改写旧迁移。Standalone SQLite 使用 metadata/bootstrap 与 `0039`
+   基线的本地等价路径及定向回归通过；未将本地 macOS/ARM 结果声称为 Windows x64 公司云桌面或远程 CI 证据。
+9. S44 已完成本地等价验收；本阶段提交后暂停，下一阶段 S45（Change-Aware Regression）必须经用户确认后开始。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 
