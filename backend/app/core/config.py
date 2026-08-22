@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     s3_secret_key: str = "flowtest-local-secret"  # noqa: S105
     s3_bucket: str = "flowtest-artifacts"
     request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    mcp_api_base_url: str = "http://localhost:8000"
+    mcp_service_account_token: str = ""
+    mcp_client_version: str = "flowtest-mcp-s41"
+    mcp_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
     artifact_limit_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
     feature_teams_enabled: bool = False

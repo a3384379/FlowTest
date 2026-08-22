@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -13,15 +14,19 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
 from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
+from app.domain.mcp_read import MCP_READ_SCOPE
 from app.domain.runtime_profiles import RuntimeProfile
+from app.domain.tenant import TenantContext
 from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
 from app.http.imports import HttpImportDocumentFetcher
 from app.http.oidc import HttpOIDCProvider
 from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
+from app.models.organizations import ServiceAccount
 from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.services.organizations import OrganizationContextService
+from app.services.service_accounts import ServiceAccountService
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -122,6 +127,53 @@ async def require_password_change_complete(authenticated_user: AuthenticatedUser
 
 
 CurrentUser = Annotated[User, Depends(require_password_change_complete)]
+
+
+@dataclass(frozen=True, slots=True)
+class MCPAuthenticatedPrincipal:
+    actor: User
+    account: ServiceAccount
+    tenant: TenantContext
+
+
+async def get_mcp_authenticated_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 需要服务账号令牌",
+            status_code=401,
+        )
+    account, tenant = await ServiceAccountService(session).authenticate(
+        credentials.credentials,
+        touch_last_used=False,
+    )
+    if MCP_READ_SCOPE not in tenant.scopes:
+        raise AppError(
+            code="MCP_SCOPE_REQUIRED",
+            message="服务账号缺少 MCP 只读权限",
+            status_code=403,
+        )
+    actor = await UserRepository(session).get(tenant.actor_id)
+    if actor is None or not actor.is_active:
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 服务账号关联用户不可用",
+            status_code=401,
+        )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
+    finally:
+        reset_tenant_context(context_token)
+
+
+MCPCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_authenticated_principal),
+]
 
 
 async def require_system_admin(current_user: CurrentUser) -> User:

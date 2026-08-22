@@ -20,6 +20,7 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.impact import router as impact_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
+from app.api.v1.endpoints.mcp_read import router as mcp_read_router
 from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
@@ -58,6 +59,7 @@ api_router.include_router(environment_lab_router, tags=["environment-lab"])
 api_router.include_router(imports_router, tags=["imports"])
 api_router.include_router(impact_router, tags=["impact"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
+api_router.include_router(mcp_read_router, tags=["mcp-read"])
 api_router.include_router(performance_router, tags=["performance"])
 api_router.include_router(artifacts_router, tags=["files"])
 api_router.include_router(api_assets_router, tags=["api-assets"])

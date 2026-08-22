@@ -24,6 +24,7 @@ SERVICE_ACCOUNT_SCOPES = frozenset(
         "artifact:read",
         "runner:read",
         "audit:read",
+        "mcp:read",
     }
 )
 
@@ -151,7 +152,9 @@ class ServiceAccountService:
         await self._session.refresh(account)
         return IssuedServiceAccount(account=account, token=token)
 
-    async def authenticate(self, token: str) -> tuple[ServiceAccount, TenantContext]:
+    async def authenticate(
+        self, token: str, *, touch_last_used: bool = True
+    ) -> tuple[ServiceAccount, TenantContext]:
         if not token.startswith(SERVICE_ACCOUNT_PREFIX):
             raise AppError(
                 code="INVALID_SERVICE_ACCOUNT_TOKEN", message="服务账号令牌无效", status_code=401
@@ -166,8 +169,9 @@ class ServiceAccountService:
             raise AppError(
                 code="SERVICE_ACCOUNT_EXPIRED", message="服务账号令牌已过期", status_code=401
             )
-        account.last_used_at = now
-        await self._session.commit()
+        if touch_last_used:
+            account.last_used_at = now
+            await self._session.commit()
         return account, TenantContext(
             organization_id=account.organization_id,
             actor_id=account.created_by_id,

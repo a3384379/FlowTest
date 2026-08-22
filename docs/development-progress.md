@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S40 FlowSpec v1 导入导出与 ChangeSet 审核链路已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S41 MCP Read 只读网关与协议适配已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -11,7 +11,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 ## 当前恢复点
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
-  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 完成后按阶段提交并暂停。
+  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 完成后按阶段提交并暂停。
   当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
@@ -101,6 +101,29 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    Branches `80.28%`、Functions `86.19%`、Lines `88.97%`；Standalone/Transfer 回归 `19 passed`。
    验证使用本地等价环境，未声称 Windows 公司云桌面实机或远程 CI 证据。
 6. S40 完成后提交本地 Git commit 并暂停；下一阶段 S41 为 MCP Read，须经用户确认后开始。
+
+## 已完成：V5 S41 MCP Read（等待用户确认）
+
+1. 新增只读 MCP Application Service 与 `/api/v1/mcp/read` REST Gateway；服务账号必须具备
+   `mcp:read` Scope，并在认证时建立 `TenantContext`。MCP 认证不会更新 `last_used_at`，避免只读调用
+   产生业务状态变化；跨组织项目统一返回不可枚举的 404。
+2. 只读结果统一使用 `data/evidence_refs/confidence/redactions/trace_id/warnings` Envelope。项目、Service/
+   Endpoint Variant、API Contract、Workflow Draft 和 Run Evidence 均采用 allow-list 投影；请求头、变量、
+   Cookie、Secret Ref 明文、认证配置、请求/响应 Body、Execution Snapshot、上下文和错误详情不返回，
+   Endpoint URL 仅保留安全 Origin，审计详情也不记录原始参数或令牌。
+3. 使用官方 Python MCP SDK，并锁定 `mcp` 2.x 当前解析版本 `2.0.0`；新增 `flowtest-mcp` CLI，支持
+   stdio 和 Streamable HTTP 两种传输。工具、Resource Template 和 Prompt 稳定排序，Prompts 明确只读、
+   不写入/不执行且需要人工确认；MCP Gateway 仅通过 HTTP Application API 访问，不直连 ORM、PostgreSQL、
+   Redis 或 MinIO。
+4. 新增 MCP Domain 合约、typed HTTP Client、SDK contract test、服务账号/租户隔离/脱敏/审计回归；
+   后端 Ruff format/check、mypy、pytest 全部通过，`394 passed / 3 skipped`，覆盖率 `90.01%`。前端未新增
+   S41 页面或业务代码，但 format、lint、coverage、build 基线全部通过，Vitest `50 files / 198 passed`，
+   Statements `86.8%`、Branches `80.28%`、Functions `86.19%`、Lines `88.97%`。
+5. 本阶段无数据库模型或迁移变更；临时 PostgreSQL 已完成从空库升级到 `20260822_0036`、`alembic check`、
+   降级到 `20260822_0035`、再升级和再次 `check`，临时数据库已清理。未把正在运行的旧 Compact 镜像当作
+   S41 证据，未声称 Windows 云桌面实机或远程 CI 验证。
+6. S41 已完成本地等价验证，提交后暂停；下一阶段 S42（TestIntent/TestCase/Test Design、Knowledge
+   Graph、State Model、Oracle、Coverage 与统一 ChangeSet）须经用户确认后开始。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 
