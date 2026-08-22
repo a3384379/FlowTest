@@ -364,6 +364,7 @@ class RunnerFabricService:
                 fencing_token=lease.fencing_token,
                 plan=encoded,
                 plan_sha256=hashlib.sha256(encoded.encode()).hexdigest(),
+                outbound_policy_enabled=policy.enabled,
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
             ),

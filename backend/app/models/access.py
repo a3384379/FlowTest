@@ -95,6 +95,9 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     outbound_allowed_private_cidrs: Mapped[list[str]] = mapped_column(
         JSON, default=list, server_default="[]"
     )
+    outbound_policy_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
+    )
     retention_days: Mapped[int] = mapped_column(Integer, default=90, server_default="90")
     execution_concurrency_limit: Mapped[int] = mapped_column(
         Integer, default=20, server_default="20"

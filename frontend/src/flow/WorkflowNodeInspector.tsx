@@ -13,8 +13,11 @@ import type {
   WorkflowNode,
 } from '../lib/api'
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
+import WorkflowApiRequestEditor from './WorkflowApiRequestEditor'
 
 type InspectorProps = {
+  projectId?: string | null
+  environmentId?: string | null
   node: WorkflowNode | null
   definition: WorkflowDefinition
   apis: ApiDefinition[]
@@ -30,6 +33,8 @@ type InspectorProps = {
 }
 
 export default function WorkflowNodeInspector({
+  projectId,
+  environmentId,
   node,
   definition,
   apis,
@@ -65,6 +70,8 @@ export default function WorkflowNodeInspector({
         graphqlSchemas={graphqlSchemas}
         grpcDescriptors={grpcDescriptors}
         eventSources={eventSources}
+        projectId={projectId}
+        environmentId={environmentId}
         editable={editable}
         onUpdate={updateNode}
       />
@@ -89,6 +96,8 @@ export default function WorkflowNodeInspector({
 }
 
 function InspectorNodeFields({
+  projectId,
+  environmentId,
   node,
   definition,
   apis,
@@ -148,6 +157,8 @@ function InspectorNodeFields({
       definition={definition}
       apis={apis}
       artifacts={artifacts}
+      projectId={projectId}
+      environmentId={environmentId}
       workflows={workflows}
       editable={editable}
       onUpdate={onUpdate}
@@ -165,6 +176,8 @@ function EmptyInspector() {
 }
 
 function NodeTypeFields({
+  projectId,
+  environmentId,
   node,
   definition,
   apis,
@@ -173,6 +186,8 @@ function NodeTypeFields({
   editable,
   onUpdate,
 }: {
+  projectId?: string | null
+  environmentId?: string | null
   node: WorkflowNode
   definition: WorkflowDefinition
   apis: ApiDefinition[]
@@ -182,7 +197,17 @@ function NodeTypeFields({
   onUpdate: (node: WorkflowNode) => void
 }) {
   if (node.type === 'api') {
-    return <ApiFields node={node} apis={apis} editable={editable} onUpdate={onUpdate} />
+    return (
+      <ApiFields
+        projectId={projectId}
+        environmentId={environmentId}
+        node={node}
+        apis={apis}
+        artifacts={artifacts}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+    )
   }
   if (node.type === 'extract') {
     return (
@@ -1198,13 +1223,19 @@ function ForEachFields({
 }
 
 function ApiFields({
+  projectId,
+  environmentId,
   node,
   apis,
+  artifacts,
   editable,
   onUpdate,
 }: {
+  projectId?: string | null
+  environmentId?: string | null
   node: WorkflowNode
   apis: ApiDefinition[]
+  artifacts: Artifact[]
   editable: boolean
   onUpdate: (node: WorkflowNode) => void
 }) {
@@ -1215,9 +1246,29 @@ function ApiFields({
           disabled={!editable}
           value={stringConfig(node, 'api_definition_id') || undefined}
           options={apis.map((api) => ({ label: api.name, value: api.id }))}
-          onChange={(value) => onUpdate(updateNodeConfig(node, 'api_definition_id', value))}
+          onChange={(value) => {
+            const selected = apis.find((api) => api.id === value)
+            onUpdate({
+              ...node,
+              config: {
+                ...node.config,
+                api_definition_id: value,
+                api_version: selected?.current_version,
+                request_overrides: {},
+              },
+            })
+          }}
         />
       </Field>
+      <WorkflowApiRequestEditor
+        projectId={projectId}
+        environmentId={environmentId}
+        node={node}
+        api={apis.find((api) => api.id === stringConfig(node, 'api_definition_id'))}
+        artifacts={artifacts}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
       <Field label="超时（秒）">
         <InputNumber
           disabled={!editable}

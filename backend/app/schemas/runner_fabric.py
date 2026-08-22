@@ -120,6 +120,7 @@ class RunnerLeaseTaskResponse(BaseModel):
     fencing_token: int
     plan: str
     plan_sha256: str
+    outbound_policy_enabled: bool = True
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
 

@@ -461,6 +461,26 @@ async def test_runner_fabric_policy_guards(
         assert disabled.value.code == "RUNNER_FABRIC_DISABLED"
 
 
+@pytest.mark.asyncio
+async def test_runner_lease_carries_project_outbound_policy_toggle(
+    fabric_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        project.outbound_policy_enabled = False
+        await session.commit()
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "runner-policy-toggle")
+        await service.enqueue(plan)
+
+        lease = await service.claim(runner_token=token)
+
+        assert lease is not None
+        assert lease.task.outbound_policy_enabled is False
+
+
 def test_runner_profile_and_production_transport_are_strict() -> None:
     assert normalize_labels(["ARM64", "zone.cn"]) == ("arm64", "zone.cn")
     with pytest.raises(ValueError, match="unique"):

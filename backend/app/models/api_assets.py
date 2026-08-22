@@ -79,6 +79,7 @@ class APIDefinition(UuidPrimaryKeyMixin, TimestampMixin, Base):
     import_key: Mapped[str | None] = mapped_column(String(64), index=True)
     import_fingerprint: Mapped[str | None] = mapped_column(String(64))
     import_source: Mapped[str | None] = mapped_column(String(255), index=True)
+    import_source_key: Mapped[str | None] = mapped_column(String(512), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

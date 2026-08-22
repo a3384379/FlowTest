@@ -10,7 +10,13 @@ from starlette.types import ASGIApp
 from app.core.config import settings
 from app.core.errors import error_response
 from app.core.redis import redis_client
-from app.services.rate_limit import RateLimitDecision, RedisRateClient, RedisRateLimiter
+from app.domain.runtime_profiles import RuntimeProfile
+from app.services.rate_limit import (
+    InProcessRateLimiter,
+    RateLimitDecision,
+    RedisRateClient,
+    RedisRateLimiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +24,11 @@ logger = logging.getLogger(__name__)
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
-        self._limiter = RedisRateLimiter(cast(RedisRateClient, redis_client))
+        self._limiter = (
+            InProcessRateLimiter()
+            if settings.runtime_profile is RuntimeProfile.STANDALONE
+            else RedisRateLimiter(cast(RedisRateClient, redis_client))
+        )
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         rule = _rule(request)

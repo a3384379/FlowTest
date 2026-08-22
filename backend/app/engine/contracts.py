@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.api_assets import BodyKind
 from app.domain.assertions import ComparisonOperator
 from app.domain.capabilities import CapabilityId, SemanticVersion
 
@@ -200,10 +201,60 @@ class WorkflowSettings(BaseModel):
     default_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
+class ApiNodeRequestParameter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    value: str = Field(default="", max_length=65536)
+    enabled: bool = True
+
+
+class ApiNodeBodyOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: BodyKind
+    value: JsonValue = None
+
+    @model_validator(mode="after")
+    def validate_body_shape(self) -> "ApiNodeBodyOverride":
+        if self.kind is BodyKind.MULTIPART:
+            ApiNodeMultipartBody.model_validate(self.value)
+        if self.kind is BodyKind.NONE and self.value is not None:
+            raise ValueError("A none body override must use a null value")
+        return self
+
+
+class ApiNodeMultipartFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(min_length=1, max_length=160)
+    artifact_id: UUID
+
+
+class ApiNodeMultipartBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: dict[str, str] = Field(default_factory=dict)
+    files: tuple[ApiNodeMultipartFile, ...] = Field(default=(), max_length=20)
+
+
+class ApiNodeRequestOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query_parameters: tuple[ApiNodeRequestParameter, ...] | None = Field(
+        default=None,
+        max_length=200,
+    )
+    headers: dict[str, str] | None = None
+    body: ApiNodeBodyOverride | None = None
+
+
 class ApiNodeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_definition_id: UUID
+    api_version: int | None = Field(default=None, ge=1)
+    request_overrides: ApiNodeRequestOverrides = Field(default_factory=ApiNodeRequestOverrides)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     max_retries: int = Field(default=0, ge=0, le=3)
     retry_on: tuple[RetryCategory, ...] = Field(

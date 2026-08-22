@@ -149,8 +149,12 @@ export type ImportItem = {
 export type ImportRun = {
   id: string
   project_id: string
+  source_kind: 'file' | 'url'
+  source_key: string
   source_type: 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
   source_name: string
+  source_url: string | null
+  document_url: string | null
   source_sha256: string
   added: number
   changed: number
@@ -173,6 +177,7 @@ export type ProjectPermission = {
 }
 
 export type ProjectSecurityPolicy = {
+  enabled: boolean
   allowed_hosts: string[]
   allowed_private_cidrs: string[]
 }
@@ -502,6 +507,7 @@ export type NodeResult = {
     sha256: string
   }>
   trace: { trace_id: string; span_id: string } | null
+  observations?: WorkflowNodeObservation[]
   redacted_paths: string[]
   error: {
     code: string
@@ -509,6 +515,35 @@ export type NodeResult = {
     details: Record<string, unknown>
     retryable: boolean
   } | null
+}
+
+export type WorkflowNodeObservation = {
+  kind: 'http'
+  attempt: number
+  request: {
+    method: string
+    url: string
+    headers: Record<string, string>
+    body: unknown
+  }
+  response: {
+    status_code: number
+    headers: Record<string, string>
+    body: unknown
+    size_bytes: number
+  } | null
+  mappings: Array<{
+    source_node_id: string
+    source_path: string
+    target_location: string
+    target_key: string
+    value: unknown
+  }>
+  duration_ms: number
+  started_at: string
+  completed_at: string
+  error_code: string | null
+  error_message: string | null
 }
 
 export type WorkflowNodeExecution = {
@@ -522,6 +557,8 @@ export type WorkflowNodeExecution = {
   result?: NodeResult | null
   error_code: string | null
   error_message: string | null
+  started_at?: string | null
+  completed_at?: string
 }
 
 export type WorkflowExecutionDetail = {
@@ -754,6 +791,7 @@ export type ReportNode = {
   status: WorkflowNodeExecution['status']
   attempts: number
   duration_ms: number | null
+  observations?: WorkflowNodeObservation[]
   request: unknown
   response: unknown
   extraction: unknown
@@ -805,7 +843,7 @@ export type NotificationDelivery = {
   event_type: NotificationEvent
   resource_id: string
   status: 'pending' | 'delivered' | 'failed'
-  attempt: number
+  attempt?: number
   response_status: number | null
   error_message: string | null
   delivered_at: string | null
@@ -822,6 +860,7 @@ export type ExecutionEvent = {
   node_type: string | null
   node_status: WorkflowNodeExecution['status'] | null
   result?: NodeResult | null
+  attempt: number
   attempts: number
   error_code: string | null
   error_message: string | null

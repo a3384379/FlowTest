@@ -6,6 +6,8 @@ from uuid import UUID
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.logging import redact
+from app.engine.results import NodeResult
 from app.engine.scheduler import NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
 from app.services.execution_events import (
@@ -129,6 +131,11 @@ class WorkflowRunCoordinator:
             execution = await service.load_execution_for_run(plan.execution_id)
 
             async def publish_status(update: NodeStatusUpdate) -> None:
+                safe_result = (
+                    NodeResult.model_validate(redact(update.result.model_dump(mode="json")))
+                    if update.result is not None
+                    else None
+                )
                 await self._publish(
                     ExecutionEvent(
                         type=(
@@ -142,7 +149,7 @@ class WorkflowRunCoordinator:
                         node_name=update.name,
                         node_type=update.node_type.value,
                         node_status=update.status,
-                        result=update.result,
+                        result=safe_result,
                         attempt=update.attempts,
                         attempts=update.attempts,
                         fencing_token=0,

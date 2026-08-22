@@ -233,12 +233,14 @@ async def list_workflow_executions(
     project_id: UUID,
     session: SessionDependency,
     current_user: CurrentUser,
+    workflow_id: Annotated[UUID | None, Query()] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> Page[WorkflowExecutionResponse]:
     items, total = await WorkflowService(session).list_executions(
         actor=current_user,
         project_id=project_id,
+        workflow_id=workflow_id,
         page=page,
         page_size=page_size,
     )

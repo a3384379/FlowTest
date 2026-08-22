@@ -35,7 +35,7 @@ describe('App authentication', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
-    await browser.type(screen.getByLabelText('邮箱'), user.email)
+    await browser.type(screen.getByLabelText('账号'), user.email)
     await browser.type(screen.getByLabelText('密码'), 'correct horse battery staple')
     await browser.click(screen.getByRole('button', { name: /登\s*录/ }))
 
@@ -61,7 +61,7 @@ describe('App authentication', () => {
     const browser = userEvent.setup()
 
     await screen.findByRole('heading', { name: '登录账号' })
-    await browser.type(screen.getByLabelText('邮箱'), user.email)
+    await browser.type(screen.getByLabelText('账号'), user.email)
     await browser.type(screen.getByLabelText('密码'), 'initial-password')
     await browser.click(screen.getByRole('button', { name: /登\s*录/ }))
     expect(await screen.findByText('首次登录，请修改密码')).toBeVisible()
@@ -162,6 +162,31 @@ describe('App authentication', () => {
     expect(await screen.findByText('暂无可访问项目')).toBeVisible()
   })
 
+  it('offers project creation when the account has no projects', async () => {
+    authenticateExistingUser()
+    const createdProject = { ...project, id: 'project-created', name: '新建订单项目' }
+    renderApp('/dashboard', [])
+    server.use(
+      http.post('/api/v1/projects', async ({ request }) => {
+        expect(await request.json()).toEqual({ name: '新建订单项目', description: '' })
+        return HttpResponse.json(createdProject, { status: 201 })
+      }),
+      http.get(`/api/v1/projects/${createdProject.id}`, () => HttpResponse.json(createdProject)),
+      http.get(`/api/v1/projects/${createdProject.id}/flaky-tests`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${createdProject.id}/release-decisions`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+    )
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '创建第一个项目' }))
+    await browser.type(screen.getByLabelText('项目名称'), createdProject.name)
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+
+    expect(await screen.findByText(`当前查看：${createdProject.name}`)).toBeVisible()
+  })
+
   it('redirects a bare project URL to its dashboard', async () => {
     authenticateExistingUser()
     renderApp(`/projects/${project.id}`)
@@ -213,7 +238,7 @@ function renderApp(
       HttpResponse.json({ effective_role: 'owner', capabilities: [], matrix: {} }),
     ),
     http.get(`/api/v1/projects/${project.id}/security-policy`, () =>
-      HttpResponse.json({ allowed_hosts: [], allowed_private_cidrs: [] }),
+      HttpResponse.json({ enabled: true, allowed_hosts: [], allowed_private_cidrs: [] }),
     ),
     http.get(`/api/v1/projects/${project.id}/retention-policy`, () =>
       HttpResponse.json({ retention_days: 90, maximum_days: 3650 }),

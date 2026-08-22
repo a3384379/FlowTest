@@ -14,6 +14,7 @@ from app.domain.api_assets import (
     AuthKind,
     HttpMethod,
     JsonValue,
+    QueryParameterSpec,
     build_variables,
     merge_headers,
     render_json,
@@ -228,13 +229,22 @@ class APIAssetService:
         return stored
 
     async def list_definitions(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        method: str | None = None,
     ) -> tuple[list[APIDefinition], int]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._assets.list_definitions(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            search=search,
+            method=method,
         )
 
     async def create_definition(
@@ -378,6 +388,8 @@ class APIAssetService:
         runtime_headers: dict[str, str],
         body_override: JsonValue,
         use_body_override: bool,
+        query_parameters_override: tuple[QueryParameterSpec, ...] | None = None,
+        headers_override: dict[str, str] | None = None,
         redact: bool = True,
         version_number: int | None = None,
         workflow_variables: dict[str, str] | None = None,
@@ -410,15 +422,29 @@ class APIAssetService:
         try:
             base_url = render_template(environment.base_url, variables).rstrip("/")
             path = render_template(api_version.path, variables).lstrip("/")
+            query_parameters = (
+                query_parameters_override
+                if query_parameters_override is not None
+                else tuple(
+                    QueryParameterSpec(
+                        name=str(item["name"]),
+                        value=str(item["value"]),
+                        enabled=bool(item.get("enabled", True)),
+                    )
+                    for item in api_version.query_parameters
+                )
+            )
             query = [
                 (
-                    render_template(str(item["name"]), variables),
-                    render_template(str(item["value"]), variables),
+                    render_template(item.name, variables),
+                    render_template(item.value, variables),
                 )
-                for item in api_version.query_parameters
-                if bool(item.get("enabled", True))
+                for item in query_parameters
+                if item.enabled
             ]
-            api_headers = dict(api_version.headers)
+            api_headers = dict(
+                api_version.headers if headers_override is None else headers_override
+            )
             _apply_auth(
                 api_version.auth_kind,
                 api_version.auth_config,

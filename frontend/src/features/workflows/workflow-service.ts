@@ -49,12 +49,12 @@ export async function listWorkflows(projectId: string): Promise<Page<Workflow>> 
 
 export async function createWorkflow(
   projectId: string,
-  input: { name: string; description: string; apiId: string },
+  input: { name: string; description: string; apiId: string; apiVersion?: number },
 ): Promise<Workflow> {
   const response = await apiClient.post<Workflow>(`/projects/${projectId}/workflows`, {
     name: input.name,
     description: input.description,
-    definition: linearWorkflow(input.apiId),
+    definition: linearWorkflow(input.apiId, input.apiVersion),
   })
   return response.data
 }
@@ -145,15 +145,18 @@ export async function getWorkflowExecution(
   return response.data
 }
 
-export async function listWorkflowExecutions(projectId: string): Promise<Page<WorkflowExecution>> {
+export async function listWorkflowExecutions(
+  projectId: string,
+  workflowId?: string,
+): Promise<Page<WorkflowExecution>> {
   const response = await apiClient.get<Page<WorkflowExecution>>(
     `/projects/${projectId}/workflow-executions`,
-    { params: { page: 1, page_size: 20 } },
+    { params: { workflow_id: workflowId, page: 1, page_size: 20 } },
   )
   return response.data
 }
 
-export function linearWorkflow(apiId: string): WorkflowDefinition {
+export function linearWorkflow(apiId: string, apiVersion?: number): WorkflowDefinition {
   return {
     schema_version: '1.0',
     variables: {},
@@ -166,6 +169,8 @@ export function linearWorkflow(apiId: string): WorkflowDefinition {
         position: { x: 220, y: 80 },
         config: {
           api_definition_id: apiId,
+          ...(apiVersion ? { api_version: apiVersion } : {}),
+          request_overrides: {},
           max_retries: 0,
           retry_on: ['network_error', '5xx'],
         },

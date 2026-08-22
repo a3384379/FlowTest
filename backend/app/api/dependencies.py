@@ -10,8 +10,11 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
 from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
+from app.domain.runtime_profiles import RuntimeProfile
 from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
+from app.http.imports import HttpImportDocumentFetcher
 from app.http.oidc import HttpOIDCProvider
+from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
 from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
@@ -60,6 +63,16 @@ def get_pact_broker_source() -> PactBrokerSource | None:
 PactBroker = Annotated[PactBrokerSource | None, Depends(get_pact_broker_source)]
 
 
+def get_import_document_fetcher() -> ImportDocumentFetcher:
+    return HttpImportDocumentFetcher(request_timeout_seconds=settings.request_timeout_seconds)
+
+
+ImportDocumentFetcherDependency = Annotated[
+    ImportDocumentFetcher,
+    Depends(get_import_document_fetcher),
+]
+
+
 async def get_current_user(
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
@@ -82,7 +95,10 @@ AuthenticatedUser = Annotated[User, Depends(get_current_user)]
 
 
 async def require_password_change_complete(authenticated_user: AuthenticatedUser) -> User:
-    if authenticated_user.requires_password_change:
+    if (
+        authenticated_user.requires_password_change
+        and settings.runtime_profile is not RuntimeProfile.STANDALONE
+    ):
         raise AppError(
             code="PASSWORD_CHANGE_REQUIRED",
             message="首次登录必须修改密码",

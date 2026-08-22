@@ -12,6 +12,7 @@ from app.domain.access import (
     validate_folder_parent,
 )
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_policy_values
+from app.domain.runtime_profiles import RuntimeProfile
 from app.models.access import AuditLog, Folder, Project, ProjectMember, User
 from app.repositories.access import ProjectRepository, UserRepository
 from app.services.audit import AuditService
@@ -50,6 +51,7 @@ class ProjectService:
             name=name.strip(),
             description=description.strip(),
             retention_days=settings.retention_default_days,
+            outbound_policy_enabled=settings.runtime_profile is not RuntimeProfile.STANDALONE,
             created_by_id=actor.id,
         )
         self._projects.add(project)
@@ -118,6 +120,7 @@ class ProjectService:
         *,
         actor: User,
         project_id: UUID,
+        enabled: bool | None,
         allowed_hosts: list[str],
         allowed_private_cidrs: list[str],
     ) -> OutboundNetworkPolicy:
@@ -129,7 +132,9 @@ class ProjectService:
         try:
             validate_policy_values(allowed_hosts, allowed_private_cidrs)
             policy = OutboundNetworkPolicy(
-                tuple(allowed_hosts), tuple(allowed_private_cidrs)
+                tuple(allowed_hosts),
+                tuple(allowed_private_cidrs),
+                access.project.outbound_policy_enabled if enabled is None else enabled,
             ).normalized()
         except (OutboundPolicyError, ValueError) as error:
             raise AppError(
@@ -139,6 +144,7 @@ class ProjectService:
             ) from error
         access.project.outbound_allowed_hosts = list(policy.allowed_hosts)
         access.project.outbound_allowed_private_cidrs = list(policy.allowed_private_cidrs)
+        access.project.outbound_policy_enabled = policy.enabled
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -146,6 +152,7 @@ class ProjectService:
             resource_type="project",
             resource_id=project_id,
             details={
+                "enabled": policy.enabled,
                 "allowed_hosts": list(policy.allowed_hosts),
                 "allowed_private_cidrs": list(policy.allowed_private_cidrs),
             },
@@ -465,4 +472,5 @@ def _project_network_policy(project: Project) -> OutboundNetworkPolicy:
     return OutboundNetworkPolicy(
         allowed_hosts=tuple(project.outbound_allowed_hosts),
         allowed_private_cidrs=tuple(project.outbound_allowed_private_cidrs),
+        enabled=project.outbound_policy_enabled,
     )

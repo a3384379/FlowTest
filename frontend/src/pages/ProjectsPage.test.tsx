@@ -49,6 +49,7 @@ describe('ProjectsPage', () => {
       http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/security-policy`, () =>
         HttpResponse.json({
+          enabled: true,
           allowed_hosts: ['api.example.com'],
           allowed_private_cidrs: ['10.20.0.0/16'],
         }),
@@ -100,6 +101,7 @@ describe('ProjectsPage', () => {
     await browser.click(screen.getByRole('button', { name: '保存安全策略' }))
     await waitFor(() =>
       expect(saved).toHaveBeenCalledWith({
+        enabled: true,
         allowed_hosts: ['api.example.com', '*.internal.example.com'],
         allowed_private_cidrs: ['10.20.0.0/16'],
       }),

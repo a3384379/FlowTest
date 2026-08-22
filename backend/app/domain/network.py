@@ -17,6 +17,7 @@ AddressResolver = Callable[[str, int], Awaitable[tuple[str, ...]]]
 class OutboundNetworkPolicy:
     allowed_hosts: tuple[str, ...] = ()
     allowed_private_cidrs: tuple[str, ...] = ()
+    enabled: bool = True
 
     def normalized(self) -> "OutboundNetworkPolicy":
         return OutboundNetworkPolicy(
@@ -29,6 +30,7 @@ class OutboundNetworkPolicy:
                     }
                 )
             ),
+            enabled=self.enabled,
         )
 
 
@@ -62,6 +64,15 @@ async def validate_outbound_target(
     normalized_hostname = _normalize_host(hostname)
     if normalized_hostname.startswith("*."):
         raise OutboundPolicyError("目标主机不能使用通配符")
+    if not normalized.enabled:
+        # Compatibility mode still performs DNS resolution so callers that
+        # verify the connected peer (SQL/Redis nodes) can detect DNS rebinding.
+        # It deliberately skips the project CIDR/loopback classification so
+        # local development targets such as localhost remain usable.
+        addresses = await (resolver or resolve_host)(normalized_hostname, port)
+        if not addresses:
+            raise OutboundPolicyError("目标域名没有可用地址")
+        return addresses
     if normalized.allowed_hosts and not any(
         _host_matches(normalized_hostname, pattern) for pattern in normalized.allowed_hosts
     ):

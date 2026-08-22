@@ -13,6 +13,7 @@ import {
   Row,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -56,7 +57,7 @@ const roleLabels = {
   viewer: 'Viewer',
 }
 
-type PolicyForm = { allowed_hosts: string; allowed_private_cidrs: string }
+type PolicyForm = { enabled: boolean; allowed_hosts: string; allowed_private_cidrs: string }
 
 export default function ProjectsPage() {
   const state = useProjectsPageState()
@@ -317,10 +318,23 @@ function SecurityPolicyPanel({
         <Alert
           type="warning"
           showIcon
-          title="默认阻止私网、回环、链路本地和云元数据地址"
-          description="公共地址默认可访问；填写域名后将启用域名白名单。私网目标还必须同时命中允许 CIDR，DNS 解析后的每个地址都会重新校验。"
+          title="关闭后允许 localhost 和私网出站请求"
+          description="关闭策略适合本机开发验证，会影响接口导入、环境执行、工作流、Webhook 和协议调试。开启后将阻止回环地址，私网目标还必须同时命中允许 CIDR。"
         />
         <Form form={form} layout="vertical" className="governance-policy-form" onFinish={onSave}>
+          <Form.Item
+            name="enabled"
+            label="启用出站安全策略"
+            valuePropName="checked"
+            extra="Standalone 新项目默认关闭；企业部署建议保持开启。"
+          >
+            <Switch
+              aria-label="启用出站安全策略"
+              disabled={!canManage}
+              checkedChildren="开启"
+              unCheckedChildren="关闭"
+            />
+          </Form.Item>
           <Form.Item label="允许域名（每行一个）" name="allowed_hosts">
             <Input.TextArea rows={4} readOnly={!canManage} />
           </Form.Item>
@@ -378,6 +392,7 @@ function AuditPanel({
 function synchronizePolicyForm(form: FormInstance<PolicyForm>, policy?: ProjectSecurityPolicy) {
   if (!policy) return
   form.setFieldsValue({
+    enabled: policy.enabled ?? true,
     allowed_hosts: policy.allowed_hosts.join('\n'),
     allowed_private_cidrs: policy.allowed_private_cidrs.join('\n'),
   })
@@ -389,6 +404,7 @@ function hasCapability(data: ProjectPermission | undefined, capability: ProjectC
 
 function policyPayload(values: PolicyForm): ProjectSecurityPolicy {
   return {
+    enabled: values.enabled,
     allowed_hosts: splitLines(values.allowed_hosts),
     allowed_private_cidrs: splitLines(values.allowed_private_cidrs),
   }

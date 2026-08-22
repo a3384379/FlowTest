@@ -9,9 +9,15 @@ from app.core.config import settings
 from app.core.database import check_database
 from app.core.redis import check_redis
 from app.core.storage import check_storage
+from app.domain.runtime_profiles import RuntimeProfile, describe_runtime_profile
 from app.observability.metrics import MetricsRegistry, render_metrics
-from app.observability.task_metrics import RedisTaskMetricsReader
-from app.schemas.health import FeatureFlagsResponse, HealthResponse, ReadinessResponse
+from app.observability.task_metrics import InProcessTaskMetricsReader, RedisTaskMetricsReader
+from app.schemas.health import (
+    FeatureFlagsResponse,
+    HealthResponse,
+    ReadinessResponse,
+    RuntimeProfileResponse,
+)
 
 router = APIRouter()
 
@@ -23,6 +29,16 @@ async def liveness() -> HealthResponse:
         status="ok",
         service=settings.app_name,
         version=settings.app_version,
+    )
+
+
+@router.get("/runtime-profile", response_model=RuntimeProfileResponse)
+async def runtime_profile() -> RuntimeProfileResponse:
+    profile = describe_runtime_profile(settings.runtime_profile)
+    return RuntimeProfileResponse(
+        profile=profile.profile,
+        worker_topology=profile.worker_topology,
+        unavailable_features=profile.unavailable_features,
     )
 
 
@@ -51,9 +67,10 @@ async def feature_flags() -> FeatureFlagsResponse:
 async def readiness(response: Response) -> ReadinessResponse:
     checks: dict[str, Callable[[], Awaitable[None]]] = {
         "database": check_database,
-        "redis": check_redis,
         "storage": check_storage,
     }
+    if settings.runtime_profile is not RuntimeProfile.STANDALONE:
+        checks["redis"] = check_redis
     results = await asyncio.gather(*(check() for check in checks.values()), return_exceptions=True)
     statuses = {
         name: "error" if isinstance(result, BaseException) else "ok"
@@ -70,5 +87,12 @@ async def metrics(request: Request, session: SessionDependency) -> PlainTextResp
     registry = request.app.state.metrics_registry
     if not isinstance(registry, MetricsRegistry):
         return PlainTextResponse("", status_code=503)
-    content = await render_metrics(registry, session, RedisTaskMetricsReader())
+    task_metrics = getattr(request.app.state, "task_metrics_reader", None)
+    if task_metrics is None:
+        task_metrics = (
+            InProcessTaskMetricsReader()
+            if settings.runtime_profile is RuntimeProfile.STANDALONE
+            else RedisTaskMetricsReader()
+        )
+    content = await render_metrics(registry, session, task_metrics)
     return PlainTextResponse(content, media_type="text/plain; version=0.0.4; charset=utf-8")

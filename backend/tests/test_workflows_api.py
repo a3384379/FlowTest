@@ -116,6 +116,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert published.status_code == 200, published.text
     version_one = published.json()
     assert version_one["version"] == 1
+    assert version_one["definition"]["nodes"][1]["config"]["api_version"] == 1
 
     updated_draft = _workflow_definition(api_id, max_retries=0)
     updated_draft["nodes"][1]["name"] = "已修改的草稿"
@@ -150,7 +151,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
         },
     )
     assert api_v2.status_code == 201
-    target = respx.get("http://workflow.example.com/users/v2").mock(
+    target = respx.get("http://workflow.example.com/users/v1").mock(
         side_effect=[Response(503, json={"error": "temporary"}), Response(200, json={"id": 7})]
     )
     executed = await workflow_client.post(
@@ -165,13 +166,34 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert detail["execution"]["status"] == "passed"
     assert detail["nodes"][1]["attempts"] == 2
     assert detail["nodes"][1]["output"]["body"] == {"id": 7}
+    observations = detail["nodes"][1]["result"]["observations"]
+    assert [item["attempt"] for item in observations] == [1, 2]
+    assert [item["response"]["status_code"] for item in observations] == [503, 200]
+    assert observations[1]["request"]["url"].endswith("/users/v1")
+    assert set(observations[1]["request"]["headers"]["X-Snapshot-Key"]) == {"*"}
+    assert observations[1]["duration_ms"] >= 0
     assert len(target.calls) == 2
     snapshot = detail["execution"]["snapshot"]
     assert snapshot["workflow"]["version"] == 1
-    assert snapshot["apis"]["api"]["version"] == 2
-    assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v2")
+    assert snapshot["apis"]["api"]["version"] == 1
+    assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v1")
     assert snapshot["apis"]["api"]["spec"]["auth_config"]["value"] == "***"
     assert "snapshot-api-key" not in json.dumps(detail)
+
+    execution_list = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions",
+        headers=headers,
+        params={"workflow_id": workflow["id"]},
+    )
+    assert execution_list.status_code == 200
+    assert [item["id"] for item in execution_list.json()["items"]] == [detail["execution"]["id"]]
+    unrelated_list = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions",
+        headers=headers,
+        params={"workflow_id": "00000000-0000-4000-8000-000000000999"},
+    )
+    assert unrelated_list.status_code == 200
+    assert unrelated_list.json()["items"] == []
 
     environment_changed = await workflow_client.patch(
         f"/api/v1/projects/{project_id}/environments/{environment_id}",
@@ -192,7 +214,62 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert history.status_code == 200
     historical_snapshot = history.json()["execution"]["snapshot"]
     assert historical_snapshot["environment"]["base_url"] == "http://workflow.example.com"
-    assert historical_snapshot["apis"]["api"]["version"] == 2
+    assert historical_snapshot["apis"]["api"]["version"] == 1
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_api_node_pins_version_and_applies_request_overrides(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    version_two = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis/{api_id}/versions",
+        headers=headers,
+        json={"method": "GET", "path": "/users/v2", "body_kind": "none"},
+    )
+    assert version_two.status_code == 201
+    definition = _workflow_definition(api_id)
+    definition["nodes"][1]["config"].update(
+        {
+            "api_version": 1,
+            "request_overrides": {
+                "query_parameters": [{"name": "source", "value": "workflow", "enabled": True}],
+                "headers": {"X-Node": "custom"},
+            },
+        }
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "固定接口版本", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1?source=workflow").mock(
+        return_value=Response(200, json={"version": 1})
+    )
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client,
+        headers,
+        project_id,
+        executed.json()["id"],
+    )
+    assert detail["execution"]["status"] == "passed"
+    assert detail["execution"]["snapshot"]["apis"]["api"]["version"] == 1
+    assert target.calls[0].request.headers["X-Node"] == "custom"
+    assert target.calls[0].request.headers["X-Snapshot-Key"] == "snapshot-api-key"
 
 
 @respx.mock
@@ -316,7 +393,7 @@ async def test_publish_rejects_invalid_or_cross_project_api_configuration(
     workflow_client: AsyncClient,
 ) -> None:
     headers = await _login_headers(workflow_client)
-    project_id, _environment_id, _api_id = await _create_assets(workflow_client, headers)
+    project_id, _environment_id, api_id = await _create_assets(workflow_client, headers)
     missing_api = "00000000-0000-0000-0000-000000000099"
     created = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows",
@@ -343,6 +420,46 @@ async def test_publish_rejects_invalid_or_cross_project_api_configuration(
     )
     assert rejected.status_code == 422
     assert rejected.json()["error"]["code"] == "INVALID_NODE_CONFIG"
+
+    missing_version_definition = _workflow_definition(api_id)
+    missing_version_definition["nodes"][1]["config"]["api_version"] = 99
+    missing_version = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "版本不存在", "definition": missing_version_definition},
+    )
+    rejected_version = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{missing_version.json()['id']}/versions",
+        headers=headers,
+    )
+    assert rejected_version.status_code == 422
+    assert rejected_version.json()["error"]["code"] == "WORKFLOW_API_VERSION_NOT_FOUND"
+
+    missing_file_definition = _workflow_definition(api_id)
+    missing_file_definition["nodes"][1]["config"]["request_overrides"] = {
+        "body": {
+            "kind": "multipart",
+            "value": {
+                "files": [
+                    {
+                        "field": "document",
+                        "artifact_id": "00000000-0000-4000-8000-000000000098",
+                    }
+                ]
+            },
+        }
+    }
+    missing_file = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "文件不存在", "definition": missing_file_definition},
+    )
+    rejected_file = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{missing_file.json()['id']}/versions",
+        headers=headers,
+    )
+    assert rejected_file.status_code == 422
+    assert rejected_file.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 
 
 @respx.mock

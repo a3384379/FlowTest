@@ -12,7 +12,7 @@ export async function authenticate(page: Page): Promise<void> {
   await expect(dashboard.or(login)).toBeVisible()
   if (await dashboard.isVisible()) return
 
-  await page.getByLabel('邮箱').fill(administratorEmail)
+  await page.getByLabel('账号').fill(administratorEmail)
   let response = await submitLogin(page, activePassword)
   if (!response.ok() && activePassword !== bootstrapPassword) {
     response = await submitLogin(page, bootstrapPassword)

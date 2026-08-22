@@ -62,7 +62,7 @@ async def _authorize(
     session_maker = websocket.app.state.database_session_factory
     async with session_maker() as session:
         user = await UserRepository(session).get(claims.user_id)
-        if user is None or not user.is_active or user.requires_password_change:
+        if user is None or not user.is_active:
             await websocket.close(code=4401, reason="访问令牌无效")
             return None
         execution = await WorkflowRepository(session).get_execution(execution_id)

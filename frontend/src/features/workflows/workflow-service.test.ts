@@ -81,14 +81,15 @@ describe('workflow service', () => {
         `/api/v1/projects/${project.id}/workflow-executions/${workflowRunningExecution.id}`,
         () => HttpResponse.json(workflowExecutionDetail),
       ),
-      http.get(`/api/v1/projects/${project.id}/workflow-executions`, () =>
-        HttpResponse.json({
+      http.get(`/api/v1/projects/${project.id}/workflow-executions`, ({ request }) => {
+        expect(new URL(request.url).searchParams.get('workflow_id')).toBe(workflow.id)
+        return HttpResponse.json({
           items: [workflowExecutionDetail.execution],
           total: 1,
           page: 1,
           page_size: 20,
-        }),
-      ),
+        })
+      }),
     )
 
     expect((await listProjects()).items).toEqual([project])
@@ -119,17 +120,19 @@ describe('workflow service', () => {
     expect(await getWorkflowExecution(project.id, workflowRunningExecution.id)).toEqual(
       workflowExecutionDetail,
     )
-    expect((await listWorkflowExecutions(project.id)).items).toEqual([
+    expect((await listWorkflowExecutions(project.id, workflow.id)).items).toEqual([
       workflowExecutionDetail.execution,
     ])
   })
 
   it('creates a stable Start to API to End definition', () => {
-    const definition = linearWorkflow(apiDefinition.id)
+    const definition = linearWorkflow(apiDefinition.id, apiDefinition.current_version)
 
     expect(definition.nodes.map((node) => node.type)).toEqual(['start', 'api', 'end'])
     expect(definition.edges).toHaveLength(2)
     expect(definition.nodes[1].config.api_definition_id).toBe(apiDefinition.id)
+    expect(definition.nodes[1].config.api_version).toBe(apiDefinition.current_version)
+    expect(definition.nodes[1].config.request_overrides).toEqual({})
   })
 })
 

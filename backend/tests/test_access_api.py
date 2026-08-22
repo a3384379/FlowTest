@@ -7,8 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.runtime_profiles import RuntimeProfile
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -83,6 +85,13 @@ async def test_login_refresh_rotation_logout_and_password_change(client: AsyncCl
 
     client.cookies.clear()
     client.cookies.set("flowtest_refresh", second_refresh, domain="test.local", path="/api/v1/auth")
+    too_short = await client.post(
+        "/api/v1/auth/change-password",
+        headers=_authorization(access_token),
+        json={"current_password": ADMIN_PASSWORD, "new_password": "1234567"},
+    )
+    assert too_short.status_code == 422
+
     changed = await client.post(
         "/api/v1/auth/change-password",
         headers=_authorization(access_token),
@@ -100,6 +109,41 @@ async def test_login_refresh_rotation_logout_and_password_change(client: AsyncCl
     )
     assert logged_out.status_code == 204
     assert client.cookies.get("flowtest_refresh") is None
+
+
+@pytest.mark.asyncio
+async def test_admin_login_alias_resolves_to_bootstrap_email(client: AsyncClient) -> None:
+    admin_token = (await _login(client, ADMIN_EMAIL, ADMIN_PASSWORD))["access_token"]
+    short_password = await client.post(
+        "/api/v1/users",
+        headers=_authorization(admin_token),
+        json={
+            "email": "short-password@example.com",
+            "display_name": "Short password",
+            "password": "1234567",
+            "is_system_admin": False,
+        },
+    )
+    assert short_password.status_code == 422
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=_authorization(admin_token),
+        json={
+            "email": settings.bootstrap_admin_email,
+            "display_name": "Bootstrap administrator",
+            "password": "admin-password-123!",
+            "is_system_admin": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    alias_login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin", "password": "admin-password-123!"},
+    )
+    assert alias_login.status_code == 200, alias_login.text
+    assert alias_login.json()["user"]["email"] == settings.bootstrap_admin_email
 
 
 @pytest.mark.asyncio
@@ -347,6 +391,16 @@ async def test_password_validation_and_missing_resources(client: AsyncClient) ->
     )
     assert reused_password.status_code == 400
 
+    too_short = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={
+            "email": "short-password@example.com",
+            "display_name": "Short Password",
+            "password": "12345",
+        },
+    )
+    assert too_short.status_code == 422
     missing_project = await client.get(
         "/api/v1/projects/00000000-0000-0000-0000-000000000001", headers=headers
     )
@@ -472,15 +526,21 @@ async def test_permission_matrix_security_policy_and_audit_access(client: AsyncC
         f"/api/v1/projects/{project_id}/security-policy",
         headers={**owner_headers, "X-Trace-ID": trace_id},
         json={
+            "enabled": False,
             "allowed_hosts": ["*.example.com", "api.internal"],
             "allowed_private_cidrs": ["10.20.0.1/16"],
         },
     )
     assert policy.status_code == 200, policy.text
     assert policy.json() == {
+        "enabled": False,
         "allowed_hosts": ["*.example.com", "api.internal"],
         "allowed_private_cidrs": ["10.20.0.0/16"],
     }
+    loaded_policy = await client.get(
+        f"/api/v1/projects/{project_id}/security-policy", headers=owner_headers
+    )
+    assert loaded_policy.json()["enabled"] is False
     assert (
         await client.put(
             f"/api/v1/projects/{project_id}/security-policy",
@@ -636,6 +696,25 @@ async def test_bootstrap_administrator_is_idempotent() -> None:
     assert administrator is not None
     assert administrator.is_system_admin
     assert administrator.requires_password_change
+    await test_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_standalone_bootstrap_uses_simple_password_without_forced_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "runtime_profile", RuntimeProfile.STANDALONE)
+    monkeypatch.setattr(settings, "bootstrap_admin_password", "admin")
+    test_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with session_maker() as session:
+        await bootstrap_administrator(session)
+        administrator = await session.scalar(select(User))
+    assert administrator is not None
+    assert not administrator.requires_password_change
+    assert password_service.verify(administrator.password_hash, "admin")
     await test_engine.dispose()
 
 

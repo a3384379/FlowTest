@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -9,8 +9,12 @@ import type { Artifact, ImportRun } from '../../lib/api'
 const importRun: ImportRun = {
   id: 'import-1',
   project_id: 'project-1',
+  source_kind: 'file',
+  source_key: 'file:openapi.json',
   source_type: 'openapi3',
   source_name: 'openapi.json',
+  source_url: null,
+  document_url: null,
   source_sha256: 'digest',
   added: 1,
   changed: 1,
@@ -44,6 +48,7 @@ describe('S4 API console panels', () => {
         importing={false}
         result={null}
         onClose={onClose}
+        onDiscover={vi.fn()}
         onPreview={onPreview}
         onMerge={onMerge}
       />,
@@ -56,6 +61,7 @@ describe('S4 API console panels', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: '生成 Diff' }))
     expect(onPreview).toHaveBeenCalledWith({
+      kind: 'file',
       file: expect.objectContaining({ name: 'openapi.json' }),
       sourceType: 'auto',
     })
@@ -66,6 +72,7 @@ describe('S4 API console panels', () => {
         importing={false}
         result={importRun}
         onClose={onClose}
+        onDiscover={vi.fn()}
         onPreview={onPreview}
         onMerge={onMerge}
       />,
@@ -77,6 +84,119 @@ describe('S4 API console panels', () => {
     expect(onMerge).toHaveBeenCalledWith(['key-1'])
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('accepts an OpenAPI URL and shows its source in the diff', async () => {
+    const documentId = 'a'.repeat(64)
+    const onDiscover = vi.fn(async () => ({
+      source_url: 'https://api.example.com/openapi.json',
+      source_kind: 'document' as const,
+      documents: [
+        {
+          id: documentId,
+          name: 'openapi.json',
+          url: 'https://api.example.com/openapi.json',
+        },
+      ],
+    }))
+    const onPreview = vi.fn(async () => importRun)
+    const onMerge = vi.fn(async () => importRun)
+    const { rerender } = render(
+      <ImportDialog
+        open
+        importing={false}
+        result={null}
+        onClose={vi.fn()}
+        onDiscover={onDiscover}
+        onPreview={onPreview}
+        onMerge={onMerge}
+      />,
+    )
+
+    await userEvent.click(screen.getByText('URL 导入'))
+    const generate = screen.getByRole('button', { name: '解析并生成 Diff' })
+    expect(generate).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('文档或 Swagger UI URL'), 'not-a-url')
+    expect(screen.getByText('请输入有效的 HTTP 或 HTTPS 地址')).toBeInTheDocument()
+    await userEvent.clear(screen.getByLabelText('文档或 Swagger UI URL'))
+    await userEvent.type(
+      screen.getByLabelText('文档或 Swagger UI URL'),
+      'https://api.example.com/openapi.json',
+    )
+    await userEvent.click(generate)
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith({
+        kind: 'url',
+        url: 'https://api.example.com/openapi.json',
+        sourceType: 'auto',
+        documentId,
+      }),
+    )
+
+    rerender(
+      <ImportDialog
+        open
+        importing={false}
+        result={{
+          ...importRun,
+          source_kind: 'url',
+          source_key: 'url:digest',
+          source_url: 'https://api.example.com/openapi.json',
+          document_url: 'https://api.example.com/openapi.json',
+        }}
+        onClose={vi.fn()}
+        onDiscover={onDiscover}
+        onPreview={onPreview}
+        onMerge={onMerge}
+      />,
+    )
+    expect(screen.getByText('来源页面：https://api.example.com/openapi.json')).toBeInTheDocument()
+  })
+
+  it('discovers and selects a Swagger UI document group before preview', async () => {
+    const usersId = 'a'.repeat(64)
+    const ordersId = 'b'.repeat(64)
+    const onDiscover = vi.fn(async () => ({
+      source_url: 'https://api.example.com/swagger-ui/index.html',
+      source_kind: 'swagger_ui' as const,
+      documents: [
+        { id: usersId, name: '用户服务', url: 'https://api.example.com/v3/api-docs/users' },
+        { id: ordersId, name: '订单服务', url: 'https://api.example.com/v3/api-docs/orders' },
+      ],
+    }))
+    const onPreview = vi.fn(async () => importRun)
+    render(
+      <ImportDialog
+        open
+        importing={false}
+        result={null}
+        onClose={vi.fn()}
+        onDiscover={onDiscover}
+        onPreview={onPreview}
+        onMerge={vi.fn(async () => importRun)}
+      />,
+    )
+
+    await userEvent.click(screen.getByText('URL 导入'))
+    await userEvent.type(
+      screen.getByLabelText('文档或 Swagger UI URL'),
+      'https://api.example.com/swagger-ui/index.html',
+    )
+    await userEvent.click(screen.getByRole('button', { name: '解析并生成 Diff' }))
+    expect(await screen.findByText('已发现 2 份接口文档')).toBeInTheDocument()
+    expect(onPreview).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '生成 Diff' })).toBeDisabled()
+
+    await userEvent.click(screen.getByText('订单服务'))
+    await userEvent.click(screen.getByRole('button', { name: '生成 Diff' }))
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith({
+        kind: 'url',
+        url: 'https://api.example.com/swagger-ui/index.html',
+        sourceType: 'auto',
+        documentId: ordersId,
+      }),
+    )
   })
 
   it('uploads and downloads artifacts while formatting their sizes', async () => {

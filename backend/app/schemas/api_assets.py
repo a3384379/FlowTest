@@ -2,13 +2,17 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints, model_validator
 
 from app.domain.api_assets import AuthKind, BodyKind, ExtractionKind, HttpMethod, JsonValue
 from app.domain.assertions import AssertionKind, ComparisonOperator
 from app.domain.scopes import HeaderScope, VariableScope
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
+APIDefinitionName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+]
 
 
 class ProjectConfigurationUpdate(BaseModel):
@@ -119,14 +123,14 @@ class APIVersionInput(BaseModel):
 
 
 class APIDefinitionCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: APIDefinitionName
     description: str = Field(default="", max_length=4000)
     folder_id: UUID | None = None
     request: APIVersionInput
 
 
 class APIDefinitionUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: APIDefinitionName | None = None
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None
 
@@ -174,8 +178,14 @@ class APIDetailResponse(BaseModel):
 
 class PreviewRequest(BaseModel):
     environment_id: UUID
+    version: int | None = Field(default=None, ge=1)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
+    query_parameters_override: list[RequestParameter] | None = Field(
+        default=None,
+        max_length=200,
+    )
+    headers_override: dict[str, str] | None = None
     body_override: JsonValue = None
     use_body_override: bool = False
 
