@@ -121,6 +121,9 @@ async def merge_api_import(
         project_id=project_id,
         run_id=run_id,
         selected_keys=payload.selected_keys,
+        service_id=payload.service_id,
+        environment_id=payload.environment_id,
+        endpoint_variant=payload.endpoint_variant,
     )
     return ImportRunResponse.model_validate(run)
 

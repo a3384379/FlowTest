@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import pytest
+import respx
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -123,6 +125,16 @@ async def test_environment_secret_api_version_and_preview_flow(
     )
     assert secret_response.status_code == 200
     assert "value" not in secret_response.json()
+    unreferenced_secret_response = await asset_client.put(
+        f"/api/v1/projects/{project_id}/secrets",
+        headers=headers,
+        json={
+            "name": "UNREFERENCED",
+            "value": "unreferenced-secret-value",
+            "environment_id": environment_a["id"],
+        },
+    )
+    assert unreferenced_secret_response.status_code == 200
     listed_secrets = await asset_client.get(
         f"/api/v1/projects/{project_id}/secrets", headers=headers
     )
@@ -201,7 +213,10 @@ async def test_environment_secret_api_version_and_preview_flow(
     )
     assert secret_variable["value"] == "******"
     assert secret_variable["secret"] is True
+    assert not any(item["name"] == "secret.UNREFERENCED" for item in preview["variables"])
+    assert "UNREFERENCED" not in preview["target"]["secret_refs"]
     assert "super-secret-token" not in preview_a.text
+    assert "unreferenced-secret-value" not in preview_a.text
 
     preview_b = await asset_client.post(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
@@ -447,3 +462,272 @@ async def _create_environment_response(
             "headers": environment_headers,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_service_endpoint_resolution_and_snapshot(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers, name="Request targets")
+    project_id = project["id"]
+    environment = await _create_environment(
+        asset_client,
+        headers,
+        project_id,
+        name="Target",
+        base_url="http://legacy.example.com",
+        variables={"layer": "environment"},
+        environment_headers={"X-Layer": "environment"},
+    )
+    default_service_id = environment["default_service_id"]
+    services = await asset_client.get(f"/api/v1/projects/{project_id}/services", headers=headers)
+    assert services.status_code == 200
+    assert {item["service_key"] for item in services.json()} == {"default"}
+
+    auth_service = await asset_client.post(
+        f"/api/v1/projects/{project_id}/services",
+        headers=headers,
+        json={"service_key": "auth", "name": "Auth Service"},
+    )
+    order_service = await asset_client.post(
+        f"/api/v1/projects/{project_id}/services",
+        headers=headers,
+        json={"service_key": "orders", "name": "Order Service"},
+    )
+    assert auth_service.status_code == 201, auth_service.text
+    assert order_service.status_code == 201, order_service.text
+    auth_id = auth_service.json()["id"]
+    order_id = order_service.json()["id"]
+
+    auth_endpoint = await asset_client.post(
+        f"/api/v1/projects/{project_id}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+        json={
+            "service_id": auth_id,
+            "base_url": "https://auth.example.com",
+            "headers": {"X-Layer": "endpoint", "X-Endpoint": "auth"},
+            "variables": {"layer": "endpoint"},
+        },
+    )
+    order_endpoint = await asset_client.post(
+        f"/api/v1/projects/{project_id}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+        json={
+            "service_id": order_id,
+            "base_url": "https://orders.example.com",
+            "headers": {"X-Endpoint": "orders"},
+        },
+    )
+    order_canary = await asset_client.post(
+        f"/api/v1/projects/{project_id}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+        json={
+            "service_id": order_id,
+            "variant": "canary",
+            "base_url": "https://orders-canary.example.com",
+        },
+    )
+    assert auth_endpoint.status_code == 201, auth_endpoint.text
+    assert order_endpoint.status_code == 201, order_endpoint.text
+    assert order_canary.status_code == 201, order_canary.text
+
+    created = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "Auth API",
+            "service_id": auth_id,
+            "request": {
+                "method": "GET",
+                "path": "/users/{{layer}}",
+                "variables": {"layer": "api"},
+                "headers": {"X-Layer": "api"},
+                "body_kind": "none",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    definition_id = created.json()["definition"]["id"]
+    preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={
+            "environment_id": environment["id"],
+            "runtime_variables": {"layer": "node"},
+            "runtime_headers": {"X-Layer": "node"},
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["url"] == "https://auth.example.com/users/node"
+    assert payload["target"]["service_key"] == "auth"
+    assert payload["target"]["endpoint_variant"] == "default"
+    assert payload["target"]["endpoint_revision"] == 1
+    assert next(item for item in payload["variables"] if item["name"] == "layer") == {
+        "name": "layer",
+        "value": "node",
+        "source": "runtime",
+        "secret": False,
+    }
+    assert (
+        next(item for item in payload["headers"] if item["name"].lower() == "x-layer")["source"]
+        == "runtime"
+    )
+
+    overridden = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={
+            "environment_id": environment["id"],
+            "service_override": "orders",
+            "endpoint_variant": "canary",
+        },
+    )
+    assert overridden.status_code == 200, overridden.text
+    assert overridden.json()["url"] == "https://orders-canary.example.com/users/api"
+    assert overridden.json()["target"]["service_key"] == "orders"
+
+    changed_environment = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/environments/{environment['id']}",
+        headers=headers,
+        json={"default_service_id": order_id},
+    )
+    assert changed_environment.status_code == 200, changed_environment.text
+    legacy_api = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "Environment default API",
+            "request": {"method": "GET", "path": "/health", "body_kind": "none"},
+        },
+    )
+    assert legacy_api.status_code == 201, legacy_api.text
+    legacy_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"]},
+    )
+    assert legacy_preview.status_code == 200, legacy_preview.text
+    assert legacy_preview.json()["target"]["service_key"] == "orders"
+    assert legacy_preview.json()["url"] == "https://orders.example.com/health"
+    assert default_service_id != order_id
+
+
+@pytest.mark.asyncio
+async def test_service_target_management_update_and_connectivity(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers, name="Target management")
+    environment = await _create_environment(
+        asset_client,
+        headers,
+        project["id"],
+        name="Connectivity",
+        base_url="http://legacy.example.com",
+        variables={},
+        environment_headers={},
+    )
+    service_response = await asset_client.post(
+        f"/api/v1/projects/{project['id']}/services",
+        headers=headers,
+        json={
+            "service_key": "billing",
+            "name": "Billing",
+            "description": "Original",
+            "owner_team": "payments",
+            "service_type": "https",
+        },
+    )
+    assert service_response.status_code == 201, service_response.text
+    service_id = service_response.json()["id"]
+    duplicate = await asset_client.post(
+        f"/api/v1/projects/{project['id']}/services",
+        headers=headers,
+        json={"service_key": "billing", "name": "Duplicate"},
+    )
+    assert duplicate.status_code == 409
+
+    updated_service = await asset_client.patch(
+        f"/api/v1/projects/{project['id']}/services/{service_id}",
+        headers=headers,
+        json={
+            "name": "Billing API",
+            "description": "Updated",
+            "owner_team": "platform",
+            "enabled": False,
+        },
+    )
+    assert updated_service.status_code == 200, updated_service.text
+    assert updated_service.json()["owner_team"] == "platform"
+    listed_services = await asset_client.get(
+        f"/api/v1/projects/{project['id']}/services", headers=headers
+    )
+    assert listed_services.status_code == 200
+    assert any(item["id"] == service_id for item in listed_services.json())
+
+    endpoint_response = await asset_client.post(
+        f"/api/v1/projects/{project['id']}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+        json={
+            "service_id": service_id,
+            "variant": "probe",
+            "base_url": "https://billing.example.com/api",
+            "health_check_path": "/health",
+            "health_expected_status": 200,
+        },
+    )
+    assert endpoint_response.status_code == 201, endpoint_response.text
+    endpoint_id = endpoint_response.json()["id"]
+    invalid_header = await asset_client.post(
+        f"/api/v1/projects/{project['id']}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+        json={
+            "service_id": service_id,
+            "variant": "invalid-header",
+            "base_url": "https://billing.example.com",
+            "headers": {"Bad\nHeader": "value"},
+        },
+    )
+    assert invalid_header.status_code == 422
+
+    updated_endpoint = await asset_client.patch(
+        f"/api/v1/projects/{project['id']}/service-endpoints/{endpoint_id}",
+        headers=headers,
+        json={
+            "variant": "probe-v2",
+            "base_url": "https://billing.example.com/api-v2",
+            "enabled": False,
+            "connect_timeout_ms": 1000,
+            "read_timeout_ms": 2000,
+            "tls_verify": False,
+            "proxy_ref": "corp-proxy",
+            "headers": {"X-Probe": "true"},
+            "variables": {"region": "cn"},
+            "secret_refs": ["billing-token"],
+            "health_check_path": "/ready",
+            "health_expected_status": 204,
+        },
+    )
+    assert updated_endpoint.status_code == 200, updated_endpoint.text
+    assert updated_endpoint.json()["revision"] == 2
+    assert updated_endpoint.json()["variant"] == "probe-v2"
+
+    all_endpoints = await asset_client.get(
+        f"/api/v1/projects/{project['id']}/service-endpoints", headers=headers
+    )
+    assert all_endpoints.status_code == 200
+    assert any(item["id"] == endpoint_id for item in all_endpoints.json())
+
+    with respx.mock(assert_all_called=False) as mocked:
+        mocked.head("https://billing.example.com/api-v2/ready").mock(
+            return_value=httpx.Response(200)
+        )
+        connectivity = await asset_client.post(
+            f"/api/v1/projects/{project['id']}/service-endpoints/{endpoint_id}/connectivity",
+            headers=headers,
+        )
+    assert connectivity.status_code == 200, connectivity.text
+    assert connectivity.json()["status"] == "unexpected_status"
+    assert connectivity.json()["http_status"] == 200

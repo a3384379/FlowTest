@@ -53,6 +53,41 @@ paths:
     assert operations[1].request.auth_kind is AuthKind.NONE
 
 
+def test_openapi_servers_become_request_target_base_urls() -> None:
+    openapi = {
+        "openapi": "3.0.3",
+        "info": {"title": "Targeted API", "version": "1.0.0"},
+        "servers": [
+            {
+                "url": "https://{region}.example.com/{version}",
+                "variables": {
+                    "region": {"default": "api"},
+                    "version": {"default": "v1"},
+                },
+            }
+        ],
+        "paths": {"/orders": {"get": {"summary": "List orders"}}},
+    }
+
+    _, operations = parse_import_document(json.dumps(openapi).encode())
+
+    assert operations[0].target_base_url == "https://api.example.com/v1"
+
+    swagger = {
+        "swagger": "2.0",
+        "info": {"title": "Legacy API", "version": "1.0.0"},
+        "schemes": ["http"],
+        "host": "legacy.example.com",
+        "basePath": "/v2",
+        "paths": {"/orders": {"get": {"summary": "List orders"}}},
+    }
+    _, swagger_operations = parse_import_document(
+        json.dumps(swagger).encode(), ImportSourceType.SWAGGER2
+    )
+
+    assert swagger_operations[0].target_base_url == "http://legacy.example.com/v2"
+
+
 def test_swagger2_and_postman_documents_are_supported() -> None:
     swagger = {
         "swagger": "2.0",

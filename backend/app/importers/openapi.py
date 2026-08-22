@@ -27,6 +27,7 @@ def parse_openapi(
     paths = _mapping(document.get("paths"))
     schemes = _security_schemes(document, source_type)
     base_path = _swagger_base_path(document, source_type)
+    target_base_url = _server_url(document, source_type)
     default_security = _sequence(document.get("security"))
     operations: list[ImportedOperation] = []
     for raw_path, path_value in paths.items():
@@ -49,7 +50,12 @@ def parse_openapi(
             name = _operation_name(operation, method, raw_path)
             description = _text(operation.get("description")) or _text(operation.get("summary"))
             operations.append(
-                ImportedOperation(name=name, description=description, request=request)
+                ImportedOperation(
+                    name=name,
+                    description=description,
+                    request=request,
+                    target_base_url=target_base_url,
+                )
             )
     return tuple(operations)
 
@@ -225,6 +231,30 @@ def _swagger_base_path(document: Mapping[str, object], source_type: ImportSource
         return ""
     value = _text(document.get("basePath"))
     return value.rstrip("/") if value and value != "/" else ""
+
+
+def _server_url(document: Mapping[str, object], source_type: ImportSourceType) -> str | None:
+    if source_type is ImportSourceType.OPENAPI3:
+        servers = _sequence(document.get("servers"))
+        if not servers:
+            return None
+        server = _mapping(servers[0])
+        url = _text(server.get("url"))
+        variables = _mapping(server.get("variables"))
+        for name, raw_variable in variables.items():
+            variable = _mapping(raw_variable)
+            default = _text(variable.get("default"))
+            if default:
+                url = url.replace("{" + name + "}", default)
+        return url.rstrip("/") or None
+    if source_type is not ImportSourceType.SWAGGER2:
+        return None
+    host = _text(document.get("host"))
+    if not host:
+        return None
+    schemes = _sequence(document.get("schemes"))
+    scheme = _text(schemes[0]) if schemes else "https"
+    return f"{scheme}://{host}{_swagger_base_path(document, source_type)}".rstrip("/")
 
 
 def _template_path(path: str) -> str:

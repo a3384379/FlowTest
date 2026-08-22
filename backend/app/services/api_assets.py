@@ -1,5 +1,5 @@
 from base64 import b64encode
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
@@ -15,18 +15,19 @@ from app.domain.api_assets import (
     HttpMethod,
     JsonValue,
     QueryParameterSpec,
-    build_variables,
-    merge_headers,
     render_json,
     render_template,
 )
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
 from app.models.access import Folder, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
+from app.models.service_targets import Service, ServiceEndpoint
 from app.repositories.access import ProjectRepository
 from app.repositories.api_assets import APIAssetRepository
+from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.request_targets import RequestTargetResolver
 
 SYSTEM_HEADERS = {"User-Agent": "FlowTest/0.1", "Accept": "*/*"}
 
@@ -53,6 +54,7 @@ class PreparedRequest:
     headers: tuple[PreparedHeader, ...]
     body: JsonValue
     variables: tuple[PreparedVariable, ...]
+    target_snapshot: dict[str, JsonValue] = field(default_factory=dict)
 
 
 class APIAssetService:
@@ -61,6 +63,8 @@ class APIAssetService:
         self._assets = APIAssetRepository(session)
         self._projects = ProjectRepository(session)
         self._project_service = ProjectService(session)
+        self._targets = ServiceTargetRepository(session)
+        self._target_resolver = RequestTargetResolver(session, secrets=secrets)
         self._audit = AuditService(session)
         self._secrets = secrets
 
@@ -124,6 +128,21 @@ class APIAssetService:
         )
         self._assets.add(environment)
         await self._session.flush()
+        default_service = await self._ensure_default_service(
+            project_id=project_id,
+            actor_id=actor.id,
+        )
+        environment.default_service_id = default_service.id
+        self._targets.add(
+            ServiceEndpoint(
+                project_id=project_id,
+                environment_id=environment.id,
+                service_id=default_service.id,
+                variant="default",
+                base_url=base_url.rstrip("/"),
+                created_by_id=actor.id,
+            )
+        )
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -143,6 +162,8 @@ class APIAssetService:
         environment_id: UUID,
         name: str | None,
         base_url: str | None,
+        default_service_id: UUID | None,
+        change_default_service: bool,
         variables: dict[str, str] | None,
         headers: dict[str, str] | None,
     ) -> Environment:
@@ -157,12 +178,23 @@ class APIAssetService:
             )
             environment.name = normalized_name
         if base_url is not None:
+            previous_base_url = environment.base_url
             environment.base_url = base_url.rstrip("/")
+            await self._sync_default_endpoint(
+                environment=environment,
+                previous_base_url=previous_base_url,
+            )
         if variables is not None:
             environment.variables = variables
         if headers is not None:
             _validate_headers(headers)
             environment.headers = headers
+        if change_default_service:
+            await self._change_default_service(
+                project_id=project_id,
+                environment=environment,
+                service_id=default_service_id,
+            )
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -253,15 +285,18 @@ class APIAssetService:
         actor: User,
         project_id: UUID,
         folder_id: UUID | None,
+        service_id: UUID | None,
         name: str,
         description: str,
         request: APIVersionSpec,
     ) -> tuple[APIDefinition, APIVersion]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_folder(project_id=project_id, folder_id=folder_id)
+        await self._validate_service(project_id=project_id, service_id=service_id)
         definition = APIDefinition(
             project_id=project_id,
             folder_id=folder_id,
+            service_id=service_id,
             name=name.strip(),
             description=description.strip(),
             current_version=1,
@@ -331,6 +366,8 @@ class APIAssetService:
         description: str | None,
         folder_id: UUID | None,
         change_folder: bool,
+        service_id: UUID | None,
+        change_service: bool,
     ) -> APIDefinition:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         definition = await self._get_definition(project_id, definition_id)
@@ -341,6 +378,9 @@ class APIAssetService:
         if change_folder:
             await self._validate_folder(project_id=project_id, folder_id=folder_id)
             definition.folder_id = folder_id
+        if change_service:
+            await self._validate_service(project_id=project_id, service_id=service_id)
+            definition.service_id = service_id
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -390,6 +430,8 @@ class APIAssetService:
         use_body_override: bool,
         query_parameters_override: tuple[QueryParameterSpec, ...] | None = None,
         headers_override: dict[str, str] | None = None,
+        service_override: str | None = None,
+        endpoint_variant: str | None = None,
         redact: bool = True,
         version_number: int | None = None,
         workflow_variables: dict[str, str] | None = None,
@@ -402,26 +444,22 @@ class APIAssetService:
             version=version_number,
         )
         environment = await self._get_environment(project_id, environment_id)
-        project = await self._projects.get(project_id)
-        if project is None:
-            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
-        secret_values = await self._load_secret_values(
-            project_id=project_id, environment_id=environment_id
+        target = await self._target_resolver.resolve(
+            actor=actor,
+            project_id=project_id,
+            environment=environment,
+            definition=_definition,
+            version=api_version,
+            path=api_version.path,
+            node_service_override=service_override,
+            endpoint_variant=endpoint_variant,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+            workflow_variables=workflow_variables or {},
+            dataset_variables=dataset_variables or {},
         )
-        variables = build_variables(
-            global_values={},
-            project_values=project.variables,
-            environment_values={
-                **environment.variables,
-                **{f"secret.{name}": value for name, value in secret_values.items()},
-            },
-            workflow_values=workflow_variables or {},
-            dataset_values=dataset_variables or {},
-            runtime_values=runtime_variables,
-        )
+        variables = target.variables
         try:
-            base_url = render_template(environment.base_url, variables).rstrip("/")
-            path = render_template(api_version.path, variables).lstrip("/")
             query_parameters = (
                 query_parameters_override
                 if query_parameters_override is not None
@@ -442,8 +480,13 @@ class APIAssetService:
                 for item in query_parameters
                 if item.enabled
             ]
-            api_headers = dict(
-                api_version.headers if headers_override is None else headers_override
+            api_headers = (
+                {}
+                if headers_override is None
+                else {
+                    name: render_template(value, variables)
+                    for name, value in headers_override.items()
+                }
             )
             _apply_auth(
                 api_version.auth_kind,
@@ -452,22 +495,19 @@ class APIAssetService:
                 query,
                 variables,
             )
-            resolved_headers = merge_headers(
-                {
-                    HeaderScope.SYSTEM: SYSTEM_HEADERS,
-                    HeaderScope.PROJECT: project.headers,
-                    HeaderScope.ENVIRONMENT: environment.headers,
-                    HeaderScope.API: api_headers,
-                    HeaderScope.RUNTIME: runtime_headers,
-                }
-            )
-            prepared_headers = tuple(
-                PreparedHeader(
-                    name=header.name,
-                    value=render_template(header.value, variables),
-                    source=header.source,
+            if headers_override is not None:
+                target = replace(
+                    target,
+                    headers={
+                        key: value
+                        for key, value in target.headers.items()
+                        if HeaderScope(value.source) is not HeaderScope.API
+                    },
                 )
-                for header in resolved_headers.values()
+            target = self._target_resolver.finalize(
+                target,
+                api_headers=api_headers,
+                query=query,
             )
             selected_body = (
                 body_override if use_body_override else cast(JsonValue, api_version.body)
@@ -477,13 +517,18 @@ class APIAssetService:
             raise AppError(
                 code="UNRESOLVED_VARIABLE", message=str(error), status_code=422
             ) from error
-        url = f"{base_url}/{path}"
-        if query:
-            url = f"{url}?{urlencode(query)}"
-        secret_variable_names = {f"secret.{name}" for name in secret_values}
+        prepared_headers = tuple(
+            PreparedHeader(
+                name=resolved.name or key,
+                value=resolved.value,
+                source=HeaderScope(resolved.source),
+            )
+            for key, resolved in target.headers.items()
+        )
+        secret_variable_names = {f"secret.{name}" for name in target.secret_values}
         prepared = PreparedRequest(
             method=api_version.http_method,
-            url=url,
+            url=target.effective_url,
             headers=prepared_headers,
             body=rendered_body,
             variables=tuple(
@@ -496,14 +541,34 @@ class APIAssetService:
                 for name, resolved in variables.items()
             ),
         )
-        if not redact:
-            return prepared
-        return _redacted_request(
+        redacted_request = _redacted_request(
             prepared,
-            secret_values=secret_values,
+            secret_values=target.secret_values,
             auth_kind=AuthKind(api_version.auth_kind),
             auth_config=api_version.auth_config,
         )
+        target_snapshot = target.snapshot(
+            method=prepared.method,
+            body=redacted_request.body,
+        )
+        target_snapshot = cast(
+            dict[str, JsonValue],
+            _redact_json(cast(JsonValue, target_snapshot), tuple(target.secret_values.values())),
+        )
+        target_snapshot["resolved_url"] = redacted_request.url
+        target_snapshot["headers"] = {
+            item.name: {"value": item.value, "source": item.source.value}
+            for item in redacted_request.headers
+        }
+        target_snapshot["variables"] = {
+            item.name: {"value": item.value, "source": item.source.value}
+            for item in redacted_request.variables
+        }
+        target_snapshot["body"] = redacted_request.body
+        prepared = replace(prepared, target_snapshot=target_snapshot)
+        if not redact:
+            return prepared
+        return replace(redacted_request, target_snapshot=target_snapshot)
 
     async def _load_secret_values(
         self, *, project_id: UUID, environment_id: UUID
@@ -570,6 +635,7 @@ class APIAssetService:
                 for item in request.query_parameters
             ],
             headers=request.headers,
+            variables=request.variables,
             body_kind=request.body_kind.value,
             body=request.body,
             auth_kind=request.auth_kind.value,
@@ -593,6 +659,76 @@ class APIAssetService:
             ],
             created_by_id=actor_id,
         )
+
+    async def _ensure_default_service(self, *, project_id: UUID, actor_id: UUID) -> Service:
+        service = await self._targets.find_service_by_key(
+            project_id=project_id,
+            service_key="default",
+        )
+        if service is not None:
+            return service
+        service = Service(
+            project_id=project_id,
+            service_key="default",
+            name="Default Service",
+            description="Legacy Environment base_url compatibility target",
+            service_type="http",
+            created_by_id=actor_id,
+        )
+        self._targets.add(service)
+        await self._session.flush()
+        return service
+
+    async def _validate_service(self, *, project_id: UUID, service_id: UUID | None) -> None:
+        if service_id is None:
+            return
+        service = await self._targets.get_service(service_id)
+        if service is None or service.project_id != project_id:
+            raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+
+    async def _sync_default_endpoint(
+        self,
+        *,
+        environment: Environment,
+        previous_base_url: str,
+    ) -> None:
+        service_id = environment.default_service_id
+        if service_id is None:
+            return
+        endpoint = await self._targets.find_endpoint(
+            environment_id=environment.id,
+            service_id=service_id,
+            variant="default",
+        )
+        if endpoint is not None and endpoint.base_url == previous_base_url:
+            endpoint.base_url = environment.base_url
+            endpoint.revision += 1
+
+    async def _change_default_service(
+        self,
+        *,
+        project_id: UUID,
+        environment: Environment,
+        service_id: UUID | None,
+    ) -> None:
+        if service_id is None:
+            environment.default_service_id = None
+            return
+        service = await self._targets.get_service(service_id)
+        if service is None or service.project_id != project_id:
+            raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        endpoint = await self._targets.find_endpoint(
+            environment_id=environment.id,
+            service_id=service.id,
+            variant="default",
+        )
+        if endpoint is None:
+            raise AppError(
+                code="SERVICE_ENDPOINT_NOT_FOUND",
+                message="默认 Service 尚未配置 default Endpoint",
+                status_code=422,
+            )
+        environment.default_service_id = service.id
 
 
 def _apply_auth(
@@ -659,6 +795,7 @@ def _redacted_request(
         headers=redacted_headers,
         body=_redact_json(prepared.body, secrets),
         variables=prepared_variables,
+        target_snapshot=prepared.target_snapshot,
     )
 
 

@@ -82,6 +82,7 @@ export type Environment = {
   project_id: string
   name: string
   base_url: string
+  default_service_id?: string | null
   variables: Record<string, string>
   headers: Record<string, string>
 }
@@ -90,6 +91,7 @@ export type ApiDefinition = {
   id: string
   project_id: string
   folder_id: string | null
+  service_id?: string | null
   name: string
   description: string
   current_version: number
@@ -113,6 +115,7 @@ export type Execution = {
   request_url: string
   request_headers: Record<string, string>
   request_body: unknown
+  target_snapshot?: Record<string, unknown>
   response_status: number | null
   response_headers: Record<string, string>
   response_body: unknown
@@ -144,6 +147,44 @@ export type ImportItem = {
   change: ImportChange
   definition_id: string | null
   version: number
+  server_url?: string | null
+}
+
+export type RequestService = {
+  id: string
+  project_id: string
+  service_key: string
+  name: string
+  description: string
+  owner_team: string | null
+  service_type: 'http' | 'https' | 'grpc' | 'graphql' | 'other'
+  enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ServiceEndpoint = {
+  id: string
+  project_id: string
+  environment_id: string
+  service_id: string
+  variant: string
+  base_url: string
+  enabled: boolean
+  connect_timeout_ms: number
+  read_timeout_ms: number
+  tls_verify: boolean
+  proxy_ref: string | null
+  headers: Record<string, string>
+  variables?: Record<string, string>
+  secret_refs: string[]
+  health_check_path: string | null
+  health_expected_status: number | null
+  revision: number
+  created_by_id: string
+  created_at: string
+  updated_at: string
 }
 
 export type ImportRun = {
@@ -338,6 +379,7 @@ export type ApiVersion = {
   path: string
   query_parameters: ApiRequestParameter[]
   headers: Record<string, string>
+  variables?: Record<string, string>
   body_kind: 'none' | 'json' | 'raw' | 'form' | 'multipart'
   body: unknown
   auth_kind: 'none' | 'bearer' | 'basic' | 'api_key'

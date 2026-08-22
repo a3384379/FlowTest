@@ -542,17 +542,23 @@ class WorkflowSnapshotBuilder:
         )
         use_body_override = overrides.body is not None
         body_override = overrides.body.value if overrides.body is not None else None
+        node_headers = {
+            **runtime_headers,
+            **(overrides.headers or {}),
+        }
         raw = await self._api_assets.preview(
             actor=actor,
             project_id=project_id,
             definition_id=definition.id,
             environment_id=environment_id,
             runtime_variables=runtime_variables,
-            runtime_headers=runtime_headers,
+            runtime_headers=node_headers,
             body_override=body_override,
             use_body_override=use_body_override,
             query_parameters_override=query_override,
-            headers_override=overrides.headers,
+            headers_override=None,
+            service_override=config.service_override,
+            endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
@@ -564,11 +570,13 @@ class WorkflowSnapshotBuilder:
             definition_id=definition.id,
             environment_id=environment_id,
             runtime_variables=runtime_variables,
-            runtime_headers=runtime_headers,
+            runtime_headers=node_headers,
             body_override=body_override,
             use_body_override=use_body_override,
             query_parameters_override=query_override,
-            headers_override=overrides.headers,
+            headers_override=None,
+            service_override=config.service_override,
+            endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
@@ -750,6 +758,7 @@ def _api_snapshot(
             "headers": {item.name: item.value for item in request.headers},
             "body": request.body,
         },
+        "target": request.target_snapshot,
         "variables": {
             item.name: {"value": item.value, "source": item.source.value}
             for item in request.variables

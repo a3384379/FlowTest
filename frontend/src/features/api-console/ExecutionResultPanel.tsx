@@ -35,6 +35,8 @@ function ResponseView({ result }: { result: ExecutionDetail | null }) {
           <ExecutionStatus status={execution.status} />
         </Descriptions.Item>
       </Descriptions>
+      <Typography.Text strong>请求目标快照</Typography.Text>
+      <pre className="response-code">{formatJson(execution.target_snapshot)}</pre>
       <Typography.Text strong>响应 Body</Typography.Text>
       <pre className="response-code">{formatJson(execution.response_body)}</pre>
     </>

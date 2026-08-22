@@ -111,6 +111,8 @@ async def update_environment(
         environment_id=environment_id,
         name=payload.name,
         base_url=str(payload.base_url) if payload.base_url is not None else None,
+        default_service_id=payload.default_service_id,
+        change_default_service="default_service_id" in payload.model_fields_set,
         variables=payload.variables,
         headers=payload.headers,
     )
@@ -185,6 +187,7 @@ async def create_api_definition(
         actor=current_user,
         project_id=project_id,
         folder_id=payload.folder_id,
+        service_id=payload.service_id,
         name=payload.name,
         description=payload.description,
         request=_version_spec(payload.request),
@@ -231,6 +234,8 @@ async def update_api_definition(
         description=payload.description,
         folder_id=payload.folder_id,
         change_folder="folder_id" in payload.model_fields_set,
+        service_id=payload.service_id,
+        change_service="service_id" in payload.model_fields_set,
     )
     return APIDefinitionResponse.model_validate(definition)
 
@@ -297,6 +302,8 @@ async def preview_api_request(
             else None
         ),
         headers_override=payload.headers_override,
+        service_override=payload.service_override,
+        endpoint_variant=payload.endpoint_variant,
         version_number=payload.version,
     )
     return PreviewResponse(
@@ -307,6 +314,7 @@ async def preview_api_request(
         variables=[
             ResolvedVariableResponse.model_validate(variable) for variable in preview.variables
         ],
+        target=preview.target_snapshot,
     )
 
 
@@ -319,6 +327,7 @@ def _version_spec(payload: APIVersionInput) -> APIVersionSpec:
             for item in payload.query_parameters
         ),
         headers=payload.headers,
+        variables=payload.variables,
         body_kind=payload.body_kind,
         body=payload.body,
         auth_kind=payload.auth.kind,

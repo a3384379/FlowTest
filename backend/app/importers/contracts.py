@@ -54,6 +54,7 @@ class ImportedOperation:
     name: str
     description: str
     request: APIVersionSpec
+    target_base_url: str | None = None
 
     @property
     def import_key(self) -> str:
@@ -77,6 +78,7 @@ class ImportedOperation:
             "body": self.request.body,
             "auth_kind": self.request.auth_kind.value,
             "auth_config": _json_string_mapping(self.request.auth_config),
+            "target_base_url": self.target_base_url,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()

@@ -15,6 +15,7 @@ class ImportItemResponse(BaseModel):
     change: ImportChange
     definition_id: UUID | None
     version: int
+    server_url: str | None = None
 
 
 class ImportRunResponse(BaseModel):
@@ -44,6 +45,13 @@ class ImportRunResponse(BaseModel):
 
 class ImportMergeRequest(BaseModel):
     selected_keys: set[str] = Field(default_factory=set, max_length=2000)
+    service_id: UUID | None = None
+    environment_id: UUID | None = None
+    endpoint_variant: str = Field(
+        default="default",
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=80,
+    )
 
 
 class ImportUrlPreviewRequest(BaseModel):

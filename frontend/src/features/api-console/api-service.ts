@@ -138,7 +138,7 @@ export async function getApiDetail(
 export async function updateApiDefinition(
   projectId: string,
   apiId: string,
-  input: { name: string },
+  input: { name?: string; service_id?: string | null },
 ): Promise<ApiDefinition> {
   const response = await apiClient.patch<ApiDefinition>(
     `/projects/${projectId}/apis/${apiId}`,
@@ -164,6 +164,8 @@ export async function previewApi(
     version?: number
     queryParametersOverride?: ApiVersion['query_parameters']
     headersOverride?: Record<string, string>
+    serviceOverride?: string
+    endpointVariant?: string
     bodyOverride?: unknown
     useBodyOverride?: boolean
   } = {},
@@ -172,12 +174,15 @@ export async function previewApi(
   url: string
   headers: Array<{ name: string; value: string; source: string }>
   body: unknown
+  target?: Record<string, unknown>
 }> {
   return (
     await apiClient.post(`/projects/${projectId}/apis/${apiId}/preview`, {
       environment_id: environmentId,
       runtime_variables: {},
       runtime_headers: {},
+      ...(options.serviceOverride ? { service_override: options.serviceOverride } : {}),
+      ...(options.endpointVariant ? { endpoint_variant: options.endpointVariant } : {}),
       ...(options.version ? { version: options.version } : {}),
       ...(options.queryParametersOverride !== undefined
         ? { query_parameters_override: options.queryParametersOverride }

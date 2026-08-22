@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S38 请求目标领域模型已实现，等待本阶段提交后的用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -42,6 +42,25 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    已取得该实机证据。
 6. S37 已完成基线冻结，下一阶段 S38（Service/ServiceEndpoint/RequestTargetResolver）须经用户确认后
    才开始。
+
+## 已完成：V5 S38 请求目标与 Endpoint Variant（等待用户确认）
+
+1. S38 继续使用独立工作树和 `codex/v5.0` 分支，基于 `codex/standalone-runtime@0643732`；当前脏的
+   `main` 工作区未参与，未执行 reset、stash 覆盖或删除操作。
+2. 新增独立的请求目标领域模型 `Service`/`ServiceEndpoint`，不复用 Contract Hub 服务目录；以
+   `service_key` 作为跨实例稳定标识，以 `(environment_id, service_id, variant)` 保证 Endpoint 唯一，
+   并在 `20260822_0034` 迁移中为旧项目回填默认 Service/Endpoint。
+3. API、Workflow 节点、API Debug/Preview 和 Execution 共用 typed `RequestTargetResolver`。目标优先级为
+   `Node Override > API Service > Environment Default Service > Legacy base_url`；变量/请求头按
+   `Node > API > ServiceEndpoint > Environment > Project` 合并。执行与 Workflow Snapshot 保存 Service、
+   Variant、Revision、最终 URL、脱敏请求目标、Secret Ref、TLS/Proxy/Outbound Policy。
+4. 新增请求目标管理 API 和前端“请求目标”页面，支持 Service、环境 Endpoint Variant、环境默认 Service、
+   API 默认 Service 管理；Workflow API 节点支持 Service Override/Endpoint Variant，执行结果展示脱敏
+   Target Snapshot。OpenAPI 3/Swagger 2 导入会提取 Server 并在 Merge 阶段经过项目/环境校验后映射 Endpoint。
+5. Standalone SQLite 增量 Schema、Transfer Manifest、Compact/Full Alembic 基线同步到 `20260822_0034`；
+   保留 `Environment.base_url` Legacy Fallback，并维持 `/api/v1` 既有请求结构兼容。
+6. S38 阶段退出前必须完成后端 Ruff/mypy/pytest、前端 format/lint/coverage/build、迁移往返、Standalone/
+   Compact/Full 兼容、目标解析/导入/脱敏/权限回归及必要的 Compose 验证；完成本地提交后暂停，不自动进入 S39。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

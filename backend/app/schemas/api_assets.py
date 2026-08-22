@@ -34,6 +34,7 @@ class EnvironmentCreate(BaseModel):
 class EnvironmentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     base_url: HttpUrl | None = None
+    default_service_id: UUID | None = None
     variables: dict[VariableName, str] | None = None
     headers: dict[str, str] | None = None
 
@@ -45,6 +46,7 @@ class EnvironmentResponse(BaseModel):
     project_id: UUID
     name: str
     base_url: str
+    default_service_id: UUID | None
     variables: dict[str, str]
     headers: dict[str, str]
     created_by_id: UUID
@@ -109,6 +111,7 @@ class APIVersionInput(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     query_parameters: list[RequestParameter] = Field(default_factory=list, max_length=200)
     headers: dict[str, str] = Field(default_factory=dict)
+    variables: dict[VariableName, str] = Field(default_factory=dict)
     body_kind: BodyKind = BodyKind.NONE
     body: JsonValue = None
     auth: AuthConfiguration = Field(default_factory=AuthConfiguration)
@@ -126,6 +129,7 @@ class APIDefinitionCreate(BaseModel):
     name: APIDefinitionName
     description: str = Field(default="", max_length=4000)
     folder_id: UUID | None = None
+    service_id: UUID | None = None
     request: APIVersionInput
 
 
@@ -133,6 +137,7 @@ class APIDefinitionUpdate(BaseModel):
     name: APIDefinitionName | None = None
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None
+    service_id: UUID | None = None
 
 
 class APIVersionResponse(BaseModel):
@@ -145,6 +150,7 @@ class APIVersionResponse(BaseModel):
     path: str
     query_parameters: list[RequestParameter]
     headers: dict[str, str]
+    variables: dict[str, str]
     body_kind: BodyKind
     body: JsonValue
     auth_kind: AuthKind
@@ -162,6 +168,7 @@ class APIDefinitionResponse(BaseModel):
     id: UUID
     project_id: UUID
     folder_id: UUID | None
+    service_id: UUID | None
     name: str
     description: str
     current_version: int
@@ -178,6 +185,8 @@ class APIDetailResponse(BaseModel):
 
 class PreviewRequest(BaseModel):
     environment_id: UUID
+    service_override: str | None = Field(default=None, max_length=160)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
     version: int | None = Field(default=None, ge=1)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
@@ -213,3 +222,4 @@ class PreviewResponse(BaseModel):
     headers: list[ResolvedHeaderResponse]
     body: JsonValue
     variables: list[ResolvedVariableResponse]
+    target: dict[str, JsonValue] = Field(default_factory=dict)

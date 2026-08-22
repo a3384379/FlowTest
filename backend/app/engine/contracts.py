@@ -254,6 +254,16 @@ class ApiNodeConfig(BaseModel):
 
     api_definition_id: UUID
     api_version: int | None = Field(default=None, ge=1)
+    service_override: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=160,
+    )
+    endpoint_variant: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=80,
+    )
     request_overrides: ApiNodeRequestOverrides = Field(default_factory=ApiNodeRequestOverrides)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     max_retries: int = Field(default=0, ge=0, le=3)

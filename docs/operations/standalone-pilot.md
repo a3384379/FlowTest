@@ -59,7 +59,7 @@ cd C:\flowtest-standalone
 
 2. 检查输出目录仅包含 `manifest.json`、`database\` 和 `artifacts\`，确认 manifest 声明 `.env`、日志和
    数据加密密钥未包含。使用公司批准的安全渠道传输整个目录。
-3. 在全新、已初始化到 `20260822_0033` 的 Compact 目录设置与 Standalone 完全相同的
+3. 在全新、已初始化到 `20260822_0034` 的 Compact 目录设置与 Standalone 完全相同的
    `FLOWTEST_DATA_ENCRYPTION_KEY`，然后执行：
 
    ```bash
@@ -75,7 +75,7 @@ cd C:\flowtest-standalone
 | 迁移项 | 结果 |
 |---|---|
 | Standalone 导出/manifest 校验 | 待填写 |
-| Compact Alembic `20260822_0033` | 待填写 |
+| Compact Alembic `20260822_0034` | 待填写 |
 | Project/Folder/Secret/Workflow 数量 | 待填写 |
 | Artifact 数量与 SHA-256 | 待填写 |
 | 登录、发布、执行、Snapshot | 待填写 |

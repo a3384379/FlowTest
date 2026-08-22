@@ -47,6 +47,7 @@ from app.models.runner_fabric import (
     RunnerRegistrationToken,
     RunnerTask,
 )
+from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import (
     TestCase,
@@ -116,7 +117,9 @@ __all__ = [
     "RunnerTask",
     "SchemaArtifact",
     "Secret",
+    "Service",
     "ServiceCatalogEntry",
+    "ServiceEndpoint",
     "ServiceToken",
     "Team",
     "TeamMember",

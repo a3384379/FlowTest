@@ -21,10 +21,12 @@ from app.importers.contracts import (
 from app.importers.document import ImportDocumentError, parse_import_document
 from app.importers.sources import ImportDocumentFetcher, ImportUrlDiscovery
 from app.models.access import User
-from app.models.api_assets import APIDefinition, APIVersion
+from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.imports import ImportRun
+from app.models.service_targets import ServiceEndpoint
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.imports import ImportRepository
+from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -38,9 +40,10 @@ class ImportItemResult:
     change: ImportChange
     definition_id: UUID | None
     version: int
+    server_url: str | None = None
 
     def as_json(self) -> dict[str, str | int | None]:
-        return {
+        result = {
             "import_key": self.import_key,
             "name": self.name,
             "method": self.method,
@@ -49,6 +52,9 @@ class ImportItemResult:
             "definition_id": str(self.definition_id) if self.definition_id else None,
             "version": self.version,
         }
+        if self.server_url is not None:
+            result["server_url"] = self.server_url
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +76,7 @@ class ImportService:
     ) -> None:
         self._session = session
         self._assets = APIAssetRepository(session)
+        self._targets = ServiceTargetRepository(session)
         self._imports = ImportRepository(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
@@ -298,6 +305,9 @@ class ImportService:
         project_id: UUID,
         run_id: UUID,
         selected_keys: set[str],
+        service_id: UUID | None = None,
+        environment_id: UUID | None = None,
+        endpoint_variant: str = "default",
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         run = await self._imports.get(run_id)
@@ -341,11 +351,20 @@ class ImportService:
         selected_operations = tuple(
             operation for operation in operations if operation.import_key in selected_keys
         )
+        await self._validate_import_target(
+            actor_id=actor.id,
+            project_id=project_id,
+            service_id=service_id,
+            environment_id=environment_id,
+            operations=selected_operations,
+            endpoint_variant=endpoint_variant,
+        )
         await self._apply_operations(
             actor=actor,
             project_id=project_id,
             source=source,
             operations=selected_operations,
+            service_id=service_id,
         )
         await self._deactivate_deleted(
             project_id=project_id,
@@ -406,6 +425,7 @@ class ImportService:
                         change=ImportChange.ADDED,
                         definition_id=None,
                         version=0,
+                        server_url=operation.target_base_url,
                     )
                 )
                 continue
@@ -433,6 +453,7 @@ class ImportService:
         project_id: UUID,
         source: ImportSourceIdentity,
         operations: tuple[ImportedOperation, ...],
+        service_id: UUID | None = None,
     ) -> list[ImportItemResult]:
         results: list[ImportItemResult] = []
         for operation in operations:
@@ -445,6 +466,7 @@ class ImportService:
                     project_id=project_id,
                     source=source,
                     operation=operation,
+                    service_id=service_id,
                 )
                 change = ImportChange.ADDED
             elif (
@@ -459,10 +481,73 @@ class ImportService:
                     definition=existing,
                     source=source,
                     operation=operation,
+                    service_id=service_id,
                 )
                 change = ImportChange.CHANGED
             results.append(_result(operation, change, definition, version.version))
         return results
+
+    async def _validate_import_target(
+        self,
+        *,
+        actor_id: UUID,
+        project_id: UUID,
+        service_id: UUID | None,
+        environment_id: UUID | None,
+        operations: tuple[ImportedOperation, ...],
+        endpoint_variant: str,
+    ) -> None:
+        if service_id is None:
+            if environment_id is not None:
+                raise AppError(
+                    code="IMPORT_TARGET_INVALID",
+                    message="指定环境 Endpoint 时必须同时指定 Service",
+                    status_code=422,
+                )
+            return
+        service = await self._targets.get_service(service_id)
+        if service is None or service.project_id != project_id:
+            raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        if environment_id is None:
+            return
+        environment = await self._session.get(Environment, environment_id)
+        if environment is None or environment.project_id != project_id:
+            raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        server_urls = {
+            operation.target_base_url
+            for operation in operations
+            if operation.target_base_url is not None
+        }
+        if len(server_urls) > 1:
+            raise AppError(
+                code="IMPORT_TARGET_AMBIGUOUS",
+                message="OpenAPI 文档包含多个 Server, 无法自动映射为单一 Endpoint",
+                status_code=422,
+            )
+        server_url = next(iter(server_urls), None)
+        if server_url is None:
+            return
+        _validate_server_url(server_url)
+        endpoint = await self._targets.find_endpoint(
+            environment_id=environment_id,
+            service_id=service_id,
+            variant=endpoint_variant,
+        )
+        if endpoint is None:
+            self._targets.add(
+                ServiceEndpoint(
+                    project_id=project_id,
+                    environment_id=environment_id,
+                    service_id=service_id,
+                    variant=endpoint_variant,
+                    base_url=server_url.rstrip("/"),
+                    created_by_id=actor_id,
+                )
+            )
+        elif endpoint.base_url != server_url.rstrip("/"):
+            endpoint.base_url = server_url.rstrip("/")
+            endpoint.revision += 1
+        await self._session.flush()
 
     async def _create_definition(
         self,
@@ -471,10 +556,12 @@ class ImportService:
         project_id: UUID,
         source: ImportSourceIdentity,
         operation: ImportedOperation,
+        service_id: UUID | None,
     ) -> tuple[APIDefinition, APIVersion]:
         definition = APIDefinition(
             project_id=project_id,
             folder_id=None,
+            service_id=service_id,
             name=operation.name,
             description=operation.description,
             current_version=1,
@@ -499,9 +586,12 @@ class ImportService:
         definition: APIDefinition,
         source: ImportSourceIdentity,
         operation: ImportedOperation,
+        service_id: UUID | None,
     ) -> tuple[APIDefinition, APIVersion]:
         definition.name = operation.name
         definition.description = operation.description
+        if service_id is not None:
+            definition.service_id = service_id
         definition.import_fingerprint = operation.content_fingerprint
         definition.import_source = source.name
         definition.import_source_key = source.key
@@ -624,6 +714,7 @@ def _version_model(
         auth_config=request.auth_config,
         extraction_rules=[],
         assertions=[],
+        variables=request.variables,
         created_by_id=actor_id,
     )
 
@@ -642,6 +733,7 @@ def _result(
         change=change,
         definition_id=definition.id,
         version=version,
+        server_url=operation.target_base_url,
     )
 
 
@@ -708,6 +800,21 @@ def _sanitized_url(url: str) -> str:
     hostname = (parsed.hostname or "").lower()
     port = f":{parsed.port}" if parsed.port is not None else ""
     return urlunsplit((parsed.scheme.lower(), f"{hostname}{port}", parsed.path, "", ""))[:2048]
+
+
+def _validate_server_url(url: str) -> None:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise AppError(
+            code="IMPORT_SERVER_INVALID",
+            message="OpenAPI Server 必须是无凭据的 HTTP/HTTPS 地址",
+            status_code=422,
+        )
 
 
 def _preview_associated_data(run_id: UUID) -> bytes:

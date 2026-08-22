@@ -37,6 +37,7 @@ class APICallExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     request_url: Mapped[str] = mapped_column(String(4096))
     request_headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     request_body: Mapped[Any | None] = mapped_column(JSON)
+    target_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     response_status: Mapped[int | None] = mapped_column(Integer)
     response_headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     response_body: Mapped[Any | None] = mapped_column(JSON)

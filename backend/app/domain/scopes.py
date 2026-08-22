@@ -7,6 +7,8 @@ class VariableScope(StrEnum):
     GLOBAL = "global"
     PROJECT = "project"
     ENVIRONMENT = "environment"
+    SERVICE_ENDPOINT = "service_endpoint"
+    API = "api"
     WORKFLOW = "workflow"
     DATASET = "dataset"
     RUNTIME = "runtime"
@@ -16,6 +18,7 @@ class HeaderScope(StrEnum):
     SYSTEM = "system"
     PROJECT = "project"
     ENVIRONMENT = "environment"
+    SERVICE_ENDPOINT = "service_endpoint"
     WORKFLOW = "workflow"
     API = "api"
     RUNTIME = "runtime"
@@ -29,6 +32,7 @@ HEADER_PRECEDENCE = tuple(HeaderScope)
 class ResolvedValue:
     value: str
     source: StrEnum
+    name: str | None = None
 
 
 def resolve_scoped_values[ScopeT: StrEnum](

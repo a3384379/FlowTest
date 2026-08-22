@@ -62,6 +62,7 @@ class StoredRequest(BaseModel):
     redacted_url: str | None = None
     redacted_headers: list[StoredHeader] | None = None
     redacted_body: JsonValue = None
+    target_snapshot: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class StoredCredentialMaterial(BaseModel):
@@ -251,6 +252,7 @@ def _store_request(prepared: PreparedWorkflowRequest) -> StoredRequest:
             for item in prepared.redacted_request.headers
         ],
         redacted_body=prepared.redacted_request.body,
+        target_snapshot=request.target_snapshot,
     )
 
 
@@ -349,6 +351,7 @@ def _load_request(stored: StoredRequest) -> PreparedWorkflowRequest:
             )
             for item in stored.variables
         ),
+        target_snapshot=stored.target_snapshot,
     )
     safe_headers = stored.redacted_headers or stored.headers
     return PreparedWorkflowRequest(
@@ -362,6 +365,7 @@ def _load_request(stored: StoredRequest) -> PreparedWorkflowRequest:
             ),
             body=stored.redacted_body if stored.redacted_url is not None else stored.body,
             variables=request.variables,
+            target_snapshot=stored.target_snapshot,
         ),
         body_kind=stored.body_kind,
         multipart=_load_multipart(stored.multipart),

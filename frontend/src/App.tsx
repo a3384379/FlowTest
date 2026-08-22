@@ -63,6 +63,7 @@ const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
 const ExecutionFabricPage = lazy(() => import('./pages/ExecutionFabricPage'))
 const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage'))
+const RequestTargetsPage = lazy(() => import('./pages/RequestTargetsPage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -70,6 +71,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '质量总览',
   settings: '项目管理',
   services: '服务目录',
+  'request-targets': '请求目标',
   apis: '接口管理',
   protocols: '多协议工作台',
   assets: '测试资产',
@@ -131,6 +133,7 @@ function AuthenticatedShell() {
             navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
             navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
             navigationItem('services', <AppstoreOutlined />, pathFor('services')),
+            navigationItem('request-targets', <ShareAltOutlined />, pathFor('request-targets')),
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
             navigationItem('protocols', <CodeOutlined />, pathFor('protocols')),
             navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
@@ -235,6 +238,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
       <Route path="/projects/:projectId/services" element={<ServiceCatalogPage />} />
+      <Route path="/projects/:projectId/request-targets" element={<RequestTargetsPage />} />
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
       <Route path="/projects/:projectId/protocols" element={<ProtocolWorkbenchPage />} />
       <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
@@ -257,6 +261,7 @@ function ApplicationRoutes() {
         [
           'settings',
           'services',
+          'request-targets',
           'apis',
           'protocols',
           'assets',

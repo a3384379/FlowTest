@@ -1260,6 +1260,22 @@ function ApiFields({
           }}
         />
       </Field>
+      <TextConfig
+        label="Service Override（可选）"
+        configKey="service_override"
+        fallback=""
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
+      <TextConfig
+        label="Endpoint Variant（可选）"
+        configKey="endpoint_variant"
+        fallback=""
+        node={node}
+        editable={editable}
+        onUpdate={onUpdate}
+      />
       <WorkflowApiRequestEditor
         projectId={projectId}
         environmentId={environmentId}
