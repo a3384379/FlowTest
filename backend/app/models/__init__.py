@@ -17,6 +17,7 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
+from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
 from app.models.contracts import (
     ContractRun,
     DeploymentCompatibilityCheck,
@@ -74,6 +75,8 @@ __all__ = [
     "AuditLog",
     "Base",
     "Capability",
+    "ChangeRegressionRun",
+    "ChangeRegressionStage",
     "ChangeSetApproval",
     "ContractRun",
     "CoverageSnapshot",

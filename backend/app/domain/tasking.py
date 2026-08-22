@@ -14,6 +14,7 @@ class TestPlanTrigger(StrEnum):
 class ServiceTokenScope(StrEnum):
     EXECUTE_WORKFLOW = "execute:workflow"
     EXECUTE_TEST_PLAN = "execute:test-plan"
+    ANALYZE_CHANGE_REGRESSION = "analyze:change-regression"
 
 
 def digest_token(token: str) -> str:

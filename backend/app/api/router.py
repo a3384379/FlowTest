@@ -7,6 +7,7 @@ from app.api.v1.endpoints.api_exports import router as api_exports_router
 from app.api.v1.endpoints.artifacts import router as artifacts_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.capabilities import router as capabilities_router
+from app.api.v1.endpoints.change_regression import router as change_regression_router
 from app.api.v1.endpoints.contract_hub import router as contract_hub_router
 from app.api.v1.endpoints.contracts import router as contracts_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
@@ -49,6 +50,7 @@ api_router.include_router(ai_router, tags=["ai"])
 api_router.include_router(ai_change_sets_router, tags=["ai-change-sets"])
 api_router.include_router(contracts_router, tags=["contracts"])
 api_router.include_router(contract_hub_router, tags=["contract-hub"])
+api_router.include_router(change_regression_router, tags=["change-regression"])
 api_router.include_router(dashboard_router, tags=["dashboard"])
 api_router.include_router(data_sources_router, tags=["data-sources"])
 api_router.include_router(mock_dispatch_router, tags=["mock-dispatch"])

@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260822_0039"
+BASELINE_REVISION = "20260823_0040"
 
 
 async def initialize_standalone_database() -> None:
@@ -56,6 +56,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_governance_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
     await _ensure_s42_controlled_write_tables(connection)
+    await _ensure_change_regression_tables(connection)
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -100,7 +101,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037', '20260822_0038')"
+            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -109,7 +110,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE alembic_version SET version_num = :revision "
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037', '20260822_0038')"
+            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -122,6 +123,16 @@ async def _ensure_s42_controlled_write_tables(connection: AsyncConnection) -> No
     from app.models.test_design import ChangeSetApproval, TestDesign
 
     for model in (TestDesign, ChangeSetApproval):
+        table = cast(Table, model.__table__)
+        await connection.execute(CreateTable(table, if_not_exists=True))
+
+
+async def _ensure_change_regression_tables(connection: AsyncConnection) -> None:
+    """Create the S45 trace tables for existing standalone SQLite databases."""
+
+    from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
+
+    for model in (ChangeRegressionRun, ChangeRegressionStage):
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
 
@@ -249,6 +260,13 @@ async def _ensure_flow_spec_change_set_columns(connection: AsyncConnection) -> N
 
 
 async def _flow_spec_tables_need_rebuild(connection: AsyncConnection) -> bool:
+    table_result = await connection.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_change_sets'")
+    )
+    table_row = table_result.first()
+    table_sql = str(table_row[0]) if table_row and table_row[0] else ""
+    if table_sql and "change_regression" not in table_sql:
+        return True
     change_sets = await connection.execute(text("PRAGMA table_info(ai_change_sets)"))
     change_items = await connection.execute(text("PRAGMA table_info(ai_change_items)"))
     set_info = {str(row[1]): bool(row[3]) for row in change_sets.fetchall()}

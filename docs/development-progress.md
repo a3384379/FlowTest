@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S44 Enterprise Collaboration 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+最后更新：2026-08-23（Asia/Shanghai）
+状态：仓库已公开；V5 S45 Change-Aware Regression 已实现、提交并完成本地等价验收，现等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -12,7 +12,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
   `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`，S42 已提交
-  `a2f97a7`，S43 已提交 `969c5c2`；S44 已完成本地等价验收，本阶段提交后暂停。
+  `a2f97a7`，S43 已提交 `969c5c2`，S44 已提交 `1d5fd75`，S45 已提交，当前阶段完成后暂停。
   当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
@@ -180,6 +180,27 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    虚构为 Windows 公司云桌面实机、72 小时试点或远程 CI 证据。当前脏 `main` 工作区未参与，未修改附件原始
    计划文件；S43 已完成本地提交后暂停，S44 等待用户确认。
 
+## 已完成：V5 S45 Change-Aware Regression（等待用户确认）
+
+1. 新增 `ChangeRegressionRun` 与 append-only `ChangeRegressionStage`，把 Change → Impact → Regression Selection →
+   Missing Test → Review → Execution → Evidence → Release Gate → Failure Triage 串成一条可追溯链路；复用既有
+   Impact、Test Plan、Test Design、AI ChangeSet、Execution 和 Release Gate Application Service，不绕过应用层直接操作 ORM。
+2. 新增人工审核与执行控制：缺失测试以置信度 `0.65` 生成 Test Design Draft，必须逐项 Review；存在待审核项或未批准时不能执行，
+   运行结果、证据引用、失败分诊和发布门禁判定均回写阶段记录。CI 入口使用独立 `analyze:change-regression` Service Account Scope，
+   复用 Idempotency 记录，重复请求返回同一条回归运行。
+3. 新增项目级变更回归 API 和前端“变更回归”页面，支持 Git Diff/OpenAPI Diff/Schema Diff 来源、测试计划与 Release Policy 绑定、
+   缺失测试 Draft 审核、批准、执行、证据查看和 Release Gate 评估；S45 页面继续遵守 Secret/PII 脱敏和标准错误 Envelope 约束。
+4. `20260823_0040` 创建回归运行/阶段表并扩展 ChangeSet 来源约束；Standalone SQLite 增量 Schema、Transfer Manifest 基线和
+   Compact/Full 迁移 head 同步到 `20260823_0040`，Transfer 表清单由 78 增至 80，原有 `standalone-compact-transfer-v1` 版本保持不变。
+   首次真实 `alembic check` 捕获并修正了迁移中多余的 `status` server default，随后往返检查无漂移。
+5. 后端质量门槛全部通过：Ruff format/check、mypy、pytest `411 passed / 3 skipped`，总覆盖率 `90.09%`；前端 format、lint、
+   TypeScript、production build 和 coverage 全部通过，Vitest `52 files / 205 passed`，Statements `86.28%`、Branches `80.02%`、
+   Functions `85.10%`、Lines `88.36%`。Standalone/Transfer 定向回归 `19 passed`。
+6. 临时 PostgreSQL 完成空库 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`；隔离高端口 Compose 完成源码构建、
+   服务健康检查和 Playwright 冒烟：管理员首次登录改密、创建项目、项目导航和 S45“变更回归”页面渲染均通过。验证使用本地 macOS/ARM
+   和独立临时数据卷，验证结束后已清理；未声称 Windows 公司云桌面实机或远程 CI 证据。
+7. S45 已完成本地 Git commit 并暂停；S46 只在用户确认后进入稳定性与 GA 收口，不在本阶段提前开始。
+
 ## 已完成：V5 S44 Enterprise Collaboration（等待用户确认）
 
 1. 新增纯 Domain 配额策略与治理决策模型，支持 `observe`、`warn`、`soft_limit`、`hard_limit` 四种模式，
@@ -209,7 +230,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 8. 空 SQLite 从最早 Alembic 链全量升级仍会在既有 `20260809_0002` 的 PostgreSQL 专用 `DEFAULT '{}'::json` 处
    失败；这是 S44 之前的迁移兼容问题，本阶段不改写旧迁移。Standalone SQLite 使用 metadata/bootstrap 与 `0039`
    基线的本地等价路径及定向回归通过；未将本地 macOS/ARM 结果声称为 Windows x64 公司云桌面或远程 CI 证据。
-9. S44 已完成本地等价验收；本阶段提交后暂停，下一阶段 S45（Change-Aware Regression）必须经用户确认后开始。
+9. S44 已完成本地等价验收并提交；下一阶段 S45 已在用户继续指令后完成，当前等待用户确认是否进入 S46。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

@@ -90,7 +90,7 @@ class AIChangeSet(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="ai_change_set_status",
         ),
         CheckConstraint(
-            "source_type IN ('ai', 'flow_spec', 'mcp', 'rest', 'cli')",
+            "source_type IN ('ai', 'flow_spec', 'mcp', 'rest', 'cli', 'change_regression')",
             name="ai_change_set_source_type",
         ),
         UniqueConstraint("ai_job_id", name="uq_ai_change_sets_job"),
