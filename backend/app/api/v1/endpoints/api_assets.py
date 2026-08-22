@@ -7,6 +7,7 @@ from app.domain.api_assets import (
     APIAssertionSpec,
     APIVersionSpec,
     ExtractionRuleSpec,
+    HttpMethod,
     QueryParameterSpec,
 )
 from app.schemas.api_assets import (
@@ -150,12 +151,16 @@ async def list_api_definitions(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=200),
+    method: HttpMethod | None = None,
 ) -> Page[APIDefinitionResponse]:
     definitions, total = await APIAssetService(session).list_definitions(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        search=search,
+        method=method.value if method is not None else None,
     )
     return Page(
         items=[APIDefinitionResponse.model_validate(item) for item in definitions],

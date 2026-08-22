@@ -95,6 +95,9 @@ class ProjectPermissionResponse(BaseModel):
 
 
 class ProjectSecurityPolicy(BaseModel):
+    # Optional on writes so older clients that only send allowlists preserve
+    # the current enforcement mode. Responses always include the boolean.
+    enabled: bool | None = None
     allowed_hosts: list[str] = Field(default_factory=list, max_length=100)
     allowed_private_cidrs: list[str] = Field(default_factory=list, max_length=100)
 

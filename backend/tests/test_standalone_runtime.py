@@ -107,6 +107,44 @@ async def test_standalone_schema_bootstrap_records_revision(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy-schema.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text("CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY)")
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE flowtest_standalone_meta "
+                "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO flowtest_standalone_meta (key, value) "
+                "VALUES ('schema_baseline', '20260822_0032')"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text("INSERT INTO alembic_version VALUES ('20260822_0032')")
+        )
+        await standalone_schema._ensure_incremental_columns(connection)
+        columns = await connection.execute(standalone_schema.text("PRAGMA table_info(projects)"))
+        version = await connection.scalar(
+            standalone_schema.text("SELECT version_num FROM alembic_version")
+        )
+
+    await test_engine.dispose()
+    assert "outbound_policy_enabled" in {str(row[1]) for row in columns.fetchall()}
+    assert version == standalone_schema.BASELINE_REVISION
+
+
+@pytest.mark.asyncio
 async def test_standalone_dispatcher_runs_and_stops_in_process_tasks(monkeypatch) -> None:
     dispatcher = StandaloneTaskDispatcher(
         lambda: _SessionContext(),

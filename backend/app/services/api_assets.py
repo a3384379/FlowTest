@@ -229,13 +229,22 @@ class APIAssetService:
         return stored
 
     async def list_definitions(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        method: str | None = None,
     ) -> tuple[list[APIDefinition], int]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._assets.list_definitions(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            search=search,
+            method=method,
         )
 
     async def create_definition(

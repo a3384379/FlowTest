@@ -238,7 +238,7 @@ function renderApp(
       HttpResponse.json({ effective_role: 'owner', capabilities: [], matrix: {} }),
     ),
     http.get(`/api/v1/projects/${project.id}/security-policy`, () =>
-      HttpResponse.json({ allowed_hosts: [], allowed_private_cidrs: [] }),
+      HttpResponse.json({ enabled: true, allowed_hosts: [], allowed_private_cidrs: [] }),
     ),
     http.get(`/api/v1/projects/${project.id}/retention-policy`, () =>
       HttpResponse.json({ retention_days: 90, maximum_days: 3650 }),

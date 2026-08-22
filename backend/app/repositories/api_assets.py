@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
@@ -106,11 +106,44 @@ class APIAssetRepository:
         )
 
     async def list_definitions(
-        self, *, project_id: UUID, offset: int, limit: int, include_inactive: bool = False
+        self,
+        *,
+        project_id: UUID,
+        offset: int,
+        limit: int,
+        search: str | None = None,
+        method: str | None = None,
+        include_inactive: bool = False,
     ) -> tuple[list[APIDefinition], int]:
         filters = [APIDefinition.project_id == project_id]
         if not include_inactive:
             filters.append(APIDefinition.is_active.is_(True))
+        normalized_search = search.strip().lower() if search else ""
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            filters.append(
+                or_(
+                    func.lower(APIDefinition.name).like(pattern),
+                    func.lower(APIDefinition.description).like(pattern),
+                    exists(
+                        select(APIVersion.id).where(
+                            APIVersion.api_definition_id == APIDefinition.id,
+                            APIVersion.version == APIDefinition.current_version,
+                            func.lower(APIVersion.path).like(pattern),
+                        )
+                    ),
+                )
+            )
+        if method:
+            filters.append(
+                exists(
+                    select(APIVersion.id).where(
+                        APIVersion.api_definition_id == APIDefinition.id,
+                        APIVersion.version == APIDefinition.current_version,
+                        APIVersion.method == method,
+                    )
+                )
+            )
         definitions = list(
             (
                 await self._session.scalars(

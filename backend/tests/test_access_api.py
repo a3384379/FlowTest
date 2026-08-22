@@ -526,15 +526,21 @@ async def test_permission_matrix_security_policy_and_audit_access(client: AsyncC
         f"/api/v1/projects/{project_id}/security-policy",
         headers={**owner_headers, "X-Trace-ID": trace_id},
         json={
+            "enabled": False,
             "allowed_hosts": ["*.example.com", "api.internal"],
             "allowed_private_cidrs": ["10.20.0.1/16"],
         },
     )
     assert policy.status_code == 200, policy.text
     assert policy.json() == {
+        "enabled": False,
         "allowed_hosts": ["*.example.com", "api.internal"],
         "allowed_private_cidrs": ["10.20.0.0/16"],
     }
+    loaded_policy = await client.get(
+        f"/api/v1/projects/{project_id}/security-policy", headers=owner_headers
+    )
+    assert loaded_policy.json()["enabled"] is False
     assert (
         await client.put(
             f"/api/v1/projects/{project_id}/security-policy",

@@ -86,9 +86,17 @@ export async function createEnvironment(
   return response.data
 }
 
-export async function listApis(projectId: string): Promise<Page<ApiDefinition>> {
+export async function listApis(
+  projectId: string,
+  options: { page?: number; pageSize?: number; search?: string; method?: HttpMethod } = {},
+): Promise<Page<ApiDefinition>> {
   const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
-    params: { page: 1, page_size: 100 },
+    params: {
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 50,
+      ...(options.search?.trim() ? { search: options.search.trim() } : {}),
+      ...(options.method ? { method: options.method } : {}),
+    },
   })
   return response.data
 }

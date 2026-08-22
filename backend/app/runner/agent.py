@@ -103,8 +103,9 @@ class RunnerAgent:
                 result = await self._executor.execute(
                     plan,
                     network_policy=OutboundNetworkPolicy(
-                        tuple(lease.task.allowed_hosts),
-                        tuple(lease.task.allowed_private_cidrs),
+                        allowed_hosts=tuple(lease.task.allowed_hosts),
+                        allowed_private_cidrs=tuple(lease.task.allowed_private_cidrs),
+                        enabled=lease.task.outbound_policy_enabled,
                     ),
                     cancellation=cancellation,
                     on_progress=progress,

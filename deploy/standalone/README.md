@@ -85,6 +85,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\deploy\standalone\stop.ps1
 ```
 
+## 项目出站安全策略与本地接口
+
+每个项目都可以在“项目设置 → 安全策略”中单独控制“启用出站安全策略”：
+
+- Standalone 新建项目默认关闭，适合在云桌面导入或调试 `localhost`、`127.0.0.1` 和公司私网服务；关闭并不等于不校验，仍会校验 HTTP/HTTPS、端口、凭据、超时/重定向和域名解析。
+- 开启后执行严格模式：回环、链路本地、云元数据和保留地址会被拒绝；私网目标必须匹配“允许私网 CIDR”，域名还必须匹配允许域名列表（如已配置）。
+- Compact/Full 以及迁移过来的旧项目默认保持开启，避免升级后扩大出站范围。只有具备项目安全管理权限的成员可以切换。
+- 该策略统一作用于接口文档/URL 导入、环境和接口执行、工作流、Webhook 及协议调试；修改后新的服务端出站请求立即生效。
+
+导入接口文档和接口列表都使用固定高度滚动区域；接口列表支持名称、路径、说明搜索、HTTP 方法筛选和服务端分页，避免接口数量较多时页面持续增长。
+
 ## 长时稳定性探针
 
 探针不启动或停止服务，只读取 `/live`、`/ready`、`/runtime-profile`，并检查 Standalone PID
@@ -145,7 +156,7 @@ FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
 拒绝执行。导入在数据库事务中进行，失败会回滚数据库并清理本次新上传的对象；成功后自动启动 6 个
 Compact 服务并执行 Readiness 验收。该工具不会迁移 Standalone 的进程内事件、限流窗口或后台任务队列。
 
-Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260822_0032` 基线 Alembic revision。后续版本升级
+Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260822_0033` 基线 Alembic revision。后续版本升级
 必须使用项目提供的升级说明和备份，不要手工删除 `flowtest.db`。
 
 ## 验收与故障定位

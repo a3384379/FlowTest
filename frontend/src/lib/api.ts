@@ -177,6 +177,7 @@ export type ProjectPermission = {
 }
 
 export type ProjectSecurityPolicy = {
+  enabled: boolean
   allowed_hosts: string[]
   allowed_private_cidrs: string[]
 }

@@ -13,7 +13,7 @@ import {
   Upload,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { ImportChange, ImportRun } from '../../lib/api'
 import type { ImportPreviewInput, ImportSourceType, ImportUrlDiscovery } from './api-service'
@@ -281,7 +281,13 @@ function ImportDocumentPicker({
   documentId: string | null
   onChange: (value: string) => void
 }) {
+  const [search, setSearch] = useState('')
   if (discovery.documents.length <= 1) return null
+  const normalizedSearch = search.trim().toLowerCase()
+  const documents = discovery.documents.filter((document) => {
+    if (!normalizedSearch) return true
+    return `${document.name} ${document.url}`.toLowerCase().includes(normalizedSearch)
+  })
   return (
     <div className="import-document-picker">
       <Alert
@@ -290,21 +296,33 @@ function ImportDocumentPicker({
         title={`已发现 ${discovery.documents.length} 份接口文档`}
         description="请选择本次需要生成 Diff 的接口分组。"
       />
+      <Input.Search
+        aria-label="搜索接口文档分组"
+        allowClear
+        placeholder="搜索文档名称或 URL"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
       <Radio.Group
         aria-label="接口文档分组"
         value={documentId}
         onChange={(event) => onChange(String(event.target.value))}
       >
-        <Space direction="vertical" size="middle">
-          {discovery.documents.map((document) => (
-            <Radio key={document.id} value={document.id}>
-              <span className="import-document-option">
-                <Typography.Text strong>{document.name}</Typography.Text>
-                <Typography.Text type="secondary">{document.url}</Typography.Text>
-              </span>
-            </Radio>
-          ))}
-        </Space>
+        <div className="import-document-options-scroll">
+          <Space direction="vertical" size="middle">
+            {documents.map((document) => (
+              <Radio key={document.id} value={document.id}>
+                <span className="import-document-option">
+                  <Typography.Text strong>{document.name}</Typography.Text>
+                  <Typography.Text type="secondary">{document.url}</Typography.Text>
+                </span>
+              </Radio>
+            ))}
+            {!documents.length ? (
+              <Typography.Text type="secondary">没有匹配的接口文档分组</Typography.Text>
+            ) : null}
+          </Space>
+        </div>
       </Radio.Group>
     </div>
   )
@@ -319,6 +337,18 @@ function ImportResult({
   selectedKeys: string[]
   onSelectionChange: (keys: string[]) => void
 }) {
+  const [search, setSearch] = useState('')
+  const [changeFilter, setChangeFilter] = useState<ImportChange | 'all'>('all')
+  const filteredResults = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase()
+    return result.results.filter((item) => {
+      if (changeFilter !== 'all' && item.change !== changeFilter) return false
+      if (!normalizedSearch) return true
+      return `${item.name} ${item.method} ${item.path} ${item.import_key}`
+        .toLowerCase()
+        .includes(normalizedSearch)
+    })
+  }, [changeFilter, result.results, search])
   return (
     <>
       <Alert
@@ -359,15 +389,47 @@ function ImportResult({
         />
         <Statistic title="未变化" value={result.unchanged} />
       </Space>
+      <Space wrap className="import-result-filters">
+        <Input.Search
+          aria-label="筛选导入接口"
+          allowClear
+          placeholder="搜索名称、方法或路径"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          style={{ width: 260 }}
+        />
+        <Select
+          aria-label="Diff 筛选"
+          value={changeFilter}
+          onChange={(value) => setChangeFilter(value as ImportChange | 'all')}
+          options={[
+            { value: 'all', label: '全部变化' },
+            ...Object.entries(changeLabels).map(([value, item]) => ({
+              value,
+              label: item.label,
+            })),
+          ]}
+          style={{ width: 130 }}
+        />
+        <Typography.Text type="secondary">
+          显示 {filteredResults.length} / {result.results.length} 项
+        </Typography.Text>
+      </Space>
       <Table
         rowKey="import_key"
         size="small"
-        pagination={false}
-        dataSource={result.results}
+        pagination={{
+          pageSize: 50,
+          showSizeChanger: false,
+          showTotal: (total) => `共 ${total} 项`,
+        }}
+        scroll={{ y: 320 }}
+        dataSource={filteredResults}
         rowSelection={
           result.status === 'preview'
             ? {
                 selectedRowKeys: selectedKeys,
+                preserveSelectedRowKeys: true,
                 onChange: (keys) => onSelectionChange(keys.map(String)),
                 getCheckboxProps: (item) => ({ disabled: item.change === 'unchanged' }),
               }

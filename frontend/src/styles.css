@@ -836,6 +836,12 @@ body {
   width: 100%;
 }
 
+.import-document-options-scroll {
+  max-height: 280px;
+  padding-right: 8px;
+  overflow-y: auto;
+}
+
 .import-document-picker .ant-radio-wrapper {
   width: 100%;
   padding: 10px 12px;
@@ -869,6 +875,10 @@ body {
 
 .import-statistics {
   margin-bottom: 20px;
+}
+
+.import-result-filters {
+  margin-bottom: 12px;
 }
 
 .management-card {

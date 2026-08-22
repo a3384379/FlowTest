@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   apiErrorMessage,
@@ -34,6 +34,7 @@ import {
   type CreateApiInput,
   type CreateEnvironmentInput,
   type CreateProjectInput,
+  type HttpMethod,
 } from './api-service'
 
 export function useApiConsole() {
@@ -42,6 +43,10 @@ export function useApiConsole() {
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | null>(null)
+  const [apiSearchInput, setApiSearchInput] = useState('')
+  const [apiSearch, setApiSearch] = useState('')
+  const [apiMethod, setApiMethod] = useState<HttpMethod | null>(null)
+  const [apiPage, setApiPage] = useState(1)
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [result, setResult] = useState<ExecutionDetail | null>(null)
   const [lastImport, setLastImport] = useState<ImportRun | null>(null)
@@ -53,8 +58,14 @@ export function useApiConsole() {
   })
   const environmentId = selectedOrFirst(environmentSelection, environments.data)
   const apis = useQuery({
-    queryKey: ['apis', projectId],
-    queryFn: () => listApis(requiredId(projectId)),
+    queryKey: ['apis', projectId, apiPage, apiSearch, apiMethod],
+    queryFn: () =>
+      listApis(requiredId(projectId), {
+        page: apiPage,
+        pageSize: 50,
+        search: apiSearch,
+        method: apiMethod ?? undefined,
+      }),
     enabled: Boolean(projectId),
   })
   const apiId = selectedOrFirst(apiSelection, apis.data?.items)
@@ -174,10 +185,22 @@ export function useApiConsole() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setApiSearch(apiSearchInput.trim())
+      setApiPage(1)
+    }, 280)
+    return () => window.clearTimeout(timer)
+  }, [apiSearchInput])
+
   function selectProject(value: string) {
     selectContextProject(value)
     setEnvironmentSelection(null)
     setApiSelection(null)
+    setApiSearchInput('')
+    setApiSearch('')
+    setApiMethod(null)
+    setApiPage(1)
     setResult(null)
   }
 
@@ -222,6 +245,15 @@ export function useApiConsole() {
     apiId,
     apiDetail,
     setApiSelection,
+    apiSearchInput,
+    setApiSearchInput,
+    apiMethod,
+    setApiMethod: (value: HttpMethod | null) => {
+      setApiMethod(value)
+      setApiPage(1)
+    },
+    apiPage,
+    setApiPage,
     history,
     artifacts,
     expectedStatus,
@@ -271,7 +303,7 @@ export type ApiConsoleDetail = ApiDetail
 type Identified = { id: string }
 
 function selectedOrFirst(selection: string | null, items?: Identified[]): string | null {
-  if (selection) return selection
+  if (selection && items?.some((item) => item.id === selection)) return selection
   return items?.at(0)?.id ?? null
 }
 

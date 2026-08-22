@@ -31,6 +31,7 @@ import type {
   CreateApiInput,
   CreateEnvironmentInput,
   CreateProjectInput,
+  HttpMethod,
 } from '../features/api-console/api-service'
 import { useApiConsole } from '../features/api-console/use-api-console'
 import type { ApiDefinition, Execution, ExecutionDetail } from '../lib/api'
@@ -142,14 +143,33 @@ export default function ApiConsolePage() {
         <Card
           title="接口列表"
           extra={
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              disabled={!canCreateAssets}
-              onClick={() => setDialog('api')}
-            >
-              新建接口
-            </Button>
+            <Space wrap>
+              <Input.Search
+                aria-label="搜索接口"
+                allowClear
+                placeholder="搜索名称、路径或说明"
+                value={consoleState.apiSearchInput}
+                onChange={(event) => consoleState.setApiSearchInput(event.target.value)}
+                style={{ width: 220 }}
+              />
+              <Select
+                aria-label="接口方法筛选"
+                allowClear
+                placeholder="全部方法"
+                value={consoleState.apiMethod ?? undefined}
+                onChange={(value?: HttpMethod) => consoleState.setApiMethod(value ?? null)}
+                options={httpMethods.map((method) => ({ value: method, label: method }))}
+                style={{ width: 120 }}
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={!canCreateAssets}
+                onClick={() => setDialog('api')}
+              >
+                新建接口
+              </Button>
+            </Space>
           }
         >
           <ApiTable
@@ -158,6 +178,10 @@ export default function ApiConsolePage() {
             selectedId={consoleState.apiId}
             onSelect={consoleState.setApiSelection}
             onRename={setRenameTarget}
+            page={consoleState.apis.data?.page ?? consoleState.apiPage}
+            pageSize={consoleState.apis.data?.page_size ?? 50}
+            total={consoleState.apis.data?.total ?? 0}
+            onPageChange={consoleState.setApiPage}
           />
         </Card>
 
@@ -268,15 +292,37 @@ type ApiTableProps = {
   selectedId: string | null
   onSelect: (id: string) => void
   onRename: (definition: ApiDefinition) => void
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
 }
 
-function ApiTable({ loading, items, selectedId, onSelect, onRename }: ApiTableProps) {
+function ApiTable({
+  loading,
+  items,
+  selectedId,
+  onSelect,
+  onRename,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: ApiTableProps) {
   return (
     <Table
       rowKey="id"
       size="small"
       loading={loading}
-      pagination={false}
+      pagination={{
+        current: page,
+        pageSize,
+        total,
+        showSizeChanger: false,
+        showTotal: (value) => `共 ${value} 个接口`,
+        onChange: onPageChange,
+      }}
+      scroll={{ y: 440 }}
       dataSource={items}
       locale={{ emptyText: '暂无接口' }}
       rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
@@ -309,6 +355,8 @@ function ApiTable({ loading, items, selectedId, onSelect, onRename }: ApiTablePr
     />
   )
 }
+
+const httpMethods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 function RenameApiDialogContainer({
   target,

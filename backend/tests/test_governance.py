@@ -200,6 +200,18 @@ async def test_outbound_policy_rejects_credentials_and_mixed_dns_answers() -> No
         )
 
 
+@pytest.mark.asyncio
+async def test_disabled_outbound_policy_allows_localhost_and_preserves_peer_resolution() -> None:
+    async def localhost(_host: str, _port: int) -> tuple[str, ...]:
+        return ("127.0.0.1", "::1")
+
+    assert await validate_outbound_url(
+        "http://localhost:8080/openapi.json",
+        OutboundNetworkPolicy(enabled=False),
+        resolver=localhost,
+    ) == ("127.0.0.1", "::1")
+
+
 class FakeRateClient:
     def __init__(self, results: list[list[int]]) -> None:
         self.results = results

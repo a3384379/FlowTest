@@ -45,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from app.models import Base
 
 TRANSFER_SCHEMA_VERSION = "standalone-compact-transfer-v1"
-STANDALONE_SCHEMA_REVISION = "20260822_0032"
+STANDALONE_SCHEMA_REVISION = "20260822_0033"
 
 # These rows are process state, one-time authentication state, or unsupported
 # Standalone features.  They must not be replayed into Compact as if they were
