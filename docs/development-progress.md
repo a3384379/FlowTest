@@ -21,13 +21,35 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
 
+## 已完成：V5 S37 V4.9 基线收口（本地等价验收）
+
+1. V5 独立工作树从干净的 `codex/standalone-runtime@0643732` 创建 `codex/v5.0`；当前脏 `main`
+   工作区未参与，未执行 reset/stash 覆盖或删除操作。本阶段提交主题为
+   `chore(s37): converge v4.9 baseline`。
+2. 后端质量门槛全部通过：Ruff format/check、mypy、pytest `380 passed / 3 skipped`，总覆盖率
+   `90.22%`。前端 format、lint、coverage、build 全部通过；Vitest `48 files / 195 passed`，
+   Statements `86.66%`、Branches `80.41%`、Functions `86.01%`、Lines `88.81%`。
+3. 独立 Compact Compose 项目完成六服务健康检查、S32 登录/项目/API/Workflow/不可变发布/执行/
+   Snapshot smoke；Chromium 完成首次密码初始化和 `s14-management-workbench` 主路径，覆盖
+   OpenAPI/请求体编辑、Params/Headers 批量编辑、Secret 脱敏及项目/团队操作。相关 URL/Swagger、
+   Transfer、BodyEditor、Workflow Editor 回归也由后端/前端测试套件覆盖。
+4. Alembic 在隔离数据库完成 `20260822_0033 → 20260822_0032 → 20260822_0033`，每步含 upgrade、
+   downgrade 和 `alembic check`；V2→V3 原地升级、回滚、再升级脚本完成真实数据与 Artifact 验证。
+   本阶段同时修正了验证脚本、Compact 文档和 Standalone ADR 中滞后的 `20260822_0032` 当前 head。
+5. 本地 Standalone 等价验收以临时 SQLite 数据目录启动真实 API：`/api/v1/live`、`/api/v1/ready`、
+   `/api/v1/runtime-profile` 和前端静态页均返回成功，Runtime Profile 为 `standalone`，SQLite
+   `alembic_version` 为 `20260822_0033`。这不替代 Windows x64 公司云桌面 72 小时试点；本阶段不声称
+   已取得该实机证据。
+6. S37 已完成基线冻结，下一阶段 S38（Service/ServiceEndpoint/RequestTargetResolver）须经用户确认后
+   才开始。
+
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 
 1. Standalone 新增独立 `standalone` 运行档位；Full/Compact 的 PostgreSQL、Redis、MinIO 和
    Celery 拓扑保持不变，不把 SQLite 数据迁移回 Docker 档位。
 2. Standalone 使用 SQLite WAL、本地附件目录、进程内事件总线、固定窗口限流和后台调度器；
    API、Web、工作流和测试计划在一个 Python 进程内运行，启动时自动创建当前模型基线并记录
-   `20260822_0032` Alembic revision。
+   `20260822_0033` Alembic revision。
 3. Performance Lab、Environment Lab、Runner Fabric 在该档位固定关闭；事件历史、限流桶和未完成
    进程任务在重启后不恢复，业务状态、附件和加密 Snapshot 持久化到 `data\`。
 4. 新增 Windows PowerShell 安装前检查、启动、停止、Readiness/档位验收、备份和离线包构建脚本；离线包可携带
