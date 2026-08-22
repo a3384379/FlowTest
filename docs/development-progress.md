@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S38 请求目标领域模型已实现，等待本阶段提交后的用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S39 组织租户边界、TenantContext、Service Account 和 Runner/审计隔离已实现，等待本阶段提交后的用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -10,6 +10,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 
 ## 当前恢复点
 
+- V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
+  `6fc3df2`，S38 已提交 `d146520`，S39 完成后按阶段提交并暂停。当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
   用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
@@ -61,6 +63,23 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    保留 `Environment.base_url` Legacy Fallback，并维持 `/api/v1` 既有请求结构兼容。
 6. S38 阶段退出前必须完成后端 Ruff/mypy/pytest、前端 format/lint/coverage/build、迁移往返、Standalone/
    Compact/Full 兼容、目标解析/导入/脱敏/权限回归及必要的 Compose 验证；完成本地提交后暂停，不自动进入 S39。
+
+## 已完成：V5 S39 Organization、TenantContext 与 Service Account（等待用户确认）
+
+1. 新增 `Organization`、`OrganizationMember`、`ServiceAccount` 领域与持久化模型；用户请求通过
+   `X-Organization-Id` 解析 typed `TenantContext`，系统管理员可切换组织，普通用户必须具备组织成员关系。
+2. `20260822_0035` 创建组织/成员/服务账号表，并为旧 Project、Runner Pool、Audit Log 增加组织索引和外键；
+   迁移会创建默认组织、回填旧资产和审计记录、为既有用户生成兼容成员关系。Standalone 增量 Schema、
+   Transfer 基线和 Compact/部署文档同步到 `20260822_0035`。
+3. Project 创建、列表和详情先经过组织上下文；Service/ServiceEndpoint、Execution、Artifact、Evidence、
+   Workflow、Test Plan 等项目资产继续沿用 Project 授权边界；Dashboard/Search、Runner Pool/Task/Lease/Event
+   查询增加组织过滤，旧 NULL 组织字段仅作为迁移兼容回退。
+4. 新增组织、成员和 Service Account 管理 API。Service Account 只返回一次明文令牌，数据库仅保存哈希，支持
+   scope 校验、过期、轮换、撤销和 `TenantContext` 认证结果；AuditService 自动写入组织索引并继续脱敏详情。
+5. 新增跨组织项目/Service Account API 回归、Runner 查询隔离回归；真实 PostgreSQL 完成
+   `20260822_0034 → 20260822_0035`、旧用户/项目/Runner/审计数据回填、降级、再升级和 `alembic check`。
+   本阶段只完成本地等价验证，未声称 Windows 公司云桌面实测或远程 CI 证据。
+6. S39 阶段完成后提交本地 Git commit 并暂停；下一阶段 S40 为 FlowSpec v1，须经用户确认后开始。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.capabilities import RunnerType
 from app.domain.runner_fabric import (
@@ -60,12 +61,19 @@ class RunnerFabricService:
     async def create_pool(self, *, actor: User, payload: RunnerPoolCreate) -> RunnerPool:
         self._require_admin(actor)
         normalized_name = payload.name.strip()
-        if await self._repository.find_pool_by_name(normalized_name) is not None:
+        if (
+            await self._repository.find_pool_by_name(
+                normalized_name,
+                organization_id=_organization_id(),
+            )
+            is not None
+        ):
             raise AppError(
                 code="RUNNER_POOL_EXISTS", message="Runner Pool 名称已存在", status_code=409
             )
         profile = self._pool_profile(payload)
         pool = RunnerPool(
+            organization_id=_organization_id(),
             name=normalized_name,
             runner_type=profile.runner_type.value,
             runtime=profile.runtime.value,
@@ -132,24 +140,24 @@ class RunnerFabricService:
 
     async def list_pools(self, *, actor: User) -> list[tuple[RunnerPool, list[Runner]]]:
         self._require_admin(actor)
-        pools = await self._repository.list_pools()
+        pools = await self._repository.list_pools(organization_id=_organization_id())
         return [(pool, await self._repository.list_runners(pool.id)) for pool in pools]
 
     async def overview(self, *, actor: User) -> dict[str, int]:
         self._require_admin(actor)
-        return await self._repository.counts()
+        return await self._repository.counts(organization_id=_organization_id())
 
     async def list_tasks(self, *, actor: User, limit: int) -> list[RunnerTask]:
         self._require_admin(actor)
-        return await self._repository.list_tasks(limit=limit)
+        return await self._repository.list_tasks(limit=limit, organization_id=_organization_id())
 
     async def list_leases(self, *, actor: User, limit: int) -> list[RunnerLeaseRecord]:
         self._require_admin(actor)
-        return await self._repository.list_leases(limit=limit)
+        return await self._repository.list_leases(limit=limit, organization_id=_organization_id())
 
     async def list_events(self, *, actor: User, limit: int) -> list[RunnerEvent]:
         self._require_admin(actor)
-        return await self._repository.list_events(limit=limit)
+        return await self._repository.list_events(limit=limit, organization_id=_organization_id())
 
     async def create_registration_token(
         self, *, actor: User, pool_id: UUID, expires_in_seconds: int
@@ -328,7 +336,9 @@ class RunnerFabricService:
             await self._session.commit()
             return None
         candidates = await self._repository.claim_candidates(
-            runner_type=pool.runner_type, available_at=now
+            runner_type=pool.runner_type,
+            available_at=now,
+            organization_id=pool.organization_id,
         )
         task = await self._select_candidate(candidates, runner, pool)
         if task is None:
@@ -761,12 +771,22 @@ class RunnerFabricService:
             raise AppError(
                 code="RUNNER_POOL_NOT_FOUND", message="Runner Pool 不存在", status_code=404
             )
+        context = get_tenant_context()
+        if (
+            context is not None
+            and pool.organization_id is not None
+            and pool.organization_id != context.organization_id
+        ):
+            raise AppError(
+                code="RUNNER_POOL_NOT_FOUND", message="Runner Pool 不存在", status_code=404
+            )
         return pool
 
     async def _require_runner(self, runner_id: UUID, *, lock: bool = False) -> Runner:
         runner = await self._repository.get_runner(runner_id, lock=lock)
         if runner is None:
             raise AppError(code="RUNNER_NOT_FOUND", message="Runner 不存在", status_code=404)
+        await self._require_pool(runner.pool_id)
         return runner
 
     async def _require_task(self, task_id: UUID, *, lock: bool = False) -> RunnerTask:
@@ -895,6 +915,11 @@ def _plan_runner_type(plan: WorkflowExecutionPlan) -> RunnerType:
             )
             types.append(manifest.runner_type if manifest is not None else RunnerType.PLUGIN)
     return select_runner_type(types)
+
+
+def _organization_id() -> UUID | None:
+    context = get_tenant_context()
+    return context.organization_id if context is not None else None
 
 
 def _new_token(prefix: str) -> str:

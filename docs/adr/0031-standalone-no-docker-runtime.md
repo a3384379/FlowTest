@@ -15,7 +15,7 @@ Compact Docker 仍需要六个容器和 PostgreSQL/Redis/MinIO，因此不能在
 新增显式 `standalone` 运行档位：
 
 - SQLite 文件数据库启用 WAL、外键和忙等待；首次启动从现有 SQLAlchemy 模型建立当前基线，并记录
-  `20260822_0034` Alembic revision。后续结构变化仍须通过 Alembic 维护。
+  `20260822_0035` Alembic revision。后续结构变化仍须通过 Alembic 维护。
 - `LocalObjectStorage` 将 Artifact 写入 `data/artifacts`，使用相对键校验、临时文件替换和内容类型旁车文件。
 - `InProcessExecutionEventBus` 保留有界事件历史并向同一进程内 WebSocket 订阅者广播。
 - `InProcessRateLimiter` 和 `StandaloneTaskDispatcher` 替代 Redis/Celery；工作流、测试计划和可选 AI

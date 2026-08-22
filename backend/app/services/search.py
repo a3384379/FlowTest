@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.models.access import User
 from app.repositories.access import ProjectRepository
@@ -29,9 +30,11 @@ class SearchService:
                 message="搜索词至少需要 2 个字符",
                 status_code=422,
             )
+        context = get_tenant_context()
         projects, _ = await self._projects.list_for_user(
             user_id=actor.id,
             system_admin=actor.is_system_admin,
+            organization_id=context.organization_id if context is not None else None,
             offset=0,
             limit=10_000,
         )

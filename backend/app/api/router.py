@@ -19,6 +19,7 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.impact import router as impact_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
+from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
@@ -68,6 +69,7 @@ api_router.include_router(quality_router, tags=["quality"])
 api_router.include_router(quality_intelligence_router, tags=["quality-intelligence"])
 api_router.include_router(release_gate_router, tags=["release-gate"])
 api_router.include_router(search_router, tags=["search"])
+api_router.include_router(organizations_router, tags=["organizations"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])

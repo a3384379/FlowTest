@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.access import ProjectRole, TeamGrantRole
@@ -102,20 +102,29 @@ class ProjectRepository:
         return await self._session.get(Project, project_id)
 
     async def list_for_user(
-        self, *, user_id: UUID, system_admin: bool, offset: int, limit: int
+        self,
+        *,
+        user_id: UUID,
+        system_admin: bool,
+        organization_id: UUID | None,
+        offset: int,
+        limit: int,
     ) -> tuple[list[tuple[Project, ProjectRole | None]], int]:
+        organization_filter = (
+            or_(Project.organization_id == organization_id, Project.organization_id.is_(None))
+            if organization_id is not None
+            else None
+        )
         if system_admin:
-            projects = list(
-                (
-                    await self._session.scalars(
-                        select(Project)
-                        .order_by(Project.created_at.desc())
-                        .offset(offset)
-                        .limit(limit)
-                    )
-                ).all()
+            statement = (
+                select(Project).order_by(Project.created_at.desc()).offset(offset).limit(limit)
             )
-            total = await self._session.scalar(select(func.count()).select_from(Project))
+            count_statement = select(func.count()).select_from(Project)
+            if organization_filter is not None:
+                statement = statement.where(organization_filter)
+                count_statement = count_statement.where(organization_filter)
+            projects = list((await self._session.scalars(statement)).all())
+            total = await self._session.scalar(count_statement)
             return [(project, None) for project in projects], int(total or 0)
 
         direct_query = (
@@ -123,6 +132,8 @@ class ProjectRepository:
             .join(ProjectMember, ProjectMember.project_id == Project.id)
             .where(ProjectMember.user_id == user_id)
         )
+        if organization_filter is not None:
+            direct_query = direct_query.where(organization_filter)
         direct_rows = list((await self._session.execute(direct_query)).tuples())
         team_query = (
             select(Project, ProjectTeamGrant.role)
@@ -130,6 +141,8 @@ class ProjectRepository:
             .join(TeamMember, TeamMember.team_id == ProjectTeamGrant.team_id)
             .where(TeamMember.user_id == user_id)
         )
+        if organization_filter is not None:
+            team_query = team_query.where(organization_filter)
         team_rows = list((await self._session.execute(team_query)).tuples())
         direct_ids = {project.id for project, _role in direct_rows}
         accessible: dict[UUID, tuple[Project, ProjectRole]] = {

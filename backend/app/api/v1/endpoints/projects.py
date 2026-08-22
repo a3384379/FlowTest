@@ -54,6 +54,7 @@ async def create_project(
         actor=current_user,
         name=payload.name,
         description=payload.description,
+        organization_id=payload.organization_id,
     )
     return _project_response(access)
 

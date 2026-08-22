@@ -80,6 +80,9 @@ class RunnerPool(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
+    organization_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL"), index=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     runner_type: Mapped[str] = mapped_column(String(32), index=True)
     runtime: Mapped[str] = mapped_column(String(16), default="docker", server_default="docker")

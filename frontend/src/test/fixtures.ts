@@ -24,6 +24,7 @@ export const user: User = {
 
 export const project: Project = {
   id: '00000000-0000-4000-8000-000000000010',
+  organization_id: null,
   name: '订单服务',
   description: '订单接口测试',
   role: 'owner',

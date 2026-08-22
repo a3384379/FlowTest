@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.access import (
     FolderMoveError,
@@ -13,9 +14,11 @@ from app.domain.access import (
 )
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_policy_values
 from app.domain.runtime_profiles import RuntimeProfile
+from app.domain.tenant import TenantContext
 from app.models.access import AuditLog, Folder, Project, ProjectMember, User
 from app.repositories.access import ProjectRepository, UserRepository
 from app.services.audit import AuditService
+from app.services.organizations import OrganizationContextService
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,13 +44,23 @@ class ProjectService:
         rows, total = await self._projects.list_for_user(
             user_id=actor.id,
             system_admin=actor.is_system_admin,
+            organization_id=_current_organization_id(),
             offset=(page - 1) * page_size,
             limit=page_size,
         )
         return [ProjectAccess(project=project, role=role) for project, role in rows], total
 
-    async def create(self, *, actor: User, name: str, description: str) -> ProjectAccess:
+    async def create(
+        self,
+        *,
+        actor: User,
+        name: str,
+        description: str,
+        organization_id: UUID | None = None,
+    ) -> ProjectAccess:
+        tenant = await self._tenant_for_create(actor=actor, organization_id=organization_id)
         project = Project(
+            organization_id=tenant.organization_id,
             name=name.strip(),
             description=description.strip(),
             retention_days=settings.retention_default_days,
@@ -410,6 +423,13 @@ class ProjectService:
         project = await self._projects.get(project_id)
         if project is None:
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        context = get_tenant_context()
+        if (
+            context is not None
+            and project.organization_id is not None
+            and project.organization_id != context.organization_id
+        ):
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
         if actor.is_system_admin:
             return ProjectAccess(project=project, role=None)
         role = await self._projects.get_role(project_id=project_id, user_id=actor.id)
@@ -419,6 +439,35 @@ class ProjectService:
         if not role.allows(required):
             raise AppError(code="PROJECT_FORBIDDEN", message="没有所需的项目权限", status_code=403)
         return ProjectAccess(project=project, role=role)
+
+    async def _tenant_for_create(
+        self,
+        *,
+        actor: User,
+        organization_id: UUID | None,
+    ) -> TenantContext:
+        context = get_tenant_context()
+        if organization_id is not None:
+            if (
+                context is not None
+                and not context.is_system_admin
+                and context.organization_id != organization_id
+            ):
+                raise AppError(
+                    code="ORGANIZATION_FORBIDDEN", message="没有所需的组织权限", status_code=403
+                )
+            return await OrganizationContextService(self._session).resolve(
+                actor=actor,
+                requested_organization_id=organization_id,
+            )
+        if context is not None:
+            return context
+        member = await OrganizationContextService(self._session).ensure_default_for_user(actor)
+        resolved = await OrganizationContextService(self._session).resolve(
+            actor=actor,
+            requested_organization_id=member.organization_id,
+        )
+        return resolved
 
     async def _authorize_owner(self, *, actor: User, project_id: UUID) -> None:
         await self.authorize(
@@ -474,3 +523,8 @@ def _project_network_policy(project: Project) -> OutboundNetworkPolicy:
         allowed_private_cidrs=tuple(project.outbound_allowed_private_cidrs),
         enabled=project.outbound_policy_enabled,
     )
+
+
+def _current_organization_id() -> UUID | None:
+    context = get_tenant_context()
+    return context.organization_id if context is not None else None

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -37,19 +37,33 @@ class RunnerFabricRepository:
     async def lock_project_capacity(self, project_id: UUID) -> None:
         await self._lock_scope(project_id, namespace=3)
 
-    async def find_pool_by_name(self, name: str) -> RunnerPool | None:
+    async def find_pool_by_name(
+        self, name: str, *, organization_id: UUID | None = None
+    ) -> RunnerPool | None:
+        filters = [RunnerPool.name == name]
+        if organization_id is not None:
+            filters.append(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
+                )
+            )
         return cast(
             RunnerPool | None,
-            await self._session.scalar(select(RunnerPool).where(RunnerPool.name == name)),
+            await self._session.scalar(select(RunnerPool).where(*filters)),
         )
 
-    async def list_pools(self) -> list[RunnerPool]:
-        return list(
-            (
-                await self._session.scalars(
-                    select(RunnerPool).order_by(RunnerPool.created_at.desc())
+    async def list_pools(self, *, organization_id: UUID | None = None) -> list[RunnerPool]:
+        statement = select(RunnerPool)
+        if organization_id is not None:
+            statement = statement.where(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
                 )
-            ).all()
+            )
+        return list(
+            (await self._session.scalars(statement.order_by(RunnerPool.created_at.desc()))).all()
         )
 
     async def list_runners(self, pool_id: UUID | None = None) -> list[Runner]:
@@ -122,16 +136,20 @@ class RunnerFabricRepository:
         *,
         runner_type: str,
         available_at: datetime,
+        organization_id: UUID | None = None,
         limit: int = 100,
     ) -> list[RunnerTask]:
-        statement = (
-            select(RunnerTask)
-            .where(
-                RunnerTask.status == "queued",
-                RunnerTask.required_runner_type == runner_type,
-                RunnerTask.available_at <= available_at,
+        statement = select(RunnerTask).where(
+            RunnerTask.status == "queued",
+            RunnerTask.required_runner_type == runner_type,
+            RunnerTask.available_at <= available_at,
+        )
+        if organization_id is not None:
+            statement = statement.join(Project, Project.id == RunnerTask.project_id).where(
+                or_(Project.organization_id == organization_id, Project.organization_id.is_(None))
             )
-            .order_by(
+        statement = (
+            statement.order_by(
                 RunnerTask.priority.desc(),
                 RunnerTask.available_at,
                 RunnerTask.created_at,
@@ -190,44 +208,129 @@ class RunnerFabricRepository:
             ).all()
         )
 
-    async def list_tasks(self, *, limit: int = 100) -> list[RunnerTask]:
+    async def list_tasks(
+        self, *, limit: int = 100, organization_id: UUID | None = None
+    ) -> list[RunnerTask]:
+        statement = select(RunnerTask)
+        if organization_id is not None:
+            statement = statement.join(Project, Project.id == RunnerTask.project_id).where(
+                or_(Project.organization_id == organization_id, Project.organization_id.is_(None))
+            )
         return list(
             (
                 await self._session.scalars(
-                    select(RunnerTask).order_by(RunnerTask.created_at.desc()).limit(limit)
+                    statement.order_by(RunnerTask.created_at.desc()).limit(limit)
                 )
             ).all()
         )
 
-    async def list_leases(self, *, limit: int = 100) -> list[RunnerLeaseRecord]:
+    async def list_leases(
+        self, *, limit: int = 100, organization_id: UUID | None = None
+    ) -> list[RunnerLeaseRecord]:
+        statement = select(RunnerLeaseRecord)
+        if organization_id is not None:
+            statement = (
+                statement.join(RunnerTask, RunnerTask.id == RunnerLeaseRecord.task_id)
+                .join(Project, Project.id == RunnerTask.project_id)
+                .where(
+                    or_(
+                        Project.organization_id == organization_id,
+                        Project.organization_id.is_(None),
+                    )
+                )
+            )
         return list(
             (
                 await self._session.scalars(
-                    select(RunnerLeaseRecord)
-                    .order_by(RunnerLeaseRecord.acquired_at.desc())
-                    .limit(limit)
+                    statement.order_by(RunnerLeaseRecord.acquired_at.desc()).limit(limit)
                 )
             ).all()
         )
 
-    async def list_events(self, *, limit: int = 100) -> list[RunnerEvent]:
+    async def list_events(
+        self, *, limit: int = 100, organization_id: UUID | None = None
+    ) -> list[RunnerEvent]:
+        statement = select(RunnerEvent)
+        if organization_id is not None:
+            statement = statement.join(RunnerPool, RunnerPool.id == RunnerEvent.pool_id).where(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
+                )
+            )
         return list(
             (
                 await self._session.scalars(
-                    select(RunnerEvent).order_by(RunnerEvent.created_at.desc()).limit(limit)
+                    statement.order_by(RunnerEvent.created_at.desc()).limit(limit)
                 )
             ).all()
         )
 
-    async def counts(self) -> dict[str, int]:
-        pools = await self._count(RunnerPool)
-        online = await self._count(Runner, Runner.status == "online")
-        offline = await self._count(Runner, Runner.status == "offline")
-        draining = await self._count(Runner, Runner.status == "draining")
-        queued = await self._count(RunnerTask, RunnerTask.status == "queued")
-        active = await self._count(RunnerLeaseRecord, RunnerLeaseRecord.status == "active")
-        completed = await self._count(RunnerTask, RunnerTask.status == "completed")
-        failed = await self._count(RunnerTask, RunnerTask.status == "failed")
+    async def counts(self, *, organization_id: UUID | None = None) -> dict[str, int]:
+        if organization_id is None:
+            pools = await self._count(RunnerPool)
+            online = await self._count(Runner, Runner.status == "online")
+            offline = await self._count(Runner, Runner.status == "offline")
+            draining = await self._count(Runner, Runner.status == "draining")
+            queued = await self._count(RunnerTask, RunnerTask.status == "queued")
+            active = await self._count(RunnerLeaseRecord, RunnerLeaseRecord.status == "active")
+            completed = await self._count(RunnerTask, RunnerTask.status == "completed")
+            failed = await self._count(RunnerTask, RunnerTask.status == "failed")
+        else:
+            pool_scope = or_(
+                RunnerPool.organization_id == organization_id,
+                RunnerPool.organization_id.is_(None),
+            )
+            project_scope = or_(
+                Project.organization_id == organization_id,
+                Project.organization_id.is_(None),
+            )
+            pools = await self._count(RunnerPool, pool_scope)
+            online = await self._count_joined(
+                Runner,
+                ((RunnerPool, Runner.pool_id == RunnerPool.id),),
+                pool_scope,
+                Runner.status == "online",
+            )
+            offline = await self._count_joined(
+                Runner,
+                ((RunnerPool, Runner.pool_id == RunnerPool.id),),
+                pool_scope,
+                Runner.status == "offline",
+            )
+            draining = await self._count_joined(
+                Runner,
+                ((RunnerPool, Runner.pool_id == RunnerPool.id),),
+                pool_scope,
+                Runner.status == "draining",
+            )
+            queued = await self._count_joined(
+                RunnerTask,
+                ((Project, RunnerTask.project_id == Project.id),),
+                project_scope,
+                RunnerTask.status == "queued",
+            )
+            active = await self._count_joined(
+                RunnerLeaseRecord,
+                (
+                    (RunnerTask, RunnerLeaseRecord.task_id == RunnerTask.id),
+                    (Project, RunnerTask.project_id == Project.id),
+                ),
+                project_scope,
+                RunnerLeaseRecord.status == "active",
+            )
+            completed = await self._count_joined(
+                RunnerTask,
+                ((Project, RunnerTask.project_id == Project.id),),
+                project_scope,
+                RunnerTask.status == "completed",
+            )
+            failed = await self._count_joined(
+                RunnerTask,
+                ((Project, RunnerTask.project_id == Project.id),),
+                project_scope,
+                RunnerTask.status == "failed",
+            )
         return {
             "pools": pools,
             "runners_online": online,
@@ -243,6 +346,19 @@ class RunnerFabricRepository:
         statement = select(func.count()).select_from(model)
         if condition is not None:
             statement = statement.where(condition)
+        return int(await self._session.scalar(statement) or 0)
+
+    async def _count_joined(
+        self,
+        model: type[Any],
+        joins: tuple[tuple[type[Any], ColumnElement[bool]], ...],
+        *conditions: ColumnElement[bool],
+    ) -> int:
+        statement = select(func.count()).select_from(model)
+        for joined_model, onclause in joins:
+            statement = statement.join(joined_model, onclause)
+        if conditions:
+            statement = statement.where(*conditions)
         return int(await self._session.scalar(statement) or 0)
 
     async def _lock_scope(self, identifier: UUID, *, namespace: int) -> None:

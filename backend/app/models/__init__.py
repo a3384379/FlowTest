@@ -35,6 +35,7 @@ from app.models.executions import APICallExecution, AssertionResult
 from app.models.governance import IdempotencyRecord
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
+from app.models.organizations import Organization, OrganizationMember, ServiceAccount
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
@@ -94,6 +95,8 @@ __all__ = [
     "NotificationDelivery",
     "NotificationWebhook",
     "OIDCLoginTransaction",
+    "Organization",
+    "OrganizationMember",
     "PactContractVersion",
     "PactProviderVerification",
     "PerformanceGateEvaluation",
@@ -118,6 +121,7 @@ __all__ = [
     "SchemaArtifact",
     "Secret",
     "Service",
+    "ServiceAccount",
     "ServiceCatalogEntry",
     "ServiceEndpoint",
     "ServiceToken",

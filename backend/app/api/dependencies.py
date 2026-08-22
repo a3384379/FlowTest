@@ -1,4 +1,6 @@
+from collections.abc import AsyncIterator
 from typing import Annotated, cast
+from uuid import UUID
 
 import jwt
 from fastapi import Depends, Request
@@ -6,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import reset_tenant_context, set_tenant_context
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
@@ -18,6 +21,7 @@ from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
 from app.repositories.access import UserRepository
 from app.services.oidc import OIDCConfiguration, OIDCProvider
+from app.services.organizations import OrganizationContextService
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -74,9 +78,10 @@ ImportDocumentFetcherDependency = Annotated[
 
 
 async def get_current_user(
+    request: Request,
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> User:
+) -> AsyncIterator[User]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AppError(code="AUTHENTICATION_REQUIRED", message="请先登录", status_code=401)
     try:
@@ -88,7 +93,16 @@ async def get_current_user(
     user = await UserRepository(session).get(claims.user_id)
     if user is None or not user.is_active:
         raise AppError(code="INVALID_ACCESS_TOKEN", message="访问令牌无效", status_code=401)
-    return user
+    requested_organization_id = _organization_header(request)
+    tenant = await OrganizationContextService(session).resolve(
+        actor=user,
+        requested_organization_id=requested_organization_id,
+    )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield user
+    finally:
+        reset_tenant_context(context_token)
 
 
 AuthenticatedUser = Annotated[User, Depends(get_current_user)]
@@ -192,3 +206,17 @@ def get_environment_dispatcher(request: Request) -> EnvironmentTaskDispatcher:
 
 
 EnvironmentQueue = Annotated[EnvironmentTaskDispatcher, Depends(get_environment_dispatcher)]
+
+
+def _organization_header(request: Request) -> UUID | None:
+    value = request.headers.get("X-Organization-Id", "").strip()
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as error:
+        raise AppError(
+            code="INVALID_ORGANIZATION_ID",
+            message="组织 ID 无效",
+            status_code=400,
+        ) from error

@@ -7,14 +7,24 @@ export const apiClient = axios.create({
 })
 
 let accessToken: string | null = null
+let organizationId: string | null = null
 
 export function setAccessToken(token: string | null) {
   accessToken = token
 }
 
+export function setOrganizationId(id: string | null) {
+  organizationId = id
+}
+
 apiClient.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  if (organizationId) {
+    config.headers['X-Organization-Id'] = organizationId
+  } else {
+    delete config.headers['X-Organization-Id']
   }
   return config
 })
@@ -40,6 +50,7 @@ export type User = {
 
 export type Project = {
   id: string
+  organization_id: string | null
   name: string
   description: string
   role: 'owner' | 'editor' | 'viewer' | null
@@ -231,12 +242,58 @@ export type ProjectRetentionPolicy = {
 export type AuditLog = {
   id: string
   actor_user_id: string | null
+  organization_id: string | null
   project_id: string
   action: string
   resource_type: string
   resource_id: string | null
   details: Record<string, unknown>
   created_at: string
+}
+
+export type OrganizationRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export type Organization = {
+  id: string
+  name: string
+  slug: string
+  description: string
+  enabled: boolean
+  created_by_id: string | null
+  role: OrganizationRole | null
+  member_count: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type OrganizationMember = {
+  id: string
+  organization_id: string
+  user_id: string
+  role: OrganizationRole
+  created_at: string
+  updated_at: string
+}
+
+export type OrganizationServiceAccount = {
+  id: string
+  organization_id: string
+  name: string
+  account_key: string
+  token_prefix: string
+  scopes: string[]
+  enabled: boolean
+  created_by_id: string
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  metadata_json: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export type IssuedOrganizationServiceAccount = OrganizationServiceAccount & {
+  token: string
 }
 
 export type ProjectMember = {

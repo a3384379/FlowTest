@@ -11,6 +11,7 @@ from app.domain.runtime_profiles import RuntimeProfile
 from app.models.access import RefreshSession, User
 from app.repositories.access import RefreshSessionRepository, UserRepository
 from app.services.audit import AuditService
+from app.services.organizations import OrganizationContextService
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +182,7 @@ class UserService:
         )
         self._users.add(user)
         await self._session.flush()
+        await OrganizationContextService(self._session).ensure_default_for_user(user)
         self._audit.record(
             actor_user_id=actor.id,
             project_id=None,
@@ -226,7 +228,9 @@ class UserService:
 async def bootstrap_administrator(session: AsyncSession) -> None:
     users = UserRepository(session)
     email = _normalize_email(settings.bootstrap_admin_email)
-    if await users.get_by_email(email) is not None:
+    existing = await users.get_by_email(email)
+    if existing is not None:
+        await OrganizationContextService(session).ensure_default_for_user(existing)
         return
     administrator = User(
         email=email,
@@ -238,6 +242,7 @@ async def bootstrap_administrator(session: AsyncSession) -> None:
     )
     users.add(administrator)
     await session.commit()
+    await OrganizationContextService(session).ensure_default_for_user(administrator)
 
 
 def _normalize_email(email: str) -> str:

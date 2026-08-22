@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.models.access import User
 from app.repositories.dashboard import (
@@ -82,9 +83,11 @@ class DashboardService:
         return records[offset : offset + page_size], total
 
     async def _scope(self, *, actor: User, project_id: UUID | None) -> list[UUID]:
+        context = get_tenant_context()
         accessible = await self._dashboard.accessible_project_ids(
             user_id=actor.id,
             system_admin=actor.is_system_admin,
+            organization_id=context.organization_id if context is not None else None,
         )
         if project_id is None:
             return accessible

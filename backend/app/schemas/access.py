@@ -69,6 +69,7 @@ class PasswordChange(BaseModel):
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=4000)
+    organization_id: UUID | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -80,6 +81,7 @@ class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    organization_id: UUID | None
     name: str
     description: str
     created_by_id: UUID
@@ -121,6 +123,7 @@ class AuditLogResponse(BaseModel):
 
     id: UUID
     actor_user_id: UUID | None
+    organization_id: UUID | None
     project_id: UUID | None
     action: str
     resource_type: str
