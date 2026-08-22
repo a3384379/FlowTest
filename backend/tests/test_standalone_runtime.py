@@ -145,6 +145,95 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_rebuilds_legacy_change_set_tables(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy-change-sets.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text(
+                """
+                CREATE TABLE ai_change_sets (
+                  project_id CHAR(32) NOT NULL,
+                  impact_run_id CHAR(32) NOT NULL,
+                  release_risk_id CHAR(32) NOT NULL,
+                  ai_job_id CHAR(32) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  status VARCHAR(24) NOT NULL DEFAULT 'generating',
+                  source_snapshot JSON NOT NULL,
+                  source_fingerprint VARCHAR(64) NOT NULL,
+                  created_by_id CHAR(32) NOT NULL,
+                  id CHAR(32) NOT NULL PRIMARY KEY,
+                  created_at DATETIME NOT NULL,
+                  updated_at DATETIME NOT NULL,
+                  CONSTRAINT uq_ai_change_sets_job UNIQUE (ai_job_id)
+                )
+                """
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                """
+                CREATE TABLE ai_change_items (
+                  change_set_id CHAR(32) NOT NULL,
+                  suggestion_id CHAR(32) NOT NULL,
+                  position INTEGER NOT NULL,
+                  item_type VARCHAR(32) NOT NULL,
+                  action VARCHAR(16) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  target_resource_id CHAR(32),
+                  target_snapshot_sha256 VARCHAR(64),
+                  proposed_content JSON NOT NULL,
+                  review_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                  review_note TEXT NOT NULL DEFAULT '',
+                  reviewed_by_id CHAR(32),
+                  reviewed_at DATETIME,
+                  materialized_resource_type VARCHAR(32),
+                  materialized_resource_id CHAR(32),
+                  id CHAR(32) NOT NULL PRIMARY KEY,
+                  created_at DATETIME NOT NULL,
+                  updated_at DATETIME NOT NULL,
+                  CONSTRAINT uq_ai_change_items_set_position UNIQUE (change_set_id, position),
+                  CONSTRAINT uq_ai_change_items_suggestion_id UNIQUE (suggestion_id)
+                )
+                """
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE INDEX ix_ai_change_sets_project_id ON ai_change_sets(project_id)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                """
+                INSERT INTO ai_change_sets VALUES
+                ('p', 'i', 'r', 'j', 'old', 'draft', '{}', 'fingerprint', 'u', 'c',
+                 '2026-01-01', '2026-01-01')
+                """
+            )
+        )
+        await standalone_schema._ensure_flow_spec_change_set_columns(connection)
+        set_columns = await connection.execute(
+            standalone_schema.text("PRAGMA table_info(ai_change_sets)")
+        )
+        item_columns = await connection.execute(
+            standalone_schema.text("PRAGMA table_info(ai_change_items)")
+        )
+        stored = await connection.execute(
+            standalone_schema.text(
+                "SELECT source_type, actor_type, impact_run_id FROM ai_change_sets"
+            )
+        )
+
+    await test_engine.dispose()
+    set_info = {str(row[1]): bool(row[3]) for row in set_columns.fetchall()}
+    item_info = {str(row[1]): bool(row[3]) for row in item_columns.fetchall()}
+    assert set_info["impact_run_id"] is False
+    assert set_info["source_type"] is True
+    assert item_info["suggestion_id"] is False
+    assert stored.fetchone() == ("ai", "user", "i")
+
+
+@pytest.mark.asyncio
 async def test_standalone_dispatcher_runs_and_stops_in_process_tasks(monkeypatch) -> None:
     dispatcher = StandaloneTaskDispatcher(
         lambda: _SessionContext(),

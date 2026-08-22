@@ -520,6 +520,123 @@ export type WorkflowDefinition = {
   }
 }
 
+export type FlowSpecNode = {
+  id: string
+  kind: string
+  name: string
+  position: { x: number; y: number }
+  config: Record<string, unknown>
+  capability_id?: string | null
+  capability_version?: string | null
+  configuration?: Record<string, unknown> | null
+  bindings?: Array<{ input: string; expression: string }> | null
+  depends_on: string[]
+  operation_ref?: string | null
+}
+
+export type FlowSpec = {
+  schema_version: 'flowtest-flow-spec-v1'
+  project_id: string | null
+  name: string
+  description: string
+  source_evidence: string[]
+  nodes: FlowSpecNode[]
+  edges: WorkflowEdge[]
+  variables: Record<string, string>
+  settings: WorkflowDefinition['settings']
+  bindings: Array<Record<string, string>>
+  parameters: Array<{
+    name: string
+    source: 'synthetic_data' | 'runtime' | 'constant' | 'secret_ref'
+    value: string | null
+    secret_ref: string | null
+    description: string
+  }>
+  assertions: Array<{
+    node_id: string
+    kind: string
+    expected: unknown
+    schema_ref: string | null
+    query_ref: string | null
+  }>
+  cleanup: Array<{ operation_ref: string; best_effort: boolean }>
+  security_policy: {
+    secret_refs_only: boolean
+    max_requests: number
+    allow_private_network: boolean
+  }
+  confidence: { overall: number; unresolved: string[] }
+}
+
+export type FlowSpecIssue = { code: string; message: string; path: string }
+
+export type FlowSpecValidationResult = {
+  valid: boolean
+  issues: FlowSpecIssue[]
+  warnings: FlowSpecIssue[]
+  requires_review: boolean
+}
+
+export type FlowSpecDiff = {
+  before_fingerprint: string | null
+  after_fingerprint: string
+  changes: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type FlowSpecCompatibilityResult = {
+  compatible: boolean
+  source_schema_version: string
+  target_schema_version: string
+  blockers: FlowSpecIssue[]
+  warnings: FlowSpecIssue[]
+  requires_review: boolean
+}
+
+export type FlowSpecExport = {
+  workflow_id: string
+  version: number | null
+  draft_revision: number | null
+  fingerprint: string
+  spec: FlowSpec
+  validation: FlowSpecValidationResult
+  compatibility: FlowSpecCompatibilityResult
+}
+
+export type FlowSpecChangeSet = {
+  id: string
+  project_id: string
+  title: string
+  status: string
+  source_type: 'flow_spec'
+  source_ref: string | null
+  source_fingerprint: string
+  target_workflow_id: string | null
+  target_revision: number | null
+  target_snapshot_sha256: string | null
+  review_status: 'pending' | 'accepted' | 'rejected'
+  reviewed_by_id: string | null
+  reviewed_at: string | null
+  applied_at: string | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type FlowSpecChangeSetDetail = FlowSpecChangeSet & {
+  spec: FlowSpec
+  validation: FlowSpecValidationResult
+  compatibility: FlowSpecCompatibilityResult
+  diff: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type FlowSpecApplyResult = {
+  change_set_id: string
+  workflow_id: string
+  draft_revision: number
+  fingerprint: string
+  applied_at: string
+}
+
 export type Workflow = {
   id: string
   project_id: string

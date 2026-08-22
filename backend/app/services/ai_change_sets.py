@@ -111,6 +111,10 @@ class AIChangeSetService:
             status="generating",
             source_snapshot=sanitized.payload,
             source_fingerprint=sanitized.sha256,
+            source_type="ai",
+            source_ref=f"ai-job://{job.id}",
+            actor_type="user",
+            actor_id=actor.id,
             created_by_id=actor.id,
         )
         self._repository.add_change_set(change_set)
@@ -176,6 +180,10 @@ class AIChangeSetService:
         _require_enabled()
         change_set = await self._repository.get_change_set_for_update(change_set_id)
         if change_set is None:
+            raise AppError(
+                code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
+            )
+        if change_set.source_type != "ai":
             raise AppError(
                 code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
             )
@@ -394,7 +402,7 @@ class AIChangeSetService:
 
     async def _get_change_set(self, change_set_id: UUID) -> AIChangeSet:
         change_set = await self._repository.get_change_set(change_set_id)
-        if change_set is None:
+        if change_set is None or change_set.source_type != "ai":
             raise AppError(
                 code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
             )

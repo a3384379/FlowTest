@@ -156,7 +156,7 @@ FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
 拒绝执行。导入在数据库事务中进行，失败会回滚数据库并清理本次新上传的对象；成功后自动启动 6 个
 Compact 服务并执行 Readiness 验收。该工具不会迁移 Standalone 的进程内事件、限流窗口或后台任务队列。
 
-Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260822_0035` 基线 Alembic revision。后续版本升级
+Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260822_0036` 基线 Alembic revision。后续版本升级
 必须使用项目提供的升级说明和备份，不要手工删除 `flowtest.db`。
 
 ## 验收与故障定位

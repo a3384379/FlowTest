@@ -89,6 +89,10 @@ class AIChangeSet(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "'rejected', 'failed')",
             name="ai_change_set_status",
         ),
+        CheckConstraint(
+            "source_type IN ('ai', 'flow_spec', 'mcp', 'rest', 'cli')",
+            name="ai_change_set_source_type",
+        ),
         UniqueConstraint("ai_job_id", name="uq_ai_change_sets_job"),
     )
 
@@ -96,16 +100,20 @@ class AIChangeSet(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("projects.id", name="fk_ai_change_set_project", ondelete="CASCADE"),
         index=True,
     )
-    impact_run_id: Mapped[UUID] = mapped_column(
+    impact_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("impact_runs.id", name="fk_ai_change_set_impact", ondelete="RESTRICT"),
         index=True,
+        nullable=True,
     )
-    release_risk_id: Mapped[UUID] = mapped_column(
+    release_risk_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("release_risks.id", name="fk_ai_change_set_risk", ondelete="RESTRICT"),
         index=True,
+        nullable=True,
     )
-    ai_job_id: Mapped[UUID] = mapped_column(
-        ForeignKey("ai_jobs.id", name="fk_ai_change_set_job", ondelete="CASCADE"), index=True
+    ai_job_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_jobs.id", name="fk_ai_change_set_job", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
     )
     title: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(
@@ -113,9 +121,20 @@ class AIChangeSet(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
     source_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    source_type: Mapped[str] = mapped_column(
+        String(24), default="ai", server_default="ai", index=True
+    )
+    source_ref: Mapped[str | None] = mapped_column(String(512), index=True)
+    actor_type: Mapped[str] = mapped_column(
+        String(32), default="user", server_default="user", index=True
+    )
+    actor_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     created_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", name="fk_ai_change_set_creator", ondelete="RESTRICT")
     )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class AIChangeItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
@@ -142,9 +161,10 @@ class AIChangeItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("ai_change_sets.id", name="fk_ai_change_item_set", ondelete="CASCADE"),
         index=True,
     )
-    suggestion_id: Mapped[UUID] = mapped_column(
+    suggestion_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("ai_suggestions.id", name="fk_ai_change_item_suggestion", ondelete="CASCADE"),
         unique=True,
+        nullable=True,
     )
     position: Mapped[int] = mapped_column(Integer)
     item_type: Mapped[str] = mapped_column(String(32), index=True)

@@ -15,6 +15,7 @@ from app.api.v1.endpoints.data_sources import router as data_sources_router
 from app.api.v1.endpoints.environment_lab import router as environment_lab_router
 from app.api.v1.endpoints.event_protocols import router as event_protocols_router
 from app.api.v1.endpoints.executions import router as executions_router
+from app.api.v1.endpoints.flow_spec import router as flow_spec_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.impact import router as impact_router
 from app.api.v1.endpoints.imports import router as imports_router
@@ -62,6 +63,7 @@ api_router.include_router(artifacts_router, tags=["files"])
 api_router.include_router(api_assets_router, tags=["api-assets"])
 api_router.include_router(service_targets_router, tags=["service-targets"])
 api_router.include_router(api_exports_router, tags=["api-exports"])
+api_router.include_router(flow_spec_router, tags=["flow-spec"])
 api_router.include_router(users_router, tags=["users"])
 api_router.include_router(projects_router, tags=["projects"])
 api_router.include_router(protocols_router, tags=["protocols"])

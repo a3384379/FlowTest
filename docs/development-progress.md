@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S39 组织租户边界、TenantContext、Service Account 和 Runner/审计隔离已实现，等待本阶段提交后的用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S40 FlowSpec v1 导入导出与 ChangeSet 审核链路已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -11,7 +11,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 ## 当前恢复点
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
-  `6fc3df2`，S38 已提交 `d146520`，S39 完成后按阶段提交并暂停。当前脏 `main` 工作区未参与。
+  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 完成后按阶段提交并暂停。
+  当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
   用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
@@ -79,7 +80,27 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 5. 新增跨组织项目/Service Account API 回归、Runner 查询隔离回归；真实 PostgreSQL 完成
    `20260822_0034 → 20260822_0035`、旧用户/项目/Runner/审计数据回填、降级、再升级和 `alembic check`。
    本阶段只完成本地等价验证，未声称 Windows 公司云桌面实测或远程 CI 证据。
-6. S39 阶段完成后提交本地 Git commit 并暂停；下一阶段 S40 为 FlowSpec v1，须经用户确认后开始。
+6. S39 已完成本地 Git commit 并暂停；S40 在用户确认后继续推进。
+
+## 已完成：V5 S40 FlowSpec v1（等待用户确认）
+
+1. 新增独立 FlowSpec v1 Domain 合约和 Pipeline：Parse → Normalize → Validate → Compatibility，支持
+   稳定规范化、跨实例语义 Fingerprint、按节点/边稳定 ID 的递归 Diff、置信度/未解析证据以及实例资源引用告警。
+2. 导出支持 Workflow Draft 和已发布版本；导入不直接改库，而是复用 AI ChangeSet/ChangeItem 物理表创建
+   `source_type=flow_spec` 的 Draft，保存源快照、校验/兼容结果、目标 Revision 和指纹，必须经过 Review
+   Accept 后 Apply，并在应用前检查目标快照防止陈旧覆盖。
+3. 新增 `/api/v1/projects/{project_id}/flow-specs` 下的 Export、Validate、Diff、Import、ChangeSet
+   List/Detail、Review、Apply API；新增前端类型化 FlowSpec service，未暴露 Secret 明文，仅支持
+   `secret://` Secret Ref。既有 AI ChangeSet 查询继续只返回 `source_type=ai`，保持原 API 行为。
+4. `20260822_0036` 将 Impact/Risk/AI Job 与 Suggestion 关系改为可空，新增来源、操作者、应用时间字段和约束；
+   PostgreSQL 已完成 `0035 → 0036` upgrade、downgrade、再 upgrade 与 `alembic check`。Standalone 基线、
+   Transfer Manifest 和 Compact/部署文档同步到 `0036`；旧 SQLite ChangeSet 表增加了可恢复的表重建路径，
+   保留已有 AI 数据后再承载 FlowSpec Draft。
+5. 本地验证：后端 Ruff format/check、mypy、pytest `389 passed / 3 skipped`，覆盖率 `90.04%`；前端
+   format、lint、coverage、build 全部通过，Vitest `50 files / 198 passed`，Statements `86.8%`、
+   Branches `80.28%`、Functions `86.19%`、Lines `88.97%`；Standalone/Transfer 回归 `19 passed`。
+   验证使用本地等价环境，未声称 Windows 公司云桌面实机或远程 CI 证据。
+6. S40 完成后提交本地 Git commit 并暂停；下一阶段 S41 为 MCP Read，须经用户确认后开始。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

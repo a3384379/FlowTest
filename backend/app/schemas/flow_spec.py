@@ -1,0 +1,121 @@
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from app.domain.flow_spec import (
+    FlowSpec,
+    FlowSpecCompatibilityResult,
+    FlowSpecDiffItem,
+    FlowSpecValidationResult,
+)
+
+
+class FlowSpecValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spec: FlowSpec
+
+
+class FlowSpecImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spec: FlowSpec
+    workflow_id: UUID | None = None
+    source_ref: str | None = Field(default=None, max_length=512)
+
+
+class FlowSpecExportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: UUID
+    version: int | None
+    draft_revision: int | None
+    fingerprint: str
+    spec: FlowSpec
+    validation: FlowSpecValidationResult
+    compatibility: FlowSpecCompatibilityResult
+
+
+class FlowSpecValidationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fingerprint: str
+    spec: FlowSpec
+    validation: FlowSpecValidationResult
+    compatibility: FlowSpecCompatibilityResult
+
+
+class FlowSpecDiffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    before: FlowSpec | None = None
+    after: FlowSpec
+
+
+class FlowSpecDiffResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    before_fingerprint: str | None
+    after_fingerprint: str
+    changes: list[FlowSpecDiffItem]
+
+
+class FlowSpecChangeSetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    title: str
+    status: str
+    source_type: Literal["flow_spec"]
+    source_ref: str | None
+    source_fingerprint: str
+    target_workflow_id: UUID | None
+    target_revision: int | None
+    target_snapshot_sha256: str | None
+    review_status: Literal["pending", "accepted", "rejected"]
+    reviewed_by_id: UUID | None
+    reviewed_at: datetime | None
+    applied_at: datetime | None
+    created_by_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowSpecChangeSetDetailResponse(FlowSpecChangeSetResponse):
+    spec: FlowSpec
+    validation: FlowSpecValidationResult
+    compatibility: FlowSpecCompatibilityResult
+    diff: list[FlowSpecDiffItem]
+
+
+class FlowSpecReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+    note: str = Field(default="", max_length=2000)
+
+
+class FlowSpecApplyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_set_id: UUID
+    workflow_id: UUID
+    draft_revision: int
+    fingerprint: str
+    applied_at: datetime
+
+
+class FlowSpecChangeSetListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FlowSpecChangeSetResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+def flow_spec_payload(value: FlowSpec) -> dict[str, JsonValue]:
+    return value.model_dump(mode="json", by_alias=True)

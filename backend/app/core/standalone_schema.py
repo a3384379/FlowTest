@@ -6,15 +6,18 @@ stamped with the latest migration revision.  Subsequent schema changes still use
 Alembic; the stamp keeps the normal migration tooling aware of the installed baseline.
 """
 
+from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.core.database import engine
 from app.models import Base
+from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260822_0035"
+BASELINE_REVISION = "20260822_0036"
 
 
 async def initialize_standalone_database() -> None:
@@ -50,6 +53,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     """Keep an existing offline SQLite installation bootable after an upgrade."""
 
     await _ensure_organization_tables(connection)
+    await _ensure_flow_spec_change_set_columns(connection)
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -93,14 +97,15 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
-            "('20260822_0032', '20260822_0033', '20260822_0034')"
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035')"
         ),
         {"revision": BASELINE_REVISION},
     )
     await connection.execute(
         text(
             "UPDATE alembic_version SET version_num = :revision "
-            "WHERE version_num IN ('20260822_0032', '20260822_0033', '20260822_0034')"
+            "WHERE version_num IN "
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -117,6 +122,7 @@ async def _ensure_organization_tables(connection: AsyncConnection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
+
     await connection.execute(
         text(
             "CREATE TABLE IF NOT EXISTS organization_members ("
@@ -143,6 +149,125 @@ async def _ensure_organization_tables(connection: AsyncConnection) -> None:
             "UNIQUE (organization_id, name), UNIQUE (organization_id, account_key))"
         )
     )
+
+
+async def _ensure_flow_spec_change_set_columns(connection: AsyncConnection) -> None:
+    """Upgrade the change-set tables used by a pre-S40 standalone database.
+
+    Fresh standalone databases get the complete model from metadata.  Existing
+    SQLite tables need a rebuild because SQLite cannot alter a NOT NULL column in
+    place; the rebuild preserves existing AI rows and adds the FlowSpec fields.
+    """
+
+    if await _flow_spec_tables_need_rebuild(connection):
+        await _rebuild_flow_spec_change_set_tables(connection)
+        return
+
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="source_type",
+        definition="VARCHAR(24) NOT NULL DEFAULT 'ai'",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="source_ref",
+        definition="VARCHAR(512)",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="actor_type",
+        definition="VARCHAR(32) NOT NULL DEFAULT 'user'",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="actor_id",
+        definition="CHAR(32)",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="applied_at",
+        definition="DATETIME",
+    )
+
+
+async def _flow_spec_tables_need_rebuild(connection: AsyncConnection) -> bool:
+    change_sets = await connection.execute(text("PRAGMA table_info(ai_change_sets)"))
+    change_items = await connection.execute(text("PRAGMA table_info(ai_change_items)"))
+    set_info = {str(row[1]): bool(row[3]) for row in change_sets.fetchall()}
+    item_info = {str(row[1]): bool(row[3]) for row in change_items.fetchall()}
+    if not set_info or not item_info:
+        return False
+    required_set_columns = {
+        "impact_run_id",
+        "release_risk_id",
+        "ai_job_id",
+        "source_type",
+        "source_ref",
+        "actor_type",
+        "actor_id",
+        "applied_at",
+    }
+    if not required_set_columns.issubset(set_info) or "suggestion_id" not in item_info:
+        return True
+    return any(
+        set_info[column] for column in ("impact_run_id", "release_risk_id", "ai_job_id")
+    ) or bool(item_info["suggestion_id"])
+
+
+async def _rebuild_flow_spec_change_set_tables(connection: AsyncConnection) -> None:
+    change_set_table = cast(Table, AIChangeSet.__table__)
+    change_item_table = cast(Table, AIChangeItem.__table__)
+    await _drop_table_indexes(connection, "ai_change_sets")
+    await _drop_table_indexes(connection, "ai_change_items")
+    await connection.execute(
+        text("ALTER TABLE ai_change_items RENAME TO ai_change_items_s40_legacy")
+    )
+    await connection.execute(text("ALTER TABLE ai_change_sets RENAME TO ai_change_sets_s40_legacy"))
+    await connection.execute(CreateTable(change_set_table))
+    await connection.execute(CreateTable(change_item_table))
+    await connection.execute(
+        text(
+            "INSERT INTO ai_change_sets ("
+            "project_id, impact_run_id, release_risk_id, ai_job_id, title, status, "
+            "source_snapshot, source_fingerprint, source_type, source_ref, actor_type, actor_id, "
+            "created_by_id, applied_at, id, created_at, updated_at) "
+            "SELECT project_id, impact_run_id, release_risk_id, ai_job_id, title, status, "
+            "source_snapshot, source_fingerprint, 'ai', NULL, 'user', NULL, created_by_id, NULL, "
+            "id, created_at, updated_at FROM ai_change_sets_s40_legacy"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO ai_change_items ("
+            "change_set_id, suggestion_id, position, item_type, action, title, target_resource_id, "
+            "target_snapshot_sha256, proposed_content, review_status, review_note, reviewed_by_id, "
+            "reviewed_at, materialized_resource_type, materialized_resource_id, id, created_at, "
+            "updated_at) SELECT change_set_id, suggestion_id, position, item_type, action, title, "
+            "target_resource_id, target_snapshot_sha256, proposed_content, review_status, "
+            "review_note, reviewed_by_id, reviewed_at, materialized_resource_type, "
+            "materialized_resource_id, id, created_at, updated_at FROM ai_change_items_s40_legacy"
+        )
+    )
+    await connection.execute(text("DROP TABLE ai_change_items_s40_legacy"))
+    await connection.execute(text("DROP TABLE ai_change_sets_s40_legacy"))
+    for table in (change_set_table, change_item_table):
+        for index in table.indexes:
+            await connection.execute(CreateIndex(index))
+
+
+async def _drop_table_indexes(connection: AsyncConnection, table: str) -> None:
+    result = await connection.execute(text(f"PRAGMA index_list({table})"))
+    for row in result.fetchall():
+        index_name = str(row[1])
+        if index_name.startswith("sqlite_autoindex_"):
+            continue
+        quoted_name = index_name.replace('"', '""')
+        await connection.execute(text(f'DROP INDEX IF EXISTS "{quoted_name}"'))
 
 
 async def _ensure_default_organization(connection: AsyncConnection) -> None:
