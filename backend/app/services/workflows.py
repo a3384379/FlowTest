@@ -24,6 +24,7 @@ from app.domain.data_nodes import (
     validate_read_only_sql,
     validate_redis_read,
 )
+from app.domain.durable_execution import is_resumable_checkpoint
 from app.domain.event_protocols import EventSourceKind
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
 from app.domain.protocols import (
@@ -68,6 +69,7 @@ from app.engine.protocol_nodes import (
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    NodeRunRecord,
     NodeStatusCallback,
     WorkflowRunResult,
     WorkflowScheduler,
@@ -93,6 +95,7 @@ from app.runner.results import (
 from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
+from app.services.durable_execution import checkpoint_to_node_record
 from app.services.event_sources import EventSourceService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
@@ -587,6 +590,28 @@ class WorkflowService:
         if execution.cancel_requested_at is not None:
             token.cancel()
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
+        from app.repositories.durable_execution import DurableExecutionRepository
+
+        checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
+            execution.id
+        )
+        checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
+        resume_attempts = {
+            node_id: max(item.attempt for item in checkpoint_history if item.node_id == node_id)
+            for node_id in {item.node_id for item in checkpoint_history}
+        }
+        context = ExecutionContext(
+            workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
+            dataset_variables=plan.prepared.dataset_variables,
+            runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+        )
+        for checkpoint in checkpoints:
+            context.restore_checkpoint(
+                node_id=checkpoint.node_id,
+                output=cast(JsonValue, checkpoint.output),
+                extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
+            )
+        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoints)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
                 client,
@@ -614,10 +639,15 @@ class WorkflowService:
                         dataset_variables=plan.prepared.dataset_variables,
                         runtime_variables=plan.runtime_variables,
                         on_node_status=on_node_status,
+                        context=context,
+                        resume_records=resume_records,
+                        resume_attempts=resume_attempts,
                     )
             finally:
                 await node_executor.close()
-        nodes = self._stage_run_result(execution=execution, plan=plan, result=result)
+        nodes = self._node_models(execution.id, result)
+        await self._workflows.replace_node_executions(execution.id, nodes)
+        self._stage_run_result(execution=execution, plan=plan, result=result)
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, nodes
@@ -632,6 +662,8 @@ class WorkflowService:
         if isinstance(plan, WorkflowRunPlan) and isinstance(submitted, RunnerSingleExecutionResult):
             self._validate_remote_execution_id(plan.execution_id, submitted.execution_id)
             execution = await self.load_execution_for_run(plan.execution_id)
+            nodes = self._node_models(execution.id, submitted.result.to_domain())
+            await self._workflows.replace_node_executions(execution.id, nodes)
             self._stage_run_result(
                 execution=execution,
                 plan=plan,
@@ -665,6 +697,8 @@ class WorkflowService:
         children: list[WorkflowExecution] = []
         for execution_id, child_plan in expected.items():
             execution = await self.load_execution_for_run(execution_id)
+            nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
+            await self._workflows.replace_node_executions(execution.id, nodes)
             self._stage_run_result(
                 execution=execution,
                 plan=child_plan,
@@ -681,9 +715,7 @@ class WorkflowService:
         execution: WorkflowExecution,
         plan: WorkflowRunPlan,
         result: WorkflowRunResult,
-    ) -> list[WorkflowNodeExecution]:
-        nodes = self._node_models(execution.id, result)
-        self._workflows.add_all(nodes)
+    ) -> None:
         execution.status = result.status.value
         execution.context = cast(dict[str, JsonValue], redact(result.context))
         execution.completed_at = datetime.now(UTC)
@@ -701,7 +733,6 @@ class WorkflowService:
             resource_id=execution.id,
             details={"status": result.status.value, "workflow_version": plan.workflow_version},
         )
-        return nodes
 
     @staticmethod
     def _validate_remote_execution_id(expected: UUID, received: UUID) -> None:
@@ -1523,17 +1554,23 @@ class WorkflowService:
         dataset_variables: dict[str, JsonValue],
         runtime_variables: dict[str, str],
         on_node_status: NodeStatusCallback | None,
+        context: ExecutionContext | None = None,
+        resume_records: tuple[NodeRunRecord, ...] = (),
+        resume_attempts: dict[str, int] | None = None,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
                 definition,
-                context=ExecutionContext(
+                context=context
+                or ExecutionContext(
                     workflow_variables=cast(dict[str, JsonValue], workflow_variables),
                     dataset_variables=dataset_variables,
                     runtime_variables=cast(dict[str, JsonValue], runtime_variables),
                 ),
                 cancellation=token,
                 on_node_status=on_node_status,
+                resume_records=resume_records,
+                resume_attempts=resume_attempts,
             )
         )
         try:

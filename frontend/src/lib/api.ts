@@ -694,7 +694,7 @@ export type WorkflowExecution = {
   triggered_by_id: string
   parent_execution_id: string | null
   dataset_row_index: number | null
-  status: 'running' | 'passed' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   snapshot: Record<string, unknown>
   context: Record<string, unknown>
   error_code: string | null

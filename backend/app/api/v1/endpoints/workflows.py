@@ -5,9 +5,15 @@ from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.composition import build_workflow_service
+from app.domain.durable_execution import ExecutionCommandType
 from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.schemas.common import Page
+from app.schemas.durable_execution import (
+    ExecutionCheckpointResponse,
+    ExecutionCommandDetailResponse,
+    ExecutionCommandResponse,
+)
 from app.schemas.workflows import (
     WorkflowCreate,
     WorkflowDebugNodeResponse,
@@ -23,6 +29,7 @@ from app.schemas.workflows import (
     WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
 )
+from app.services.durable_execution import DurableExecutionService
 from app.services.idempotency import IdempotencyService
 from app.services.workflows import WorkflowService
 
@@ -214,7 +221,30 @@ async def execute_workflow(
             runtime_variables=payload.runtime_variables,
             runtime_headers=payload.runtime_headers,
         )
-        await coordinator.start(plan)
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "workflow_id": str(workflow_id),
+                "execution_id": str(execution.id),
+                **payload.model_dump(mode="json"),
+            },
+        )
+        command_id = command.id
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command_id)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command_id,
+                error_code="EXECUTION_COMMAND_DISPATCH_FAILED",
+                error_message="执行启动命令未能提交到执行运行时",
+            )
+            raise
         return WorkflowExecutionResponse.model_validate(execution)
 
     response = await IdempotencyService(session).run(
@@ -226,6 +256,105 @@ async def execute_workflow(
         action=start,
     )
     return WorkflowExecutionResponse.model_validate(response)
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/resume",
+    response_model=ExecutionCommandDetailResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_workflow_execution(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> ExecutionCommandDetailResponse:
+    return await _recover_workflow_execution(
+        project_id=project_id,
+        execution_id=execution_id,
+        command_type=ExecutionCommandType.RESUME,
+        session=session,
+        current_user=current_user,
+        coordinator=coordinator,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/retry",
+    response_model=ExecutionCommandDetailResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_workflow_execution(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> ExecutionCommandDetailResponse:
+    return await _recover_workflow_execution(
+        project_id=project_id,
+        execution_id=execution_id,
+        command_type=ExecutionCommandType.RETRY,
+        session=session,
+        current_user=current_user,
+        coordinator=coordinator,
+        idempotency_key=idempotency_key,
+    )
+
+
+async def _recover_workflow_execution(
+    *,
+    project_id: UUID,
+    execution_id: UUID,
+    command_type: ExecutionCommandType,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: str | None,
+) -> ExecutionCommandDetailResponse:
+    async def recover() -> ExecutionCommandDetailResponse:
+        durable = DurableExecutionService(session)
+        command, execution = await durable.prepare_recovery_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution_id,
+            command_type=command_type,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={"execution_id": str(execution_id), "command_type": command_type.value},
+        )
+        command_id = command.id
+        try:
+            plan = await build_workflow_service(session).load_execution_plan(execution_id)
+            await coordinator.resume(plan, retry=command_type is ExecutionCommandType.RETRY)
+            await durable.mark_dispatched(command_id)
+        except Exception:
+            await session.rollback()
+            await durable.mark_failed(
+                command_id,
+                error_code="EXECUTION_COMMAND_DISPATCH_FAILED",
+                error_message="恢复命令未能提交到执行运行时",
+            )
+            raise
+        await session.refresh(execution)
+        return ExecutionCommandDetailResponse(
+            command=ExecutionCommandResponse.model_validate(command),
+            execution=WorkflowExecutionResponse.model_validate(execution),
+        )
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.{command_type.value}:{execution_id}",
+        request_payload={"execution_id": str(execution_id), "command_type": command_type.value},
+        action=recover,
+    )
+    return ExecutionCommandDetailResponse.model_validate(response)
 
 
 @router.get("/workflow-executions", response_model=Page[WorkflowExecutionResponse])
@@ -265,6 +394,38 @@ async def get_workflow_execution(
         execution_id=execution_id,
     )
     return _execution_detail(execution, nodes, children)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/commands",
+    response_model=list[ExecutionCommandResponse],
+)
+async def list_execution_commands(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> list[ExecutionCommandResponse]:
+    commands = await DurableExecutionService(session).list_commands(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return [ExecutionCommandResponse.model_validate(command) for command in commands]
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/checkpoints",
+    response_model=list[ExecutionCheckpointResponse],
+)
+async def list_execution_checkpoints(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> list[ExecutionCheckpointResponse]:
+    checkpoints = await DurableExecutionService(session).list_checkpoints(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return [ExecutionCheckpointResponse.model_validate(item) for item in checkpoints]
 
 
 @router.post(

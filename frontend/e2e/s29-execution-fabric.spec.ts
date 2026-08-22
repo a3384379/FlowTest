@@ -11,8 +11,8 @@ test('S29 Worker 故障转移在执行面显示递增 Fence、唯一终态与 Dr
 
   await expect(page.getByRole('heading', { name: '分布式执行面' })).toBeVisible()
   await expect(page.getByText('PostgreSQL 是任务、Lease 与 Fence 的唯一真相源')).toBeVisible()
-  await expect(page.getByText('Runner Lease 已过期并触发 Fence')).toBeVisible()
-  await expect(page.getByText('Runner Lease 已写入唯一终态')).toBeVisible()
+  await expect(page.getByText('Runner Lease 已过期并触发 Fence').first()).toBeVisible()
+  await expect(page.getByText('Runner Lease 已写入唯一终态').first()).toBeVisible()
 
   const recoveredWorker = page
     .getByRole('row')

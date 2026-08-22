@@ -26,6 +26,7 @@ from app.models.contracts import (
     ServiceCatalogEntry,
 )
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
+from app.models.durable_execution import ExecutionCheckpoint, ExecutionCommand
 from app.models.environment_lab import (
     EnvironmentInstance,
     EnvironmentTemplate,
@@ -83,6 +84,8 @@ __all__ = [
     "EnvironmentTemplate",
     "EnvironmentTemplateVersion",
     "EventSource",
+    "ExecutionCheckpoint",
+    "ExecutionCommand",
     "FailureCluster",
     "FlakyRecord",
     "Folder",

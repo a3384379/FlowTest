@@ -173,6 +173,21 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert set(observations[1]["request"]["headers"]["X-Snapshot-Key"]) == {"*"}
     assert observations[1]["duration_ms"] >= 0
     assert len(target.calls) == 2
+    commands = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{detail['execution']['id']}/commands",
+        headers=headers,
+    )
+    assert commands.status_code == 200, commands.text
+    assert len(commands.json()) == 1
+    assert commands.json()[0]["command_type"] == "start"
+    assert commands.json()[0]["status"] == "completed"
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{detail['execution']['id']}/checkpoints",
+        headers=headers,
+    )
+    assert checkpoints.status_code == 200, checkpoints.text
+    assert {item["node_id"] for item in checkpoints.json()} == {"start", "api", "end"}
+    assert all(len(item["input_hash"]) == 64 for item in checkpoints.json())
     snapshot = detail["execution"]["snapshot"]
     assert snapshot["workflow"]["version"] == 1
     assert snapshot["apis"]["api"]["version"] == 1
@@ -215,6 +230,71 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     historical_snapshot = history.json()["execution"]["snapshot"]
     assert historical_snapshot["environment"]["base_url"] == "http://workflow.example.com"
     assert historical_snapshot["apis"]["api"]["version"] == 1
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_failed_workflow_resume_reuses_checkpoints_and_command_idempotency(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = _workflow_definition(api_id)
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "可恢复流程", "definition": definition},
+    )
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[Response(500, json={"error": "temporary"}), Response(200, json={"id": 8})]
+    )
+
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers={**headers, "Idempotency-Key": "s43-start"},
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["id"]
+    failed = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert failed["execution"]["status"] == "failed"
+
+    resumed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers={**headers, "Idempotency-Key": "s43-resume"},
+    )
+    assert resumed.status_code == 202, resumed.text
+    assert resumed.json()["command"]["command_type"] == "resume"
+    completed = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, execution_id
+    )
+    assert completed["execution"]["status"] == "passed"
+    assert len(target.calls) == 2
+
+    duplicate = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers={**headers, "Idempotency-Key": "s43-resume"},
+    )
+    assert duplicate.status_code == 202
+    assert duplicate.json()["command"]["id"] == resumed.json()["command"]["id"]
+    commands = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/commands",
+        headers=headers,
+    )
+    assert [item["command_type"] for item in commands.json()] == ["resume", "start"]
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+        headers=headers,
+    )
+    api_checkpoints = [item for item in checkpoints.json() if item["node_id"] == "api"]
+    assert [item["attempt"] for item in api_checkpoints] == [1, 2]
+    assert [item["status"] for item in api_checkpoints] == ["failed", "passed"]
 
 
 @respx.mock

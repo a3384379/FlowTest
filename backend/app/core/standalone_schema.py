@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260822_0037"
+BASELINE_REVISION = "20260822_0038"
 
 
 async def initialize_standalone_database() -> None:
@@ -98,7 +98,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
-            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', '20260822_0036')"
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
+            "'20260822_0036', '20260822_0037')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -106,7 +107,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         text(
             "UPDATE alembic_version SET version_num = :revision "
             "WHERE version_num IN "
-            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', '20260822_0036')"
+            "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
+            "'20260822_0036', '20260822_0037')"
         ),
         {"revision": BASELINE_REVISION},
     )

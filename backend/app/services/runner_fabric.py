@@ -30,6 +30,8 @@ from app.models.runner_fabric import (
 from app.repositories.runner_fabric import RunnerFabricRepository
 from app.runner.results import RunnerExecutionResult
 from app.schemas.runner_fabric import (
+    RunnerCheckpointRequest,
+    RunnerCheckpointResume,
     RunnerFailRequest,
     RunnerHeartbeatRequest,
     RunnerLeaseAckResponse,
@@ -42,6 +44,10 @@ from app.schemas.runner_fabric import (
     RunnerRegisterResponse,
 )
 from app.services.audit import AuditService
+from app.services.durable_execution import (
+    DurableExecutionService,
+    checkpoint_to_runner_resume,
+)
 from app.services.projects import ProjectService
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
@@ -361,6 +367,7 @@ class RunnerFabricService:
             details={"fencing_token": lease.fencing_token, "attempt": task.attempts},
         )
         encoded = encode_execution_plan(plan)
+        resume_checkpoints = await self._resume_checkpoints(plan)
         await self._session.commit()
         return RunnerLeaseResponse(
             lease_id=lease.id,
@@ -377,6 +384,7 @@ class RunnerFabricService:
                 outbound_policy_enabled=policy.enabled,
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
+                resume_checkpoints=resume_checkpoints,
             ),
         )
 
@@ -413,6 +421,40 @@ class RunnerFabricService:
             )
         await self._session.commit()
         return acknowledgment
+
+    async def checkpoint(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        payload: RunnerCheckpointRequest,
+    ) -> RunnerLeaseAckResponse:
+        runner, lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=payload.fencing_token,
+            now=datetime.now(UTC),
+        )
+        if payload.execution_id != task.execution_id:
+            raise AppError(
+                code="RUNNER_CHECKPOINT_EXECUTION_MISMATCH",
+                message="Checkpoint 不属于当前 Runner 执行",
+                status_code=409,
+            )
+        await DurableExecutionService(self._session).record_checkpoint(
+            project_id=task.project_id,
+            lease_id=lease.id,
+            runner_id=runner.id,
+            actor_user_id=None,
+            payload=payload,
+        )
+        runner.last_seen_at = datetime.now(UTC)
+        await self._session.commit()
+        return RunnerLeaseAckResponse(
+            task_status=task.status,
+            expires_at=lease.expires_at,
+            cancel_requested=await self._cancel_requested(task.execution_id),
+        )
 
     async def complete(
         self,
@@ -452,6 +494,10 @@ class RunnerFabricService:
             details={"fencing_token": fencing_token},
         )
         await self._session.commit()
+        await DurableExecutionService(self._session).mark_execution_command_completed(
+            task.execution_id,
+            execution_status=task.status,
+        )
         return RunnerLeaseAckResponse(task_status=task.status)
 
     async def fail(
@@ -527,6 +573,49 @@ class RunnerFabricService:
         expired = await self._reconcile_expired(now)
         offline = await self._reconcile_offline(now)
         return expired + offline
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool = False) -> RunnerTask:
+        """Requeue an existing durable task without creating a second Runner lease."""
+        self._require_enabled()
+        task = await self._repository.get_task_by_execution(plan.execution_id, lock=True)
+        if task is None:
+            return await self.enqueue(plan)
+        execution = await self._repository.get_execution(plan.execution_id, lock=True)
+        if execution is None:
+            raise AppError(
+                code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
+            )
+        if execution.status == "passed":
+            raise AppError(
+                code="EXECUTION_NOT_RECOVERABLE",
+                message="已成功完成的执行不能 Retry",
+                status_code=409,
+            )
+        if task.status == "leased":
+            raise AppError(
+                code="EXECUTION_ALREADY_ACTIVE",
+                message="执行仍持有活动 Lease",
+                status_code=409,
+            )
+        if not retry and task.attempts >= task.max_attempts:
+            raise AppError(
+                code="RUNNER_RETRY_EXHAUSTED",
+                message="Runner 重试次数已耗尽, 请使用 Retry Command 重置尝试次数",
+                status_code=409,
+            )
+        now = datetime.now(UTC)
+        task.status = "queued"
+        task.available_at = now
+        task.selected_runner_id = None
+        task.error_code = None
+        task.error_message = None
+        task.completed_at = None
+        if retry:
+            task.attempts = 0
+        await self._repository.set_execution_family_status(plan.execution_id, "queued")
+        await self._session.commit()
+        await self._session.refresh(task)
+        return task
 
     async def _reconcile_offline(self, now: datetime) -> int:
         count = 0
@@ -735,6 +824,20 @@ class RunnerFabricService:
     async def _cancel_requested(self, execution_id: UUID) -> bool:
         execution = await self._repository.get_execution(execution_id)
         return execution is not None and execution.cancel_requested_at is not None
+
+    async def _resume_checkpoints(
+        self, plan: WorkflowExecutionPlan
+    ) -> dict[str, list[RunnerCheckpointResume]]:
+        execution_ids = (
+            [child.execution_id for child in plan.children]
+            if isinstance(plan, WorkflowBatchPlan)
+            else [plan.execution_id]
+        )
+        checkpoints = await DurableExecutionService(self._session).checkpoint_history(execution_ids)
+        return {
+            str(execution_id): [checkpoint_to_runner_resume(item) for item in items]
+            for execution_id, items in checkpoints.items()
+        }
 
     async def _authenticate_runner(self, raw_token: str) -> Runner:
         self._require_enabled()

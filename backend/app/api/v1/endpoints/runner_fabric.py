@@ -12,6 +12,7 @@ from app.runner.results import RUNNER_EXECUTION_RESULT_ADAPTER
 from app.schemas.common import Page
 from app.schemas.runner_fabric import (
     RunnerActionRequest,
+    RunnerCheckpointRequest,
     RunnerCompleteRequest,
     RunnerEventResponse,
     RunnerFabricOverviewResponse,
@@ -228,6 +229,20 @@ async def report_runner_progress(
     )
 
 
+@runner_router.post("/leases/{lease_id}/checkpoints", response_model=RunnerLeaseAckResponse)
+async def record_runner_checkpoint(
+    lease_id: UUID,
+    payload: RunnerCheckpointRequest,
+    request: Request,
+    session: SessionDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> RunnerLeaseAckResponse:
+    _validate_checkpoint_size(request, payload)
+    return await _service(session).checkpoint(
+        runner_token=_bearer_token(authorization), lease_id=lease_id, payload=payload
+    )
+
+
 @runner_router.post("/leases/{lease_id}/complete", response_model=RunnerLeaseAckResponse)
 async def complete_runner_lease(
     lease_id: UUID,
@@ -307,6 +322,32 @@ def _result_too_large() -> AppError:
     return AppError(
         code="RUNNER_RESULT_TOO_LARGE",
         message="Runner 结果超过允许大小",
+        status_code=413,
+        details={"limit_bytes": settings.runner_result_limit_bytes},
+    )
+
+
+def _validate_checkpoint_size(request: Request, payload: RunnerCheckpointRequest) -> None:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise AppError(
+                code="RUNNER_CONTENT_LENGTH_INVALID",
+                message="Runner 请求长度无效",
+                status_code=400,
+            ) from error
+        if declared_size > settings.runner_result_limit_bytes:
+            raise _checkpoint_too_large()
+    if len(payload.model_dump_json()) > settings.runner_result_limit_bytes:
+        raise _checkpoint_too_large()
+
+
+def _checkpoint_too_large() -> AppError:
+    return AppError(
+        code="RUNNER_CHECKPOINT_TOO_LARGE",
+        message="Runner Checkpoint 超过允许大小",
         status_code=413,
         details={"limit_bytes": settings.runner_result_limit_bytes},
     )

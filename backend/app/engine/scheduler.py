@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -45,6 +47,7 @@ class NodeRunRecord:
     error_message: str | None
     started_at: datetime | None
     completed_at: datetime
+    input_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,8 @@ class NodeStatusUpdate:
     error_message: str | None
     result: NodeResult | None
     occurred_at: datetime
+    input_hash: str | None = None
+    context_snapshot: dict[str, JsonValue] | None = None
 
 
 NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
@@ -136,9 +141,20 @@ class ExecutionContext:
             "workflow_variables": dict(self.workflow_variables),
             "dataset_variables": dict(self.dataset_variables),
             "resolved_variables": self.resolved_variables(),
+            "extracted_variables": dict(self._extracted_variables),
             "variable_sources": dict(self._variable_sources),
             "node_outputs": dict(self._node_outputs),
         }
+
+    def restore_checkpoint(
+        self,
+        *,
+        node_id: str,
+        output: JsonValue,
+        extracted_variables: dict[str, JsonValue],
+    ) -> None:
+        self._node_outputs[node_id] = output
+        self._extracted_variables.update(extracted_variables)
 
     def _record_scope(self, values: dict[str, JsonValue], scope: str) -> None:
         for name in values:
@@ -178,6 +194,8 @@ class WorkflowScheduler:
         cancellation: CancellationToken | None = None,
         on_node_status: NodeStatusCallback | None = None,
         selected_node_ids: frozenset[str] | None = None,
+        resume_records: tuple[NodeRunRecord, ...] = (),
+        resume_attempts: dict[str, int] | None = None,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
@@ -187,17 +205,23 @@ class WorkflowScheduler:
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
         notified: dict[str, NodeStatus] = {}
+        attempt_offsets = resume_attempts or {}
 
         if selected_node_ids is not None:
             _exclude_unselected(nodes, statuses, records, selected_node_ids)
+        _restore_records(nodes, statuses, records, run_context, resume_records)
 
-        await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+        await _notify_status_changes(
+            nodes, statuses, records, notified, run_context, on_node_status
+        )
 
         while len(records) < len(nodes):
             if token.cancelled:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
-                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+                await _notify_status_changes(
+                    nodes, statuses, records, notified, run_context, on_node_status
+                )
                 break
 
             _skip_blocked(nodes, incoming, statuses, records, run_context)
@@ -210,12 +234,17 @@ class WorkflowScheduler:
                 active,
                 run_context,
                 self._run_node,
+                attempt_offsets,
             )
-            await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+            await _notify_status_changes(
+                nodes, statuses, records, notified, run_context, on_node_status
+            )
             if not active:
                 if len(records) < len(nodes):
                     _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED)
-                    await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+                    await _notify_status_changes(
+                        nodes, statuses, records, notified, run_context, on_node_status
+                    )
                 break
 
             cancellation_wait = asyncio.create_task(token.wait())
@@ -225,7 +254,9 @@ class WorkflowScheduler:
             if cancellation_wait in done:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
-                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+                await _notify_status_changes(
+                    nodes, statuses, records, notified, run_context, on_node_status
+                )
                 break
             cancellation_wait.cancel()
             await asyncio.gather(cancellation_wait, return_exceptions=True)
@@ -242,12 +273,16 @@ class WorkflowScheduler:
                 else:
                     failed = True
 
-            await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+            await _notify_status_changes(
+                nodes, statuses, records, notified, run_context, on_node_status
+            )
 
             if failed and definition.settings.fail_fast:
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
-                await _notify_status_changes(nodes, statuses, records, notified, on_node_status)
+                await _notify_status_changes(
+                    nodes, statuses, records, notified, run_context, on_node_status
+                )
                 break
 
         ordered = tuple(records[node.id] for node in definition.nodes)
@@ -259,10 +294,12 @@ class WorkflowScheduler:
         node: WorkflowNode,
         context: ExecutionContext,
         default_timeout_seconds: int,
+        initial_attempts: int = 0,
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
+        input_hash = _input_hash(node.id, context.snapshot())
         policy = _execution_policy(node, default_timeout_seconds)
-        attempts = 0
+        attempts = initial_attempts
         while True:
             attempts += 1
             failure: NodeExecutionError
@@ -282,6 +319,7 @@ class WorkflowScheduler:
                     error_code=error.code if error else None,
                     error_message=error.message if error else None,
                     started_at=started_at,
+                    input_hash=input_hash,
                 )
             except TimeoutError:
                 failure = NodeExecutionError(
@@ -303,6 +341,7 @@ class WorkflowScheduler:
                         message="节点执行发生未预期错误",
                     ),
                     observations=context.observations_of(node.id),
+                    input_hash=input_hash,
                 )
 
             if attempts > policy.max_retries or failure.category not in policy.retry_on:
@@ -312,6 +351,7 @@ class WorkflowScheduler:
                     started_at,
                     failure,
                     observations=context.observations_of(node.id),
+                    input_hash=input_hash,
                 )
             if policy.retry_delay_seconds:
                 await asyncio.sleep(policy.retry_delay_seconds)
@@ -403,7 +443,10 @@ def _schedule_ready(
     records: dict[str, NodeRunRecord],
     active: dict[asyncio.Task[NodeRunRecord], str],
     context: ExecutionContext,
-    runner: Callable[[WorkflowNode, ExecutionContext, int], Coroutine[Any, Any, NodeRunRecord]],
+    runner: Callable[
+        [WorkflowNode, ExecutionContext, int, int], Coroutine[Any, Any, NodeRunRecord]
+    ],
+    attempt_offsets: dict[str, int],
 ) -> None:
     capacity = definition.settings.concurrency - len(active)
     if capacity <= 0:
@@ -419,7 +462,12 @@ def _schedule_ready(
     for node in ready[:capacity]:
         statuses[node.id] = NodeStatus.RUNNING
         task: asyncio.Task[NodeRunRecord] = asyncio.create_task(
-            runner(node, context, definition.settings.default_timeout_seconds)
+            runner(
+                node,
+                context,
+                definition.settings.default_timeout_seconds,
+                attempt_offsets.get(node.id, 0),
+            )
         )
         active[task] = node.id
 
@@ -508,6 +556,28 @@ def _exclude_unselected(
         )
 
 
+def _restore_records(
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    context: ExecutionContext,
+    resume_records: tuple[NodeRunRecord, ...],
+) -> None:
+    for record in resume_records:
+        node = nodes.get(record.node_id)
+        if node is None:
+            raise ValueError(f"Resume checkpoint references unknown node: {record.node_id}")
+        if record.status not in {
+            NodeStatus.PASSED,
+            NodeStatus.SKIPPED,
+        }:
+            continue
+        statuses[record.node_id] = record.status
+        records[record.node_id] = record
+        if record.status is NodeStatus.PASSED:
+            context.record_output(record.node_id, record.output)
+
+
 def _failed_record(
     node: WorkflowNode,
     attempts: int,
@@ -515,6 +585,7 @@ def _failed_record(
     error: NodeExecutionError,
     *,
     observations: tuple[NodeObservation, ...] = (),
+    input_hash: str | None = None,
 ) -> NodeRunRecord:
     return _record(
         node,
@@ -531,6 +602,7 @@ def _failed_record(
             observations=observations,
         ),
         started_at=started_at,
+        input_hash=input_hash,
     )
 
 
@@ -544,6 +616,7 @@ def _record(
     error_code: str | None = None,
     error_message: str | None = None,
     started_at: datetime | None = None,
+    input_hash: str | None = None,
 ) -> NodeRunRecord:
     return NodeRunRecord(
         node_id=node.id,
@@ -570,6 +643,7 @@ def _record(
         error_message=error_message,
         started_at=started_at,
         completed_at=datetime.now(UTC),
+        input_hash=input_hash,
     )
 
 
@@ -586,6 +660,7 @@ async def _notify_status_changes(
     statuses: dict[str, NodeStatus],
     records: dict[str, NodeRunRecord],
     notified: dict[str, NodeStatus],
+    context: ExecutionContext,
     callback: NodeStatusCallback | None,
 ) -> None:
     if callback is None:
@@ -605,6 +680,18 @@ async def _notify_status_changes(
                 error_message=record.error_message if record else None,
                 result=record.result if record else None,
                 occurred_at=record.completed_at if record else datetime.now(UTC),
+                input_hash=record.input_hash if record else None,
+                context_snapshot=context.snapshot(),
             )
         )
         notified[node_id] = status
+
+
+def _input_hash(node_id: str, context_snapshot: dict[str, JsonValue]) -> str:
+    encoded = json.dumps(
+        {"node_id": node_id, "context": context_snapshot},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

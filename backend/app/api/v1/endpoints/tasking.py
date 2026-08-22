@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, Query, Request, status
 from app.api.dependencies import CurrentUser, SessionDependency, TestPlanQueue, WorkflowCoordinator
 from app.composition import build_workflow_service
 from app.core.errors import AppError
+from app.domain.durable_execution import ExecutionCommandType
 from app.domain.tasking import ServiceTokenScope, TestPlanTrigger
 from app.models.tasking import TestPlanItem
 from app.schemas.common import Page
@@ -23,6 +24,7 @@ from app.schemas.tasking import (
     TestPlanUpdate,
 )
 from app.schemas.workflows import WorkflowExecuteRequest, WorkflowExecutionResponse
+from app.services.durable_execution import DurableExecutionService
 from app.services.idempotency import IdempotencyService
 from app.services.tasking import ServiceTokenService, TestPlanDetail, TestPlanService
 
@@ -330,7 +332,31 @@ async def ci_run_workflow(
             runtime_variables=payload.runtime_variables,
             runtime_headers=payload.runtime_headers,
         )
-        await coordinator.start(plan)
+        command = await DurableExecutionService(session).create_start_command(
+            actor=identity.actor,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"service-token:{identity.model.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "workflow_id": str(workflow_id),
+                "execution_id": str(execution.id),
+                "command_type": ExecutionCommandType.START.value,
+                **payload.model_dump(mode="json"),
+            },
+        )
+        command_id = command.id
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command_id)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command_id,
+                error_code="EXECUTION_COMMAND_DISPATCH_FAILED",
+                error_message="CI 执行启动命令未能提交到执行运行时",
+            )
+            raise
         return WorkflowExecutionResponse.model_validate(execution)
 
     response = await IdempotencyService(session).run(

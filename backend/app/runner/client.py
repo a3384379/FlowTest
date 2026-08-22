@@ -7,6 +7,7 @@ import httpx
 from app.runner.results import RunnerExecutionResult
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
+    RunnerCheckpointRequest,
     RunnerLeaseAckResponse,
     RunnerLeaseResponse,
     RunnerRegisterResponse,
@@ -95,6 +96,17 @@ class RunnerControlPlaneClient:
                 "progress_percent": progress_percent,
                 "message": message,
             },
+        )
+        response.raise_for_status()
+        return RunnerLeaseAckResponse.model_validate(response.json())
+
+    async def checkpoint(
+        self, lease_id: UUID, payload: RunnerCheckpointRequest
+    ) -> RunnerLeaseAckResponse:
+        response = await self._client.post(
+            f"/api/v1/runner-control/leases/{lease_id}/checkpoints",
+            headers=self._headers(),
+            json=payload.model_dump(mode="json"),
         )
         response.raise_for_status()
         return RunnerLeaseAckResponse.model_validate(response.json())

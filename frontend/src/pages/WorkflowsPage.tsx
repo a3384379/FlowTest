@@ -72,7 +72,7 @@ type WorkflowState = ReturnType<typeof useWorkflows>
 function RunConsoleCard({ state }: { state: WorkflowState }) {
   return (
     <Card
-      title="运行控制台"
+      title="最近一次运行"
       className="workflow-result-card"
       extra={
         state.runtimeExecution && (
@@ -160,9 +160,10 @@ function WorkflowWorkspace({ state }: { state: WorkflowState }) {
         extra={
           <Space wrap>
             <WorkspaceModeSwitch state={state} />
-            {(state.workspaceMode === 'draft' || state.activeExecutionId) && (
-              <DraftActions state={state} />
-            )}
+            {state.workspaceMode !== 'history' &&
+              (state.workspaceMode === 'draft' ||
+                Boolean(state.activeExecutionId) ||
+                Boolean(state.lastResult)) && <DraftActions state={state} />}
           </Space>
         }
       >
@@ -597,6 +598,7 @@ function StatusTag({ status }: { status: string }) {
   const colors: Record<string, string> = {
     passed: 'success',
     failed: 'error',
+    queued: 'default',
     running: 'processing',
     skipped: 'default',
     cancelled: 'warning',

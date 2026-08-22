@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-22（Asia/Shanghai）
-状态：仓库已公开；V5 S42 Test Design、统一 ChangeSet 与 MCP Controlled Write 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S43 Durable Execution 已实现，完成本阶段提交后等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -11,7 +11,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 ## 当前恢复点
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
-  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`；S42 完成后按阶段提交并暂停。
+  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`，S42 已提交
+  `a2f97a7`；S43 完成后按阶段提交并暂停。
   当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
@@ -148,7 +149,36 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    Domain、MCP API/SDK、人工审批、敏感信息、Standalone/Transfer 回归。前端保持既有 `50 files / 198 passed`
    与 format、lint、coverage、build 基线；本阶段未新增 UI 业务页面。验证为本地等价环境，未声称 Windows
    公司云桌面实机或远程 CI 证据。
-7. S42 已完成本地 Git commit 并暂停；下一阶段 S43 须经用户确认后开始。
+7. S42 已完成本地 Git commit 并暂停；用户确认后进入 S43 Durable Execution 实施。
+
+## 已完成：V5 S43 Durable Execution（等待用户确认）
+
+1. 新增纯 Domain Durable Execution 合约，固定 `s43-durable-v1` Schema Version，定义
+   `ExecutionCommand`（Start/Resume/Retry/Cancel）、幂等键、命令状态、Checkpoint 状态和
+   可恢复节点判断；Domain/Engine 不依赖 FastAPI、Celery、SQLAlchemy Model 或具体基础设施客户端。
+2. 新增 `ExecutionCommand`、`ExecutionCheckpoint` 持久化模型及可回滚迁移 `20260822_0038`。命令保存
+   请求摘要、幂等键、响应/错误和 Fence 信息；Checkpoint 保存节点、Attempt、输入哈希、脱敏上下文、输出
+   Digest、提取变量和 Lease/Fence 证据，敏感值不会进入命令或 Checkpoint 明文。既有 `RunnerTask`
+   Lease/Fencing 状态机继续作为执行事实源。
+3. Workflow Start/Resume/Retry、Standalone Recovery 和 Runner Control Plane 共用 Durable Execution
+   Application Service。相同幂等键返回同一 Execution；已完成节点恢复时跳过，失败节点从连续 Attempt
+   继续；远程 Runner 重启后恢复已持久化 Checkpoint，旧 Lease/Fence 不能覆盖新状态，终态命令只完成一次。
+4. 新增 Runner Checkpoint 上报 API、命令/Checkpoint 查询 API，并在 Lease 校验、Payload 大小、脱敏、重复
+   Checkpoint 和旧 Fence 场景增加回归。Coordinator 使用独立短事务写入终态 Checkpoint，避免取消轮询刷新
+   与回调写入互相污染 SQLAlchemy Session 状态；Standalone 启动时会恢复 queued/running 的加密执行计划。
+5. 执行控制台修正 queued 状态轮询、完成后 Replay/Debug 操作可见性和执行面事件展示；Runner 事件查询保留
+   `/api/v1` 既有 `limit <= 100` 契约。Standalone、Compact、Full 继续共享业务状态语义，Transfer/Standalone
+   Schema 与迁移 head 同步到 `20260822_0038`，Transfer 表清单为 76。
+6. 后端验证：`uv run ruff format --check .`、`ruff check .`、`mypy app` 全部通过；pytest `406 passed /
+   3 skipped`，总覆盖率 `90.01%`。前端 format、lint、TypeScript、生产 build 全部通过；Vitest `50 files /
+   198 passed`，Statements `86.8%`、Branches `80.29%`、Functions `86.19%`、Lines `88.97%`。
+7. 真实 PostgreSQL 已完成 `20260822_0037 → 20260822_0038` upgrade、`alembic check`、downgrade 到
+   `0037`、再 upgrade 和再次 `check`；本轮验证栈最终 `alembic check` 无漂移。S11 基线和 S29 Runner
+   故障转移/恢复冒烟通过，包含 Attempt=2、Fence=2、Runner B 接管及 Drain；干净 Compose 数据卷上的
+   Playwright 全量 `20/20` 通过，API 上限修正后追加 S29 页面 `1/1` 通过。
+8. 验证运行于本地 macOS/ARM，因现有 Compact 环境占用默认端口使用隔离的高端口 Compose 项目；未将该结果
+   虚构为 Windows 公司云桌面实机、72 小时试点或远程 CI 证据。当前脏 `main` 工作区未参与，未修改附件原始
+   计划文件；S43 已完成本地提交后暂停，S44 等待用户确认。
 
 ## 进行中：V4 Standalone 无 Docker 云桌面部署
 

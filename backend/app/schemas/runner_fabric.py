@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
+from app.engine.contracts import NodeStatus, NodeType
+from app.engine.results import NodeResult
 from app.runner.results import RunnerExecutionResult
 
 
@@ -21,7 +25,7 @@ class RunnerPoolCreate(BaseModel):
     heartbeat_timeout_seconds: int = Field(default=90, ge=15, le=600)
 
     @model_validator(mode="after")
-    def validate_timeouts(self) -> "RunnerPoolCreate":
+    def validate_timeouts(self) -> RunnerPoolCreate:
         if self.heartbeat_timeout_seconds <= self.lease_timeout_seconds:
             raise ValueError("心跳超时必须大于 Lease 时长")
         return self
@@ -123,6 +127,46 @@ class RunnerLeaseTaskResponse(BaseModel):
     outbound_policy_enabled: bool = True
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
+    resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
+
+
+class RunnerCheckpointResume(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node_id: str = Field(min_length=1, max_length=128)
+    node_type: NodeType
+    name: str = Field(min_length=1, max_length=200)
+    status: NodeStatus
+    attempts: int = Field(ge=0, le=100)
+    output: JsonValue = None
+    result: NodeResult
+    error_code: str | None = Field(default=None, max_length=100)
+    error_message: str | None = Field(default=None, max_length=1000)
+    started_at: datetime | None
+    completed_at: datetime
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class RunnerCheckpointRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_id: UUID
+    node_id: str = Field(min_length=1, max_length=128)
+    node_type: NodeType
+    name: str = Field(min_length=1, max_length=200)
+    status: NodeStatus
+    attempts: int = Field(ge=0, le=100)
+    output: JsonValue = None
+    result: NodeResult
+    error_code: str | None = Field(default=None, max_length=100)
+    error_message: str | None = Field(default=None, max_length=1000)
+    started_at: datetime | None
+    finished_at: datetime
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
+    snapshot_revision: int = Field(default=1, ge=1, le=1000000)
+    fencing_token: int = Field(ge=0)
 
 
 class RunnerLeaseResponse(BaseModel):
@@ -256,7 +300,7 @@ class RunnerAgentConfiguration(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_tokens_and_transport(self) -> "RunnerAgentConfiguration":
+    def validate_tokens_and_transport(self) -> RunnerAgentConfiguration:
         if not self.registration_token and not self.runner_token:
             raise ValueError("Runner 必须配置注册令牌或已签发身份令牌")
         if self.production and not self.control_plane_url.startswith("https://"):

@@ -280,7 +280,7 @@ export function useWorkflows() {
     completingExecutionId.current = executionId
     try {
       const result = await getWorkflowExecution(requiredId(projectId), executionId)
-      if (result.execution.status === 'running') return false
+      if (['queued', 'running'].includes(result.execution.status)) return false
       completedExecutionId.current = executionId
       setLastResult(result)
       setActiveExecution(result.execution)

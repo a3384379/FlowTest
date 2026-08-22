@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflows import (
@@ -159,3 +159,13 @@ class WorkflowRepository:
                 )
             ).all()
         )
+
+    async def replace_node_executions(
+        self, execution_id: UUID, entities: Sequence[WorkflowNodeExecution]
+    ) -> None:
+        await self._session.execute(
+            delete(WorkflowNodeExecution).where(
+                WorkflowNodeExecution.workflow_execution_id == execution_id
+            )
+        )
+        self.add_all(entities)

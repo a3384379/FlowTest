@@ -8,12 +8,14 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.storage import ObjectStorage
 from app.http.ai import OpenAICompatibleConfiguration, OpenAICompatibleProvider
+from app.models.workflows import WorkflowExecution
 from app.observability.task_metrics import InProcessTaskMetricsReader
 from app.services.ai import AIJobRunner
 from app.services.execution_events import ExecutionEventBus
@@ -22,7 +24,7 @@ from app.services.retention import RetentionCleanupService
 from app.services.tasking import TestPlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
-from app.services.workflows import WorkflowExecutionPlan
+from app.services.workflows import WorkflowExecutionPlan, WorkflowService
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -71,6 +73,10 @@ class StandaloneTaskDispatcher(
             "workflow",
             lambda: self._run_workflow(plan),
         )
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool) -> None:
+        del retry
+        await self.start(plan)
 
     def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None:
         del queue_name, priority
@@ -164,6 +170,7 @@ class StandaloneTaskDispatcher(
             await AIJobRunner(session, provider).run(job_id)
 
     async def _scheduler_loop(self) -> None:
+        await self._recover_incomplete_workflows()
         last_retention = asyncio.get_running_loop().time()
         while True:
             await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -182,6 +189,43 @@ class StandaloneTaskDispatcher(
                 except Exception as error:
                     logger.warning("Standalone retention cleanup failed: %s", type(error).__name__)
                 last_retention = now
+
+    async def _recover_incomplete_workflows(self) -> None:
+        """Re-submit persisted plans after a Standalone process restart."""
+        async with self._session_factory() as session:
+            execution_ids = list(
+                (
+                    await session.scalars(
+                        select(WorkflowExecution.id)
+                        .where(
+                            WorkflowExecution.parent_execution_id.is_(None),
+                            WorkflowExecution.status.in_(("queued", "running")),
+                            WorkflowExecution.run_payload_ciphertext.is_not(None),
+                            WorkflowExecution.run_payload_nonce.is_not(None),
+                        )
+                        .order_by(WorkflowExecution.created_at)
+                    )
+                ).all()
+            )
+            plans: list[WorkflowExecutionPlan] = []
+            service = WorkflowService(session)
+            for execution_id in execution_ids:
+                try:
+                    plans.append(await service.load_execution_plan(execution_id))
+                except Exception as error:
+                    logger.warning(
+                        "Standalone workflow recovery skipped",
+                        extra={
+                            "execution_id": str(execution_id),
+                            "error_type": type(error).__name__,
+                        },
+                    )
+        for plan in plans:
+
+            async def recover(plan: WorkflowExecutionPlan = plan) -> None:
+                await self._run_workflow(plan)
+
+            self._spawn("workflow-recovery", recover)
 
     async def _enqueue_due_test_plans(self) -> None:
         async with self._session_factory() as session:

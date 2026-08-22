@@ -21,22 +21,33 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
+from app.domain.durable_execution import ExecutionCommandType
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.runner_fabric import RunnerProfile, normalize_labels
-from app.engine.contracts import WorkflowDefinition
-from app.engine.scheduler import CancellationToken
+from app.engine.contracts import NodeStatus, NodeType, WorkflowDefinition
+from app.engine.results import NodeResult
+from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
+from app.models.durable_execution import ExecutionCommand
 from app.models.runner_fabric import RunnerLeaseRecord, RunnerTask
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+from app.repositories.durable_execution import DurableExecutionRepository
 from app.repositories.runner_fabric import _advisory_lock_key
-from app.runner.agent import RunnerAgent, configuration_from_environment
+from app.runner.agent import (
+    RunnerAgent,
+    _checkpoint_payload,
+    _read_runner_token,
+    _retryable_control_plane_error,
+    configuration_from_environment,
+)
 from app.runner.client import RunnerControlPlaneClient
 from app.runner.results import RunnerExecutionResult
 from app.runner.workflow import RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
+    RunnerCheckpointRequest,
     RunnerCompleteRequest,
     RunnerFailRequest,
     RunnerHeartbeatRequest,
@@ -47,7 +58,15 @@ from app.schemas.runner_fabric import (
     RunnerProgressRequest,
     RunnerRegisterRequest,
 )
+from app.services.durable_execution import (
+    DurableExecutionService,
+    _optional_string,
+    checkpoint_to_node_record,
+    checkpoint_to_runner_resume,
+)
+from app.services.execution_events import InProcessExecutionEventBus
 from app.services.runner_fabric import RunnerFabricService
+from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflow_snapshots import PreparedExecution
 from app.services.workflows import WorkflowRunPlan, WorkflowService
@@ -183,6 +202,29 @@ async def test_expired_lease_requeues_and_old_fence_cannot_duplicate_terminal_st
             network_policy=OutboundNetworkPolicy(),
             cancellation=CancellationToken(),
         )
+        result_record = result.result.records[0]
+        checkpoint = RunnerCheckpointRequest(
+            execution_id=execution.id,
+            node_id=result_record.node_id,
+            node_type=result_record.node_type,
+            name=result_record.name,
+            status=result_record.status,
+            attempts=max(1, result_record.attempts),
+            output=result_record.output,
+            result=result_record.result,
+            error_code=result_record.error_code,
+            error_message=result_record.error_message,
+            started_at=result_record.started_at,
+            finished_at=result_record.completed_at,
+            input_hash=result_record.input_hash or "0" * 64,
+            fencing_token=first.task.fencing_token,
+        )
+        acknowledged = await service.checkpoint(
+            runner_token=first_token,
+            lease_id=first.lease_id,
+            payload=checkpoint,
+        )
+        assert acknowledged.task_status == "leased"
         first_lease = await session.get(RunnerLeaseRecord, first.lease_id)
         assert first_lease is not None
         first_lease.expires_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -192,6 +234,17 @@ async def test_expired_lease_requeues_and_old_fence_cannot_duplicate_terminal_st
         assert second is not None
         assert second.task.fencing_token == first.task.fencing_token + 1
         assert second.task.attempt == 2
+        assert [item.node_id for item in second.task.resume_checkpoints[str(execution.id)]] == [
+            "start"
+        ]
+
+        with pytest.raises(AppError) as stale_checkpoint:
+            await service.checkpoint(
+                runner_token=first_token,
+                lease_id=first.lease_id,
+                payload=checkpoint,
+            )
+        assert stale_checkpoint.value.code == "RUNNER_LEASE_FENCED"
 
         with pytest.raises(AppError) as fenced:
             await service.complete(
@@ -244,6 +297,179 @@ async def test_expired_lease_requeues_and_old_fence_cannot_duplicate_terminal_st
         )
         assert {node.node_id for node in nodes} == {"start", "end"}
         assert len(nodes) == 2
+
+
+@pytest.mark.asyncio
+async def test_durable_command_and_checkpoint_edge_cases(
+    fabric_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        _plan, execution = await _seed_execution_plan(session, actor, project)
+        execution_id = execution.id
+        durable = DurableExecutionService(session)
+        coordinator = WorkflowRunCoordinator(
+            fabric_sessions, InProcessExecutionEventBus(retention_seconds=60)
+        )
+        failed_runtime = await coordinator._mark_failed(_plan)
+        assert failed_runtime.status == "failed"
+
+        with pytest.raises(AppError) as invalid_command:
+            await durable.prepare_recovery_command(
+                actor=actor,
+                project_id=project.id,
+                execution_id=execution.id,
+                command_type=ExecutionCommandType.START,
+                actor_key="user:test",
+                idempotency_key=None,
+                payload={},
+            )
+        assert invalid_command.value.code == "EXECUTION_COMMAND_INVALID"
+
+        with pytest.raises(AppError) as missing_execution:
+            await durable.prepare_recovery_command(
+                actor=actor,
+                project_id=project.id,
+                execution_id=uuid4(),
+                command_type=ExecutionCommandType.RESUME,
+                actor_key="user:test",
+                idempotency_key=None,
+                payload={},
+            )
+        assert missing_execution.value.code == "WORKFLOW_EXECUTION_NOT_FOUND"
+
+        execution.status = "queued"
+        await session.commit()
+        with pytest.raises(AppError) as active_execution:
+            await durable.prepare_recovery_command(
+                actor=actor,
+                project_id=project.id,
+                execution_id=execution.id,
+                command_type=ExecutionCommandType.RESUME,
+                actor_key="user:test",
+                idempotency_key=None,
+                payload={},
+            )
+        assert active_execution.value.code == "EXECUTION_ALREADY_ACTIVE"
+
+        execution.status = "passed"
+        await session.commit()
+        with pytest.raises(AppError) as completed_execution:
+            await durable.prepare_recovery_command(
+                actor=actor,
+                project_id=project.id,
+                execution_id=execution.id,
+                command_type=ExecutionCommandType.RESUME,
+                actor_key="user:test",
+                idempotency_key=None,
+                payload={},
+            )
+        assert completed_execution.value.code == "EXECUTION_NOT_RECOVERABLE"
+
+        execution.status = "failed"
+        await session.commit()
+        command = await durable.create_start_command(
+            actor=actor,
+            project_id=project.id,
+            execution_id=execution.id,
+            actor_key="user:test",
+            idempotency_key=None,
+            payload={},
+        )
+        await durable.mark_failed(
+            command.id,
+            error_code="WORKER_CRASHED",
+            error_message="worker stopped",
+        )
+        failed_command = await session.get(ExecutionCommand, command.id)
+        assert failed_command is not None
+        assert failed_command.status == "failed"
+        with pytest.raises(AppError) as missing_dispatch:
+            await durable.mark_dispatched(uuid4())
+        assert missing_dispatch.value.code == "EXECUTION_COMMAND_NOT_FOUND"
+        await durable.mark_failed(uuid4(), error_code="MISSING", error_message="missing")
+
+        result = NodeResult.passed({"value": "checkpoint"})
+        checkpoint_payload = RunnerCheckpointRequest(
+            execution_id=execution.id,
+            node_id="start",
+            node_type=NodeType.START,
+            name="开始",
+            status=NodeStatus.PASSED,
+            attempts=1,
+            output=result.output,
+            result=result,
+            error_code=None,
+            error_message=None,
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+            input_hash="0" * 64,
+            extracted_variables={"safe": "value"},
+            snapshot_revision=1,
+            fencing_token=0,
+        )
+        with pytest.raises(AppError) as non_terminal:
+            await durable.record_checkpoint(
+                project_id=project.id,
+                lease_id=None,
+                runner_id=None,
+                actor_user_id=actor.id,
+                payload=checkpoint_payload.model_copy(update={"status": NodeStatus.PENDING}),
+            )
+        assert non_terminal.value.code == "EXECUTION_CHECKPOINT_NOT_TERMINAL"
+
+        with pytest.raises(AppError) as missing_checkpoint_execution:
+            await durable.record_checkpoint(
+                project_id=project.id,
+                lease_id=None,
+                runner_id=None,
+                actor_user_id=actor.id,
+                payload=checkpoint_payload.model_copy(update={"execution_id": uuid4()}),
+            )
+        assert missing_checkpoint_execution.value.code == "WORKFLOW_EXECUTION_NOT_FOUND"
+
+        checkpoint = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=checkpoint_payload,
+        )
+        duplicate = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=checkpoint_payload,
+        )
+        assert duplicate.id == checkpoint.id
+        checkpoint.finished_at = datetime.now(UTC)
+        assert checkpoint_to_node_record(checkpoint).status is NodeStatus.PASSED
+        assert checkpoint_to_runner_resume(checkpoint).input_hash == "0" * 64
+        assert _optional_string({"code": "value"}, "code") == "value"
+        assert _optional_string({"code": 1}, "code") is None
+
+        with pytest.raises(AppError) as conflict:
+            await durable.record_checkpoint(
+                project_id=project.id,
+                lease_id=None,
+                runner_id=None,
+                actor_user_id=actor.id,
+                payload=checkpoint_payload.model_copy(update={"input_hash": "1" * 64}),
+            )
+        assert conflict.value.code == "EXECUTION_CHECKPOINT_CONFLICT"
+        await session.rollback()
+        await session.refresh(actor)
+        await session.refresh(project)
+
+        repository = DurableExecutionRepository(session)
+        resumable = await repository.list_checkpoints(execution_id, resumable_only=True)
+        assert [item.node_id for item in resumable] == ["start"]
+        assert await repository.list_checkpoints_for_executions([]) == {}
+        with pytest.raises(AppError):
+            await durable.list_checkpoints(actor=actor, project_id=project.id, execution_id=uuid4())
+        with pytest.raises(AppError):
+            await durable.list_commands(actor=actor, project_id=project.id, execution_id=uuid4())
 
 
 @pytest.mark.asyncio
@@ -639,6 +865,25 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
         assert renewed.accepted
         progressed = await client.progress(lease.lease_id, lease.task.fencing_token, 50, "running")
         assert progressed.task_status == "leased"
+        record = result.result.records[0]
+        checkpoint = RunnerCheckpointRequest(
+            execution_id=lease.task.execution_id,
+            node_id=record.node_id,
+            node_type=record.node_type,
+            name=record.name,
+            status=record.status,
+            attempts=max(1, record.attempts),
+            output=record.output,
+            result=record.result,
+            error_code=record.error_code,
+            error_message=record.error_message,
+            started_at=record.started_at,
+            finished_at=record.completed_at,
+            input_hash=record.input_hash or "0" * 64,
+            fencing_token=lease.task.fencing_token,
+        )
+        checkpoint_ack = await client.checkpoint(lease.lease_id, checkpoint)
+        assert checkpoint_ack.task_status == "leased"
         await client.complete(lease.lease_id, lease.task.fencing_token, result)
         await client.fail(
             lease.lease_id,
@@ -668,6 +913,8 @@ async def test_runner_agent_executes_claim_and_reports_digest_failure() -> None:
 
     assert control.connected == 1
     assert control.completed == [lease.lease_id]
+    assert [item.node_id for item in control.checkpoints] == ["start", "end"]
+    assert all(len(item.input_hash) == 64 for item in control.checkpoints)
     assert control.closed == 1
     bad_lease = lease.model_copy(
         update={"task": lease.task.model_copy(update={"plan_sha256": "0" * 64})}
@@ -691,6 +938,140 @@ async def test_runner_agent_retries_transient_control_plane_failure() -> None:
     assert control.claim_failures == 0
     assert control.completed == [lease.lease_id]
     assert control.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_agent_reconnects_renews_and_shuts_down_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = FakeControlPlane(leases=[], connect_failures=1)
+    agent = RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=control
+    )
+
+    async def no_wait() -> None:
+        return None
+
+    monkeypatch.setattr(agent, "_wait_for_poll", no_wait)
+    assert await agent._connect()
+    assert control.connected == 1
+
+    class PermanentConnect(FakeControlPlane):
+        async def connect(self) -> None:
+            request = Request("POST", "http://control/connect")
+            raise httpx.HTTPStatusError(
+                "permanent failure", request=request, response=Response(400, request=request)
+            )
+
+    permanent_agent = RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"),
+        control_plane=PermanentConnect(leases=[]),
+    )
+    monkeypatch.setattr(permanent_agent, "_wait_for_poll", no_wait)
+    with pytest.raises(httpx.HTTPStatusError):
+        await permanent_agent._connect()
+    stopped_agent = RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=control
+    )
+    stopped_agent.stop()
+    assert not await stopped_agent._connect()
+
+    class CancelOnRenew(FakeControlPlane):
+        async def renew(self, _lease_id: UUID, _fencing_token: int) -> object:
+            return type("Ack", (), {"cancel_requested": True})()
+
+    renewing_control = CancelOnRenew(leases=[])
+    renewing_agent = RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=renewing_control
+    )
+    lease = _lease_fixture(_plan_fixture())
+    cancellation = CancellationToken()
+    sleep_calls = 0
+
+    async def stop_after_renew(_delay: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr("app.runner.agent.asyncio.sleep", stop_after_renew)
+    with pytest.raises(asyncio.CancelledError):
+        await renewing_agent._renew_until_done(lease, cancellation)
+    assert cancellation.cancelled
+
+    pending = asyncio.Event()
+    renewing_agent._tasks.add(asyncio.create_task(pending.wait()))
+    await renewing_agent._shutdown_tasks()
+    assert not renewing_agent._tasks
+
+
+@pytest.mark.asyncio
+async def test_runner_agent_honors_checkpoint_cancel_and_fenced_complete() -> None:
+    plan = _plan_fixture()
+    lease = _lease_fixture(plan)
+
+    class CancelCheckpoint(FakeControlPlane):
+        async def checkpoint(self, _lease_id: UUID, payload: RunnerCheckpointRequest) -> object:
+            self.checkpoints.append(payload)
+            return type("Ack", (), {"cancel_requested": True})()
+
+    cancelling = CancelCheckpoint(leases=[])
+    await RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=cancelling
+    )._execute(lease)
+    assert cancelling.checkpoints
+
+    class FencedComplete(FakeControlPlane):
+        async def complete(
+            self,
+            _lease_id: UUID,
+            _fencing_token: int,
+            _result: RunnerExecutionResult,
+        ) -> None:
+            request = Request("POST", "http://control/complete")
+            raise httpx.HTTPStatusError(
+                "fenced", request=request, response=Response(409, request=request)
+            )
+
+    fenced = FencedComplete(leases=[])
+    await RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=fenced
+    )._execute(lease)
+    assert fenced.failed == []
+
+
+def test_runner_checkpoint_and_token_guards(tmp_path: Path) -> None:
+    plan = _plan_fixture()
+    lease = _lease_fixture(plan)
+    update = NodeStatusUpdate(
+        node_id="start",
+        node_type=NodeType.START,
+        name="开始",
+        status=NodeStatus.PASSED,
+        attempts=1,
+        error_code=None,
+        error_message=None,
+        result=NodeResult.passed({"value": "safe"}),
+        occurred_at=datetime.now(UTC),
+        context_snapshot={"extracted_variables": "not-a-map"},
+    )
+    checkpoint = _checkpoint_payload(lease, update)
+    assert checkpoint.extracted_variables == {}
+    with pytest.raises(ValueError, match="NodeResult"):
+        _checkpoint_payload(lease, replace(update, result=None))
+
+    assert _read_runner_token("") == ""
+    assert _read_runner_token(str(tmp_path / "missing-token")) == ""
+    oversized = tmp_path / "oversized-token"
+    oversized.write_text("x" * 513)
+    with pytest.raises(ValueError, match="too large"):
+        _read_runner_token(str(oversized))
+
+    request = Request("GET", "http://control")
+    retryable = httpx.HTTPStatusError("temporary", request=request, response=Response(500))
+    permanent = httpx.HTTPStatusError("permanent", request=request, response=Response(400))
+    assert _retryable_control_plane_error(retryable)
+    assert not _retryable_control_plane_error(permanent)
 
 
 def test_runner_agent_environment_configuration(
@@ -930,12 +1311,19 @@ class FakeControlPlane:
     leases: list[RunnerLeaseResponse]
     stop: object | None = None
     claim_failures: int = 0
+    connect_failures: int = 0
     connected: int = 0
     closed: int = 0
     completed: list[UUID] = field(default_factory=list)
     failed: list[UUID] = field(default_factory=list)
+    checkpoints: list[RunnerCheckpointRequest] = field(default_factory=list)
 
     async def connect(self) -> None:
+        if self.connect_failures:
+            self.connect_failures -= 1
+            raise httpx.ConnectError(
+                "temporary failure", request=Request("POST", "http://control/connect")
+            )
         self.connected += 1
 
     async def claim(self) -> RunnerLeaseResponse | None:
@@ -963,6 +1351,10 @@ class FakeControlPlane:
         _progress_percent: float,
         _message: str,
     ) -> object:
+        return type("Ack", (), {"cancel_requested": False})()
+
+    async def checkpoint(self, _lease_id: UUID, payload: RunnerCheckpointRequest) -> object:
+        self.checkpoints.append(payload)
         return type("Ack", (), {"cancel_requested": False})()
 
     async def complete(
