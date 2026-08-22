@@ -24,7 +24,9 @@ class UserResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # The UI accepts the local Standalone alias ``admin`` as well as an email
+    # address.  Keep the wire field named ``email`` for API compatibility.
+    email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -49,7 +51,7 @@ class OIDCStatusResponse(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     display_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=12, max_length=256)
+    password: str = Field(min_length=8, max_length=256)
     is_system_admin: bool = False
 
 
@@ -61,7 +63,7 @@ class UserUpdate(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 class ProjectCreate(BaseModel):

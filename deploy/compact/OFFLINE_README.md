@@ -23,7 +23,9 @@ cd flowtest-compact-*/
 
 安装器会再次校验包内每个文件、加载 `images.tar`、比对每个镜像 ID 和架构，
 然后生成权限为 `0600` 的 `.env` 并以 `--pull never --no-build` 启动。默认访问地址为
-<http://localhost:3000>，管理员密码仅在 `deploy/compact/.env` 中。
+<http://localhost:3000>。使用 `.env` 中的管理员邮箱或登录别名 `admin`，密码为
+`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 的值。若账号没有项目，质量总览会显示“创建第一个项目”，无需进入
+隐藏路由即可创建第一个项目。
 
 ## 无外网升级
 

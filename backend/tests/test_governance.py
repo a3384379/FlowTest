@@ -37,6 +37,17 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
     )
     assert configured.secure_cookies
 
+    with pytest.raises(ValidationError, match="生产环境"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            secret_key="production-signing-key-with-more-than-32-bytes",
+            bootstrap_admin_password="admin",
+            data_encryption_key="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+            s3_secret_key="production-object-storage-secret",
+            secure_cookies=True,
+        )
+
 
 def test_retention_default_does_not_exceed_system_limit() -> None:
     with pytest.raises(ValidationError, match="默认保留天数"):

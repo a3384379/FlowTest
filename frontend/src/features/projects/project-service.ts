@@ -8,10 +8,20 @@ import {
   type ProjectSecurityPolicy,
 } from '../../lib/api'
 
+export type CreateProjectInput = {
+  name: string
+  description: string
+}
+
 export async function listManagedProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
     params: { page: 1, page_size: 100 },
   })
+  return response.data
+}
+
+export async function createProject(input: CreateProjectInput): Promise<Project> {
+  const response = await apiClient.post<Project>('/projects', input)
   return response.data
 }
 

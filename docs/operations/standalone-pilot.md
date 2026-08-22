@@ -25,8 +25,9 @@ cd C:\flowtest-standalone
 .\deploy\standalone\preflight.ps1
 ```
 
-检查输出必须为 `status=passed`。首次启动由 `start.ps1` 生成 `.env`；管理员初始密码只在本机文件中
-读取，登录后立即修改。记录 `/api/v1/runtime-profile` 的 `profile=standalone`、
+检查输出必须为 `status=passed`。首次启动由 `start.ps1` 生成 `.env`；使用初始账号 `admin`、密码 `admin`
+登录即可，Standalone 不强制首次改密（若开放内网访问，验证后立即修改）。记录
+`/api/v1/runtime-profile` 的 `profile=standalone`、
 `worker_topology=in_process`，并确认 Readiness 不包含 Redis。
 
 ## 72 小时观察

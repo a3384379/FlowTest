@@ -33,8 +33,9 @@ cd C:\flowtest-standalone
 端口占用；失败时先按 JSON 输出的 `errors` 修复。它不会打印 `.env` 中的密钥，也不需要 Docker、WSL2
 或联网。
 
-浏览器打开 `http://127.0.0.1:8000`。首次密码只保存在包根目录 `.env`，登录后立即修改；安装人员
-不要把 `.env` 上传 GitHub、工单或聊天工具。
+浏览器打开 `http://127.0.0.1:8000`，使用账号 `admin`、密码 `admin` 登录。Standalone 不强制首次改密；
+新建用户和主动修改密码的最低长度为 8 位。`admin/admin` 只适用于默认本机回环试用，若按公司要求开放
+内网访问，应在验证完成后立即修改管理员密码。安装人员不要把 `.env` 上传 GitHub、工单或聊天工具。
 
 从 GitHub Actions 下载离线包后，可在 PowerShell 用以下命令校验压缩包；输出必须为 `True`：
 

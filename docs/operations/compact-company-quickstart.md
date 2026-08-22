@@ -55,8 +55,9 @@ Docker 镜像缓存。成功标准是 `verify.sh` 输出 6 个服务运行中，
 AES-256-GCM 数据加密密钥、数据库和对象存储凭据。脚本拒绝覆盖已有 `.env`；该文件已被 Git 忽略，
 但仍应限制为部署管理员可读并纳入公司 Secret 托管，不得提交 Git、上传网盘或粘贴到工单。
 
-浏览器访问 <http://localhost:3000>，使用管理员邮箱 `admin@flowtest.dev` 和本机 `.env` 中的
-`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 登录，随后立即修改密码。
+浏览器访问 <http://localhost:3000>，使用管理员邮箱 `admin@flowtest.dev`（或账号别名 `admin`）和本机
+`.env` 中的 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 登录，随后立即修改密码。若登录账号没有项目，进入
+质量总览即可看到“创建第一个项目”按钮；创建后会自动切换到新项目。
 
 ## 日常启停和检查
 

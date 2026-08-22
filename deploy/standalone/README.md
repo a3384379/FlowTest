@@ -63,10 +63,12 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 `preflight.ps1` 会检查 Windows x64、内置 Python 3.13、离线依赖、前端文件、目录写入权限、磁盘空间和
 端口占用；失败时先按 JSON 输出的 `errors` 修复。它不会打印 `.env` 中的密钥，也不需要 Docker、WSL2
-或联网。首次运行如果尚未创建 `.env`，检查会给出提示，随后由 `start.ps1` 生成随机密钥。
+或联网。首次运行如果尚未创建 `.env`，检查会给出提示，随后由 `start.ps1` 生成随机服务密钥。
 
-首次启动会在包根目录创建 `.env`、`data\`、`logs\` 和 `.flowtest\`，并随机生成管理员初始密码。
-密码只写入本机 `.env`，不会输出到控制台；登录后立即修改。访问 <http://127.0.0.1:8000>。
+首次启动会在包根目录创建 `.env`、`data\`、`logs\` 和 `.flowtest\`。Standalone 本地初始账号固定为
+`admin`，初始密码固定为 `admin`，不会强制首次改密；新建用户和主动修改密码的最低长度为 8 位。
+该简单凭据只适用于默认的本机回环试用，若使用 `-BindHost` 对公司网段开放，应在验证完成后立即修改
+管理员密码。访问 <http://127.0.0.1:8000>。
 如果需要受控内网访问，使用明确的监听地址启动，并先由 IT 配置 Windows 防火墙：
 
 ```powershell

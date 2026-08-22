@@ -28,7 +28,7 @@ export default function PasswordChangePage() {
       <Card className="password-card">
         <Typography.Title level={3}>首次登录，请修改密码</Typography.Title>
         <Typography.Paragraph type="secondary">
-          新密码至少 12 位。完成后即可进入 FlowTest 工作台。
+          新密码至少 8 位。完成后即可进入 FlowTest 工作台。
         </Typography.Paragraph>
         {error && <Alert type="error" showIcon message={error} className="form-alert" />}
         <Form<PasswordValues> layout="vertical" onFinish={submit} requiredMark={false}>
@@ -38,7 +38,7 @@ export default function PasswordChangePage() {
           <Form.Item
             label="新密码"
             name="newPassword"
-            rules={[{ required: true, min: 12, message: '新密码至少 12 位' }]}
+            rules={[{ required: true, min: 8, message: '新密码至少 8 位' }]}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>

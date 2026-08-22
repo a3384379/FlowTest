@@ -33,7 +33,10 @@ cd FlowTest
 
 脚本首次运行会生成 `deploy/compact/.env`，权限为 `0600`，其中包含随机管理员密码和随机服务密钥；
 已有文件绝不会被覆盖。启动完成后访问 <http://localhost:3000>，管理员邮箱默认为
-`admin@flowtest.dev`。密码只在本机 `.env` 中读取，不要复制到聊天、工单或部署日志。
+`admin@flowtest.dev`。登录页面的账号字段同时接受邮箱和 `admin` 别名；`admin` 会解析到配置的
+`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`。密码仍以本机 `.env` 中的
+`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 为准，Compact 首次登录后需要修改密码。不要复制密码到聊天、工单
+或部署日志。登录后如果账号没有项目，质量总览和项目管理页会显示“创建第一个项目”入口。
 源码构建使用独立 `compose.build.yaml`；当同目录存在 `images.env` 时，`start.sh` 会自动改为
 不构建、不拉取的镜像部署模式。
 

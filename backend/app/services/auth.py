@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import PasswordService, TokenService, password_service, token_service
+from app.domain.runtime_profiles import RuntimeProfile
 from app.models.access import RefreshSession, User
 from app.repositories.access import RefreshSessionRepository, UserRepository
 from app.services.audit import AuditService
@@ -35,13 +36,13 @@ class AuthService:
         self._tokens = tokens
 
     async def login(self, *, email: str, password: str) -> TokenPair:
-        user = await self._users.get_by_email(_normalize_email(email))
+        user = await self._users.get_by_email(_normalize_login_identifier(email))
         if (
             user is None
             or not user.is_active
             or not self._passwords.verify(user.password_hash, password)
         ):
-            raise AppError(code="INVALID_CREDENTIALS", message="邮箱或密码错误", status_code=401)
+            raise AppError(code="INVALID_CREDENTIALS", message="账号或密码错误", status_code=401)
         if self._passwords.needs_rehash(user.password_hash):
             user.password_hash = self._passwords.hash(password)
         pair = await self._issue_pair(user)
@@ -233,7 +234,7 @@ async def bootstrap_administrator(session: AsyncSession) -> None:
         password_hash=password_service.hash(settings.bootstrap_admin_password),
         is_active=True,
         is_system_admin=True,
-        requires_password_change=True,
+        requires_password_change=settings.runtime_profile is not RuntimeProfile.STANDALONE,
     )
     users.add(administrator)
     await session.commit()
@@ -241,3 +242,10 @@ async def bootstrap_administrator(session: AsyncSession) -> None:
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _normalize_login_identifier(identifier: str) -> str:
+    normalized = _normalize_email(identifier)
+    if normalized == "admin":
+        return _normalize_email(settings.bootstrap_admin_email)
+    return normalized

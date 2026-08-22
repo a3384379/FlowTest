@@ -23,7 +23,6 @@ import {
   Avatar,
   Breadcrumb,
   Button,
-  Empty,
   Layout,
   Menu,
   Select,
@@ -39,6 +38,7 @@ import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
+import ProjectEmptyState from './features/projects/ProjectEmptyState'
 import { projectPath, type ProjectSection } from './features/projects/project-routing'
 import { useProjectContext } from './features/projects/use-project-context'
 import GlobalSearch from './features/search/GlobalSearch'
@@ -114,6 +114,8 @@ function AuthenticatedShell() {
   const logout = useAuthStore((state) => state.logout)
   const { projects, projectId, currentProject, section, selectProject, pathFor } =
     useProjectContext()
+  const hasNoProjects = isNoProjectView(projects.data?.items.length, projectId)
+  const isGlobalAdministration = isGlobalAdministrationSection(section)
   return (
     <Layout className="app-shell">
       <Sider width={224} theme="dark" className="sidebar">
@@ -186,13 +188,43 @@ function AuthenticatedShell() {
             className="page-breadcrumb"
             items={breadcrumbItems(currentProject?.name ?? null, section)}
           />
-          <Suspense fallback={<PageLoading />}>
-            <ApplicationRoutes key={projectId ?? 'global'} />
-          </Suspense>
+          <AuthenticatedContent
+            hasNoProjects={hasNoProjects}
+            isGlobalAdministration={isGlobalAdministration}
+            projectId={projectId}
+          />
         </Content>
       </Layout>
     </Layout>
   )
+}
+
+function AuthenticatedContent({
+  hasNoProjects,
+  isGlobalAdministration,
+  projectId,
+}: {
+  hasNoProjects: boolean
+  isGlobalAdministration: boolean
+  projectId: string | null
+}) {
+  return (
+    <Suspense fallback={<PageLoading />}>
+      {hasNoProjects && !isGlobalAdministration ? (
+        <ProjectEmptyState />
+      ) : (
+        <ApplicationRoutes key={projectId ?? 'global'} />
+      )}
+    </Suspense>
+  )
+}
+
+function isNoProjectView(projectCount: number | undefined, projectId: string | null): boolean {
+  return projectCount === 0 && projectId === null
+}
+
+function isGlobalAdministrationSection(section: ProjectSection): boolean {
+  return section === 'platform' || section === 'fabric'
 }
 
 function ApplicationRoutes() {
@@ -257,7 +289,7 @@ function DefaultProjectRedirect({ section }: { section: ProjectSection }) {
   const { projects } = useProjectContext()
   if (projects.isLoading) return <PageLoading />
   const projectId = projects.data?.items.at(0)?.id
-  if (!projectId) return <Empty description="暂无可访问项目" />
+  if (!projectId) return <ProjectEmptyState />
   return <Navigate to={projectPath(projectId, section)} replace />
 }
 

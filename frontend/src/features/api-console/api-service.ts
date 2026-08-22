@@ -11,14 +11,12 @@ import {
   type Project,
 } from '../../lib/api'
 
+export { createProject } from '../projects/project-service'
+export type { CreateProjectInput } from '../projects/project-service'
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type BodyKind = 'none' | 'json' | 'multipart'
 export type AuthKind = 'none' | 'bearer' | 'basic' | 'api_key'
-
-export type CreateProjectInput = {
-  name: string
-  description: string
-}
 
 export type CreateEnvironmentInput = {
   name: string
@@ -55,11 +53,6 @@ export async function listProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
     params: { page: 1, page_size: 100 },
   })
-  return response.data
-}
-
-export async function createProject(input: CreateProjectInput): Promise<Project> {
-  const response = await apiClient.post<Project>('/projects', input)
   return response.data
 }
 

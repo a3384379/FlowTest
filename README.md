@@ -46,7 +46,7 @@ cd FlowTest
 
 首次启动会构建或下载镜像，并在 `deploy/compact/.env` 生成权限为 `0600` 的随机管理员密码和服务密钥；
 该文件已被 Git 忽略，不得提交、上传或发到聊天/工单。启动完成后访问 <http://localhost:3000>，
-管理员邮箱为 `admin@flowtest.dev`。Windows 公司电脑请在 WSL2 中执行上述命令，并启用 Docker Desktop
+管理员可使用 `admin@flowtest.dev` 或账号别名 `admin` 登录。Windows 公司电脑请在 WSL2 中执行上述命令，并启用 Docker Desktop
 的 WSL 集成。
 
 详细的系统要求、首次登录、启停、内网开放、备份、升级及完全离线安装步骤见
@@ -84,8 +84,10 @@ docker compose up --build
 - gRPC/Reflection 目标服务：`localhost:50051`
 - MinIO Console：<http://localhost:9001>
 
-本地初始管理员为 `admin@flowtest.dev`，密码由
-`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置。首次登录后必须修改密码；生产部署不得沿用示例值。
+登录账号字段同时接受管理员邮箱和 `admin` 别名；别名会解析到
+`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`。Full/Compact 的密码由 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置，
+并按安装档位执行首次改密策略；Standalone 新包固定使用 `admin/admin` 且不强制首次改密。所有新建或
+主动修改的密码最低为 8 位；生产部署不得沿用示例值。
 
 S1 已提供 `/api/v1/auth`、`/api/v1/users`、`/api/v1/projects`、项目成员和任意层级目录接口。
 Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15 分钟。

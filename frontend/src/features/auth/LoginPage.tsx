@@ -1,4 +1,4 @@
-import { ApiOutlined, LockOutlined, MailOutlined, SafetyOutlined } from '@ant-design/icons'
+import { ApiOutlined, LockOutlined, SafetyOutlined, UserOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Divider, Form, Input, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
@@ -56,16 +56,12 @@ export default function LoginPage() {
         <Typography.Paragraph type="secondary">请使用管理员分配的内部账号</Typography.Paragraph>
         {error && <Alert type="error" showIcon message={error} className="form-alert" />}
         <Form<LoginValues> layout="vertical" onFinish={submit} requiredMark={false}>
-          <Form.Item
-            label="邮箱"
-            name="email"
-            rules={[{ required: true, type: 'email', message: '请输入有效邮箱' }]}
-          >
+          <Form.Item label="账号" name="email" rules={[{ required: true, message: '请输入账号' }]}>
             <Input
               autoComplete="username"
-              prefix={<MailOutlined />}
+              prefix={<UserOutlined />}
               size="large"
-              placeholder="name@example.com"
+              placeholder="admin 或 name@example.com"
             />
           </Form.Item>
           <Form.Item

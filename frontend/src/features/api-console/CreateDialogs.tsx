@@ -9,6 +9,7 @@ import type {
   HttpMethod,
 } from './api-service'
 import type { Artifact } from '../../lib/api'
+import CreateProjectDialog from '../projects/CreateProjectDialog'
 
 type DialogState = 'project' | 'environment' | 'api' | null
 
@@ -43,38 +44,15 @@ type ApiFields = {
 export default function CreateDialogs(props: DialogProps) {
   return (
     <>
-      <ProjectDialog {...props} />
+      <CreateProjectDialog
+        open={props.open === 'project'}
+        submitting={props.submitting}
+        onClose={props.onClose}
+        onCreate={props.onCreateProject}
+      />
       <EnvironmentDialog {...props} />
       <ApiDialog {...props} />
     </>
-  )
-}
-
-function ProjectDialog({ open, submitting, onClose, onCreateProject }: DialogProps) {
-  const [form] = Form.useForm<CreateProjectInput>()
-  return (
-    <Modal
-      title="新建项目"
-      open={open === 'project'}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{ description: '' }}
-        onFinish={onCreateProject}
-      >
-        <Form.Item name="name" label="项目名称" rules={[{ required: true }]}>
-          <Input placeholder="例如：订单服务" />
-        </Form.Item>
-        <Form.Item name="description" label="项目说明">
-          <Input.TextArea rows={3} />
-        </Form.Item>
-      </Form>
-    </Modal>
   )
 }
 
