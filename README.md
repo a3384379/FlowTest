@@ -101,7 +101,8 @@ S3 已提供 HTTPX 异步执行、GET/POST/PUT/PATCH/DELETE、响应与耗时查
 “创建项目与环境 → 创建 API → 发送请求 → 查看断言与历史”闭环；请求与响应中的认证信息、
 Cookie、Token、Password 和 Secret 会在持久化及展示前统一脱敏。
 
-S4 已提供 OpenAPI 3、Swagger 2、Postman Collection 导入和指纹去重；重导入返回
+S4 已提供 OpenAPI 3、Swagger 2、Postman Collection 导入和指纹去重；URL 导入可从
+Swagger UI、Springdoc、FastAPI 和 Knife4j 页面发现原始文档，并在多分组时先行选择。重导入返回
 `added/changed/deleted/unchanged`，变更接口自动创建不可变新版本，删除项只预览不自动停用。
 Bearer、Basic 和 Header/Query API Key 已接入真实请求执行。上传文件和二进制响应统一存放于
 MinIO，数据库只保留 Artifact 元数据与 SHA-256；支持 multipart 请求、受权下载、文件大小、

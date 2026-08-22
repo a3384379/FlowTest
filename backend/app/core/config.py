@@ -223,6 +223,7 @@ class Settings(BaseSettings):
             self.secret_key == "change-me-before-production-at-least-32-bytes"  # noqa: S105
             or self.bootstrap_admin_password == "FlowTest-Change-Me-123!"  # noqa: S105
             or self.bootstrap_admin_password == "admin"  # noqa: S105
+            or self.bootstrap_admin_password == "123456"  # noqa: S105
             or self.data_encryption_key == "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
         )
         if self.runtime_profile is not RuntimeProfile.STANDALONE:

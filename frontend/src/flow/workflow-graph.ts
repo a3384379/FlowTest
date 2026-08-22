@@ -27,7 +27,11 @@ export function connectNodes(
   }
 }
 
-export function addApiNode(definition: WorkflowDefinition, apiId: string): WorkflowDefinition {
+export function addApiNode(
+  definition: WorkflowDefinition,
+  apiId: string,
+  apiVersion?: number,
+): WorkflowDefinition {
   const id = uniqueNodeId(definition, 'api')
   return {
     ...definition,
@@ -38,7 +42,13 @@ export function addApiNode(definition: WorkflowDefinition, apiId: string): Workf
         type: 'api',
         name: `接口请求 ${definition.nodes.filter((node) => node.type === 'api').length + 1}`,
         position: nextPosition(definition),
-        config: { api_definition_id: apiId, max_retries: 0, retry_on: ['network_error', '5xx'] },
+        config: {
+          api_definition_id: apiId,
+          ...(apiVersion ? { api_version: apiVersion } : {}),
+          request_overrides: {},
+          max_retries: 0,
+          retry_on: ['network_error', '5xx'],
+        },
       },
     ],
   }

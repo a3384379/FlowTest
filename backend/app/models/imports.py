@@ -15,14 +15,19 @@ class ImportRun(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "source_type IN ('openapi3', 'swagger2', 'postman', 'har', 'curl', 'bruno', 'excel')",
             name="import_run_source_type",
         ),
+        CheckConstraint("source_kind IN ('file', 'url')", name="import_run_source_kind"),
         CheckConstraint("status IN ('applied', 'preview')", name="import_run_status"),
     )
 
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
+    source_kind: Mapped[str] = mapped_column(String(16), default="file", server_default="file")
+    source_key: Mapped[str] = mapped_column(String(512), index=True)
     source_type: Mapped[str] = mapped_column(String(20))
     source_name: Mapped[str] = mapped_column(String(255))
+    source_url: Mapped[str | None] = mapped_column(String(2048))
+    document_url: Mapped[str | None] = mapped_column(String(2048))
     source_sha256: Mapped[str] = mapped_column(String(64))
     added: Mapped[int] = mapped_column(Integer, default=0)
     changed: Mapped[int] = mapped_column(Integer, default=0)

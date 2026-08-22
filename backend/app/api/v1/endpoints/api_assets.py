@@ -283,6 +283,16 @@ async def preview_api_request(
         runtime_headers=payload.runtime_headers,
         body_override=payload.body_override,
         use_body_override=payload.use_body_override,
+        query_parameters_override=(
+            tuple(
+                QueryParameterSpec(name=item.name, value=item.value, enabled=item.enabled)
+                for item in payload.query_parameters_override
+            )
+            if payload.query_parameters_override is not None
+            else None
+        ),
+        headers_override=payload.headers_override,
+        version_number=payload.version,
     )
     return PreviewResponse(
         method=preview.method,

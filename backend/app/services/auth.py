@@ -177,7 +177,7 @@ class UserService:
             password_hash=password_service.hash(password),
             is_active=True,
             is_system_admin=is_system_admin,
-            requires_password_change=True,
+            requires_password_change=settings.runtime_profile is not RuntimeProfile.STANDALONE,
         )
         self._users.add(user)
         await self._session.flush()

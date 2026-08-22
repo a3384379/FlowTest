@@ -168,6 +168,12 @@ async def test_environment_secret_api_version_and_preview_flow(
     )
     assert renamed_api.status_code == 200
     assert renamed_api.json()["name"] == "查询用户详情"
+    blank_name = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}",
+        headers=headers,
+        json={"name": "   "},
+    )
+    assert blank_name.status_code == 422
 
     preview_a = await asset_client.post(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
@@ -272,6 +278,26 @@ async def test_environment_secret_api_version_and_preview_flow(
     assert persisted_version_two.json()["version"]["extraction_rules"] == [
         {"name": "request_id", "kind": "header", "expression": "X-Request-ID"}
     ]
+    node_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={
+            "environment_id": environment_a["id"],
+            "version": 1,
+            "runtime_variables": {"tenant": "node", "user_id": "42"},
+            "query_parameters_override": [{"name": "source", "value": "workflow", "enabled": True}],
+            "headers_override": {"X-Node": "custom"},
+            "body_override": {"owner": "{{tenant}}"},
+            "use_body_override": True,
+        },
+    )
+    assert node_preview.status_code == 200, node_preview.text
+    assert node_preview.json()["url"] == ("http://env-a.example.com/node/users/42?source=workflow")
+    node_headers = {item["name"].lower(): item["value"] for item in node_preview.json()["headers"]}
+    assert node_headers["x-node"] == "custom"
+    assert "x-token-copy" not in node_headers
+    assert node_headers["authorization"] == "******"
+    assert node_preview.json()["body"] == {"owner": "node"}
     versions = await asset_client.get(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/versions", headers=headers
     )

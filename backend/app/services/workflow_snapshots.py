@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
-from app.domain.api_assets import BodyKind
+from app.domain.api_assets import BodyKind, QueryParameterSpec
 from app.domain.data_nodes import CredentialKind
 from app.domain.event_protocols import EventSourceKind
 from app.domain.protocols import ProtocolKind
@@ -19,6 +19,7 @@ from app.engine.capabilities import (
     legacy_node_adapter,
 )
 from app.engine.contracts import (
+    ApiNodeConfig,
     ForEachNodeConfig,
     NodeType,
     RedisNodeConfig,
@@ -475,6 +476,7 @@ class WorkflowSnapshotBuilder:
                 actor=actor,
                 project_id=project_id,
                 definition_id=config.api_definition_id,
+                version=config.api_version,
             )
             raw_request, redacted_request = await self._prepare_requests(
                 actor=actor,
@@ -486,14 +488,24 @@ class WorkflowSnapshotBuilder:
                 dataset_variables=_template_variables(dataset_variables),
                 runtime_variables=runtime_variables,
                 runtime_headers=runtime_headers,
+                config=config,
             )
-            body_kind = BodyKind(api_version.body_kind)
+            body_kind = (
+                config.request_overrides.body.kind
+                if config.request_overrides.body is not None
+                else BodyKind(api_version.body_kind)
+            )
             multipart = (
                 await self._prepare_multipart(project_id, raw_request)
                 if body_kind is BodyKind.MULTIPART
                 else None
             )
-            requests[node.id] = PreparedWorkflowRequest(raw_request, body_kind, multipart)
+            requests[node.id] = PreparedWorkflowRequest(
+                request=raw_request,
+                redacted_request=redacted_request,
+                body_kind=body_kind,
+                multipart=multipart,
+            )
             api_snapshots[node.id] = _api_snapshot(
                 api_definition,
                 api_version,
@@ -513,7 +525,23 @@ class WorkflowSnapshotBuilder:
         dataset_variables: dict[str, str],
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
+        config: ApiNodeConfig,
     ) -> tuple[PreparedRequest, PreparedRequest]:
+        overrides = config.request_overrides
+        query_override = (
+            tuple(
+                QueryParameterSpec(
+                    name=item.name,
+                    value=item.value,
+                    enabled=item.enabled,
+                )
+                for item in overrides.query_parameters
+            )
+            if overrides.query_parameters is not None
+            else None
+        )
+        use_body_override = overrides.body is not None
+        body_override = overrides.body.value if overrides.body is not None else None
         raw = await self._api_assets.preview(
             actor=actor,
             project_id=project_id,
@@ -521,8 +549,10 @@ class WorkflowSnapshotBuilder:
             environment_id=environment_id,
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
-            body_override=None,
-            use_body_override=False,
+            body_override=body_override,
+            use_body_override=use_body_override,
+            query_parameters_override=query_override,
+            headers_override=overrides.headers,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
@@ -535,8 +565,10 @@ class WorkflowSnapshotBuilder:
             environment_id=environment_id,
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
-            body_override=None,
-            use_body_override=False,
+            body_override=body_override,
+            use_body_override=use_body_override,
+            query_parameters_override=query_override,
+            headers_override=overrides.headers,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,

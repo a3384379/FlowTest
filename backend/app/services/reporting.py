@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.reporting import FailureCategory, classify_failure
+from app.engine.results import NodeObservation, NodeResult
 from app.models.access import User
 from app.models.artifacts import Artifact
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
@@ -46,6 +47,7 @@ class NodeReport:
     status: str
     attempts: int
     duration_ms: float | None
+    observations: list[NodeObservation]
     request: JsonValue
     response: JsonValue
     extraction: JsonValue
@@ -204,7 +206,18 @@ class ReportService:
     @staticmethod
     def _node(execution: WorkflowExecution, node: WorkflowNodeExecution) -> NodeReport:
         output = node.output if isinstance(node.output, dict) else {}
-        request = _prepared_request(execution.snapshot, node.node_id)
+        observations = _node_observations(node.result)
+        latest = observations[-1] if observations else None
+        request = (
+            cast(JsonValue, latest.request.model_dump(mode="json"))
+            if latest is not None
+            else _prepared_request(execution.snapshot, node.node_id)
+        )
+        response = (
+            cast(JsonValue, latest.response.model_dump(mode="json"))
+            if latest is not None and latest.response is not None
+            else _response(node.node_type, output)
+        )
         return NodeReport(
             id=node.id,
             node_id=node.node_id,
@@ -213,8 +226,9 @@ class ReportService:
             status=node.status,
             attempts=node.attempts,
             duration_ms=_duration_ms(node.started_at, node.completed_at),
+            observations=observations,
             request=request,
-            response=_response(node.node_type, output),
+            response=response,
             extraction=cast(JsonValue, output) if node.node_type == "extract" else None,
             assertion=cast(JsonValue, output) if node.node_type == "assert" else None,
             input_mappings=cast(JsonValue, output.get("input_mappings")),
@@ -250,6 +264,15 @@ def _prepared_request(snapshot: dict[str, object], node_id: str) -> JsonValue:
     if not isinstance(api, dict):
         return None
     return cast(JsonValue, api.get("prepared_request"))
+
+
+def _node_observations(result: dict[str, object] | None) -> list[NodeObservation]:
+    if result is None:
+        return []
+    try:
+        return list(NodeResult.model_validate(result).observations)
+    except ValueError:
+        return []
 
 
 def _response(node_type: str, output: dict[str, object]) -> JsonValue:

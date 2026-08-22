@@ -14,9 +14,11 @@ import {
   createApiVersion,
   createEnvironment,
   createProject,
+  discoverApiDocumentUrl,
   downloadArtifact,
   mergeApiImport,
   previewApiDocument,
+  previewApiDocumentUrl,
   executeApi,
   exportApis,
   getApiDetail,
@@ -26,6 +28,8 @@ import {
   listExecutions,
   uploadArtifact,
   previewApi,
+  updateApiDefinition,
+  type ImportPreviewInput,
   type ApiVersionInput,
   type CreateApiInput,
   type CreateEnvironmentInput,
@@ -94,17 +98,23 @@ export function useApiConsole() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const previewImportMutation = useMutation({
-    mutationFn: ({
-      file,
-      sourceType,
-    }: {
-      file: File
-      sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
-    }) => previewApiDocument(requiredId(projectId), file, sourceType),
+    mutationFn: (input: ImportPreviewInput) =>
+      input.kind === 'file'
+        ? previewApiDocument(requiredId(projectId), input.file, input.sourceType)
+        : previewApiDocumentUrl(
+            requiredId(projectId),
+            input.url,
+            input.sourceType,
+            input.documentId,
+          ),
     onSuccess: (value) => {
       setLastImport(value)
       void message.success('导入差异已生成，请选择需要合并的接口')
     },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const discoverImportMutation = useMutation({
+    mutationFn: (url: string) => discoverApiDocumentUrl(requiredId(projectId), url),
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const mergeImportMutation = useMutation({
@@ -134,6 +144,21 @@ export function useApiConsole() {
         queryClient.invalidateQueries({ queryKey: ['api-detail', projectId, apiId] }),
       ])
       void message.success('接口新版本已保存')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const renameMutation = useMutation({
+    mutationFn: ({ apiId: targetApiId, name }: { apiId: string; name: string }) =>
+      updateApiDefinition(requiredId(projectId), targetApiId, { name }),
+    onSuccess: async (_definition, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['apis', projectId] }),
+        queryClient.invalidateQueries({
+          queryKey: ['api-detail', projectId, variables.apiId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['global-search'] }),
+      ])
+      void message.success('接口名称已更新')
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
@@ -204,9 +229,13 @@ export function useApiConsole() {
     result,
     lastImport,
     clearImportResult: () => setLastImport(null),
+    discoverImport: discoverImportMutation.mutateAsync,
     previewImport: previewImportMutation.mutateAsync,
     mergeImport: mergeImportMutation.mutateAsync,
-    importing: previewImportMutation.isPending || mergeImportMutation.isPending,
+    importing:
+      discoverImportMutation.isPending ||
+      previewImportMutation.isPending ||
+      mergeImportMutation.isPending,
     uploadFile: uploadMutation.mutateAsync,
     uploading: uploadMutation.isPending,
     downloadFile,
@@ -217,6 +246,9 @@ export function useApiConsole() {
     addApi,
     saveVersion: versionMutation.mutateAsync,
     savingVersion: versionMutation.isPending,
+    renameApi: (targetApiId: string, name: string) =>
+      renameMutation.mutateAsync({ apiId: targetApiId, name }),
+    renamingApi: renameMutation.isPending,
     previewRequest: previewMutation.mutateAsync,
     previewing: previewMutation.isPending,
     exportApis: exportMutation.mutate,
@@ -225,6 +257,7 @@ export function useApiConsole() {
       projectMutation.isPending,
       environmentMutation.isPending,
       apiMutation.isPending,
+      discoverImportMutation.isPending,
       previewImportMutation.isPending,
       mergeImportMutation.isPending,
       uploadMutation.isPending,

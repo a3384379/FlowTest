@@ -59,6 +59,9 @@ class StoredRequest(BaseModel):
     variables: list[StoredVariable]
     body_kind: BodyKind
     multipart: StoredMultipart | None
+    redacted_url: str | None = None
+    redacted_headers: list[StoredHeader] | None = None
+    redacted_body: JsonValue = None
 
 
 class StoredCredentialMaterial(BaseModel):
@@ -242,6 +245,12 @@ def _store_request(prepared: PreparedWorkflowRequest) -> StoredRequest:
         ],
         body_kind=prepared.body_kind,
         multipart=_store_multipart(prepared.multipart),
+        redacted_url=prepared.redacted_request.url,
+        redacted_headers=[
+            StoredHeader(name=item.name, value=item.value, source=item.source)
+            for item in prepared.redacted_request.headers
+        ],
+        redacted_body=prepared.redacted_request.body,
     )
 
 
@@ -323,24 +332,36 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
 
 
 def _load_request(stored: StoredRequest) -> PreparedWorkflowRequest:
+    request = PreparedRequest(
+        method=stored.method,
+        url=stored.url,
+        headers=tuple(
+            PreparedHeader(name=item.name, value=item.value, source=item.source)
+            for item in stored.headers
+        ),
+        body=stored.body,
+        variables=tuple(
+            PreparedVariable(
+                name=item.name,
+                value=item.value,
+                source=item.source,
+                secret=item.secret,
+            )
+            for item in stored.variables
+        ),
+    )
+    safe_headers = stored.redacted_headers or stored.headers
     return PreparedWorkflowRequest(
-        request=PreparedRequest(
+        request=request,
+        redacted_request=PreparedRequest(
             method=stored.method,
-            url=stored.url,
+            url=stored.redacted_url or stored.url,
             headers=tuple(
                 PreparedHeader(name=item.name, value=item.value, source=item.source)
-                for item in stored.headers
+                for item in safe_headers
             ),
-            body=stored.body,
-            variables=tuple(
-                PreparedVariable(
-                    name=item.name,
-                    value=item.value,
-                    source=item.source,
-                    secret=item.secret,
-                )
-                for item in stored.variables
-            ),
+            body=stored.redacted_body if stored.redacted_url is not None else stored.body,
+            variables=request.variables,
         ),
         body_kind=stored.body_kind,
         multipart=_load_multipart(stored.multipart),

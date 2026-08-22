@@ -18,7 +18,7 @@ from app.engine.contracts import (
     WorkflowNode,
     WorkflowRunStatus,
 )
-from app.engine.results import NodeResult, normalize_node_result
+from app.engine.results import NodeObservation, NodeResult, normalize_node_result
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +78,7 @@ class ExecutionContext:
     _node_outputs: dict[str, JsonValue] = field(default_factory=dict)
     _extracted_variables: dict[str, JsonValue] = field(default_factory=dict)
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
+    _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")
@@ -89,6 +90,12 @@ class ExecutionContext:
 
     def record_output(self, node_id: str, output: JsonValue) -> None:
         self._node_outputs[node_id] = output
+
+    def record_observation(self, node_id: str, observation: NodeObservation) -> None:
+        self._node_observations.setdefault(node_id, []).append(observation)
+
+    def observations_of(self, node_id: str) -> tuple[NodeObservation, ...]:
+        return tuple(self._node_observations.get(node_id, ()))
 
     def record_variable(
         self,
@@ -262,6 +269,9 @@ class WorkflowScheduler:
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
                     result = normalize_node_result(await self._executor.execute(node, context))
+                observations = context.observations_of(node.id)
+                if observations and not result.observations:
+                    result = result.model_copy(update={"observations": observations})
                 error = result.error
                 return _record(
                     node,
@@ -292,10 +302,17 @@ class WorkflowScheduler:
                         code="NODE_EXECUTION_ERROR",
                         message="节点执行发生未预期错误",
                     ),
+                    observations=context.observations_of(node.id),
                 )
 
             if attempts > policy.max_retries or failure.category not in policy.retry_on:
-                return _failed_record(node, attempts, started_at, failure)
+                return _failed_record(
+                    node,
+                    attempts,
+                    started_at,
+                    failure,
+                    observations=context.observations_of(node.id),
+                )
             if policy.retry_delay_seconds:
                 await asyncio.sleep(policy.retry_delay_seconds)
 
@@ -496,6 +513,8 @@ def _failed_record(
     attempts: int,
     started_at: datetime,
     error: NodeExecutionError,
+    *,
+    observations: tuple[NodeObservation, ...] = (),
 ) -> NodeRunRecord:
     return _record(
         node,
@@ -509,6 +528,7 @@ def _failed_record(
             message=error.message,
             output=error.output,
             retryable=error.category is not None,
+            observations=observations,
         ),
         started_at=started_at,
     )

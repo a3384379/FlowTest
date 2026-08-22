@@ -37,6 +37,11 @@ class ImportSourceType(StrEnum):
     EXCEL = "excel"
 
 
+class ImportSourceKind(StrEnum):
+    FILE = "file"
+    URL = "url"
+
+
 class ImportChange(StrEnum):
     ADDED = "added"
     CHANGED = "changed"

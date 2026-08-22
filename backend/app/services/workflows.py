@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.api_assets import BodyKind
 from app.domain.data_nodes import (
     CredentialKind,
     DataNodeValidationError,
@@ -35,6 +36,7 @@ from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
     ApiNodeConfig,
+    ApiNodeMultipartBody,
     AssertNodeConfig,
     ConditionNodeConfig,
     DatasetNodeConfig,
@@ -269,6 +271,7 @@ class WorkflowService:
         workflow = await self._get_workflow_for_update(project_id, workflow_id)
         definition = self._load_definition(workflow.draft_definition)
         await self._validate_publishable(project_id, workflow.id, definition)
+        definition = await self._pin_api_versions(definition)
         next_version = (workflow.current_version or 0) + 1
         serialized = definition.model_dump(mode="json", exclude_none=True)
         published = WorkflowVersion(
@@ -293,6 +296,23 @@ class WorkflowService:
         await self._session.commit()
         await self._session.refresh(published)
         return published
+
+    async def _pin_api_versions(self, definition: WorkflowDefinition) -> WorkflowDefinition:
+        nodes: list[WorkflowNode] = []
+        for node in definition.nodes:
+            if node.effective_type is not NodeType.API:
+                nodes.append(node)
+                continue
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
+            if not isinstance(config, ApiNodeConfig) or config.api_version is not None:
+                nodes.append(node)
+                continue
+            api_definition = await self._api_repository.get_definition(config.api_definition_id)
+            if api_definition is None:
+                nodes.append(node)
+                continue
+            nodes.append(_with_api_version(node, api_definition.current_version))
+        return definition.model_copy(update={"nodes": nodes})
 
     async def list_versions(
         self, *, actor: User, project_id: UUID, workflow_id: UUID
@@ -834,11 +854,18 @@ class WorkflowService:
         return execution
 
     async def list_executions(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        page: int,
+        page_size: int,
     ) -> tuple[list[WorkflowExecution], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._workflows.list_executions(
             project_id=project_id,
+            workflow_id=workflow_id,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
@@ -1145,14 +1172,7 @@ class WorkflowService:
         config: object,
     ) -> None:
         if isinstance(config, ApiNodeConfig):
-            definition_model = await self._api_repository.get_definition(config.api_definition_id)
-            if definition_model is None or definition_model.project_id != project_id:
-                raise AppError(
-                    code="WORKFLOW_API_NOT_FOUND",
-                    message=f"API 节点 {node.name} 引用的接口不存在",
-                    status_code=422,
-                    details={"node_id": node.id},
-                )
+            await self._validate_api_node_resource(project_id, node, config)
         if isinstance(config, DatasetNodeConfig):
             artifact = await self._session.get(Artifact, config.artifact_id)
             if artifact is None or artifact.project_id != project_id:
@@ -1164,6 +1184,46 @@ class WorkflowService:
                 )
         if isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
             await self._validate_data_node(project_id, node, config)
+
+    async def _validate_api_node_resource(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: ApiNodeConfig,
+    ) -> None:
+        definition = await self._api_repository.get_definition(config.api_definition_id)
+        if definition is None or definition.project_id != project_id:
+            raise AppError(
+                code="WORKFLOW_API_NOT_FOUND",
+                message=f"API 节点 {node.name} 引用的接口不存在",
+                status_code=422,
+                details={"node_id": node.id},
+            )
+        if config.api_version is not None:
+            version = await self._api_repository.get_version(
+                definition_id=config.api_definition_id,
+                version=config.api_version,
+            )
+            if version is None:
+                raise AppError(
+                    code="WORKFLOW_API_VERSION_NOT_FOUND",
+                    message=f"API 节点 {node.name} 引用的接口版本不存在",
+                    status_code=422,
+                    details={"node_id": node.id, "api_version": config.api_version},
+                )
+        body_override = config.request_overrides.body
+        if body_override is None or body_override.kind is not BodyKind.MULTIPART:
+            return
+        multipart = ApiNodeMultipartBody.model_validate(body_override.value)
+        for file in multipart.files:
+            artifact = await self._session.get(Artifact, file.artifact_id)
+            if artifact is None or artifact.project_id != project_id:
+                raise AppError(
+                    code="ARTIFACT_NOT_FOUND",
+                    message=f"API 节点 {node.name} 引用的文件不存在",
+                    status_code=422,
+                    details={"node_id": node.id, "artifact_id": str(file.artifact_id)},
+                )
 
     def _validate_control_node(
         self,
@@ -1590,6 +1650,14 @@ class WorkflowService:
             )
             for record in result.records
         ]
+
+
+def _with_api_version(node: WorkflowNode, version: int) -> WorkflowNode:
+    if node.type is NodeType.CAPABILITY:
+        return node.model_copy(
+            update={"configuration": {**(node.configuration or {}), "api_version": version}}
+        )
+    return node.model_copy(update={"config": {**node.config, "api_version": version}})
 
 
 def _fingerprint(definition: dict[str, object]) -> str:

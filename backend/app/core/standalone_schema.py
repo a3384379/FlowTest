@@ -11,7 +11,7 @@ from sqlalchemy import text
 from app.core.database import engine
 from app.models import Base
 
-BASELINE_REVISION = "20260821_0029"
+BASELINE_REVISION = "20260822_0032"
 
 
 async def initialize_standalone_database() -> None:

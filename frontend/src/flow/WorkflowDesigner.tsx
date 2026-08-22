@@ -42,9 +42,11 @@ import type {
   Workflow,
   WorkflowDefinition,
   WorkflowNode,
+  WorkflowNodeExecution,
 } from '../lib/api'
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
+import WorkflowRunInspector from './WorkflowRunInspector'
 import {
   addApiNode,
   addEventProtocolNode,
@@ -57,6 +59,8 @@ import {
 } from './workflow-graph'
 
 type DesignerProps = {
+  projectId?: string | null
+  environmentId?: string | null
   definition: WorkflowDefinition
   apis: ApiDefinition[]
   artifacts: Artifact[]
@@ -67,6 +71,9 @@ type DesignerProps = {
   eventSources?: EventSource[]
   statuses: Record<string, string>
   editable: boolean
+  runtimeMode?: 'run' | 'history'
+  runtimeNodes?: WorkflowNodeExecution[]
+  runtimeContext?: Record<string, unknown>
   onChange: (definition: WorkflowDefinition) => void
 }
 
@@ -74,6 +81,7 @@ type NodeData = Record<string, unknown> & {
   label: string
   nodeType: WorkflowNode['type']
   status: string
+  runtimeLabel: string
 }
 
 type CanvasNode = Node<NodeData, 'workflowNode'>
@@ -90,6 +98,8 @@ export default function WorkflowDesigner(props: DesignerProps) {
       graphqlSchemas={props.graphqlSchemas ?? []}
       grpcDescriptors={props.grpcDescriptors ?? []}
       eventSources={props.eventSources ?? []}
+      runtimeNodes={props.runtimeNodes ?? []}
+      runtimeContext={props.runtimeContext ?? {}}
     />
   )
 }
@@ -99,9 +109,13 @@ type ReadyDesignerProps = DesignerProps & {
   graphqlSchemas: SchemaArtifact[]
   grpcDescriptors: SchemaArtifact[]
   eventSources: EventSource[]
+  runtimeNodes: WorkflowNodeExecution[]
+  runtimeContext: Record<string, unknown>
 }
 
 function WorkflowDesignerReady({
+  projectId,
+  environmentId,
   definition,
   apis,
   artifacts,
@@ -112,6 +126,9 @@ function WorkflowDesignerReady({
   eventSources,
   statuses,
   editable,
+  runtimeMode,
+  runtimeNodes,
+  runtimeContext,
   onChange,
 }: ReadyDesignerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -137,13 +154,21 @@ function WorkflowDesignerReady({
     past: WorkflowDefinition[]
     future: WorkflowDefinition[]
   }>({ past: [], future: [] })
+  const runtimeByNode = useMemo(
+    () => new Map(runtimeNodes.map((node) => [node.node_id, node])),
+    [runtimeNodes],
+  )
   const nodes = useMemo(
-    () => definition.nodes.map((node) => toCanvasNode(node, statuses[node.id])),
-    [definition.nodes, statuses],
+    () =>
+      definition.nodes.map((node) =>
+        toCanvasNode(node, statuses[node.id], runtimeByNode.get(node.id)),
+      ),
+    [definition.nodes, runtimeByNode, statuses],
   )
   const edges = useMemo(() => definition.edges.map(toCanvasEdge), [definition.edges])
   const selected = selectedNode(definition, selectedId)
   const selectedApiId = selectedResourceId(apiSelection, apis)
+  const selectedApi = apis.find((api) => api.id === selectedApiId)
   const selectedGraphql = selectedSchema(graphqlSelection, graphqlSchemas)
   const selectedGrpc = selectedSchema(grpcSelection, grpcDescriptors)
   const selectedSubflow = selectedWorkflow(subflowSelection, publishedWorkflows)
@@ -178,7 +203,9 @@ function WorkflowDesignerReady({
   }
 
   function addSelectedApi() {
-    if (selectedApiId) applyChange(addApiNode(definition, selectedApiId))
+    if (selectedApi) {
+      applyChange(addApiNode(definition, selectedApi.id, selectedApi.current_version))
+    }
   }
 
   function addSelectedProtocol(protocol: 'graphql' | 'grpc') {
@@ -224,6 +251,7 @@ function WorkflowDesignerReady({
   return (
     <div className="workflow-designer">
       <DesignerToolbar
+        runtimeMode={runtimeMode}
         apiSelection={selectedApiId}
         apis={apis}
         graphqlSchemas={graphqlSchemas}
@@ -291,8 +319,14 @@ function WorkflowDesignerReady({
             <Controls />
           </ReactFlow>
         </div>
-        <WorkflowNodeInspector
-          node={selected}
+        <DesignerInspector
+          projectId={projectId}
+          environmentId={environmentId}
+          runtimeMode={runtimeMode}
+          runtimeNodes={runtimeNodes}
+          runtimeContext={runtimeContext}
+          runtimeByNode={runtimeByNode}
+          selected={selected}
           definition={definition}
           apis={apis}
           artifacts={artifacts}
@@ -303,14 +337,85 @@ function WorkflowDesignerReady({
           eventSources={eventSources}
           editable={editable}
           onChange={applyChange}
-          onDelete={() => {
-            if (!selected) return
-            applyChange(removeNode(definition, selected.id))
-            setSelectedId(null)
-          }}
+          onClearSelection={() => setSelectedId(null)}
         />
       </div>
     </div>
+  )
+}
+
+function DesignerInspector({
+  projectId,
+  environmentId,
+  runtimeMode,
+  runtimeNodes,
+  runtimeContext,
+  runtimeByNode,
+  selected,
+  definition,
+  apis,
+  artifacts,
+  workflows,
+  credentials,
+  graphqlSchemas,
+  grpcDescriptors,
+  eventSources,
+  editable,
+  onChange,
+  onClearSelection,
+}: {
+  projectId?: string | null
+  environmentId?: string | null
+  runtimeMode?: 'run' | 'history'
+  runtimeNodes: WorkflowNodeExecution[]
+  runtimeContext: Record<string, unknown>
+  runtimeByNode: Map<string, WorkflowNodeExecution>
+  selected: WorkflowNode | null
+  definition: WorkflowDefinition
+  apis: ApiDefinition[]
+  artifacts: Artifact[]
+  workflows: Workflow[]
+  credentials: Credential[]
+  graphqlSchemas: SchemaArtifact[]
+  grpcDescriptors: SchemaArtifact[]
+  eventSources: EventSource[]
+  editable: boolean
+  onChange: (definition: WorkflowDefinition) => void
+  onClearSelection: () => void
+}) {
+  if (runtimeMode) {
+    return (
+      <WorkflowRunInspector
+        mode={runtimeMode}
+        node={selected}
+        definition={definition}
+        execution={selected ? runtimeByNode.get(selected.id) : undefined}
+        nodes={runtimeNodes}
+        context={runtimeContext}
+      />
+    )
+  }
+  return (
+    <WorkflowNodeInspector
+      projectId={projectId}
+      environmentId={environmentId}
+      node={selected}
+      definition={definition}
+      apis={apis}
+      artifacts={artifacts}
+      workflows={workflows}
+      credentials={credentials}
+      graphqlSchemas={graphqlSchemas}
+      grpcDescriptors={grpcDescriptors}
+      eventSources={eventSources}
+      editable={editable}
+      onChange={onChange}
+      onDelete={() => {
+        if (!selected) return
+        onChange(removeNode(definition, selected.id))
+        onClearSelection()
+      }}
+    />
   )
 }
 
@@ -369,6 +474,7 @@ function workflowReference(workflow: Workflow | undefined) {
 }
 
 function DesignerToolbar({
+  runtimeMode,
   apiSelection,
   apis,
   graphqlSelection,
@@ -409,6 +515,7 @@ function DesignerToolbar({
   onRedo,
   onAutoLayout,
 }: {
+  runtimeMode?: 'run' | 'history'
   apiSelection?: string
   apis: ApiDefinition[]
   graphqlSelection?: string
@@ -449,6 +556,20 @@ function DesignerToolbar({
   onRedo: () => void
   onAutoLayout: () => void
 }) {
+  if (runtimeMode) {
+    return (
+      <div className="workflow-toolbar workflow-runtime-toolbar">
+        <Space wrap>
+          <Tag color={runtimeMode === 'history' ? 'gold' : 'processing'}>
+            {runtimeMode === 'history' ? '历史快照 · 只读' : '实时运行视图'}
+          </Tag>
+          <Typography.Text type="secondary">
+            点击节点查看输入、映射后的真实请求、响应和每次重试。
+          </Typography.Text>
+        </Space>
+      </div>
+    )
+  }
   return (
     <div className="workflow-toolbar">
       <Space wrap>
@@ -678,21 +799,43 @@ function WorkflowNodeCard({ data }: NodeProps<CanvasNode>) {
         <strong>{data.label}</strong>
         <small>{nodeTypeLabel(data.nodeType)}</small>
       </span>
-      <span className="flow-node-status">{statusLabel(data.status)}</span>
+      <span className="flow-node-status">
+        {statusLabel(data.status)}
+        {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
+      </span>
       {!terminal && <Handle type="source" position={Position.Right} />}
     </div>
   )
 }
 
-function toCanvasNode(node: WorkflowNode, status = 'pending'): CanvasNode {
+function toCanvasNode(
+  node: WorkflowNode,
+  status = 'pending',
+  runtime?: WorkflowNodeExecution,
+): CanvasNode {
   return {
     id: node.id,
     type: 'workflowNode',
     position: node.position,
     initialWidth: NODE_INITIAL_WIDTH,
     initialHeight: NODE_INITIAL_HEIGHT,
-    data: { label: node.name, nodeType: node.type, status },
+    data: { label: node.name, nodeType: node.type, status, runtimeLabel: runtimeLabel(runtime) },
   }
+}
+
+function runtimeLabel(runtime: WorkflowNodeExecution | undefined): string {
+  if (!runtime) return ''
+  const observation = runtime.result?.observations?.at(-1)
+  if (observation?.response) {
+    return `${observation.response.status_code} · ${formatNodeDuration(observation.duration_ms)}`
+  }
+  if (observation) return formatNodeDuration(observation.duration_ms)
+  if (runtime.attempts > 1) return `${runtime.attempts} 次尝试`
+  return ''
+}
+
+function formatNodeDuration(value: number): string {
+  return value < 1000 ? `${Math.round(value)}ms` : `${Math.round(value / 10) / 100}s`
 }
 
 function toCanvasEdge(edge: WorkflowDefinition['edges'][number]): Edge {

@@ -1,6 +1,8 @@
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from io import BytesIO
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -8,14 +10,97 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.dependencies import get_import_document_fetcher
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.network import OutboundNetworkPolicy
+from app.importers.sources import (
+    FetchedImportDocument,
+    ImportDocumentOption,
+    ImportUrlDiscovery,
+)
 from app.main import app
 from app.models import Base
 from app.models.access import User
 
 ADMIN_EMAIL = "import-admin@example.com"
 ADMIN_PASSWORD = "import-password-123!"
+
+
+class StubImportDocumentFetcher:
+    def __init__(
+        self,
+        documents: dict[str, bytes],
+        discoveries: dict[str, list[tuple[str, str]]] | None = None,
+    ) -> None:
+        self.documents = documents
+        self.discoveries = discoveries or {}
+        self.requests: list[tuple[str, int]] = []
+
+    async def discover(
+        self,
+        *,
+        url: str,
+        network_policy: OutboundNetworkPolicy,
+        maximum_bytes: int,
+    ) -> ImportUrlDiscovery:
+        del network_policy
+        self.requests.append((url, maximum_bytes))
+        options = self.discoveries.get(url, [("openapi.json", url)])
+        return ImportUrlDiscovery(
+            source_url=_safe_url(url),
+            source_kind="swagger_ui" if url in self.discoveries else "document",
+            documents=tuple(_stub_option(name, document_url) for name, document_url in options),
+        )
+
+    async def fetch(
+        self,
+        *,
+        url: str,
+        network_policy: OutboundNetworkPolicy,
+        maximum_bytes: int,
+        document_id: str | None = None,
+    ) -> FetchedImportDocument:
+        del network_policy
+        self.requests.append((url, maximum_bytes))
+        options = self.discoveries.get(url, [("openapi.json", url)])
+        selected = next(
+            (
+                _stub_option(name, document_url)
+                for name, document_url in options
+                if document_id is None or _stub_id(document_url) == document_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise AssertionError("Unknown stub document selection")
+        hostname = urlsplit(selected.url).hostname or "remote"
+        return FetchedImportDocument(
+            content=self.documents[selected.url],
+            source_page_url=_safe_url(url),
+            resolved_url=selected.url,
+            source_name=f"{hostname}/{selected.name}",
+            document_id=selected.id,
+            discovered_from_page=url in self.discoveries,
+        )
+
+
+def _stub_id(url: str) -> str:
+    return hashlib.sha256(url.encode()).hexdigest()
+
+
+def _safe_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _stub_option(name: str, url: str) -> ImportDocumentOption:
+    return ImportDocumentOption(
+        id=_stub_id(url),
+        name=name,
+        url=url,
+        display_url=_safe_url(url),
+    )
 
 
 @pytest.fixture
@@ -213,6 +298,123 @@ async def test_import_preview_selective_merge_and_explicit_deactivation(
     )
     assert different.status_code == 409
     assert different.json()["error"]["code"] == "IMPORT_ALREADY_APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_url_import_previews_and_keeps_same_named_sources_separate(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    service_a = "https://service-a.example/openapi.json?version=1"
+    service_b = "https://service-b.example/openapi.json"
+    fetcher = StubImportDocumentFetcher(
+        {
+            service_a: _openapi_document(
+                {
+                    "/users": {"get": {"summary": "List users"}},
+                    "/legacy": {"get": {"summary": "Legacy users"}},
+                }
+            ),
+            service_b: _openapi_document({"/orders": {"get": {"summary": "List orders"}}}),
+        }
+    )
+    app.dependency_overrides[get_import_document_fetcher] = lambda: fetcher
+
+    preview_a = await import_client.post(
+        f"/api/v1/projects/{project_id}/imports/url/preview",
+        headers=headers,
+        json={"url": service_a, "source_type": "auto"},
+    )
+    assert preview_a.status_code == 201, preview_a.text
+    payload_a = preview_a.json()
+    assert payload_a["source_kind"] == "url"
+    assert payload_a["source_name"] == "service-a.example/openapi.json"
+    assert payload_a["source_url"] == "https://service-a.example/openapi.json"
+    assert payload_a["document_url"] == "https://service-a.example/openapi.json"
+    assert payload_a["source_key"].startswith("url:")
+    assert "version=1" not in str(payload_a)
+    selected_a = [item["import_key"] for item in payload_a["results"]]
+    merged_a = await import_client.post(
+        f"/api/v1/projects/{project_id}/imports/{payload_a['id']}/merge",
+        headers=headers,
+        json={"selected_keys": selected_a},
+    )
+    assert merged_a.status_code == 200, merged_a.text
+
+    preview_b = await import_client.post(
+        f"/api/v1/projects/{project_id}/imports/url/preview",
+        headers=headers,
+        json={"url": service_b},
+    )
+    assert preview_b.status_code == 201, preview_b.text
+    payload_b = preview_b.json()
+    assert payload_b["source_name"] == "service-b.example/openapi.json"
+    assert payload_b["source_key"] != payload_a["source_key"]
+    assert payload_b["added"] == 1
+    assert payload_b["deleted"] == 0
+    assert fetcher.requests[0][0] == service_a
+    assert fetcher.requests[0][1] == 50 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_swagger_ui_discovery_selects_group_and_redacts_document_query(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    page_url = "https://service.example/swagger-ui/index.html"
+    users_url = "https://service.example/v3/api-docs/users?token=private"
+    orders_url = "https://service.example/v3/api-docs/orders"
+    fetcher = StubImportDocumentFetcher(
+        {
+            users_url: _openapi_document({"/users": {"get": {"summary": "List users"}}}),
+            orders_url: _openapi_document({"/orders": {"get": {"summary": "List orders"}}}),
+        },
+        {page_url: [("用户服务", users_url), ("订单服务", orders_url)]},
+    )
+    app.dependency_overrides[get_import_document_fetcher] = lambda: fetcher
+
+    discovery = await import_client.post(
+        f"/api/v1/projects/{project_id}/imports/url/discover",
+        headers=headers,
+        json={"url": page_url},
+    )
+    assert discovery.status_code == 200, discovery.text
+    discovery_payload = discovery.json()
+    assert discovery_payload == {
+        "source_url": page_url,
+        "source_kind": "swagger_ui",
+        "documents": [
+            {
+                "id": _stub_id(users_url),
+                "name": "用户服务",
+                "url": "https://service.example/v3/api-docs/users",
+            },
+            {
+                "id": _stub_id(orders_url),
+                "name": "订单服务",
+                "url": orders_url,
+            },
+        ],
+    }
+    assert "private" not in discovery.text
+
+    preview = await import_client.post(
+        f"/api/v1/projects/{project_id}/imports/url/preview",
+        headers=headers,
+        json={
+            "url": page_url,
+            "source_type": "auto",
+            "document_id": _stub_id(orders_url),
+        },
+    )
+    assert preview.status_code == 201, preview.text
+    payload = preview.json()
+    assert payload["source_url"] == page_url
+    assert payload["document_url"] == orders_url
+    assert payload["source_name"] == "service.example/订单服务"
+    assert payload["added"] == 1
 
 
 @pytest.mark.asyncio

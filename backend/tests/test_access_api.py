@@ -391,6 +391,16 @@ async def test_password_validation_and_missing_resources(client: AsyncClient) ->
     )
     assert reused_password.status_code == 400
 
+    too_short = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={
+            "email": "short-password@example.com",
+            "display_name": "Short Password",
+            "password": "12345",
+        },
+    )
+    assert too_short.status_code == 422
     missing_project = await client.get(
         "/api/v1/projects/00000000-0000-0000-0000-000000000001", headers=headers
     )

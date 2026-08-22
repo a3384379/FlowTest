@@ -53,8 +53,9 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
 ```
 
 预期 `profile=standalone`、`worker_topology=in_process`，Readiness 只有 `database` 和 `storage`
-等本地检查，不应出现 `redis`。Performance Lab、Environment Lab 和 Runner Fabric 不属于公司云桌面
-轻量安装范围。
+等本地检查，不应出现 `redis`。API URL/Swagger UI 导入、Postman 风格参数与请求体编辑、流程编排、数据节点、
+运行观测和历史快照属于公司云桌面轻量包的默认能力；Performance Lab、Environment Lab 和 Runner Fabric
+仍不属于该安装范围。
 
 若 IT 要做维护窗口稳定性观察，先保持服务运行，再执行只读探针：
 

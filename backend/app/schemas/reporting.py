@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue
 
 from app.domain.reporting import FailureCategory, NotificationEvent
+from app.engine.results import NodeObservation
 
 WebhookName = Annotated[str, Field(min_length=1, max_length=160)]
 
@@ -33,6 +34,7 @@ class ReportNodeResponse(BaseModel):
     status: str
     attempts: int
     duration_ms: float | None
+    observations: list[NodeObservation] = Field(default_factory=list)
     request: JsonValue = None
     response: JsonValue = None
     extraction: JsonValue = None

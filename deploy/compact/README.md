@@ -119,7 +119,7 @@ FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
   ./deploy/compact/import-standalone.sh /srv/flowtest-transfer/standalone-to-compact
 ```
 
-脚本会在导入前启动 PostgreSQL/Redis/MinIO 并运行 Alembic；随后只接受 `20260821_0029`、业务表为空的
+脚本会在导入前启动 PostgreSQL/Redis/MinIO 并运行 Alembic；随后只接受 `20260822_0032`、业务表为空的
 目标数据库，先校验逐表 JSONL、外键关系和 Artifact SHA-256，再导入 PostgreSQL 并上传 MinIO。失败会回滚数据库并清理由本次导入新上传的对象；
 非空目标、版本不匹配、同名对象内容不同或传输包篡改都会拒绝。登录会话、OIDC 事务、通知重试、Runner
 租约/任务等运行状态不会迁移，导入完成后需重新登录并重新建立这些运行状态。

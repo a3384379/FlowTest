@@ -438,6 +438,7 @@ async def _send_request(
     if body_kind is BodyKind.MULTIPART:
         if multipart is None:
             raise ValueError("Multipart request requires prepared files")
+        payload = MultipartBody.model_validate(request.body)
         multipart_headers = {
             name: value for name, value in headers.items() if name.lower() != "content-type"
         }
@@ -449,7 +450,7 @@ async def _send_request(
             request.method.value,
             request.url,
             headers=multipart_headers,
-            data=multipart.fields,
+            data=payload.fields,
             files=files,
             timeout=timeout,
         )

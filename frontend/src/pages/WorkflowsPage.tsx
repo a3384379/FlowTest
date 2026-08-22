@@ -3,12 +3,26 @@ import {
   BugOutlined,
   CloudUploadOutlined,
   DiffOutlined,
+  EyeOutlined,
+  LockOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RedoOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { Button, Card, Empty, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Modal,
+  Segmented,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import { useState } from 'react'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -29,10 +43,17 @@ export default function WorkflowsPage() {
     <>
       <WorkflowHeading state={state} onCreate={() => setCreateOpen(true)} />
       <WorkflowWorkspace state={state} />
-      <LatestRunCard state={state} />
+      <RunConsoleCard state={state} />
       <DebugResultCard result={state.debugResult} />
       <Card title="工作流执行历史" className="workflow-result-card">
-        <ExecutionTable items={state.executions.data?.items ?? []} />
+        <ExecutionTable
+          items={(state.executions.data?.items ?? []).filter(
+            (item) => item.workflow_id === state.workflowId,
+          )}
+          selectedId={state.historyExecutionId}
+          loading={state.historyLoading}
+          onView={state.showHistory}
+        />
       </Card>
       <VersionDiffDialog state={state} />
       <CreateWorkflowDialog
@@ -48,18 +69,33 @@ export default function WorkflowsPage() {
 
 type WorkflowState = ReturnType<typeof useWorkflows>
 
-function LatestRunCard({ state }: { state: WorkflowState }) {
-  const result = state.lastResult
-  const datasetChildren = result?.children ?? []
+function RunConsoleCard({ state }: { state: WorkflowState }) {
   return (
-    <Card title="最近一次运行" className="workflow-result-card">
-      {datasetChildren.length ? (
-        <DatasetRunSummary items={datasetChildren} />
+    <Card
+      title="运行控制台"
+      className="workflow-result-card"
+      extra={
+        state.runtimeExecution && (
+          <Space wrap>
+            <StatusTag status={state.runtimeExecution.status} />
+            <Typography.Text type="secondary">
+              {state.runtimeExecution.id} · {executionDuration(state.runtimeExecution)}
+            </Typography.Text>
+          </Space>
+        )
+      }
+    >
+      {state.runtimeChildren.length ? (
+        <DatasetRunSummary items={state.runtimeChildren} />
       ) : (
         <NodeTable
-          nodes={result?.nodes ?? []}
+          nodes={state.runtimeNodes}
           replaying={state.replaying}
-          onReplay={(nodeId) => void state.replayNode(nodeId)}
+          onReplay={
+            state.workspaceMode === 'run' && state.lastResult
+              ? (nodeId) => void state.replayNode(nodeId)
+              : undefined
+          }
         />
       )}
     </Card>
@@ -118,11 +154,65 @@ function WorkflowWorkspace({ state }: { state: WorkflowState }) {
           onSelect={state.setWorkflowSelection}
         />
       </Card>
-      <Card title="可视化草稿" extra={<DraftActions state={state} />}>
+      <Card
+        title={workspaceTitle(state)}
+        loading={state.workspaceMode === 'history' && state.historyLoading}
+        extra={
+          <Space wrap>
+            <WorkspaceModeSwitch state={state} />
+            {(state.workspaceMode === 'draft' || state.activeExecutionId) && (
+              <DraftActions state={state} />
+            )}
+          </Space>
+        }
+      >
         <DraftEditor state={state} />
       </Card>
     </div>
   )
+}
+
+function WorkspaceModeSwitch({ state }: { state: WorkflowState }) {
+  return (
+    <Segmented
+      aria-label="工作流视图模式"
+      value={state.workspaceMode}
+      options={[
+        { label: '编排', value: 'draft' },
+        {
+          label: '运行视图',
+          value: 'run',
+          disabled: !state.lastResult && !state.activeExecutionId,
+        },
+        {
+          label: '历史快照',
+          value: 'history',
+          disabled: !state.historyExecutionId,
+        },
+      ]}
+      onChange={(value) => {
+        if (value === 'draft') state.showDraft()
+        if (value === 'run') state.showLatestRun()
+        if (value === 'history' && state.historyExecutionId) {
+          state.showHistory(state.historyExecutionId)
+        }
+      }}
+    />
+  )
+}
+
+function workspaceTitle(state: WorkflowState) {
+  if (state.workspaceMode === 'history') {
+    return (
+      <Space>
+        历史执行快照
+        <Tag icon={<LockOutlined />} color="gold">
+          不可修改
+        </Tag>
+      </Space>
+    )
+  }
+  return state.workspaceMode === 'run' ? '实时运行视图' : '可视化草稿'
 }
 
 function DraftActions({ state }: { state: WorkflowState }) {
@@ -187,12 +277,35 @@ function DraftEditor({ state }: { state: WorkflowState }) {
   const resources = workflowDesignerResources(state, workflow.id)
   return (
     <>
+      {state.workspaceMode === 'history' && (
+        <Alert
+          showIcon
+          type="warning"
+          title="正在查看历史执行快照"
+          description="画布、节点配置、接口版本和运行结果均来自当次执行，不会随当前草稿变化。"
+          className="workflow-snapshot-alert"
+        />
+      )}
+      {state.workspaceMode === 'run' && state.activeExecutionId && (
+        <Alert
+          showIcon
+          type="info"
+          title="工作流正在运行"
+          description="节点状态和结果会实时更新，点击画布节点查看请求与响应。"
+          className="workflow-snapshot-alert"
+        />
+      )}
       <Space className="workflow-meta" wrap>
         <Tag color="blue">草稿 r{workflow.draft_revision}</Tag>
         <PublishedTag version={workflow.current_version} />
+        {state.runtimeExecution && state.workspaceMode !== 'draft' && (
+          <Tag>执行 {state.runtimeExecution.id.slice(0, 8)}</Tag>
+        )}
       </Space>
       <WorkflowDesigner
-        key={workflow.id}
+        key={`${workflow.id}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
+        projectId={state.projectId}
+        environmentId={state.environmentId}
         definition={state.designerDefinition}
         apis={resources.apis}
         artifacts={resources.artifacts}
@@ -202,7 +315,10 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         grpcDescriptors={resources.grpcDescriptors}
         eventSources={resources.eventSources}
         statuses={state.nodeStatuses}
-        editable={!state.activeExecutionId}
+        editable={state.workspaceMode === 'draft' && !state.activeExecutionId}
+        runtimeMode={state.workspaceMode === 'draft' ? undefined : state.workspaceMode}
+        runtimeNodes={state.runtimeNodes}
+        runtimeContext={state.runtimeContext}
         onChange={state.setDraftDefinition}
       />
     </>
@@ -330,7 +446,7 @@ function NodeTable({
                     loading={replaying}
                     onClick={() => onReplay(node.node_id)}
                   >
-                    重放
+                    重放节点
                   </Button>
                 ),
               },
@@ -402,16 +518,33 @@ function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
   )
 }
 
-function ExecutionTable({ items }: { items: WorkflowExecution[] }) {
+function ExecutionTable({
+  items,
+  selectedId,
+  loading,
+  onView,
+}: {
+  items: WorkflowExecution[]
+  selectedId: string | null
+  loading: boolean
+  onView: (executionId: string) => void
+}) {
   return (
     <Table
       rowKey="id"
       size="small"
       pagination={false}
       dataSource={items}
+      loading={loading}
       locale={{ emptyText: '暂无执行记录' }}
+      rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
       columns={[
         { title: '执行 ID', dataIndex: 'id', ellipsis: true },
+        {
+          title: '版本',
+          width: 80,
+          render: (_value: unknown, item: WorkflowExecution) => `v${executionVersion(item)}`,
+        },
         {
           title: '状态',
           dataIndex: 'status',
@@ -423,9 +556,41 @@ function ExecutionTable({ items }: { items: WorkflowExecution[] }) {
           dataIndex: 'started_at',
           render: (value: string) => new Date(value).toLocaleString('zh-CN'),
         },
+        {
+          title: '耗时',
+          width: 110,
+          render: (_value: unknown, item: WorkflowExecution) => executionDuration(item),
+        },
+        {
+          title: '操作',
+          width: 120,
+          render: (_value: unknown, item: WorkflowExecution) => (
+            <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => onView(item.id)}>
+              查看快照
+            </Button>
+          ),
+        },
       ]}
     />
   )
+}
+
+function executionVersion(execution: WorkflowExecution): number | string {
+  const workflow = execution.snapshot.workflow
+  if (isRecord(workflow) && typeof workflow.version === 'number') return workflow.version
+  return '—'
+}
+
+function executionDuration(execution: WorkflowExecution): string {
+  if (!execution.completed_at) return '运行中'
+  const duration =
+    new Date(execution.completed_at).getTime() - new Date(execution.started_at).getTime()
+  if (duration < 1000) return `${duration} ms`
+  return `${Math.round(duration / 10) / 100} s`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function StatusTag({ status }: { status: string }) {

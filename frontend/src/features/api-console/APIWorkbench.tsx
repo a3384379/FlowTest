@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
+import { EditOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   Button,
   Card,
@@ -15,8 +15,19 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 
+import BodyEditor from './BodyEditor'
+import { toBodyFields, toBodyInput, type BodyEditorFields } from './body-edit'
+import {
+  parseBulkHeaders,
+  parseBulkParameters,
+  serializeBulkHeaders,
+  serializeBulkParameters,
+  type KeyValueField,
+  type ParameterField,
+} from './bulk-edit'
+import { BulkEditor, DynamicFields } from './StructuredFields'
 import type { ApiVersionInput } from './api-service'
-import type { ApiDetail, ApiVersion } from '../../lib/api'
+import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 type APIWorkbenchProps = {
   detail?: ApiDetail
@@ -25,16 +36,15 @@ type APIWorkbenchProps = {
   previewing: boolean
   onSave: (input: ApiVersionInput) => Promise<ApiVersion>
   onPreview: () => Promise<unknown>
+  onRename: () => void
+  artifacts?: Artifact[]
 }
 
-type KeyValueField = { name: string; value: string }
-type WorkbenchFields = {
+type WorkbenchFields = BodyEditorFields & {
   method: ApiVersion['method']
   path: string
   query_parameters: Array<KeyValueField & { enabled: boolean }>
   headers: KeyValueField[]
-  body_kind: ApiVersion['body_kind']
-  body_text: string
   auth_kind: ApiVersion['auth_kind']
   auth_config: KeyValueField[]
   extraction_rules: ApiVersion['extraction_rules']
@@ -57,6 +67,15 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
         <Space>
           <span>{props.detail?.definition.name ?? '接口工作台'}</span>
           {props.detail && <Tag color="blue">v{props.detail.version.version}</Tag>}
+          {props.detail && (
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              aria-label="重命名接口"
+              onClick={props.onRename}
+            />
+          )}
         </Space>
       }
       extra={
@@ -94,16 +113,22 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
           </Form.Item>
         </div>
         <Tabs
+          key={props.detail?.definition.id}
           items={[
             { key: 'params', label: 'Params', children: <ParameterFields />, forceRender: true },
             {
               key: 'headers',
               label: 'Headers',
-              children: <KeyValueFields name="headers" />,
+              children: <HeaderFields />,
               forceRender: true,
             },
             { key: 'auth', label: 'Auth', children: <AuthFields />, forceRender: true },
-            { key: 'body', label: 'Body', children: <BodyFields />, forceRender: true },
+            {
+              key: 'body',
+              label: 'Body',
+              children: <BodyEditor artifacts={props.artifacts ?? []} />,
+              forceRender: true,
+            },
             { key: 'extract', label: '提取', children: <ExtractionFields />, forceRender: true },
             {
               key: 'assertions',
@@ -128,6 +153,31 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
 }
 
 function ParameterFields() {
+  const form = Form.useFormInstance<WorkbenchFields>()
+  const [bulkText, setBulkText] = useState<string | null>(null)
+  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  if (bulkText !== null) {
+    return (
+      <BulkEditor
+        label="Params"
+        text={bulkText}
+        errors={bulkErrors}
+        help="每行使用“参数名: 值”；# 开头表示禁用，同名参数会按顺序保留。"
+        onChange={setBulkText}
+        onCancel={() => {
+          setBulkText(null)
+          setBulkErrors([])
+        }}
+        onApply={() => {
+          const parsed = parseBulkParameters(bulkText)
+          setBulkErrors(parsed.errors)
+          if (parsed.errors.length) return
+          form.setFieldValue('query_parameters', parsed.values)
+          setBulkText(null)
+        }}
+      />
+    )
+  }
   return (
     <Form.List name="query_parameters">
       {(fields, { add, remove }) => (
@@ -135,6 +185,11 @@ function ParameterFields() {
           fields={fields}
           onAdd={() => add({ enabled: true, name: '', value: '' })}
           onRemove={remove}
+          onBulkEdit={() => {
+            const parameters = (form.getFieldValue('query_parameters') ?? []) as ParameterField[]
+            setBulkText(serializeBulkParameters(parameters))
+            setBulkErrors([])
+          }}
           render={(field) => (
             <>
               <Form.Item name={[field.name, 'enabled']} valuePropName="checked">
@@ -154,7 +209,63 @@ function ParameterFields() {
   )
 }
 
-function KeyValueFields({ name }: { name: 'headers' | 'auth_config' }) {
+function HeaderFields() {
+  const form = Form.useFormInstance<WorkbenchFields>()
+  const [bulkText, setBulkText] = useState<string | null>(null)
+  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  const [originalHeaders, setOriginalHeaders] = useState<KeyValueField[]>([])
+  if (bulkText !== null) {
+    return (
+      <BulkEditor
+        label="Headers"
+        text={bulkText}
+        errors={bulkErrors}
+        help="每行使用“Header 名: 值”；# 开头的注释行不会保存，敏感值请使用 {{secret.NAME}}。"
+        onChange={setBulkText}
+        onCancel={() => {
+          setBulkText(null)
+          setBulkErrors([])
+        }}
+        onApply={() => {
+          const parsed = parseBulkHeaders(bulkText, originalHeaders)
+          setBulkErrors(parsed.errors)
+          if (parsed.errors.length) return
+          form.setFieldValue('headers', parsed.values)
+          setBulkText(null)
+        }}
+      />
+    )
+  }
+  return (
+    <Form.List name="headers">
+      {(fields, { add, remove }) => (
+        <DynamicFields
+          fields={fields}
+          onAdd={() => add({ name: '', value: '' })}
+          onRemove={remove}
+          onBulkEdit={() => {
+            const headers = (form.getFieldValue('headers') ?? []) as KeyValueField[]
+            setOriginalHeaders(headers)
+            setBulkText(serializeBulkHeaders(headers))
+            setBulkErrors([])
+          }}
+          render={(field) => (
+            <>
+              <Form.Item name={[field.name, 'name']} rules={[{ required: true }]}>
+                <Input placeholder="名称" />
+              </Form.Item>
+              <Form.Item name={[field.name, 'value']}>
+                <Input.Password placeholder="值或 {{secret.NAME}}" visibilityToggle={false} />
+              </Form.Item>
+            </>
+          )}
+        />
+      )}
+    </Form.List>
+  )
+}
+
+function KeyValueFields({ name }: { name: 'auth_config' }) {
   return (
     <Form.List name={name}>
       {(fields, { add, remove }) => (
@@ -195,27 +306,6 @@ function AuthFields() {
         Bearer 使用 token；Basic 使用 username/password；API Key 使用 name/value/in。
       </Typography.Paragraph>
       <KeyValueFields name="auth_config" />
-    </>
-  )
-}
-
-function BodyFields() {
-  return (
-    <>
-      <Form.Item name="body_kind" label="Body 类型">
-        <Select
-          options={[
-            { value: 'none', label: 'none' },
-            { value: 'json', label: 'JSON' },
-            { value: 'raw', label: 'raw' },
-            { value: 'form', label: 'form' },
-            { value: 'multipart', label: 'multipart' },
-          ]}
-        />
-      </Form.Item>
-      <Form.Item name="body_text" label="Body" rules={[bodyRule]}>
-        <Input.TextArea rows={12} className="code-input" placeholder={'{\n  "name": "demo"\n}'} />
-      </Form.Item>
     </>
   )
 }
@@ -305,60 +395,13 @@ function AssertionFields() {
   )
 }
 
-type DynamicField = { key: number; name: number }
-
-function DynamicFields({
-  fields,
-  onAdd,
-  onRemove,
-  render,
-}: {
-  fields: DynamicField[]
-  onAdd: () => void
-  onRemove: (index: number) => void
-  render: (field: DynamicField) => React.ReactNode
-}) {
-  return (
-    <Space orientation="vertical" className="full-width">
-      {fields.map((field) => (
-        <div className="workbench-dynamic-row" key={field.key}>
-          {render(field)}
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            aria-label="删除配置行"
-            onClick={() => onRemove(field.name)}
-          />
-        </div>
-      ))}
-      <Button type="dashed" icon={<PlusOutlined />} onClick={onAdd}>
-        添加一行
-      </Button>
-    </Space>
-  )
-}
-
-const bodyRule = {
-  validator: (_: unknown, value: string) => {
-    if (!value?.trim()) return Promise.resolve()
-    try {
-      JSON.parse(value)
-      return Promise.resolve()
-    } catch {
-      return Promise.reject(new Error('Body 请输入有效 JSON'))
-    }
-  },
-}
-
 function toFields(version: ApiVersion): WorkbenchFields {
   return {
     method: version.method,
     path: version.path,
     query_parameters: version.query_parameters,
     headers: toKeyValues(version.headers),
-    body_kind: version.body_kind,
-    body_text: version.body === null ? '' : JSON.stringify(version.body, null, 2),
+    ...toBodyFields(version),
     auth_kind: version.auth_kind,
     auth_config: toKeyValues(version.auth_config),
     extraction_rules: version.extraction_rules,
@@ -372,13 +415,13 @@ function toFields(version: ApiVersion): WorkbenchFields {
 }
 
 function toInput(values: WorkbenchFields): ApiVersionInput {
+  const body = toBodyInput(values)
   return {
     method: values.method,
     path: values.path,
     query_parameters: values.query_parameters ?? [],
     headers: toRecord(values.headers),
-    body_kind: values.body_kind,
-    body: values.body_text?.trim() ? JSON.parse(values.body_text) : null,
+    ...body,
     auth: { kind: values.auth_kind, values: toRecord(values.auth_config) },
     extraction_rules: values.extraction_rules ?? [],
     assertions: (values.assertions ?? []).map((assertion) => ({

@@ -98,16 +98,24 @@ class WorkflowRepository:
         return await self._session.get(WorkflowExecution, execution_id)
 
     async def list_executions(
-        self, *, project_id: UUID, offset: int, limit: int
+        self,
+        *,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        offset: int,
+        limit: int,
     ) -> tuple[list[WorkflowExecution], int]:
+        criteria = [
+            WorkflowExecution.project_id == project_id,
+            WorkflowExecution.parent_execution_id.is_(None),
+        ]
+        if workflow_id is not None:
+            criteria.append(WorkflowExecution.workflow_id == workflow_id)
         items = list(
             (
                 await self._session.scalars(
                     select(WorkflowExecution)
-                    .where(
-                        WorkflowExecution.project_id == project_id,
-                        WorkflowExecution.parent_execution_id.is_(None),
-                    )
+                    .where(*criteria)
                     .order_by(WorkflowExecution.started_at.desc())
                     .offset(offset)
                     .limit(limit)
@@ -115,12 +123,7 @@ class WorkflowRepository:
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count())
-            .select_from(WorkflowExecution)
-            .where(
-                WorkflowExecution.project_id == project_id,
-                WorkflowExecution.parent_execution_id.is_(None),
-            )
+            select(func.count()).select_from(WorkflowExecution).where(*criteria)
         )
         return items, int(total or 0)
 

@@ -14,6 +14,7 @@ from app.domain.api_assets import (
     AuthKind,
     HttpMethod,
     JsonValue,
+    QueryParameterSpec,
     build_variables,
     merge_headers,
     render_json,
@@ -378,6 +379,8 @@ class APIAssetService:
         runtime_headers: dict[str, str],
         body_override: JsonValue,
         use_body_override: bool,
+        query_parameters_override: tuple[QueryParameterSpec, ...] | None = None,
+        headers_override: dict[str, str] | None = None,
         redact: bool = True,
         version_number: int | None = None,
         workflow_variables: dict[str, str] | None = None,
@@ -410,15 +413,29 @@ class APIAssetService:
         try:
             base_url = render_template(environment.base_url, variables).rstrip("/")
             path = render_template(api_version.path, variables).lstrip("/")
+            query_parameters = (
+                query_parameters_override
+                if query_parameters_override is not None
+                else tuple(
+                    QueryParameterSpec(
+                        name=str(item["name"]),
+                        value=str(item["value"]),
+                        enabled=bool(item.get("enabled", True)),
+                    )
+                    for item in api_version.query_parameters
+                )
+            )
             query = [
                 (
-                    render_template(str(item["name"]), variables),
-                    render_template(str(item["value"]), variables),
+                    render_template(item.name, variables),
+                    render_template(item.value, variables),
                 )
-                for item in api_version.query_parameters
-                if bool(item.get("enabled", True))
+                for item in query_parameters
+                if item.enabled
             ]
-            api_headers = dict(api_version.headers)
+            api_headers = dict(
+                api_version.headers if headers_override is None else headers_override
+            )
             _apply_auth(
                 api_version.auth_kind,
                 api_version.auth_config,

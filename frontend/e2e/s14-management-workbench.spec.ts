@@ -7,6 +7,7 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
   const suffix = Date.now().toString()
   const environmentName = `S14 环境 ${suffix}`
   const apiName = `S14 接口 ${suffix}`
+  const renamedApiName = `${apiName} 已重命名`
   const folderName = `S14 目录 ${suffix}`
   const renamedFolder = `${folderName} 已编辑`
   const secretName = `S14_SECRET_${suffix}`
@@ -20,7 +21,8 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
   await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
   await createEnvironment(page, environmentName)
   await createApi(page, apiName)
-  await editApiVersion(page, apiName)
+  await renameApi(page, apiName, renamedApiName)
+  await editApiVersion(page, renamedApiName)
 
   await page.getByRole('link', { name: '项目管理' }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
@@ -40,6 +42,20 @@ async function createEnvironment(page: import('@playwright/test').Page, name: st
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 }
 
+async function renameApi(
+  page: import('@playwright/test').Page,
+  currentName: string,
+  renamedName: string,
+) {
+  await workbench(page, currentName).getByRole('button', { name: '重命名接口' }).click()
+  const dialog = page.getByRole('dialog', { name: '重命名接口' })
+  await dialog.getByLabel('接口名称').fill(renamedName)
+  await dialog.getByRole('button', { name: /保\s*存/ }).click()
+  await expect(page.getByText('接口名称已更新').last()).toBeVisible()
+  await expect(workbench(page, renamedName)).toBeVisible()
+  await expect(workbench(page, renamedName).getByText('v1', { exact: true })).toBeVisible()
+}
+
 async function createApi(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: '新建接口' }).click()
   const dialog = page.getByRole('dialog', { name: '新建接口' })
@@ -53,9 +69,20 @@ async function createApi(page: import('@playwright/test').Page, name: string) {
 async function editApiVersion(page: import('@playwright/test').Page, apiName: string) {
   const panel = workbench(page, apiName)
   await panel.getByRole('tab', { name: 'Params' }).click()
-  await panel.getByRole('button', { name: '添加一行' }).click()
-  await panel.getByPlaceholder('参数名').fill('source')
-  await panel.getByPlaceholder('值或 {{变量}}').fill('s14')
+  await panel.getByRole('button', { name: '批量编辑' }).click()
+  await panel.getByLabel('批量编辑 Params').fill('source: s14\n# disabled: ignored')
+  await panel.getByRole('button', { name: '应用并返回表格' }).click()
+
+  await panel.getByRole('tab', { name: 'Headers' }).click()
+  await panel.getByRole('button', { name: '批量编辑' }).click()
+  await panel.getByLabel('批量编辑 Headers').fill('X-S14-Bulk: enabled')
+  await panel.getByRole('button', { name: '应用并返回表格' }).click()
+
+  await panel.getByRole('tab', { name: 'Body' }).click()
+  await panel.getByText('raw', { exact: true }).click()
+  await panel.getByLabel('raw 数据类型').click()
+  await page.getByText('Text', { exact: true }).last().click()
+  await panel.getByLabel('原始 Body').fill('s14 raw payload')
 
   await panel.getByRole('tab', { name: '提取' }).click()
   await panel.getByRole('button', { name: '添加一行' }).click()
@@ -72,6 +99,9 @@ async function editApiVersion(page: import('@playwright/test').Page, apiName: st
   const preview = page.getByRole('dialog', { name: '最终请求预览（Secret 已脱敏）' })
   await expect(preview).toContainText('http://mock-target.test:8080/echo')
   await expect(preview).toContainText('source')
+  await expect(preview).toContainText('X-S14-Bulk')
+  await expect(preview).toContainText('text/plain')
+  await expect(preview).toContainText('s14 raw payload')
   await page.keyboard.press('Escape')
 }
 

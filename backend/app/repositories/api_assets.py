@@ -92,14 +92,14 @@ class APIAssetRepository:
         return (await self._session.execute(query)).scalar_one_or_none()
 
     async def list_imported_definitions(
-        self, *, project_id: UUID, import_source: str
+        self, *, project_id: UUID, import_source_key: str
     ) -> list[APIDefinition]:
         return list(
             (
                 await self._session.scalars(
                     select(APIDefinition).where(
                         APIDefinition.project_id == project_id,
-                        APIDefinition.import_source == import_source,
+                        APIDefinition.import_source_key == import_source_key,
                     )
                 )
             ).all()

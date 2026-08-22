@@ -27,7 +27,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    Celery 拓扑保持不变，不把 SQLite 数据迁移回 Docker 档位。
 2. Standalone 使用 SQLite WAL、本地附件目录、进程内事件总线、固定窗口限流和后台调度器；
    API、Web、工作流和测试计划在一个 Python 进程内运行，启动时自动创建当前模型基线并记录
-   `20260821_0029` Alembic revision。
+   `20260822_0032` Alembic revision。
 3. Performance Lab、Environment Lab、Runner Fabric 在该档位固定关闭；事件历史、限流桶和未完成
    进程任务在重启后不恢复，业务状态、附件和加密 Snapshot 持久化到 `data\`。
 4. 新增 Windows PowerShell 安装前检查、启动、停止、Readiness/档位验收、备份和离线包构建脚本；离线包可携带

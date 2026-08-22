@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import APIWorkbench from './APIWorkbench'
-import type { ApiDetail, ApiVersion } from '../../lib/api'
+import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 describe('APIWorkbench', () => {
   it('edits a selected API continuously and saves a new typed version', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
+    const onRename = vi.fn()
     render(
       <APIWorkbench
         detail={detail}
@@ -17,10 +18,13 @@ describe('APIWorkbench', () => {
         previewing={false}
         onSave={onSave}
         onPreview={vi.fn(async () => ({ url: 'https://api.example.com/users' }))}
+        onRename={onRename}
       />,
     )
 
     expect(await screen.findByText('查询用户')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重命名接口' }))
+    expect(onRename).toHaveBeenCalledTimes(1)
     const path = screen.getByPlaceholderText('/api/users/{{user_id}}')
     fireEvent.change(path, { target: { value: '/users/{id}' } })
     await user.click(screen.getByRole('tab', { name: 'Params' }))
@@ -55,6 +59,7 @@ describe('APIWorkbench', () => {
         previewing={false}
         onSave={vi.fn()}
         onPreview={onPreview}
+        onRename={vi.fn()}
       />,
     )
     await user.click(await screen.findByRole('button', { name: '预览最终请求' }))
@@ -75,6 +80,7 @@ describe('APIWorkbench', () => {
         previewing={false}
         onSave={onSave}
         onPreview={vi.fn()}
+        onRename={vi.fn()}
       />,
     )
 
@@ -87,6 +93,8 @@ describe('APIWorkbench', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Body' }))
     panel = screen.getByRole('tabpanel')
+    expect(within(panel).getByText('该请求不发送 Body')).toBeVisible()
+    await user.click(within(panel).getByText('raw', { exact: true }))
     const body = within(panel).getByPlaceholderText(/"name": "demo"/)
     fireEvent.change(body, { target: { value: '{invalid' } })
     await user.click(screen.getByRole('button', { name: /保存新版本/ }))
@@ -132,6 +140,7 @@ describe('APIWorkbench', () => {
         previewing={false}
         onSave={vi.fn()}
         onPreview={vi.fn()}
+        onRename={vi.fn()}
       />,
     )
     expect(screen.getByText('请选择接口后进行持续编辑')).toBeInTheDocument()
@@ -147,10 +156,154 @@ describe('APIWorkbench', () => {
         previewing={false}
         onSave={vi.fn()}
         onPreview={vi.fn()}
+        onRename={vi.fn()}
       />,
     )
     await user.click(screen.getByRole('tab', { name: 'Body' }))
     expect(screen.getByDisplayValue(/"active": true/)).toBeInTheDocument()
+  })
+
+  it('saves raw text and form-urlencoded bodies without JSON parsing', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
+    render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Body' }))
+    let panel = screen.getByRole('tabpanel')
+    await user.click(within(panel).getByText('raw', { exact: true }))
+    await user.click(within(panel).getByLabelText('raw 数据类型'))
+    await user.click(screen.getAllByText('Text', { exact: true }).at(-1)!)
+    await user.type(within(panel).getByLabelText('原始 Body'), '<not-json>')
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      body_kind: 'raw',
+      body: '<not-json>',
+      headers: { 'Content-Type': 'text/plain' },
+    })
+
+    onSave.mockClear()
+    await user.click(within(panel).getByText('x-www-form-urlencoded', { exact: true }))
+    panel = screen.getByRole('tabpanel')
+    await user.click(within(panel).getByRole('button', { name: '批量编辑' }))
+    fireEvent.change(within(panel).getByLabelText('批量编辑 x-www-form-urlencoded'), {
+      target: { value: 'username: demo\npassword: {{secret.PASSWORD}}' },
+    })
+    await user.click(within(panel).getByRole('button', { name: '应用并返回表格' }))
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      body_kind: 'form',
+      body: { username: 'demo', password: '{{secret.PASSWORD}}' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    })
+  })
+
+  it('builds multipart text and file rows from the artifact repository', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
+    render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        artifacts={[artifact]}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Body' }))
+    const panel = screen.getByRole('tabpanel')
+    await user.click(within(panel).getByText('form-data', { exact: true }))
+    await user.click(within(panel).getByRole('button', { name: /添加一行/ }))
+    await user.type(within(panel).getByPlaceholderText('Key'), 'description')
+    await user.type(within(panel).getByPlaceholderText('Value 或 {{变量}}'), 'avatar')
+    await user.click(within(panel).getByRole('button', { name: /添加一行/ }))
+    await user.type(within(panel).getAllByPlaceholderText('Key')[1], 'file')
+    await user.click(within(panel).getAllByLabelText('form-data 字段类型')[1])
+    await user.click(screen.getByText('File', { exact: true }))
+    await user.click(within(panel).getByLabelText('form-data 文件'))
+    await user.click(screen.getByText('payload.txt (12 B)', { exact: true }))
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      body_kind: 'multipart',
+      body: {
+        fields: { description: 'avatar' },
+        files: [{ field: 'file', artifact_id: 'artifact-1' }],
+      },
+    })
+  })
+
+  it('applies bulk Params and Headers without exposing an existing sensitive value', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
+    const sensitiveDetail: ApiDetail = {
+      ...detail,
+      version: {
+        ...detail.version,
+        headers: { Authorization: 'Bearer legacy-token', Accept: 'application/json' },
+      },
+    }
+    render(
+      <APIWorkbench
+        detail={sensitiveDetail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Params' }))
+    let panel = screen.getByRole('tabpanel')
+    await user.click(within(panel).getByRole('button', { name: '批量编辑' }))
+    fireEvent.change(within(panel).getByLabelText('批量编辑 Params'), {
+      target: {
+        value: 'source: s14\nsource: duplicate\n# callback: https://example.test/result',
+      },
+    })
+    await user.click(within(panel).getByRole('button', { name: '应用并返回表格' }))
+
+    await user.click(screen.getByRole('tab', { name: 'Headers' }))
+    panel = screen.getByRole('tabpanel')
+    await user.click(within(panel).getByRole('button', { name: '批量编辑' }))
+    const headers = within(panel).getByLabelText('批量编辑 Headers')
+    expect((headers as HTMLTextAreaElement).value).toContain('Authorization: ******')
+    expect((headers as HTMLTextAreaElement).value).not.toContain('legacy-token')
+    fireEvent.change(headers, {
+      target: { value: 'Authorization: ******\nX-Region: cn' },
+    })
+    await user.click(within(panel).getByRole('button', { name: '应用并返回表格' }))
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      query_parameters: [
+        { enabled: true, name: 'source', value: 's14' },
+        { enabled: true, name: 'source', value: 'duplicate' },
+        { enabled: false, name: 'callback', value: 'https://example.test/result' },
+      ],
+      headers: { Authorization: 'Bearer legacy-token', 'X-Region': 'cn' },
+    })
   })
 })
 
@@ -182,4 +335,15 @@ const detail: ApiDetail = {
     is_active: true,
   },
   version,
+}
+
+const artifact: Artifact = {
+  id: 'artifact-1',
+  project_id: 'project-1',
+  filename: 'payload.txt',
+  content_type: 'text/plain',
+  size_bytes: 12,
+  sha256: 'hash',
+  purpose: 'upload',
+  created_at: '2026-08-09T00:00:00Z',
 }

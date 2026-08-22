@@ -12,7 +12,9 @@ Standalone 是不依赖 Docker、WSL2、PostgreSQL、Redis、MinIO 或虚拟化�
   本机回环端口和写入应用目录。
 - 建议至少 2 个 vCPU、4 GB 内存、10 GB 可用磁盘。Core2 Duo 级云桌面可以用于低并发功能测试，
   不作为容量或性能测试环境。
-- Performance Lab、Environment Lab 和 Runner Fabric 在该档位固定关闭；AI 默认关闭。需要访问的
+- API URL/Swagger UI 导入、Postman 风格请求体与多参数编辑、可视化流程编排、数据节点、运行观测和历史快照
+  在 Standalone 包中默认开启；Teams、契约、质量和多协议能力也使用同一进程内实现。
+- Performance Lab、Environment Lab 和 Runner Fabric 在该档位固定关闭；AI 和 OIDC 默认关闭。需要访问的
   HTTP、GraphQL、gRPC、Kafka 或外部 Redis 目标仍需公司网络策略单独放行。
 - 所有业务数据位于 `data\flowtest.db` 和 `data\artifacts\`；事件历史和限流状态为进程内数据，
   重启后不会保留。业务执行状态、附件和 Snapshot 会持久化。
@@ -143,7 +145,7 @@ FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \
 拒绝执行。导入在数据库事务中进行，失败会回滚数据库并清理本次新上传的对象；成功后自动启动 6 个
 Compact 服务并执行 Readiness 验收。该工具不会迁移 Standalone 的进程内事件、限流窗口或后台任务队列。
 
-Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260821_0029` 基线 Alembic revision。后续版本升级
+Standalone 当前使用模型元数据创建初始 SQLite Schema，并记录 `20260822_0032` 基线 Alembic revision。后续版本升级
 必须使用项目提供的升级说明和备份，不要手工删除 `flowtest.db`。
 
 ## 验收与故障定位
