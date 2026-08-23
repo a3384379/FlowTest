@@ -8,7 +8,7 @@ import secrets
 from typing import Any, cast
 
 from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password
-from smoke_s5 import _api_request, _create_api, _create_workflow
+from smoke_s5 import _create_api, _create_workflow
 from smoke_s8 import _wait_for_plan_run
 
 
@@ -49,11 +49,14 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
     environment = client.json(
         "POST",
         f"/projects/{project_id}/environments",
-        {"name": "S19 Mock", "base_url": config.target_url},
+        {
+            "name": "S19 Mock",
+            "base_url": f"{config.target_url.rstrip('/')}/s19-first-run-failure",
+        },
         token=token,
     )
     environment_id = str(environment["id"])
-    api = _create_api(client, token, project_id, "S19 Flaky API", "/failure")
+    api = _create_api(client, token, project_id, "S19 Flaky API", "/health")
     api_id = str(cast(dict[str, Any], api["definition"])["id"])
     workflow = _create_workflow(client, token, project_id, "S19 Flaky Workflow", api_id)
     workflow_id = str(workflow["id"])
@@ -89,9 +92,9 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
     if failed["run"]["status"] != "failed":
         raise RuntimeError("first quality baseline should fail")
     client.json(
-        "POST",
-        f"/projects/{project_id}/apis/{api_id}/versions",
-        _api_request("/health"),
+        "PATCH",
+        f"/projects/{project_id}/environments/{environment_id}",
+        {"base_url": config.target_url},
         token=token,
     )
     passed = _run_plan(client, token, project_id, str(plan["id"]))
