@@ -27,6 +27,9 @@ FlowTest/
 [docs/development-plan.md](docs/development-plan.md)；V5 设计草案见
 [docs/development-plan-v5.md](docs/development-plan-v5.md)。
 
+系统各模块的完整使用说明见 [FlowTest V5 系统使用手册](docs/system-user-guide.md)，其中详细介绍了
+接口管理、接口工作流、FlowSpec，以及对外 MCP 的 stdio/Streamable HTTP 接入与安全边界。
+
 ## 公司电脑快速运行
 
 如果公司 Windows 10 云桌面没有 WSL2、SLAT 或 Docker Desktop 条件，请使用
