@@ -56,7 +56,7 @@ test('管理员登录并完成首次密码初始化', async ({ page }) => {
     expect((await submitLogin(page, activePassword)).ok()).toBeTruthy()
   }
 
-  await expect(page.getByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '退出' })).toBeVisible()
   await mkdir('.playwright/.auth', { recursive: true })
   await page.context().storageState({ path: authenticationStatePath })
 })

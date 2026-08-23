@@ -7,10 +7,10 @@ export const bootstrapPassword =
 export const authenticationStatePath = '.playwright/.auth/administrator.json'
 
 export async function authenticate(page: Page): Promise<void> {
-  const dashboard = page.getByRole('heading', { name: '质量指挥中心' })
+  const authenticatedShell = page.getByRole('button', { name: '退出' })
   const login = page.getByRole('heading', { name: '登录账号' })
-  await expect(dashboard.or(login)).toBeVisible()
-  if (await dashboard.isVisible()) return
+  await expect(authenticatedShell.or(login)).toBeVisible()
+  if (await authenticatedShell.isVisible()) return
 
   await page.getByLabel('账号').fill(administratorEmail)
   let response = await submitLogin(page, activePassword)
@@ -18,7 +18,7 @@ export async function authenticate(page: Page): Promise<void> {
     response = await submitLogin(page, bootstrapPassword)
   }
   expect(response.ok()).toBeTruthy()
-  await expect(dashboard).toBeVisible()
+  await expect(authenticatedShell).toBeVisible()
 }
 
 export async function submitLogin(page: Page, password: string): Promise<Response> {
