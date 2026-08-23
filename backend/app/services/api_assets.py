@@ -1,7 +1,7 @@
 import re
 from base64 import b64encode
 from dataclasses import dataclass, field, replace
-from typing import cast
+from typing import Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -445,6 +445,10 @@ class APIAssetService:
         workflow_variables: dict[str, str] | None = None,
         dataset_variables: dict[str, str] | None = None,
         auth_disabled: bool = False,
+        auth_mode: Literal["inherit", "disabled"] | None = None,
+        suppressed_headers: tuple[str, ...] = (),
+        suppressed_query_parameters: tuple[str, ...] = (),
+        suppressed_cookies: tuple[str, ...] = (),
     ) -> PreparedRequest:
         _definition, api_version = await self.get_detail(
             actor=actor,
@@ -469,6 +473,12 @@ class APIAssetService:
             api_headers_override=headers_override,
         )
         variables = target.variables
+        effective_auth_mode = auth_mode or ("disabled" if auth_disabled else "inherit")
+        auth_headers: tuple[str, ...] = ()
+        auth_query: tuple[str, ...] = ()
+        auth_cookies: tuple[str, ...] = ()
+        if effective_auth_mode == "disabled":
+            auth_headers, auth_query, auth_cookies = _auth_suppressions(api_version)
         try:
             query_parameters = (
                 query_parameters_override
@@ -498,7 +508,7 @@ class APIAssetService:
                     for name, value in headers_override.items()
                 }
             )
-            if not auth_disabled:
+            if effective_auth_mode != "disabled":
                 _apply_auth(
                     api_version.auth_kind,
                     api_version.auth_config,
@@ -519,6 +529,11 @@ class APIAssetService:
                 target,
                 api_headers=api_headers,
                 query=query,
+                suppressed_headers=tuple(sorted({*suppressed_headers, *auth_headers})),
+                suppressed_query_parameters=tuple(
+                    sorted({*suppressed_query_parameters, *auth_query})
+                ),
+                suppressed_cookies=tuple(sorted({*suppressed_cookies, *auth_cookies})),
             )
             selected_body = (
                 body_override if use_body_override else cast(JsonValue, api_version.body)
@@ -555,7 +570,11 @@ class APIAssetService:
         redacted_request = _redacted_request(
             prepared,
             secret_values=target.secret_values,
-            auth_kind=(AuthKind.NONE if auth_disabled else AuthKind(api_version.auth_kind)),
+            auth_kind=(
+                AuthKind.NONE
+                if effective_auth_mode == "disabled"
+                else AuthKind(api_version.auth_kind)
+            ),
             auth_config=api_version.auth_config,
         )
         target_snapshot = target.snapshot(
@@ -576,6 +595,18 @@ class APIAssetService:
             for item in redacted_request.variables
         }
         target_snapshot["body"] = redacted_request.body
+        target_snapshot["request_suppression"] = {
+            "auth_mode": effective_auth_mode,
+            "suppressed_header_names": cast(
+                JsonValue, sorted({*suppressed_headers, *auth_headers})
+            ),
+            "suppressed_query_parameter_names": cast(
+                JsonValue, sorted({*suppressed_query_parameters, *auth_query})
+            ),
+            "suppressed_cookie_names": cast(
+                JsonValue, sorted({*suppressed_cookies, *auth_cookies})
+            ),
+        }
         prepared = replace(prepared, target_snapshot=target_snapshot)
         if not redact:
             return prepared
@@ -767,10 +798,43 @@ def _apply_auth(
         return
     name = auth_config.get("name", "X-API-Key")
     value = render_template(auth_config.get("value", ""), variables)
-    if auth_config.get("in", "header") == "query":
+    location = auth_config.get("in", "header")
+    if location == "query":
         query.append((name, value))
+    elif location == "cookie":
+        existing = headers.get("Cookie")
+        headers["Cookie"] = f"{existing}; {name}={value}" if existing else f"{name}={value}"
     else:
         headers[name] = value
+
+
+def _auth_suppressions(
+    version: APIVersion,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    kind = version.auth_kind
+    location = version.auth_config.get("in")
+    name = version.auth_config.get("name")
+    if kind == AuthKind.NONE.value and version.canonical_contract:
+        contract = OperationContract.model_validate(version.canonical_contract)
+        kind = contract.auth.kind
+        location = contract.auth.location
+        name = contract.auth.name
+    if kind in {AuthKind.NONE.value, "none"}:
+        return (), (), ()
+    if kind in {AuthKind.BEARER.value, AuthKind.BASIC.value, "oauth2"}:
+        return ("Authorization",), (), ()
+    if kind == AuthKind.API_KEY.value:
+        carrier = name or "X-API-Key"
+        if location == "query":
+            return ("Authorization",), (carrier,), ()
+        if location == "cookie":
+            return ("Authorization",), (), (carrier,)
+        return ("Authorization", carrier), (), ()
+    raise AppError(
+        code="AUTH_SUPPRESSION_UNSUPPORTED",
+        message="无法确定认证载体,缺失认证场景仅可保留为 Design",
+        status_code=422,
+    )
 
 
 def _redacted_request(

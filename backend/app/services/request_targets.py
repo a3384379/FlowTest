@@ -7,6 +7,7 @@ typed domain data and never need to know which persistence model supplied it.
 
 from collections.abc import Sequence
 from dataclasses import replace
+from http.cookies import CookieError, SimpleCookie
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -194,6 +195,9 @@ class RequestTargetResolver:
         *,
         api_headers: dict[str, str],
         query: Sequence[tuple[str, str]],
+        suppressed_headers: Sequence[str] = (),
+        suppressed_query_parameters: Sequence[str] = (),
+        suppressed_cookies: Sequence[str] = (),
     ) -> ResolvedRequestTarget:
         headers = dict(target.headers)
         for name, value in api_headers.items():
@@ -205,9 +209,24 @@ class RequestTargetResolver:
                 source=HeaderScope.API,
                 name=name,
             )
+        suppressed_header_keys = {name.lower() for name in suppressed_headers}
+        headers = {
+            name: value for name, value in headers.items() if name not in suppressed_header_keys
+        }
+        if suppressed_cookies and "cookie" in headers:
+            cookie_value = _suppress_cookies(
+                headers["cookie"].value,
+                suppressed_cookies,
+            )
+            if cookie_value:
+                headers["cookie"] = replace(headers["cookie"], value=cookie_value)
+            else:
+                headers.pop("cookie", None)
         parsed = urlsplit(target.effective_url)
         query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
         query_pairs.extend(query)
+        suppressed_query = set(suppressed_query_parameters)
+        query_pairs = [(name, value) for name, value in query_pairs if name not in suppressed_query]
         effective_url = urlunsplit(
             (parsed.scheme, parsed.netloc, parsed.path, urlencode(query_pairs), parsed.fragment)
         )
@@ -308,3 +327,17 @@ def _collect_secret_refs(value: object, refs: set[str]) -> None:
     if isinstance(value, (list, tuple)):
         for child in value:
             _collect_secret_refs(child, refs)
+
+
+def _suppress_cookies(value: str, names: Sequence[str]) -> str:
+    cookie = SimpleCookie()
+    try:
+        cookie.load(value)
+    except CookieError as error:
+        raise ValueError("Cookie header cannot be safely parsed for suppression") from error
+    if value.strip() and not cookie:
+        raise ValueError("Cookie header cannot be safely parsed for suppression")
+    suppressed = set(names)
+    return "; ".join(
+        f"{name}={morsel.coded_value}" for name, morsel in cookie.items() if name not in suppressed
+    )

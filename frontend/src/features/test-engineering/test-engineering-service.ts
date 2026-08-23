@@ -5,6 +5,28 @@ export type EvidenceRef = {
   source_type: string
   source_ref: string
   revision: string
+  semantic_role?: 'normative' | 'observed' | 'mixed' | 'coverage' | 'supporting'
+}
+
+export type OperationContract = {
+  operation: string
+  method: string
+  path: string
+  service: string | null
+  auth: {
+    required: boolean
+    kind: 'none' | 'bearer' | 'basic' | 'api_key' | 'oauth2' | 'other'
+    location: 'header' | 'query' | 'cookie' | null
+    name: string | null
+  }
+  parameters: Array<{
+    name: string
+    location: 'path' | 'query' | 'header' | 'cookie'
+    required: boolean
+    schema: Record<string, unknown>
+  }>
+  completeness: 'complete' | 'partial' | 'legacy_partial' | 'redacted_partial'
+  warnings: string[]
 }
 
 export type ScenarioCandidate = {
@@ -80,6 +102,7 @@ export type TestEngineeringGeneration = {
   persisted: false
   contract_completeness: string
   contract_fingerprint: string
+  contract?: OperationContract
 }
 
 export type TestEngineeringProposal = {
@@ -92,6 +115,7 @@ export type TestEngineeringProposal = {
   applied: boolean
   contract_completeness: string
   contract_fingerprint: string
+  contract?: OperationContract
 }
 
 export type TestEngineeringApplyResult = {

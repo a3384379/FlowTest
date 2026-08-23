@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from hashlib import sha256
 from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.canonical_contracts import (
+    sanitize_contract_payload,
+    semantic_contract_fingerprint,
+)
 from app.domain.evidence import (
     EvidenceBundle,
     EvidenceFinding,
@@ -85,7 +91,17 @@ class OperationContract(BaseModel):
     responses: dict[str, ContractResponse] = Field(default_factory=dict, max_length=100)
     source_ref: str | None = Field(default=None, max_length=512)
     revision: str | None = Field(default=None, max_length=160)
-    completeness: Literal["complete", "partial", "legacy_partial"] = "complete"
+    completeness: Literal["complete", "partial", "legacy_partial", "redacted_partial"] = "complete"
+    warnings: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_canonical_contract(cls, value: object) -> object:
+        if isinstance(value, cls):
+            value = value.model_dump(mode="json", by_alias=True)
+        if not isinstance(value, Mapping):
+            return value
+        return sanitize_contract_payload(value).payload
 
     @model_validator(mode="after")
     def validate_responses(self) -> OperationContract:
@@ -106,9 +122,9 @@ class OperationContract(BaseModel):
 
 
 def fingerprint_contract(contract: OperationContract) -> str:
-    payload = contract.model_dump(mode="json", by_alias=True, exclude_none=False)
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return sha256(canonical.encode()).hexdigest()
+    return semantic_contract_fingerprint(
+        contract.model_dump(mode="json", by_alias=True, exclude_none=False)
+    )
 
 
 class GenerationPolicy(BaseModel):
@@ -138,6 +154,8 @@ class TestEngineeringEngine:
         evidence = _merge_evidence(contract, bundles)
         fields = _field_constraints(evidence)
         candidates = _scenario_candidates(contract, fields, generation_policy)
+        if contract.completeness == "redacted_partial":
+            candidates = _mark_redacted_contract_scenarios(candidates)
         scenarios = candidates[: generation_policy.max_scenarios]
         truncated = len(candidates) > len(scenarios)
         oracles, oracle_warnings = OracleInferenceEngine().infer(contract, evidence, scenarios)
@@ -147,7 +165,7 @@ class TestEngineeringEngine:
             scenarios=scenarios,
             oracles=oracles,
         )
-        warnings = list(oracle_warnings)
+        warnings = [*contract.warnings, *oracle_warnings]
         warnings.extend(evidence.warnings)
         if truncated:
             warnings.append(
@@ -159,6 +177,8 @@ class TestEngineeringEngine:
         }
         if any(scenario.requires_review for scenario in scenarios):
             review_requirements.add("scenario_precondition_review")
+        if contract.completeness == "redacted_partial":
+            review_requirements.add("redacted_contract_test_data")
         conflicts = sorted(
             {
                 str(conflict)
@@ -203,7 +223,7 @@ class OracleInferenceEngine:
         scenarios: list[ScenarioCandidate],
     ) -> tuple[list[OracleSpec], list[str]]:
         statuses = {int(key) for key in contract.responses if key.isdigit()}
-        evidence_ids = _evidence_ids(evidence, "operation_contract", "response_contract")
+        fallback_ids = _evidence_ids(evidence, "operation_contract")
         grouped = {
             "success": [
                 scenario.id for scenario in scenarios if scenario.expected_category == "success"
@@ -219,7 +239,14 @@ class OracleInferenceEngine:
                 if scenario.expected_category == "unauthorized"
             ],
         }
-        oracles = [self._success_oracle(statuses, evidence_ids, grouped["success"])]
+        success = _declared_success_status(statuses)
+        oracles = [
+            self._success_oracle(
+                success,
+                _status_evidence_ids(evidence, success) or fallback_ids,
+                grouped["success"],
+            )
+        ]
         warnings: list[str] = []
         if oracles[0].requires_review:
             warnings.append("Contract 未声明成功状态码,禁止推断固定 200;物化前必须审核补全")
@@ -227,7 +254,10 @@ class OracleInferenceEngine:
             category="invalid_request",
             explicit_status=_declared_invalid_request_status(statuses),
             scenarios=grouped["invalid_request"],
-            evidence_ids=evidence_ids,
+            evidence_ids=(
+                _status_evidence_ids(evidence, _declared_invalid_request_status(statuses))
+                or fallback_ids
+            ),
         )
         if invalid_oracle is not None:
             oracles.append(invalid_oracle)
@@ -237,7 +267,9 @@ class OracleInferenceEngine:
             category="unauthorized",
             explicit_status=_declared_auth_status(statuses),
             scenarios=grouped["unauthorized"],
-            evidence_ids=evidence_ids,
+            evidence_ids=(
+                _status_evidence_ids(evidence, _declared_auth_status(statuses)) or fallback_ids
+            ),
         )
         if auth_oracle is not None:
             oracles.append(auth_oracle)
@@ -247,10 +279,8 @@ class OracleInferenceEngine:
         return oracles, warnings
 
     def _success_oracle(
-        self, statuses: set[int], evidence_ids: list[str], scenarios: list[str]
+        self, success: int | None, evidence_ids: list[str], scenarios: list[str]
     ) -> OracleSpec:
-        declared = sorted(status for status in statuses if 200 <= status < 300)
-        success = declared[0] if declared else None
         explicit = success is not None
         return OracleSpec(
             id="oracle_success_status",
@@ -301,6 +331,11 @@ def _declared_invalid_request_status(statuses: set[int]) -> int | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _declared_success_status(statuses: set[int]) -> int | None:
+    candidates = sorted(status for status in statuses if 200 <= status < 300)
+    return candidates[0] if candidates else None
+
+
 def _declared_auth_status(statuses: set[int]) -> int | None:
     if 401 in statuses:
         return 401
@@ -325,7 +360,7 @@ class CoverageAnalyzer:
                 requirement="happy path",
                 scenario_kind="happy_path",
                 scenarios=scenarios,
-                evidence_refs=_evidence_ids_from(fields),
+                evidence_refs=_evidence_ids(contract_evidence(contract), "operation_contract"),
             )
         ]
         for field in fields:
@@ -338,7 +373,7 @@ class CoverageAnalyzer:
                     requirement="auth missing",
                     scenario_kind="auth_missing",
                     scenarios=scenarios,
-                    evidence_refs=_evidence_ids_from(fields),
+                    evidence_refs=_evidence_ids(contract_evidence(contract), "auth_requirement"),
                     priority="high",
                 )
             )
@@ -447,6 +482,9 @@ def _schema_findings(
         "enum",
         "minimum",
         "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
         "minLength",
         "maxLength",
         "pattern",
@@ -566,19 +604,27 @@ def _scenario_candidates(
             for finding in contract_evidence(contract).findings
             if finding.kind == "auth_requirement"
         ]
-        scenarios.insert(
-            1,
-            _scenario(
-                field_path="auth",
-                kind="auth_missing",
-                title="缺失认证",
-                operation="omit",
-                value=None,
-                base=base,
-                evidence_refs=auth_refs,
-                expected="unauthorized",
-            ),
+        auth_scenario = _scenario(
+            field_path="auth",
+            kind="auth_missing",
+            title="缺失认证",
+            operation="omit",
+            value=None,
+            base=base,
+            evidence_refs=auth_refs,
+            expected="unauthorized",
         )
+        if contract.auth.kind == "other":
+            auth_scenario = auth_scenario.model_copy(
+                update={
+                    "expected_category": "review",
+                    "deterministic": False,
+                    "requires_review": True,
+                    "confidence": 0.5,
+                    "tags": sorted({*auth_scenario.tags, "unknown-auth-carrier"}),
+                }
+            )
+        scenarios.insert(1, auth_scenario)
     if policy.pairwise_enabled:
         scenarios.extend(_pairwise_scenarios(fields, base))
     return _deduplicate_scenarios(scenarios)
@@ -668,8 +714,15 @@ def _field_scenarios(
 def _mark_conflicted_scenarios(
     field: EvidenceFinding, scenarios: list[ScenarioCandidate]
 ) -> list[ScenarioCandidate]:
-    if not _json_string_list(field.structured_data.get("conflicts")):
+    conflict_evidence = field.structured_data.get("conflict_evidence")
+    if not isinstance(conflict_evidence, dict):
         return scenarios
+    conflict_ids = {
+        str(value)
+        for values in conflict_evidence.values()
+        if isinstance(values, list)
+        for value in values
+    }
     return [
         scenario.model_copy(
             update={
@@ -680,6 +733,8 @@ def _mark_conflicted_scenarios(
                 "tags": sorted({*scenario.tags, "evidence-conflict"}),
             }
         )
+        if conflict_ids.intersection(scenario.evidence_refs)
+        else scenario
         for scenario in scenarios
     ]
 
@@ -691,17 +746,48 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
     scenarios: list[ScenarioCandidate] = []
     minimum = data.get("minimum")
     maximum = data.get("maximum")
+    exclusive_minimum = data.get("exclusiveMinimum")
+    exclusive_maximum = data.get("exclusiveMaximum")
     if isinstance(minimum, (int, float)):
+        step = _numeric_step(data, minimum)
         scenarios.extend(
             [
                 _negative_scenario(
-                    field, base, "number_below_min", "低于最小值", "set", minimum - 1
+                    field,
+                    base,
+                    "number_below_min",
+                    "低于最小值",
+                    "set",
+                    _adjacent_number(minimum, step, upward=False),
                 ),
                 _positive_scenario(field, base, "number_at_min", "等于最小值", "set", minimum),
             ]
         )
+    if isinstance(exclusive_minimum, (int, float)) and not isinstance(exclusive_minimum, bool):
+        step = _numeric_step(data, exclusive_minimum)
+        scenarios.extend(
+            [
+                _negative_scenario(
+                    field,
+                    base,
+                    "number_at_exclusive_min",
+                    "等于排他最小值",
+                    "set",
+                    exclusive_minimum,
+                ),
+                _positive_scenario(
+                    field,
+                    base,
+                    "number_above_exclusive_min",
+                    "高于排他最小值的相邻合法值",
+                    "set",
+                    _adjacent_number(exclusive_minimum, step, upward=True),
+                ),
+            ]
+        )
     if isinstance(maximum, (int, float)):
-        below_maximum = maximum - 1
+        step = _numeric_step(data, maximum)
+        below_maximum = _adjacent_number(maximum, step, upward=False)
         if not isinstance(minimum, (int, float)) or below_maximum >= minimum:
             scenarios.append(
                 _positive_scenario(
@@ -717,11 +803,53 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
             [
                 _positive_scenario(field, base, "number_at_max", "等于最大值", "set", maximum),
                 _negative_scenario(
-                    field, base, "number_above_max", "高于最大值", "set", maximum + 1
+                    field,
+                    base,
+                    "number_above_max",
+                    "高于最大值",
+                    "set",
+                    _adjacent_number(maximum, step, upward=True),
+                ),
+            ]
+        )
+    if isinstance(exclusive_maximum, (int, float)) and not isinstance(exclusive_maximum, bool):
+        step = _numeric_step(data, exclusive_maximum)
+        scenarios.extend(
+            [
+                _positive_scenario(
+                    field,
+                    base,
+                    "number_below_exclusive_max",
+                    "低于排他最大值的相邻合法值",
+                    "set",
+                    _adjacent_number(exclusive_maximum, step, upward=False),
+                ),
+                _negative_scenario(
+                    field,
+                    base,
+                    "number_at_exclusive_max",
+                    "等于排他最大值",
+                    "set",
+                    exclusive_maximum,
                 ),
             ]
         )
     return scenarios
+
+
+def _numeric_step(data: dict[str, JsonValue], boundary: int | float) -> int | float | None:
+    if _schema_type(data) == "integer":
+        return 1
+    multiple = data.get("multipleOf")
+    if isinstance(multiple, (int, float)) and not isinstance(multiple, bool) and multiple > 0:
+        return multiple
+    return None
+
+
+def _adjacent_number(value: int | float, step: int | float | None, *, upward: bool) -> int | float:
+    if step is not None:
+        return value + step if upward else value - step
+    return math.nextafter(float(value), math.inf if upward else -math.inf)
 
 
 def _string_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[ScenarioCandidate]:
@@ -857,7 +985,7 @@ def _positive_scenario(
         operation=operation,
         value=value,
         base=base,
-        evidence_refs=_field_evidence_ids(field),
+        evidence_refs=_field_evidence_ids_for_kind(field, kind),
         expected="success",
     )
 
@@ -877,7 +1005,7 @@ def _negative_scenario(
         operation=operation,
         value=value,
         base=base,
-        evidence_refs=_field_evidence_ids(field),
+        evidence_refs=_field_evidence_ids_for_kind(field, kind),
         expected="invalid_request",
     )
 
@@ -896,7 +1024,7 @@ def _review_scenario(
         operation="set",
         value=value,
         base=base,
-        evidence_refs=_field_evidence_ids(field),
+        evidence_refs=_field_evidence_ids_for_kind(field, kind),
         expected="review",
     )
     return scenario.model_copy(
@@ -993,7 +1121,7 @@ def _partition_values(data: dict[str, JsonValue]) -> list[JsonValue]:
     enum_values = data.get("enum")
     if isinstance(enum_values, list):
         values.extend(enum_values[:2])
-    for key in ("minimum", "maximum"):
+    for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
         if isinstance(data.get(key), (int, float)):
             values.append(data[key])
     unique: list[JsonValue] = []
@@ -1010,63 +1138,12 @@ def _field_coverage(
     operation: str, field: EvidenceFinding, scenarios: list[ScenarioCandidate]
 ) -> list[CoverageEntry]:
     data = field.structured_data
-    requirements: list[tuple[str, str, str, str]] = []
-    if bool(data.get("required")):
-        requirements.extend(
-            [
-                ("required_field", "required omitted", "required_omitted", "high"),
-                ("required_field", "null", "required_null", "high"),
-            ]
-        )
-    if "minimum" in data:
-        requirements.extend(
-            [
-                ("boundary", "minimum", "number_at_min", "high"),
-                ("boundary", "below minimum", "number_below_min", "high"),
-            ]
-        )
-    if "maximum" in data:
-        requirements.extend(
-            [
-                ("boundary", "maximum", "number_at_max", "high"),
-                ("boundary", "above maximum", "number_above_max", "high"),
-            ]
-        )
-    enum_values = data.get("enum")
-    if isinstance(enum_values, list):
-        requirements.extend(
-            [("enum", f"enum value {value}", "enum_value", "medium") for value in enum_values]
-        )
-        requirements.append(("enum", "invalid enum", "enum_invalid", "high"))
-    if "maxLength" in data:
-        requirements.extend(
-            [
-                ("boundary", "maxLength", "string_at_max_length", "medium"),
-                ("boundary", "above maxLength", "string_above_max_length", "high"),
-            ]
-        )
-    if _schema_type(data) in {"integer", "number", "boolean", "object", "array"}:
-        requirements.append(("type_negative", "invalid type", "invalid_type", "high"))
-    if "format" in data:
-        requirements.extend(
-            [
-                ("format", "valid format", "format_valid", "medium"),
-                ("format", "invalid format", "format_invalid", "high"),
-            ]
-        )
-    if data.get("unique") is True:
-        requirements.append(
-            ("database_constraint", "duplicate unique value", "duplicate_value", "high")
-        )
-    if isinstance(data.get("foreign_key"), str):
-        requirements.append(
-            (
-                "database_constraint",
-                "nonexistent foreign key",
-                "nonexistent_reference",
-                "high",
-            )
-        )
+    requirements = [
+        *_required_coverage_requirements(data),
+        *_boundary_coverage_requirements(data),
+        *_enum_coverage_requirements(data),
+        *_other_coverage_requirements(data),
+    ]
     return [
         _coverage_entry(
             dimension=cast(CoverageDimension, dimension),
@@ -1074,7 +1151,7 @@ def _field_coverage(
             requirement=requirement,
             scenario_kind=kind,
             scenarios=scenarios,
-            evidence_refs=_field_evidence_ids(field),
+            evidence_refs=_field_evidence_ids_for_kind(field, kind),
             priority=cast(CoveragePriority, priority),
             field_path=field.path,
             expected_value=(
@@ -1085,6 +1162,78 @@ def _field_coverage(
         )
         for dimension, requirement, kind, priority in requirements
     ]
+
+
+def _required_coverage_requirements(
+    data: dict[str, JsonValue],
+) -> list[tuple[str, str, str, str]]:
+    if not bool(data.get("required")):
+        return []
+    return [
+        ("required_field", "required omitted", "required_omitted", "high"),
+        ("required_field", "null", "required_null", "high"),
+    ]
+
+
+def _boundary_coverage_requirements(
+    data: dict[str, JsonValue],
+) -> list[tuple[str, str, str, str]]:
+    mapping = {
+        "minimum": (("minimum", "number_at_min"), ("below minimum", "number_below_min")),
+        "maximum": (("maximum", "number_at_max"), ("above maximum", "number_above_max")),
+        "exclusiveMinimum": (
+            ("exclusive minimum", "number_above_exclusive_min"),
+            ("at exclusive minimum", "number_at_exclusive_min"),
+        ),
+        "exclusiveMaximum": (
+            ("exclusive maximum", "number_below_exclusive_max"),
+            ("at exclusive maximum", "number_at_exclusive_max"),
+        ),
+        "maxLength": (
+            ("maxLength", "string_at_max_length"),
+            ("above maxLength", "string_above_max_length"),
+        ),
+    }
+    return [
+        ("boundary", requirement, kind, "high")
+        for key, pairs in mapping.items()
+        if key in data
+        for requirement, kind in pairs
+    ]
+
+
+def _enum_coverage_requirements(
+    data: dict[str, JsonValue],
+) -> list[tuple[str, str, str, str]]:
+    values = data.get("enum")
+    if not isinstance(values, list):
+        return []
+    return [
+        *(("enum", f"enum value {value}", "enum_value", "medium") for value in values),
+        ("enum", "invalid enum", "enum_invalid", "high"),
+    ]
+
+
+def _other_coverage_requirements(
+    data: dict[str, JsonValue],
+) -> list[tuple[str, str, str, str]]:
+    result: list[tuple[str, str, str, str]] = []
+    if _schema_type(data) in {"integer", "number", "boolean", "object", "array"}:
+        result.append(("type_negative", "invalid type", "invalid_type", "high"))
+    if "format" in data:
+        result.extend(
+            [
+                ("format", "valid format", "format_valid", "medium"),
+                ("format", "invalid format", "format_invalid", "high"),
+            ]
+        )
+    if data.get("unique") is True:
+        result.append(("database_constraint", "duplicate unique value", "duplicate_value", "high"))
+    if isinstance(data.get("foreign_key"), str):
+        result.append(
+            ("database_constraint", "nonexistent foreign key", "nonexistent_reference", "high")
+        )
+    return result
 
 
 CoverageDimension = Literal[
@@ -1212,32 +1361,29 @@ def _valid_request(fields: list[EvidenceFinding]) -> ScenarioRequest:
 
 
 def _valid_value(data: dict[str, JsonValue]) -> JsonValue:
+    name = data.get("name")
+    schema = data.get("schema")
+    redacted_enum = isinstance(schema, dict) and "x-flowtest-redacted-enum" in schema
+    if isinstance(name, str) and (_is_sensitive_field_name(name) or redacted_enum):
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "value"
+        return f"secret://test-data/{normalized}"
     values = data.get("enum")
     if isinstance(values, list) and values:
         return values[0]
+    observed_values = data.get("observed_enum_candidates")
+    if isinstance(observed_values, list) and observed_values:
+        return observed_values[0]
     schema = data.get("schema")
-    schema_mapping = schema if isinstance(schema, dict) else data
+    schema_mapping = {**data, **schema} if isinstance(schema, dict) else data
     value_type = _schema_type(schema_mapping)
     if value_type in {"integer", "number"}:
-        minimum = schema_mapping.get("minimum")
-        return minimum if isinstance(minimum, (int, float)) else 1
+        return _valid_numeric_value(schema_mapping)
     if value_type == "boolean":
         return True
     if value_type == "array":
-        minimum = schema_mapping.get("minItems")
-        item_schema = schema_mapping.get("items")
-        item_data = {"schema": item_schema, **item_schema} if isinstance(item_schema, dict) else {}
-        return [_valid_value(item_data)] * (minimum if isinstance(minimum, int) else 1)
+        return _valid_array_value(schema_mapping)
     if value_type == "object":
-        properties = schema_mapping.get("properties")
-        required = _string_set(schema_mapping.get("required"))
-        if not isinstance(properties, dict):
-            return {}
-        return {
-            name: _valid_value({"schema": child, **child} if isinstance(child, dict) else {})
-            for name, child in sorted(properties.items())
-            if name in required
-        }
+        return _valid_object_value(schema_mapping)
     if isinstance(schema_mapping.get("format"), str):
         return _format_values(cast(str, schema_mapping["format"]))[0]
     pattern = schema_mapping.get("pattern")
@@ -1245,6 +1391,109 @@ def _valid_value(data: dict[str, JsonValue]) -> JsonValue:
         return sample
     minimum_length = schema_mapping.get("minLength")
     return "x" * max(1, minimum_length if isinstance(minimum_length, int) else 1)
+
+
+def _is_sensitive_field_name(value: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    parts = set(normalized.split("_"))
+    return bool(
+        parts
+        & {
+            "authorization",
+            "card",
+            "cookie",
+            "password",
+            "passwd",
+            "secret",
+            "token",
+        }
+    )
+
+
+def _mark_redacted_contract_scenarios(
+    scenarios: list[ScenarioCandidate],
+) -> list[ScenarioCandidate]:
+    return [
+        scenario.model_copy(
+            update={
+                "requires_review": True,
+                "deterministic": False,
+                "confidence": min(scenario.confidence, 0.5),
+                "tags": sorted({*scenario.tags, "redacted-contract-data"}),
+            }
+        )
+        if _contains_test_data_secret_ref(scenario.request.model_dump(mode="json"))
+        else scenario
+        for scenario in scenarios
+    ]
+
+
+def _contains_test_data_secret_ref(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_test_data_secret_ref(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_test_data_secret_ref(child) for child in value)
+    return isinstance(value, str) and value.startswith("secret://test-data/")
+
+
+def _valid_numeric_value(schema: dict[str, JsonValue]) -> int | float:
+    observed = next(
+        (
+            value
+            for value in (schema.get("observed_minimum"), schema.get("observed_maximum"))
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and _within_numeric_bounds(value, schema)
+        ),
+        None,
+    )
+    if observed is not None:
+        return observed
+    exclusive_minimum = schema.get("exclusiveMinimum")
+    if isinstance(exclusive_minimum, (int, float)) and not isinstance(exclusive_minimum, bool):
+        return _adjacent_number(
+            exclusive_minimum,
+            _numeric_step(schema, exclusive_minimum),
+            upward=True,
+        )
+    minimum = schema.get("minimum")
+    return minimum if isinstance(minimum, (int, float)) else 1
+
+
+def _valid_array_value(schema: dict[str, JsonValue]) -> list[JsonValue]:
+    minimum = schema.get("minItems")
+    item_schema = schema.get("items")
+    item_data = {"schema": item_schema, **item_schema} if isinstance(item_schema, dict) else {}
+    return [_valid_value(item_data)] * (minimum if isinstance(minimum, int) else 1)
+
+
+def _valid_object_value(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    properties = schema.get("properties")
+    required = _string_set(schema.get("required"))
+    if not isinstance(properties, dict):
+        return {}
+    return {
+        name: _valid_value({"schema": child, **child} if isinstance(child, dict) else {})
+        for name, child in sorted(properties.items())
+        if name in required
+    }
+
+
+def _within_numeric_bounds(value: int | float, schema: dict[str, JsonValue]) -> bool:
+    minimum = _numeric_constraint(schema.get("minimum"))
+    maximum = _numeric_constraint(schema.get("maximum"))
+    exclusive_minimum = _numeric_constraint(schema.get("exclusiveMinimum"))
+    exclusive_maximum = _numeric_constraint(schema.get("exclusiveMaximum"))
+    return (
+        (minimum is None or value >= minimum)
+        and (maximum is None or value <= maximum)
+        and (exclusive_minimum is None or value > exclusive_minimum)
+        and (exclusive_maximum is None or value < exclusive_maximum)
+    )
+
+
+def _numeric_constraint(value: JsonValue | None) -> int | float | None:
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _invalid_type_value(value_type: JsonValue) -> JsonValue:
@@ -1360,35 +1609,75 @@ def _field_constraints(evidence: EvidenceBundle) -> list[EvidenceFinding]:
     for finding in evidence.findings:
         if finding.kind == "field_constraint":
             grouped.setdefault(finding.path, []).append(finding)
-    result: list[EvidenceFinding] = []
-    for path, findings in sorted(grouped.items()):
-        ordered = sorted(
-            findings,
-            key=lambda item: (item.source_type is not EvidenceSourceType.CONTRACT, item.id),
-        )
-        primary = ordered[0]
-        merged = dict(primary.structured_data)
-        conflicts: list[str] = []
-        for finding in ordered[1:]:
-            for key, value in finding.structured_data.items():
-                if key in {"supporting_evidence_ids", "conflicts", "example"}:
-                    continue
-                if key not in merged or merged[key] is None:
-                    merged[key] = value
-                elif _constraint_conflicts(key, merged[key], value):
-                    conflicts.append(f"{path}.{key}")
-        merged["supporting_evidence_ids"] = cast(
-            list[JsonValue], [finding.id for finding in ordered]
-        )
-        if conflicts:
-            merged["conflicts"] = cast(list[JsonValue], sorted(set(conflicts)))
-        result.append(primary.model_copy(update={"structured_data": merged}))
-    return result
+    return [_merged_field_constraint(path, findings) for path, findings in sorted(grouped.items())]
+
+
+def _merged_field_constraint(path: str, findings: list[EvidenceFinding]) -> EvidenceFinding:
+    ordered = sorted(findings, key=lambda item: (_evidence_priority(item), item.id))
+    primary = ordered[0]
+    merged = dict(primary.structured_data)
+    conflicts: list[str] = []
+    provenance: dict[str, list[JsonValue]] = {
+        key: [primary.id]
+        for key, value in merged.items()
+        if value is not None and key not in {"supporting_evidence_ids", "conflicts"}
+    }
+    conflict_evidence: dict[str, list[JsonValue]] = {}
+    for finding in ordered[1:]:
+        _merge_constraint_finding(path, finding, merged, provenance, conflicts, conflict_evidence)
+    merged["supporting_evidence_ids"] = cast(list[JsonValue], [finding.id for finding in ordered])
+    if conflicts:
+        merged["conflicts"] = cast(list[JsonValue], sorted(set(conflicts)))
+        merged["conflict_evidence"] = cast(JsonValue, conflict_evidence)
+    merged["constraint_evidence_ids"] = cast(
+        JsonValue,
+        {key: sorted(set(map(str, values))) for key, values in sorted(provenance.items())},
+    )
+    return primary.model_copy(update={"structured_data": merged})
+
+
+def _merge_constraint_finding(
+    path: str,
+    finding: EvidenceFinding,
+    merged: dict[str, JsonValue],
+    provenance: dict[str, list[JsonValue]],
+    conflicts: list[str],
+    conflict_evidence: dict[str, list[JsonValue]],
+) -> None:
+    for key, value in finding.structured_data.items():
+        if key in {"supporting_evidence_ids", "conflicts", "example"}:
+            continue
+        if key not in merged or merged[key] is None:
+            merged[key] = value
+            provenance[key] = [finding.id]
+        elif _constraint_conflicts(key, merged[key], value):
+            conflicts.append(f"{path}.{key}")
+            conflict_evidence[key] = cast(
+                list[JsonValue], sorted({*map(str, provenance.get(key, [])), finding.id})
+            )
+        elif merged[key] == value:
+            provenance.setdefault(key, []).append(finding.id)
+
+
+def _evidence_priority(finding: EvidenceFinding) -> int:
+    priorities = {
+        EvidenceSourceType.USER_CONFIRMED_RULE: 0,
+        EvidenceSourceType.CONTRACT: 1,
+        EvidenceSourceType.DATA_PROFILE: 2,
+        EvidenceSourceType.SOURCE: 3,
+        EvidenceSourceType.EXISTING_TEST: 4,
+        EvidenceSourceType.RUNTIME: 5,
+    }
+    return priorities.get(finding.source_type, 6)
 
 
 def _merge_evidence(contract: OperationContract, bundles: list[EvidenceBundle]) -> EvidenceBundle:
     raw_findings = [finding for bundle in bundles for finding in bundle.findings]
-    contract_fields = [finding for finding in raw_findings if finding.kind == "field_constraint"]
+    contract_fields = [
+        finding
+        for finding in raw_findings
+        if finding.kind == "field_constraint" and finding.source_type is EvidenceSourceType.CONTRACT
+    ]
     findings = sorted(
         (_normalize_finding(finding, contract_fields) for finding in raw_findings),
         key=lambda finding: finding.id,
@@ -1402,12 +1691,32 @@ def _merge_evidence(contract: OperationContract, bundles: list[EvidenceBundle]) 
 def _normalize_finding(
     finding: EvidenceFinding, contract_fields: list[EvidenceFinding]
 ) -> EvidenceFinding:
+    if (
+        finding.source_type is EvidenceSourceType.EXISTING_TEST
+        and finding.kind == "field_constraint"
+    ):
+        return finding.model_copy(
+            update={
+                "kind": "coverage_observation",
+                "structured_data": {
+                    **finding.structured_data,
+                    "normative": False,
+                    "drift_candidate": True,
+                },
+            }
+        )
     if finding.kind == "enum":
         return _normalize_source_enum(finding, contract_fields)
     if finding.kind == "validation_constraint":
         return _normalize_source_constraint(finding, contract_fields)
     if finding.kind != "column_profile":
         return finding
+    return _normalize_profile_finding(finding, contract_fields)
+
+
+def _normalize_profile_finding(
+    finding: EvidenceFinding, contract_fields: list[EvidenceFinding]
+) -> EvidenceFinding:
     name = finding.structured_data.get("name")
     if not isinstance(name, str):
         return finding
@@ -1422,17 +1731,32 @@ def _normalize_finding(
         "required": data.get("nullable") is False,
     }
     mapped = {
-        "minimum": "minimum",
-        "maximum": "maximum",
+        "observed_minimum": "observed_minimum",
+        "observed_maximum": "observed_maximum",
         "min_length": "minLength",
         "max_length": "maxLength",
-        "enum_candidates": "enum",
+        "observed_enum_candidates": "observed_enum_candidates",
+        "constraint_minimum": "minimum",
+        "constraint_maximum": "maximum",
+        "constraint_enum": "enum",
         "unique": "unique",
         "foreign_key": "foreign_key",
     }
     for source_key, target_key in mapped.items():
         if source_key in data and data[source_key] is not None:
             normalized[target_key] = data[source_key]
+    check_constraint = data.get("check_constraint")
+    if isinstance(check_constraint, dict):
+        for key in (
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "enum",
+            "pattern",
+        ):
+            if key in check_constraint:
+                normalized[key] = check_constraint[key]
     data_type = data.get("data_type")
     if isinstance(data_type, str):
         normalized["type"] = _profile_schema_type(data_type)
@@ -1500,7 +1824,20 @@ def _normalize_source_constraint(
     data = {
         key: value
         for key, value in finding.structured_data.items()
-        if key in {"name", "minimum", "maximum"}
+        if key
+        in {
+            "name",
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "enum",
+            "pattern",
+            "required",
+            "nullable",
+            "type",
+            "format",
+        }
     }
     data["location"] = target.structured_data.get("location", "body")
     return finding.model_copy(
@@ -1514,23 +1851,37 @@ def _normalize_source_constraint(
 
 
 def _constraint_conflicts(key: str, current: JsonValue, candidate: JsonValue) -> bool:
-    if key in {"type", "required", "nullable", "additionalProperties"}:
+    if key in {
+        "type",
+        "required",
+        "nullable",
+        "additionalProperties",
+        "pattern",
+        "format",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "multipleOf",
+        "unique",
+        "foreign_key",
+    }:
         return current != candidate
     if key == "enum" and isinstance(current, list) and isinstance(candidate, list):
-        return any(value not in current for value in candidate)
+        return {_semantic_json(value) for value in current} != {
+            _semantic_json(value) for value in candidate
+        }
     if (
-        key == "minimum"
+        key in {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"}
         and isinstance(current, (int, float))
         and isinstance(candidate, (int, float))
     ):
-        return candidate < current
-    if (
-        key == "maximum"
-        and isinstance(current, (int, float))
-        and isinstance(candidate, (int, float))
-    ):
-        return candidate > current
+        return current != candidate
     return False
+
+
+def _semantic_json(value: JsonValue) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _profile_schema_type(value: str) -> str:
@@ -1694,6 +2045,17 @@ def _evidence_ids(evidence: EvidenceBundle, *kinds: str) -> list[str]:
     return [finding.id for finding in evidence.findings if finding.kind in kinds]
 
 
+def _status_evidence_ids(evidence: EvidenceBundle, status: int | None) -> list[str]:
+    if status is None:
+        return []
+    path = f"responses.{status}"
+    return [
+        finding.id
+        for finding in evidence.findings
+        if finding.kind == "response_contract" and finding.path == path
+    ]
+
+
 def _evidence_ids_from(findings: list[EvidenceFinding]) -> list[str]:
     return sorted({item for finding in findings for item in _field_evidence_ids(finding)})
 
@@ -1701,6 +2063,54 @@ def _evidence_ids_from(findings: list[EvidenceFinding]) -> list[str]:
 def _field_evidence_ids(finding: EvidenceFinding) -> list[str]:
     supporting = _json_string_list(finding.structured_data.get("supporting_evidence_ids"))
     return supporting or [finding.id]
+
+
+def _field_evidence_ids_for_kind(finding: EvidenceFinding, kind: str) -> list[str]:
+    keys_by_kind = {
+        "required_omitted": ("required",),
+        "required_null": ("required", "nullable"),
+        "number_below_min": ("type", "minimum", "multipleOf"),
+        "number_at_min": ("type", "minimum"),
+        "number_below_max": ("type", "maximum", "multipleOf"),
+        "number_at_max": ("type", "maximum"),
+        "number_above_max": ("type", "maximum", "multipleOf"),
+        "number_at_exclusive_min": ("type", "exclusiveMinimum"),
+        "number_above_exclusive_min": ("type", "exclusiveMinimum", "multipleOf"),
+        "number_below_exclusive_max": ("type", "exclusiveMaximum", "multipleOf"),
+        "number_at_exclusive_max": ("type", "exclusiveMaximum"),
+        "enum_value": ("type", "enum"),
+        "enum_invalid": ("type", "enum"),
+        "string_below_min_length": ("type", "minLength"),
+        "string_at_min_length": ("type", "minLength"),
+        "string_at_max_length": ("type", "maxLength"),
+        "string_above_max_length": ("type", "maxLength"),
+        "format_valid": ("type", "format"),
+        "format_invalid": ("type", "format"),
+        "pattern_valid": ("type", "pattern"),
+        "pattern_invalid": ("type", "pattern"),
+        "array_below_min": ("type", "minItems", "items"),
+        "array_at_min": ("type", "minItems", "items"),
+        "array_at_max": ("type", "maxItems", "items"),
+        "array_above_max": ("type", "maxItems", "items"),
+        "array_duplicate": ("type", "uniqueItems", "items"),
+        "invalid_type": ("type",),
+        "duplicate_value": ("unique",),
+        "nonexistent_reference": ("foreign_key",),
+    }
+    provenance = finding.structured_data.get("constraint_evidence_ids")
+    conflicts = finding.structured_data.get("conflict_evidence")
+    if not isinstance(provenance, dict):
+        return _field_evidence_ids(finding)
+    result: set[str] = set()
+    for key in keys_by_kind.get(kind, ()):
+        values = provenance.get(key)
+        if isinstance(values, list):
+            result.update(str(value) for value in values)
+        if isinstance(conflicts, dict):
+            conflict_values = conflicts.get(key)
+            if isinstance(conflict_values, list):
+                result.update(str(value) for value in conflict_values)
+    return sorted(result) or [finding.id]
 
 
 def _deduplicate_scenarios(items: list[ScenarioCandidate]) -> list[ScenarioCandidate]:

@@ -236,7 +236,11 @@ def test_s47_semantic_coverage_avoids_historical_boundary_duplicates() -> None:
             source_ref="github://acme/orders/commit/s47-1",
             position=1,
             current_contract=current_contract,
-            covered_values={"99", "100", "101"},
+            covered_values={
+                "99|success",
+                "100|success",
+                "101|success",
+            },
         )
     )
 

@@ -264,7 +264,8 @@ def test_auth_missing_design_materializes_by_explicitly_disabling_auth() -> None
     )
     request = next(node for node in workflow.nodes if node.id == "request")
     assert request.config["api_version"] == 3
-    assert request.config["request_overrides"]["auth_disabled"] is True
+    assert request.config["request_overrides"]["auth_mode"] == "disabled"
+    assert "auth_disabled" not in request.config["request_overrides"]
 
 
 def test_json_path_oracle_materializes_as_real_assert_node() -> None:
@@ -450,7 +451,7 @@ def test_evidence_rejects_raw_sensitive_values_and_requires_masked_profiles() ->
     assert finding.sensitive is True
 
 
-def test_data_profile_evidence_changes_boundaries_with_exact_provenance() -> None:
+def test_observed_data_profile_does_not_create_normative_boundaries() -> None:
     contract = OperationContract.model_validate(
         {
             "operation": "orders.create",
@@ -458,6 +459,7 @@ def test_data_profile_evidence_changes_boundaries_with_exact_provenance() -> Non
             "path": "/orders",
             "request": {
                 "type": "object",
+                "required": ["quantity"],
                 "properties": {"quantity": {"type": "integer"}},
             },
             "responses": {"201": {"description": "created"}},
@@ -483,14 +485,56 @@ def test_data_profile_evidence_changes_boundaries_with_exact_provenance() -> Non
     )
 
     design = TestEngineeringEngine().generate(contract=contract, additional_evidence=[evidence])
+    assert not any(
+        scenario.kind in {"number_at_max", "number_above_max"}
+        and scenario.mutations[0].path == "body.quantity"
+        for scenario in design.scenarios
+    )
+    assert "evidence_conflict" not in design.review_requirements
+
+
+def test_explicit_data_profile_constraint_creates_boundary_with_exact_provenance() -> None:
+    contract = OperationContract.model_validate(
+        {
+            "operation": "orders.create",
+            "method": "POST",
+            "path": "/orders",
+            "request": {
+                "type": "object",
+                "required": ["quantity"],
+                "properties": {"quantity": {"type": "integer"}},
+            },
+            "responses": {"201": {"description": "created"}},
+        }
+    )
+    evidence = data_profile_evidence(
+        DataProfile.model_validate(
+            {
+                "source_ref": "db://orders/schema",
+                "revision": "43",
+                "entity": "orders",
+                "columns": [
+                    {
+                        "name": "quantity",
+                        "data_type": "integer",
+                        "nullable": False,
+                        "constraint_maximum": 10,
+                    }
+                ],
+            }
+        )
+    )
+
+    design = TestEngineeringEngine().generate(contract=contract, additional_evidence=[evidence])
     boundary = next(
         scenario
         for scenario in design.scenarios
         if scenario.kind == "number_above_max" and scenario.mutations[0].path == "body.quantity"
     )
-
     assert boundary.mutations[0].value == 11
     assert evidence.findings[0].id in boundary.evidence_refs
+    assert len(boundary.evidence_refs) == 2
+    assert boundary.evidence_refs != list(design.evidence_refs)
 
 
 def test_evidence_conflict_marks_scenarios_review_only_and_blocks_materialization() -> None:
@@ -501,6 +545,7 @@ def test_evidence_conflict_marks_scenarios_review_only_and_blocks_materializatio
             "path": "/orders",
             "request": {
                 "type": "object",
+                "required": ["quantity"],
                 "properties": {"quantity": {"type": "integer", "maximum": 100}},
             },
             "responses": {"201": {"description": "created"}},
@@ -517,7 +562,7 @@ def test_evidence_conflict_marks_scenarios_review_only_and_blocks_materializatio
                         "name": "quantity",
                         "data_type": "integer",
                         "nullable": False,
-                        "maximum": 999,
+                        "constraint_maximum": 999,
                     }
                 ],
             }
@@ -588,7 +633,7 @@ def test_generation_helper_edges_are_explicit_and_reviewable() -> None:
     assert _constraint_conflicts("enum", ["A"], ["A", "B"]) is True
     assert _constraint_conflicts("minimum", 10, 1) is True
     assert _constraint_conflicts("maximum", 10, 20) is True
-    assert _constraint_conflicts("pattern", "a", "b") is False
+    assert _constraint_conflicts("pattern", "a", "b") is True
 
     route_evidence = EvidenceBundle.model_validate(
         {

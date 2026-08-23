@@ -22,6 +22,7 @@ import type {
   ChangeRegressionStatus,
   FailureTriageResult,
   MissingTestProposal,
+  SemanticCoverageScope,
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
 
@@ -204,6 +205,7 @@ function RunDetail({
           {run.release_decision_id ?? '尚未评估'}
         </Descriptions.Item>
       </Descriptions>
+      <CoverageDimensionsPanel run={run} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
       {run.missing_tests.length > 0 && (
         <>
@@ -291,6 +293,93 @@ function RunDetail({
       )}
     </Space>
   )
+}
+
+function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
+  const scopes = run.selection_summary.semantic_coverage_scopes ?? []
+  const assetGapCount = run.selection_summary.asset_coverage_gap_count
+  const coverageStatus = (dimension: 'project_known_coverage' | 'current_test_plan_coverage') => {
+    if (!scopes.length) return '无语义变更目标'
+    return scopes.every((scope) => scope[dimension] === 'covered') ? 'covered' : 'missing'
+  }
+  return (
+    <Card size="small" title="Coverage Scope / 位置化语义缺口">
+      <Descriptions size="small" bordered column={3}>
+        <Descriptions.Item label="Asset Mapping Coverage">
+          <CoverageStatus
+            value={assetGapCount === undefined ? 'unknown' : assetGapCount ? 'missing' : 'covered'}
+          />
+        </Descriptions.Item>
+        <Descriptions.Item label="Project Known Semantic Coverage">
+          <CoverageStatus value={coverageStatus('project_known_coverage')} />
+        </Descriptions.Item>
+        <Descriptions.Item label="Current Test Plan Semantic Coverage">
+          <CoverageStatus value={coverageStatus('current_test_plan_coverage')} />
+        </Descriptions.Item>
+      </Descriptions>
+      {scopes.length ? (
+        <Table
+          rowKey="change_key"
+          size="small"
+          pagination={false}
+          dataSource={scopes}
+          columns={[
+            {
+              title: 'Operation',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.operation
+                  ? `${scope.operation.service_key} · ${scope.operation.method} ${scope.operation.normalized_path}`
+                  : 'unresolved',
+            },
+            {
+              title: 'Location',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.target?.location ?? 'unresolved',
+            },
+            {
+              title: 'Field',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.target?.field_path.join('.') ?? 'unresolved',
+            },
+            {
+              title: 'Constraint',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.target?.constraint ?? 'unresolved',
+            },
+            {
+              title: 'Before → After',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.target
+                  ? `${JSON.stringify(scope.target.before)} → ${JSON.stringify(scope.target.after)}`
+                  : '-',
+            },
+            {
+              title: 'Existing Values',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.project_known_values.join(', ') || '无',
+            },
+            {
+              title: 'Missing Values',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.current_test_plan_missing_values.join(', ') || '无',
+            },
+            {
+              title: 'Oracle Source',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.oracle_sources
+                  .map((source) => `${source.source_type}:${source.source_ref}`)
+                  .join(', ') || '待审核',
+            },
+          ]}
+        />
+      ) : null}
+    </Card>
+  )
+}
+
+function CoverageStatus({ value }: { value: string }) {
+  const color = value === 'covered' ? 'green' : value === 'missing' ? 'red' : 'default'
+  return <Tag color={color}>{value}</Tag>
 }
 
 function FailureTriagePanel({ value }: { value: ChangeRegressionRun['failure_triage'] }) {

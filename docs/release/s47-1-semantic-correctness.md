@@ -149,9 +149,10 @@ Schema 仍为 `flowtest-flow-spec-v1`，新导出使用
 - current 落地时不写 `api_version`，继续跟随目标 current；pinned 恢复目标 exact version；
 - version strategy 和 contract fingerprint 都参与 v3 指纹。
 
-v1/v2 文档继续按原投影读取和验证，新字段不会被静默纳入旧指纹。Golden 用例覆盖 Source current
-v3 / node pinned v1 → Target current v4 / mapped compatible v1，最终节点仍为 `api_version=1`；
-目标没有兼容 v1 时 Import 阻断。
+S47.1 阶段曾保留 v1/v2 原投影读取，并以 Source current v3 / node pinned v1 → Target current v4 /
+mapped compatible v1 验证版本固定语义。S47.2 已明确 V5 只正式支持 fingerprint v3；上述开发期
+旧投影代码可以保留，但不构成兼容承诺、迁移范围或合并门槛。v3 中 pinned 目标没有 exact compatible
+version 时仍必须阻断，禁止回退 current。
 
 ## 9. Semantic Coverage 与 Change Regression
 
@@ -239,3 +240,16 @@ Compose `2 passed`。`pip-audit` 未发现已知漏洞（本地项目包不在 P
 S47.1 的本地语义闭环完成后，只能进入
 `READY_FOR_V5_FUNCTIONAL_COMPLETION_REVIEW`。由于真实 Key Rotation 和外部/时间型门槛未完成，
 `GA_READY` 必须保持 `NO`；本文不构成 Merge、Tag、Release 或生产发布授权。
+
+## 17. S47.2 后续校正
+
+S47.2 进一步关闭了 S47.1 尚存的安全与正确性缺口：Canonical Contract 从“字段级脱敏”收紧为统一
+allowlist sanitizer；0043 对既有 PostgreSQL/Standalone 数据执行同语义净化并重算 fingerprint；请求
+suppression 在全部配置层合并后应用；Coverage 绑定 Operation 和 location；Change Regression 使用
+当前契约支持 Body/Path/Query/Header/Cookie；Evidence 区分规范性约束与观察统计并执行对称冲突；
+exclusiveMinimum/exclusiveMaximum 与 Source AST 严格比较保持精确边界。
+
+同时校正文档范围：V5 正式 FlowSpec 基线仅为 fingerprint v3，开发期 v1/v2 不属于正式兼容承诺，
+S47.2 不为旧格式增加迁移复杂度。最终事实与测试结果见
+[S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。本文原有外部证据和 GA 限制继续
+有效；真实 Key Rotation 等门槛未完成，因此 `GA_READY` 仍为 `NO`。

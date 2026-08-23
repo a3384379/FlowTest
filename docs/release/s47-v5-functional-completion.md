@@ -168,3 +168,19 @@ Projection/Conflict、Path/Query/Header/Body/Auth 真实物化、Response Schema
 pinned/current v3 指纹、独立 Test Semantic Coverage、value-level Evidence Redaction、HTTP 5xx
 upstream 分类和 0041 downgrade truth fix。详细审计矩阵、Schema、迁移和剩余风险见
 [S47.1 语义正确性与证据闭环](s47-1-semantic-correctness.md)。
+
+## 12. S47.2 最终正确性与安全补充
+
+S47.2 在 S47.1 语义链路上增加统一 Canonical Contract allowlist sanitizer、0043 既有数据净化与
+fingerprint 重算、五层请求 suppression、Operation/location scoped coverage、位置化 Change Regression、
+规范性/观察性 Evidence 分离、对称冲突和 exclusive boundary 精确生成。REST、MCP、Test Engineering、
+Execution Snapshot 与 Audit 都不得暴露被移除的敏感值。
+
+V5 FlowSpec 的唯一正式基线是 `flowtest-flow-spec-fingerprint-v3`；开发期 v1/v2 不属于正式兼容范围，
+也不是 V5 合并阻断项。Pairwise 仍是有界代表组合，State Model 未实现，Knowledge Graph 仅表达已有
+Evidence 的确定性关系；这些能力不得写成完整实现。
+
+最终实现、迁移往返、本地门禁、Draft PR 和远程 CI 证据见
+[S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。无论本地功能闭环结果如何，真实
+Key Rotation、Windows 实机、长时 Standalone/Compact、连续 RC、安全审批和人工签署未完成前，
+`GA_READY` 必须为 `NO`。

@@ -238,6 +238,80 @@ async def test_standalone_schema_backfills_safe_partial_api_contract(tmp_path) -
     assert row[2] == "legacy_partial"
 
 
+@pytest.mark.asyncio
+async def test_standalone_s472_sanitizes_existing_contract_data_irreversibly(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's472-security.db'}")
+    raw_contract = {
+        "operation": "orders.create",
+        "method": "POST",
+        "path": "/orders",
+        "request_body": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "password": {"type": "string", "example": "database-password"},
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "NORMAL",
+                            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123",
+                        ],
+                    },
+                },
+            }
+        },
+        "responses": {
+            "200": {
+                "description": "ok",
+                "schema": {"type": "string", "default": "database-token"},
+            }
+        },
+        "completeness": "complete",
+    }
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE api_versions ("
+                "id VARCHAR(36) PRIMARY KEY, canonical_contract JSON NOT NULL, "
+                "contract_fingerprint VARCHAR(64), contract_completeness VARCHAR(32) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO api_versions VALUES "
+                "('version-1', :contract, 'old-fingerprint', 'complete')"
+            ),
+            {"contract": json.dumps(raw_contract)},
+        )
+        await standalone_schema._sanitize_s472_api_version_contracts(connection)
+        first = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT canonical_contract, contract_fingerprint, contract_completeness "
+                    "FROM api_versions WHERE id = 'version-1'"
+                )
+            )
+        ).one()
+        await standalone_schema._sanitize_s472_api_version_contracts(connection)
+        second = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT canonical_contract, contract_fingerprint, contract_completeness "
+                    "FROM api_versions WHERE id = 'version-1'"
+                )
+            )
+        ).one()
+
+    await test_engine.dispose()
+    persisted = str(first[0])
+    assert "database-password" not in persisted
+    assert "database-token" not in persisted
+    assert "eyJhbGci" not in persisted
+    assert first[2] == "redacted_partial"
+    assert len(str(first[1])) == 64
+    assert first == second
+
+
 def test_standalone_partial_contract_schema_inference_is_bounded() -> None:
     assert standalone_schema._standalone_inferred_schema(True) == {"type": "boolean"}
     assert standalone_schema._standalone_inferred_schema(1.5) == {"type": "number"}

@@ -303,6 +303,9 @@ def _swagger_parameter_schema(
         "enum",
         "minimum",
         "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
         "minLength",
         "maxLength",
         "pattern",
@@ -315,7 +318,7 @@ def _swagger_parameter_schema(
             schema[key] = _json_value(parameter[key])
     if "items" in schema:
         schema["items"] = _resolved_schema(document, parameter.get("items"))
-    return schema
+    return _normalize_exclusive_boundaries(schema)
 
 
 def _resolved_mapping(document: Mapping[str, object], value: object) -> Mapping[str, object]:
@@ -326,9 +329,11 @@ def _resolved_mapping(document: Mapping[str, object], value: object) -> Mapping[
     current: object = document
     for part in reference[2:].split("/"):
         if not isinstance(current, Mapping):
-            return {}
+            return mapping
         current = current.get(part.replace("~1", "/").replace("~0", "~"))
-    return _mapping(current)
+    resolved = dict(_mapping(current))
+    resolved.update({key: item for key, item in mapping.items() if key != "$ref"})
+    return resolved
 
 
 def _resolved_schema(
@@ -346,10 +351,33 @@ def _resolved_schema(
                 str(name): _resolved_schema(document, child, depth=depth + 1)
                 for name, child in item.items()
             }
-        elif key == "items":
+        elif key in {"items", "not"}:
+            result[key] = _resolved_schema(document, item, depth=depth + 1)
+        elif key in {"oneOf", "anyOf", "allOf"}:
+            result[key] = [
+                _resolved_schema(document, child, depth=depth + 1) for child in _sequence(item)
+            ]
+        elif key == "additionalProperties" and isinstance(item, Mapping):
             result[key] = _resolved_schema(document, item, depth=depth + 1)
         else:
             result[key] = _json_value(item)
+    return _normalize_exclusive_boundaries(result)
+
+
+def _normalize_exclusive_boundaries(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    result = dict(schema)
+    for inclusive_key, exclusive_key in (
+        ("minimum", "exclusiveMinimum"),
+        ("maximum", "exclusiveMaximum"),
+    ):
+        exclusive = result.get(exclusive_key)
+        inclusive = result.get(inclusive_key)
+        if not isinstance(exclusive, bool):
+            continue
+        result.pop(exclusive_key, None)
+        if exclusive and isinstance(inclusive, (int, float)) and not isinstance(inclusive, bool):
+            result.pop(inclusive_key, None)
+            result[exclusive_key] = inclusive
     return result
 
 

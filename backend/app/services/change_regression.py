@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from builtins import list as list_type
 from datetime import UTC, datetime
-from typing import Any, cast
+from http.cookies import CookieError, SimpleCookie
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -20,17 +22,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.change_regression import (
+    ChangeConstraintTarget,
     ChangeRegressionStatus,
-    existing_semantic_values,
-    gap_covered_values,
+    OperationIdentity,
+    SemanticCoverageFact,
+    change_constraint_target,
     missing_test_design,
     regression_fingerprint,
+    semantic_coverage_tokens,
     transition_status,
 )
 from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.tasking import TestPlanTrigger
 from app.domain.test_design import TestDesignDocument, fingerprint_design, sensitive_paths
-from app.domain.test_engineering import OperationContract
+from app.domain.test_engineering import ContractParameter, OperationContract, fingerprint_contract
 from app.engine.results import NodeResult
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -39,10 +44,11 @@ from app.models.change_regression import ChangeRegressionRun, ChangeRegressionSt
 from app.models.contracts import DeploymentCompatibilityCheck
 from app.models.quality_intelligence import ReleaseRisk
 from app.models.release_gate import ReleasePolicy
+from app.models.service_targets import Service
 from app.models.tasking import TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import TestCase
 from app.models.test_design import ChangeSetApproval, TestDesign
-from app.models.workflows import Workflow, WorkflowNodeExecution
+from app.models.workflows import Workflow, WorkflowNodeExecution, WorkflowVersion
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.change_regression import (
     ChangeRegressionBundle,
@@ -110,19 +116,85 @@ class ChangeRegressionService:
         asset_gaps = cast(list[dict[str, JsonValue]], impact.coverage.gaps)
         gaps = _missing_test_targets(impact, asset_gaps)
         semantic_coverage = await self._existing_semantic_coverage(project_id)
+        current_plan_scope = await self._current_plan_scope(
+            selected_assets=selected_assets,
+            plan_items=plan_items,
+            project_id=project_id,
+        )
         missing_tests: list[dict[str, JsonValue]] = []
+        semantic_scope_results: list[dict[str, JsonValue]] = []
+        plan_recommendations: list[dict[str, JsonValue]] = []
         if payload.generate_missing_tests:
             for index, gap in enumerate(gaps, start=1):
-                covered_values = gap_covered_values(gap, semantic_coverage)
-                contract = await self._current_contract_for_gap(project_id, gap)
+                resolved = await self._current_contract_for_gap(project_id, gap)
+                contract, identity = resolved if resolved is not None else (None, None)
+                target = change_constraint_target(gap)
+                project_values = (
+                    semantic_coverage_tokens(semantic_coverage, identity, target)
+                    if identity is not None and target is not None
+                    else set()
+                )
+                current_plan_values = (
+                    semantic_coverage_tokens(
+                        semantic_coverage,
+                        identity,
+                        target,
+                        asset_scope=current_plan_scope,
+                    )
+                    if identity is not None and target is not None
+                    else set()
+                )
                 content = missing_test_design(
                     gap=gap,
                     source_ref=payload.source_ref,
                     position=index,
                     current_contract=contract,
-                    covered_values=covered_values,
+                    covered_values=project_values,
+                )
+                plan_content = missing_test_design(
+                    gap=gap,
+                    source_ref=payload.source_ref,
+                    position=index,
+                    current_contract=contract,
+                    covered_values=current_plan_values,
+                )
+                semantic_scope_results.append(
+                    _semantic_scope_result(
+                        gap=gap,
+                        identity=identity,
+                        target=target,
+                        project_content=content,
+                        current_plan_content=plan_content,
+                        project_values=project_values,
+                        current_plan_values=current_plan_values,
+                    )
                 )
                 if not content.get("scenarios"):
+                    review_requirements = content.get("review_requirements")
+                    if (
+                        isinstance(review_requirements, list)
+                        and "change_target_unresolved" in review_requirements
+                    ):
+                        missing_tests.append(
+                            {
+                                "position": index,
+                                "change_key": str(gap.get("change_key", index)),
+                                "source_key": str(gap.get("source_key", "")),
+                                "title": f"待定位变更：{_change_label(gap, index)}",
+                                "confidence": 0.5,
+                                "content": content,
+                            }
+                        )
+                        continue
+                    if plan_content.get("scenarios"):
+                        plan_recommendations.append(
+                            {
+                                "change_key": str(gap.get("change_key") or index),
+                                "action": "add_project_known_test_to_current_plan",
+                                "operation": identity.model_dump(mode="json") if identity else None,
+                                "target": target.model_dump(mode="json") if target else None,
+                            }
+                        )
                     continue
                 missing_tests.append(
                     {
@@ -150,8 +222,10 @@ class ChangeRegressionService:
             "semantic_change_target_count": len(gaps),
             "coverage_gap_count": len(asset_gaps),
             "missing_test_generation": payload.generate_missing_tests,
-            "semantic_coverage_known_paths": len(semantic_coverage),
+            "semantic_coverage_fact_count": len(semantic_coverage),
             "semantic_gap_count": len(missing_tests),
+            "semantic_coverage_scopes": cast(JsonValue, semantic_scope_results),
+            "current_plan_recommendations": cast(JsonValue, plan_recommendations),
         }
         fingerprint = regression_fingerprint(
             source_fingerprint=impact.run.source_fingerprint,
@@ -894,71 +968,152 @@ class ChangeRegressionService:
         ]
         return cast(dict[str, JsonValue], triage_failures(signals).model_dump(mode="json"))
 
-    async def _existing_semantic_coverage(self, project_id: UUID) -> dict[str, set[str]]:
-        models = list(
-            (
-                await self._session.scalars(
-                    select(TestDesign).where(TestDesign.project_id == project_id)
-                )
-            ).all()
-        )
-        documents: list[TestDesignDocument] = []
-        for model in models:
-            try:
-                documents.append(
-                    TestDesignDocument.model_validate(
-                        {
-                            "intent": model.intent,
-                            "knowledge_graph": model.knowledge_graph,
-                            "state_model": model.state_model or None,
-                            "scenarios": model.scenarios,
-                            "oracles": model.oracles,
-                            "coverage": model.coverage,
-                            "evidence_refs": model.evidence_refs,
-                            "warnings": model.warnings,
-                            "confidence": model.confidence,
-                            "review_requirements": model.review_requirements,
-                            "test_case_refs": model.test_case_refs,
-                        }
-                    )
-                )
-            except ValueError:
-                # An opaque legacy design is unknown coverage, never implicitly covered.
-                continue
-        coverage = existing_semantic_values(documents)
-        test_cases = list(
+    async def _existing_semantic_coverage(
+        self, project_id: UUID
+    ) -> list_type[SemanticCoverageFact]:
+        """Extract only executable workflow facts with an operation identity and oracle."""
+
+        test_cases = list_type(
             (
                 await self._session.scalars(
                     select(TestCase).where(TestCase.project_id == project_id)
                 )
             ).all()
         )
-        workflow_ids = {
-            workflow_id
-            for case in test_cases
-            if (workflow_id := _test_case_workflow_id(case.draft_definition)) is not None
+        workflows = list_type(
+            (
+                await self._session.scalars(
+                    select(Workflow).where(
+                        Workflow.project_id == project_id,
+                        Workflow.current_version.is_not(None),
+                    )
+                )
+            ).all()
+        )
+        facts: list_type[SemanticCoverageFact] = []
+        workflows_by_id = {workflow.id: workflow for workflow in workflows}
+        for case in test_cases:
+            workflow_id = _test_case_workflow_id(case.draft_definition)
+            workflow = workflows_by_id.get(workflow_id) if workflow_id is not None else None
+            if workflow is None:
+                continue
+            facts.extend(
+                await self._workflow_semantic_facts(
+                    project_id=project_id,
+                    workflow=workflow,
+                    source_asset_type="test_case",
+                    source_asset_id=case.id,
+                )
+            )
+        for workflow in workflows:
+            facts.extend(
+                await self._workflow_semantic_facts(
+                    project_id=project_id,
+                    workflow=workflow,
+                    source_asset_type="workflow",
+                    source_asset_id=workflow.id,
+                )
+            )
+        return facts
+
+    async def _workflow_semantic_facts(
+        self,
+        *,
+        project_id: UUID,
+        workflow: Workflow,
+        source_asset_type: Literal["test_case", "workflow"],
+        source_asset_id: UUID,
+    ) -> list_type[SemanticCoverageFact]:
+        if workflow.current_version is None:
+            return []
+        published = await self._session.scalar(
+            select(WorkflowVersion).where(
+                WorkflowVersion.workflow_id == workflow.id,
+                WorkflowVersion.version == workflow.current_version,
+            )
+        )
+        if published is None:
+            return []
+        workflow_definition = published.definition
+        facts: list_type[SemanticCoverageFact] = []
+        for raw_node in _workflow_api_nodes(workflow_definition):
+            config = _mapping(raw_node.get("config"))
+            try:
+                definition_id = UUID(str(config["api_definition_id"]))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+            raw_version = config.get("api_version")
+            version_number = raw_version if isinstance(raw_version, int) else None
+            resolved = await self._operation_identity(
+                project_id=project_id,
+                definition_id=definition_id,
+                version_number=version_number,
+            )
+            if resolved is None:
+                continue
+            identity, contract = resolved
+            category, oracle = _expected_semantics(config.get("expected_statuses"))
+            facts.extend(
+                _workflow_node_facts(
+                    definition=workflow_definition,
+                    config=config,
+                    identity=identity,
+                    contract=contract,
+                    expected_category=category,
+                    oracle_identity=oracle,
+                    source_asset_type=source_asset_type,
+                    source_asset_id=str(source_asset_id),
+                )
+            )
+        return facts
+
+    async def _current_plan_scope(
+        self,
+        *,
+        selected_assets: list_type[dict[str, JsonValue]],
+        plan_items: list_type[TestPlanItem],
+        project_id: UUID,
+    ) -> set[tuple[str, str]]:
+        selected = {
+            (str(asset.get("target_type")), str(asset.get("target_id")))
+            for asset in selected_assets
         }
-        workflows = (
-            list(
+        scope: set[tuple[str, str]] = set()
+        case_ids = [item.target_id for item in plan_items if item.target_type == "case"]
+        cases = (
+            list_type(
                 (
                     await self._session.scalars(
-                        select(Workflow).where(
-                            Workflow.project_id == project_id,
-                            Workflow.id.in_(workflow_ids),
+                        select(TestCase).where(
+                            TestCase.project_id == project_id,
+                            TestCase.id.in_(case_ids),
                         )
                     )
                 ).all()
             )
-            if workflow_ids
+            if case_ids
             else []
         )
-        for workflow in workflows:
-            _merge_workflow_semantics(coverage, workflow.draft_definition)
-        return coverage
+        cases_by_id = {case.id: case for case in cases}
+        for item in plan_items:
+            if item.target_type == "workflow":
+                key = ("workflow", str(item.target_id))
+                if key in selected:
+                    scope.add(key)
+                continue
+            if item.target_type != "case":
+                continue
+            case_key = ("test_case", str(item.target_id))
+            case = cases_by_id.get(item.target_id)
+            workflow_id = _test_case_workflow_id(case.draft_definition) if case else None
+            workflow_key = ("workflow", str(workflow_id)) if workflow_id else None
+            if case_key in selected or (workflow_key is not None and workflow_key in selected):
+                scope.add(case_key)
+        return scope
 
     async def _current_contract_for_gap(
         self, project_id: UUID, gap: dict[str, JsonValue]
-    ) -> OperationContract | None:
+    ) -> tuple[OperationContract, OperationIdentity] | None:
         source_key = str(gap.get("source_key") or "")
         parts = source_key.split(maxsplit=1)
         if len(parts) != 2 or not parts[1].startswith("/"):
@@ -988,9 +1143,64 @@ class ChangeRegressionService:
         ]
         if len(matches) != 1:
             return None
-        return await TestEngineeringService(self._session).contract_for_api(
-            project_id=project_id, definition_id=matches[0].id
+        resolved = await self._operation_identity(
+            project_id=project_id,
+            definition_id=matches[0].id,
+            version_number=None,
         )
+        if resolved is None:
+            return None
+        identity, contract = resolved
+        return contract, identity
+
+    async def _operation_identity(
+        self,
+        *,
+        project_id: UUID,
+        definition_id: UUID,
+        version_number: int | None,
+    ) -> tuple[OperationIdentity, OperationContract] | None:
+        definition = await self._session.get(APIDefinition, definition_id)
+        if definition is None or definition.project_id != project_id or not definition.is_active:
+            return None
+        target_version = version_number or definition.current_version
+        version = await self._session.scalar(
+            select(APIVersion).where(
+                APIVersion.api_definition_id == definition.id,
+                APIVersion.version == target_version,
+            )
+        )
+        # A missing pinned version is unknown coverage; never fall back to current.
+        if version is None:
+            return None
+        service_key = "default"
+        if definition.service_id is not None:
+            service = await self._session.get(Service, definition.service_id)
+            if service is None or service.project_id != project_id:
+                return None
+            service_key = service.service_key
+        if version.canonical_contract:
+            try:
+                contract = OperationContract.model_validate(version.canonical_contract)
+            except ValueError:
+                return None
+            contract = contract.model_copy(update={"service": service_key})
+        else:
+            contract = await TestEngineeringService(self._session).contract_for_api(
+                project_id=project_id,
+                definition_id=definition.id,
+            )
+            if target_version != definition.current_version:
+                return None
+        identity = OperationIdentity(
+            api_definition_id=str(definition.id),
+            portable_operation_ref=contract.operation,
+            service_key=service_key,
+            method=version.method,
+            normalized_path=_semantic_path(version.path),
+            contract_fingerprint=fingerprint_contract(contract),
+        )
+        return identity, contract
 
     async def _current_path(self, definition: APIDefinition) -> str:
         version = await self._session.scalar(
@@ -1069,6 +1279,253 @@ def _semantic_path(value: str) -> str:
     return re.sub(r"\{\{[^}]+\}\}|\{[^}]+\}", "{}", value)
 
 
+def _mapping(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _workflow_api_nodes(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = definition.get("nodes")
+    if not isinstance(nodes, list):
+        return []
+    return [node for node in nodes if isinstance(node, dict) and node.get("type") == "api"]
+
+
+def _expected_semantics(
+    raw_statuses: object,
+) -> tuple[Literal["success", "invalid_request", "unauthorized", "unknown"], str | None]:
+    if (
+        not isinstance(raw_statuses, list)
+        or len(raw_statuses) != 1
+        or not isinstance(raw_statuses[0], int)
+    ):
+        return "unknown", None
+    status = raw_statuses[0]
+    if 200 <= status <= 299:
+        return "success", f"status:{status}"
+    if status in {401, 403}:
+        return "unauthorized", f"status:{status}"
+    if 400 <= status <= 499:
+        return "invalid_request", f"status:{status}"
+    return "unknown", f"status:{status}"
+
+
+def _workflow_node_facts(
+    *,
+    definition: dict[str, Any],
+    config: dict[str, Any],
+    identity: OperationIdentity,
+    contract: OperationContract,
+    expected_category: Literal["success", "invalid_request", "unauthorized", "unknown"],
+    oracle_identity: str | None,
+    source_asset_type: Literal["test_case", "workflow"],
+    source_asset_id: str,
+) -> list[SemanticCoverageFact]:
+    values: list[tuple[Literal["path", "query", "header", "cookie", "body"], str, object]] = []
+    variables = definition.get("variables")
+    if isinstance(variables, dict):
+        for parameter in contract.parameters:
+            if parameter.location == "path" and parameter.name in variables:
+                values.append(
+                    (
+                        "path",
+                        parameter.name,
+                        _coerce_parameter_value(variables[parameter.name], parameter),
+                    )
+                )
+    overrides = _mapping(config.get("request_overrides"))
+    values.extend(_query_override_values(overrides, contract))
+    values.extend(_header_override_values(overrides, contract))
+    body = overrides.get("body")
+    if isinstance(body, dict) and body.get("kind") == "json":
+        values.extend(("body", path, value) for path, value in _flatten_values(body.get("value")))
+    scenario_kind = str(config.get("scenario_kind") or expected_category)
+    return [
+        SemanticCoverageFact(
+            operation_identity=identity,
+            request_location=location,
+            field_path=field_path,
+            semantic_value=_encoded_semantic_value(value),
+            scenario_kind=scenario_kind,
+            expected_category=expected_category,
+            oracle_identity=oracle_identity,
+            source_asset_type=source_asset_type,
+            source_asset_id=source_asset_id,
+        )
+        for location, field_path, value in values
+    ]
+
+
+def _query_override_values(
+    overrides: dict[str, Any], contract: OperationContract
+) -> list[tuple[Literal["query"], str, object]]:
+    query = overrides.get("query_parameters")
+    if not isinstance(query, list):
+        return []
+    result: list[tuple[Literal["query"], str, object]] = []
+    for raw_parameter in query:
+        parameter = _mapping(raw_parameter)
+        name = parameter.get("name")
+        if not isinstance(name, str) or parameter.get("enabled", True) is False:
+            continue
+        contract_parameter = _contract_parameter(contract, "query", name)
+        result.append(
+            (
+                "query",
+                name,
+                _coerce_parameter_value(parameter.get("value"), contract_parameter),
+            )
+        )
+    return result
+
+
+def _header_override_values(
+    overrides: dict[str, Any], contract: OperationContract
+) -> list[tuple[Literal["header", "cookie"], str, object]]:
+    headers = overrides.get("headers")
+    if not isinstance(headers, dict):
+        return []
+    result: list[tuple[Literal["header", "cookie"], str, object]] = []
+    for raw_name, value in headers.items():
+        if not isinstance(raw_name, str):
+            continue
+        if raw_name.lower() == "cookie":
+            result.extend(_cookie_values(value))
+            continue
+        contract_parameter = _contract_parameter(contract, "header", raw_name)
+        name = contract_parameter.name if contract_parameter is not None else raw_name
+        result.append(
+            (
+                "header",
+                name,
+                _coerce_parameter_value(value, contract_parameter),
+            )
+        )
+    return result
+
+
+def _contract_parameter(
+    contract: OperationContract,
+    location: Literal["path", "query", "header", "cookie"],
+    name: str,
+) -> ContractParameter | None:
+    matches = [
+        parameter
+        for parameter in contract.parameters
+        if parameter.location == location
+        and (
+            parameter.name.lower() == name.lower()
+            if location == "header"
+            else parameter.name == name
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _coerce_parameter_value(value: object, parameter: ContractParameter | None) -> object:
+    if parameter is None or not isinstance(value, str):
+        return value
+    schema_type = parameter.schema_.get("type")
+    try:
+        if schema_type == "integer":
+            return int(value)
+        if schema_type == "number":
+            return float(value)
+        if schema_type == "boolean" and value.lower() in {"true", "false"}:
+            return value.lower() == "true"
+    except ValueError:
+        return value
+    return value
+
+
+def _cookie_values(value: object) -> list[tuple[Literal["cookie"], str, object]]:
+    if not isinstance(value, str):
+        return []
+    cookie = SimpleCookie()
+    try:
+        cookie.load(value)
+    except CookieError:
+        return []
+    return [("cookie", name, morsel.value) for name, morsel in cookie.items()]
+
+
+def _flatten_values(value: object, path: str = "") -> list[tuple[str, object]]:
+    if isinstance(value, dict):
+        return [
+            item
+            for name, child in value.items()
+            for item in _flatten_values(child, f"{path}.{name}" if path else str(name))
+        ]
+    if isinstance(value, list):
+        return [(path, child) for child in value]
+    return [(path, value)] if path else []
+
+
+def _encoded_semantic_value(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _semantic_scope_result(
+    *,
+    gap: dict[str, JsonValue],
+    identity: OperationIdentity | None,
+    target: ChangeConstraintTarget | None,
+    project_content: dict[str, JsonValue],
+    current_plan_content: dict[str, JsonValue],
+    project_values: set[str],
+    current_plan_values: set[str],
+) -> dict[str, JsonValue]:
+    project_missing = _design_missing_values(project_content)
+    current_plan_missing = _design_missing_values(current_plan_content)
+    return {
+        "change_key": str(gap.get("change_key") or ""),
+        "operation": cast(
+            JsonValue, identity.model_dump(mode="json") if identity is not None else None
+        ),
+        "target": cast(JsonValue, target.model_dump(mode="json") if target is not None else None),
+        "project_known_coverage": "missing" if project_missing else "covered",
+        "current_test_plan_coverage": "missing" if current_plan_missing else "covered",
+        "project_known_values": cast(JsonValue, sorted(project_values)),
+        "current_test_plan_values": cast(JsonValue, sorted(current_plan_values)),
+        "project_missing_values": cast(JsonValue, project_missing),
+        "current_test_plan_missing_values": cast(JsonValue, current_plan_missing),
+        "oracle_sources": cast(JsonValue, _design_oracle_sources(current_plan_content)),
+        "requires_review": identity is None or target is None,
+    }
+
+
+def _design_oracle_sources(content: dict[str, JsonValue]) -> list[dict[str, str]]:
+    oracles = content.get("oracles")
+    if not isinstance(oracles, list):
+        return []
+    sources: set[tuple[str, str]] = set()
+    for raw_oracle in oracles:
+        oracle = _mapping(raw_oracle)
+        source_type = oracle.get("source_type")
+        source_ref = oracle.get("source_ref")
+        if isinstance(source_type, str) and isinstance(source_ref, str):
+            sources.add((source_type, source_ref))
+    return [
+        {"source_type": source_type, "source_ref": source_ref}
+        for source_type, source_ref in sorted(sources)
+    ]
+
+
+def _design_missing_values(content: dict[str, JsonValue]) -> list[str]:
+    scenarios = content.get("scenarios")
+    if not isinstance(scenarios, list):
+        return []
+    result: set[str] = set()
+    for raw_scenario in scenarios:
+        scenario = _mapping(raw_scenario)
+        mutations = scenario.get("mutations")
+        expected = str(scenario.get("expected_category") or "unknown")
+        if not isinstance(mutations, list) or not mutations:
+            continue
+        mutation = _mapping(mutations[0])
+        result.add(f"{_encoded_semantic_value(mutation.get('value'))}|{expected}")
+    return sorted(result)
+
+
 def _missing_test_targets(
     impact: ImpactRunBundle, asset_gaps: list[dict[str, JsonValue]]
 ) -> list[dict[str, JsonValue]]:
@@ -1094,11 +1551,15 @@ def _is_semantic_test_target(change: dict[str, JsonValue]) -> bool:
     return str(change.get("source_kind")) == "openapi" and semantic_type in {
         "minimum_changed",
         "maximum_changed",
+        "exclusiveMinimum_changed",
+        "exclusiveMaximum_changed",
         "minLength_changed",
         "maxLength_changed",
         "minItems_changed",
         "maxItems_changed",
         "enum_changed",
+        "pattern_changed",
+        "format_changed",
     }
 
 
@@ -1166,6 +1627,10 @@ def _add_semantic_value(coverage: dict[str, set[str]], path: str, value: object)
 
 def _selected_assets(impact: ImpactRunBundle) -> list[dict[str, JsonValue]]:
     return cast(list[dict[str, JsonValue]], impact.selection.selected_assets)
+
+
+def _change_label(gap: dict[str, JsonValue], index: int) -> str:
+    return str(gap.get("label") or gap.get("source_key") or index)[:160]
 
 
 def _execution_assets(

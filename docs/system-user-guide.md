@@ -29,6 +29,8 @@
 - Secret、Credential 值只写入并加密保存，正常读取、预览、报告和 MCP 输出不返回明文。
 - MCP 是应用网关，不直接访问数据库，也不绕过项目权限、租户隔离、审计或人工审核。
 - MCP 目前只有一个受控写工具；它只能创建待审核的 Test Design ChangeSet Draft，不能自动发布、执行、删除、修改权限或创建 Credential。
+- FlowSpec 的 V5 正式基线是 `flowtest-flow-spec-v1` Schema + `flowtest-flow-spec-fingerprint-v3` 指纹。开发期 v1/v2 指纹文件不属于正式兼容承诺。
+- 当前组合生成属于 **Bounded Pairwise Partitions（有界代表性成对组合）**，不是完整 covering array；State Model 为 unavailable/experimental；Knowledge Graph 仅为 Basic Test Knowledge Graph。
 - Standalone 适合本机、单用户或低并发功能验证，不提供高可用、跨进程任务续跑、Performance Lab、Environment Lab 或 Runner Fabric。
 - Compact/Full 使用 PostgreSQL；Standalone 使用 SQLite。不要通过复制数据库文件替代正式 Transfer、备份或升级流程。
 
@@ -211,6 +213,25 @@ System → Project → Environment → Service Endpoint → Workflow → API →
 ```
 
 Header 名称按不区分大小写的方式合并。Runtime Header 的优先级最高，API 认证生成的 Header 不会覆盖已有 Runtime Header。
+
+#### 5.4.1 最终请求抑制
+
+工作流 API 节点可以在 `request_overrides` 中使用最终抑制语义。抑制发生在 Project、Environment、Service Endpoint、Workflow、API 和 Runtime 全部合并完成之后，因此 Runtime 不能重新注入被删除的载体。
+
+```json
+{
+  "auth_mode": "disabled",
+  "suppressed_headers": ["X-Tenant-Id"],
+  "suppressed_query_parameters": ["api_key"],
+  "suppressed_cookies": ["session"]
+}
+```
+
+- `auth_mode=disabled` 会按实际认证方案删除 `Authorization`、API Key Header/Query/Cookie 等载体；`auth_disabled` 仅作为开发期兼容别名，新资产不再生成它。
+- Header 名称不区分大小写；Query 名称精确匹配并区分大小写；Cookie 使用安全 Cookie 解析后按名称删除。
+- Required Header/Query/Cookie 的 omission 场景会物化为对应 `suppressed_*`，不是简单地“不写节点覆盖值”。
+- 未知认证方案无法确定载体时，场景保持 Design-only 并要求人工复核，不会假装已经禁用认证。
+- Snapshot 只保存 `auth_mode` 和被抑制的名称，不保存 Token、API Key 或 Cookie 值。
 
 模板变量写法：
 
@@ -423,6 +444,8 @@ Diff 状态：
 
 URL 和导入文档均视为不可信输入。服务端会执行协议、Host、DNS、私网/回环、元数据地址、重定向和响应大小等安全检查。若项目开启出站安全策略，应先在“项目管理”中加入获批 Host/CIDR。
 
+OpenAPI/Swagger 的 Canonical Contract 只保留测试语义白名单字段。`example`、`examples`、`default`、`const`、`x-example` 和 `x-examples` 不会持久化；疑似 Token、PII 或高熵凭据的 Enum 会只保留数量和哈希摘要，并把契约标记为 `redacted_partial`。因此接口详情、Test Engineering、MCP 和 Audit 都不会返回这些原值。`redacted_partial` 场景需要通过 `secret://` 安全测试数据引用并完成人工审核后才能物化。
+
 ### 6.8 导出接口
 
 接口管理支持导出：
@@ -631,6 +654,8 @@ FlowSpec 是工作流的可移植描述，不直接依赖源项目实例 UUID。
 
 FlowSpec 不用于携带 Secret、Credential 或源实例内部 ID。跨项目导入必须完成 Mapping Review；不要通过手工替换 UUID 绕过验证。
 
+V5 新导出、验证、Diff、Review 和 Apply 一律使用 `flowtest-flow-spec-fingerprint-v3`。指纹包含 pinned/current API 版本、Operation Contract 和请求抑制语义，但不包含数据库 UUID、来源修订和 Warning。开发期 fingerprint v1/v2 文件不属于 V5 正式兼容范围。
+
 ### 7.13 工作流常见问题
 
 | 现象/错误 | 原因 | 处理方式 |
@@ -795,7 +820,7 @@ http://127.0.0.1:8765/mcp
 | `flowtest.list_projects` | `page`、`page_size` | 列出当前组织和账号可见项目 |
 | `flowtest.inspect_project` | `project_id` | 读取安全的项目元数据 |
 | `flowtest.discover_services` | `project_id`、可选 `environment_id` | 读取项目 Service 和可用 Endpoint Variant，不返回 Credential |
-| `flowtest.inspect_contract` | `project_id`、可选 `api_definition_id` | 读取当前 API 契约结构，不返回请求值或 Secret |
+| `flowtest.inspect_contract` | `project_id`、可选 `api_definition_id` | 读取已净化的当前 API 契约结构；不返回 Example、PII、Token 或 Secret Enum 原值 |
 | `flowtest.inspect_flow` | `workflow_id` | 读取工作流草稿拓扑、安全操作引用和草稿指纹 |
 | `flowtest.inspect_run_evidence` | `execution_id` | 读取执行状态证据，不返回原始请求/响应 Body |
 
@@ -1003,11 +1028,21 @@ MCP 只读 Tool 的成功结果包含：
 
 ### 9.9 Test Engineering
 
-从 API Contract Evidence 确定性生成 Scenario、Oracle 和 Coverage。生成结果先进入 Draft/Review，不直接进入执行体系。确认覆盖维度、证据和缺口后，再物化为 Workflow/TestCase。
+从 API Canonical Contract 和 Evidence 确定性生成 Scenario、Oracle 和 Coverage。页面会展示 Contract Completeness、Operation Identity、参数 Location、Auth Mode、Suppression、Evidence Conflict、Normative/Observed 角色以及 Materializable/Design-only 原因。生成结果先进入 Draft/Review，不直接进入执行体系。
+
+- `complete` 表示契约结构可完整参与生成；`partial`/`legacy_partial` 表示结构不完整；`redacted_partial` 表示敏感语义值已安全删除。
+- Contract、用户确认规则、确定性源码验证和显式数据库 Check Constraint 属于规范性 Evidence；数据样本最小/最大值和候选枚举只属于观察统计，不能自动产生非法 Oracle。
+- 当前 Pairwise 只提供有界代表性成对组合；Coverage 中未证明的组合仍是 Gap。State 开关缺少显式状态证据时返回 unavailable，不会 silent no-op。
+- Basic Test Knowledge Graph 只表达当前已有的 Operation/Schema/Evidence 关系，不代表完整业务知识图谱。
+- 只有唯一确定性 Oracle、无冲突、无敏感测试数据缺口且请求可真实表示的场景才能物化为 Workflow/TestCase。
 
 ### 9.10 影响分析和变更回归
 
 影响分析读取 Git、OpenAPI、GraphQL 或 Proto 的结构化变化，建立服务/接口/测试资产影响图并生成智能选择。变更回归把 Change、Impact、测试选择、缺失测试审核、执行证据和 Release Gate 串成一条链路。
+
+变更回归页面分别展示 Asset Mapping、Project Known Semantic Coverage 和 Current Test Plan Semantic Coverage。语义覆盖绑定 Service、Method、规范化 Path、请求 Location、Field、Value、Expected Category 和 Oracle；Inventory 的 `body.quantity=999` 不会覆盖 Orders 的同名字段，没有 Oracle 的值也不算完整负面覆盖。发布缺口以“当前 TestPlan ∩ Impact Selected Assets”为准，项目中已有但未进入本次计划的测试只会生成“加入当前计划”建议。
+
+位置化变更支持 Path、Query、Header、Cookie 和 Body 的 minimum/maximum、exclusive boundary、长度、枚举、pattern 和 format。找不到唯一 Operation/Location/Field 时保持 blocker/requires-review，不会回退成虚构的 `body.value`。
 
 ### 9.11 质量中心和发布门禁
 

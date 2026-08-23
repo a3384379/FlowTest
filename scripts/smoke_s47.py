@@ -6,24 +6,28 @@ from __future__ import annotations
 import json
 import os
 import secrets
-from typing import Any, cast
+from typing import Any, Final, cast
 from urllib.request import urlopen
 
 from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password
-from smoke_s5 import _api_request, _start_and_wait
+from smoke_s5 import _api_request, _start_and_wait, _wait_for_completion
+
+_CONTRACT_SECURITY_SENTINELS: Final = (
+    "contract-password-sentinel",
+    "contract-token-sentinel",
+    "contract-person@example.test",
+    "4111111111111111",
+    "eyJhbGciOiJIUzI1NiJ9.c2Vuc2l0aXZl.c2lnbmF0dXJl",
+)
 
 
 def main() -> None:
     config = SmokeConfig.from_environment()
     client = APIClient(config.api_url)
-    login = client.json(
-        "POST", "/auth/login", {"email": config.email, "password": config.password}
-    )
+    login = client.json("POST", "/auth/login", {"email": config.email, "password": config.password})
     token = str(login["access_token"])
     active_password = config.password
-    password_changed = bool(
-        cast(dict[str, Any], login["user"])["requires_password_change"]
-    )
+    password_changed = bool(cast(dict[str, Any], login["user"])["requires_password_change"])
     if password_changed:
         active_password = f"FlowTest-S47-{secrets.token_urlsafe(18)}"
         _change_password(client, token, config.password, active_password)
@@ -36,19 +40,11 @@ def main() -> None:
         client.json("POST", "/auth/logout", token=token)
 
 
-def _run_acceptance(
-    client: APIClient, config: SmokeConfig, human_token: str
-) -> dict[str, str]:
-    source = _create_portable_project(
-        client, config, human_token, "Source", ("orders", "billing")
-    )
+def _run_acceptance(client: APIClient, config: SmokeConfig, human_token: str) -> dict[str, str]:
+    source = _create_portable_project(client, config, human_token, "Source", ("orders", "billing"))
     source_workflow = _create_multi_service_workflow(client, human_token, source)
-    source_execution = _publish_and_execute(
-        client, human_token, source, source_workflow
-    )
-    flow_spec = _export_and_validate_flow_spec(
-        client, human_token, source, source_workflow
-    )
+    source_execution = _publish_and_execute(client, human_token, source, source_workflow)
+    flow_spec = _export_and_validate_flow_spec(client, human_token, source, source_workflow)
 
     target = _create_portable_project(
         client, config, human_token, "Target", ("orders-v2", "billing-v2")
@@ -56,19 +52,16 @@ def _run_acceptance(
     imported_workflow = _import_review_apply(
         client, human_token, target, flow_spec, source_keys=("orders", "billing")
     )
-    imported_execution = _publish_and_execute(
-        client, human_token, target, imported_workflow
-    )
+    imported_execution = _publish_and_execute(client, human_token, target, imported_workflow)
 
-    generated_workflows, mcp_trace, change_regression_id = (
-        _verify_test_engineering_and_mcp(client, human_token, source)
+    generated_workflows, mcp_trace, change_regression_id = _verify_test_engineering_and_mcp(
+        client, human_token, source
     )
     generated_executions = []
     for workflow, scenario in generated_workflows:
-        generated_executions.append(
-            _publish_and_execute(client, human_token, source, workflow)
-        )
+        generated_executions.append(_publish_and_execute(client, human_token, source, workflow))
         _verify_target_receipt(scenario)
+    suppression_execution_ids = _verify_cross_layer_suppression(client, human_token, source)
     return {
         "source_project_id": str(source["project"]["id"]),
         "target_project_id": str(target["project"]["id"]),
@@ -78,6 +71,8 @@ def _run_acceptance(
         "negative_execution_count": str(len(generated_executions)),
         "mcp_trace_id": mcp_trace,
         "change_regression_id": change_regression_id,
+        "suppression_execution_count": str(len(suppression_execution_ids)),
+        "suppression_execution_id": suppression_execution_ids[0],
     }
 
 
@@ -107,6 +102,7 @@ def _create_portable_project(
     )
     services: dict[str, dict[str, Any]] = {}
     apis: dict[str, dict[str, Any]] = {}
+    endpoints: dict[str, dict[str, Any]] = {}
     for index, service_key in enumerate(service_keys):
         logical_key = ("orders", "billing")[index]
         service = client.json(
@@ -116,7 +112,7 @@ def _create_portable_project(
             token=token,
         )
         variant = ("blue", "canary")[index]
-        client.json(
+        endpoint = client.json(
             "POST",
             f"/projects/{project_id}/environments/{environment['id']}/service-endpoints",
             {
@@ -140,11 +136,13 @@ def _create_portable_project(
         )
         services[logical_key] = service
         apis[logical_key] = cast(dict[str, Any], api["definition"])
+        endpoints[logical_key] = endpoint
     return {
         "project": project,
         "environment": environment,
         "services": services,
         "apis": apis,
+        "endpoints": endpoints,
         "variants": {"orders": "blue", "billing": "canary"},
     }
 
@@ -216,13 +214,8 @@ def _export_and_validate_flow_spec(
         {"spec": spec},
         token=token,
     )
-    if (
-        not validated["validation"]["valid"]
-        or validated["fingerprint"] != exported["fingerprint"]
-    ):
-        raise RuntimeError(
-            f"S47 FlowSpec validation or fingerprint was unstable: {validated}"
-        )
+    if not validated["validation"]["valid"] or validated["fingerprint"] != exported["fingerprint"]:
+        raise RuntimeError(f"S47 FlowSpec validation or fingerprint was unstable: {validated}")
     return spec
 
 
@@ -237,9 +230,7 @@ def _import_review_apply(
     project_id = str(target["project"]["id"])
     services = cast(dict[str, dict[str, Any]], target["services"])
     apis = cast(dict[str, dict[str, Any]], target["apis"])
-    operation_refs = {
-        str(item["service_ref"]): str(item["ref"]) for item in spec["operations"]
-    }
+    operation_refs = {str(item["service_ref"]): str(item["ref"]) for item in spec["operations"]}
     service_mappings = {key: services[key]["id"] for key in source_keys}
     operation_mappings = {operation_refs[key]: apis[key]["id"] for key in source_keys}
     proposed = client.json(
@@ -280,6 +271,8 @@ def _verify_test_engineering_and_mcp(
         {"name": "bearerAuth", "value": "mock-token"},
         token=human_token,
     )
+    sensitive_api_id = _verify_contract_security(client, human_token, project_id)
+    _verify_exclusive_boundary(client, human_token, assets)
     baseline_document = _s471_openapi(maximum=100)
     baseline_import = client.multipart(
         f"/projects/{project_id}/imports",
@@ -290,9 +283,7 @@ def _verify_test_engineering_and_mcp(
         fields={"source_type": "openapi3"},
         token=human_token,
     )
-    api_id = str(
-        cast(list[dict[str, Any]], baseline_import["results"])[0]["definition_id"]
-    )
+    api_id = str(cast(list[dict[str, Any]], baseline_import["results"])[0]["definition_id"])
     baseline_generation = client.json(
         "POST",
         f"/projects/{project_id}/test-engineering/generate",
@@ -302,9 +293,7 @@ def _verify_test_engineering_and_mcp(
         },
         token=human_token,
     )
-    baseline_scenarios = cast(
-        list[dict[str, Any]], baseline_generation["design"]["scenarios"]
-    )
+    baseline_scenarios = cast(list[dict[str, Any]], baseline_generation["design"]["scenarios"])
     baseline_ids = [
         scenario["id"]
         for scenario in baseline_scenarios
@@ -324,12 +313,14 @@ def _verify_test_engineering_and_mcp(
         baseline_ids,
         title="S47.1 Historical Boundaries",
     )
-    baseline_workflow_id = str(cast(list[str], baseline_applied["workflow_ids"])[0])
-    client.json(
-        "POST",
-        f"/projects/{project_id}/workflows/{baseline_workflow_id}/versions",
-        token=human_token,
-    )
+    baseline_workflow_ids = cast(list[str], baseline_applied["workflow_ids"])
+    baseline_workflow_id = str(baseline_workflow_ids[0])
+    for workflow_id in baseline_workflow_ids:
+        client.json(
+            "POST",
+            f"/projects/{project_id}/workflows/{workflow_id}/versions",
+            token=human_token,
+        )
     current_document = _s471_openapi(maximum=999)
     current_import = client.multipart(
         f"/projects/{project_id}/imports",
@@ -340,9 +331,7 @@ def _verify_test_engineering_and_mcp(
         fields={"source_type": "openapi3"},
         token=human_token,
     )
-    current_api_id = str(
-        cast(list[dict[str, Any]], current_import["results"])[0]["definition_id"]
-    )
+    current_api_id = str(cast(list[dict[str, Any]], current_import["results"])[0]["definition_id"])
     if current_api_id != api_id:
         raise RuntimeError("S47.1 re-import created a duplicate API definition")
     change_regression_id = _verify_change_regression(
@@ -374,17 +363,21 @@ def _verify_test_engineering_and_mcp(
         title=f"S47 Generated {secrets.token_hex(4)}",
     )
     mcp_trace = _verify_mcp_dry_run(
-        client, human_token, project, project_id, api_id, generation["design"]
+        client,
+        human_token,
+        project,
+        project_id,
+        api_id,
+        sensitive_api_id,
+        generation["design"],
     )
     workflow_ids = cast(list[str], applied["workflow_ids"])
     if len(workflow_ids) != len(selected):
-        raise RuntimeError(
-            "S47.1 reviewed proposal did not materialize every selected scenario"
-        )
+        raise RuntimeError("S47.1 reviewed proposal did not materialize every selected scenario")
     return (
         [
             ({"id": workflow_id}, scenario)
-            for workflow_id, scenario in zip(workflow_ids, selected)
+            for workflow_id, scenario in zip(workflow_ids, selected, strict=True)
         ],
         mcp_trace,
         change_regression_id,
@@ -481,22 +474,23 @@ def _verify_change_regression(
         },
         token=token,
     )
+    run_payload = {
+        "title": "S47.2 maximum 100 to 999",
+        "source_ref": "openapi://s47-2/orders",
+        "candidate_ref": "contract:s47-2-current",
+        "openapi_diffs": [
+            {
+                "baseline_run_id": baseline_run["id"],
+                "current_run_id": current_run["id"],
+            }
+        ],
+        "test_plan_id": plan["id"],
+        "release_policy_id": policy["id"],
+    }
     run = client.json(
         "POST",
         f"/projects/{project_id}/change-regressions",
-        {
-            "title": "S47.1 maximum 100 to 999",
-            "source_ref": "openapi://s47-1/orders",
-            "candidate_ref": "contract:s47-1-current",
-            "openapi_diffs": [
-                {
-                    "baseline_run_id": baseline_run["id"],
-                    "current_run_id": current_run["id"],
-                }
-            ],
-            "test_plan_id": plan["id"],
-            "release_policy_id": policy["id"],
-        },
+        run_payload,
         token=token,
     )
     if run["selection_summary"]["asset_coverage_gap_count"] != 0:
@@ -512,8 +506,19 @@ def _verify_change_regression(
         for mutation in cast(list[dict[str, Any]], scenario["mutations"])
         if mutation["path"] == "body.quantity"
     }
-    if values != {999, 1000}:
-        raise RuntimeError(f"S47.1 semantic gaps were not 999/1000: {design}")
+    if values != {101, 999, 1000}:
+        raise RuntimeError(f"S47.2 semantic gaps did not preserve Oracle identity: {design}")
+    scope = cast(list[dict[str, Any]], run["selection_summary"]["semantic_coverage_scopes"])[0]
+    operation = cast(dict[str, Any], scope["operation"])
+    target = cast(dict[str, Any], scope["target"])
+    if (
+        operation["api_definition_id"] != api_definition_id
+        or operation["method"] != "POST"
+        or target["location"] != "body"
+        or target["field_path"] != ["quantity"]
+    ):
+        raise RuntimeError(f"S47.2 regression lost operation/location identity: {scope}")
+    workflows_before = _workflow_ids(client, token, project_id)
     accepted = client.json(
         "POST",
         f"/projects/{project_id}/change-regressions/{run['id']}"
@@ -531,7 +536,46 @@ def _verify_change_regression(
     accepted_item = cast(list[dict[str, Any]], accepted["missing_tests"])[0]
     if accepted_item["materialized_resource_type"] != "test_design_bundle":
         raise RuntimeError(f"S47.1 semantic proposal did not materialize: {accepted}")
-    return str(run["id"])
+    materialized_workflows = _workflow_ids(client, token, project_id) - workflows_before
+    if not materialized_workflows:
+        raise RuntimeError("S47.2 semantic proposal did not create executable Workflows")
+    for workflow_id in materialized_workflows:
+        client.json(
+            "POST",
+            f"/projects/{project_id}/workflows/{workflow_id}/versions",
+            token=token,
+        )
+    scoped_payload = {
+        **run_payload,
+        "title": "S47.2 current TestPlan semantic scope",
+        "candidate_ref": "contract:s47-2-current-plan-scope",
+    }
+    scoped_run = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions",
+        scoped_payload,
+        token=token,
+    )
+    scoped = cast(
+        list[dict[str, Any]],
+        scoped_run["selection_summary"]["semantic_coverage_scopes"],
+    )[0]
+    recommendations = cast(
+        list[dict[str, Any]], scoped_run["selection_summary"]["current_plan_recommendations"]
+    )
+    if (
+        scoped["project_known_coverage"] != "covered"
+        or scoped["current_test_plan_coverage"] != "missing"
+        or not recommendations
+        or recommendations[0]["action"] != "add_project_known_test_to_current_plan"
+    ):
+        raise RuntimeError(f"S47.2 current TestPlan scope was incorrect: {scoped_run}")
+    return str(scoped_run["id"])
+
+
+def _workflow_ids(client: APIClient, token: str, project_id: str) -> set[str]:
+    page = client.json("GET", f"/projects/{project_id}/workflows?page=1&page_size=100", token=token)
+    return {str(item["id"]) for item in cast(list[dict[str, Any]], page["items"])}
 
 
 def _create_contract_run(
@@ -557,6 +601,7 @@ def _verify_mcp_dry_run(
     project: dict[str, Any],
     project_id: str,
     api_definition_id: str,
+    sensitive_api_definition_id: str,
     design: dict[str, Any],
 ) -> str:
     organization_id = project.get("organization_id")
@@ -581,6 +626,13 @@ def _verify_mcp_dry_run(
     )
     if read["data"]["fingerprint"] == "" or not read["evidence_refs"]:
         raise RuntimeError(f"S47 MCP read did not return traceable generation: {read}")
+    sensitive_read = client.json(
+        "POST",
+        f"/mcp/read/projects/{project_id}/test-design/generate",
+        {"api_definition_id": sensitive_api_definition_id},
+        token=mcp_token,
+    )
+    _assert_no_contract_sentinels(sensitive_read, "MCP response")
     key = f"s47-preview-{secrets.token_hex(8)}"
     payload = {
         "project_id": project_id,
@@ -604,10 +656,97 @@ def _verify_mcp_dry_run(
         or preview["item_count"] != 1
         or not preview["design_fingerprint"]
     ):
-        raise RuntimeError(
-            f"S47 MCP dry-run/idempotency contract failed: {first}, {second}"
-        )
+        raise RuntimeError(f"S47 MCP dry-run/idempotency contract failed: {first}, {second}")
     return str(read["trace_id"])
+
+
+def _verify_contract_security(client: APIClient, token: str, project_id: str) -> str:
+    imported = client.multipart(
+        f"/projects/{project_id}/imports",
+        field="document",
+        filename="s47-2-contract-security.json",
+        content=_s472_sensitive_openapi(),
+        content_type="application/json",
+        fields={"source_type": "openapi3"},
+        token=token,
+    )
+    definition_id = str(cast(list[dict[str, Any]], imported["results"])[0]["definition_id"])
+    detail = client.json("GET", f"/projects/{project_id}/apis/{definition_id}", token=token)
+    if detail["version"]["contract_completeness"] != "redacted_partial":
+        raise RuntimeError("S47.2 sensitive Enum did not mark the contract redacted_partial")
+    _assert_no_contract_sentinels(detail, "API response")
+    generated = client.json(
+        "POST",
+        f"/projects/{project_id}/test-engineering/generate",
+        {"api_definition_id": definition_id},
+        token=token,
+    )
+    if generated["contract_completeness"] != "redacted_partial":
+        raise RuntimeError("S47.2 Test Engineering lost contract redaction completeness")
+    _assert_no_contract_sentinels(generated, "TestDesign")
+    return definition_id
+
+
+def _verify_exclusive_boundary(client: APIClient, token: str, assets: dict[str, Any]) -> None:
+    project_id = str(assets["project"]["id"])
+    imported = client.multipart(
+        f"/projects/{project_id}/imports",
+        field="document",
+        filename="s47-2-exclusive.json",
+        content=_s472_exclusive_openapi(),
+        content_type="application/json",
+        fields={"source_type": "openapi3"},
+        token=token,
+    )
+    definition_id = str(cast(list[dict[str, Any]], imported["results"])[0]["definition_id"])
+    generated = client.json(
+        "POST",
+        f"/projects/{project_id}/test-engineering/generate",
+        {"api_definition_id": definition_id, "generation_policy": {"max_scenarios": 100}},
+        token=token,
+    )
+    scenarios = cast(list[dict[str, Any]], generated["design"]["scenarios"])
+    expected = {
+        ("number_below_exclusive_max", "body.upper"): 998,
+        ("number_at_exclusive_max", "body.upper"): 999,
+        ("number_at_exclusive_min", "body.lower"): 1,
+        ("number_above_exclusive_min", "body.lower"): 2,
+    }
+    selected: list[dict[str, Any]] = []
+    for (kind, path), expected_value in expected.items():
+        scenario = next(
+            (
+                item
+                for item in scenarios
+                if item["kind"] == kind
+                and any(
+                    mutation["path"] == path and mutation.get("value") == expected_value
+                    for mutation in cast(list[dict[str, Any]], item["mutations"])
+                )
+            ),
+            None,
+        )
+        if scenario is None:
+            raise RuntimeError(f"S47.2 exclusive boundary is missing {kind}:{path}")
+        selected.append(scenario)
+    applied = _review_and_apply_generation(
+        client,
+        token,
+        assets,
+        definition_id,
+        [str(scenario["id"]) for scenario in selected],
+        title=f"S47.2 Exclusive Boundary {secrets.token_hex(4)}",
+    )
+    workflow_ids = cast(list[str], applied["workflow_ids"])
+    for workflow_id, scenario in zip(workflow_ids, selected, strict=True):
+        _publish_and_execute(client, token, assets, {"id": workflow_id})
+        _verify_exclusive_receipt(scenario)
+
+
+def _assert_no_contract_sentinels(payload: object, boundary: str) -> None:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    if any(value in encoded for value in _CONTRACT_SECURITY_SENTINELS):
+        raise RuntimeError(f"S47.2 canonical contract leaked a sensitive value at {boundary}")
 
 
 def _required_s471_scenarios(
@@ -641,6 +780,291 @@ def _required_s471_scenarios(
     return selected
 
 
+def _verify_cross_layer_suppression(
+    client: APIClient, token: str, assets: dict[str, Any]
+) -> list[str]:
+    project_id = str(assets["project"]["id"])
+    environment_id = str(assets["environment"]["id"])
+    layer_headers = {
+        "Authorization": "Bearer layer-sentinel",
+        "X-Tenant-Id": "layer-sentinel",
+        "Cookie": "session=layer-sentinel; keep=layer",
+    }
+    client.json(
+        "PUT",
+        f"/projects/{project_id}/configuration",
+        {"variables": {}, "headers": layer_headers},
+        token=token,
+    )
+    client.json(
+        "PATCH",
+        f"/projects/{project_id}/environments/{environment_id}",
+        {"headers": layer_headers},
+        token=token,
+    )
+    endpoint_id = str(assets["endpoints"]["orders"]["id"])
+    client.json(
+        "PATCH",
+        f"/projects/{project_id}/service-endpoints/{endpoint_id}",
+        {"headers": layer_headers},
+        token=token,
+    )
+    cases: list[
+        tuple[
+            str,
+            dict[str, Any],
+            list[dict[str, Any]],
+            dict[str, str],
+            dict[str, str],
+            dict[str, Any],
+        ]
+    ] = [
+        (
+            "bearer-cross-layer",
+            {"kind": "bearer", "values": {"token": "api-bearer-sentinel"}},
+            [{"name": "api_key", "value": "api-query-sentinel", "enabled": True}],
+            {
+                "Authorization": "Bearer api-sentinel",
+                "X-Tenant-Id": "api-sentinel",
+                "Cookie": "session=api-sentinel; keep=api",
+                "X-Service-Metadata": "orders",
+            },
+            {
+                "Authorization": "Bearer runtime-sentinel",
+                "X-Tenant-Id": "runtime-sentinel",
+                "Cookie": "session=runtime-sentinel; keep=runtime",
+            },
+            {
+                "auth_mode": "disabled",
+                "suppressed_headers": ["x-tenant-id"],
+                "suppressed_query_parameters": ["api_key"],
+                "suppressed_cookies": ["session"],
+            },
+        ),
+        (
+            "basic-auth",
+            {
+                "kind": "basic",
+                "values": {
+                    "username": "basic-user-sentinel",
+                    "password": "basic-password-sentinel",
+                },
+            },
+            [],
+            {"X-Service-Metadata": "orders"},
+            {},
+            {"auth_mode": "disabled"},
+        ),
+        (
+            "api-key-query",
+            {
+                "kind": "api_key",
+                "values": {
+                    "in": "query",
+                    "name": "api_key",
+                    "value": "query-auth-sentinel",
+                },
+            },
+            [{"name": "api_key", "value": "api-query-sentinel", "enabled": True}],
+            {"X-Service-Metadata": "orders"},
+            {},
+            {"auth_mode": "disabled"},
+        ),
+        (
+            "api-key-cookie",
+            {
+                "kind": "api_key",
+                "values": {
+                    "in": "cookie",
+                    "name": "auth_session",
+                    "value": "cookie-auth-sentinel",
+                },
+            },
+            [],
+            {
+                "Cookie": "auth_session=api-sentinel; keep=api",
+                "X-Service-Metadata": "orders",
+            },
+            {"Cookie": "auth_session=runtime-sentinel; keep=runtime"},
+            {"auth_mode": "disabled"},
+        ),
+    ]
+    return [
+        _execute_suppression_case(
+            client,
+            token,
+            assets,
+            label=label,
+            auth=auth,
+            query_parameters=query_parameters,
+            api_headers=api_headers,
+            runtime_headers=runtime_headers,
+            request_overrides=request_overrides,
+        )
+        for (
+            label,
+            auth,
+            query_parameters,
+            api_headers,
+            runtime_headers,
+            request_overrides,
+        ) in cases
+    ]
+
+
+def _execute_suppression_case(
+    client: APIClient,
+    token: str,
+    assets: dict[str, Any],
+    *,
+    label: str,
+    auth: dict[str, Any],
+    query_parameters: list[dict[str, Any]],
+    api_headers: dict[str, str],
+    runtime_headers: dict[str, str],
+    request_overrides: dict[str, Any],
+) -> str:
+    project_id = str(assets["project"]["id"])
+    effective_overrides = {
+        "suppressed_headers": ["x-tenant-id"],
+        "suppressed_query_parameters": ["api_key"],
+        "suppressed_cookies": ["session"],
+        **request_overrides,
+    }
+    definition = cast(
+        dict[str, Any],
+        client.json(
+            "POST",
+            f"/projects/{project_id}/apis",
+            {
+                "name": f"S47.2 suppression {label} {secrets.token_hex(3)}",
+                "service_id": assets["services"]["orders"]["id"],
+                "request": {
+                    "method": "POST",
+                    "path": "/s47-2/inspect",
+                    "query_parameters": query_parameters,
+                    "headers": api_headers,
+                    "body_kind": "none",
+                    "body": None,
+                    "auth": auth,
+                },
+            },
+            token=token,
+        )["definition"],
+    )
+    workflow = client.json(
+        "POST",
+        f"/projects/{project_id}/workflows",
+        {
+            "name": f"S47.2 suppression {label} {secrets.token_hex(3)}",
+            "definition": {
+                "schema_version": "1.0",
+                "variables": {},
+                "nodes": [
+                    _node("start", "start", {}),
+                    _node(
+                        "api",
+                        "api",
+                        {
+                            "api_definition_id": definition["id"],
+                            "api_version": 1,
+                            "endpoint_variant": assets["variants"]["orders"],
+                            "expected_statuses": [200],
+                            "request_overrides": effective_overrides,
+                        },
+                    ),
+                    _node("end", "end", {}),
+                ],
+                "edges": [
+                    {"id": "start-api", "source": "start", "target": "api"},
+                    {"id": "api-end", "source": "api", "target": "end"},
+                ],
+                "settings": {},
+            },
+        },
+        token=token,
+    )
+    workflow_id = str(workflow["id"])
+    client.json(
+        "POST",
+        f"/projects/{project_id}/workflows/{workflow_id}/versions",
+        token=token,
+    )
+    started = client.json(
+        "POST",
+        f"/projects/{project_id}/workflows/{workflow_id}/executions",
+        {
+            "environment_id": assets["environment"]["id"],
+            "runtime_headers": runtime_headers,
+        },
+        token=token,
+    )
+    detail = _wait_for_completion(client, token, project_id, str(started["id"]))
+    if detail["execution"]["status"] != "passed":
+        raise RuntimeError(f"S47.2 suppression execution failed: {detail}")
+    suppression = detail["execution"]["snapshot"]["apis"]["api"]["target"]["request_suppression"]
+    if suppression["auth_mode"] != "disabled":
+        raise RuntimeError(f"S47.2 auth mode was not snapshotted: {suppression}")
+    encoded_snapshot = json.dumps(detail["execution"]["snapshot"], sort_keys=True)
+    if "sentinel" in encoded_snapshot:
+        paths = _matching_string_paths(detail["execution"]["snapshot"], "sentinel")
+        raise RuntimeError(
+            "S47.2 execution snapshot retained a credential sentinel at " + ", ".join(paths)
+        )
+    receipt = _read_s472_receipt()
+    if any(
+        receipt[key]
+        for key in (
+            "authorization_present",
+            "tenant_header_present",
+            "api_key_present",
+            "auth_cookie_present",
+        )
+    ):
+        raise RuntimeError(f"S47.2 {label} suppression leaked a carrier to the target: {receipt}")
+    if receipt["service_metadata"] != "orders":
+        raise RuntimeError(f"S47.2 service metadata was lost: {receipt}")
+    return str(started["id"])
+
+
+def _matching_string_paths(value: Any, marker: str, *, path: str = "$") -> list[str]:
+    if isinstance(value, dict):
+        return [
+            matched
+            for key, child in value.items()
+            for matched in _matching_string_paths(child, marker, path=f"{path}.{key}")
+        ]
+    if isinstance(value, list):
+        return [
+            matched
+            for index, child in enumerate(value)
+            for matched in _matching_string_paths(child, marker, path=f"{path}[{index}]")
+        ]
+    if isinstance(value, str) and marker in value:
+        return [path]
+    return []
+
+
+def _read_s472_receipt() -> dict[str, Any]:
+    public_target = os.environ.get(
+        "FLOWTEST_SMOKE_PUBLIC_TARGET_URL", "http://127.0.0.1:8080"
+    ).rstrip("/")
+    with urlopen(f"{public_target}/s47-2/requests/last", timeout=10) as response:
+        return cast(dict[str, Any], json.loads(response.read()))
+
+
+def _verify_exclusive_receipt(scenario: dict[str, Any]) -> None:
+    public_target = os.environ.get(
+        "FLOWTEST_SMOKE_PUBLIC_TARGET_URL", "http://127.0.0.1:8080"
+    ).rstrip("/")
+    with urlopen(f"{public_target}/s47-2/exclusive/last", timeout=10) as response:
+        receipt = cast(dict[str, Any], json.loads(response.read()))
+    mutation = cast(list[dict[str, Any]], scenario["mutations"])[0]
+    field = str(mutation["path"]).removeprefix("body.")
+    if cast(dict[str, Any], receipt["body"]).get(field) != mutation.get("value"):
+        raise RuntimeError(f"S47.2 exclusive boundary did not reach the target: {receipt}")
+
+
 def _verify_target_receipt(scenario: dict[str, Any]) -> None:
     public_target = os.environ.get(
         "FLOWTEST_SMOKE_PUBLIC_TARGET_URL", "http://127.0.0.1:8080"
@@ -651,9 +1075,7 @@ def _verify_target_receipt(scenario: dict[str, Any]) -> None:
     if kind == "number_at_max" and receipt["body"]["quantity"] != 999:
         raise RuntimeError(f"S47.1 body boundary did not reach target: {receipt}")
     if kind == "number_above_max" and receipt["body"]["quantity"] != 1000:
-        raise RuntimeError(
-            f"S47.1 invalid body boundary did not reach target: {receipt}"
-        )
+        raise RuntimeError(f"S47.1 invalid body boundary did not reach target: {receipt}")
     if kind == "invalid_type" and receipt["dry_run"] != "invalid":
         raise RuntimeError(f"S47.1 query mutation did not reach target: {receipt}")
     if kind == "format_invalid" and receipt["tenant_id"] != "not-a-uuid":
@@ -664,14 +1086,150 @@ def _verify_target_receipt(scenario: dict[str, Any]) -> None:
         raise RuntimeError(f"S47.1 auth disable did not reach target: {receipt}")
 
 
+def _s472_sensitive_openapi() -> bytes:
+    return json.dumps(
+        {
+            "openapi": "3.0.3",
+            "info": {"title": "S47.2 Contract Security", "version": "1.0.0"},
+            "paths": {
+                "/s47-2/security-contract": {
+                    "post": {
+                        "operationId": "verifyContractSecurity",
+                        "parameters": [
+                            {
+                                "name": "contact",
+                                "in": "query",
+                                "schema": {
+                                    "type": "string",
+                                    "example": _CONTRACT_SECURITY_SENTINELS[2],
+                                },
+                            }
+                        ],
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "password": {
+                                                "type": "string",
+                                                "example": _CONTRACT_SECURITY_SENTINELS[0],
+                                            },
+                                            "token": {
+                                                "type": "string",
+                                                "default": _CONTRACT_SECURITY_SENTINELS[1],
+                                            },
+                                            "card": {
+                                                "type": "string",
+                                                "const": _CONTRACT_SECURITY_SENTINELS[3],
+                                            },
+                                            "credential": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "NORMAL",
+                                                    _CONTRACT_SECURITY_SENTINELS[4],
+                                                ],
+                                            },
+                                            "nested": {
+                                                "type": "array",
+                                                "items": {
+                                                    "oneOf": [
+                                                        {
+                                                            "type": "string",
+                                                            "example": _CONTRACT_SECURITY_SENTINELS[
+                                                                1
+                                                            ],
+                                                        },
+                                                        {"type": "integer"},
+                                                    ]
+                                                },
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "safe",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "allOf": [
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "email": {
+                                                            "type": "string",
+                                                            "example": _CONTRACT_SECURITY_SENTINELS[
+                                                                2
+                                                            ],
+                                                        }
+                                                    },
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        ensure_ascii=False,
+    ).encode()
+
+
+def _s472_exclusive_openapi() -> bytes:
+    return json.dumps(
+        {
+            "openapi": "3.1.0",
+            "info": {"title": "S47.2 Exclusive", "version": "1.0.0"},
+            "paths": {
+                "/s47-2/exclusive": {
+                    "post": {
+                        "operationId": "verifyExclusiveBoundary",
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["upper", "lower"],
+                                        "properties": {
+                                            "upper": {
+                                                "type": "integer",
+                                                "exclusiveMaximum": 999,
+                                            },
+                                            "lower": {
+                                                "type": "integer",
+                                                "exclusiveMinimum": 1,
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "200": {"description": "valid"},
+                            "400": {"description": "invalid"},
+                        },
+                    }
+                }
+            },
+        },
+        ensure_ascii=False,
+    ).encode()
+
+
 def _s471_openapi(*, maximum: int) -> bytes:
     return json.dumps(
         {
             "openapi": "3.0.3",
             "info": {"title": "S47.1 Orders", "version": "1.0.0"},
-            "components": {
-                "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}
-            },
+            "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}},
             "paths": {
                 "/tenants/{tenantId}/orders": {
                     "post": {

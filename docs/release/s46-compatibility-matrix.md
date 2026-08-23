@@ -13,9 +13,9 @@
 | Durable Command/Checkpoint | 支持 | 支持 | 受 Standalone 调度边界约束 | 幂等、Fence 和已完成节点跳过规则一致 |
 | MCP Read/Controlled Write | stdio/HTTP Gateway | HTTP Gateway | 本机 stdio/HTTP Gateway | Gateway 只调用 Application API，不直连数据库 |
 | Test Engineering/Evidence | 支持 | 支持 | 支持 | Canonical Contract、位置生成与审核语义一致；物化复用 Workflow/TestCase |
-| FlowSpec Portable Mapping | 支持 | 支持 | 支持 | v1 Schema 兼容；v3 指纹不依赖 UUID 并保留 pinned/current |
+| FlowSpec Portable Mapping | 支持 | 支持 | 支持 | V5 正式基线为 v3 指纹，不依赖 UUID 并保留 pinned/current；开发期 v1/v2 不作正式兼容承诺 |
 | Performance/Environment Lab | 可按 Feature Flag 启用 | 明确关闭 | 明确关闭 | 不支持档位必须启动时拒绝配置 |
-| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0042` |
+| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0043` |
 
 ## 数据与版本边界
 
@@ -31,10 +31,12 @@
 - S47.1 迁移 `20260823_0042` 的回滚目标是 `20260823_0041`；它为 `api_versions` 增加
   Canonical Contract、fingerprint 和 completeness，并对 PostgreSQL/Standalone 旧版本做安全
   partial backfill。Backfill 不复制 Header/Query 值、不伪造 response status。
-- 旧 FlowSpec 未带 `fingerprint_version` 时按 `flowtest-flow-spec-fingerprint-v1` 验证；v2 保持
-  原指纹投影；新导出使用 `flowtest-flow-spec-fingerprint-v3` 并保存版本策略。三者都保持
-  `flowtest-flow-spec-v1` Schema，因此不修改
-  `/api/v1` 路由版本。
+- V5 新 Export、Import、Review、Apply 和测试只以 `flowtest-flow-spec-fingerprint-v3` 为正式基线，
+  并保存 pinned/current 版本策略。`schema_version` 仍为 `flowtest-flow-spec-v1`，它与 fingerprint
+  版本是两个独立维度，因此不修改 `/api/v1` 路由版本。仓库中的 v1/v2 读取代码可保留，但开发期
+  旧文件不属于正式兼容范围，S47.2 不增加迁移或兼容逻辑。
+- S47.2 迁移 `20260823_0043` 的回滚目标是 `20260823_0042`；升级统一净化既有 Canonical Contract、
+  重算 fingerprint/completeness。降级保留已净化数据，绝不恢复已删除的敏感值。
 - Transfer Manifest 版本保持 `standalone-compact-transfer-v1`；新增表必须通过显式表清单和
   数据分类验证，不能静默改变旧包含义。
 - MCP、AI、REST、CLI 只经过 Application Service；MCP 关闭时普通 Web/API/Standalone/Compact

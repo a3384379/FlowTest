@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from typing import Final, Literal, cast
 
-from pydantic import JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from app.domain.test_design import (
     CoverageEntry,
@@ -21,7 +22,12 @@ from app.domain.test_design import (
     ScenarioRequest,
     TestDesignDocument,
 )
-from app.domain.test_engineering import GenerationPolicy, OperationContract, TestEngineeringEngine
+from app.domain.test_engineering import (
+    ContractParameter,
+    GenerationPolicy,
+    OperationContract,
+    TestEngineeringEngine,
+)
 
 ChangeRegressionStatus = Literal[
     "review_required",
@@ -58,6 +64,81 @@ STAGES: Final[tuple[StageName, ...]] = (
 )
 
 
+class OperationIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_definition_id: str | None = None
+    portable_operation_ref: str = Field(min_length=1, max_length=240)
+    service_key: str = Field(min_length=1, max_length=160)
+    method: str = Field(pattern=r"^[A-Z]+$", max_length=16)
+    normalized_path: str = Field(min_length=1, max_length=2048)
+    contract_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @property
+    def semantic_prefix(self) -> str:
+        instance = self.api_definition_id or self.portable_operation_ref
+        return f"{instance}|{self.service_key}|{self.method}|{self.normalized_path}"
+
+
+class SemanticCoverageFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_identity: OperationIdentity
+    request_location: Literal["path", "query", "header", "cookie", "body"]
+    field_path: str = Field(min_length=1, max_length=512)
+    semantic_value: str = Field(min_length=1, max_length=65536)
+    scenario_kind: str = Field(min_length=1, max_length=80)
+    expected_category: Literal["success", "invalid_request", "unauthorized", "unknown"]
+    oracle_identity: str | None = Field(default=None, max_length=240)
+    source_asset_type: Literal["test_case", "workflow", "test_design"]
+    source_asset_id: str = Field(min_length=1, max_length=160)
+    test_plan_id: str | None = Field(default=None, max_length=160)
+
+    @property
+    def complete(self) -> bool:
+        return self.expected_category != "unknown" and self.oracle_identity is not None
+
+    @property
+    def target_key(self) -> str:
+        return (
+            f"{self.operation_identity.semantic_prefix}|{self.request_location}|{self.field_path}"
+        )
+
+    @property
+    def coverage_token(self) -> str:
+        return f"{self.semantic_value}|{self.expected_category}"
+
+
+class ChangeConstraintTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    location: Literal["path", "query", "header", "cookie", "body"]
+    field_path: tuple[str, ...]
+    constraint: Literal[
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "enum",
+        "pattern",
+        "format",
+    ]
+    before: JsonValue = None
+    after: JsonValue = None
+
+    @property
+    def mutation_path(self) -> str:
+        return f"{self.location}.{'.'.join(self.field_path)}"
+
+    @property
+    def parameter_name(self) -> str | None:
+        return self.field_path[0] if self.location != "body" and len(self.field_path) == 1 else None
+
+
 def regression_fingerprint(
     *,
     source_fingerprint: str,
@@ -92,13 +173,36 @@ def missing_test_design(
     source_key = str(gap.get("source_key") or raw_key)[:240]
     label = str(gap.get("label") or source_key)[:240]
     contract = current_contract or _change_contract(gap=gap, digest=digest, source_ref=source_ref)
-    generation_contract = _focused_change_contract(contract, gap) if current_contract else contract
+    target = change_constraint_target(gap)
+    unresolved_target = current_contract is not None and not _exact_change_target_exists(
+        current_contract, target
+    )
+    generation_contract = (
+        _change_contract(gap=gap, digest=digest, source_ref=source_ref)
+        if unresolved_target
+        else _focused_change_contract(contract, gap)
+        if current_contract
+        else contract
+    )
     generated = TestEngineeringEngine().generate(
         contract=generation_contract,
         policy=GenerationPolicy(max_scenarios=30, pairwise_enabled=False),
     )
     scenarios = _change_scenarios(generated, gap)
     scenarios = _exclude_covered_scenarios(scenarios, covered_values or set())
+    if unresolved_target:
+        scenarios = [
+            scenario.model_copy(
+                update={
+                    "expected_category": "review",
+                    "deterministic": False,
+                    "requires_review": True,
+                    "confidence": min(scenario.confidence, 0.5),
+                    "tags": sorted({*scenario.tags, "change-target-unresolved"}),
+                }
+            )
+            for scenario in scenarios
+        ]
     oracles = _extend_oracle_scope(generated, scenarios)
     coverage = _change_coverage(generated, gap, scenarios)
     document = generated.model_copy(
@@ -120,9 +224,20 @@ def missing_test_design(
             "warnings": [
                 *generated.warnings,
                 "变更回归草案需人工核对存量覆盖与业务前置条件",
+                *(
+                    ["当前契约无法唯一定位变更字段；草案仅可 Design 审核"]
+                    if unresolved_target
+                    else []
+                ),
             ],
-            "confidence": 0.75,
-            "review_requirements": sorted({*generated.review_requirements, "change_impact_review"}),
+            "confidence": 0.5 if unresolved_target else 0.75,
+            "review_requirements": sorted(
+                {
+                    *generated.review_requirements,
+                    "change_impact_review",
+                    *({"change_target_unresolved"} if unresolved_target else set()),
+                }
+            ),
         }
     )
     return cast(dict[str, JsonValue], document.model_dump(mode="json"))
@@ -131,25 +246,61 @@ def missing_test_design(
 def _focused_change_contract(
     contract: OperationContract, gap: dict[str, JsonValue]
 ) -> OperationContract:
-    """Limit generation to the changed body field while retaining actual response oracles."""
+    """Limit generation to the exact changed location while retaining response oracles."""
 
-    field_path, constraint = _constraint_target(gap)
-    if not field_path or constraint is None:
+    target = change_constraint_target(gap)
+    if target is None:
         return contract
-    leaf = _schema_at_path(contract.body_schema, field_path)
-    if leaf is None:
+    if target.location == "body":
+        leaf = _schema_at_path(contract.body_schema, list(target.field_path))
+        if leaf is None:
+            return contract
+        focused_schema = _nested_schema(list(target.field_path), leaf)
+        request_body = contract.request_body
+        if request_body is not None:
+            request_body = request_body.model_copy(update={"schema_": focused_schema})
+        return contract.model_copy(
+            update={
+                "parameters": [],
+                "request_body": request_body,
+                "request": focused_schema,
+            }
+        )
+    parameter = _target_parameter(contract, target)
+    if parameter is None:
         return contract
-    focused_schema = _nested_schema(field_path, leaf)
-    request_body = contract.request_body
-    if request_body is not None:
-        request_body = request_body.model_copy(update={"schema_": focused_schema})
     return contract.model_copy(
-        update={
-            "parameters": [],
-            "request_body": request_body,
-            "request": focused_schema,
-        }
+        update={"parameters": [parameter], "request_body": None, "request": {}}
     )
+
+
+def _target_parameter(
+    contract: OperationContract, target: ChangeConstraintTarget
+) -> ContractParameter | None:
+    name = target.parameter_name
+    if name is None:
+        return None
+    matches = [
+        parameter
+        for parameter in contract.parameters
+        if parameter.location == target.location
+        and (
+            parameter.name.lower() == name.lower()
+            if target.location == "header"
+            else parameter.name == name
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _exact_change_target_exists(
+    contract: OperationContract, target: ChangeConstraintTarget | None
+) -> bool:
+    if target is None:
+        return False
+    if target.location == "body":
+        return _schema_at_path(contract.body_schema, list(target.field_path)) is not None
+    return _target_parameter(contract, target) is not None
 
 
 def _schema_at_path(
@@ -182,13 +333,30 @@ def _change_contract(
 ) -> OperationContract:
     source_key = str(gap.get("source_key") or "POST /change")
     method, path = _operation_target(source_key)
-    field_path, constraint = _constraint_target(gap)
-    request = _request_schema(field_path, constraint, gap.get("after"))
+    target = change_constraint_target(gap)
+    request = (
+        _request_schema(list(target.field_path), target.constraint, gap.get("after"))
+        if target is not None and target.location == "body"
+        else {}
+    )
+    parameters = (
+        [
+            ContractParameter(
+                name=target.parameter_name,
+                location=target.location,
+                required=target.location == "path",
+                schema=_constraint_schema(target.constraint, gap.get("after")),
+            )
+        ]
+        if target is not None and target.location != "body" and target.parameter_name is not None
+        else []
+    )
     return OperationContract.model_validate(
         {
             "operation": f"change_{digest}",
             "method": method,
             "path": path,
+            "parameters": parameters,
             "request": request,
             "responses": {},
             "source_ref": source_ref[:512] or f"change://{digest}",
@@ -204,21 +372,57 @@ def _operation_target(source_key: str) -> tuple[str, str]:
     return "POST", "/change-impact"
 
 
-def _constraint_target(gap: dict[str, JsonValue]) -> tuple[list[str], str | None]:
+def change_constraint_target(gap: dict[str, JsonValue]) -> ChangeConstraintTarget | None:
     raw_path = str(gap.get("field_path") or "")
     parts = [part for part in raw_path.split(".") if part]
-    if parts and parts[0] in {"request", "response"}:
+    if parts and parts[0] == "response":
+        return None
+    if parts and parts[0] == "request":
         parts.pop(0)
-    if parts and parts[0] == "body":
-        parts.pop(0)
+    if not parts or parts[0] not in {"path", "query", "header", "cookie", "body"}:
+        return None
+    location = parts.pop(0)
     constraint = parts.pop() if parts and parts[-1] in _CONSTRAINT_KEYS else None
-    safe_parts = [part for part in parts if part.replace("_", "").isalnum()]
-    return safe_parts[:8], constraint
+    safe_parts = [part for part in parts if re.fullmatch(r"[A-Za-z0-9_-]+", part)]
+    if constraint is None or not safe_parts:
+        return None
+    return ChangeConstraintTarget(
+        location=cast(Literal["path", "query", "header", "cookie", "body"], location),
+        field_path=tuple(safe_parts[:8]),
+        constraint=cast(AnyConstraint, constraint),
+        before=gap.get("before"),
+        after=gap.get("after"),
+    )
 
 
 _CONSTRAINT_KEYS = frozenset(
-    {"enum", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"}
+    {
+        "enum",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "pattern",
+        "format",
+    }
 )
+AnyConstraint = Literal[
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "enum",
+    "pattern",
+    "format",
+]
 
 
 def _request_schema(
@@ -226,7 +430,7 @@ def _request_schema(
 ) -> dict[str, JsonValue]:
     if not field_path or constraint is None:
         return {}
-    leaf: dict[str, JsonValue] = {"type": _constraint_schema_type(constraint)}
+    leaf: dict[str, JsonValue] = {"type": _constraint_schema_type(constraint, after)}
     if after is not None:
         leaf[constraint] = after
     current: dict[str, JsonValue] = leaf
@@ -235,9 +439,16 @@ def _request_schema(
     return current
 
 
-def _constraint_schema_type(constraint: str) -> str:
-    if constraint in {"minimum", "maximum"}:
-        return "number"
+def _constraint_schema(constraint: str, after: JsonValue) -> dict[str, JsonValue]:
+    schema: dict[str, JsonValue] = {"type": _constraint_schema_type(constraint, after)}
+    if after is not None:
+        schema[constraint] = after
+    return schema
+
+
+def _constraint_schema_type(constraint: str, value: JsonValue = None) -> str:
+    if constraint in {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"}:
+        return "integer" if isinstance(value, int) and not isinstance(value, bool) else "number"
     if constraint in {"minItems", "maxItems"}:
         return "array"
     return "string"
@@ -246,10 +457,10 @@ def _constraint_schema_type(constraint: str) -> str:
 def _change_scenarios(
     generated: TestDesignDocument, gap: dict[str, JsonValue]
 ) -> list[ScenarioCandidate]:
-    field_path, constraint = _constraint_target(gap)
-    if constraint is None:
+    target = change_constraint_target(gap)
+    if target is None:
         return list(generated.scenarios)
-    mutation_path = f"body.{'.'.join(field_path)}" if field_path else _mutation_path(generated)
+    mutation_path = target.mutation_path
     scenarios = []
     for item in generated.scenarios:
         if not any(mutation.path == mutation_path for mutation in item.mutations):
@@ -266,23 +477,39 @@ def _label_generated_boundary(
     scenario: ScenarioCandidate, gap: dict[str, JsonValue]
 ) -> ScenarioCandidate:
     semantic_type = str(gap.get("semantic_type") or "")
-    mapping = (
-        {
-            "number_at_max": "new_legal_boundary",
-            "number_above_max": "new_illegal_boundary",
-        }
-        if semantic_type == "maximum_changed"
-        else {
-            "number_at_min": "new_legal_boundary",
-            "number_below_min": "new_illegal_boundary",
-        }
-        if semantic_type == "minimum_changed"
-        else {}
-    )
+    mapping = _change_boundary_kinds(semantic_type)
     label = mapping.get(scenario.kind)
     if label is None:
         return scenario
     return scenario.model_copy(update={"tags": sorted({*scenario.tags, "change-impact", label})})
+
+
+def _change_boundary_kinds(semantic_type: str) -> dict[str, str]:
+    mappings = {
+        "maximum_changed": ("number_at_max", "number_above_max"),
+        "minimum_changed": ("number_at_min", "number_below_min"),
+        "exclusiveMaximum_changed": (
+            "number_below_exclusive_max",
+            "number_at_exclusive_max",
+        ),
+        "exclusiveMinimum_changed": (
+            "number_above_exclusive_min",
+            "number_at_exclusive_min",
+        ),
+        "maxLength_changed": ("string_at_max_length", "string_above_max_length"),
+        "minLength_changed": ("string_at_min_length", "string_below_min_length"),
+        "maxItems_changed": ("array_at_max", "array_above_max"),
+        "minItems_changed": ("array_at_min", "array_below_min"),
+        "pattern_changed": ("pattern_valid", "pattern_invalid"),
+        "format_changed": ("format_valid", "format_invalid"),
+        "enum_changed": ("enum_value", "enum_invalid"),
+    }
+    kinds = mappings.get(semantic_type)
+    return (
+        {kinds[0]: "new_legal_boundary", kinds[1]: "new_illegal_boundary"}
+        if kinds is not None
+        else {}
+    )
 
 
 def _historical_boundary_scenarios(
@@ -299,8 +526,8 @@ def _historical_boundary_scenarios(
         "maximum" if semantic_type == "maximum_changed" else "minimum"
     )
     base = _base_request(generated)
-    field_path, _constraint = _constraint_target(gap)
-    mutation_path = f"body.{'.'.join(field_path)}" if field_path else _mutation_path(generated)
+    target = change_constraint_target(gap)
+    mutation_path = target.mutation_path if target is not None else _mutation_path(generated)
     adjacent = before + 1 if direction == "maximum" else before - 1
     return [
         _historical_scenario(base, mutation_path, before, after, direction, "historical_boundary"),
@@ -311,15 +538,15 @@ def _historical_boundary_scenarios(
 
 
 def _historical_scenario(
-    base: dict[str, JsonValue],
+    base: ScenarioRequest,
     path: str,
     value: int | float,
     current_boundary: int | float,
     direction: Literal["minimum", "maximum"],
     kind: str,
 ) -> ScenarioCandidate:
-    body = deepcopy(base)
-    _set_nested(body, path.removeprefix("body."), value)
+    request = deepcopy(base)
+    _set_request_value(request, path, value)
     valid = value <= current_boundary if direction == "maximum" else value >= current_boundary
     validity_label = "合法" if valid else "非法"
     suffix = hashlib.sha256(f"{kind}:{path}:{value}".encode()).hexdigest()[:10]
@@ -327,18 +554,28 @@ def _historical_scenario(
         id=f"scenario_change_{kind}_{suffix}",
         kind=f"change_{kind}",
         title=f"{path}: 历史边界值 {value} 在当前契约下应{validity_label}",
-        request_body=body,
-        request=ScenarioRequest(body=body),
-        mutations=[ScenarioMutation(path=path, location="body", operation="set", value=value)],
+        request_body=request.body if isinstance(request.body, dict) else {},
+        request=request,
+        mutations=[
+            ScenarioMutation(
+                path=path,
+                location=cast(
+                    Literal["path", "query", "header", "cookie", "body", "auth"],
+                    path.split(".", 1)[0],
+                ),
+                operation="set",
+                value=value,
+            )
+        ],
         expected_category="success" if valid else "invalid_request",
         negative=not valid,
         tags=["generated", "change-impact", kind],
     )
 
 
-def _base_request(document: TestDesignDocument) -> dict[str, JsonValue]:
+def _base_request(document: TestDesignDocument) -> ScenarioRequest:
     happy = next((item for item in document.scenarios if item.kind == "happy_path"), None)
-    return deepcopy(happy.request_body) if happy is not None else {}
+    return deepcopy(happy.request) if happy is not None else ScenarioRequest(body={})
 
 
 def _mutation_path(document: TestDesignDocument) -> str:
@@ -361,6 +598,23 @@ def _set_nested(target: dict[str, JsonValue], path: str, value: JsonValue) -> No
         cursor[parts[-1]] = value
 
 
+def _set_request_value(request: ScenarioRequest, path: str, value: JsonValue) -> None:
+    location, _, field_path = path.partition(".")
+    if location == "body":
+        body = request.body if isinstance(request.body, dict) else {}
+        _set_nested(body, field_path, value)
+        request.body = body
+        return
+    target = {
+        "path": request.path_parameters,
+        "query": request.query_parameters,
+        "header": request.headers,
+        "cookie": request.cookies,
+    }.get(location)
+    if target is not None:
+        target[field_path] = value
+
+
 def existing_semantic_values(documents: list[TestDesignDocument]) -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
     for document in documents:
@@ -373,8 +627,8 @@ def existing_semantic_values(documents: list[TestDesignDocument]) -> dict[str, s
 
 
 def gap_covered_values(gap: dict[str, JsonValue], coverage: dict[str, set[str]]) -> set[str]:
-    field_path, _constraint = _constraint_target(gap)
-    path = f"body.{'.'.join(field_path)}" if field_path else "body.value"
+    target = change_constraint_target(gap)
+    path = target.mutation_path if target is not None else "body.value"
     return set(coverage.get(path, set()))
 
 
@@ -384,13 +638,51 @@ def _exclude_covered_scenarios(
     return [
         scenario
         for scenario in scenarios
-        if not scenario.mutations
-        or _semantic_value(scenario.mutations[0].value) not in covered_values
+        if not scenario.mutations or _scenario_coverage_token(scenario) not in covered_values
     ]
 
 
 def _semantic_value(value: JsonValue | None) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _scenario_coverage_token(scenario: ScenarioCandidate) -> str:
+    return f"{_semantic_value(scenario.mutations[0].value)}|{scenario.expected_category}"
+
+
+def semantic_coverage_tokens(
+    facts: list[SemanticCoverageFact],
+    identity: OperationIdentity,
+    target: ChangeConstraintTarget,
+    *,
+    asset_scope: set[tuple[str, str]] | None = None,
+) -> set[str]:
+    """Select complete coverage for one operation/location/field and optional asset scope."""
+
+    field_path = ".".join(target.field_path)
+    return {
+        fact.coverage_token
+        for fact in facts
+        if fact.complete
+        and _same_operation(fact.operation_identity, identity)
+        and fact.request_location == target.location
+        and fact.field_path == field_path
+        and (asset_scope is None or (fact.source_asset_type, fact.source_asset_id) in asset_scope)
+    }
+
+
+def _same_operation(left: OperationIdentity, right: OperationIdentity) -> bool:
+    if left.api_definition_id is not None and right.api_definition_id is not None:
+        return left.api_definition_id == right.api_definition_id
+    return (
+        left.service_key,
+        left.method,
+        left.normalized_path,
+    ) == (
+        right.service_key,
+        right.method,
+        right.normalized_path,
+    )
 
 
 def _extend_oracle_scope(

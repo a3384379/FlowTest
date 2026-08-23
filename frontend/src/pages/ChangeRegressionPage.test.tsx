@@ -100,7 +100,38 @@ const baseRun: ChangeRegressionRun = {
   change_set_id: '00000000-0000-4000-8000-000000003009',
   release_decision_id: null,
   selected_assets: [],
-  selection_summary: { coverage_gap_count: 1 },
+  selection_summary: {
+    coverage_gap_count: 1,
+    asset_coverage_gap_count: 0,
+    semantic_coverage_scopes: [
+      {
+        change_key: 'openapi:orders:query.page.maximum',
+        operation: {
+          api_definition_id: '00000000-0000-4000-8000-000000003010',
+          portable_operation_ref: 'orders.list',
+          service_key: 'orders',
+          method: 'GET',
+          normalized_path: '/orders',
+          contract_fingerprint: 'b'.repeat(64),
+        },
+        target: {
+          location: 'query',
+          field_path: ['page'],
+          constraint: 'maximum',
+          before: 100,
+          after: 999,
+        },
+        project_known_coverage: 'covered',
+        current_test_plan_coverage: 'missing',
+        project_known_values: ['999|success'],
+        current_test_plan_values: [],
+        project_missing_values: [],
+        current_test_plan_missing_values: ['999|success', '1000|invalid_request'],
+        oracle_sources: [{ source_type: 'contract', source_ref: 'openapi://orders/GET' }],
+        requires_review: false,
+      },
+    ],
+  },
   missing_tests: [{ ...pendingItem, review_status: 'accepted' as const }],
   evidence: {},
   failure_triage: {},
@@ -131,6 +162,12 @@ describe('ChangeRegressionPage', () => {
 
     expect(await screen.findByRole('heading', { name: '变更驱动回归' })).toBeVisible()
     expect(await screen.findByText('订单变更回归')).toBeVisible()
+    expect(screen.getByText('Asset Mapping Coverage')).toBeVisible()
+    expect(screen.getByText('Project Known Semantic Coverage')).toBeVisible()
+    expect(screen.getByText('Current Test Plan Semantic Coverage')).toBeVisible()
+    expect(screen.getByText('orders · GET /orders')).toBeVisible()
+    expect(screen.getByText('100 → 999')).toBeVisible()
+    expect(screen.getByText('contract:openapi://orders/GET')).toBeVisible()
     await waitFor(() => expect(screen.getByRole('button', { name: '人工批准' })).toBeVisible())
 
     await browser.click(screen.getByRole('button', { name: '人工批准' }))
@@ -207,6 +244,62 @@ describe('ChangeRegressionPage', () => {
     expect(screen.getByText('SERVICE_ENDPOINT_FAILURE')).toBeVisible()
     expect(screen.getByText('orders')).toBeVisible()
     expect(screen.getByText('建议回归：目标服务健康回归')).toBeVisible()
+  })
+
+  it('shows unresolved semantic targets and truthful empty triage fields', async () => {
+    const unresolvedRun: ChangeRegressionRun = {
+      ...baseRun,
+      source_ref: '',
+      selection_summary: {
+        coverage_gap_count: 1,
+        semantic_coverage_scopes: [
+          {
+            change_key: 'unresolved:legacy-change',
+            operation: null,
+            target: null,
+            project_known_coverage: 'missing',
+            current_test_plan_coverage: 'missing',
+            project_known_values: [],
+            current_test_plan_values: [],
+            project_missing_values: [],
+            current_test_plan_missing_values: [],
+            oracle_sources: [],
+            requires_review: true,
+          },
+        ],
+      },
+      missing_tests: [{ ...pendingItem, review_status: 'rejected' }],
+      failure_triage: {
+        algorithm_version: 's47-failure-triage-v2',
+        primary_classification: 'NETWORK_FAILURE',
+        secondary_candidates: [],
+        confidence: 0.5,
+        reason_codes: [],
+        affected_service: null,
+        endpoint_variant: null,
+        affected_operation: null,
+        evidence_refs: [],
+        retry_signal: false,
+        recommended_action: '检查网络路径',
+        recommended_regression: [],
+      },
+    }
+    installHandlers(
+      () => unresolvedRun,
+      () => undefined,
+    )
+    renderPage()
+
+    expect(await screen.findByText('订单变更回归')).toBeVisible()
+    expect(screen.getByText('unknown')).toBeVisible()
+    expect(screen.getAllByText('unresolved')).toHaveLength(4)
+    expect(screen.getByText('-')).toBeVisible()
+    expect(screen.getAllByText('无').length).toBeGreaterThanOrEqual(3)
+    expect(screen.getByText('待审核')).toBeVisible()
+    expect(screen.getByText('未填写')).toBeVisible()
+    expect(screen.getByText('否')).toBeVisible()
+    expect(screen.getAllByText('未定位')).toHaveLength(3)
+    expect(screen.queryByText(/建议回归：/)).not.toBeInTheDocument()
   })
 
   it('reports review decisions and action failures through the hook', async () => {

@@ -746,7 +746,34 @@ def _request_overrides(scenario: ScenarioCandidate) -> dict[str, Any]:
         ],
         "headers": headers,
         "replace_headers": True,
-        "auth_disabled": scenario.request.auth_disabled,
+        "auth_mode": "disabled" if scenario.request.auth_disabled else "inherit",
+        "suppressed_headers": sorted(
+            {
+                mutation.path.split(".", 1)[1]
+                for mutation in scenario.mutations
+                if mutation.location == "header"
+                and mutation.operation == "omit"
+                and "." in mutation.path
+            }
+        ),
+        "suppressed_query_parameters": sorted(
+            {
+                mutation.path.split(".", 1)[1]
+                for mutation in scenario.mutations
+                if mutation.location == "query"
+                and mutation.operation == "omit"
+                and "." in mutation.path
+            }
+        ),
+        "suppressed_cookies": sorted(
+            {
+                mutation.path.split(".", 1)[1]
+                for mutation in scenario.mutations
+                if mutation.location == "cookie"
+                and mutation.operation == "omit"
+                and "." in mutation.path
+            }
+        ),
     }
     if scenario.request.body is not None:
         overrides["body"] = {"kind": "json", "value": scenario.request.body}

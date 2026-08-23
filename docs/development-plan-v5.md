@@ -249,3 +249,22 @@ S47.1 不重建 S47 的资产或引擎，而是把真实 OpenAPI 导入后的语
 Pairwise value-partition covering array 和显式 State Model 仍是 P1；State 无证据时能力明确不可用。
 真实 Key Rotation 和外部发布门槛仍阻断 GA。详细记录见
 [S47.1 语义正确性与证据闭环](release/s47-1-semantic-correctness.md)。
+
+## S47.2 最终正确性与安全闭环（2026-08-23）
+
+S47.2 只关闭 V5 现有链路的正确性、安全和合并门禁，不扩展新的执行引擎或资产模型：
+
+1. Canonical Contract 在导入、持久化、迁移、API、MCP、Test Engineering 和 fingerprint 前统一经过
+   allowlist sanitizer；示例、默认值、常量和敏感枚举不进入数据库或对外响应。
+2. Request suppression 在 Project、Environment、ServiceEndpoint、API 和 Runtime 合并完成后统一应用，
+   因而 required Header omit 与 auth disabled 不会被高优先级层重新注入。
+3. Change Regression 的 Coverage 绑定 Operation Identity 和 parameter location，同时区分项目已知覆盖与当前
+   TestPlan 覆盖；只有已发布 WorkflowVersion 可以形成执行覆盖事实。
+4. Evidence 将规范性约束与观察统计分开，冲突判断对称并保留双方 provenance；Source AST 与 OpenAPI
+   exclusive boundary 保留严格/非严格语义。
+5. Pairwise 仍是有界组合能力，State Model 保持 unavailable，Knowledge Graph 仅是确定性 Evidence 关系图；
+   Key Rotation 仍只有计划能力。
+
+V5 FlowSpec 的唯一正式基线为 `flowtest-flow-spec-fingerprint-v3`。开发期 v1/v2 文件不属于正式兼容范围，
+本轮不增加旧格式迁移或兼容逻辑。详细证据见
+[S47.2 最终正确性与安全闭环](release/s47-2-final-correctness-security.md)。

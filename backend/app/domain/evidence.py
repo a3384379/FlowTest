@@ -8,7 +8,7 @@ import re
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -50,6 +50,9 @@ class EvidenceRef(BaseModel):
     source_type: EvidenceSourceType
     source_ref: str = Field(min_length=1, max_length=512)
     revision: str = Field(min_length=1, max_length=160)
+    semantic_role: Literal["normative", "observed", "mixed", "coverage", "supporting"] = (
+        "supporting"
+    )
 
 
 class EvidenceFinding(BaseModel):
@@ -103,7 +106,52 @@ class EvidenceFinding(BaseModel):
             source_type=self.source_type,
             source_ref=self.source_ref,
             revision=self.revision,
+            semantic_role=_evidence_semantic_role(self),
         )
+
+
+def _evidence_semantic_role(
+    finding: EvidenceFinding,
+) -> Literal["normative", "observed", "mixed", "coverage", "supporting"]:
+    if finding.source_type is EvidenceSourceType.EXISTING_TEST:
+        return "coverage"
+    if finding.source_type is EvidenceSourceType.RUNTIME:
+        return "observed"
+    if finding.source_type is EvidenceSourceType.DATA_PROFILE:
+        keys = set(finding.structured_data)
+        observed = bool(
+            keys.intersection({"observed_minimum", "observed_maximum", "observed_enum_candidates"})
+        )
+        normative = bool(
+            keys.intersection(
+                {
+                    "constraint_minimum",
+                    "constraint_maximum",
+                    "constraint_enum",
+                    "check_constraint",
+                    "minimum",
+                    "maximum",
+                    "exclusiveMinimum",
+                    "exclusiveMaximum",
+                    "enum",
+                    "pattern",
+                    "required",
+                    "nullable",
+                    "unique",
+                    "foreign_key",
+                }
+            )
+        )
+        if observed and normative:
+            return "mixed"
+        return "normative" if normative else "observed"
+    if finding.source_type in {
+        EvidenceSourceType.CONTRACT,
+        EvidenceSourceType.SOURCE,
+        EvidenceSourceType.USER_CONFIRMED_RULE,
+    }:
+        return "normative"
+    return "supporting"
 
 
 class EvidenceBudget(BaseModel):
@@ -155,6 +203,13 @@ class DataProfileColumn(BaseModel):
     enum_candidates: list[JsonValue] = Field(default_factory=list, max_length=100)
     minimum: float | None = None
     maximum: float | None = None
+    observed_enum_candidates: list[JsonValue] = Field(default_factory=list, max_length=100)
+    observed_minimum: float | None = None
+    observed_maximum: float | None = None
+    constraint_minimum: float | None = None
+    constraint_maximum: float | None = None
+    constraint_enum: list[JsonValue] = Field(default_factory=list, max_length=100)
+    check_constraint: dict[str, JsonValue] | None = None
     min_length: int | None = Field(default=None, ge=0)
     max_length: int | None = Field(default=None, ge=0)
     null_ratio: float | None = Field(default=None, ge=0, le=1)
@@ -246,11 +301,26 @@ def data_profile_evidence(profile: DataProfile) -> EvidenceBundle:
             kind="column_profile",
             path=f"column.{column.name}",
             revision=profile.revision,
-            data=cast(dict[str, JsonValue], column.model_dump(mode="json", exclude_none=True)),
+            data=_profile_column_data(column),
         )
         for column in profile.columns
     ]
     return EvidenceBundle(subject_ref=f"entity://{profile.entity}", findings=findings)
+
+
+def _profile_column_data(column: DataProfileColumn) -> dict[str, JsonValue]:
+    raw = cast(dict[str, JsonValue], column.model_dump(mode="json", exclude_none=True))
+    legacy_enum = raw.pop("enum_candidates", [])
+    legacy_minimum = raw.pop("minimum", None)
+    legacy_maximum = raw.pop("maximum", None)
+    if not raw.get("observed_enum_candidates") and legacy_enum:
+        raw["observed_enum_candidates"] = legacy_enum
+    if raw.get("observed_minimum") is None and legacy_minimum is not None:
+        raw["observed_minimum"] = legacy_minimum
+    if raw.get("observed_maximum") is None and legacy_maximum is not None:
+        raw["observed_maximum"] = legacy_maximum
+    raw["evidence_semantics"] = "observed_distribution_and_explicit_constraints"
+    return raw
 
 
 def _python_findings(
@@ -263,13 +333,14 @@ def _python_findings(
         if kind is None:
             continue
         line = int(getattr(node, "lineno", 1))
+        column = int(getattr(node, "col_offset", 0))
         findings.append(
             _finding(
                 source_type=EvidenceSourceType.SOURCE,
                 source_ref=source_ref,
-                subject_ref=f"source-symbol://{file.path}:{line}",
+                subject_ref=f"source-symbol://{file.path}:{line}:{column}",
                 kind=kind,
-                path=f"{file.path}:{line}",
+                path=f"{file.path}:{line}:{column}",
                 revision=snapshot.commit,
                 data=data,
             )
@@ -323,9 +394,13 @@ def _comparison_constraint(node: ast.Compare) -> dict[str, JsonValue] | None:
     name = _base_name(node.left).rsplit(".", 1)[-1]
     if not name:
         return None
-    if isinstance(node.ops[0], (ast.Lt, ast.LtE)):
+    if isinstance(node.ops[0], ast.Lt):
+        return {"name": name, "exclusiveMaximum": comparator.value}
+    if isinstance(node.ops[0], ast.LtE):
         return {"name": name, "maximum": comparator.value}
-    if isinstance(node.ops[0], (ast.Gt, ast.GtE)):
+    if isinstance(node.ops[0], ast.Gt):
+        return {"name": name, "exclusiveMinimum": comparator.value}
+    if isinstance(node.ops[0], ast.GtE):
         return {"name": name, "minimum": comparator.value}
     return None
 

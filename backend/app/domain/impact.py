@@ -755,7 +755,18 @@ def _contract_change_type(code: str) -> str:
 def _constraint_semantic_type(constraint: str) -> str:
     if constraint == "enum":
         return "enum_changed"
-    if constraint in {"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"}:
+    if constraint in {"pattern", "format"}:
+        return f"{constraint}_changed"
+    if constraint in {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    }:
         return f"{constraint}_changed"
     return "schema_changed"
 
@@ -767,9 +778,9 @@ def _constraint_severity(constraint: str, before: JsonValue, after: JsonValue) -
             if set(map(str, before)) - set(map(str, after))
             else ChangeSeverity.WARNING
         )
-    if constraint in {"minimum", "minLength", "minItems"}:
+    if constraint in {"minimum", "exclusiveMinimum", "minLength", "minItems"}:
         return _numeric_constraint_severity(before, after, increase_breaks=True)
-    if constraint in {"maximum", "maxLength", "maxItems"}:
+    if constraint in {"maximum", "exclusiveMaximum", "maxLength", "maxItems"}:
         return _numeric_constraint_severity(before, after, increase_breaks=False)
     return ChangeSeverity.WARNING
 

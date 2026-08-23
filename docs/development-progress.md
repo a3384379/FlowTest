@@ -874,3 +874,28 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 4. 继续 S31 剩余页面产品化、容量、安全、备份恢复和 V3 试点；未完成这些门槛前不宣告 V3 GA。
 5. 并行推进 `v2.0.0-rc.1` 的真实试点与连续 14 个自然日观察；只有签署、恢复演练、扫描和容量证据
    全部通过后创建 `v2.0.0` 正式标签。
+
+## S47.2 V5 最终正确性与安全闭环（2026-08-23）
+
+### 已完成实现
+
+- Canonical Contract 采用统一 allowlist sanitizer，覆盖 OpenAPI/Swagger 导入、APIVersion 持久化、既有数据
+  迁移、REST/MCP 读取、Test Engineering 和 fingerprint；危险示例和值级 Secret/PII 不再进入稳定契约。
+- Project、Environment、ServiceEndpoint、API、Runtime 五层请求合并后执行 Header/Query/Cookie suppression；
+  `auth_mode=disabled` 优先于旧 alias，并按 Bearer/Basic/OAuth/API Key carrier 删除认证值。
+- Semantic Coverage 使用 Service/Operation/Location/Field/Value/Category 身份，区分 Project Known 与 Current
+  TestPlan；pinned 版本缺失不回退 current，未发布 WorkflowVersion 不算覆盖。
+- Change Regression 支持 Body、Path、Query、Header、Cookie 位置化变化并从当前 Canonical Contract 生成
+  Oracle；Evidence 冲突对称、provenance 完整，观察统计不会冒充规范性约束。
+- Swagger/OpenAPI 3.0 与 3.1 exclusive boundary 以及 Source AST 的 `<`、`<=`、`>`、`>=` 已保持精确语义。
+- 迁移 head 升级为 `20260823_0043`，Standalone baseline/incremental schema 和 Transfer revision 同步。
+
+### 能力与发布边界
+
+V5 FlowSpec 正式基线仅为 fingerprint v3；开发期 v1/v2 不承担正式兼容承诺。Pairwise 仍是有界代表组合，
+State Model 未实现并明确不可用，Knowledge Graph 只表达可追溯 Evidence 关系。真实 Key Rotation、Windows
+实机、长时 Standalone/Compact、连续 RC 观察和人工安全审批仍未完成，所以 `GA_READY` 保持 `NO`。
+
+本地与远程验证结果以
+[S47.2 最终正确性与安全闭环](release/s47-2-final-correctness-security.md)为准；远程 GitHub Actions
+未真实完成前不得用本地结果替代。

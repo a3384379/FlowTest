@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from app.api.dependencies import CurrentUser, SessionDependency
-from app.domain.test_engineering import fingerprint_contract
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.schemas.test_engineering import (
     TestEngineeringApplyResponse,
     TestEngineeringGenerateRequest,
@@ -46,6 +46,7 @@ async def generate_test_design(
         design=design,
         contract_completeness=contract.completeness,
         contract_fingerprint=fingerprint_contract(contract),
+        contract=contract,
     )
 
 
@@ -100,8 +101,9 @@ async def apply_test_design_proposal(
 
 def _proposal_response(view: TestEngineeringProposalView) -> TestEngineeringProposalResponse:
     contract_fingerprint = view.change_set.source_snapshot.get("contract_fingerprint")
-    contract = view.change_set.source_snapshot.get("contract")
-    completeness = contract.get("completeness") if isinstance(contract, dict) else None
+    raw_contract = view.change_set.source_snapshot.get("contract")
+    contract = OperationContract.model_validate(raw_contract)
+    completeness = contract.completeness
     return TestEngineeringProposalResponse(
         change_set_id=view.change_set.id,
         status=view.change_set.status,
@@ -114,4 +116,5 @@ def _proposal_response(view: TestEngineeringProposalView) -> TestEngineeringProp
         contract_fingerprint=(
             contract_fingerprint if isinstance(contract_fingerprint, str) else ""
         ),
+        contract=contract,
     )

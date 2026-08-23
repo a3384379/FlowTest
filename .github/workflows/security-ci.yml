@@ -36,6 +36,13 @@ jobs:
           uv run --project backend pip-audit
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend audit --audit-level high
+      - name: Verify canonical contract leak prevention
+        working-directory: backend
+        run: >-
+          uv run pytest --no-cov
+          tests/test_s47_2_correctness_security.py::test_canonical_contract_redacts_nested_hints_and_sensitive_enum
+          tests/test_imports_api.py::test_sensitive_openapi_hints_never_reach_api_design_or_audit
+          tests/test_standalone_runtime.py::test_standalone_s472_sanitizes_existing_contract_data_irreversibly
       - name: Lint operations scripts
         run: |
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt \

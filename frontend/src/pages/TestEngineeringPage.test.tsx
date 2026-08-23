@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
 import type {
+  OperationContract,
   TestDesignDocument,
   TestEngineeringProposal,
 } from '../features/test-engineering/test-engineering-service'
@@ -13,6 +14,19 @@ import ProjectTestProvider from '../test/ProjectTestProvider'
 import { apiDefinition, environment, project } from '../test/fixtures'
 import { server } from '../test/server'
 import TestEngineeringPage from './TestEngineeringPage'
+
+const operationContract: OperationContract = {
+  operation: 'orders.create',
+  method: 'POST',
+  path: '/orders',
+  service: 'orders',
+  auth: { required: true, kind: 'bearer', location: 'header', name: 'Authorization' },
+  parameters: [
+    { name: 'X-Tenant-Id', location: 'header', required: true, schema: { type: 'string' } },
+  ],
+  completeness: 'complete',
+  warnings: [],
+}
 
 const design: TestDesignDocument = {
   schema_version: '1.0',
@@ -105,6 +119,7 @@ const design: TestDesignDocument = {
       source_type: 'contract',
       source_ref: 'contract://orders.create',
       revision: 'sha256:contract',
+      semantic_role: 'normative',
     },
   ],
   warnings: [],
@@ -127,6 +142,7 @@ describe('TestEngineeringPage', () => {
       applied: false,
       contract_completeness: 'complete',
       contract_fingerprint: 'a'.repeat(64),
+      contract: operationContract,
     }
     server.use(
       http.get('/api/v1/projects', () =>
@@ -159,6 +175,7 @@ describe('TestEngineeringPage', () => {
           persisted: false,
           contract_completeness: 'complete',
           contract_fingerprint: 'a'.repeat(64),
+          contract: operationContract,
         }),
       ),
       http.post(
@@ -199,6 +216,12 @@ describe('TestEngineeringPage', () => {
     await browser.click(screen.getByRole('button', { name: '只读生成预览' }))
 
     expect(await screen.findByText('验证 POST /orders 的契约边界')).toBeVisible()
+    expect(screen.getByText('Operation Identity').closest('tr')).toHaveTextContent(
+      'orders · POST /orders · orders.create',
+    )
+    expect(screen.getByText('disabled')).toBeVisible()
+    expect(screen.getByText('auth:disabled')).toBeVisible()
+    expect(screen.getByText('normative')).toBeVisible()
     expect(screen.getAllByText('可物化')).toHaveLength(2)
     const rowCheckboxes = screen.getAllByRole('checkbox')
     await browser.click(rowCheckboxes[1])
@@ -232,7 +255,7 @@ describe('TestEngineeringPage', () => {
         },
       ],
       warnings: ['Oracle 需要人工复核'],
-      review_requirements: ['state_evidence_unavailable'],
+      review_requirements: ['state_evidence_unavailable', 'evidence_conflict'],
       oracles: [{ ...design.oracles[0], requires_review: true }],
       coverage: { entries: [] },
     }
@@ -259,6 +282,11 @@ describe('TestEngineeringPage', () => {
       applied: false,
       contract_completeness: 'partial',
       contract_fingerprint: 'b'.repeat(64),
+      contract: {
+        ...operationContract,
+        completeness: 'redacted_partial',
+        warnings: ['sensitive enum values redacted'],
+      },
     }
     server.use(
       http.get('/api/v1/projects', () =>
@@ -275,8 +303,13 @@ describe('TestEngineeringPage', () => {
           fingerprint: 'fingerprint-review',
           design: previewDesign,
           persisted: false,
-          contract_completeness: 'partial',
+          contract_completeness: 'redacted_partial',
           contract_fingerprint: 'b'.repeat(64),
+          contract: {
+            ...operationContract,
+            completeness: 'redacted_partial',
+            warnings: ['sensitive enum values redacted'],
+          },
         }),
       ),
       http.post(`/api/v1/projects/${project.id}/test-engineering/proposals`, () =>
@@ -303,6 +336,8 @@ describe('TestEngineeringPage', () => {
     await browser.click(screen.getByRole('button', { name: '只读生成预览' }))
 
     expect(await screen.findByText('Oracle 需要人工复核')).toBeVisible()
+    expect(screen.getByText('Canonical Contract 已安全净化')).toBeVisible()
+    expect(screen.getByText('Evidence Conflict')).toBeVisible()
     expect(screen.getByText('缺少显式状态证据')).toBeVisible()
     expect(screen.getByText('需要')).toBeVisible()
     expect(screen.getByText('仅设计')).toBeVisible()

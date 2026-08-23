@@ -90,3 +90,19 @@ Key Rotation 真实重加密 Apply/Rollback 未实现，因此即使 S47 功能�
 专项事实见 [S47.1 语义正确性与证据闭环](s47-1-semantic-correctness.md)。即使本地门槛
 全部通过，Remote CI、Windows 实机、连续 RC、安全审批和真实 Key Rotation 未完成时，
 `GA_READY` 仍必须为 `NO`。
+
+## S47.2 最终正确性与安全门槛
+
+| Gate | 必须通过的证据 | 阻断条件 |
+|---|---|---|
+| Contract Security | allowlist sanitizer 覆盖导入、存储、迁移、REST、MCP、设计与 fingerprint | 数据库或任何对外面仍出现示例、Token、Secret、PII 原值 |
+| Cross-layer Suppression | Project/Environment/ServiceEndpoint/API/Runtime 合并后统一删除 Header/Query/Cookie carrier | Runtime 或任一继承层可重新注入 omit/auth-disabled 值 |
+| Operation Coverage | Coverage Fact 包含 Operation Identity、location、field、value、category；Current Plan 独立 | 跨 Operation 同名字段互相覆盖，或项目全部测试冒充当前计划 |
+| Regression Location | Body/Path/Query/Header/Cookie 变化映射到真实位置和当前契约 Oracle | 非 Body 变化被降级成 `body.value` 或生成虚假 status |
+| Evidence Truth | 规范性与观察值分离，冲突双向且保留双方 provenance | 观察最大值成为业务 maximum，或反向输入得出不同冲突结论 |
+| Exclusive Boundary | Swagger/OAS 3.0/OAS 3.1 和 AST 严格/非严格比较均有 Golden | `<` 与 `<=`、`>` 与 `>=` 生成同一边界语义 |
+| Remote Review | Draft PR 指向 `main`，本次提交对应 Actions 全部完成并通过 | 未运行、未完成、失败或证据不对应提交 |
+
+FlowSpec v3 是 V5 唯一正式基线；开发期 v1/v2 兼容明确不属于 S47.2 或合并门槛。完整记录见
+[S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。Remote CI 未全部通过时
+`MERGE_TO_MAIN` 必须为 `NO-GO`；真实 Key Rotation 和外部时间型证据未完成时 `GA_READY` 始终为 `NO`。

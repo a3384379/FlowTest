@@ -11,6 +11,12 @@ services:
   minio:
     ports: !override []
 
+  redpanda:
+    ports: !override []
+
+  grpc-target:
+    ports: !override []
+
   mock-target:
     ports: !override
       - "127.0.0.1:${FLOWTEST_S47_TARGET_PORT:-38048}:8080"

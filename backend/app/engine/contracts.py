@@ -249,6 +249,31 @@ class ApiNodeRequestOverrides(BaseModel):
     body: ApiNodeBodyOverride | None = None
     replace_headers: bool = False
     auth_disabled: bool = False
+    auth_mode: Literal["inherit", "disabled"] | None = None
+    suppressed_headers: tuple[str, ...] = Field(default=(), max_length=200)
+    suppressed_query_parameters: tuple[str, ...] = Field(default=(), max_length=200)
+    suppressed_cookies: tuple[str, ...] = Field(default=(), max_length=200)
+
+    @model_validator(mode="after")
+    def validate_suppression_names(self) -> "ApiNodeRequestOverrides":
+        groups = (
+            (self.suppressed_headers, True),
+            (self.suppressed_query_parameters, False),
+            (self.suppressed_cookies, False),
+        )
+        for names, case_insensitive in groups:
+            if any(not name.strip() or any(char in name for char in "\r\n:;") for name in names):
+                raise ValueError("request suppression names must be valid HTTP token names")
+            normalized = [name.lower() if case_insensitive else name for name in names]
+            if len(normalized) != len(set(normalized)):
+                raise ValueError("request suppression names must be unique")
+        return self
+
+    @property
+    def effective_auth_mode(self) -> Literal["inherit", "disabled"]:
+        if self.auth_mode is not None:
+            return self.auth_mode
+        return "disabled" if self.auth_disabled else "inherit"
 
 
 class ApiNodeConfig(BaseModel):

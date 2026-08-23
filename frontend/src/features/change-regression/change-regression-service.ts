@@ -45,6 +45,40 @@ export type MissingTestProposal = {
   materialized_resource_id: string | null
 }
 
+export type SemanticCoverageScope = {
+  change_key: string
+  operation: {
+    api_definition_id: string | null
+    portable_operation_ref: string
+    service_key: string
+    method: string
+    normalized_path: string
+    contract_fingerprint: string
+  } | null
+  target: {
+    location: 'path' | 'query' | 'header' | 'cookie' | 'body'
+    field_path: string[]
+    constraint: string
+    before: unknown
+    after: unknown
+  } | null
+  project_known_coverage: 'covered' | 'missing'
+  current_test_plan_coverage: 'covered' | 'missing'
+  project_known_values: string[]
+  current_test_plan_values: string[]
+  project_missing_values: string[]
+  current_test_plan_missing_values: string[]
+  oracle_sources: Array<{ source_type: string; source_ref: string }>
+  requires_review: boolean
+}
+
+export type ChangeRegressionSelectionSummary = Record<string, unknown> & {
+  asset_coverage_gap_count?: number
+  impact_selected_asset_count?: number
+  semantic_coverage_scopes?: SemanticCoverageScope[]
+  current_plan_recommendations?: Array<Record<string, unknown>>
+}
+
 export type FailureTriageResult = {
   algorithm_version: 's47-failure-triage-v2'
   primary_classification: string
@@ -88,7 +122,7 @@ export type ChangeRegressionRun = Omit<
   release_risk_id: string | null
   deployment_check_id: string | null
   selected_assets: Array<Record<string, unknown>>
-  selection_summary: Record<string, unknown>
+  selection_summary: ChangeRegressionSelectionSummary
   missing_tests: MissingTestProposal[]
   evidence: Record<string, unknown>
   failure_triage: FailureTriageResult | Record<string, unknown>

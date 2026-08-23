@@ -323,6 +323,112 @@ async def test_openapi_import_persists_complete_canonical_contract(
 
 
 @pytest.mark.asyncio
+async def test_sensitive_openapi_hints_never_reach_api_design_or_audit(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    sensitive_values = (
+        "real-password",
+        "real-token-value-A1B2C3D4E5F6G7H8",
+        "user@example.test",
+        "4111111111111111",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123",
+    )
+    password, token, email, card, jwt = sensitive_values
+    document = json.dumps(
+        {
+            "openapi": "3.0.3",
+            "info": {"title": "Sensitive contract", "version": "1"},
+            "paths": {
+                "/secure-orders": {
+                    "post": {
+                        "parameters": [
+                            {
+                                "name": "contact",
+                                "in": "query",
+                                "schema": {"type": "string", "example": email},
+                            }
+                        ],
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "password": {
+                                                "type": "string",
+                                                "example": password,
+                                            },
+                                            "token": {"type": "string", "default": token},
+                                            "card": {"type": "string", "const": card},
+                                            "status": {
+                                                "type": "string",
+                                                "enum": ["NORMAL", jwt],
+                                            },
+                                            "nested": {
+                                                "type": "array",
+                                                "items": {
+                                                    "oneOf": [
+                                                        {
+                                                            "type": "string",
+                                                            "example": token,
+                                                        }
+                                                    ]
+                                                },
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "ok",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "email": {
+                                                    "type": "string",
+                                                    "example": email,
+                                                }
+                                            },
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+    ).encode()
+
+    imported = await _upload_document(import_client, headers, project_id, document)
+    assert imported.status_code == 201, imported.text
+    definition_id = imported.json()["results"][0]["definition_id"]
+    detail = await import_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}", headers=headers
+    )
+    generated = await import_client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/generate",
+        headers=headers,
+        json={"api_definition_id": definition_id},
+    )
+    audit = await import_client.get(f"/api/v1/projects/{project_id}/audit-logs", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert generated.status_code == 200, generated.text
+    assert audit.status_code == 200, audit.text
+    assert detail.json()["version"]["contract_completeness"] == "redacted_partial"
+    assert "redacted_contract_test_data" in generated.json()["design"]["review_requirements"]
+    combined = detail.text + generated.text + audit.text
+    assert all(value not in combined for value in sensitive_values)
+
+
+@pytest.mark.asyncio
 async def test_import_rejects_invalid_and_duplicate_operations(
     import_client: AsyncClient,
 ) -> None:

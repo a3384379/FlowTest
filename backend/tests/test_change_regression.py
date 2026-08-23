@@ -1,12 +1,14 @@
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_test_plan_dispatcher, get_workflow_coordinator
@@ -16,6 +18,8 @@ from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.main import app
 from app.models import Base
+from app.models import TestCase as ORMTestCase
+from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
 from app.services.change_regression import (
     _add_semantic_value,
@@ -343,7 +347,46 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         headers=headers,
     )
     assert applied.status_code == 200, applied.text
-    generated_workflow_id = applied.json()["workflow_ids"][0]
+    generated_workflow_ids = applied.json()["workflow_ids"]
+    generated_workflow_id = generated_workflow_ids[0]
+    for generated_id in generated_workflow_ids:
+        generated_published = await context.client.post(
+            f"/api/v1/projects/{project_id}/workflows/{generated_id}/versions",
+            headers=headers,
+        )
+        assert generated_published.status_code == 200, generated_published.text
+
+    inventory_api = await context.client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "Inventory quantity API",
+            "request": {
+                "method": "POST",
+                "path": "/inventory",
+                "body_kind": "json",
+                "body": {"quantity": 1},
+            },
+        },
+    )
+    assert inventory_api.status_code == 201, inventory_api.text
+    inventory_workflow = await context.client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "Inventory 999 and 1000 coverage",
+            "definition": _quantity_workflow_definition(
+                inventory_api.json()["definition"]["id"],
+                values=(999, 1000),
+            ),
+        },
+    )
+    assert inventory_workflow.status_code == 201, inventory_workflow.text
+    inventory_published = await context.client.post(
+        f"/api/v1/projects/{project_id}/workflows/{inventory_workflow.json()['id']}/versions",
+        headers=headers,
+    )
+    assert inventory_published.status_code == 200, inventory_published.text
 
     baseline_run_id = await _create_contract_run(
         context.client, headers, project_id, baseline_document, "orders-baseline.json"
@@ -395,7 +438,11 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         for mutation in scenario["mutations"]
         if mutation["path"] == "body.quantity"
     }
-    assert values == {999, 1000}
+    # 101 carried an invalid-request oracle under the previous maximum. It now
+    # expects success, so value-only matching must not hide the changed semantic.
+    assert values == {101, 999, 1000}
+    semantic_scope = body["selection_summary"]["semantic_coverage_scopes"][0]
+    assert "999|invalid_request" not in semantic_scope["project_known_values"]
     status_oracles = {
         oracle["expected"] for oracle in draft["oracles"] if oracle["kind"] == "status"
     }
@@ -419,6 +466,54 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     accepted_item = accepted.json()["missing_tests"][0]
     assert accepted_item["materialized_resource_type"] == "test_design_bundle"
     assert accepted_item["materialized_resource_id"]
+    async with context.sessions() as session:
+        materialized_design = await session.get(
+            ORMTestDesign, UUID(accepted_item["materialized_resource_id"])
+        )
+        assert materialized_design is not None
+        case_ids = [
+            UUID(value.removeprefix("testcase://")) for value in materialized_design.test_case_refs
+        ]
+        materialized_cases = list(
+            (await session.scalars(select(ORMTestCase).where(ORMTestCase.id.in_(case_ids)))).all()
+        )
+    for materialized_case in materialized_cases:
+        materialized_workflow_id = materialized_case.draft_definition["workflow_id"]
+        materialized_published = await context.client.post(
+            f"/api/v1/projects/{project_id}/workflows/{materialized_workflow_id}/versions",
+            headers=headers,
+        )
+        assert materialized_published.status_code == 200, materialized_published.text
+
+    scoped = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": "S47.2 current plan semantic scope",
+            "source_ref": "openapi://orders/maximum",
+            "candidate_ref": "contract:orders-v2-scoped",
+            "openapi_diffs": [
+                {
+                    "baseline_run_id": baseline_run_id,
+                    "current_run_id": current_run_id,
+                }
+            ],
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+        },
+    )
+    assert scoped.status_code == 201, scoped.text
+    scoped_body = scoped.json()
+    semantic_scope = scoped_body["selection_summary"]["semantic_coverage_scopes"][0]
+    assert semantic_scope["operation"]["api_definition_id"] == api_definition_id
+    assert semantic_scope["project_known_coverage"] == "covered"
+    assert semantic_scope["current_test_plan_coverage"] == "missing"
+    assert scoped_body["selection_summary"]["semantic_gap_count"] == 0
+    assert scoped_body["missing_tests"] == []
+    assert (
+        scoped_body["selection_summary"]["current_plan_recommendations"][0]["action"]
+        == "add_project_known_test_to_current_plan"
+    )
 
 
 def test_existing_workflow_semantics_extracts_locations_and_treats_opaque_data_as_unknown() -> None:
@@ -556,6 +651,39 @@ def _workflow_definition(api_id: str) -> dict[str, object]:
         "edges": [
             {"id": "start-api", "source": "start", "target": "api"},
             {"id": "api-end", "source": "api", "target": "end"},
+        ],
+    }
+
+
+def _quantity_workflow_definition(api_id: str, *, values: tuple[int, ...]) -> dict[str, object]:
+    request_nodes = [
+        {
+            "id": f"quantity-{value}",
+            "type": "api",
+            "name": f"Quantity {value}",
+            "position": {"x": 100 * index, "y": 0},
+            "config": {
+                "api_definition_id": api_id,
+                "expected_statuses": [422],
+                "request_overrides": {"body": {"kind": "json", "value": {"quantity": value}}},
+            },
+        }
+        for index, value in enumerate(values, start=1)
+    ]
+    node_ids = ["start", *(node["id"] for node in request_nodes), "end"]
+    return {
+        "nodes": [
+            {"id": "start", "type": "start", "name": "Start", "position": {"x": 0, "y": 0}},
+            *request_nodes,
+            {"id": "end", "type": "end", "name": "End", "position": {"x": 400, "y": 0}},
+        ],
+        "edges": [
+            {
+                "id": f"{source}-{target}",
+                "source": source,
+                "target": target,
+            }
+            for source, target in pairwise(node_ids)
         ],
     }
 

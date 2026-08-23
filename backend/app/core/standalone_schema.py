@@ -8,7 +8,6 @@ Alembic; the stamp keeps the normal migration tooling aware of the installed bas
 
 import json
 import re
-from hashlib import sha256
 from typing import cast
 from uuid import uuid4
 
@@ -17,10 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.core.database import engine
+from app.domain.canonical_contracts import (
+    sanitize_contract_payload,
+    semantic_contract_fingerprint,
+)
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0042"
+BASELINE_REVISION = "20260823_0043"
 
 
 async def initialize_standalone_database() -> None:
@@ -104,6 +107,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         definition="VARCHAR(32) NOT NULL DEFAULT 'legacy_partial'",
     )
     await _ensure_s471_api_version_contracts(connection)
+    await _sanitize_s472_api_version_contracts(connection)
     await _add_column_if_missing(
         connection,
         table="api_call_executions",
@@ -125,7 +129,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041')"
+            "'20260823_0040', '20260823_0041', '20260823_0042')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -135,7 +139,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041')"
+            "'20260823_0040', '20260823_0041', '20260823_0042')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -190,7 +194,7 @@ async def _ensure_s471_api_version_contracts(connection: AsyncConnection) -> Non
         if _json_value(row["canonical_contract"]):
             continue
         contract = _standalone_legacy_contract(dict(row))
-        canonical = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        sanitized = sanitize_contract_payload(contract).payload
         await connection.execute(
             text(
                 "UPDATE api_versions SET canonical_contract = :contract, "
@@ -199,8 +203,39 @@ async def _ensure_s471_api_version_contracts(connection: AsyncConnection) -> Non
             ),
             {
                 "id": row["id"],
-                "contract": canonical,
-                "fingerprint": sha256(canonical.encode()).hexdigest(),
+                "contract": json.dumps(
+                    sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ),
+                "fingerprint": semantic_contract_fingerprint(sanitized),
+            },
+        )
+
+
+async def _sanitize_s472_api_version_contracts(connection: AsyncConnection) -> None:
+    columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
+    if not columns.fetchall():
+        return
+    rows = (
+        await connection.execute(text("SELECT id, canonical_contract FROM api_versions"))
+    ).mappings()
+    for row in rows:
+        raw = _json_value(row["canonical_contract"])
+        if not isinstance(raw, dict) or not raw:
+            continue
+        sanitized = sanitize_contract_payload(raw).payload
+        await connection.execute(
+            text(
+                "UPDATE api_versions SET canonical_contract = :contract, "
+                "contract_fingerprint = :fingerprint, contract_completeness = :completeness "
+                "WHERE id = :id"
+            ),
+            {
+                "id": row["id"],
+                "contract": json.dumps(
+                    sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ),
+                "fingerprint": semantic_contract_fingerprint(sanitized),
+                "completeness": sanitized["completeness"],
             },
         )
 

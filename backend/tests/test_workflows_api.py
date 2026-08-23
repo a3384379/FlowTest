@@ -362,11 +362,52 @@ async def test_location_overrides_and_auth_disabled_reach_real_target(
         "/api/v1/projects", headers=headers, json={"name": "Location E2E project"}
     )
     project_id = project.json()["id"]
+    project_configuration = await workflow_client.put(
+        f"/api/v1/projects/{project_id}/configuration",
+        headers=headers,
+        json={
+            "headers": {
+                "Authorization": "Bearer project-token",
+                "X-Tenant-Id": "project",
+                "Cookie": "session=project; keep=project",
+            }
+        },
+    )
+    assert project_configuration.status_code == 200, project_configuration.text
     environment = await workflow_client.post(
         f"/api/v1/projects/{project_id}/environments",
         headers=headers,
-        json={"name": "Location target", "base_url": "http://workflow.example.com"},
+        json={
+            "name": "Location target",
+            "base_url": "http://workflow.example.com",
+            "headers": {
+                "Authorization": "Bearer environment-token",
+                "X-Tenant-Id": "environment",
+                "Cookie": "session=environment; keep=environment",
+            },
+        },
     )
+    endpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/service-endpoints", headers=headers
+    )
+    assert endpoints.status_code == 200, endpoints.text
+    default_endpoint = next(
+        item
+        for item in endpoints.json()
+        if item["service_id"] == environment.json()["default_service_id"]
+    )
+    endpoint_update = await workflow_client.patch(
+        f"/api/v1/projects/{project_id}/service-endpoints/{default_endpoint['id']}",
+        headers=headers,
+        json={
+            "headers": {
+                "Authorization": "Bearer endpoint-token",
+                "X-Tenant-Id": "endpoint",
+                "Cookie": "session=endpoint; keep=endpoint",
+            }
+        },
+    )
+    assert endpoint_update.status_code == 200, endpoint_update.text
     api = await workflow_client.post(
         f"/api/v1/projects/{project_id}/apis",
         headers=headers,
@@ -375,17 +416,20 @@ async def test_location_overrides_and_auth_disabled_reach_real_target(
             "request": {
                 "method": "POST",
                 "path": "/tenants/{{tenantId}}/orders",
-                "query_parameters": [{"name": "dryRun", "value": "false", "enabled": True}],
-                "headers": {"X-Tenant-Id": "{{X-Tenant-Id}}"},
+                "query_parameters": [
+                    {"name": "dryRun", "value": "false", "enabled": True},
+                    {"name": "api_key", "value": "api-key", "enabled": True},
+                ],
+                "headers": {
+                    "Authorization": "Bearer api-token",
+                    "X-Tenant-Id": "api",
+                    "Cookie": "session=api; keep=api",
+                },
                 "body_kind": "json",
                 "body": {"quantity": 1},
                 "auth": {
-                    "kind": "api_key",
-                    "values": {
-                        "in": "header",
-                        "name": "X-Snapshot-Key",
-                        "value": "snapshot-api-key",
-                    },
+                    "kind": "bearer",
+                    "values": {"token": "api-bearer-token"},
                 },
             },
         },
@@ -398,10 +442,13 @@ async def test_location_overrides_and_auth_disabled_reach_real_target(
             "expected_statuses": [401],
             "request_overrides": {
                 "query_parameters": [{"name": "dryRun", "value": "true", "enabled": True}],
-                "headers": {},
+                "headers": {"X-Tenant-Id": "node-suppressed-value"},
                 "replace_headers": True,
                 "body": {"kind": "json", "value": {"quantity": 1000}},
-                "auth_disabled": True,
+                "auth_mode": "disabled",
+                "suppressed_headers": ["x-tenant-id"],
+                "suppressed_query_parameters": ["api_key"],
+                "suppressed_cookies": ["session"],
             },
         }
     )
@@ -422,7 +469,14 @@ async def test_location_overrides_and_auth_disabled_reach_real_target(
     executed = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
         headers=headers,
-        json={"environment_id": environment.json()["id"]},
+        json={
+            "environment_id": environment.json()["id"],
+            "runtime_headers": {
+                "Authorization": "Bearer runtime-token",
+                "X-Tenant-Id": "runtime",
+                "Cookie": "session=runtime; keep=runtime",
+            },
+        },
     )
     assert executed.status_code == 202, executed.text
     detail = await _wait_for_completed_execution(
@@ -433,8 +487,128 @@ async def test_location_overrides_and_auth_disabled_reach_real_target(
     assert request.url.path == "/tenants/tenant-47/orders"
     assert request.url.params["dryRun"] == "true"
     assert "X-Tenant-Id" not in request.headers
-    assert "X-Snapshot-Key" not in request.headers
+    assert "Authorization" not in request.headers
+    assert "api_key" not in request.url.params
+    assert request.headers["Cookie"] == "keep=runtime"
     assert json.loads(request.content) == {"quantity": 1000}
+    suppression = detail["execution"]["snapshot"]["apis"]["api"]["target"]["request_suppression"]
+    assert suppression == {
+        "auth_mode": "disabled",
+        "suppressed_header_names": ["Authorization", "x-tenant-id"],
+        "suppressed_query_parameter_names": ["api_key"],
+        "suppressed_cookie_names": ["session"],
+    }
+    snapshot_text = json.dumps(detail["execution"]["snapshot"])
+    for suppressed_value in (
+        "node-suppressed-value",
+        "api-key",
+        "api-token",
+        "runtime-token",
+        "runtime-sentinel",
+    ):
+        assert suppressed_value not in snapshot_text
+
+
+@respx.mock
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_location", ["query", "cookie"])
+async def test_api_key_query_and_cookie_auth_are_suppressed_after_all_layers(
+    workflow_client: AsyncClient,
+    auth_location: str,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project = await workflow_client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": f"API key {auth_location} suppression"},
+    )
+    project_id = project.json()["id"]
+    environment = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={"name": "Suppression target", "base_url": "http://workflow.example.com"},
+    )
+    carrier = "api_key" if auth_location == "query" else "auth_session"
+    api_headers = {"Cookie": f"{carrier}=api; keep=api"} if auth_location == "cookie" else {}
+    query_parameters = (
+        [{"name": carrier, "value": "api", "enabled": True}] if auth_location == "query" else []
+    )
+    api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": f"API key {auth_location}",
+            "request": {
+                "method": "GET",
+                "path": f"/auth-{auth_location}",
+                "query_parameters": query_parameters,
+                "headers": api_headers,
+                "body_kind": "none",
+                "auth": {
+                    "kind": "api_key",
+                    "values": {
+                        "in": auth_location,
+                        "name": carrier,
+                        "value": "auth-value",
+                    },
+                },
+            },
+        },
+    )
+    assert api.status_code == 201, api.text
+    definition = _workflow_definition(api.json()["definition"]["id"])
+    overrides: dict[str, Any] = {"auth_mode": "disabled"}
+    if auth_location == "query":
+        overrides["query_parameters"] = [{"name": carrier, "value": "node", "enabled": True}]
+    definition["nodes"][1]["config"].update(
+        {"expected_statuses": [200], "request_overrides": overrides}
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": f"Suppress {auth_location} auth", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get(f"http://workflow.example.com/auth-{auth_location}").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+    runtime_headers = {"Authorization": "Bearer stale-runtime-auth"}
+    if auth_location == "cookie":
+        runtime_headers["Cookie"] = f"{carrier}=runtime; keep=runtime"
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={
+            "environment_id": environment.json()["id"],
+            "runtime_headers": runtime_headers,
+        },
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, executed.json()["id"]
+    )
+    assert detail["execution"]["status"] == "passed"
+    request = target.calls[0].request
+    assert "Authorization" not in request.headers
+    if auth_location == "query":
+        assert carrier not in request.url.params
+    else:
+        assert request.headers["Cookie"] == "keep=runtime"
+    suppression = detail["execution"]["snapshot"]["apis"]["api"]["target"]["request_suppression"]
+    assert suppression["auth_mode"] == "disabled"
+    expected_key = (
+        "suppressed_query_parameter_names"
+        if auth_location == "query"
+        else "suppressed_cookie_names"
+    )
+    assert suppression[expected_key] == [carrier]
+    assert "auth-value" not in json.dumps(detail)
+    assert "stale-runtime-auth" not in json.dumps(detail)
 
 
 @respx.mock

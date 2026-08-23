@@ -36,6 +36,7 @@ class TestEngineeringGenerateResponse(BaseModel):
     persisted: bool = False
     contract_completeness: str
     contract_fingerprint: str
+    contract: OperationContract
 
 
 class TestEngineeringProposalCreate(BaseModel):
@@ -75,6 +76,7 @@ class TestEngineeringProposalResponse(BaseModel):
     applied: bool
     contract_completeness: str
     contract_fingerprint: str
+    contract: OperationContract
 
 
 class TestEngineeringApplyResponse(BaseModel):

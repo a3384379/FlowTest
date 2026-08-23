@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { listServiceEndpoints } from '../features/service-targets/service-target-service'
 import type {
   CoverageEntry,
+  OperationContract,
   OracleSpec,
   ScenarioCandidate,
   TestDesignDocument,
@@ -94,13 +95,11 @@ function GeneratedDesign({
       </Card>
     )
   }
-  const contractCompleteness =
-    state.proposal?.contract_completeness ?? state.generation?.contract_completeness
-  const contractFingerprint =
-    state.proposal?.contract_fingerprint ?? state.generation?.contract_fingerprint
+  const { contractCompleteness, contractFingerprint, contract } = generationContext(state)
   return (
     <DesignReview
       design={design}
+      contract={contract}
       contractCompleteness={contractCompleteness}
       contractFingerprint={contractFingerprint}
       scenarioIds={scenarioIds}
@@ -111,6 +110,21 @@ function GeneratedDesign({
       onApply={state.applyProposal}
     />
   )
+}
+
+function generationContext(state: ReturnType<typeof useTestEngineering>) {
+  if (state.proposal) {
+    return {
+      contractCompleteness: state.proposal.contract_completeness,
+      contractFingerprint: state.proposal.contract_fingerprint,
+      contract: state.proposal.contract,
+    }
+  }
+  return {
+    contractCompleteness: state.generation?.contract_completeness,
+    contractFingerprint: state.generation?.contract_fingerprint,
+    contract: state.generation?.contract,
+  }
 }
 
 function GenerationTargetCard({
@@ -239,6 +253,7 @@ function required(value: string | null | undefined): string {
 
 function DesignReview({
   design,
+  contract,
   contractCompleteness,
   contractFingerprint,
   scenarioIds,
@@ -249,6 +264,7 @@ function DesignReview({
   onApply,
 }: {
   design: TestDesignDocument
+  contract?: OperationContract
   contractCompleteness?: string
   contractFingerprint?: string
   scenarioIds: string[]
@@ -263,51 +279,16 @@ function DesignReview({
   const percent = total ? Math.round((covered * 100) / total) : 100
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <Card title="Test Intent / 审核状态">
-        <Descriptions bordered size="small" column={2}>
-          <Descriptions.Item label="Intent">{design.intent.objective}</Descriptions.Item>
-          <Descriptions.Item label="Confidence">
-            {(design.confidence * 100).toFixed(0)}%
-          </Descriptions.Item>
-          <Descriptions.Item label="Evidence">
-            {design.evidence_refs.length} 条结构化引用
-          </Descriptions.Item>
-          <Descriptions.Item label="Contract Completeness">
-            <Tag color={contractCompleteness === 'complete' ? 'green' : 'orange'}>
-              {contractCompleteness ?? 'unknown'}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="Contract Fingerprint">
-            <Typography.Text code copyable>
-              {contractFingerprint ?? 'unknown'}
-            </Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="Evidence Selection">
-            API canonical + {Math.max(0, design.evidence_refs.length - 1)} 条关联 Evidence
-          </Descriptions.Item>
-          <Descriptions.Item label="State Capability">
-            {design.review_requirements.includes('state_evidence_unavailable')
-              ? '缺少显式状态证据'
-              : '未启用'}
-          </Descriptions.Item>
-          <Descriptions.Item label="Review">
-            {proposal ? (
-              <Tag color={reviewColor(proposal.review_status)}>{proposal.review_status}</Tag>
-            ) : (
-              '未创建 Draft'
-            )}
-          </Descriptions.Item>
-        </Descriptions>
-        {design.warnings.map((warning) => (
-          <Alert key={warning} type="warning" showIcon message={warning} />
-        ))}
-        <ProposalActions
-          proposal={proposal}
-          acting={acting}
-          onReview={onReview}
-          onApply={onApply}
-        />
-      </Card>
+      <IntentReviewCard
+        design={design}
+        contract={contract}
+        contractCompleteness={contractCompleteness}
+        contractFingerprint={contractFingerprint}
+        proposal={proposal}
+        acting={acting}
+        onReview={onReview}
+        onApply={onApply}
+      />
       <Card title={`Scenario Review · ${design.scenarios.length}`}>
         <ScenarioTable
           items={design.scenarios}
@@ -325,7 +306,7 @@ function DesignReview({
         <Col xs={24} xl={12}>
           <Card
             title="Coverage / Gap"
-            extra={<Progress width={46} type="circle" percent={percent} />}
+            extra={<Progress size={46} type="circle" percent={percent} />}
           >
             <CoverageTable items={design.coverage.entries} />
           </Card>
@@ -339,6 +320,15 @@ function DesignReview({
           dataSource={design.evidence_refs}
           columns={[
             { title: 'Type', dataIndex: 'source_type' },
+            {
+              title: 'Semantics',
+              dataIndex: 'semantic_role',
+              render: (value: string | undefined) => (
+                <Tag color={value === 'normative' ? 'blue' : value === 'observed' ? 'gold' : ''}>
+                  {value ?? 'supporting'}
+                </Tag>
+              ),
+            },
             { title: 'Source', dataIndex: 'source_ref', ellipsis: true },
             { title: 'Revision', dataIndex: 'revision', ellipsis: true },
           ]}
@@ -346,6 +336,136 @@ function DesignReview({
       </Card>
     </Space>
   )
+}
+
+function IntentReviewCard({
+  design,
+  contract,
+  contractCompleteness,
+  contractFingerprint,
+  proposal,
+  acting,
+  onReview,
+  onApply,
+}: {
+  design: TestDesignDocument
+  contract?: OperationContract
+  contractCompleteness?: string
+  contractFingerprint?: string
+  proposal: ReturnType<typeof useTestEngineering>['proposal']
+  acting: boolean
+  onReview: (accept: boolean) => Promise<boolean>
+  onApply: () => Promise<boolean>
+}) {
+  return (
+    <Card title="Test Intent / 审核状态">
+      <Descriptions bordered size="small" column={2}>
+        <Descriptions.Item label="Intent">{design.intent.objective}</Descriptions.Item>
+        <Descriptions.Item label="Confidence">
+          {(design.confidence * 100).toFixed(0)}%
+        </Descriptions.Item>
+        <Descriptions.Item label="Evidence">
+          {design.evidence_refs.length} 条结构化引用
+        </Descriptions.Item>
+        <Descriptions.Item label="Contract Completeness">
+          <Tag color={contractCompleteness === 'complete' ? 'green' : 'orange'}>
+            {contractCompleteness ?? 'unknown'}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="Contract Fingerprint">
+          <Typography.Text code copyable>
+            {contractFingerprint ?? 'unknown'}
+          </Typography.Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="Evidence Selection">
+          API canonical + {Math.max(0, design.evidence_refs.length - 1)} 条关联 Evidence
+        </Descriptions.Item>
+        <Descriptions.Item label="State Capability">{stateCapability(design)}</Descriptions.Item>
+        <Descriptions.Item label="Review">
+          <ProposalReviewStatus proposal={proposal} />
+        </Descriptions.Item>
+      </Descriptions>
+      <ContractOverview contract={contract} />
+      <ContractAlerts design={design} contractCompleteness={contractCompleteness} />
+      {design.warnings.map((warning) => (
+        <Alert key={warning} type="warning" showIcon message={warning} />
+      ))}
+      <ProposalActions proposal={proposal} acting={acting} onReview={onReview} onApply={onApply} />
+    </Card>
+  )
+}
+
+function ContractOverview({ contract }: { contract?: OperationContract }) {
+  if (!contract) {
+    return (
+      <Descriptions bordered size="small" column={2}>
+        <Descriptions.Item label="Operation Identity">legacy response 未提供</Descriptions.Item>
+        <Descriptions.Item label="Auth">unknown</Descriptions.Item>
+        <Descriptions.Item label="Parameter Locations">unknown</Descriptions.Item>
+      </Descriptions>
+    )
+  }
+  const parameterLocations = contract.parameters
+    .map((parameter) => `${parameter.location}.${parameter.name}`)
+    .join('、')
+  const authName = contract.auth.name ? `:${contract.auth.name}` : ''
+  return (
+    <Descriptions bordered size="small" column={2}>
+      <Descriptions.Item label="Operation Identity">
+        {`${contract.service ?? 'default'} · ${contract.method} ${contract.path} · ${contract.operation}`}
+      </Descriptions.Item>
+      <Descriptions.Item label="Auth">
+        {`${contract.auth.required ? 'required' : 'optional'} · ${contract.auth.kind} · ${contract.auth.location ?? 'none'}${authName}`}
+      </Descriptions.Item>
+      <Descriptions.Item label="Parameter Locations">
+        {parameterLocations || '无显式参数'}
+      </Descriptions.Item>
+    </Descriptions>
+  )
+}
+
+function ContractAlerts({
+  design,
+  contractCompleteness,
+}: {
+  design: TestDesignDocument
+  contractCompleteness?: string
+}) {
+  return (
+    <>
+      {contractCompleteness === 'redacted_partial' ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Canonical Contract 已安全净化"
+          description="敏感 Enum 或示例值未进入持久化契约；相关场景仅保留为 Design，需人工提供 secret:// 测试数据后才能物化。"
+        />
+      ) : null}
+      {design.review_requirements.includes('evidence_conflict') ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Evidence Conflict"
+          description="确定性权威证据存在双向语义冲突；只有实际依赖冲突 Finding 的场景需要人工复核。"
+        />
+      ) : null}
+    </>
+  )
+}
+
+function ProposalReviewStatus({
+  proposal,
+}: {
+  proposal: ReturnType<typeof useTestEngineering>['proposal']
+}) {
+  if (!proposal) return <>未创建 Draft</>
+  return <Tag color={reviewColor(proposal.review_status)}>{proposal.review_status}</Tag>
+}
+
+function stateCapability(design: TestDesignDocument): string {
+  return design.review_requirements.includes('state_evidence_unavailable')
+    ? '缺少显式状态证据'
+    : '未启用'
 }
 
 function ProposalActions({
@@ -442,6 +562,20 @@ function ScenarioTable({
             ),
         },
         {
+          title: 'Auth Mode',
+          render: (_: unknown, scenario: ScenarioCandidate) =>
+            scenario.request.auth_disabled ? 'disabled' : 'inherit',
+        },
+        {
+          title: 'Suppression',
+          render: (_: unknown, scenario: ScenarioCandidate) => suppressionSummary(scenario) || '无',
+        },
+        {
+          title: 'Design-only 原因',
+          render: (_: unknown, scenario: ScenarioCandidate) =>
+            materializableReason(scenario) ?? '-',
+        },
+        {
           title: 'Evidence',
           render: (_: unknown, scenario: ScenarioCandidate) => scenario.evidence_refs.length,
         },
@@ -482,6 +616,7 @@ function CoverageTable({ items }: { items: CoverageEntry[] }) {
       columns={[
         { title: 'Dimension', dataIndex: 'dimension' },
         { title: 'Requirement', dataIndex: 'requirement', ellipsis: true },
+        { title: 'Scope / Target', dataIndex: 'target_ref', ellipsis: true },
         {
           title: '状态',
           dataIndex: 'covered',
@@ -507,4 +642,28 @@ function materializableScenario(scenario: ScenarioCandidate): boolean {
       (mutation) => mutation.location === 'path' && mutation.operation === 'omit',
     )
   )
+}
+
+function materializableReason(scenario: ScenarioCandidate): string | null {
+  if (scenario.requires_review) return '证据冲突、敏感测试数据或前置条件待审核'
+  if (!scenario.deterministic) return '缺少确定性输入或 Oracle'
+  if (
+    scenario.mutations.some(
+      (mutation) => mutation.location === 'path' && mutation.operation === 'omit',
+    )
+  ) {
+    return '必填 Path omission 无法表示为真实 HTTP 请求'
+  }
+  return null
+}
+
+function suppressionSummary(scenario: ScenarioCandidate): string {
+  const omitted = scenario.mutations
+    .filter(
+      (mutation) =>
+        mutation.operation === 'omit' && ['header', 'query', 'cookie'].includes(mutation.location),
+    )
+    .map((mutation) => `${mutation.location}:${mutation.path.replace(/^[^.]+\./, '')}`)
+  if (scenario.request.auth_disabled) omitted.unshift('auth:disabled')
+  return omitted.join('、')
 }
