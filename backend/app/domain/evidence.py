@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -345,6 +346,23 @@ def _python_findings(
                 data=data,
             )
         )
+    for candidate in _source_constraint_candidates(tree):
+        node = candidate.node
+        line = int(getattr(node, "lineno", 1))
+        column = int(getattr(node, "col_offset", 0))
+        findings.append(
+            _finding(
+                source_type=EvidenceSourceType.SOURCE,
+                source_ref=source_ref,
+                subject_ref=f"source-symbol://{file.path}:{line}:{column}",
+                kind=candidate.kind,
+                path=f"{file.path}:{line}:{column}",
+                revision=snapshot.commit,
+                data=candidate.data,
+                confidence=candidate.confidence,
+                deterministic=candidate.deterministic,
+            )
+        )
     return findings
 
 
@@ -367,42 +385,225 @@ def _python_node_evidence(node: ast.AST) -> tuple[str | None, dict[str, JsonValu
             return "enum", {
                 "name": node.name,
                 "value_count": len(values),
-                "value_hashes": [
-                    sha256(
-                        json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
-                    ).hexdigest()
-                    for value in values
-                ],
                 "values_redacted": True,
             }
         return "enum", {"name": node.name, "values": cast(list[JsonValue], values)}
     if isinstance(node, ast.Raise):
         return "error_branch", {"exception": _base_name(node.exc) if node.exc else "reraised"}
-    if isinstance(node, ast.Compare):
-        constraint = _comparison_constraint(node)
-        if constraint is not None:
-            return "validation_constraint", constraint
     return None, {}
 
 
-def _comparison_constraint(node: ast.Compare) -> dict[str, JsonValue] | None:
+@dataclass(frozen=True, slots=True)
+class _SourceConstraint:
+    node: ast.AST
+    kind: str
+    data: dict[str, JsonValue]
+    confidence: float
+    deterministic: bool
+
+
+def _source_constraint_candidates(tree: ast.AST) -> list[_SourceConstraint]:
+    candidates: list[_SourceConstraint] = []
+    module_body = tree.body if isinstance(tree, ast.Module) else []
+    candidates.extend(_statements_constraints(module_body, validator=False))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            candidates.extend(_statements_constraints(node.body, validator=_is_validator(node)))
+    return candidates
+
+
+def _statements_constraints(
+    statements: list[ast.stmt], *, validator: bool
+) -> list[_SourceConstraint]:
+    candidates: list[_SourceConstraint] = []
+    for statement in statements:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(statement, ast.Assert):
+            candidates.extend(_condition_constraints(statement.test, truth=True, context="assert"))
+            continue
+        if isinstance(statement, ast.Return) and validator and statement.value is not None:
+            candidates.extend(
+                _condition_constraints(statement.value, truth=True, context="validator-return")
+            )
+            continue
+        if isinstance(statement, ast.If):
+            candidates.extend(_if_constraints(statement, validator=validator))
+            candidates.extend(_statements_constraints(statement.body, validator=validator))
+            candidates.extend(_statements_constraints(statement.orelse, validator=validator))
+            continue
+        nested = _nested_statement_lists(statement)
+        for children in nested:
+            candidates.extend(_statements_constraints(children, validator=validator))
+    return candidates
+
+
+def _if_constraints(statement: ast.If, *, validator: bool) -> list[_SourceConstraint]:
+    if _body_terminates_with_raise(statement.body):
+        return _condition_constraints(statement.test, truth=False, context="guard-raise")
+    if validator and _body_returns_false(statement.body):
+        return _condition_constraints(statement.test, truth=False, context="guard-return-false")
+    return _supporting_conditions(statement.test)
+
+
+def _condition_constraints(
+    expression: ast.expr, *, truth: bool, context: str
+) -> list[_SourceConstraint]:
+    if isinstance(expression, ast.UnaryOp) and isinstance(expression.op, ast.Not):
+        return _condition_constraints(expression.operand, truth=not truth, context=context)
+    if isinstance(expression, ast.BoolOp):
+        splittable = (isinstance(expression.op, ast.And) and truth) or (
+            isinstance(expression.op, ast.Or) and not truth
+        )
+        if splittable:
+            return [
+                item
+                for value in expression.values
+                for item in _condition_constraints(value, truth=truth, context=context)
+            ]
+        return [
+            _SourceConstraint(
+                node=expression,
+                kind="validation_constraint",
+                data={
+                    "context": "complex-guard" if context.startswith("guard-") else context,
+                    "complex_condition": True,
+                    "requires_review": True,
+                },
+                confidence=0.5,
+                deterministic=False,
+            )
+        ]
+    if not isinstance(expression, ast.Compare):
+        return []
+    constraint = _comparison_constraint(expression, truth=truth)
+    if constraint is None:
+        return []
+    return [
+        _SourceConstraint(
+            node=expression,
+            kind="validation_constraint",
+            data={**constraint, "context": context, "requires_review": False},
+            confidence=1,
+            deterministic=True,
+        )
+    ]
+
+
+def _supporting_conditions(expression: ast.expr) -> list[_SourceConstraint]:
+    return [
+        _SourceConstraint(
+            node=node,
+            kind="supporting_condition",
+            data={
+                **constraint,
+                "context": "supporting-condition",
+                "requires_review": True,
+            },
+            confidence=0.5,
+            deterministic=False,
+        )
+        for node in ast.walk(expression)
+        if isinstance(node, ast.Compare)
+        and (constraint := _comparison_constraint(node, truth=True)) is not None
+    ]
+
+
+def _comparison_constraint(node: ast.Compare, *, truth: bool) -> dict[str, JsonValue] | None:
     if len(node.ops) != 1 or len(node.comparators) != 1:
         return None
-    comparator = node.comparators[0]
-    if not isinstance(comparator, ast.Constant) or not isinstance(comparator.value, (int, float)):
+    left = node.left
+    right = node.comparators[0]
+    operator = node.ops[0]
+    if (
+        isinstance(left, ast.Constant)
+        and _number(left.value)
+        and not isinstance(right, ast.Constant)
+    ):
+        left, right = right, left
+        operator = _swap_operator(operator)
+    if not isinstance(right, ast.Constant) or not _number(right.value):
         return None
-    name = _base_name(node.left).rsplit(".", 1)[-1]
+    name = _base_name(left).rsplit(".", 1)[-1]
     if not name:
         return None
-    if isinstance(node.ops[0], ast.Lt):
-        return {"name": name, "exclusiveMaximum": comparator.value}
-    if isinstance(node.ops[0], ast.LtE):
-        return {"name": name, "maximum": comparator.value}
-    if isinstance(node.ops[0], ast.Gt):
-        return {"name": name, "exclusiveMinimum": comparator.value}
-    if isinstance(node.ops[0], ast.GtE):
-        return {"name": name, "minimum": comparator.value}
+    if not truth:
+        operator = _negate_operator(operator)
+    if isinstance(operator, ast.Lt):
+        return {"name": name, "exclusiveMaximum": cast(JsonValue, right.value)}
+    if isinstance(operator, ast.LtE):
+        return {"name": name, "maximum": cast(JsonValue, right.value)}
+    if isinstance(operator, ast.Gt):
+        return {"name": name, "exclusiveMinimum": cast(JsonValue, right.value)}
+    if isinstance(operator, ast.GtE):
+        return {"name": name, "minimum": cast(JsonValue, right.value)}
     return None
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _swap_operator(operator: ast.cmpop) -> ast.cmpop:
+    mapping: dict[type[ast.cmpop], type[ast.cmpop]] = {
+        ast.Lt: ast.Gt,
+        ast.LtE: ast.GtE,
+        ast.Gt: ast.Lt,
+        ast.GtE: ast.LtE,
+    }
+    replacement = mapping.get(type(operator))
+    return replacement() if replacement is not None else operator
+
+
+def _negate_operator(operator: ast.cmpop) -> ast.cmpop:
+    mapping: dict[type[ast.cmpop], type[ast.cmpop]] = {
+        ast.Lt: ast.GtE,
+        ast.LtE: ast.Gt,
+        ast.Gt: ast.LtE,
+        ast.GtE: ast.Lt,
+    }
+    replacement = mapping.get(type(operator))
+    return replacement() if replacement is not None else operator
+
+
+def _is_validator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    names = {
+        _base_name(decorator.func if isinstance(decorator, ast.Call) else decorator)
+        for decorator in node.decorator_list
+    }
+    decorated = any(
+        name.rsplit(".", 1)[-1]
+        in {"field_validator", "model_validator", "validator", "root_validator", "validates"}
+        for name in names
+    )
+    normalized = node.name.lower()
+    named = normalized == "validate" or normalized.startswith(("validate_", "is_valid_"))
+    return decorated or named
+
+
+def _body_terminates_with_raise(statements: list[ast.stmt]) -> bool:
+    return bool(statements) and isinstance(statements[-1], ast.Raise)
+
+
+def _body_returns_false(statements: list[ast.stmt]) -> bool:
+    if not statements or not isinstance(statements[-1], ast.Return):
+        return False
+    value = statements[-1].value
+    return isinstance(value, ast.Constant) and value.value is False
+
+
+def _nested_statement_lists(statement: ast.stmt) -> list[list[ast.stmt]]:
+    result: list[list[ast.stmt]] = []
+    for name in ("body", "orelse", "finalbody"):
+        value = getattr(statement, name, None)
+        if isinstance(value, list):
+            result.append([item for item in value if isinstance(item, ast.stmt)])
+    handlers = getattr(statement, "handlers", None)
+    if isinstance(handlers, list):
+        result.extend(
+            handler.body for handler in handlers if isinstance(handler, ast.ExceptHandler)
+        )
+    return result
 
 
 def _route_data(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, JsonValue] | None:
@@ -440,6 +641,8 @@ def _finding(
     path: str,
     revision: str,
     data: dict[str, JsonValue],
+    confidence: float = 1,
+    deterministic: bool = True,
 ) -> EvidenceFinding:
     key = f"{source_type.value}:{source_ref}:{subject_ref}:{kind}:{path}"
     return EvidenceFinding(
@@ -450,8 +653,8 @@ def _finding(
         kind=kind,
         path=path,
         structured_data=data,
-        confidence=1,
-        deterministic=True,
+        confidence=confidence,
+        deterministic=deterministic,
         revision=revision,
     )
 

@@ -7,6 +7,7 @@ from app.domain.change_regression import (
     _mutation_path,
     _schema_at_path,
     missing_test_design,
+    oracle_set_fingerprint,
 )
 from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.flow_spec import (
@@ -194,6 +195,8 @@ def test_s47_change_boundary_and_failure_triage_are_concrete() -> None:
 
 
 def test_s47_semantic_coverage_avoids_historical_boundary_duplicates() -> None:
+    success_oracle = oracle_set_fingerprint(("status:201",))
+    assert success_oracle is not None
     current_contract = OperationContract.model_validate(
         {
             "operation": "orders.create",
@@ -237,9 +240,9 @@ def test_s47_semantic_coverage_avoids_historical_boundary_duplicates() -> None:
             position=1,
             current_contract=current_contract,
             covered_values={
-                "99|success",
-                "100|success",
-                "101|success",
+                f"99|success|{success_oracle}",
+                f"100|success|{success_oracle}",
+                f"101|success|{success_oracle}",
             },
         )
     )

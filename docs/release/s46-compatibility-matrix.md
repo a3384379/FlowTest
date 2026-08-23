@@ -15,7 +15,7 @@
 | Test Engineering/Evidence | 支持 | 支持 | 支持 | Canonical Contract、位置生成与审核语义一致；物化复用 Workflow/TestCase |
 | FlowSpec Portable Mapping | 支持 | 支持 | 支持 | V5 正式基线为 v3 指纹，不依赖 UUID 并保留 pinned/current；开发期 v1/v2 不作正式兼容承诺 |
 | Performance/Environment Lab | 可按 Feature Flag 启用 | 明确关闭 | 明确关闭 | 不支持档位必须启动时拒绝配置 |
-| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0043` |
+| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0044` |
 
 ## 数据与版本边界
 
@@ -37,6 +37,9 @@
   旧文件不属于正式兼容范围，S47.2 不增加迁移或兼容逻辑。
 - S47.2 迁移 `20260823_0043` 的回滚目标是 `20260823_0042`；升级统一净化既有 Canonical Contract、
   重算 fingerprint/completeness。降级保留已净化数据，绝不恢复已删除的敏感值。
+- S47.3 迁移 `20260823_0044` 的回滚目标是 `20260823_0043`；它新增逐 Gap Waiver 持久化、
+  删除历史敏感 Enum Hash、清理非法 Keyword 并重算指纹。降级只删除 Waiver Schema，
+  安全净化不可逆，不恢复原值或 Hash。
 - Transfer Manifest 版本保持 `standalone-compact-transfer-v1`；新增表必须通过显式表清单和
   数据分类验证，不能静默改变旧包含义。
 - MCP、AI、REST、CLI 只经过 Application Service；MCP 关闭时普通 Web/API/Standalone/Compact

@@ -11,6 +11,7 @@ from app.domain.api_assets import (
     JsonValue,
     QueryParameterSpec,
 )
+from app.domain.canonical_contracts import sanitize_contract_payload
 from app.domain.test_engineering import (
     ContractAuth,
     ContractParameter,
@@ -131,19 +132,27 @@ def _operation_contract(
     responses = _contract_responses(document, operation, source_type)
     info = _mapping(document.get("info"))
     revision = _text(info.get("version")) or None
-    return OperationContract(
-        operation=_contract_operation_name(operation_name),
-        method=request.method.value,
-        path=request.path,
-        auth=auth,
-        parameters=contract_parameters,
-        request_body=request_body,
-        request=request_body.schema_ if request_body is not None else {},
-        responses=responses,
-        source_ref=f"openapi://{_contract_operation_name(operation_name)}",
-        revision=revision,
-        completeness="complete",
-    )
+    raw = {
+        "operation": _contract_operation_name(operation_name),
+        "method": request.method.value,
+        "path": request.path,
+        "auth": auth.model_dump(mode="json"),
+        "parameters": [item.model_dump(mode="json", by_alias=True) for item in contract_parameters],
+        "request_body": (
+            request_body.model_dump(mode="json", by_alias=True)
+            if request_body is not None
+            else None
+        ),
+        "request": request_body.schema_ if request_body is not None else {},
+        "responses": {
+            status: response.model_dump(mode="json", by_alias=True)
+            for status, response in responses.items()
+        },
+        "source_ref": f"openapi://{_contract_operation_name(operation_name)}",
+        "revision": revision,
+        "completeness": "complete",
+    }
+    return OperationContract.model_validate(sanitize_contract_payload(raw).payload)
 
 
 def _contract_parameters(

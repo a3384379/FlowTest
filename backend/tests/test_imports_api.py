@@ -323,6 +323,55 @@ async def test_openapi_import_persists_complete_canonical_contract(
 
 
 @pytest.mark.asyncio
+async def test_invalid_canonical_keyword_value_returns_structured_422(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    document = json.dumps(
+        {
+            "openapi": "3.0.3",
+            "info": {"title": "Invalid canonical schema", "version": "1"},
+            "paths": {
+                "/invalid": {
+                    "post": {
+                        "operationId": "invalidSchema",
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"type": "Bearer invalid-contract-value"}
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}},
+                    }
+                }
+            },
+        }
+    ).encode()
+
+    response = await _upload_document(
+        import_client,
+        headers,
+        project_id,
+        document,
+        filename="invalid-openapi.json",
+        source_type="openapi3",
+    )
+
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "CANONICAL_CONTRACT_INVALID"
+    assert error["details"]["issues"] == [
+        {
+            "path": "$.request_body.schema",
+            "keyword": "type",
+            "reason": "type must be a supported JSON Schema primitive",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_sensitive_openapi_hints_never_reach_api_design_or_audit(
     import_client: AsyncClient,
 ) -> None:

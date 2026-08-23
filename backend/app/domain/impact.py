@@ -64,6 +64,16 @@ class ChangeItem:
     after: JsonValue = None
     semantic_type: str = "schema_changed"
     field_path: str | None = None
+    portable_operation_ref: str | None = None
+    service_key: str | None = None
+    method: str | None = None
+    normalized_path: str | None = None
+    current_contract_fingerprint: str | None = None
+    baseline_contract_fingerprint: str | None = None
+    source_contract_run_id: str | None = None
+    current_contract_run_id: str | None = None
+    api_definition_id: str | None = None
+    api_version: int | None = None
 
     def as_json(self) -> dict[str, JsonValue]:
         return {
@@ -78,6 +88,16 @@ class ChangeItem:
             "after": self.after,
             "semantic_type": self.semantic_type,
             "field_path": self.field_path,
+            "portable_operation_ref": self.portable_operation_ref,
+            "service_key": self.service_key,
+            "method": self.method,
+            "normalized_path": self.normalized_path,
+            "current_contract_fingerprint": self.current_contract_fingerprint,
+            "baseline_contract_fingerprint": self.baseline_contract_fingerprint,
+            "source_contract_run_id": self.source_contract_run_id,
+            "current_contract_run_id": self.current_contract_run_id,
+            "api_definition_id": self.api_definition_id,
+            "api_version": self.api_version,
         }
 
 

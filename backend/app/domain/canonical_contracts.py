@@ -69,6 +69,7 @@ class CanonicalContractSanitization:
     payload: dict[str, JsonValue]
     redacted_count: int
     removed_hint_count: int
+    invalid_count: int
     warnings: tuple[str, ...]
 
 
@@ -78,12 +79,17 @@ class _SanitizationState:
     removed_hint_count: int = 0
     enum_redacted: bool = False
     semantic_value_removed: bool = False
+    invalid_count: int = 0
 
 
-def sanitize_contract_payload(payload: Mapping[str, object]) -> CanonicalContractSanitization:
+def sanitize_contract_payload(
+    payload: Mapping[str, object], *, strict: bool = True
+) -> CanonicalContractSanitization:
     """Return the only persistable/readable representation of an operation contract."""
 
     state = _SanitizationState()
+    if strict:
+        _validate_contract_schemas(payload)
     parameters = [
         sanitized
         for raw in _list(payload.get("parameters"))
@@ -109,7 +115,7 @@ def sanitize_contract_payload(payload: Mapping[str, object]) -> CanonicalContrac
     if state.redacted_count:
         warnings.add("sensitive canonical contract values redacted")
     if state.enum_redacted:
-        warnings.add("sensitive enum values replaced by hashes; safe test data requires review")
+        warnings.add("sensitive enum values removed; only value count is retained")
     result: dict[str, JsonValue] = {
         "operation": str(payload.get("operation") or "operation"),
         "method": str(payload.get("method") or "GET").upper(),
@@ -129,6 +135,7 @@ def sanitize_contract_payload(payload: Mapping[str, object]) -> CanonicalContrac
         payload=result,
         redacted_count=state.redacted_count,
         removed_hint_count=state.removed_hint_count,
+        invalid_count=state.invalid_count,
         warnings=tuple(sorted(warnings)),
     )
 
@@ -143,20 +150,23 @@ def semantic_contract_fingerprint(payload: Mapping[str, object]) -> str:
         parameter = _mapping(raw)
         parameters.append(
             {
-                key: parameter.get(key)
+                key: _semantic_schema_projection(parameter.get(key))
                 for key in ("name", "location", "required", "schema", "style", "explode")
             }
         )
     request_body = _mapping(sanitized.get("request_body"))
     if request_body:
         semantic_request: JsonValue = {
-            key: cast(JsonValue, request_body.get(key))
+            key: _semantic_schema_projection(request_body.get(key))
             for key in ("required", "content_type", "schema")
         }
     else:
-        semantic_request = sanitized.get("request", {})
+        semantic_request = _semantic_schema_projection(sanitized.get("request", {}))
     responses = {
-        status: {key: response.get(key) for key in ("content_type", "schema")}
+        status: {
+            key: _semantic_schema_projection(response.get(key))
+            for key in ("content_type", "schema")
+        }
         for status, raw in sorted(_mapping(sanitized.get("responses")).items())
         if (response := _mapping(raw))
     }
@@ -176,6 +186,15 @@ def semantic_contract_fingerprint(payload: Mapping[str, object]) -> str:
     return sha256(canonical.encode()).hexdigest()
 
 
+def semantic_schema_fingerprint(schema: Mapping[str, object]) -> str:
+    """Return a stable, annotation-free and secret-free response Schema identity."""
+
+    state = _SanitizationState()
+    normalized = _sanitize_schema(schema, state)
+    projection = _semantic_schema_projection(normalized)
+    return sha256(_canonical_json(projection).encode()).hexdigest()
+
+
 def looks_sensitive_contract_value(value: str) -> bool:
     if value in {"", "***"} or value.startswith("secret://") or "{{secret." in value:
         return False
@@ -191,6 +210,12 @@ def looks_sensitive_contract_value(value: str) -> bool:
         or _url_has_sensitive_identity(value)
         or _high_entropy(value)
     )
+
+
+def contains_sensitive_contract_value(value: object) -> bool:
+    """Return whether a JSON-like value contains a credential or direct identifier."""
+
+    return _sensitive_json_value(value)
 
 
 def _sanitize_parameter(
@@ -324,9 +349,58 @@ def _sanitize_enum(values: list[object], state: _SanitizationState) -> JsonValue
     state.semantic_value_removed = True
     return {
         "value_count": len(values),
-        "value_hashes": [sha256(_canonical_json(value).encode()).hexdigest() for value in values],
         "values_redacted": True,
     }
+
+
+def _validate_contract_schemas(payload: Mapping[str, object]) -> None:
+    # Lazy import avoids a module cycle while keeping sensitive-value recognition centralized.
+    from app.domain.canonical_schemas import CanonicalSchemaValidator
+
+    validator = CanonicalSchemaValidator()
+    allow_partial = str(payload.get("completeness") or "complete") != "complete"
+    for index, raw in enumerate(_list(payload.get("parameters"))):
+        parameter = _mapping(raw)
+        validator.validate(
+            _normalize_exclusive_boundaries(_mapping(parameter.get("schema"))),
+            path=f"$.parameters[{index}].schema",
+            allow_partial_required=allow_partial,
+        )
+    request_body = _mapping(payload.get("request_body"))
+    if request_body:
+        validator.validate(
+            _normalize_exclusive_boundaries(_mapping(request_body.get("schema"))),
+            path="$.request_body.schema",
+            allow_partial_required=allow_partial,
+        )
+    request = _mapping(payload.get("request"))
+    if request:
+        validator.validate(
+            _normalize_exclusive_boundaries(request),
+            path="$.request",
+            allow_partial_required=allow_partial,
+        )
+    for status, raw in _mapping(payload.get("responses")).items():
+        response = _mapping(raw)
+        schema = response.get("schema")
+        if isinstance(schema, Mapping):
+            validator.validate(
+                _normalize_exclusive_boundaries(_mapping(schema)),
+                path=f"$.responses.{status}.schema",
+                allow_partial_required=allow_partial,
+            )
+
+
+def _semantic_schema_projection(value: object) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _semantic_schema_projection(child)
+            for key, child in sorted(value.items(), key=lambda item: str(item[0]))
+            if str(key) not in {"title", "description", "source_ref", "warnings"}
+        }
+    if isinstance(value, list):
+        return [_semantic_schema_projection(child) for child in value]
+    return cast(JsonValue, value)
 
 
 def _sanitize_generic(value: JsonValue, state: _SanitizationState) -> JsonValue:

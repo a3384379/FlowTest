@@ -1,11 +1,16 @@
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai import AIChangeItem, AIChangeSet
-from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
+from app.models.change_regression import (
+    ChangeRegressionRun,
+    ChangeRegressionStage,
+    SemanticGapWaiver,
+)
 from app.models.release_gate import ReleaseDecision
 from app.models.tasking import TestPlanRun
 
@@ -18,6 +23,7 @@ class ChangeRegressionBundle:
     change_items: list[AIChangeItem]
     test_plan_run: TestPlanRun | None
     release_decision: ReleaseDecision | None
+    semantic_gap_waivers: list[SemanticGapWaiver]
 
 
 class ChangeRegressionRepository:
@@ -29,6 +35,31 @@ class ChangeRegressionRepository:
 
     def add_stage(self, stage: ChangeRegressionStage) -> None:
         self._session.add(stage)
+
+    def add_waiver(self, waiver: SemanticGapWaiver) -> None:
+        self._session.add(waiver)
+
+    async def list_waivers(self, run_id: UUID) -> list[SemanticGapWaiver]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(SemanticGapWaiver)
+                    .where(SemanticGapWaiver.regression_run_id == run_id)
+                    .order_by(SemanticGapWaiver.approved_at, SemanticGapWaiver.gap_key)
+                )
+            ).all()
+        )
+
+    async def find_waiver(self, run_id: UUID, gap_key: str) -> SemanticGapWaiver | None:
+        return cast(
+            SemanticGapWaiver | None,
+            await self._session.scalar(
+                select(SemanticGapWaiver).where(
+                    SemanticGapWaiver.regression_run_id == run_id,
+                    SemanticGapWaiver.gap_key == gap_key,
+                )
+            ),
+        )
 
     async def get_run(self, run_id: UUID) -> ChangeRegressionRun | None:
         return await self._session.get(ChangeRegressionRun, run_id)
@@ -122,4 +153,5 @@ class ChangeRegressionRepository:
             change_items=change_items,
             test_plan_run=test_plan_run,
             release_decision=release_decision,
+            semantic_gap_waivers=await self.list_waivers(run_id),
         )

@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -128,3 +129,39 @@ class ChangeRegressionStage(UuidPrimaryKeyMixin, TimestampMixin, Base):
     actor_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", name="fk_change_regression_stage_actor", ondelete="SET NULL")
     )
+
+
+class SemanticGapWaiver(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    """A durable, per-requirement human waiver; it never represents coverage."""
+
+    __tablename__ = "semantic_gap_waivers"
+    __table_args__ = (
+        UniqueConstraint(
+            "regression_run_id",
+            "gap_key",
+            name="uq_semantic_gap_waiver_run_gap",
+        ),
+    )
+
+    regression_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "change_regression_runs.id",
+            name="fk_semantic_gap_waiver_run",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", name="fk_semantic_gap_waiver_project", ondelete="CASCADE"),
+        index=True,
+    )
+    gap_key: Mapped[str] = mapped_column(String(64), index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    approved_by_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", name="fk_semantic_gap_waiver_approver", ondelete="RESTRICT")
+    )
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    operation_identity: Mapped[dict[str, Any]] = mapped_column(JSON)
+    semantic_requirement: Mapped[dict[str, Any]] = mapped_column(JSON)
+    requirement_fingerprint: Mapped[str] = mapped_column(String(64), index=True)

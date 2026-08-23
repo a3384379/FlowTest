@@ -61,6 +61,8 @@ jobs:
             ) | Out-Null
             if ($errors.Count -gt 0) { throw "preflight.ps1 PowerShell 语法检查失败" }
             ./deploy/standalone/preflight.ps1 -MinimumFreeGb 1
+            & "runtime\python.exe" -c `
+              "from app.core.standalone_schema import BASELINE_REVISION; assert BASELINE_REVISION == '20260823_0044'"
             & "runtime\python.exe" -m app.operations.standalone_transfer --help
             ./deploy/standalone/start.ps1
             ./deploy/standalone/verify.ps1

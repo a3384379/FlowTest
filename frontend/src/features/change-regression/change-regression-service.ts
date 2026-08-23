@@ -49,6 +49,7 @@ export type SemanticCoverageScope = {
   change_key: string
   operation: {
     api_definition_id: string | null
+    api_version: number | null
     portable_operation_ref: string
     service_key: string
     method: string
@@ -72,11 +73,57 @@ export type SemanticCoverageScope = {
   requires_review: boolean
 }
 
+export type SemanticCoverageStatus = 'COVERED' | 'PARTIAL' | 'MISSING' | 'WAIVED' | 'UNKNOWN'
+
+export type SemanticGapWaiver = {
+  id: string
+  gap_key: string
+  reason: string
+  approved_by_id: string
+  approved_at: string
+  expires_at: string | null
+  operation_identity: Record<string, unknown>
+  semantic_requirement: Record<string, unknown>
+  requirement_fingerprint: string
+}
+
+export type CurrentPlanGap = {
+  change_key: string
+  gap_key: string
+  operation: SemanticCoverageScope['operation']
+  target: SemanticCoverageScope['target']
+  semantic_requirement: {
+    semantic_value?: string
+    expected_category?: string
+    oracle_set_fingerprint?: string
+  }
+  requirement_fingerprint: string
+  coverage_status: SemanticCoverageStatus
+  project_known_coverage: 'COVERED' | 'MISSING'
+  current_test_plan_coverage: SemanticCoverageStatus
+  recommended_existing_assets: Array<{
+    target_type: 'workflow' | 'test_case'
+    target_id: string
+  }>
+  waiver: {
+    reason: string
+    approved_by: string
+    approved_at: string
+    expires_at: string | null
+  } | null
+}
+
 export type ChangeRegressionSelectionSummary = Record<string, unknown> & {
   asset_coverage_gap_count?: number
   impact_selected_asset_count?: number
   semantic_coverage_scopes?: SemanticCoverageScope[]
   current_plan_recommendations?: Array<Record<string, unknown>>
+  current_plan_gaps?: CurrentPlanGap[]
+  asset_mapping_gap_count?: number
+  project_semantic_gap_count?: number
+  current_test_plan_semantic_gap_count?: number
+  waived_current_plan_gap_count?: number
+  unresolved_current_plan_gap_count?: number
 }
 
 export type FailureTriageResult = {
@@ -126,9 +173,43 @@ export type ChangeRegressionRun = Omit<
   missing_tests: MissingTestProposal[]
   evidence: Record<string, unknown>
   failure_triage: FailureTriageResult | Record<string, unknown>
+  semantic_gap_waivers: SemanticGapWaiver[]
   approved_by_id: string | null
   approved_at: string | null
   stages: ChangeRegressionStage[]
+}
+
+export async function addProjectKnownTestToCurrentPlan(
+  projectId: string,
+  runId: string,
+  input: {
+    gap_key: string
+    item: {
+      target_type: 'workflow' | 'case'
+      target_id: string
+      environment_id?: string
+    }
+  },
+): Promise<ChangeRegressionRun> {
+  return (
+    await apiClient.post<ChangeRegressionRun>(
+      '/projects/' + projectId + '/change-regressions/' + runId + '/add-project-known-test',
+      input,
+    )
+  ).data
+}
+
+export async function waiveSemanticGap(
+  projectId: string,
+  runId: string,
+  input: { gap_key: string; reason: string; expires_at?: string },
+): Promise<ChangeRegressionRun> {
+  return (
+    await apiClient.post<ChangeRegressionRun>(
+      '/projects/' + projectId + '/change-regressions/' + runId + '/semantic-gap-waivers',
+      input,
+    )
+  ).data
 }
 
 export async function listChangeRegressions(

@@ -41,6 +41,8 @@ jobs:
         run: >-
           uv run pytest --no-cov
           tests/test_s47_2_correctness_security.py::test_canonical_contract_redacts_nested_hints_and_sensitive_enum
+          tests/test_s47_3_semantic_integrity.py::test_strict_canonical_schema_rejects_invalid_keyword_values
+          tests/test_s47_3_semantic_integrity.py::test_historical_contract_cleanup_removes_enum_hashes_and_invalid_keywords
           tests/test_imports_api.py::test_sensitive_openapi_hints_never_reach_api_design_or_audit
           tests/test_standalone_runtime.py::test_standalone_s472_sanitizes_existing_contract_data_irreversibly
       - name: Lint operations scripts

@@ -7,6 +7,7 @@ import math
 import re
 from collections.abc import Mapping
 from copy import deepcopy
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from hashlib import sha256
 from typing import Literal, cast
 
@@ -91,7 +92,13 @@ class OperationContract(BaseModel):
     responses: dict[str, ContractResponse] = Field(default_factory=dict, max_length=100)
     source_ref: str | None = Field(default=None, max_length=512)
     revision: str | None = Field(default=None, max_length=160)
-    completeness: Literal["complete", "partial", "legacy_partial", "redacted_partial"] = "complete"
+    completeness: Literal[
+        "complete",
+        "partial",
+        "legacy_partial",
+        "redacted_partial",
+        "invalid_history_cleaned",
+    ] = "complete"
     warnings: list[str] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="before")
@@ -153,9 +160,10 @@ class TestEngineeringEngine:
         bundles = [contract_bundle, *(additional_evidence or [])]
         evidence = _merge_evidence(contract, bundles)
         fields = _field_constraints(evidence)
-        candidates = _scenario_candidates(contract, fields, generation_policy)
-        if contract.completeness == "redacted_partial":
-            candidates = _mark_redacted_contract_scenarios(candidates)
+        consistency_issues = ConstraintConsistencyValidator().issues(fields)
+        candidates = _generated_candidates(
+            contract, fields, generation_policy, blocked=bool(consistency_issues)
+        )
         scenarios = candidates[: generation_policy.max_scenarios]
         truncated = len(candidates) > len(scenarios)
         oracles, oracle_warnings = OracleInferenceEngine().infer(contract, evidence, scenarios)
@@ -167,6 +175,9 @@ class TestEngineeringEngine:
         )
         warnings = [*contract.warnings, *oracle_warnings]
         warnings.extend(evidence.warnings)
+        if consistency_issues:
+            warnings.extend(f"约束不可满足: {issue}" for issue in consistency_issues)
+        unsupported_formats, unsupported_patterns = _unsupported_schema_annotations(fields)
         if truncated:
             warnings.append(
                 f"场景预算为 {generation_policy.max_scenarios},已稳定截断,"
@@ -179,6 +190,14 @@ class TestEngineeringEngine:
             review_requirements.add("scenario_precondition_review")
         if contract.completeness == "redacted_partial":
             review_requirements.add("redacted_contract_test_data")
+        if consistency_issues:
+            review_requirements.add("constraint_unsatisfiable")
+        _apply_annotation_reviews(
+            review_requirements,
+            warnings,
+            unsupported_formats=unsupported_formats,
+            unsupported_patterns=unsupported_patterns,
+        )
         conflicts = sorted(
             {
                 str(conflict)
@@ -213,6 +232,144 @@ class TestEngineeringEngine:
             confidence=confidence,
             review_requirements=sorted(review_requirements),
         )
+
+
+class ConstraintConsistencyValidator:
+    """Reject merged constraints that cannot describe any legal request value."""
+
+    def issues(self, fields: list[EvidenceFinding]) -> list[str]:
+        issues: list[str] = []
+        for field in fields:
+            issues.extend(_field_consistency_issues(field))
+        return sorted(set(issues))
+
+
+def _generated_candidates(
+    contract: OperationContract,
+    fields: list[EvidenceFinding],
+    policy: GenerationPolicy,
+    *,
+    blocked: bool,
+) -> list[ScenarioCandidate]:
+    if blocked:
+        return []
+    candidates = _scenario_candidates(contract, fields, policy)
+    return (
+        _mark_redacted_contract_scenarios(candidates)
+        if contract.completeness == "redacted_partial"
+        else candidates
+    )
+
+
+def _unsupported_schema_annotations(
+    fields: list[EvidenceFinding],
+) -> tuple[list[str], list[str]]:
+    formats = sorted(
+        {
+            value
+            for field in fields
+            if isinstance((value := field.structured_data.get("format")), str)
+            and _format_values(value) is None
+        }
+    )
+    patterns = sorted(
+        {
+            field.path
+            for field in fields
+            if isinstance((value := field.structured_data.get("pattern")), str)
+            and _pattern_sample(value) is None
+        }
+    )
+    return formats, patterns
+
+
+def _apply_annotation_reviews(
+    requirements: set[str],
+    warnings: list[str],
+    *,
+    unsupported_formats: list[str],
+    unsupported_patterns: list[str],
+) -> None:
+    if unsupported_formats:
+        requirements.add("format_requires_review")
+        warnings.append(f"未知 format 仅作为 Annotation 保留: {', '.join(unsupported_formats)}")
+    if unsupported_patterns:
+        requirements.add("pattern_requires_review")
+        warnings.append("部分 pattern 无法安全生成合法样例,未生成推测场景")
+
+
+def _field_consistency_issues(field: EvidenceFinding) -> list[str]:
+    data = field.structured_data
+    issues: list[str] = []
+    lower = _effective_bound(data, lower=True)
+    upper = _effective_bound(data, lower=False)
+    if lower is not None and upper is not None:
+        lower_value, lower_exclusive = lower
+        upper_value, upper_exclusive = upper
+        if lower_value > upper_value or (
+            lower_value == upper_value and (lower_exclusive or upper_exclusive)
+        ):
+            issues.append(f"{field.path}: numeric bounds have no legal value")
+    enum = data.get("enum")
+    if isinstance(enum, list):
+        for index, value in enumerate(enum):
+            if not _enum_value_satisfies(value, data, lower, upper):
+                issues.append(f"{field.path}: enum[{index}] violates type or bounds")
+    return issues
+
+
+def _effective_bound(data: dict[str, JsonValue], *, lower: bool) -> tuple[Decimal, bool] | None:
+    keys = ("minimum", "exclusiveMinimum") if lower else ("maximum", "exclusiveMaximum")
+    candidates = [
+        (Decimal(str(value)), key.startswith("exclusive"))
+        for key in keys
+        if _number_value(value := data.get(key))
+    ]
+    if not candidates:
+        return None
+    boundary = (max if lower else min)(value for value, _ in candidates)
+    exclusive = any(value == boundary and is_exclusive for value, is_exclusive in candidates)
+    return boundary, exclusive
+
+
+def _enum_value_satisfies(
+    value: JsonValue,
+    data: dict[str, JsonValue],
+    lower: tuple[Decimal, bool] | None,
+    upper: tuple[Decimal, bool] | None,
+) -> bool:
+    raw_type = data.get("type")
+    allowed_types = raw_type if isinstance(raw_type, list) else [raw_type]
+    if raw_type is not None and not any(_value_matches_type(value, item) for item in allowed_types):
+        return False
+    if not _number_value(value):
+        return True
+    number = Decimal(str(value))
+    if lower is not None and (number < lower[0] or (number == lower[0] and lower[1])):
+        return False
+    return not (upper is not None and (number > upper[0] or (number == upper[0] and upper[1])))
+
+
+def _value_matches_type(value: JsonValue, expected: JsonValue) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return _number_value(value)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    return False
+
+
+def _number_value(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 class OracleInferenceEngine:
@@ -750,6 +907,7 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
     exclusive_maximum = data.get("exclusiveMaximum")
     if isinstance(minimum, (int, float)):
         step = _numeric_step(data, minimum)
+        valid_minimum = _aligned_boundary_number(minimum, step, upward=True, inclusive=True)
         scenarios.extend(
             [
                 _negative_scenario(
@@ -760,7 +918,14 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
                     "set",
                     _adjacent_number(minimum, step, upward=False),
                 ),
-                _positive_scenario(field, base, "number_at_min", "等于最小值", "set", minimum),
+                _positive_scenario(
+                    field,
+                    base,
+                    "number_at_min",
+                    "最小约束内合法值",
+                    "set",
+                    valid_minimum,
+                ),
             ]
         )
     if isinstance(exclusive_minimum, (int, float)) and not isinstance(exclusive_minimum, bool):
@@ -787,7 +952,8 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
         )
     if isinstance(maximum, (int, float)):
         step = _numeric_step(data, maximum)
-        below_maximum = _adjacent_number(maximum, step, upward=False)
+        valid_maximum = _aligned_boundary_number(maximum, step, upward=False, inclusive=True)
+        below_maximum = _adjacent_number(valid_maximum, step, upward=False)
         if not isinstance(minimum, (int, float)) or below_maximum >= minimum:
             scenarios.append(
                 _positive_scenario(
@@ -801,7 +967,14 @@ def _numeric_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sc
             )
         scenarios.extend(
             [
-                _positive_scenario(field, base, "number_at_max", "等于最大值", "set", maximum),
+                _positive_scenario(
+                    field,
+                    base,
+                    "number_at_max",
+                    "最大约束内合法值",
+                    "set",
+                    valid_maximum,
+                ),
                 _negative_scenario(
                     field,
                     base,
@@ -848,8 +1021,32 @@ def _numeric_step(data: dict[str, JsonValue], boundary: int | float) -> int | fl
 
 def _adjacent_number(value: int | float, step: int | float | None, *, upward: bool) -> int | float:
     if step is not None:
-        return value + step if upward else value - step
+        return _aligned_boundary_number(value, step, upward=upward, inclusive=False)
     return math.nextafter(float(value), math.inf if upward else -math.inf)
+
+
+def _aligned_boundary_number(
+    value: int | float,
+    step: int | float | None,
+    *,
+    upward: bool,
+    inclusive: bool,
+) -> int | float:
+    if step is None:
+        if inclusive:
+            return value
+        return math.nextafter(float(value), math.inf if upward else -math.inf)
+    boundary = Decimal(str(value))
+    multiple = Decimal(str(step))
+    rounding = ROUND_CEILING if upward else ROUND_FLOOR
+    multiplier = (boundary / multiple).to_integral_value(rounding=rounding)
+    candidate = multiplier * multiple
+    if not inclusive and candidate == boundary:
+        candidate += multiple if upward else -multiple
+    prefer_integer = isinstance(value, int) and isinstance(step, int)
+    if prefer_integer and candidate == candidate.to_integral_value():
+        return int(candidate)
+    return float(str(candidate.normalize()))
 
 
 def _string_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[ScenarioCandidate]:
@@ -901,13 +1098,15 @@ def _string_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sce
             ]
         )
     if isinstance(data.get("format"), str):
-        valid, invalid = _format_values(cast(str, data["format"]))
-        scenarios.extend(
-            [
-                _positive_scenario(field, base, "format_valid", "有效格式", "set", valid),
-                _negative_scenario(field, base, "format_invalid", "无效格式", "set", invalid),
-            ]
-        )
+        format_values = _format_values(cast(str, data["format"]))
+        if format_values is not None:
+            valid, invalid = format_values
+            scenarios.extend(
+                [
+                    _positive_scenario(field, base, "format_valid", "有效格式", "set", valid),
+                    _negative_scenario(field, base, "format_invalid", "无效格式", "set", invalid),
+                ]
+            )
     pattern = data.get("pattern")
     if isinstance(pattern, str):
         pattern_valid = _pattern_sample(pattern)
@@ -917,7 +1116,7 @@ def _string_scenarios(field: EvidenceFinding, base: ScenarioRequest) -> list[Sce
                     field, base, "pattern_valid", "匹配 pattern", "set", pattern_valid
                 )
             )
-        pattern_invalid = _pattern_invalid_value(pattern)
+        pattern_invalid = _pattern_invalid_value(pattern) if pattern_valid is not None else None
         if pattern_invalid is not None:
             scenarios.append(
                 _negative_scenario(
@@ -1375,6 +1574,10 @@ def _valid_value(data: dict[str, JsonValue]) -> JsonValue:
         return observed_values[0]
     schema = data.get("schema")
     schema_mapping = {**data, **schema} if isinstance(schema, dict) else data
+    return _valid_schema_value(schema_mapping)
+
+
+def _valid_schema_value(schema_mapping: dict[str, JsonValue]) -> JsonValue:
     value_type = _schema_type(schema_mapping)
     if value_type in {"integer", "number"}:
         return _valid_numeric_value(schema_mapping)
@@ -1385,7 +1588,9 @@ def _valid_value(data: dict[str, JsonValue]) -> JsonValue:
     if value_type == "object":
         return _valid_object_value(schema_mapping)
     if isinstance(schema_mapping.get("format"), str):
-        return _format_values(cast(str, schema_mapping["format"]))[0]
+        format_values = _format_values(cast(str, schema_mapping["format"]))
+        if format_values is not None:
+            return format_values[0]
     pattern = schema_mapping.get("pattern")
     if isinstance(pattern, str) and (sample := _pattern_sample(pattern)) is not None:
         return sample
@@ -1444,6 +1649,7 @@ def _valid_numeric_value(schema: dict[str, JsonValue]) -> int | float:
             if isinstance(value, (int, float))
             and not isinstance(value, bool)
             and _within_numeric_bounds(value, schema)
+            and _matches_multiple_of(value, schema)
         ),
         None,
     )
@@ -1457,7 +1663,40 @@ def _valid_numeric_value(schema: dict[str, JsonValue]) -> int | float:
             upward=True,
         )
     minimum = schema.get("minimum")
-    return minimum if isinstance(minimum, (int, float)) else 1
+    if isinstance(minimum, (int, float)) and not isinstance(minimum, bool):
+        return _aligned_boundary_number(
+            minimum,
+            _numeric_step(schema, minimum),
+            upward=True,
+            inclusive=True,
+        )
+    exclusive_maximum = schema.get("exclusiveMaximum")
+    if isinstance(exclusive_maximum, (int, float)) and not isinstance(exclusive_maximum, bool):
+        return _adjacent_number(
+            exclusive_maximum,
+            _numeric_step(schema, exclusive_maximum),
+            upward=False,
+        )
+    maximum = schema.get("maximum")
+    if isinstance(maximum, (int, float)) and not isinstance(maximum, bool):
+        return _aligned_boundary_number(
+            maximum,
+            _numeric_step(schema, maximum),
+            upward=False,
+            inclusive=True,
+        )
+    multiple = schema.get("multipleOf")
+    if isinstance(multiple, (int, float)) and not isinstance(multiple, bool):
+        return multiple
+    return 1
+
+
+def _matches_multiple_of(value: int | float, schema: dict[str, JsonValue]) -> bool:
+    multiple = schema.get("multipleOf")
+    if not isinstance(multiple, (int, float)) or isinstance(multiple, bool):
+        return True
+    quotient = Decimal(str(value)) / Decimal(str(multiple))
+    return quotient == quotient.to_integral_value()
 
 
 def _valid_array_value(schema: dict[str, JsonValue]) -> list[JsonValue]:
@@ -1504,7 +1743,7 @@ def _invalid_type_value(value_type: JsonValue) -> JsonValue:
     return None
 
 
-def _format_values(format_name: str) -> tuple[str, str]:
+def _format_values(format_name: str) -> tuple[str, str] | None:
     values = {
         "email": ("user@example.test", "not-an-email"),
         "uuid": ("00000000-0000-4000-8000-000000000000", "not-a-uuid"),
@@ -1515,7 +1754,7 @@ def _format_values(format_name: str) -> tuple[str, str]:
         "ipv4": ("192.0.2.1", "999.0.0.1"),
         "ipv6": ("2001:db8::1", "not-ipv6"),
     }
-    return values.get(format_name, ("valid", "invalid"))
+    return values.get(format_name)
 
 
 def _pattern_sample(pattern: str) -> str | None:

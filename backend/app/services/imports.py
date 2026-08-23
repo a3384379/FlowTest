@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.api_assets import APIVersionSpec
+from app.domain.canonical_schemas import CanonicalSchemaValidationError
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.importers.contracts import (
     ImportChange,
@@ -97,6 +98,8 @@ class ImportService:
         source = _file_source(source_name)
         try:
             detected_type, operations = parse_import_document(content, source_type)
+        except CanonicalSchemaValidationError as error:
+            raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
             raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
         _ensure_unique_operations(operations)
@@ -243,6 +246,8 @@ class ImportService:
     ) -> ImportRun:
         try:
             detected_type, operations = parse_import_document(content, source_type)
+        except CanonicalSchemaValidationError as error:
+            raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
             raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
         _ensure_unique_operations(operations)
@@ -731,6 +736,15 @@ def _version_model(
         contract_completeness=contract.completeness if contract is not None else "partial",
         variables=request.variables,
         created_by_id=actor_id,
+    )
+
+
+def _canonical_contract_error(error: CanonicalSchemaValidationError) -> AppError:
+    return AppError(
+        code="CANONICAL_CONTRACT_INVALID",
+        message="Canonical Contract 包含非法 Schema Keyword Value",
+        status_code=422,
+        details={"issues": [issue.as_json() for issue in error.issues]},
     )
 
 

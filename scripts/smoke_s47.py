@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from collections.abc import Callable
 from typing import Any, Final, cast
 from urllib.request import urlopen
 
@@ -507,7 +508,10 @@ def _verify_change_regression(
         if mutation["path"] == "body.quantity"
     }
     if values != {101, 999, 1000}:
-        raise RuntimeError(f"S47.2 semantic gaps did not preserve Oracle identity: {design}")
+        raise RuntimeError(
+            "S47.3 Oracle-aware coverage did not preserve current-contract requirements: "
+            f"{design}"
+        )
     scope = cast(list[dict[str, Any]], run["selection_summary"]["semantic_coverage_scopes"])[0]
     operation = cast(dict[str, Any], scope["operation"])
     target = cast(dict[str, Any], scope["target"])
@@ -519,6 +523,23 @@ def _verify_change_regression(
     ):
         raise RuntimeError(f"S47.2 regression lost operation/location identity: {scope}")
     workflows_before = _workflow_ids(client, token, project_id)
+    _expect_error_code(
+        lambda: client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{run['id']}"
+            f"/change-set-items/{missing[0]['item_id']}/accept",
+            {
+                "note": "S47.3 wrong target rejection",
+                "materialization": {
+                    "api_definition_id": assets["apis"]["billing"]["id"],
+                    "environment_id": assets["environment"]["id"],
+                    "scenario_ids": [scenario["id"] for scenario in scenarios],
+                },
+            },
+            token=token,
+        ),
+        "CHANGE_REGRESSION_TARGET_MISMATCH",
+    )
     accepted = client.json(
         "POST",
         f"/projects/{project_id}/change-regressions/{run['id']}"
@@ -570,7 +591,56 @@ def _verify_change_regression(
         or recommendations[0]["action"] != "add_project_known_test_to_current_plan"
     ):
         raise RuntimeError(f"S47.2 current TestPlan scope was incorrect: {scoped_run}")
+    _verify_current_plan_gate(client, token, project_id, scoped_run)
     return str(scoped_run["id"])
+
+
+def _verify_current_plan_gate(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    scoped_run: dict[str, Any],
+) -> None:
+    gaps = cast(list[dict[str, Any]], scoped_run["selection_summary"]["current_plan_gaps"])
+    if not gaps or scoped_run["selection_summary"]["unresolved_current_plan_gap_count"] <= 0:
+        raise RuntimeError(f"S47.3 current TestPlan gate did not identify blockers: {scoped_run}")
+    _expect_error_code(
+        lambda: client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{scoped_run['id']}/approve",
+            {"note": "S47.3 unresolved plan gap must block"},
+            token=token,
+        ),
+        "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED",
+    )
+    for gap in gaps:
+        client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{scoped_run['id']}/semantic-gap-waivers",
+            {
+                "gap_key": gap["gap_key"],
+                "reason": "S47.3 Compose 人工逐项风险豁免验证",
+            },
+            token=token,
+        )
+    approved = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{scoped_run['id']}/approve",
+        {"note": "S47.3 audited per-gap waivers"},
+        token=token,
+    )
+    if approved["selection_summary"]["waived_current_plan_gap_count"] != len(gaps):
+        raise RuntimeError(f"S47.3 waivers did not close the plan gate: {approved}")
+
+
+def _expect_error_code(action: Callable[[], object], code: str) -> None:
+    try:
+        action()
+    except RuntimeError as error:
+        if code not in str(error):
+            raise
+        return
+    raise RuntimeError(f"Expected API error {code}")
 
 
 def _workflow_ids(client: APIClient, token: str, project_id: str) -> set[str]:

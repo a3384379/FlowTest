@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.schemas.impact import OpenApiDiffReference, SchemaDiffReference
+from app.schemas.tasking import TestPlanItemInput
 
 ChangeRegressionStatus = Literal[
     "review_required",
@@ -61,6 +62,53 @@ class ChangeRegressionApproval(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     note: str = Field(default="", max_length=2000)
+
+
+class SemanticGapWaiverCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gap_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=10, max_length=1000)
+    expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def require_future_expiry(self) -> "SemanticGapWaiverCreate":
+        if self.expires_at is not None:
+            expiry = self.expires_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=UTC)
+            if expiry <= datetime.now(UTC):
+                raise ValueError("豁免失效时间必须晚于当前时间")
+        return self
+
+
+class ChangeRegressionAddToPlanInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gap_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    item: TestPlanItemInput
+
+
+class ChangeRegressionOperationSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_key: str = Field(min_length=1, max_length=160)
+    api_definition_id: UUID
+    api_version: int = Field(ge=1)
+
+
+class SemanticGapWaiverResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    gap_key: str
+    reason: str
+    approved_by_id: UUID
+    approved_at: datetime
+    expires_at: datetime | None
+    operation_identity: dict[str, JsonValue]
+    semantic_requirement: dict[str, JsonValue]
+    requirement_fingerprint: str
 
 
 class ChangeRegressionStageResponse(BaseModel):
@@ -127,6 +175,7 @@ class ChangeRegressionRunResponse(BaseModel):
     missing_tests: list[ChangeRegressionMissingTestResponse]
     evidence: dict[str, JsonValue]
     failure_triage: dict[str, JsonValue]
+    semantic_gap_waivers: list[SemanticGapWaiverResponse] = Field(default_factory=list)
     approved_by_id: UUID | None
     approved_at: datetime | None
     created_by_id: UUID

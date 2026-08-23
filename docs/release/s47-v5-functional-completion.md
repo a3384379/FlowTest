@@ -184,3 +184,10 @@ Evidence 的确定性关系；这些能力不得写成完整实现。
 [S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。无论本地功能闭环结果如何，真实
 Key Rotation、Windows 实机、长时 Standalone/Compact、连续 RC、安全审批和人工签署未完成前，
 `GA_READY` 必须为 `NO`。
+
+## S47.3 补充校正
+
+S47.3 将覆盖语义扩展为 Oracle-aware Token，将 Current TestPlan Gap 升级为审批、执行和发布硬门禁，
+并关闭多 Service Operation、物化绑定、AST 控制流、约束可满足性、Canonical Keyword、
+敏感 Enum Hash、Decimal MultipleOf 和 0044 迁移确定性问题。S47.2 的旧结论以
+[S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md)和其最终 HEAD Remote CI 为准。

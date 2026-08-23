@@ -206,9 +206,7 @@ class OrderType(Enum):
     PRIORITY = "PRIORITY"
 
 def validate(quantity):
-    if quantity <= 999:
-        return True
-    raise ValueError("invalid")
+    return quantity <= 999
 """,
                 }
             ],
@@ -319,7 +317,7 @@ class UnsafeValues(Enum):
 
     assert finding.structured_data["values_redacted"] is True
     assert finding.structured_data["value_count"] == 3
-    assert len(finding.structured_data["value_hashes"]) == 3
+    assert "value_hashes" not in finding.structured_data
     assert "user@" not in str(finding.model_dump(mode="json"))
     for repository_url in (
         "https://user:password@example.test/repo.git",

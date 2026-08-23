@@ -899,3 +899,17 @@ State Model 未实现并明确不可用，Knowledge Graph 只表达可追溯 Evi
 本地与远程验证结果以
 [S47.2 最终正确性与安全闭环](release/s47-2-final-correctness-security.md)为准；远程 GitHub Actions
 未真实完成前不得用本地结果替代。
+
+## S47.3 V5 最终语义完整性闭环（2026-08-23）
+
+- Coverage Token 绑定 Oracle Set Fingerprint，Status/Response Schema 改变不再被值覆盖隐藏。
+- Current Plan Gap 成为 Approve/Execute/Release 硬门禁；Add-to-Plan 和人工逐 Gap Waiver 重算 Coverage。
+- Waiver 可过期、可审计、进入 Release Evidence，Service Token 无权创建。
+- ChangeSet 冻结 Operation/API/Version/Service/Route/Fingerprint；多 Service 同路由不会选第一个。
+- AST 区分规范控制流与普通分支，不可满足约束阻断生成/物化。
+- Canonical Schema 增加严格 Keyword Value/Range/Budget 校验；敏感 Enum 只保留 Count。
+- `20260823_0044` 使用冻结 Migration Support 清理历史数据并持久化 Waiver，Standalone/Transfer 同步。
+- MultipleOf 相邻值使用 Decimal 精确对齐。
+
+详细证据见 [S47.3 最终语义完整性闭环](release/s47-3-final-semantic-integrity.md)。真实 Key Rotation、
+Windows 实机、长时运行、RC 观察和安全审批未完成，`GA_READY` 仍为 `NO`。

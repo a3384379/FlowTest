@@ -106,3 +106,19 @@ Key Rotation 真实重加密 Apply/Rollback 未实现，因此即使 S47 功能�
 FlowSpec v3 是 V5 唯一正式基线；开发期 v1/v2 兼容明确不属于 S47.2 或合并门槛。完整记录见
 [S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。Remote CI 未全部通过时
 `MERGE_TO_MAIN` 必须为 `NO-GO`；真实 Key Rotation 和外部时间型证据未完成时 `GA_READY` 始终为 `NO`。
+
+## S47.3 最终语义完整性门槛
+
+| Gate | 必须通过的证据 | 阻断条件 |
+|---|---|---|
+| Oracle Coverage | Token 包含 Oracle Set Fingerprint；400/422、200/201、Schema v1/v2 Golden | 仍只比较 Value+Category 或无 Oracle 被认为 complete |
+| Current Plan Gate | Approve/Execute/Release 均重算；Add-to-Plan 与过期 Waiver Golden | 项目已有测试未进当前计划仍可通过 |
+| Waiver | 逐 Gap、人工、Reason、Expiry、Audit、Release Evidence | 全局豁免、Service Token 豁免或 WAIVED 显示 COVERED |
+| Operation Binding | 多 Service 同路由歧义阻断；错误/过期 API 物化返回 409 | 选第一个候选或不复验 Version/Service/Route/Fingerprint |
+| Source Truth | Assert/Validator/Guard/Ordinary/Complex Context Golden；矛盾约束阻断 | 所有 Compare 都是规范约束或 Guard 反转错误 |
+| Canonical Strictness | Keyword 类型/范围/预算验证；非法导入 422；无敏感 Hash | 非法值静默持久化或保存无盐摘要 |
+| Migration 0044 | PostgreSQL `0043→0044→0043→0044`、Standalone、Transfer、check | 改写 0043、导入可变 Domain Sanitizer 或降级恢复敏感数据 |
+
+详细证据见 [S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md)。Required Remote CI
+未全部通过时 `MERGE_TO_MAIN: NO-GO`；无论本地和 CI 结果如何，真实 Key Rotation 和外部门槛
+未完成时 `GA_READY: NO`。

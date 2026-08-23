@@ -8,13 +8,17 @@ from app.core.errors import AppError
 from app.domain.tasking import ServiceTokenScope
 from app.repositories.change_regression import ChangeRegressionBundle
 from app.schemas.change_regression import (
+    ChangeRegressionAddToPlanInput,
     ChangeRegressionApproval,
     ChangeRegressionMissingTestResponse,
+    ChangeRegressionOperationSelection,
     ChangeRegressionReview,
     ChangeRegressionRunCreate,
     ChangeRegressionRunResponse,
     ChangeRegressionRunSummaryResponse,
     ChangeRegressionStageResponse,
+    SemanticGapWaiverCreate,
+    SemanticGapWaiverResponse,
 )
 from app.schemas.common import Page
 from app.services.change_regression import ChangeRegressionService
@@ -173,6 +177,91 @@ async def review_change_regression_item(
 
 
 @router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/add-project-known-test",
+    response_model=ChangeRegressionRunResponse,
+)
+async def add_project_known_test_to_current_plan(
+    project_id: UUID,
+    run_id: UUID,
+    payload: ChangeRegressionAddToPlanInput,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    bundle = await ChangeRegressionService(session).add_project_known_test_to_current_plan(
+        actor=current_user,
+        project_id=project_id,
+        run_id=run_id,
+        payload=payload,
+    )
+    return _response(bundle)
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/operation-selection",
+    response_model=ChangeRegressionRunResponse,
+)
+async def select_change_regression_operation(
+    project_id: UUID,
+    run_id: UUID,
+    payload: ChangeRegressionOperationSelection,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    bundle = await ChangeRegressionService(session).select_operation(
+        actor=current_user,
+        project_id=project_id,
+        run_id=run_id,
+        payload=payload,
+    )
+    return _response(bundle)
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/semantic-gap-waivers",
+    response_model=ChangeRegressionRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def waive_change_regression_semantic_gap(
+    project_id: UUID,
+    run_id: UUID,
+    payload: SemanticGapWaiverCreate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    bundle = await ChangeRegressionService(session).waive_semantic_gap(
+        actor=current_user,
+        project_id=project_id,
+        run_id=run_id,
+        payload=payload,
+    )
+    return _response(bundle)
+
+
+@router.post(
+    "/ci/projects/{project_id}/change-regressions/{run_id}/semantic-gap-waivers",
+    status_code=status.HTTP_403_FORBIDDEN,
+)
+async def reject_service_token_semantic_gap_waiver(
+    project_id: UUID,
+    run_id: UUID,
+    payload: SemanticGapWaiverCreate,
+    session: SessionDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    await ServiceTokenService(session).authenticate(
+        raw_token=_bearer_token(authorization),
+        project_id=project_id,
+        required_scope=ServiceTokenScope.ANALYZE_CHANGE_REGRESSION,
+    )
+    del run_id, payload
+    raise AppError(
+        code="CHANGE_REGRESSION_WAIVER_HUMAN_REQUIRED",
+        message="语义缺口豁免只能由人工用户创建",
+        status_code=403,
+    )
+
+
+@router.post(
     "/projects/{project_id}/change-regressions/{run_id}/approve",
     response_model=ChangeRegressionRunResponse,
 )
@@ -275,6 +364,10 @@ def _response(bundle: ChangeRegressionBundle) -> ChangeRegressionRunResponse:
         ],
         evidence=cast(dict[str, object], run.evidence),
         failure_triage=cast(dict[str, object], run.failure_triage),
+        semantic_gap_waivers=[
+            SemanticGapWaiverResponse.model_validate(waiver)
+            for waiver in bundle.semantic_gap_waivers
+        ],
         approved_by_id=run.approved_by_id,
         approved_at=run.approved_at,
         created_by_id=run.created_by_id,

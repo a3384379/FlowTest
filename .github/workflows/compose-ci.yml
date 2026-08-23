@@ -380,7 +380,7 @@ jobs:
         run: python3 scripts/smoke_s30.py
       - name: Verify S31 global search and immutable release gate flow
         run: python3 scripts/smoke_s31.py
-      - name: Verify S47.2 contract security, suppression, semantic regression, MCP, and FlowSpec v3
+      - name: Verify S47.3 semantic gate, contract security, suppression, MCP, and FlowSpec v3
         run: python3 scripts/smoke_s47.py
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |

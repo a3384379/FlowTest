@@ -253,3 +253,8 @@ exclusiveMinimum/exclusiveMaximum 与 Source AST 严格比较保持精确边界�
 S47.2 不为旧格式增加迁移复杂度。最终事实与测试结果见
 [S47.2 最终正确性与安全闭环](s47-2-final-correctness-security.md)。本文原有外部证据和 GA 限制继续
 有效；真实 Key Rotation 等门槛未完成，因此 `GA_READY` 仍为 `NO`。
+
+## S47.3 后续语义校正
+
+S47.1 的 Value/Category 覆盖结论已被 S47.3 的 Oracle Set Fingerprint Token 收紧；Current TestPlan Gap
+已从建议升级为硬门禁。最终事实见 [S47.3 记录](s47-3-final-semantic-integrity.md)。

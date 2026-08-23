@@ -11,8 +11,12 @@ import re
 from copy import deepcopy
 from typing import Final, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.canonical_contracts import (
+    contains_sensitive_contract_value,
+    semantic_schema_fingerprint,
+)
 from app.domain.test_design import (
     CoverageEntry,
     CoverageModel,
@@ -68,6 +72,7 @@ class OperationIdentity(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_definition_id: str | None = None
+    api_version: int | None = Field(default=None, ge=1)
     portable_operation_ref: str = Field(min_length=1, max_length=240)
     service_key: str = Field(min_length=1, max_length=160)
     method: str = Field(pattern=r"^[A-Z]+$", max_length=16)
@@ -90,13 +95,34 @@ class SemanticCoverageFact(BaseModel):
     scenario_kind: str = Field(min_length=1, max_length=80)
     expected_category: Literal["success", "invalid_request", "unauthorized", "unknown"]
     oracle_identity: str | None = Field(default=None, max_length=240)
+    oracle_identities: tuple[str, ...] = Field(default=(), max_length=100)
+    oracle_set_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source_asset_type: Literal["test_case", "workflow", "test_design"]
     source_asset_id: str = Field(min_length=1, max_length=160)
     test_plan_id: str | None = Field(default=None, max_length=160)
 
+    @model_validator(mode="after")
+    def normalize_oracle_set(self) -> SemanticCoverageFact:
+        identities = self.oracle_identities
+        if not identities and self.oracle_identity is not None:
+            identities = (self.oracle_identity,)
+        fingerprint = self.oracle_set_fingerprint or oracle_set_fingerprint(identities)
+        if identities == self.oracle_identities and fingerprint == self.oracle_set_fingerprint:
+            return self
+        return self.model_copy(
+            update={
+                "oracle_identities": tuple(sorted(set(identities))),
+                "oracle_set_fingerprint": fingerprint,
+            }
+        )
+
     @property
     def complete(self) -> bool:
-        return self.expected_category != "unknown" and self.oracle_identity is not None
+        return (
+            self.expected_category != "unknown"
+            and bool(self.oracle_identities)
+            and self.oracle_set_fingerprint is not None
+        )
 
     @property
     def target_key(self) -> str:
@@ -106,7 +132,58 @@ class SemanticCoverageFact(BaseModel):
 
     @property
     def coverage_token(self) -> str:
-        return f"{self.semantic_value}|{self.expected_category}"
+        fingerprint = self.oracle_set_fingerprint or "unknown-oracle"
+        return f"{self.semantic_value}|{self.expected_category}|{fingerprint}"
+
+
+def oracle_set_fingerprint(identities: list[str] | tuple[str, ...]) -> str | None:
+    normalized = sorted({identity for identity in identities if identity})
+    if not normalized:
+        return None
+    return hashlib.sha256("\n".join(normalized).encode()).hexdigest()
+
+
+def oracle_semantic_identity(oracle: OracleSpec) -> str | None:
+    """Project an executable Oracle without IDs, labels, provenance, or sensitive values."""
+
+    if not oracle.deterministic or oracle.requires_review:
+        return None
+    if oracle.kind == "status":
+        if isinstance(oracle.expected, int) and not isinstance(oracle.expected, bool):
+            return f"status:{oracle.expected}"
+        if oracle.operator == "in" and isinstance(oracle.expected, list):
+            statuses = sorted(
+                {
+                    value
+                    for value in oracle.expected
+                    if isinstance(value, int) and not isinstance(value, bool)
+                }
+            )
+            return "status_set:" + ",".join(str(value) for value in statuses) if statuses else None
+        return None
+    if oracle.kind == "schema" and isinstance(oracle.expected, dict):
+        return f"schema:{semantic_schema_fingerprint(oracle.expected)}"
+    if oracle.kind not in {"json_path", "expression"}:
+        return None
+    if contains_sensitive_contract_value(oracle.expected):
+        return None
+    canonical_expected = json.dumps(
+        oracle.expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    prefix = "json_path" if oracle.kind == "json_path" else "expression"
+    return f"{prefix}:{oracle.expression}|{oracle.operator}|{canonical_expected}"
+
+
+def scenario_oracle_identities(
+    scenario: ScenarioCandidate, oracles: list[OracleSpec]
+) -> tuple[str, ...]:
+    identities = {
+        identity
+        for oracle in oracles
+        if scenario.id in oracle.applies_to
+        and (identity := oracle_semantic_identity(oracle)) is not None
+    }
+    return tuple(sorted(identities))
 
 
 class ChangeConstraintTarget(BaseModel):
@@ -189,7 +266,12 @@ def missing_test_design(
         policy=GenerationPolicy(max_scenarios=30, pairwise_enabled=False),
     )
     scenarios = _change_scenarios(generated, gap)
-    scenarios = _exclude_covered_scenarios(scenarios, covered_values or set())
+    candidate_oracles = _extend_oracle_scope(generated, scenarios)
+    scenarios = _exclude_covered_scenarios(
+        scenarios,
+        candidate_oracles,
+        covered_values or set(),
+    )
     if unresolved_target:
         scenarios = [
             scenario.model_copy(
@@ -633,12 +715,16 @@ def gap_covered_values(gap: dict[str, JsonValue], coverage: dict[str, set[str]])
 
 
 def _exclude_covered_scenarios(
-    scenarios: list[ScenarioCandidate], covered_values: set[str]
+    scenarios: list[ScenarioCandidate],
+    oracles: list[OracleSpec],
+    covered_values: set[str],
 ) -> list[ScenarioCandidate]:
     return [
         scenario
         for scenario in scenarios
-        if not scenario.mutations or _scenario_coverage_token(scenario) not in covered_values
+        if not scenario.mutations
+        or (token := _scenario_coverage_token(scenario, oracles)) is None
+        or token not in covered_values
     ]
 
 
@@ -646,8 +732,14 @@ def _semantic_value(value: JsonValue | None) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _scenario_coverage_token(scenario: ScenarioCandidate) -> str:
-    return f"{_semantic_value(scenario.mutations[0].value)}|{scenario.expected_category}"
+def _scenario_coverage_token(scenario: ScenarioCandidate, oracles: list[OracleSpec]) -> str | None:
+    identities = scenario_oracle_identities(scenario, oracles)
+    fingerprint = oracle_set_fingerprint(identities)
+    if fingerprint is None or scenario.expected_category == "review":
+        return None
+    return (
+        f"{_semantic_value(scenario.mutations[0].value)}|{scenario.expected_category}|{fingerprint}"
+    )
 
 
 def semantic_coverage_tokens(
@@ -688,22 +780,23 @@ def _same_operation(left: OperationIdentity, right: OperationIdentity) -> bool:
 def _extend_oracle_scope(
     generated: TestDesignDocument, scenarios: list[ScenarioCandidate]
 ) -> list[OracleSpec]:
-    success_ids = [item.id for item in scenarios if item.expected_category == "success"]
-    invalid_ids = [item.id for item in scenarios if item.expected_category == "invalid_request"]
-    return [
-        oracle.model_copy(
-            update={
-                "applies_to": (
-                    success_ids
-                    if oracle.id == "oracle_success_status"
-                    else invalid_ids
-                    if oracle.id == "oracle_invalid_request_status"
-                    else oracle.applies_to
-                )
-            }
-        )
-        for oracle in generated.oracles
-    ]
+    generated_categories = {
+        scenario.id: scenario.expected_category for scenario in generated.scenarios
+    }
+    result: list[OracleSpec] = []
+    for oracle in generated.oracles:
+        categories = {
+            generated_categories[scenario_id]
+            for scenario_id in oracle.applies_to
+            if scenario_id in generated_categories
+        }
+        applicable = [
+            scenario.id
+            for scenario in scenarios
+            if not oracle.applies_to or scenario.expected_category in categories
+        ]
+        result.append(oracle.model_copy(update={"applies_to": applicable}))
+    return result
 
 
 def _change_coverage(

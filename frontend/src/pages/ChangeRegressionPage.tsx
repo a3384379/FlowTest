@@ -17,9 +17,11 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { useState } from 'react'
 import type {
   ChangeRegressionRun,
   ChangeRegressionStatus,
+  CurrentPlanGap,
   FailureTriageResult,
   MissingTestProposal,
   SemanticCoverageScope,
@@ -189,6 +191,7 @@ function RunDetail({
     description: stage.status,
   }))
   const pending = run.missing_tests.filter((item) => item.review_status === 'pending')
+  const planGateOpen = Boolean(run.selection_summary.unresolved_current_plan_gap_count)
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <Descriptions size="small" column={2} bordered>
@@ -206,6 +209,7 @@ function RunDetail({
         </Descriptions.Item>
       </Descriptions>
       <CoverageDimensionsPanel run={run} />
+      <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
       {run.missing_tests.length > 0 && (
         <>
@@ -269,12 +273,22 @@ function RunDetail({
       )}
       <Space wrap>
         {run.status === 'review_required' && pending.length === 0 && (
-          <Button type="primary" loading={state.acting} onClick={() => void state.approve(run.id)}>
+          <Button
+            type="primary"
+            loading={state.acting}
+            disabled={planGateOpen}
+            onClick={() => void state.approve(run.id)}
+          >
             人工批准
           </Button>
         )}
         {run.status === 'approved' && (
-          <Button type="primary" loading={state.acting} onClick={() => void state.execute(run.id)}>
+          <Button
+            type="primary"
+            loading={state.acting}
+            disabled={planGateOpen}
+            onClick={() => void state.execute(run.id)}
+          >
             执行回归
           </Button>
         )}
@@ -328,8 +342,13 @@ function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
               title: 'Operation',
               render: (_: unknown, scope: SemanticCoverageScope) =>
                 scope.operation
-                  ? `${scope.operation.service_key} · ${scope.operation.method} ${scope.operation.normalized_path}`
+                  ? `${scope.operation.service_key} · ${scope.operation.method} ${scope.operation.normalized_path} · v${scope.operation.api_version ?? '?'}`
                   : 'unresolved',
+            },
+            {
+              title: 'Contract',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.operation?.contract_fingerprint.slice(0, 12) ?? 'unresolved',
             },
             {
               title: 'Location',
@@ -377,8 +396,273 @@ function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
   )
 }
 
+function SemanticPlanGatePanel({
+  run,
+  state,
+}: {
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+}) {
+  const gaps = currentPlanGaps(run)
+  const unresolved = Number(run.selection_summary.unresolved_current_plan_gap_count)
+  const [reasons, setReasons] = useState<Record<string, string>>({})
+  const [expiries, setExpiries] = useState<Record<string, string>>({})
+  const environmentId = currentPlanEnvironmentId(run, state)
+
+  if (!gaps.length) return null
+  return (
+    <Card
+      size="small"
+      title="Current TestPlan Semantic Gate"
+      extra={<CoverageStatus value={unresolved > 0 ? 'MISSING' : 'COVERED'} />}
+    >
+      {unresolved > 0 ? (
+        <Alert
+          type="error"
+          showIcon
+          title={`${unresolved} 个当前计划语义缺口尚未解决`}
+          description="Approve、Execute 和 Release Gate 均由后端重新计算并阻断；请加入精确覆盖的已有测试，或逐 Gap 创建人工豁免。"
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <Descriptions size="small" bordered column={5} style={{ marginBottom: 12 }}>
+        <Descriptions.Item label="Asset Mapping">
+          {run.selection_summary.asset_mapping_gap_count ?? 0}
+        </Descriptions.Item>
+        <Descriptions.Item label="Project Gap">
+          {run.selection_summary.project_semantic_gap_count ?? 0}
+        </Descriptions.Item>
+        <Descriptions.Item label="Current Plan Gap">
+          {run.selection_summary.current_test_plan_semantic_gap_count ?? 0}
+        </Descriptions.Item>
+        <Descriptions.Item label="Waived">
+          {run.selection_summary.waived_current_plan_gap_count ?? 0}
+        </Descriptions.Item>
+        <Descriptions.Item label="Unresolved">{unresolved}</Descriptions.Item>
+      </Descriptions>
+      <Space orientation="vertical" style={{ width: '100%' }} size={12}>
+        {gaps.map((gap) => (
+          <SemanticGapCard
+            key={gap.gap_key}
+            gap={gap}
+            run={run}
+            state={state}
+            environmentId={environmentId}
+            reason={reasons[gap.gap_key] ?? ''}
+            expiry={expiries[gap.gap_key]}
+            onReason={(value) => setReasons((current) => ({ ...current, [gap.gap_key]: value }))}
+            onExpiry={(value) => setExpiries((current) => ({ ...current, [gap.gap_key]: value }))}
+          />
+        ))}
+      </Space>
+    </Card>
+  )
+}
+
+function SemanticGapCard({
+  gap,
+  run,
+  state,
+  environmentId,
+  reason,
+  expiry,
+  onReason,
+  onExpiry,
+}: {
+  gap: CurrentPlanGap
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+  environmentId?: string
+  reason: string
+  expiry?: string
+  onReason: (value: string) => void
+  onExpiry: (value: string) => void
+}) {
+  return (
+    <Card
+      size="small"
+      type="inner"
+      title={semanticGapOperationLabel(gap)}
+      extra={<CoverageStatus value={gap.coverage_status} />}
+    >
+      <Descriptions size="small" column={3} bordered>
+        <Descriptions.Item label="Field">{semanticGapFieldLabel(gap)}</Descriptions.Item>
+        <Descriptions.Item label="Value / Category">
+          {gap.semantic_requirement.semantic_value ?? '?'} ·{' '}
+          {gap.semantic_requirement.expected_category ?? 'unknown'}
+        </Descriptions.Item>
+        <Descriptions.Item label="Oracle Set">
+          {gap.semantic_requirement.oracle_set_fingerprint?.slice(0, 12) ?? 'unknown'}
+        </Descriptions.Item>
+        <Descriptions.Item label="Existing Asset">
+          <SemanticGapExistingAsset
+            gap={gap}
+            run={run}
+            state={state}
+            environmentId={environmentId}
+          />
+        </Descriptions.Item>
+        <Descriptions.Item label="Waiver Reason">
+          <SemanticGapReason gap={gap} reason={reason} onReason={onReason} />
+        </Descriptions.Item>
+        <Descriptions.Item label="Waiver Expiry">
+          <SemanticGapExpiry gap={gap} onExpiry={onExpiry} />
+        </Descriptions.Item>
+      </Descriptions>
+      <SemanticGapWaiverAction gap={gap} run={run} state={state} reason={reason} expiry={expiry} />
+    </Card>
+  )
+}
+
+function semanticGapOperationLabel(gap: CurrentPlanGap): string {
+  if (!gap.operation) return 'AMBIGUOUS / UNKNOWN'
+  return `${gap.operation.service_key} · ${gap.operation.method} ${gap.operation.normalized_path} · v${gap.operation.api_version ?? '?'}`
+}
+
+function semanticGapFieldLabel(gap: CurrentPlanGap): string {
+  return gap.target ? `${gap.target.location}.${gap.target.field_path.join('.')}` : 'unresolved'
+}
+
+function SemanticGapExistingAsset({
+  gap,
+  run,
+  state,
+  environmentId,
+}: {
+  gap: CurrentPlanGap
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+  environmentId?: string
+}) {
+  const asset = gap.recommended_existing_assets[0]
+  if (!asset) return <>无精确匹配资产</>
+  return (
+    <Button
+      size="small"
+      disabled={gap.coverage_status === 'COVERED' || gap.coverage_status === 'WAIVED'}
+      onClick={() =>
+        void state.addToPlan({
+          runId: run.id,
+          gapKey: gap.gap_key,
+          targetType: asset.target_type,
+          targetId: asset.target_id,
+          environmentId,
+        })
+      }
+    >
+      Add to Plan · {asset.target_type}
+    </Button>
+  )
+}
+
+function SemanticGapReason({
+  gap,
+  reason,
+  onReason,
+}: {
+  gap: CurrentPlanGap
+  reason: string
+  onReason: (value: string) => void
+}) {
+  if (!gap.waiver) {
+    return (
+      <Input
+        value={reason}
+        maxLength={1000}
+        placeholder="至少 10 字，说明发布风险与补偿措施"
+        onChange={(event) => onReason(event.target.value)}
+      />
+    )
+  }
+  return (
+    <Space orientation="vertical" size={0}>
+      <Typography.Text>{gap.waiver.reason}</Typography.Text>
+      <Typography.Text type="secondary">Approver: {gap.waiver.approved_by}</Typography.Text>
+    </Space>
+  )
+}
+
+function SemanticGapExpiry({
+  gap,
+  onExpiry,
+}: {
+  gap: CurrentPlanGap
+  onExpiry: (value: string) => void
+}) {
+  if (gap.waiver) return <>{gap.waiver.expires_at ?? '不过期'}</>
+  return (
+    <Input
+      type="datetime-local"
+      aria-label={`Waiver Expiry ${gap.gap_key}`}
+      onChange={(event) =>
+        onExpiry(event.target.value ? new Date(event.target.value).toISOString() : '')
+      }
+    />
+  )
+}
+
+function SemanticGapWaiverAction({
+  gap,
+  run,
+  state,
+  reason,
+  expiry,
+}: {
+  gap: CurrentPlanGap
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+  reason: string
+  expiry?: string
+}) {
+  if (gap.waiver || gap.coverage_status === 'COVERED') return null
+  return (
+    <Button
+      size="small"
+      danger
+      style={{ marginTop: 12 }}
+      disabled={reason.trim().length < 10}
+      onClick={() =>
+        void state.waiveGap({
+          runId: run.id,
+          gapKey: gap.gap_key,
+          reason: reason.trim(),
+          expiresAt: expiry || undefined,
+        })
+      }
+    >
+      人工豁免
+    </Button>
+  )
+}
+
+function currentPlanGaps(run: ChangeRegressionRun): CurrentPlanGap[] {
+  const value = run.selection_summary.current_plan_gaps
+  return Array.isArray(value) ? value : []
+}
+
+function currentPlanEnvironmentId(
+  run: ChangeRegressionRun,
+  state: ReturnType<typeof useChangeRegression>,
+): string | undefined {
+  const plans = state.plans.data ? state.plans.data.items : []
+  const plan = plans.find((item) => item.id === run.test_plan_id)
+  if (!plan) return undefined
+  const item = plan.items.find((candidate) => candidate.environment_id)
+  return item && item.environment_id ? item.environment_id : undefined
+}
+
 function CoverageStatus({ value }: { value: string }) {
-  const color = value === 'covered' ? 'green' : value === 'missing' ? 'red' : 'default'
+  const normalized = value.toUpperCase()
+  const color =
+    normalized === 'COVERED'
+      ? 'green'
+      : normalized === 'WAIVED'
+        ? 'gold'
+        : normalized === 'PARTIAL'
+          ? 'orange'
+          : normalized === 'MISSING'
+            ? 'red'
+            : 'default'
   return <Tag color={color}>{value}</Tag>
 }
 

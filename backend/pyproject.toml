@@ -120,6 +120,7 @@ ignore_missing_imports = true
 [tool.coverage.run]
 concurrency = ["greenlet", "thread"]
 source = ["app"]
+omit = ["app/migrations_support/*"]
 
 [tool.coverage.report]
 fail_under = 90

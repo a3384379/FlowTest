@@ -60,14 +60,14 @@ def test_canonical_contract_redacts_nested_hints_and_sensitive_enum() -> None:
     assert contract.warnings == [
         "canonical schema example/default/const hints removed",
         "sensitive canonical contract values redacted",
-        "sensitive enum values replaced by hashes; safe test data requires review",
+        "sensitive enum values removed; only value count is retained",
     ]
     enum_schema = contract.body_schema["properties"]["status"]
     assert "enum" not in enum_schema
     redacted = enum_schema["x-flowtest-redacted-enum"]
     assert redacted["value_count"] == 2
     assert redacted["values_redacted"] is True
-    assert len(redacted["value_hashes"]) == 2
+    assert "value_hashes" not in redacted
     assert sensitive_paths(design.model_dump(mode="json")) == ()
 
 
@@ -166,7 +166,8 @@ def test_canonical_sanitizer_handles_generic_schema_and_invalid_fragments() -> N
                     "schema": "not-a-schema",
                 }
             },
-        }
+        },
+        strict=False,
     )
 
     serialized = json.dumps(result.payload, ensure_ascii=False)
@@ -323,8 +324,8 @@ def test_change_regression_helper_edges_preserve_scope_and_transition_truth() ->
 
     assert identity.semantic_prefix == "orders.create|orders|POST|/orders"
     assert fact.target_key.endswith("|body|quantity")
-    assert fact.coverage_token == "999|invalid_request"
-    assert semantic_coverage_tokens([fact], identity, target) == {"999|invalid_request"}
+    assert fact.coverage_token.startswith("999|invalid_request|")
+    assert semantic_coverage_tokens([fact], identity, target) == {fact.coverage_token}
     assert change_constraint_target({"field_path": "response.200.maximum"}) is None
     assert change_constraint_target({"field_path": "request.query.page"}) is None
 
@@ -495,7 +496,11 @@ def test_exclusive_boundaries_and_source_ast_preserve_operator_semantics() -> No
         )
     )
     comparisons = {
-        str(finding.structured_data["name"]): finding.structured_data
+        str(finding.structured_data["name"]): {
+            key: value
+            for key, value in finding.structured_data.items()
+            if key not in {"context", "requires_review"}
+        }
         for finding in evidence.findings
         if finding.kind == "validation_constraint"
     }
@@ -585,8 +590,9 @@ def test_semantic_coverage_is_operation_scoped_and_requires_an_oracle() -> None:
     ]
 
     assert semantic_coverage_tokens(facts, orders, target) == set()
-    facts.append(_coverage_fact(orders, "999", "invalid_request", "status:422"))
-    assert semantic_coverage_tokens(facts, orders, target) == {"999|invalid_request"}
+    covered = _coverage_fact(orders, "999", "invalid_request", "status:422")
+    facts.append(covered)
+    assert semantic_coverage_tokens(facts, orders, target) == {covered.coverage_token}
 
 
 @pytest.mark.parametrize(

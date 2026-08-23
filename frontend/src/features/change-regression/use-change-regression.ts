@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
 import {
+  addProjectKnownTestToCurrentPlan,
   approveChangeRegression,
   createChangeRegression,
   evaluateChangeRegressionRelease,
@@ -14,6 +15,7 @@ import {
   listChangeRegressionPolicies,
   listChangeRegressions,
   reviewMissingTest,
+  waiveSemanticGap,
   type ChangeRegressionInput,
 } from './change-regression-service'
 
@@ -72,6 +74,23 @@ export function useChangeRegression() {
   })
   const release = useMutation({
     mutationFn: (runId: string) => evaluateChangeRegressionRelease(required(projectId), runId),
+  })
+  const addToPlan = useMutation({
+    mutationFn: (input: {
+      runId: string
+      gapKey: string
+      targetType: 'workflow' | 'test_case'
+      targetId: string
+      environmentId?: string
+    }) =>
+      addProjectKnownTestToCurrentPlan(required(projectId), input.runId, {
+        gap_key: input.gapKey,
+        item: planItemInput(input),
+      }),
+  })
+  const waive = useMutation({
+    mutationFn: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
+      waiveSemanticGap(required(projectId), input.runId, waiverInput(input)),
   })
 
   async function refresh() {
@@ -136,12 +155,47 @@ export function useChangeRegression() {
     execute: (runId: string) => runAction(() => execute.mutateAsync(runId), '回归执行已入队'),
     evaluateRelease: (runId: string) =>
       runAction(() => release.mutateAsync(runId), 'Release Gate 已评估'),
+    addToPlan: (input: {
+      runId: string
+      gapKey: string
+      targetType: 'workflow' | 'test_case'
+      targetId: string
+      environmentId?: string
+    }) => runAction(() => addToPlan.mutateAsync(input), '已有测试已加入当前计划'),
+    waiveGap: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
+      runAction(() => waive.mutateAsync(input), '语义缺口已记录人工豁免'),
     creating: create.isPending,
-    acting: review.isPending || approve.isPending || execute.isPending || release.isPending,
+    acting: mutationPending(review, approve, execute, release, addToPlan, waive),
   }
 }
 
 function required(value: string | null): string {
   if (!value) throw new Error('请选择项目')
   return value
+}
+
+function planItemInput(input: {
+  targetType: 'workflow' | 'test_case'
+  targetId: string
+  environmentId?: string
+}) {
+  if (input.targetType === 'test_case') {
+    return { target_type: 'case' as const, target_id: input.targetId }
+  }
+  return {
+    target_type: 'workflow' as const,
+    target_id: input.targetId,
+    environment_id: input.environmentId,
+  }
+}
+
+function waiverInput(input: { gapKey: string; reason: string; expiresAt?: string }) {
+  if (input.expiresAt) {
+    return { gap_key: input.gapKey, reason: input.reason, expires_at: input.expiresAt }
+  }
+  return { gap_key: input.gapKey, reason: input.reason }
+}
+
+function mutationPending(...mutations: Array<{ isPending: boolean }>): boolean {
+  return mutations.some((mutation) => mutation.isPending)
 }

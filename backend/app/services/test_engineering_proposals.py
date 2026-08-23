@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.change_regression import OperationIdentity
 from app.domain.evidence import EvidenceBundle
 from app.domain.test_design import (
     OracleSpec,
@@ -274,10 +275,25 @@ class TestEngineeringProposalService:
         environment_id: UUID,
         endpoint_variant: str | None,
         scenario_ids: list[str],
+        frozen_operation: OperationIdentity | None = None,
     ) -> TestEngineeringMaterialization:
         """Reuse the reviewed Test Engineering materializer for another ChangeSet flow."""
 
+        if frozen_operation is not None and frozen_operation.api_definition_id != str(
+            api_definition_id
+        ):
+            raise _change_regression_target_mismatch()
         definition, api_version = await self._target_api(project_id, api_definition_id)
+        current_contract = await TestEngineeringService(self._session).contract_for_api(
+            project_id=project_id, definition_id=definition.id
+        )
+        if frozen_operation is not None:
+            _validate_change_regression_target(
+                frozen=frozen_operation,
+                definition=definition,
+                api_version=api_version,
+                contract=current_contract,
+            )
         await self._target_environment(project_id, environment_id)
         resolved_variant = await self._endpoint_variant(
             project_id=project_id,
@@ -313,6 +329,12 @@ class TestEngineeringProposalService:
         endpoint_variant: str | None,
         api_version: int,
     ) -> TestEngineeringMaterialization:
+        if "constraint_unsatisfiable" in design.review_requirements:
+            raise AppError(
+                code="TEST_ENGINEERING_CONSTRAINT_UNSATISFIABLE",
+                message="测试设计包含不可满足的约束,禁止物化 Workflow/TestCase",
+                status_code=409,
+            )
         await self._ensure_unique_design(project_id, title)
         workflow_ids: list[UUID] = []
         test_case_ids: list[UUID] = []
@@ -894,6 +916,65 @@ def _invalid_frozen_proposal(message: str) -> AppError:
     return AppError(
         code="TEST_ENGINEERING_PROPOSAL_INVALID",
         message=message,
+        status_code=409,
+    )
+
+
+def _validate_change_regression_target(
+    *,
+    frozen: OperationIdentity,
+    definition: APIDefinition,
+    api_version: int,
+    contract: OperationContract,
+) -> None:
+    if frozen.api_definition_id != str(definition.id):
+        raise _change_regression_target_mismatch()
+    if frozen.api_version != api_version:
+        raise AppError(
+            code="CHANGE_REGRESSION_TARGET_STALE",
+            message="目标 API 版本已变化,必须重新审计变更",
+            status_code=409,
+        )
+    identity_contract = contract.model_copy(update={"service": contract.service or "unassigned"})
+    current_fingerprint = fingerprint_contract(identity_contract)
+    if current_fingerprint != frozen.contract_fingerprint:
+        raise AppError(
+            code="CHANGE_REGRESSION_TARGET_STALE",
+            message="目标 API Contract Fingerprint 已变化,必须重新审计变更",
+            status_code=409,
+        )
+    actual = (
+        contract.service or "unassigned",
+        contract.method,
+        _semantic_operation_path(contract.path),
+        contract.operation,
+    )
+    expected = (
+        frozen.service_key,
+        frozen.method,
+        frozen.normalized_path,
+        frozen.portable_operation_ref,
+    )
+    if actual != expected:
+        raise _change_regression_target_mismatch()
+
+
+def _semantic_operation_path(value: str) -> str:
+    parts = value.split("?")
+    path = parts[0] or "/"
+    while "//" in path:
+        path = path.replace("//", "/")
+    segments = [
+        "{}" if segment.startswith("{") and segment.endswith("}") else segment
+        for segment in path.split("/")
+    ]
+    return "/".join(segments)
+
+
+def _change_regression_target_mismatch() -> AppError:
+    return AppError(
+        code="CHANGE_REGRESSION_TARGET_MISMATCH",
+        message="所选 API 与冻结的变更 Operation Identity 不一致",
         status_code=409,
     )
 

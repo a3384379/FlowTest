@@ -268,3 +268,13 @@ S47.2 只关闭 V5 现有链路的正确性、安全和合并门禁，不扩展�
 V5 FlowSpec 的唯一正式基线为 `flowtest-flow-spec-fingerprint-v3`。开发期 v1/v2 文件不属于正式兼容范围，
 本轮不增加旧格式迁移或兼容逻辑。详细证据见
 [S47.2 最终正确性与安全闭环](release/s47-2-final-correctness-security.md)。
+
+## S47.3 最终语义完整性收口（2026-08-23）
+
+S47.3 不增加 V5 大功能，只关闭 Oracle-aware Coverage、Current TestPlan 硬门禁、逐 Gap
+Waiver、多 Service Operation 唯一定位、物化目标复验、AST 控制流、约束可满足性、
+Canonical Keyword 严格值校验、敏感 Enum Hash 删除、Decimal MultipleOf 与 0044 确定性迁移。
+
+FlowSpec v1/v2 继续是 Development-only / Unsupported Compatibility；Pairwise 仍是 Bounded，State Model
+仍是 Unavailable/Experimental，Knowledge Graph 仍是 Basic，Key Rotation 仍是 Planned Metadata Only。
+详细记录见 [S47.3 最终语义完整性闭环](release/s47-3-final-semantic-integrity.md)。

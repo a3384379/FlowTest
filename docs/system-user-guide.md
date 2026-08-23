@@ -841,6 +841,11 @@ http://127.0.0.1:8765/mcp
 | `flowtest.analyze_test_coverage` | `project_id`、`api_definition_id`、可选 `generation_policy` | 输出维度覆盖和明确缺口，不持久化 |
 | `flowtest.inspect_change_impact` | `project_id`、`impact_run_id` | 读取结构化契约变化、覆盖缺口和已选资产 |
 
+Coverage 输出中的完整覆盖不再只表示“某个值出现过”。调用方应同时检查
+Operation、Location、Field、Value、Expected Category 和 `oracle_set_fingerprint`。Status 400 与 422、
+Status 200 与 201、不同 Response Schema 都属于不同覆盖要求；没有确定性 Oracle 时只能
+解读为 `PARTIAL` 或 `UNKNOWN`。MCP 只提供分析与 Draft 提案，不能为 Release Gap 创建 Waiver。
+
 #### 8.6.4 外部证据分析
 
 | Tool | 主要参数 | 作用 |
@@ -1040,7 +1045,19 @@ MCP 只读 Tool 的成功结果包含：
 
 影响分析读取 Git、OpenAPI、GraphQL 或 Proto 的结构化变化，建立服务/接口/测试资产影响图并生成智能选择。变更回归把 Change、Impact、测试选择、缺失测试审核、执行证据和 Release Gate 串成一条链路。
 
-变更回归页面分别展示 Asset Mapping、Project Known Semantic Coverage 和 Current Test Plan Semantic Coverage。语义覆盖绑定 Service、Method、规范化 Path、请求 Location、Field、Value、Expected Category 和 Oracle；Inventory 的 `body.quantity=999` 不会覆盖 Orders 的同名字段，没有 Oracle 的值也不算完整负面覆盖。发布缺口以“当前 TestPlan ∩ Impact Selected Assets”为准，项目中已有但未进入本次计划的测试只会生成“加入当前计划”建议。
+变更回归页面分别展示 Asset Mapping、Project Known Semantic Coverage 和 Current Test Plan Semantic Coverage。语义覆盖绑定 Service、Method、规范化 Path、请求 Location、Field、Value、Expected Category 和 Oracle Set Fingerprint；Inventory 的 `body.quantity=999` 不会覆盖 Orders 的同名字段，没有确定性 Oracle 的值也不算完整覆盖。
+
+发布缺口以“当前 TestPlan ∩ Impact Selected Assets”为准。项目中已有精确覆盖、但未进入本次计划时，
+后端默认阻断 Approve、Execute 和 Release Gate，不再只是建议。用户必须选择以下一种处理：
+
+1. 在 `Existing Asset` 列显式将系统验证过的 Workflow/TestCase 加入当前计划；资产必须属于当前项目、
+   Impact Selected Scope，且覆盖完整语义 Token。加入后只重算 Coverage，不自动执行。
+2. 由人工 User 对每个 Gap 单独填写不少于 10 字的 Reason，可选设置 Expiry，创建可审计 Waiver。
+   Service Account/CI Token 不能 Waive。Waiver 显示为 `WAIVED`，永远不显示为 `COVERED`。
+
+Approve、Execute 和 Release Gate 都会重新计算；审批后删除 Plan Item、修改已发布 Workflow、
+Contract 变更或 Waiver 过期，都会恢复阻断。多 Service 共用同一 Method/Path 时，页面显示 Service、
+API Version 和 Contract Fingerprint；无法唯一定位时必须人工选择，系统不会选第一个候选。
 
 位置化变更支持 Path、Query、Header、Cookie 和 Body 的 minimum/maximum、exclusive boundary、长度、枚举、pattern 和 format。找不到唯一 Operation/Location/Field 时保持 blocker/requires-review，不会回退成虚构的 `body.value`。
 

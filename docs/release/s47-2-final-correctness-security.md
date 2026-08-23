@@ -194,3 +194,9 @@ GA_READY: NO
 ```
 
 这里的 `MERGE_TO_MAIN: GO` 仅表示功能与自动化门禁允许进入人工合并评审；本文不授权也未执行 Merge、Tag 或 Release，Draft PR 状态保持不变。
+
+## S47.3 取代说明
+
+S47.2 完成后复审发现 Oracle-aware Coverage、Current Plan Gate、多 Service 身份、AST 控制流、
+Canonical Keyword 值校验、Enum Hash 和 MultipleOf 仍有缺口。本文的 GO 判定不再作为当前合并证据；
+以 [S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md) 和最终 HEAD 的 Required CI 为准。

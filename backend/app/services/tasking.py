@@ -167,6 +167,62 @@ class TestPlanService:
         plan = await self._get_project_plan(project_id, plan_id)
         return TestPlanDetail(plan, await self._tasks.list_plan_items(plan.id))
 
+    async def add_item(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        plan_id: UUID,
+        item: TestPlanItemInput,
+    ) -> TestPlanDetail:
+        """Explicitly append one validated, pinned asset to an existing plan."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        plan = await self._get_project_plan(project_id, plan_id)
+        existing = await self._tasks.list_plan_items(plan.id)
+        target_id = item.target_id or item.workflow_id
+        if target_id is None:
+            raise AppError(
+                code="INVALID_TEST_PLAN_ITEM",
+                message="测试计划项缺少目标",
+                status_code=422,
+            )
+        if any(
+            current.target_type == item.target_type.value and current.target_id == target_id
+            for current in existing
+        ):
+            raise AppError(
+                code="TEST_PLAN_ITEM_EXISTS",
+                message="测试资产已在当前计划中",
+                status_code=409,
+            )
+        if item.target_type is TestTargetType.WORKFLOW:
+            models = await self._build_items(project_id, plan.id, [item])
+            model = models[0]
+            model.position = len(existing)
+        else:
+            model = await self._build_asset_item(
+                plan.id,
+                len(existing),
+                project_id,
+                item,
+            )
+        self._tasks.add(model)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="test_plan.item_added",
+            resource_type="test_plan",
+            resource_id=plan.id,
+            details={
+                "target_type": model.target_type,
+                "target_id": str(model.target_id),
+                "target_version": model.target_version,
+            },
+        )
+        await self._session.commit()
+        return TestPlanDetail(plan, [*existing, model])
+
     async def update(
         self,
         *,

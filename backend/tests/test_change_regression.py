@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 from uuid import UUID
@@ -8,7 +9,7 @@ from uuid import UUID
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_test_plan_dispatcher, get_workflow_coordinator
@@ -17,7 +18,7 @@ from app.core.database import get_session
 from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.main import app
-from app.models import Base
+from app.models import Base, SemanticGapWaiver
 from app.models import TestCase as ORMTestCase
 from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
@@ -277,6 +278,7 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
 
 
 @pytest.mark.asyncio
+@respx.mock
 async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_contract(
     regression_context: RegressionContext,
 ) -> None:
@@ -449,6 +451,21 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     assert status_oracles == {201, 422}
 
     item_id = body["missing_tests"][0]["item_id"]
+    wrong_target = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{body['id']}"
+        f"/change-set-items/{item_id}/accept",
+        headers=headers,
+        json={
+            "note": "错误 API 目标必须被拒绝",
+            "materialization": {
+                "api_definition_id": inventory_api.json()["definition"]["id"],
+                "environment_id": environment_id,
+                "scenario_ids": [scenario["id"] for scenario in draft["scenarios"]],
+            },
+        },
+    )
+    assert wrong_target.status_code == 409, wrong_target.text
+    assert wrong_target.json()["error"]["code"] == "CHANGE_REGRESSION_TARGET_MISMATCH"
     accepted = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{body['id']}"
         f"/change-set-items/{item_id}/accept",
@@ -477,8 +494,10 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         materialized_cases = list(
             (await session.scalars(select(ORMTestCase).where(ORMTestCase.id.in_(case_ids)))).all()
         )
+    materialized_workflow_ids: list[str] = []
     for materialized_case in materialized_cases:
         materialized_workflow_id = materialized_case.draft_definition["workflow_id"]
+        materialized_workflow_ids.append(materialized_workflow_id)
         materialized_published = await context.client.post(
             f"/api/v1/projects/{project_id}/workflows/{materialized_workflow_id}/versions",
             headers=headers,
@@ -514,6 +533,190 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         scoped_body["selection_summary"]["current_plan_recommendations"][0]["action"]
         == "add_project_known_test_to_current_plan"
     )
+    unresolved_gaps = scoped_body["selection_summary"]["current_plan_gaps"]
+    blocked_approval = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}/approve",
+        headers=headers,
+        json={"note": "当前计划缺少精确 Oracle 覆盖"},
+    )
+    assert blocked_approval.status_code == 409
+    assert blocked_approval.json()["error"]["code"] == "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED"
+
+    token_created = await context.client.post(
+        f"/api/v1/projects/{project_id}/service-tokens",
+        headers=headers,
+        json={"name": "S47.3 waiver forbidden", "scopes": ["analyze:change-regression"]},
+    )
+    assert token_created.status_code == 201, token_created.text
+    service_waiver = await context.client.post(
+        f"/api/v1/ci/projects/{project_id}/change-regressions/{scoped_body['id']}"
+        "/semantic-gap-waivers",
+        headers={"Authorization": f"Bearer {token_created.json()['token']}"},
+        json={
+            "gap_key": unresolved_gaps[0]["gap_key"],
+            "reason": "CI 服务身份不能批准发布语义风险",
+        },
+    )
+    assert service_waiver.status_code == 403
+    assert service_waiver.json()["error"]["code"] == "CHANGE_REGRESSION_WAIVER_HUMAN_REQUIRED"
+
+    for gap in unresolved_gaps:
+        waived = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}"
+            "/semantic-gap-waivers",
+            headers=headers,
+            json={
+                "gap_key": gap["gap_key"],
+                "reason": "人工确认本次发布风险并登记逐项补偿性回归措施",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+        )
+        assert waived.status_code == 201, waived.text
+    approved_with_waivers = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}/approve",
+        headers=headers,
+        json={"note": "逐项人工豁免已审计"},
+    )
+    assert approved_with_waivers.status_code == 200, approved_with_waivers.text
+    assert approved_with_waivers.json()["selection_summary"][
+        "waived_current_plan_gap_count"
+    ] == len(unresolved_gaps)
+
+    respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"id": 7})
+    )
+    queued = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}/execute",
+        headers=headers,
+    )
+    assert queued.status_code == 202, queued.text
+    await PlanRunCoordinator(context.sessions, context.events).run(
+        UUID(queued.json()["test_plan_run_id"])
+    )
+    released = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}/release-gate",
+        headers=headers,
+    )
+    assert released.status_code == 200, released.text
+    assert released.json()["status"] == "passed"
+    assert len(released.json()["evidence"]["semantic_gap_waivers"]) == len(unresolved_gaps)
+
+    expiry_run = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": "S47.3 expired waiver recheck",
+            "source_ref": "openapi://orders/maximum",
+            "candidate_ref": "contract:orders-v2-expiry",
+            "openapi_diffs": [
+                {"baseline_run_id": baseline_run_id, "current_run_id": current_run_id}
+            ],
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+        },
+    )
+    assert expiry_run.status_code == 201, expiry_run.text
+    expiry_body = expiry_run.json()
+    expiry_gaps = expiry_body["selection_summary"]["current_plan_gaps"]
+    for gap in expiry_gaps:
+        waived = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}"
+            "/semantic-gap-waivers",
+            headers=headers,
+            json={
+                "gap_key": gap["gap_key"],
+                "reason": "临时人工豁免用于验证执行阶段重新计算语义覆盖",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+        )
+        assert waived.status_code == 201, waived.text
+    approved_expiry = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}/approve",
+        headers=headers,
+        json={"note": "批准后模拟豁免过期"},
+    )
+    assert approved_expiry.status_code == 200, approved_expiry.text
+    async with context.sessions() as session:
+        await session.execute(
+            update(SemanticGapWaiver)
+            .where(SemanticGapWaiver.regression_run_id == UUID(expiry_body["id"]))
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await session.commit()
+    blocked_execute = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}/execute",
+        headers=headers,
+    )
+    assert blocked_execute.status_code == 409
+    assert blocked_execute.json()["error"]["code"] == "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED"
+    blocked_release = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}/release-gate",
+        headers=headers,
+    )
+    assert blocked_release.status_code == 200, blocked_release.text
+    assert blocked_release.json()["status"] == "blocked"
+
+    for workflow_id in [*generated_workflow_ids[1:], *materialized_workflow_ids]:
+        added_mapping = await context.client.post(
+            f"/api/v1/projects/{project_id}/impact/mappings",
+            headers=headers,
+            json={
+                "source_kind": "openapi",
+                "source_selector": "POST /orders",
+                "target_type": "workflow",
+                "target_id": workflow_id,
+            },
+        )
+        assert added_mapping.status_code == 201, added_mapping.text
+    add_run = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": "S47.3 explicit add-to-plan",
+            "source_ref": "openapi://orders/maximum",
+            "candidate_ref": "contract:orders-v2-add-plan",
+            "openapi_diffs": [
+                {"baseline_run_id": baseline_run_id, "current_run_id": current_run_id}
+            ],
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+        },
+    )
+    assert add_run.status_code == 201, add_run.text
+    add_body = add_run.json()
+    selected = {(asset["target_type"], asset["target_id"]) for asset in add_body["selected_assets"]}
+    for gap in add_body["selection_summary"]["current_plan_gaps"]:
+        recommended = next(
+            asset
+            for asset in gap["recommended_existing_assets"]
+            if (asset["target_type"], asset["target_id"]) in selected
+        )
+        added = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{add_body['id']}"
+            "/add-project-known-test",
+            headers=headers,
+            json={
+                "gap_key": gap["gap_key"],
+                "item": {
+                    "target_type": (
+                        "case" if recommended["target_type"] == "test_case" else "workflow"
+                    ),
+                    "target_id": recommended["target_id"],
+                    "environment_id": (
+                        environment_id if recommended["target_type"] == "workflow" else None
+                    ),
+                },
+            },
+        )
+        assert added.status_code == 200, added.text
+        add_body = added.json()
+    assert add_body["selection_summary"]["unresolved_current_plan_gap_count"] == 0
+    approved_after_add = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{add_body['id']}/approve",
+        headers=headers,
+        json={"note": "显式加入精确覆盖资产后批准"},
+    )
+    assert approved_after_add.status_code == 200, approved_after_add.text
 
 
 def test_existing_workflow_semantics_extracts_locations_and_treats_opaque_data_as_unknown() -> None:

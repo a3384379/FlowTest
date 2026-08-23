@@ -20,10 +20,11 @@ from app.domain.canonical_contracts import (
     sanitize_contract_payload,
     semantic_contract_fingerprint,
 )
+from app.migrations_support.canonical_contract_v2 import clean_historical_contract
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0043"
+BASELINE_REVISION = "20260823_0044"
 
 
 async def initialize_standalone_database() -> None:
@@ -107,7 +108,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         definition="VARCHAR(32) NOT NULL DEFAULT 'legacy_partial'",
     )
     await _ensure_s471_api_version_contracts(connection)
-    await _sanitize_s472_api_version_contracts(connection)
+    await _sanitize_s473_api_version_contracts(connection)
     await _add_column_if_missing(
         connection,
         table="api_call_executions",
@@ -129,7 +130,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041', '20260823_0042')"
+            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -139,7 +140,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041', '20260823_0042')"
+            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -211,7 +212,7 @@ async def _ensure_s471_api_version_contracts(connection: AsyncConnection) -> Non
         )
 
 
-async def _sanitize_s472_api_version_contracts(connection: AsyncConnection) -> None:
+async def _sanitize_s473_api_version_contracts(connection: AsyncConnection) -> None:
     columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
     if not columns.fetchall():
         return
@@ -222,7 +223,7 @@ async def _sanitize_s472_api_version_contracts(connection: AsyncConnection) -> N
         raw = _json_value(row["canonical_contract"])
         if not isinstance(raw, dict) or not raw:
             continue
-        sanitized = sanitize_contract_payload(raw).payload
+        cleaned = clean_historical_contract(raw)
         await connection.execute(
             text(
                 "UPDATE api_versions SET canonical_contract = :contract, "
@@ -232,12 +233,16 @@ async def _sanitize_s472_api_version_contracts(connection: AsyncConnection) -> N
             {
                 "id": row["id"],
                 "contract": json.dumps(
-                    sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                    cleaned.payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 ),
-                "fingerprint": semantic_contract_fingerprint(sanitized),
-                "completeness": sanitized["completeness"],
+                "fingerprint": cleaned.fingerprint,
+                "completeness": cleaned.completeness,
             },
         )
+
+
+# S47.2 internal compatibility for standalone upgrade tests and extension callers.
+_sanitize_s472_api_version_contracts = _sanitize_s473_api_version_contracts
 
 
 def _standalone_legacy_contract(row: dict[str, object]) -> dict[str, object]:
@@ -347,9 +352,13 @@ def _json_value(value: object) -> object:
 async def _ensure_change_regression_tables(connection: AsyncConnection) -> None:
     """Create the S45 trace tables for existing standalone SQLite databases."""
 
-    from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
+    from app.models.change_regression import (
+        ChangeRegressionRun,
+        ChangeRegressionStage,
+        SemanticGapWaiver,
+    )
 
-    for model in (ChangeRegressionRun, ChangeRegressionStage):
+    for model in (ChangeRegressionRun, ChangeRegressionStage, SemanticGapWaiver):
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
 
