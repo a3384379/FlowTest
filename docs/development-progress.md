@@ -1,7 +1,7 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-23（Asia/Shanghai）
-状态：仓库已公开；V5 S45 Change-Aware Regression 已实现、提交并完成本地等价验收，现等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S46 GA 稳定性与发布收口已完成本地等价验收，提交后暂停等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -12,8 +12,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 
 - V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
   `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`，S42 已提交
-  `a2f97a7`，S43 已提交 `969c5c2`，S44 已提交 `1d5fd75`，S45 已提交，当前阶段完成后暂停。
-  当前脏 `main` 工作区未参与。
+  `a2f97a7`，S43 已提交 `969c5c2`，S44 已提交 `1d5fd75`，S45 已提交 `6f493d4`，S46 已完成本地等价验收，
+  本阶段提交后暂停。当前脏 `main` 工作区未参与。
 - 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
 - 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
   用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
@@ -199,9 +199,31 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 6. 临时 PostgreSQL 完成空库 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`；隔离高端口 Compose 完成源码构建、
    服务健康检查和 Playwright 冒烟：管理员首次登录改密、创建项目、项目导航和 S45“变更回归”页面渲染均通过。验证使用本地 macOS/ARM
    和独立临时数据卷，验证结束后已清理；未声称 Windows 公司云桌面实机或远程 CI 证据。
-7. S45 已完成本地 Git commit 并暂停；S46 只在用户确认后进入稳定性与 GA 收口，不在本阶段提前开始。
+7. S45 已完成本地 Git commit 并暂停；随后按用户继续指令进入 S46 稳定性与 GA 收口。
 
-## 已完成：V5 S44 Enterprise Collaboration（等待用户确认）
+## 已完成：V5 S46 稳定性、安全与 GA 收口（等待用户确认）
+
+1. S46 只做发布收口：新增 GA Gate、Full/Compact/Standalone 兼容矩阵、故障注入与恢复 Runbook，并补充
+   S37–S45 的升级/回滚边界；原始 V5 计划附件未修改。当前迁移 head 为 `20260823_0040`，Transfer Manifest
+   仍为 `standalone-compact-transfer-v1`，`/api/v1` 兼容基线和三个 Runtime Profile 行为保持冻结。
+2. 标准错误边界完成安全硬化：HTTP 404/405 等错误统一返回带 trace ID 的 Error Envelope；Pydantic 校验错误、
+   Application Error 详情和验证输入按敏感字段脱敏，password/token/authorization/cookie/api key 等原始值不再
+   回显。Mock 多方法路由拆分为显式 Operation，消除 OpenAPI 重复 operationId。
+3. 后端门禁全部通过：Ruff format/check、mypy、pytest `417 passed / 3 skipped`，总覆盖率 `90.10%`；前端
+   format、lint、coverage、build 全部通过，Vitest `52 files / 205 passed`，Branches `80.02%`。Standalone
+   SQLite 与 Transfer 定向回归 `19 passed`。
+4. 隔离 PostgreSQL 完成空库 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`，最终
+   revision 为 `20260823_0040`。Backend/Frontend S46 镜像均构建通过；pip-audit、pnpm audit 通过，Grype
+   扫描未发现未登记的可修复 High/Critical，CPython `3.13.15` 精确例外已在本阶段复核并更新下次复核日期。
+5. 独立高端口 Compact 栈完成六服务健康检查、S32 登录/项目/Artifact/Workflow/Snapshot smoke；20 秒 Soak
+   采样 9 次、失败 0、ready p95 `0.047471s`；100 请求/10 并发 API p95 `0.022282s`，4 条工作流/2 并发
+   全部通过，队列无积压。Full↔Compact 双向兼容演练通过；停止 Worker 后重新启动、健康检查和工作流验收再次通过。
+6. Playwright 在同一独立 Compact 栈完成管理员登录、Dashboard 和 S45“变更回归”页面渲染冒烟；MCP 租户隔离、
+   脱敏、只读/受控写入和红队静态面由 S46 Gate 测试覆盖。验证环境为本地 macOS/ARM 和临时数据卷，不声称
+   Windows x64 公司云桌面 72 小时试点、生产备份恢复、人工安全审批或远程 CI 证据。
+7. S46 已完成本地 Git 提交后暂停；下一步仅在用户确认后进行发布评审或 GA 外部环境验证，不再自动增加大功能。
+
+## 已完成：V4 S44 Enterprise Collaboration（等待用户确认）
 
 1. 新增纯 Domain 配额策略与治理决策模型，支持 `observe`、`warn`、`soft_limit`、`hard_limit` 四种模式，
    覆盖 Project、User、Runner 并发、Execution 并发、AI 日请求和 Artifact 存储六个维度；硬限制通过统一

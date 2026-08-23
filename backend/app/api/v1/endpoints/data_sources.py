@@ -264,11 +264,57 @@ async def list_mock_request_logs(
     )
 
 
-@mock_dispatch_router.api_route(
-    "/{slug}/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-)
-async def dispatch_mock(
+@mock_dispatch_router.get("/{slug}/{path:path}", operation_id="dispatch_mock_get")
+async def dispatch_mock_get(
+    slug: str,
+    path: str,
+    request: Request,
+    session: SessionDependency,
+) -> JSONResponse:
+    return await _dispatch_mock(slug, path, request, session)
+
+
+@mock_dispatch_router.post("/{slug}/{path:path}", operation_id="dispatch_mock_post")
+async def dispatch_mock_post(
+    slug: str,
+    path: str,
+    request: Request,
+    session: SessionDependency,
+) -> JSONResponse:
+    return await _dispatch_mock(slug, path, request, session)
+
+
+@mock_dispatch_router.put("/{slug}/{path:path}", operation_id="dispatch_mock_put")
+async def dispatch_mock_put(
+    slug: str,
+    path: str,
+    request: Request,
+    session: SessionDependency,
+) -> JSONResponse:
+    return await _dispatch_mock(slug, path, request, session)
+
+
+@mock_dispatch_router.patch("/{slug}/{path:path}", operation_id="dispatch_mock_patch")
+async def dispatch_mock_patch(
+    slug: str,
+    path: str,
+    request: Request,
+    session: SessionDependency,
+) -> JSONResponse:
+    return await _dispatch_mock(slug, path, request, session)
+
+
+@mock_dispatch_router.delete("/{slug}/{path:path}", operation_id="dispatch_mock_delete")
+async def dispatch_mock_delete(
+    slug: str,
+    path: str,
+    request: Request,
+    session: SessionDependency,
+) -> JSONResponse:
+    return await _dispatch_mock(slug, path, request, session)
+
+
+async def _dispatch_mock(
     slug: str,
     path: str,
     request: Request,

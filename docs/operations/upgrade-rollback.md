@@ -105,3 +105,21 @@ PostgreSQL + MinIO 恢复点。
   Change Set 及其审核证据；降级前先关闭 Quality Intelligence 与 AI，并停止 AI Worker。
 - 降级到 `20260813_0027` 会删除 Release Policy 和不可变 Release Decision Snapshot。这些
   是发布判断的历史证据，需要保留时必须使用完整恢复点，不得以当前页面重算代替。
+
+## V5 S37–S45 / 0033–0040 特别说明
+
+- S37–S45 的当前迁移 head 为 `20260823_0040`；升级前必须停止 Worker/Beat 和新的执行提交，
+  保存 PostgreSQL custom dump、MinIO 对象 SHA-256 清单、当前 Runtime Profile 和镜像摘要。
+- 从 `20260822_0039` 升级到 `20260823_0040` 会创建 Change-Aware Regression 的运行/阶段记录，
+  并扩展 AI ChangeSet 的 `source_type` 约束；既有 Project、Workflow、Execution、Artifact、Evidence、
+  MCP 和组织数据保持可读取。
+- `20260823_0040 → 20260822_0039` 会删除 S45 回归运行、阶段、证据和缺失测试关联记录。需要保留
+  这些发布证据时不得执行数据库 downgrade，应恢复升级前完整 PostgreSQL + MinIO 一致性备份。
+- 若只切换旧镜像而不处理数据库 revision，旧应用可能无法理解新表或 ChangeSet 来源；禁止把切换镜像
+  当作回滚完成。回滚后必须再次执行 `/api/v1/ready`、`/api/v1/runtime-profile`、旧项目资产读取、
+  Artifact 下载和一条无副作用的执行/证据查询。
+- Standalone 使用显式 `20260823_0040` metadata/bootstrap 基线；Standalone 与 Compact 之间只通过
+  `standalone-compact-transfer-v1` 导出/导入，不复制 SQLite 文件。Transfer 表清单和数据分类必须与
+  [S46 兼容矩阵](../release/s46-compatibility-matrix.md)一致。
+- 每次迁移演练都必须执行 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`，
+  并清理明确命名的临时数据库、容器和卷；不得触碰开发环境现有 Compact 数据卷。
