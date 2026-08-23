@@ -7,10 +7,11 @@ import argparse
 import asyncio
 import json
 
-from app.core.config import settings
-from app.migrations_support.canonical_contract_v2 import clean_historical_contract
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.core.config import settings
+from app.migrations_support.canonical_contract_v2 import clean_historical_contract
 
 _IMPORT_KEY = "s47-2-contract-migration-golden"
 _SENSITIVE_PATTERN = "Bearer migration-sensitive-pattern"
@@ -71,13 +72,8 @@ async def _verify() -> None:
         raise TypeError("S47.3 migration contract is missing")
     encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True)
     if "value_hashes" in encoded or _SENSITIVE_PATTERN in encoded:
-        raise RuntimeError(
-            "S47.3 migration retained a sensitive enum digest or pattern"
-        )
-    if (
-        '"minimum": "invalid-number"' in encoded
-        or '"type": "Bearer invalid-type"' in encoded
-    ):
+        raise RuntimeError("S47.3 migration retained a sensitive enum digest or pattern")
+    if '"minimum": "invalid-number"' in encoded or '"type": "Bearer invalid-type"' in encoded:
         raise RuntimeError("S47.3 migration retained an invalid keyword value")
     redacted = contract["request"]["properties"]["status"]["x-flowtest-redacted-enum"]
     if redacted != {"value_count": 2, "values_redacted": True}:

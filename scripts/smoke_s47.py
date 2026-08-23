@@ -509,8 +509,7 @@ def _verify_change_regression(
     }
     if values != {101, 999, 1000}:
         raise RuntimeError(
-            "S47.3 Oracle-aware coverage did not preserve current-contract requirements: "
-            f"{design}"
+            f"S47.3 Oracle-aware coverage did not preserve current-contract requirements: {design}"
         )
     scope = cast(list[dict[str, Any]], run["selection_summary"]["semantic_coverage_scopes"])[0]
     operation = cast(dict[str, Any], scope["operation"])
