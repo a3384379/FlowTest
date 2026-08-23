@@ -354,6 +354,91 @@ async def test_api_node_pins_version_and_applies_request_overrides(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_location_overrides_and_auth_disabled_reach_real_target(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project = await workflow_client.post(
+        "/api/v1/projects", headers=headers, json={"name": "Location E2E project"}
+    )
+    project_id = project.json()["id"]
+    environment = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={"name": "Location target", "base_url": "http://workflow.example.com"},
+    )
+    api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "Create tenant order",
+            "request": {
+                "method": "POST",
+                "path": "/tenants/{{tenantId}}/orders",
+                "query_parameters": [{"name": "dryRun", "value": "false", "enabled": True}],
+                "headers": {"X-Tenant-Id": "{{X-Tenant-Id}}"},
+                "body_kind": "json",
+                "body": {"quantity": 1},
+                "auth": {
+                    "kind": "api_key",
+                    "values": {
+                        "in": "header",
+                        "name": "X-Snapshot-Key",
+                        "value": "snapshot-api-key",
+                    },
+                },
+            },
+        },
+    )
+    assert api.status_code == 201, api.text
+    definition = _workflow_definition(api.json()["definition"]["id"])
+    definition["variables"] = {"tenantId": "tenant-47"}
+    definition["nodes"][1]["config"].update(
+        {
+            "expected_statuses": [401],
+            "request_overrides": {
+                "query_parameters": [{"name": "dryRun", "value": "true", "enabled": True}],
+                "headers": {},
+                "replace_headers": True,
+                "body": {"kind": "json", "value": {"quantity": 1000}},
+                "auth_disabled": True,
+            },
+        }
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "Location negative E2E", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.post("http://workflow.example.com/tenants/tenant-47/orders?dryRun=true").mock(
+        return_value=Response(401, json={"error": "missing authentication"})
+    )
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={"environment_id": environment.json()["id"]},
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, executed.json()["id"]
+    )
+    assert detail["execution"]["status"] == "passed"
+    request = target.calls[0].request
+    assert request.url.path == "/tenants/tenant-47/orders"
+    assert request.url.params["dryRun"] == "true"
+    assert "X-Tenant-Id" not in request.headers
+    assert "X-Snapshot-Key" not in request.headers
+    assert json.loads(request.content) == {"quantity": 1000}
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_subflow_foreach_diff_breakpoint_replay_and_recursion_guards(
     workflow_client: AsyncClient,
 ) -> None:

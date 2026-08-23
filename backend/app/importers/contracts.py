@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from app.domain.api_assets import APIVersionSpec, AuthKind, BodyKind, HttpMethod, JsonValue
+from app.domain.test_engineering import OperationContract
 
 SENSITIVE_IMPORT_NAMES = frozenset(
     {
@@ -55,6 +56,7 @@ class ImportedOperation:
     description: str
     request: APIVersionSpec
     target_base_url: str | None = None
+    canonical_contract: OperationContract | None = None
 
     @property
     def import_key(self) -> str:
@@ -79,6 +81,11 @@ class ImportedOperation:
             "auth_kind": self.request.auth_kind.value,
             "auth_config": _json_string_mapping(self.request.auth_config),
             "target_base_url": self.target_base_url,
+            "canonical_contract": (
+                self.canonical_contract.model_dump(mode="json", by_alias=True)
+                if self.canonical_contract is not None
+                else None
+            ),
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()

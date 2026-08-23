@@ -189,6 +189,140 @@ async def test_reimport_produces_diff_without_duplicate_definitions(
 
 
 @pytest.mark.asyncio
+async def test_openapi_import_persists_complete_canonical_contract(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    document = json.dumps(
+        {
+            "openapi": "3.0.3",
+            "info": {"title": "Orders", "version": "5.0.0"},
+            "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}},
+            "paths": {
+                "/orders/{tenantId}": {
+                    "post": {
+                        "operationId": "updateOrder",
+                        "security": [{"bearerAuth": []}],
+                        "parameters": [
+                            {
+                                "name": "tenantId",
+                                "in": "path",
+                                "required": True,
+                                "schema": {"type": "string", "format": "uuid"},
+                            },
+                            {
+                                "name": "dry_run",
+                                "in": "query",
+                                "schema": {"type": "boolean"},
+                            },
+                            {
+                                "name": "X-Tenant-Id",
+                                "in": "header",
+                                "required": True,
+                                "schema": {"type": "string", "minLength": 1},
+                            },
+                        ],
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["quantity", "type", "profile"],
+                                        "properties": {
+                                            "quantity": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 999,
+                                            },
+                                            "type": {
+                                                "type": "string",
+                                                "enum": ["NORMAL", "PRIORITY"],
+                                            },
+                                            "remark": {"type": "string", "maxLength": 20},
+                                            "profile": {
+                                                "type": "object",
+                                                "required": ["display_name"],
+                                                "properties": {
+                                                    "display_name": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                    }
+                                                },
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "updated",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "required": ["id"],
+                                            "properties": {"id": {"type": "string"}},
+                                        }
+                                    }
+                                },
+                            },
+                            "400": {"description": "invalid"},
+                            "401": {"description": "unauthorized"},
+                        },
+                    }
+                }
+            },
+        }
+    ).encode()
+
+    imported = await _upload_document(import_client, headers, project_id, document)
+    assert imported.status_code == 201, imported.text
+    definition_id = imported.json()["results"][0]["definition_id"]
+    detail = await import_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}", headers=headers
+    )
+    assert detail.status_code == 200, detail.text
+    version = detail.json()["version"]
+
+    assert version["contract_completeness"] == "complete"
+    assert len(version["contract_fingerprint"]) == 64
+    assert version["canonical_contract"]["parameters"][0]["location"] == "path"
+    assert version["canonical_contract"]["responses"]["200"]["schema"]["required"] == ["id"]
+    generated = await import_client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/generate",
+        headers=headers,
+        json={"api_definition_id": definition_id},
+    )
+    assert generated.status_code == 200, generated.text
+    design = generated.json()["design"]
+    mutations = [
+        (mutation["location"], mutation["path"], mutation.get("value"))
+        for scenario in design["scenarios"]
+        for mutation in scenario["mutations"]
+    ]
+    assert ("body", "body.quantity", 1000) in mutations
+    assert ("path", "path.tenantId", "not-a-uuid") in mutations
+    assert any(
+        location == "query" and path == "query.dry_run" and value == "invalid"
+        for location, path, value in mutations
+    )
+    assert ("header", "header.X-Tenant-Id", None) in mutations
+    assert ("body", "body.quantity", 0) in mutations
+    assert ("body", "body.quantity", 1) in mutations
+    assert ("body", "body.quantity", 999) in mutations
+    assert ("body", "body.type", "__invalid__") in mutations
+    assert ("body", "body.remark", "x" * 21) in mutations
+    assert any(path == "body.profile.display_name" for _location, path, _value in mutations)
+    assert ("auth", "auth", None) in mutations
+    happy = next(item for item in design["scenarios"] if item["kind"] == "happy_path")
+    assert happy["request"]["body"]["profile"]["display_name"]
+    assert any(oracle["kind"] == "schema" for oracle in design["oracles"])
+
+
+@pytest.mark.asyncio
 async def test_import_rejects_invalid_and_duplicate_operations(
     import_client: AsyncClient,
 ) -> None:

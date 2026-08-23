@@ -2,11 +2,20 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.domain.api_assets import AuthKind, BodyKind, ExtractionKind, HttpMethod, JsonValue
 from app.domain.assertions import AssertionKind, ComparisonOperator
 from app.domain.scopes import HeaderScope, VariableScope
+from app.domain.test_engineering import OperationContract
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 APIDefinitionName = Annotated[
@@ -157,9 +166,17 @@ class APIVersionResponse(BaseModel):
     auth_config: dict[str, str]
     extraction_rules: list[ExtractionRuleInput]
     assertions: list[APIVersionAssertionInput]
+    canonical_contract: OperationContract | None = None
+    contract_fingerprint: str | None = None
+    contract_completeness: str
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("canonical_contract", mode="before")
+    @classmethod
+    def normalize_empty_contract(cls, value: object) -> object:
+        return None if value == {} else value
 
 
 class APIDefinitionResponse(BaseModel):

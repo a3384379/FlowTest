@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -167,6 +168,91 @@ async def test_standalone_schema_upgrades_s47_test_design_columns(tmp_path) -> N
     }
     assert definitions["scenarios"] == ("JSON", 1, "'[]'")
     assert definitions["confidence"] == ("FLOAT", 1, "1")
+
+
+@pytest.mark.asyncio
+async def test_standalone_schema_backfills_safe_partial_api_contract(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's471-schema.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE api_versions ("
+                "id VARCHAR(36) PRIMARY KEY, version INTEGER NOT NULL, "
+                "method VARCHAR(16) NOT NULL, path VARCHAR(2048) NOT NULL, "
+                "query_parameters JSON NOT NULL, headers JSON NOT NULL, "
+                "body JSON, auth_kind VARCHAR(32) NOT NULL, auth_config JSON NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO api_versions VALUES ("
+                "'version-1', 1, 'POST', '/orders/{order_id}', :query, :headers, :body, "
+                "'bearer', '{}')"
+            ),
+            {
+                "query": json.dumps(
+                    [{"name": "trace", "required": True, "value": "must-not-survive"}]
+                ),
+                "headers": json.dumps({"X-Trace": "must-not-survive"}),
+                "body": json.dumps({"quantity": 99}),
+            },
+        )
+        for column, definition in (
+            ("canonical_contract", "JSON NOT NULL DEFAULT '{}'"),
+            ("contract_fingerprint", "VARCHAR(64)"),
+            ("contract_completeness", "VARCHAR(32) NOT NULL DEFAULT 'legacy_partial'"),
+        ):
+            await standalone_schema._add_column_if_missing(
+                connection,
+                table="api_versions",
+                column=column,
+                definition=definition,
+            )
+        await standalone_schema._ensure_s471_api_version_contracts(connection)
+        # Re-running an incremental upgrade must preserve the frozen snapshot.
+        await standalone_schema._ensure_s471_api_version_contracts(connection)
+        row = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT canonical_contract, contract_fingerprint, contract_completeness "
+                    "FROM api_versions WHERE id = 'version-1'"
+                )
+            )
+        ).one()
+
+    await test_engine.dispose()
+    contract = json.loads(str(row[0]))
+    parameter_identity = {
+        (parameter["name"], parameter["location"], parameter["required"])
+        for parameter in contract["parameters"]
+    }
+    assert parameter_identity == {
+        ("order_id", "path", True),
+        ("trace", "query", True),
+        ("X-Trace", "header", False),
+    }
+    assert contract["completeness"] == "legacy_partial"
+    assert contract["responses"] == {}
+    assert "must-not-survive" not in str(row[0])
+    assert len(str(row[1])) == 64
+    assert row[2] == "legacy_partial"
+
+
+def test_standalone_partial_contract_schema_inference_is_bounded() -> None:
+    assert standalone_schema._standalone_inferred_schema(True) == {"type": "boolean"}
+    assert standalone_schema._standalone_inferred_schema(1.5) == {"type": "number"}
+    assert standalone_schema._standalone_inferred_schema([]) == {
+        "type": "array",
+        "items": {},
+    }
+    assert standalone_schema._standalone_inferred_schema([1]) == {
+        "type": "array",
+        "items": {"type": "integer"},
+    }
+    assert standalone_schema._standalone_inferred_schema(None) == {}
+    assert standalone_schema._standalone_inferred_schema("opaque") == {"type": "string"}
+    assert standalone_schema._json_value({"safe": True}) == {"safe": True}
+    assert standalone_schema._json_value("not-json") is None
 
 
 @pytest.mark.asyncio

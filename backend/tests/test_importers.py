@@ -48,9 +48,21 @@ paths:
     assert query_user.request.query_parameters[0].value == "true"
     assert query_user.request.auth_kind is AuthKind.BEARER
     assert query_user.request.auth_config["token"] == "{{secret.bearerAuth}}"
+    assert query_user.canonical_contract is not None
+    assert [
+        (parameter.location, parameter.name, parameter.required)
+        for parameter in query_user.canonical_contract.parameters
+    ] == [("path", "user_id", True), ("query", "verbose", False)]
+    assert query_user.canonical_contract.responses["200"].description == "ok"
     assert operations[1].request.body_kind is BodyKind.JSON
     assert operations[1].request.body == {"product": "", "amount": 0}
     assert operations[1].request.auth_kind is AuthKind.NONE
+    assert operations[1].canonical_contract is not None
+    assert operations[1].canonical_contract.request_body is not None
+    assert operations[1].canonical_contract.request_body.schema_["properties"] == {
+        "product": {"type": "string"},
+        "amount": {"type": "integer"},
+    }
 
 
 def test_openapi_servers_become_request_target_base_urls() -> None:

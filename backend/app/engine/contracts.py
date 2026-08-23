@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -247,6 +247,8 @@ class ApiNodeRequestOverrides(BaseModel):
     )
     headers: dict[str, str] | None = None
     body: ApiNodeBodyOverride | None = None
+    replace_headers: bool = False
+    auth_disabled: bool = False
 
 
 class ApiNodeConfig(BaseModel):
@@ -303,6 +305,7 @@ class AssertNodeConfig(BaseModel):
     expression: str = Field(min_length=1, max_length=500)
     operator: ComparisonOperator = ComparisonOperator.EQUALS
     expected: JsonValue = None
+    assertion_type: Literal["comparison", "json_schema"] = "comparison"
 
 
 class ConditionNodeConfig(BaseModel):

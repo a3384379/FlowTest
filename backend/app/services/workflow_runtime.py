@@ -731,6 +731,8 @@ def _record_http_observation(
 
 
 def _http_request_snapshot(request: PreparedRequest) -> HttpRequestSnapshot:
+    service_key = request.target_snapshot.get("service_key")
+    endpoint_variant = request.target_snapshot.get("endpoint_variant")
     return HttpRequestSnapshot(
         method=request.method.value,
         url=_redact_request_url(request.url),
@@ -739,6 +741,8 @@ def _http_request_snapshot(request: PreparedRequest) -> HttpRequestSnapshot:
             redact({item.name: item.value for item in request.headers}),
         ),
         body=cast(JsonValue, redact(request.body)),
+        service_key=service_key if isinstance(service_key, str) else None,
+        endpoint_variant=endpoint_variant if isinstance(endpoint_variant, str) else None,
     )
 
 

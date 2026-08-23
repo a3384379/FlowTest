@@ -78,11 +78,15 @@ class ResolvedFlowSpecMappings:
     service_ids: Mapping[str, UUID]
     service_keys: Mapping[str, str]
     operation_ids: Mapping[str, UUID]
+    operation_versions: Mapping[str, int]
 
     def snapshot(self) -> dict[str, dict[str, str]]:
         return {
             "services": {key: str(value) for key, value in self.service_ids.items()},
             "operations": {key: str(value) for key, value in self.operation_ids.items()},
+            "operation_versions": {
+                key: str(value) for key, value in self.operation_versions.items()
+            },
         }
 
 
@@ -170,6 +174,7 @@ class FlowSpecService:
             spec=pipeline.spec,
             service_mappings=payload.service_mappings,
             operation_mappings=payload.operation_mappings,
+            operation_version_mappings=payload.operation_version_mappings,
         )
         target = await self._target_workflow(project_id, payload.workflow_id)
         target_snapshot = None
@@ -365,6 +370,7 @@ class FlowSpecService:
                     pipeline.spec,
                     operation_mappings=mappings.operation_ids,
                     service_keys=mappings.service_keys,
+                    operation_versions=mappings.operation_versions,
                 ),
                 commit=False,
             )
@@ -409,6 +415,7 @@ class FlowSpecService:
                     pipeline.spec,
                     operation_mappings=mappings.operation_ids,
                     service_keys=mappings.service_keys,
+                    operation_versions=mappings.operation_versions,
                 ),
                 commit=False,
             )
@@ -454,6 +461,7 @@ class FlowSpecService:
         spec: FlowSpec,
         service_mappings: Mapping[str, UUID],
         operation_mappings: Mapping[str, UUID],
+        operation_version_mappings: Mapping[str, int],
     ) -> ResolvedFlowSpecMappings:
         _reject_unknown_mapping_refs(
             requested=service_mappings,
@@ -464,6 +472,11 @@ class FlowSpecService:
             requested=operation_mappings,
             known={operation.ref for operation in spec.operations},
             kind="Operation",
+        )
+        _reject_unknown_mapping_refs(
+            requested=operation_version_mappings,
+            known={operation.ref for operation in spec.operations},
+            kind="Operation Version",
         )
         service_ids: dict[str, UUID] = {}
         service_keys: dict[str, str] = {}
@@ -476,18 +489,22 @@ class FlowSpecService:
             service_ids[service_spec.ref] = service.id
             service_keys[service_spec.ref] = service.service_key
         operation_ids: dict[str, UUID] = {}
+        operation_versions: dict[str, int] = {}
         for operation in spec.operations:
-            definition = await self._resolve_operation_mapping(
+            definition, version = await self._resolve_operation_mapping(
                 project_id=project_id,
                 operation=operation,
                 requested_id=operation_mappings.get(operation.ref),
+                requested_version=operation_version_mappings.get(operation.ref),
                 service_ids=service_ids,
             )
             operation_ids[operation.ref] = definition.id
+            operation_versions[operation.ref] = version.version
         return ResolvedFlowSpecMappings(
             service_ids=service_ids,
             service_keys=service_keys,
             operation_ids=operation_ids,
+            operation_versions=operation_versions,
         )
 
     async def _resolve_service_mapping(
@@ -514,8 +531,9 @@ class FlowSpecService:
         project_id: UUID,
         operation: FlowSpecOperation,
         requested_id: UUID | None,
+        requested_version: int | None,
         service_ids: Mapping[str, UUID],
-    ) -> APIDefinition:
+    ) -> tuple[APIDefinition, APIVersion]:
         if requested_id is not None:
             definition = await self._api_assets.get_definition(requested_id)
             candidates = [definition] if definition is not None else []
@@ -532,12 +550,13 @@ class FlowSpecService:
                 path=f"$.operation_mappings.{operation.ref}",
             )
         definition = candidates[0]
-        await self._validate_operation_mapping(
+        version = await self._validate_operation_mapping(
             definition=definition,
             operation=operation,
+            requested_version=requested_version,
             expected_service_id=service_ids.get(operation.service_ref or ""),
         )
-        return definition
+        return definition, version
 
     async def _operation_candidates(
         self,
@@ -548,18 +567,25 @@ class FlowSpecService:
     ) -> list[APIDefinition]:
         query = (
             select(APIDefinition)
-            .join(
-                APIVersion,
-                (APIVersion.api_definition_id == APIDefinition.id)
-                & (APIVersion.version == APIDefinition.current_version),
-            )
+            .join(APIVersion, APIVersion.api_definition_id == APIDefinition.id)
             .where(
                 APIDefinition.project_id == project_id,
                 APIDefinition.is_active.is_(True),
                 APIVersion.method == operation.method,
                 APIVersion.path == operation.path,
             )
+            .distinct()
         )
+        if operation.version_strategy == "current":
+            query = query.where(APIVersion.version == APIDefinition.current_version)
+            if operation.contract_fingerprint is not None:
+                query = query.where(
+                    APIVersion.contract_fingerprint == operation.contract_fingerprint
+                )
+        elif operation.contract_fingerprint is not None:
+            query = query.where(APIVersion.contract_fingerprint == operation.contract_fingerprint)
+        elif operation.api_version is not None:
+            query = query.where(APIVersion.version == operation.api_version)
         if service_id is not None:
             query = query.where(APIDefinition.service_id == service_id)
         candidates = list((await self._session.scalars(query)).all())
@@ -572,12 +598,58 @@ class FlowSpecService:
         *,
         definition: APIDefinition,
         operation: FlowSpecOperation,
+        requested_version: int | None,
         expected_service_id: UUID | None,
-    ) -> None:
-        version = await self._api_assets.get_version(
-            definition_id=definition.id, version=definition.current_version
+    ) -> APIVersion:
+        if (
+            requested_version is not None
+            and operation.version_strategy == "current"
+            and requested_version != definition.current_version
+        ):
+            raise _mapping_error(
+                code="FLOWSPEC_API_VERSION_INCOMPATIBLE",
+                message=f"Operation {operation.ref} 的目标 current version 已变化",
+                path=f"$.operation_version_mappings.{operation.ref}",
+            )
+        version_number = requested_version
+        if version_number is None and operation.version_strategy == "current":
+            version_number = definition.current_version
+        version_identity = (
+            APIVersion.version == version_number
+            if version_number is not None
+            else (
+                APIVersion.contract_fingerprint == operation.contract_fingerprint
+                if operation.contract_fingerprint is not None
+                else APIVersion.version == operation.api_version
+            )
         )
-        if version is None or (version.method, version.path) != (
+        versions = list(
+            (
+                await self._session.scalars(
+                    select(APIVersion).where(
+                        APIVersion.api_definition_id == definition.id,
+                        version_identity,
+                    )
+                )
+            ).all()
+        )
+        if len(versions) != 1:
+            raise _mapping_error(
+                code="FLOWSPEC_API_VERSION_INCOMPATIBLE",
+                message=f"Operation {operation.ref} 在目标 API 中没有唯一兼容版本",
+                path=f"$.operation_mappings.{operation.ref}",
+            )
+        version = versions[0]
+        if (
+            operation.contract_fingerprint is not None
+            and version.contract_fingerprint != operation.contract_fingerprint
+        ):
+            raise _mapping_error(
+                code="FLOWSPEC_API_VERSION_INCOMPATIBLE",
+                message=f"Operation {operation.ref} 的目标版本 Contract Fingerprint 不兼容",
+                path=f"$.operation_version_mappings.{operation.ref}",
+            )
+        if (version.method, version.path) != (
             operation.method,
             operation.path,
         ):
@@ -592,6 +664,7 @@ class FlowSpecService:
                 message=f"Operation {operation.ref} 与目标 Service 不一致",
                 path=f"$.operation_mappings.{operation.ref}",
             )
+        return version
 
     async def _mappings_from_snapshot(
         self,
@@ -600,12 +673,13 @@ class FlowSpecService:
         spec: FlowSpec,
         snapshot: Mapping[str, Any],
     ) -> ResolvedFlowSpecMappings:
-        service_mappings, operation_mappings = _mapping_ids(snapshot)
+        service_mappings, operation_mappings, operation_version_mappings = _mapping_ids(snapshot)
         return await self._resolve_mappings(
             project_id=project_id,
             spec=spec,
             service_mappings=service_mappings,
             operation_mappings=operation_mappings,
+            operation_version_mappings=operation_version_mappings,
         )
 
     async def _target_workflow(self, project_id: UUID, workflow_id: UUID | None) -> Workflow | None:
@@ -711,6 +785,9 @@ class FlowSpecService:
                 name=api_definition.name,
                 method=api_version.method,
                 path=api_version.path,
+                version_strategy="pinned" if config.api_version is not None else "current",
+                source_version=api_version.version,
+                contract_fingerprint=api_version.contract_fingerprint,
             )
             if service is not None:
                 services[service.service_key] = PortableService(
@@ -818,7 +895,7 @@ def _source_snapshot(
 
 def _mapping_ids(
     snapshot: Mapping[str, Any],
-) -> tuple[dict[str, UUID], dict[str, UUID]]:
+) -> tuple[dict[str, UUID], dict[str, UUID], dict[str, int]]:
     raw = snapshot.get("resource_mappings")
     if not isinstance(raw, dict):
         raise _mapping_error(
@@ -826,7 +903,11 @@ def _mapping_ids(
             message="FlowSpec 变更集缺少资源映射快照",
             path="$.resource_mappings",
         )
-    return _uuid_mapping(raw.get("services")), _uuid_mapping(raw.get("operations"))
+    return (
+        _uuid_mapping(raw.get("services")),
+        _uuid_mapping(raw.get("operations")),
+        _int_mapping(raw.get("operation_versions")),
+    )
 
 
 def _uuid_mapping(value: object) -> dict[str, UUID]:
@@ -846,8 +927,32 @@ def _uuid_mapping(value: object) -> dict[str, UUID]:
         ) from error
 
 
+def _int_mapping(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec Operation Version 映射快照无效",
+            path="$.resource_mappings.operation_versions",
+        )
+    try:
+        result = {str(key): int(item) for key, item in value.items()}
+    except (TypeError, ValueError) as error:
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec Operation Version 映射包含无效版本号",
+            path="$.resource_mappings.operation_versions",
+        ) from error
+    if any(version < 1 for version in result.values()):
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec Operation Version 映射版本号必须大于零",
+            path="$.resource_mappings.operation_versions",
+        )
+    return result
+
+
 def _reject_unknown_mapping_refs(
-    *, requested: Mapping[str, UUID], known: set[str], kind: str
+    *, requested: Mapping[str, object], known: set[str], kind: str
 ) -> None:
     unknown = sorted(set(requested) - known)
     if unknown:

@@ -54,6 +54,7 @@ export async function importFlowSpec(
   mappings?: {
     service_mappings: Record<string, string>
     operation_mappings: Record<string, string>
+    operation_version_mappings?: Record<string, number>
   },
 ): Promise<FlowSpecChangeSetDetail> {
   const response = await apiClient.post<FlowSpecChangeSetDetail>(

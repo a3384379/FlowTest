@@ -1,13 +1,14 @@
 import asyncio
 import json
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import (
     FastAPI,
     File,
     Header,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     WebSocket,
@@ -28,6 +29,13 @@ class LoginRequest(BaseModel):
 class OrderRequest(BaseModel):
     product: str
     amount: int = Field(gt=0)
+
+
+class S471OrderRequest(BaseModel):
+    quantity: int
+    type: str
+    remark: str | None = None
+    profile: dict[str, str]
 
 
 @app.get("/health")
@@ -65,6 +73,50 @@ async def create_order(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
         )
     return {"code": 0, "data": {"id": str(uuid4()), **payload.model_dump()}}
+
+
+@app.post("/tenants/{tenant_id}/orders")
+async def create_s471_order(
+    tenant_id: str,
+    payload: S471OrderRequest,
+    dry_run: Annotated[str | None, Query(alias="dryRun")] = None,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-Id")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    app.state.last_s471_request = {
+        "tenant_id": tenant_id,
+        "dry_run": dry_run,
+        "tenant_header_present": x_tenant_id is not None,
+        "authorization_present": authorization is not None,
+        "body": payload.model_dump(),
+    }
+    try:
+        UUID(tenant_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Invalid tenant id") from error
+    if authorization != "Bearer mock-token":
+        raise HTTPException(status_code=401, detail="Missing token")
+    if x_tenant_id is None:
+        raise HTTPException(status_code=400, detail="Missing tenant header")
+    if dry_run not in {None, "true", "false"}:
+        raise HTTPException(status_code=400, detail="Invalid dryRun")
+    if not 1 <= payload.quantity <= 999:
+        raise HTTPException(status_code=400, detail="Invalid quantity")
+    if payload.type not in {"NORMAL", "PRIORITY"}:
+        raise HTTPException(status_code=400, detail="Invalid order type")
+    if payload.remark is not None and len(payload.remark) > 20:
+        raise HTTPException(status_code=400, detail="Invalid remark")
+    if not payload.profile.get("display_name"):
+        raise HTTPException(status_code=400, detail="Invalid profile")
+    return {"id": str(uuid4()), "accepted": True}
+
+
+@app.get("/s47-1/requests/last")
+async def last_s471_request() -> dict[str, object]:
+    request = getattr(app.state, "last_s471_request", None)
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=404, detail="No S47.1 request")
+    return request
 
 
 @app.post("/upload")

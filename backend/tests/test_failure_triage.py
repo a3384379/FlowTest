@@ -23,10 +23,29 @@ def test_failure_triage_uses_status_and_error_codes() -> None:
     assert timeout.retry_signal is True
 
     contract = triage_failures(
-        [_signal(error_code="WORKFLOW_ASSERTION_FAILED", contract_assertion_failed=True)]
+        [
+            _signal(
+                error_code="WORKFLOW_ASSERTION_FAILED",
+                http_status=500,
+                response_received=True,
+                contract_assertion_failed=True,
+            )
+        ]
     )
     assert contract.primary_classification == "CONTRACT_DRIFT"
     assert contract.recommended_regression == ["重跑 Contract Oracle", "生成差异边界用例"]
+
+    server_response = triage_failures(
+        [_signal(http_status=503, response_received=True, error_code="HTTP_5XX")]
+    )
+    assert server_response.primary_classification == "UPSTREAM_SERVICE_FAILURE"
+    assert server_response.reason_codes == ["UPSTREAM_RESPONSE_5XX"]
+
+    product_500 = triage_failures(
+        [_signal(http_status=500, response_received=True, assertion_failed=True)]
+    )
+    assert product_500.primary_classification == "PRODUCT_DEFECT"
+    assert product_500.reason_codes == ["SERVER_RESPONSE_ASSERTION_MISMATCH"]
 
 
 def test_failure_triage_aggregates_service_and_flaky_evidence() -> None:

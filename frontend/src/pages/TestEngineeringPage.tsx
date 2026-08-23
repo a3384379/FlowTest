@@ -65,23 +65,51 @@ export default function TestEngineeringPage() {
           scenarioIds={scenarioIds}
           onGenerated={() => setScenarioIds([])}
         />
-        {design ? (
-          <DesignReview
-            design={design}
-            scenarioIds={scenarioIds}
-            onScenarioIdsChange={setScenarioIds}
-            proposal={state.proposal}
-            acting={state.acting}
-            onReview={state.reviewProposal}
-            onApply={state.applyProposal}
-          />
-        ) : (
-          <Card>
-            <Typography.Text type="secondary">请选择 API 契约并生成预览。</Typography.Text>
-          </Card>
-        )}
+        <GeneratedDesign
+          design={design}
+          state={state}
+          scenarioIds={scenarioIds}
+          onScenarioIdsChange={setScenarioIds}
+        />
       </Space>
     </Layout>
+  )
+}
+
+function GeneratedDesign({
+  design,
+  state,
+  scenarioIds,
+  onScenarioIdsChange,
+}: {
+  design: TestDesignDocument | null
+  state: ReturnType<typeof useTestEngineering>
+  scenarioIds: string[]
+  onScenarioIdsChange: (ids: string[]) => void
+}) {
+  if (!design) {
+    return (
+      <Card>
+        <Typography.Text type="secondary">请选择 API 契约并生成预览。</Typography.Text>
+      </Card>
+    )
+  }
+  const contractCompleteness =
+    state.proposal?.contract_completeness ?? state.generation?.contract_completeness
+  const contractFingerprint =
+    state.proposal?.contract_fingerprint ?? state.generation?.contract_fingerprint
+  return (
+    <DesignReview
+      design={design}
+      contractCompleteness={contractCompleteness}
+      contractFingerprint={contractFingerprint}
+      scenarioIds={scenarioIds}
+      onScenarioIdsChange={onScenarioIdsChange}
+      proposal={state.proposal}
+      acting={state.acting}
+      onReview={state.reviewProposal}
+      onApply={state.applyProposal}
+    />
   )
 }
 
@@ -211,6 +239,8 @@ function required(value: string | null | undefined): string {
 
 function DesignReview({
   design,
+  contractCompleteness,
+  contractFingerprint,
   scenarioIds,
   onScenarioIdsChange,
   proposal,
@@ -219,6 +249,8 @@ function DesignReview({
   onApply,
 }: {
   design: TestDesignDocument
+  contractCompleteness?: string
+  contractFingerprint?: string
   scenarioIds: string[]
   onScenarioIdsChange: (ids: string[]) => void
   proposal: ReturnType<typeof useTestEngineering>['proposal']
@@ -240,6 +272,24 @@ function DesignReview({
           <Descriptions.Item label="Evidence">
             {design.evidence_refs.length} 条结构化引用
           </Descriptions.Item>
+          <Descriptions.Item label="Contract Completeness">
+            <Tag color={contractCompleteness === 'complete' ? 'green' : 'orange'}>
+              {contractCompleteness ?? 'unknown'}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Contract Fingerprint">
+            <Typography.Text code copyable>
+              {contractFingerprint ?? 'unknown'}
+            </Typography.Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Evidence Selection">
+            API canonical + {Math.max(0, design.evidence_refs.length - 1)} 条关联 Evidence
+          </Descriptions.Item>
+          <Descriptions.Item label="State Capability">
+            {design.review_requirements.includes('state_evidence_unavailable')
+              ? '缺少显式状态证据'
+              : '未启用'}
+          </Descriptions.Item>
           <Descriptions.Item label="Review">
             {proposal ? (
               <Tag color={reviewColor(proposal.review_status)}>{proposal.review_status}</Tag>
@@ -251,26 +301,12 @@ function DesignReview({
         {design.warnings.map((warning) => (
           <Alert key={warning} type="warning" showIcon message={warning} />
         ))}
-        {proposal ? (
-          <Space wrap style={{ marginTop: 16 }}>
-            {proposal.review_status === 'pending' ? (
-              <>
-                <Button type="primary" loading={acting} onClick={() => void onReview(true)}>
-                  接受 Draft
-                </Button>
-                <Button danger loading={acting} onClick={() => void onReview(false)}>
-                  拒绝 Draft
-                </Button>
-              </>
-            ) : null}
-            {proposal.review_status === 'accepted' && !proposal.applied ? (
-              <Button type="primary" loading={acting} onClick={() => void onApply()}>
-                物化为 Workflow / TestCase
-              </Button>
-            ) : null}
-            {proposal.applied ? <Tag color="green">已进入执行体系</Tag> : null}
-          </Space>
-        ) : null}
+        <ProposalActions
+          proposal={proposal}
+          acting={acting}
+          onReview={onReview}
+          onApply={onApply}
+        />
       </Card>
       <Card title={`Scenario Review · ${design.scenarios.length}`}>
         <ScenarioTable
@@ -312,6 +348,40 @@ function DesignReview({
   )
 }
 
+function ProposalActions({
+  proposal,
+  acting,
+  onReview,
+  onApply,
+}: {
+  proposal: ReturnType<typeof useTestEngineering>['proposal']
+  acting: boolean
+  onReview: (accept: boolean) => Promise<boolean>
+  onApply: () => Promise<boolean>
+}) {
+  if (!proposal) return null
+  return (
+    <Space wrap style={{ marginTop: 16 }}>
+      {proposal.review_status === 'pending' ? (
+        <>
+          <Button type="primary" loading={acting} onClick={() => void onReview(true)}>
+            接受 Draft
+          </Button>
+          <Button danger loading={acting} onClick={() => void onReview(false)}>
+            拒绝 Draft
+          </Button>
+        </>
+      ) : null}
+      {proposal.review_status === 'accepted' && !proposal.applied ? (
+        <Button type="primary" loading={acting} onClick={() => void onApply()}>
+          物化为 Workflow / TestCase
+        </Button>
+      ) : null}
+      {proposal.applied ? <Tag color="green">已进入执行体系</Tag> : null}
+    </Space>
+  )
+}
+
 function ScenarioTable({
   items,
   selected,
@@ -333,16 +403,30 @@ function ScenarioTable({
         selectedRowKeys: selected,
         onChange: (keys) => onChange(keys.map(String)),
         getCheckboxProps: (scenario) => ({
-          disabled: disabled || scenario.kind === 'auth_missing',
-          name:
-            scenario.kind === 'auth_missing'
-              ? '尚无法物化：Workflow API 节点不支持显式禁用认证'
-              : scenario.title,
+          disabled: disabled || !materializableScenario(scenario),
+          name: materializableScenario(scenario)
+            ? scenario.title
+            : '仅设计：需要补全前置条件或可执行 Oracle',
         }),
       }}
       columns={[
         { title: 'Kind', dataIndex: 'kind' },
         { title: '标题', dataIndex: 'title' },
+        {
+          title: 'Location',
+          render: (_: unknown, scenario: ScenarioCandidate) =>
+            scenario.mutations.map((mutation) => mutation.location).join(', ') || 'request',
+        },
+        {
+          title: 'Parameter Path',
+          render: (_: unknown, scenario: ScenarioCandidate) =>
+            scenario.mutations.map((mutation) => mutation.path).join(', ') || '-',
+        },
+        {
+          title: 'Mutation',
+          render: (_: unknown, scenario: ScenarioCandidate) =>
+            scenario.mutations.map((mutation) => mutation.operation).join(', ') || '-',
+        },
         {
           title: '预期分类',
           dataIndex: 'expected_category',
@@ -351,11 +435,15 @@ function ScenarioTable({
         {
           title: '可执行性',
           render: (_: unknown, scenario: ScenarioCandidate) =>
-            scenario.kind === 'auth_missing' ? (
-              <Tag color="orange">仅设计</Tag>
-            ) : (
+            materializableScenario(scenario) ? (
               <Tag color="green">可物化</Tag>
+            ) : (
+              <Tag color="orange">仅设计</Tag>
             ),
+        },
+        {
+          title: 'Evidence',
+          render: (_: unknown, scenario: ScenarioCandidate) => scenario.evidence_refs.length,
         },
       ]}
     />
@@ -409,4 +497,14 @@ function reviewColor(status: 'pending' | 'accepted' | 'rejected'): string {
   if (status === 'accepted') return 'green'
   if (status === 'rejected') return 'default'
   return 'orange'
+}
+
+function materializableScenario(scenario: ScenarioCandidate): boolean {
+  return (
+    !scenario.requires_review &&
+    scenario.deterministic &&
+    !scenario.mutations.some(
+      (mutation) => mutation.location === 'path' && mutation.operation === 'omit',
+    )
+  )
 }

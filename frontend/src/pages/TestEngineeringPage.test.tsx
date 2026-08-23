@@ -30,6 +30,14 @@ const design: TestDesignDocument = {
       kind: 'happy_path',
       title: '有效订单',
       request_body: { quantity: 100 },
+      request: {
+        path_parameters: {},
+        query_parameters: {},
+        headers: {},
+        cookies: {},
+        body: { quantity: 100 },
+        auth_disabled: false,
+      },
       mutations: [],
       expected_category: 'success',
       negative: false,
@@ -44,7 +52,15 @@ const design: TestDesignDocument = {
       kind: 'auth_missing',
       title: '缺失认证',
       request_body: { quantity: 100 },
-      mutations: [],
+      request: {
+        path_parameters: {},
+        query_parameters: {},
+        headers: {},
+        cookies: {},
+        body: { quantity: 100 },
+        auth_disabled: true,
+      },
+      mutations: [{ location: 'auth', path: 'auth', operation: 'omit', value: null }],
       expected_category: 'unauthorized',
       negative: true,
       evidence_refs: ['evidence-contract'],
@@ -109,6 +125,8 @@ describe('TestEngineeringPage', () => {
       design,
       scenario_ids: ['scenario_happy_path'],
       applied: false,
+      contract_completeness: 'complete',
+      contract_fingerprint: 'a'.repeat(64),
     }
     server.use(
       http.get('/api/v1/projects', () =>
@@ -135,7 +153,13 @@ describe('TestEngineeringPage', () => {
           ]),
       ),
       http.post(`/api/v1/projects/${project.id}/test-engineering/generate`, () =>
-        HttpResponse.json({ fingerprint: 'fingerprint-s47', design, persisted: false }),
+        HttpResponse.json({
+          fingerprint: 'fingerprint-s47',
+          design,
+          persisted: false,
+          contract_completeness: 'complete',
+          contract_fingerprint: 'a'.repeat(64),
+        }),
       ),
       http.post(
         `/api/v1/projects/${project.id}/test-engineering/proposals`,
@@ -175,7 +199,7 @@ describe('TestEngineeringPage', () => {
     await browser.click(screen.getByRole('button', { name: '只读生成预览' }))
 
     expect(await screen.findByText('验证 POST /orders 的契约边界')).toBeVisible()
-    expect(screen.getByText('仅设计')).toBeVisible()
+    expect(screen.getAllByText('可物化')).toHaveLength(2)
     const rowCheckboxes = screen.getAllByRole('checkbox')
     await browser.click(rowCheckboxes[1])
     await browser.click(screen.getByRole('button', { name: '创建待审核 Draft' }))
@@ -195,7 +219,20 @@ describe('TestEngineeringPage', () => {
   it('renders review warnings and gaps and keeps rejected drafts non-applicable', async () => {
     const previewDesign: TestDesignDocument = {
       ...design,
+      scenarios: [
+        ...design.scenarios,
+        {
+          ...design.scenarios[0],
+          id: 'scenario_path_omitted',
+          title: '缺失路径参数',
+          mutations: [{ location: 'path', path: 'tenant_id', operation: 'omit', value: null }],
+          expected_category: 'client_error',
+          negative: true,
+          tags: ['path'],
+        },
+      ],
       warnings: ['Oracle 需要人工复核'],
+      review_requirements: ['state_evidence_unavailable'],
       oracles: [{ ...design.oracles[0], requires_review: true }],
       coverage: { entries: [] },
     }
@@ -220,6 +257,8 @@ describe('TestEngineeringPage', () => {
       design: proposalDesign,
       scenario_ids: ['scenario_happy_path'],
       applied: false,
+      contract_completeness: 'partial',
+      contract_fingerprint: 'b'.repeat(64),
     }
     server.use(
       http.get('/api/v1/projects', () =>
@@ -236,6 +275,8 @@ describe('TestEngineeringPage', () => {
           fingerprint: 'fingerprint-review',
           design: previewDesign,
           persisted: false,
+          contract_completeness: 'partial',
+          contract_fingerprint: 'b'.repeat(64),
         }),
       ),
       http.post(`/api/v1/projects/${project.id}/test-engineering/proposals`, () =>
@@ -262,7 +303,9 @@ describe('TestEngineeringPage', () => {
     await browser.click(screen.getByRole('button', { name: '只读生成预览' }))
 
     expect(await screen.findByText('Oracle 需要人工复核')).toBeVisible()
+    expect(screen.getByText('缺少显式状态证据')).toBeVisible()
     expect(screen.getByText('需要')).toBeVisible()
+    expect(screen.getByText('仅设计')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: '创建待审核 Draft' }))
     expect(await screen.findByText('Gap')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: '拒绝 Draft' }))

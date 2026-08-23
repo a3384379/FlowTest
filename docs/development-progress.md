@@ -1,7 +1,9 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-23（Asia/Shanghai）
-状态：仓库已公开；V5 S47 正确性修复与功能闭环已通过本地全量、真实迁移往返、隔离 Compose 与 Playwright 验收，可进入功能完成审核，但 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
+版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
+真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
@@ -32,6 +34,31 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    Smoke，Playwright 通过 Test Engineering Generate → Draft → Review → Apply 主路径。
    未执行的远程 CI、Windows x64 72 小时试点、14 日 RC 观察与人工签署不记为通过。完整事实见
    [S47 V5 功能闭环记录](release/s47-v5-functional-completion.md)。
+
+## 进行中：V5 S47.1 语义正确性与证据闭环
+
+1. OpenAPI 3/Swagger 2 导入把带 location 的 parameter、request body、response status/schema、auth、
+   source/revision/completeness 持久化到 APIVersion Canonical Contract；手工/旧 API 使用安全 partial
+   backfill，不保存 Header/Query 值，也不伪造 response status。
+2. Test Engineering 从持久化契约和最多 10 个、聚合 2 MiB 的 Evidence Bundle 生成 Path/Query/Header/
+   Cookie/Body/Auth 场景；DataProfile/Source/Existing Test Finding 真实改变 Scenario、Oracle、Coverage
+   和 Knowledge Graph。冲突场景强制 review 且默认不可物化。
+3. Workflow request override 与 Runtime 已支持位置化 mutation 和节点级 auth disabled；Response Schema、
+   JSON Path 和可支持 expression 物化为 Assert，不支持的 Oracle 返回 blocker。Mock Target 记录并验证
+   实际收到的 Path、Query、Header、Body 和认证缺失。
+4. FlowSpec 新导出使用 fingerprint v3，保存 pinned/current、source version 和 contract fingerprint；
+   pinned 找不到 exact compatible target 时阻断，绝不回退 current。
+5. Change Regression 将 Asset Mapping Coverage 与 Test Semantic Coverage 拆分。真实服务集成测试覆盖
+   Mapping=100%、旧边界已覆盖时仍发现 999/1000，并使用 Current Canonical Contract 的真实 201/422
+   Oracle；审核后复用 TestEngineering 物化 Workflow/TestCase bundle。
+6. Evidence value sanitizer 覆盖 JWT、Bearer/Basic、PEM、Cloud Key、高熵值、Email、Phone、Card 和
+   URL 凭据；Failure Triage 将收到的 5xx 归为 upstream，并优先使用 service key/endpoint variant。
+7. 新迁移 `20260823_0042` 添加 API Contract 快照并 backfill；未进入 main 的 0041 downgrade 已校正，
+   不再把 planned key migration 伪造为 migrated。SQLite baseline/增量 backfill 和 Transfer revision
+   同步到 0042。
+8. 详细事实、兼容策略、门禁和剩余风险见
+   [S47.1 语义正确性与证据闭环](release/s47-1-semantic-correctness.md)。远程 CI、Windows x64 试点、
+   连续 RC、安全审批和真实 Key Rotation 未执行/未完成，不记为通过。
 
 ## 当前恢复点
 

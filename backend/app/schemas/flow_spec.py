@@ -26,6 +26,7 @@ class FlowSpecImportRequest(BaseModel):
     source_ref: str | None = Field(default=None, max_length=512)
     service_mappings: dict[str, UUID] = Field(default_factory=dict, max_length=500)
     operation_mappings: dict[str, UUID] = Field(default_factory=dict, max_length=1000)
+    operation_version_mappings: dict[str, int] = Field(default_factory=dict, max_length=1000)
 
 
 class FlowSpecExportResponse(BaseModel):

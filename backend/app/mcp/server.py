@@ -263,6 +263,7 @@ def _register_coverage_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
         project_id: str,
         api_definition_id: str,
         generation_policy: dict[str, Any] | None = None,
+        additional_evidence: list[dict[str, Any]] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
@@ -271,6 +272,7 @@ def _register_coverage_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
                 {
                     "api_definition_id": api_definition_id,
                     "generation_policy": generation_policy or {},
+                    "additional_evidence": additional_evidence or [],
                 },
                 token=_request_token(ctx, client),
             )
@@ -309,6 +311,7 @@ def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
         project_id: str,
         api_definition_id: str,
         generation_policy: dict[str, Any] | None = None,
+        additional_evidence: list[dict[str, Any]] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
@@ -317,6 +320,7 @@ def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
                 {
                     "api_definition_id": api_definition_id,
                     "generation_policy": generation_policy or {},
+                    "additional_evidence": additional_evidence or [],
                 },
                 token=_request_token(ctx, client),
             )

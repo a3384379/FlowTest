@@ -13,6 +13,7 @@ FailureClassification = Literal[
     "BAD_TEST_DATA",
     "ENVIRONMENT_FAILURE",
     "SERVICE_ENDPOINT_FAILURE",
+    "UPSTREAM_SERVICE_FAILURE",
     "CONTRACT_DRIFT",
     "AUTH_FAILURE",
     "NETWORK_FAILURE",
@@ -33,6 +34,7 @@ class FailureSignal(BaseModel):
     retryable: bool = False
     http_status: int | None = Field(default=None, ge=100, le=599)
     affected_service: str | None = Field(default=None, max_length=255)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
     affected_operation: str | None = Field(default=None, max_length=2048)
     response_received: bool = False
     assertion_failed: bool = False
@@ -48,6 +50,7 @@ class FailureTriageResult(BaseModel):
     confidence: float = Field(ge=0, le=1)
     reason_codes: list[str] = Field(default_factory=list)
     affected_service: str | None = None
+    endpoint_variant: str | None = None
     affected_operation: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     retry_signal: bool = False
@@ -71,14 +74,23 @@ def _classify(signal: FailureSignal) -> tuple[FailureClassification, str]:
     status_result = _status_classification(signal)
     if status_result is not None:
         return status_result
+    if signal.http_status in {401, 403}:
+        return "AUTH_FAILURE", "HTTP_AUTH_STATUS"
+    if signal.contract_assertion_failed:
+        return "CONTRACT_DRIFT", "CONTRACT_ASSERTION_FAILED"
+    if (
+        signal.assertion_failed
+        and signal.response_received
+        and signal.http_status is not None
+        and signal.http_status >= 500
+    ):
+        return "PRODUCT_DEFECT", "SERVER_RESPONSE_ASSERTION_MISMATCH"
     response_result = _response_classification(signal)
     if response_result is not None:
         return response_result
     code_result = _code_classification(signal.error_code or "")
     if code_result is not None:
         return code_result
-    if signal.contract_assertion_failed:
-        return "CONTRACT_DRIFT", "CONTRACT_ASSERTION_FAILED"
     if signal.assertion_failed and signal.response_received:
         return "PRODUCT_DEFECT", "DETERMINISTIC_ASSERTION_MISMATCH"
     return "UNKNOWN", "NO_RULE_MATCH"
@@ -100,7 +112,7 @@ def _response_classification(
     if signal.http_status in {401, 403}:
         return "AUTH_FAILURE", "HTTP_AUTH_STATUS"
     if signal.http_status is not None and signal.http_status >= 500:
-        return "SERVICE_ENDPOINT_FAILURE", "ENDPOINT_OR_SERVER_FAILURE"
+        return "UPSTREAM_SERVICE_FAILURE", "UPSTREAM_RESPONSE_5XX"
     return None
 
 
@@ -174,6 +186,7 @@ def _result(
         confidence=confidence,
         reason_codes=reasons,
         affected_service=(representative.affected_service if representative else None),
+        endpoint_variant=(representative.endpoint_variant if representative else None),
         affected_operation=(representative.affected_operation if representative else None),
         evidence_refs=sorted({signal.evidence_ref for signal in signals})[:200],
         retry_signal=any(signal.retryable or signal.attempts > 1 for signal in signals),
@@ -192,10 +205,8 @@ _TIMEOUT_CODES = frozenset(
 _NETWORK_CODES = frozenset({"NETWORK_ERROR", "DNS_ERROR", "CONNECTION_REFUSED"})
 _ENDPOINT_CODES = frozenset(
     {
-        "HTTP_5XX",
         "SERVICE_ENDPOINT_NOT_FOUND",
         "SERVICE_ENDPOINT_DISABLED",
-        "HTTP_UNEXPECTED_STATUS",
     }
 )
 _CONTRACT_CODES = frozenset(
@@ -216,6 +227,7 @@ _PRIORITY: dict[FailureClassification, int] = {
     "AUTH_FAILURE": 11,
     "CONTRACT_DRIFT": 10,
     "SERVICE_ENDPOINT_FAILURE": 9,
+    "UPSTREAM_SERVICE_FAILURE": 9,
     "NETWORK_FAILURE": 8,
     "TIMEOUT": 7,
     "ENVIRONMENT_FAILURE": 6,
@@ -233,6 +245,10 @@ _RECOMMENDATIONS: dict[FailureClassification, tuple[str, list[str]]] = {
     "SERVICE_ENDPOINT_FAILURE": (
         "检查 Service Endpoint 健康、变体与服务状态",
         ["目标服务健康回归"],
+    ),
+    "UPSTREAM_SERVICE_FAILURE": (
+        "检查上游服务日志、依赖健康与 5xx 响应证据",
+        ["固定请求重放", "上游 5xx 回归"],
     ),
     "CONTRACT_DRIFT": ("对比运行响应与当前 Contract", ["重跑 Contract Oracle", "生成差异边界用例"]),
     "AUTH_FAILURE": ("检查认证引用、权限与环境配置", ["认证成功/缺失场景"]),

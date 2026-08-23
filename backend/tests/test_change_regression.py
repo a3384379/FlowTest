@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,11 @@ from app.core.storage import StoredObject
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.services.change_regression import (
+    _add_semantic_value,
+    _merge_workflow_semantics,
+    _test_case_workflow_id,
+)
 from app.services.execution_events import ExecutionEvent
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -266,6 +272,199 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert approved_missing.json()["status"] == "approved"
 
 
+@pytest.mark.asyncio
+async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_contract(
+    regression_context: RegressionContext,
+) -> None:
+    context = regression_context
+    headers = await _login_headers(context.client)
+    project_id, environment_id, plan_workflow_id = await _create_workflow(context.client, headers)
+    plan = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "S47.1 语义覆盖计划",
+            "items": [{"workflow_id": plan_workflow_id, "environment_id": environment_id}],
+        },
+    )
+    policy = await context.client.post(
+        f"/api/v1/projects/{project_id}/release-policies",
+        headers=headers,
+        json={
+            "name": "S47.1 语义覆盖门禁",
+            "require_quality_gate": False,
+            "require_contract_compatibility": False,
+            "require_impact_evidence": False,
+            "require_release_risk": False,
+        },
+    )
+    assert plan.status_code == 201, plan.text
+    assert policy.status_code == 201, policy.text
+
+    baseline_document = _orders_openapi(maximum=100)
+    baseline_import = await _upload_openapi(context.client, headers, project_id, baseline_document)
+    assert baseline_import.status_code == 201, baseline_import.text
+    api_definition_id = baseline_import.json()["results"][0]["definition_id"]
+    generated = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/generate",
+        headers=headers,
+        json={"api_definition_id": api_definition_id},
+    )
+    assert generated.status_code == 200, generated.text
+    covered_scenarios = [
+        scenario["id"]
+        for scenario in generated.json()["design"]["scenarios"]
+        if any(
+            mutation["path"] == "body.quantity" and mutation.get("value") in {99, 100, 101}
+            for mutation in scenario["mutations"]
+        )
+    ]
+    assert len(covered_scenarios) == 3
+    proposal = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/proposals",
+        headers=headers,
+        json={
+            "title": "S47.1 旧边界生成测试",
+            "api_definition_id": api_definition_id,
+            "environment_id": environment_id,
+            "scenario_ids": covered_scenarios,
+        },
+    )
+    assert proposal.status_code == 201, proposal.text
+    change_set_id = proposal.json()["change_set_id"]
+    reviewed = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/proposals/{change_set_id}/review",
+        headers=headers,
+        json={"accept": True, "note": "确认旧边界覆盖"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    applied = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-engineering/proposals/{change_set_id}/apply",
+        headers=headers,
+    )
+    assert applied.status_code == 200, applied.text
+    generated_workflow_id = applied.json()["workflow_ids"][0]
+
+    baseline_run_id = await _create_contract_run(
+        context.client, headers, project_id, baseline_document, "orders-baseline.json"
+    )
+    current_document = _orders_openapi(maximum=999)
+    current_import = await _upload_openapi(context.client, headers, project_id, current_document)
+    assert current_import.status_code == 201, current_import.text
+    current_run_id = await _create_contract_run(
+        context.client, headers, project_id, current_document, "orders-current.json"
+    )
+    mapping = await context.client.post(
+        f"/api/v1/projects/{project_id}/impact/mappings",
+        headers=headers,
+        json={
+            "source_kind": "openapi",
+            "source_selector": "POST /orders",
+            "target_type": "workflow",
+            "target_id": generated_workflow_id,
+        },
+    )
+    assert mapping.status_code == 201, mapping.text
+
+    run = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": "S47.1 maximum 语义变化",
+            "source_ref": "openapi://orders/maximum",
+            "candidate_ref": "contract:orders-v2",
+            "openapi_diffs": [
+                {
+                    "baseline_run_id": baseline_run_id,
+                    "current_run_id": current_run_id,
+                }
+            ],
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+        },
+    )
+    assert run.status_code == 201, run.text
+    body = run.json()
+    assert body["selection_summary"]["asset_coverage_gap_count"] == 0
+    assert body["selection_summary"]["semantic_gap_count"] == 1
+    assert len(body["missing_tests"]) == 1
+    draft = body["missing_tests"][0]["proposed_content"]
+    values = {
+        mutation.get("value")
+        for scenario in draft["scenarios"]
+        for mutation in scenario["mutations"]
+        if mutation["path"] == "body.quantity"
+    }
+    assert values == {999, 1000}
+    status_oracles = {
+        oracle["expected"] for oracle in draft["oracles"] if oracle["kind"] == "status"
+    }
+    assert status_oracles == {201, 422}
+
+    item_id = body["missing_tests"][0]["item_id"]
+    accepted = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{body['id']}"
+        f"/change-set-items/{item_id}/accept",
+        headers=headers,
+        json={
+            "note": "确认新边界语义并物化",
+            "materialization": {
+                "api_definition_id": api_definition_id,
+                "environment_id": environment_id,
+                "scenario_ids": [scenario["id"] for scenario in draft["scenarios"]],
+            },
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_item = accepted.json()["missing_tests"][0]
+    assert accepted_item["materialized_resource_type"] == "test_design_bundle"
+    assert accepted_item["materialized_resource_id"]
+
+
+def test_existing_workflow_semantics_extracts_locations_and_treats_opaque_data_as_unknown() -> None:
+    coverage: dict[str, set[str]] = {}
+    _merge_workflow_semantics(coverage, {"nodes": "opaque"})
+    _merge_workflow_semantics(
+        coverage,
+        {
+            "variables": {"tenant_id": "tenant-1"},
+            "nodes": [
+                "opaque",
+                {"type": "delay", "config": {}},
+                {"type": "api", "config": "opaque"},
+                {"type": "api", "config": {}},
+                {
+                    "type": "api",
+                    "config": {
+                        "request_overrides": {
+                            "query_parameters": [
+                                {"name": "page", "value": 2},
+                                {"value": "ignored"},
+                            ],
+                            "headers": {"X-Mode": "safe"},
+                            "body": {
+                                "kind": "json",
+                                "value": {"order": {"quantity": 99}, "tags": ["A", "B"]},
+                            },
+                        }
+                    },
+                },
+            ],
+        },
+    )
+    _add_semantic_value(coverage, "body.opaque", object())
+
+    assert coverage == {
+        "path.tenant_id": {'"tenant-1"'},
+        "query.page": {"2"},
+        "header.X-Mode": {'"safe"'},
+        "body.order.quantity": {"99"},
+        "body.tags": {'"A"', '"B"'},
+    }
+    assert _test_case_workflow_id({}) is None
+    assert _test_case_workflow_id({"workflow_id": "invalid"}) is None
+
+
 class RecordingQueue:
     def __init__(self) -> None:
         self.test_plan_run_ids: list[UUID] = []
@@ -359,6 +558,82 @@ def _workflow_definition(api_id: str) -> dict[str, object]:
             {"id": "api-end", "source": "api", "target": "end"},
         ],
     }
+
+
+async def _upload_openapi(
+    client: AsyncClient, headers: dict[str, str], project_id: str, content: bytes
+):
+    return await client.post(
+        f"/api/v1/projects/{project_id}/imports",
+        headers=headers,
+        files={"document": ("orders.json", content, "application/json")},
+        data={"source_type": "openapi3"},
+    )
+
+
+async def _create_contract_run(
+    client: AsyncClient,
+    headers: dict[str, str],
+    project_id: str,
+    content: bytes,
+    filename: str,
+) -> str:
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/contract-runs",
+        headers=headers,
+        files={"document": (filename, content, "application/json")},
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["id"])
+
+
+def _orders_openapi(*, maximum: int) -> bytes:
+    return json.dumps(
+        {
+            "openapi": "3.0.3",
+            "info": {"title": "S47.1 Orders", "version": str(maximum)},
+            "paths": {
+                "/orders": {
+                    "post": {
+                        "operationId": "createOrder",
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["quantity"],
+                                        "properties": {
+                                            "quantity": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": maximum,
+                                            }
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "required": ["id"],
+                                            "properties": {"id": {"type": "string"}},
+                                        }
+                                    }
+                                },
+                            },
+                            "422": {"description": "invalid request"},
+                        },
+                    }
+                }
+            },
+        }
+    ).encode()
 
 
 def _git_diff(path: str) -> str:

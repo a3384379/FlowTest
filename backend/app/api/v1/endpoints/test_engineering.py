@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.domain.test_engineering import fingerprint_contract
 from app.schemas.test_engineering import (
     TestEngineeringApplyResponse,
     TestEngineeringGenerateRequest,
@@ -27,12 +28,25 @@ async def generate_test_design(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> TestEngineeringGenerateResponse:
-    design, fingerprint = await TestEngineeringService(session).generate(
+    service = TestEngineeringService(session)
+    design, fingerprint = await service.generate(
         actor=current_user,
         project_id=project_id,
         payload=payload,
     )
-    return TestEngineeringGenerateResponse(fingerprint=fingerprint, design=design)
+    contract = payload.contract
+    if payload.api_definition_id is not None:
+        contract = await service.contract_for_api(
+            project_id=project_id, definition_id=payload.api_definition_id
+        )
+    if contract is None:
+        raise RuntimeError("validated test engineering request lost its contract")
+    return TestEngineeringGenerateResponse(
+        fingerprint=fingerprint,
+        design=design,
+        contract_completeness=contract.completeness,
+        contract_fingerprint=fingerprint_contract(contract),
+    )
 
 
 @router.post("/proposals", response_model=TestEngineeringProposalResponse, status_code=201)
@@ -85,6 +99,9 @@ async def apply_test_design_proposal(
 
 
 def _proposal_response(view: TestEngineeringProposalView) -> TestEngineeringProposalResponse:
+    contract_fingerprint = view.change_set.source_snapshot.get("contract_fingerprint")
+    contract = view.change_set.source_snapshot.get("contract")
+    completeness = contract.get("completeness") if isinstance(contract, dict) else None
     return TestEngineeringProposalResponse(
         change_set_id=view.change_set.id,
         status=view.change_set.status,
@@ -93,4 +110,8 @@ def _proposal_response(view: TestEngineeringProposalView) -> TestEngineeringProp
         design=view.design,
         scenario_ids=view.scenario_ids,
         applied=view.change_set.applied_at is not None,
+        contract_completeness=(completeness if isinstance(completeness, str) else "legacy_partial"),
+        contract_fingerprint=(
+            contract_fingerprint if isinstance(contract_fingerprint, str) else ""
+        ),
     )

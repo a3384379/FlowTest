@@ -166,8 +166,20 @@ class ScenarioMutation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(min_length=1, max_length=512)
+    location: Literal["path", "query", "header", "cookie", "body", "auth"]
     operation: Literal["set", "omit", "null", "invalid_type", "duplicate"]
     value: JsonValue | None = None
+
+
+class ScenarioRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path_parameters: dict[str, JsonValue] = Field(default_factory=dict, max_length=200)
+    query_parameters: dict[str, JsonValue] = Field(default_factory=dict, max_length=200)
+    headers: dict[str, JsonValue] = Field(default_factory=dict, max_length=200)
+    cookies: dict[str, JsonValue] = Field(default_factory=dict, max_length=200)
+    body: JsonValue = None
+    auth_disabled: bool = False
 
 
 class ScenarioCandidate(BaseModel):
@@ -177,6 +189,7 @@ class ScenarioCandidate(BaseModel):
     kind: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=240)
     request_body: dict[str, JsonValue] = Field(default_factory=dict, max_length=500)
+    request: ScenarioRequest = Field(default_factory=ScenarioRequest)
     mutations: list[ScenarioMutation] = Field(default_factory=list, max_length=20)
     expected_category: Literal["success", "invalid_request", "unauthorized", "review"]
     negative: bool = False

@@ -321,6 +321,9 @@ function FailureTriagePanel({ value }: { value: ChangeRegressionRun['failure_tri
           <Descriptions.Item label="Affected Service">
             {value.affected_service ?? '未定位'}
           </Descriptions.Item>
+          <Descriptions.Item label="Endpoint Variant">
+            {value.endpoint_variant ?? '未定位'}
+          </Descriptions.Item>
           <Descriptions.Item label="Affected Operation">
             {value.affected_operation ?? '未定位'}
           </Descriptions.Item>

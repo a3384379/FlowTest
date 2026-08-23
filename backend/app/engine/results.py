@@ -68,6 +68,8 @@ class HttpRequestSnapshot(BaseModel):
     url: str = Field(min_length=1, max_length=4096)
     headers: dict[str, str] = Field(default_factory=dict)
     body: JsonValue = None
+    service_key: str | None = Field(default=None, max_length=160)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
 
 
 class HttpResponseSnapshot(BaseModel):

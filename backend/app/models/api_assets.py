@@ -124,6 +124,13 @@ class APIVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):
     assertions: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, default=list, server_default="[]"
     )
+    canonical_contract: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}"
+    )
+    contract_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    contract_completeness: Mapped[str] = mapped_column(
+        String(32), default="legacy_partial", server_default="legacy_partial"
+    )
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     @property

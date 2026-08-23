@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import get_session
 from app.core.security import password_service
 from app.domain.flow_spec import (
+    FlowSpec,
     FlowSpecAssertion,
     FlowSpecEdge,
     FlowSpecNode,
@@ -96,6 +97,63 @@ def test_flowspec_normalization_is_portable_and_secret_safe() -> None:
     validation = validate_flow_spec(unsafe)
     assert validation.valid is False
     assert any(item.code == "SECRET_LITERAL_FORBIDDEN" for item in validation.issues)
+
+
+def test_legacy_v2_fingerprint_does_not_reinterpret_v3_version_fields() -> None:
+    legacy = FlowSpec.model_validate(
+        {
+            "fingerprint_version": "flowtest-flow-spec-fingerprint-v2",
+            "name": "Legacy pinned",
+            "operations": [
+                {
+                    "ref": "orders.get",
+                    "method": "GET",
+                    "path": "/orders/{id}",
+                    "api_version": 1,
+                    "contract_fingerprint": "a" * 64,
+                }
+            ],
+            "nodes": [{"id": "end", "kind": "end", "name": "End"}],
+        }
+    )
+    enriched = legacy.model_copy(
+        update={
+            "operations": [
+                legacy.operations[0].model_copy(
+                    update={"version_strategy": "current", "source_version": 9}
+                )
+            ]
+        }
+    )
+
+    assert flow_spec_fingerprint(legacy) == flow_spec_fingerprint(enriched)
+
+
+def test_v3_fingerprint_includes_version_strategy_and_contract_identity() -> None:
+    pinned = FlowSpec.model_validate(
+        {
+            "name": "V3 pinned",
+            "fingerprint_version": "flowtest-flow-spec-fingerprint-v3",
+            "operations": [
+                {
+                    "ref": "orders.get",
+                    "method": "GET",
+                    "path": "/orders/{id}",
+                    "version_strategy": "pinned",
+                    "source_version": 1,
+                    "contract_fingerprint": "a" * 64,
+                }
+            ],
+            "nodes": [{"id": "end", "kind": "end", "name": "End"}],
+        }
+    )
+    current = pinned.model_copy(
+        update={
+            "operations": [pinned.operations[0].model_copy(update={"version_strategy": "current"})]
+        }
+    )
+
+    assert flow_spec_fingerprint(pinned) != flow_spec_fingerprint(current)
 
 
 def test_flowspec_diff_and_compatibility_report_reviewable_changes() -> None:
@@ -337,6 +395,21 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     target_project, target_service, target_api = await _create_portable_assets(
         flow_spec_client, headers, "Target"
     )
+    for project_id, api_id, versions in (
+        (source_project, source_api, (2, 3)),
+        (target_project, target_api, (2, 3, 4)),
+    ):
+        for version in versions:
+            created_version = await flow_spec_client.post(
+                f"/api/v1/projects/{project_id}/apis/{api_id}/versions",
+                headers=headers,
+                json={
+                    "method": "GET",
+                    "path": f"/orders/v{version}",
+                    "body_kind": "none",
+                },
+            )
+            assert created_version.status_code == 201, created_version.text
     workflow = await flow_spec_client.post(
         f"/api/v1/projects/{source_project}/workflows",
         headers=headers,
@@ -361,8 +434,14 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
                         "position": {"x": 200, "y": 0},
                         "config": {
                             "api_definition_id": source_api,
+                            "api_version": 1,
                             "service_override": "orders",
                             "endpoint_variant": "canary",
+                            "request_overrides": {
+                                "headers": {},
+                                "replace_headers": True,
+                                "auth_disabled": True,
+                            },
                         },
                     },
                     {
@@ -393,6 +472,11 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     assert exported.status_code == 200, exported.text
     spec = exported.json()["spec"]
     operation_ref = spec["operations"][0]["ref"]
+    assert spec["fingerprint_version"] == "flowtest-flow-spec-fingerprint-v3"
+    assert spec["operations"][0]["version_strategy"] == "pinned"
+    assert spec["operations"][0]["source_version"] == 1
+    assert spec["operations"][0]["api_version"] is None
+    assert len(spec["operations"][0]["contract_fingerprint"]) == 64
     service_ref = spec["services"][0]["ref"]
     request_node = next(node for node in spec["nodes"] if node["id"] == "request")
     assert request_node["operation_ref"] == operation_ref
@@ -446,6 +530,8 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     assert config["api_definition_id"] == target_api
     assert config["service_override"] == "orders"
     assert config["endpoint_variant"] == "canary"
+    assert config["api_version"] == 1
+    assert config["request_overrides"]["auth_disabled"] is True
 
 
 @pytest.mark.asyncio
@@ -616,6 +702,7 @@ async def test_test_engineering_proposal_materializes_existing_assets(
     assert request_config["api_definition_id"] == api_id
     assert request_config["endpoint_variant"] == "blue"
     assert request_config["expected_statuses"] == [200]
+    assert request_config["api_version"] == 1
     test_case = await flow_spec_client.get(
         f"/api/v1/projects/{project_id}/test-cases/{result['test_case_ids'][0]}",
         headers=headers,

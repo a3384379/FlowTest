@@ -6,6 +6,9 @@ stamped with the latest migration revision.  Subsequent schema changes still use
 Alembic; the stamp keeps the normal migration tooling aware of the installed baseline.
 """
 
+import json
+import re
+from hashlib import sha256
 from typing import cast
 from uuid import uuid4
 
@@ -17,7 +20,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0041"
+BASELINE_REVISION = "20260823_0042"
 
 
 async def initialize_standalone_database() -> None:
@@ -84,6 +87,25 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     )
     await _add_column_if_missing(
         connection,
+        table="api_versions",
+        column="canonical_contract",
+        definition="JSON NOT NULL DEFAULT '{}'",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="api_versions",
+        column="contract_fingerprint",
+        definition="VARCHAR(64)",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="api_versions",
+        column="contract_completeness",
+        definition="VARCHAR(32) NOT NULL DEFAULT 'legacy_partial'",
+    )
+    await _ensure_s471_api_version_contracts(connection)
+    await _add_column_if_missing(
+        connection,
         table="api_call_executions",
         column="target_snapshot",
         definition="JSON NOT NULL DEFAULT '{}'",
@@ -103,7 +125,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040')"
+            "'20260823_0040', '20260823_0041')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -113,7 +135,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040')"
+            "'20260823_0040', '20260823_0041')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -144,6 +166,147 @@ async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
             column=column,
             definition=definition,
         )
+
+
+async def _ensure_s471_api_version_contracts(connection: AsyncConnection) -> None:
+    columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
+    if not columns.fetchall():
+        return
+    await connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_api_versions_contract_fingerprint "
+            "ON api_versions (contract_fingerprint)"
+        )
+    )
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT id, version, method, path, query_parameters, headers, body, "
+                "auth_kind, auth_config, canonical_contract FROM api_versions"
+            )
+        )
+    ).mappings()
+    for row in rows:
+        if _json_value(row["canonical_contract"]):
+            continue
+        contract = _standalone_legacy_contract(dict(row))
+        canonical = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        await connection.execute(
+            text(
+                "UPDATE api_versions SET canonical_contract = :contract, "
+                "contract_fingerprint = :fingerprint, "
+                "contract_completeness = 'legacy_partial' WHERE id = :id"
+            ),
+            {
+                "id": row["id"],
+                "contract": canonical,
+                "fingerprint": sha256(canonical.encode()).hexdigest(),
+            },
+        )
+
+
+def _standalone_legacy_contract(row: dict[str, object]) -> dict[str, object]:
+    path = str(row["path"]).split("?", 1)[0] or "/"
+    body = _json_value(row.get("body"))
+    body_schema = _standalone_inferred_schema(body) if body is not None else {}
+    auth_kind = str(row.get("auth_kind") or "none")
+    auth_config = _json_value(row.get("auth_config"))
+    auth_config = auth_config if isinstance(auth_config, dict) else {}
+    auth_location = auth_config.get("in")
+    return {
+        "operation": f"legacy_{str(row['id']).replace('-', '_')}",
+        "method": str(row["method"]),
+        "path": path,
+        "service": None,
+        "auth": {
+            "required": auth_kind != "none",
+            "kind": auth_kind,
+            "location": (
+                auth_location
+                if auth_location in {"header", "query", "cookie"}
+                else ("header" if auth_kind != "none" else None)
+            ),
+            "name": auth_config.get("name"),
+            "source_ref": None,
+        },
+        "parameters": _standalone_legacy_parameters(row, path),
+        "request_body": (
+            {"required": False, "content_type": "application/json", "schema": body_schema}
+            if body_schema
+            else None
+        ),
+        "request": body_schema,
+        "responses": {},
+        "source_ref": f"api-version://{row['id']}",
+        "revision": str(row["version"]),
+        "completeness": "legacy_partial",
+    }
+
+
+def _standalone_legacy_parameters(row: dict[str, object], path: str) -> list[dict[str, object]]:
+    parameters = [
+        _standalone_parameter(name, "path", True)
+        for name in re.findall(r"\{\{?([A-Za-z_][A-Za-z0-9_.-]*)\}\}?", path)
+    ]
+    query = _json_value(row.get("query_parameters"))
+    if isinstance(query, list):
+        parameters.extend(
+            _standalone_parameter(str(item["name"]), "query", item.get("required") is True)
+            for item in query
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        )
+    headers = _json_value(row.get("headers"))
+    if isinstance(headers, dict):
+        parameters.extend(
+            _standalone_parameter(str(name), "header", False) for name in sorted(headers)
+        )
+    return parameters
+
+
+def _standalone_parameter(name: str, location: str, required: bool) -> dict[str, object]:
+    return {
+        "name": name,
+        "location": location,
+        "required": required,
+        "schema": {"type": "string"},
+        "example": None,
+        "style": None,
+        "explode": None,
+        "source_ref": None,
+    }
+
+
+def _standalone_inferred_schema(value: object) -> dict[str, object]:
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, list):
+        return {
+            "type": "array",
+            "items": _standalone_inferred_schema(value[0]) if value else {},
+        }
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "properties": {
+                str(key): _standalone_inferred_schema(child) for key, child in value.items()
+            },
+        }
+    if value is None:
+        return {}
+    return {"type": "string"}
+
+
+def _json_value(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
 
 
 async def _ensure_change_regression_tables(connection: AsyncConnection) -> None:

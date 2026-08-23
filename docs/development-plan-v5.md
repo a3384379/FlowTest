@@ -227,3 +227,25 @@ S47 以已实现代码为事实源，校正了上述早期草案的里程碑命�
 S47 不改变 Windows 72 小时试点、14 日 RC 观察、真实备份恢复和人工签署门槛。
 实际验收证据、未完成项和发布判定见
 [S47 V5 功能闭环记录](release/s47-v5-functional-completion.md)。
+
+## S47.1 语义正确性校正（2026-08-23）
+
+S47.1 不重建 S47 的资产或引擎，而是把真实 OpenAPI 导入后的语义贯穿既有链路：
+
+1. APIVersion 保存 Canonical Operation Contract 和 fingerprint，区分 Path/Query/Header/Cookie/
+   Body/Auth，并保留 request/response Schema；旧数据只做可证明的 partial backfill。
+2. Evidence Bundle 通过明确 Projection 进入 Scenario、Oracle、Coverage 和 Graph；冲突保留双方
+   provenance，自动物化被阻断。
+3. Scenario Mutation 和 Workflow request override 保留参数位置，Runtime 支持节点级 auth disabled，
+   Schema/JSON Path/受支持 expression Oracle 复用现有 Assert 节点。
+4. FlowSpec fingerprint v3 将 pinned/current、source version 和 contract fingerprint 纳入语义；
+   pinned 映射必须 exact compatible，禁止回退 current。
+5. Change Regression 分离 Asset Mapping 与 Test Semantic Coverage，从 Current Canonical Contract
+   生成真实 Oracle，并经既有 ChangeSet 审核后复用 TestEngineering 物化服务。
+6. Source Evidence 增加 value-level Secret/PII redaction；Failure Triage 区分 received 5xx upstream
+   与 no-response endpoint/network，并使用 service key。
+7. 0042 迁移、Standalone SQLite 和 Transfer 同步；0041 downgrade 不再伪造 key migrated。
+
+Pairwise value-partition covering array 和显式 State Model 仍是 P1；State 无证据时能力明确不可用。
+真实 Key Rotation 和外部发布门槛仍阻断 GA。详细记录见
+[S47.1 语义正确性与证据闭环](release/s47-1-semantic-correctness.md)。

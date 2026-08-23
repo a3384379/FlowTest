@@ -2,7 +2,12 @@
 
 from uuid import UUID
 
-from app.domain.change_regression import missing_test_design
+from app.domain.change_regression import (
+    _focused_change_contract,
+    _mutation_path,
+    _schema_at_path,
+    missing_test_design,
+)
 from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.flow_spec import (
     FlowSpecNodeTarget,
@@ -181,10 +186,82 @@ def test_s47_change_boundary_and_failure_triage_are_concrete() -> None:
         "historical_boundary": 100,
         "historical_adjacent": 101,
     }
-    assert triage.primary_classification == "SERVICE_ENDPOINT_FAILURE"
+    assert triage.primary_classification == "UPSTREAM_SERVICE_FAILURE"
+    assert "UPSTREAM_RESPONSE_5XX" in triage.reason_codes
     assert triage.evidence_refs == ["execution://s47/item/1"]
     assert triage.retry_signal is True
     assert triage.recommended_regression
+
+
+def test_s47_semantic_coverage_avoids_historical_boundary_duplicates() -> None:
+    current_contract = OperationContract.model_validate(
+        {
+            "operation": "orders.create",
+            "method": "POST",
+            "path": "/tenants/{tenant_id}/orders",
+            "auth": {"required": True, "kind": "bearer"},
+            "parameters": [
+                {
+                    "name": "tenant_id",
+                    "location": "path",
+                    "required": True,
+                    "schema": {"type": "string", "format": "uuid"},
+                }
+            ],
+            "request_body": {
+                "required": True,
+                "schema": {
+                    "type": "object",
+                    "required": ["quantity"],
+                    "properties": {"quantity": {"type": "integer", "minimum": 1, "maximum": 999}},
+                },
+            },
+            "responses": {
+                "201": {"description": "created"},
+                "422": {"description": "invalid"},
+            },
+        }
+    )
+    document = DesignDocument.model_validate(
+        missing_test_design(
+            gap={
+                "change_key": "orders.quantity.maximum",
+                "source_key": "POST /orders",
+                "label": "quantity maximum 100 -> 999",
+                "semantic_type": "maximum_changed",
+                "field_path": "request.body.quantity.maximum",
+                "before": 100,
+                "after": 999,
+            },
+            source_ref="github://acme/orders/commit/s47-1",
+            position=1,
+            current_contract=current_contract,
+            covered_values={"99", "100", "101"},
+        )
+    )
+
+    assert {
+        scenario.mutations[0].value for scenario in document.scenarios if scenario.mutations
+    } == {999, 1000}
+    assert {
+        oracle.expected
+        for oracle in document.oracles
+        if oracle.kind == "status" and oracle.deterministic
+    } == {
+        201,
+        422,
+    }
+    assert (
+        _focused_change_contract(current_contract, {"field_path": "request.body.quantity"})
+        is current_contract
+    )
+    assert (
+        _focused_change_contract(current_contract, {"field_path": "request.body.missing.maximum"})
+        is current_contract
+    )
+    assert _schema_at_path({"properties": {"quantity": 1}}, ["quantity", "child"]) is None
+    assert _schema_at_path({"type": "object"}, ["missing"]) is None
+    assert _mutation_path(document) == "body.quantity"
 
 
 def _node(node_id: str, node_type: str, config: dict[str, str]) -> dict[str, object]:

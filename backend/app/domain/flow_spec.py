@@ -30,7 +30,7 @@ from app.engine.contracts import (
 )
 
 FLOW_SPEC_SCHEMA_VERSION = "flowtest-flow-spec-v1"
-FLOW_SPEC_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v2"
+FLOW_SPEC_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v3"
 FLOW_SPEC_LEGACY_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v1"
 
 
@@ -81,6 +81,17 @@ class FlowSpecOperation(BaseModel):
     name: str = Field(default="", max_length=200)
     method: str = Field(pattern=r"^[A-Z]+$", min_length=3, max_length=16)
     path: str = Field(min_length=1, max_length=2048)
+    version_strategy: Literal["pinned", "current"] | None = None
+    source_version: int | None = Field(default=None, ge=1)
+    # v1/v2 compatibility only. New v3 exports use version_strategy/source_version.
+    api_version: int | None = Field(default=None, ge=1)
+    contract_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_version_identity(self) -> FlowSpecOperation:
+        if self.version_strategy == "pinned" and self.source_version is None:
+            raise ValueError("pinned operations require source_version")
+        return self
 
 
 class FlowSpecEdge(BaseModel):
@@ -156,8 +167,10 @@ class FlowSpec(BaseModel):
 
     schema_version: str = FLOW_SPEC_SCHEMA_VERSION
     fingerprint_version: Literal[
-        "flowtest-flow-spec-fingerprint-v1", "flowtest-flow-spec-fingerprint-v2"
-    ] = "flowtest-flow-spec-fingerprint-v2"
+        "flowtest-flow-spec-fingerprint-v1",
+        "flowtest-flow-spec-fingerprint-v2",
+        "flowtest-flow-spec-fingerprint-v3",
+    ] = "flowtest-flow-spec-fingerprint-v3"
     project_id: UUID | None = None
     name: str = Field(default="Imported Flow", min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)
@@ -347,6 +360,16 @@ def flow_spec_fingerprint(spec: FlowSpec) -> str:
     payload.pop("confidence", None)
     payload.pop("fingerprint_version", None)
     version = normalized.fingerprint_version
+    if version in {
+        "flowtest-flow-spec-fingerprint-v1",
+        "flowtest-flow-spec-fingerprint-v2",
+    }:
+        operations = payload.get("operations")
+        if isinstance(operations, list):
+            for operation in operations:
+                if isinstance(operation, dict):
+                    operation.pop("version_strategy", None)
+                    operation.pop("source_version", None)
     canonical = json.dumps(
         {"version": version, "spec": payload},
         ensure_ascii=False,
@@ -469,6 +492,27 @@ def _validate_semantic_references(spec: FlowSpec) -> list[FlowSpecIssue]:
                     code="UNKNOWN_SERVICE_REF",
                     message=f"Operation 引用了未知 Service {operation.service_ref}",
                     path=f"$.operations[{index}].service_ref",
+                )
+            )
+        if spec.fingerprint_version == FLOW_SPEC_FINGERPRINT_VERSION:
+            version_identity_missing = (
+                operation.version_strategy is None
+                or operation.source_version is None
+                or operation.contract_fingerprint is None
+            )
+        else:
+            version_identity_missing = (
+                operation.api_version is None or operation.contract_fingerprint is None
+            )
+        if version_identity_missing:
+            issues.append(
+                FlowSpecIssue(
+                    code="OPERATION_VERSION_IDENTITY_REQUIRED",
+                    message=(
+                        "v3 Operation 必须声明 version_strategy、source_version 与 "
+                        "canonical contract fingerprint"
+                    ),
+                    path=f"$.operations[{index}]",
                 )
             )
     issues.extend(_validate_node_semantics(spec, known_services))
@@ -729,9 +773,17 @@ def flow_spec_to_workflow_definition(
     *,
     operation_mappings: Mapping[str, UUID] | None = None,
     service_keys: Mapping[str, str] | None = None,
+    operation_versions: Mapping[str, int] | None = None,
 ) -> WorkflowDefinition:
+    operations = {operation.ref: operation for operation in spec.operations}
     nodes = [
-        _flow_spec_node_to_workflow_node(node, operation_mappings or {}, service_keys or {})
+        _flow_spec_node_to_workflow_node(
+            node,
+            operation_mappings or {},
+            service_keys or {},
+            operation_versions or {},
+            operations,
+        )
         for node in spec.nodes
     ]
     edges = [WorkflowEdge.model_validate(edge.model_dump(mode="json")) for edge in spec.edges]
@@ -752,6 +804,8 @@ def _flow_spec_node_to_workflow_node(
     node: FlowSpecNode,
     operation_mappings: Mapping[str, UUID],
     service_keys: Mapping[str, str],
+    operation_versions: Mapping[str, int],
+    operations: Mapping[str, FlowSpecOperation],
 ) -> WorkflowNode:
     node_type = _FLOW_NODE_TYPES.get(node.kind)
     if node_type is None:
@@ -762,6 +816,14 @@ def _flow_spec_node_to_workflow_node(
         if mapped_operation is None:
             raise ValueError(f"Operation {node.operation_ref} has no target mapping")
         config["api_definition_id"] = str(mapped_operation)
+        operation = operations[node.operation_ref]
+        version = None
+        if operation.version_strategy != "current":
+            version = operation_versions.get(node.operation_ref)
+            if version is None and operation.version_strategy is None:
+                version = operation.api_version
+        if version is not None:
+            config["api_version"] = version
     if node.target is not None and node.target.service_ref is not None:
         service_key = service_keys.get(node.target.service_ref)
         if service_key is None:

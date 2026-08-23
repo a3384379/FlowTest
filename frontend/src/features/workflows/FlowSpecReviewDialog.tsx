@@ -7,6 +7,7 @@ import {
   Descriptions,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
@@ -44,6 +45,9 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
   const [proposal, setProposal] = useState<Awaited<ReturnType<typeof importFlowSpec>> | null>(null)
   const [serviceMappings, setServiceMappings] = useState<Record<string, string>>({})
   const [operationMappings, setOperationMappings] = useState<Record<string, string>>({})
+  const [operationVersionMappings, setOperationVersionMappings] = useState<Record<string, number>>(
+    {},
+  )
   const [busy, setBusy] = useState(false)
   const services = useQuery({
     queryKey: ['flow-spec-target-services', props.projectId],
@@ -65,6 +69,7 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
       setProposal(null)
       setServiceMappings({})
       setOperationMappings({})
+      setOperationVersionMappings({})
     }, '当前草稿已导出')
   }
 
@@ -88,6 +93,7 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
           {
             service_mappings: serviceMappings,
             operation_mappings: operationMappings,
+            operation_version_mappings: operationVersionMappings,
           },
         ),
       )
@@ -145,7 +151,7 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
         <Alert
           showIcon
           type="info"
-          title="跨项目导入必须将便携 Service / Operation Ref 映射到当前项目资产，不使用源实例 UUID。"
+          title="跨项目导入按 canonical contract fingerprint 校验版本：pinned 恢复显式 api_version，current 保持跟随目标 API 当前版本。"
         />
         <Space wrap>
           <Button loading={busy} onClick={() => void exportCurrent()}>
@@ -182,11 +188,15 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
             apis={props.apis}
             serviceMappings={serviceMappings}
             operationMappings={operationMappings}
+            operationVersionMappings={operationVersionMappings}
             onServiceMapping={(ref, id) =>
               setServiceMappings((current) => ({ ...current, [ref]: id }))
             }
             onOperationMapping={(ref, id) =>
               setOperationMappings((current) => ({ ...current, [ref]: id }))
+            }
+            onOperationVersionMapping={(ref, version) =>
+              setOperationVersionMappings((current) => ({ ...current, [ref]: version }))
             }
           />
         ) : null}
@@ -205,16 +215,20 @@ function MappingReview({
   apis,
   serviceMappings,
   operationMappings,
+  operationVersionMappings,
   onServiceMapping,
   onOperationMapping,
+  onOperationVersionMapping,
 }: {
   spec: FlowSpec
   services: Array<{ id: string; service_key: string; name: string; enabled: boolean }>
   apis: ApiDefinition[]
   serviceMappings: Record<string, string>
   operationMappings: Record<string, string>
+  operationVersionMappings: Record<string, number>
   onServiceMapping: (ref: string, id: string) => void
   onOperationMapping: (ref: string, id: string) => void
+  onOperationVersionMapping: (ref: string, version: number) => void
 }) {
   return (
     <Card title="Portable Resource Mapping Review" size="small">
@@ -239,19 +253,42 @@ function MappingReview({
         {spec.operations.map((source) => (
           <Form.Item
             key={source.ref}
-            label={`Operation ${source.ref} · ${source.method} ${source.path}`}
+            label={`Operation ${source.ref} · ${source.method} ${source.path} · Source v${source.source_version ?? source.api_version ?? 'unversioned'}`}
             required
           >
-            <Select
-              aria-label={`Operation Mapping ${source.ref}`}
-              value={operationMappings[source.ref]}
-              options={apis.map((target) => ({
-                value: target.id,
-                label: `${target.name} · v${target.current_version}`,
-                disabled: !target.is_active,
-              }))}
-              onChange={(value) => onOperationMapping(source.ref, value)}
-            />
+            <Space orientation="vertical" style={{ width: '100%' }}>
+              <Descriptions size="small" bordered column={2}>
+                <Descriptions.Item label="Version Strategy">
+                  {source.version_strategy ?? 'legacy pinned'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Contract Fingerprint">
+                  <Typography.Text code>{source.contract_fingerprint ?? 'missing'}</Typography.Text>
+                </Descriptions.Item>
+              </Descriptions>
+              <Select
+                aria-label={`Operation Mapping ${source.ref}`}
+                value={operationMappings[source.ref]}
+                options={apis.map((target) => ({
+                  value: target.id,
+                  label: `${target.name} · v${target.current_version}`,
+                  disabled: !target.is_active,
+                }))}
+                onChange={(value) => onOperationMapping(source.ref, value)}
+              />
+              {source.version_strategy === 'pinned' ? (
+                <InputNumber
+                  aria-label={`Operation Version Mapping ${source.ref}`}
+                  min={1}
+                  precision={0}
+                  placeholder="可选：显式目标版本；留空则按 Contract Fingerprint 匹配"
+                  style={{ width: '100%' }}
+                  value={operationVersionMappings[source.ref]}
+                  onChange={(value) => {
+                    if (typeof value === 'number') onOperationVersionMapping(source.ref, value)
+                  }}
+                />
+              ) : null}
+            </Space>
           </Form.Item>
         ))}
       </Form>

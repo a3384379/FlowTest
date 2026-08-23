@@ -9,6 +9,7 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Protocol, cast
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -21,6 +22,13 @@ _SECRET_KEY = re.compile(
     r"(?:^|[_-])(authorization|cookie|password|secret|token|api[_-]?key)(?:$|[_-])",
     re.IGNORECASE,
 )
+_EMAIL_VALUE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_BEARER_VALUE = re.compile(r"^Bearer\s+\S+$", re.IGNORECASE)
+_BASIC_VALUE = re.compile(r"^Basic\s+[A-Za-z0-9+/=]{8,}$", re.IGNORECASE)
+_JWT_VALUE = re.compile(r"^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$")
+_CARD_VALUE = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
+_AWS_ACCESS_KEY = re.compile(r"^(?:AKIA|ASIA)[A-Z0-9]{16}$")
+_PHONE_VALUE = re.compile(r"^\+?[1-9]\d{9,14}$")
 
 
 class EvidenceSourceType(StrEnum):
@@ -59,6 +67,28 @@ class EvidenceFinding(BaseModel):
     revision: str = Field(min_length=1, max_length=160)
     sensitive: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def redact_sensitive_values(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        structured = value.get("structured_data")
+        if not isinstance(structured, dict):
+            return value
+        sanitized, changed = _sanitize_evidence_value(cast(JsonValue, structured))
+        if not changed:
+            return value
+        warnings = (
+            list(value.get("warnings", [])) if isinstance(value.get("warnings"), list) else []
+        )
+        warnings.append("sensitive evidence values redacted")
+        return {
+            **value,
+            "structured_data": sanitized,
+            "sensitive": True,
+            "warnings": sorted(set(str(item) for item in warnings))[:20],
+        }
 
     @model_validator(mode="after")
     def reject_sensitive_values(self) -> EvidenceFinding:
@@ -174,6 +204,7 @@ class SourceSnapshot(BaseModel):
 
     @model_validator(mode="after")
     def validate_budget_and_allowlist(self) -> SourceSnapshot:
+        _validate_repository_identity(self.repository_url)
         prefixes = tuple(path.rstrip("/") + "/" for path in self.allowlist_paths)
         if any(not file.path.startswith(prefixes) for file in self.files):
             raise ValueError("source evidence file is outside the allowlist")
@@ -261,10 +292,42 @@ def _python_node_evidence(node: ast.AST) -> tuple[str | None, dict[str, JsonValu
             and isinstance(child.value, ast.Constant)
             and isinstance(child.value.value, (str, int, float, bool))
         ]
+        if any(not _safe_source_enum_value(value) for value in values):
+            return "enum", {
+                "name": node.name,
+                "value_count": len(values),
+                "value_hashes": [
+                    sha256(
+                        json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
+                    ).hexdigest()
+                    for value in values
+                ],
+                "values_redacted": True,
+            }
         return "enum", {"name": node.name, "values": cast(list[JsonValue], values)}
     if isinstance(node, ast.Raise):
         return "error_branch", {"exception": _base_name(node.exc) if node.exc else "reraised"}
+    if isinstance(node, ast.Compare):
+        constraint = _comparison_constraint(node)
+        if constraint is not None:
+            return "validation_constraint", constraint
     return None, {}
+
+
+def _comparison_constraint(node: ast.Compare) -> dict[str, JsonValue] | None:
+    if len(node.ops) != 1 or len(node.comparators) != 1:
+        return None
+    comparator = node.comparators[0]
+    if not isinstance(comparator, ast.Constant) or not isinstance(comparator.value, (int, float)):
+        return None
+    name = _base_name(node.left).rsplit(".", 1)[-1]
+    if not name:
+        return None
+    if isinstance(node.ops[0], (ast.Lt, ast.LtE)):
+        return {"name": name, "maximum": comparator.value}
+    if isinstance(node.ops[0], (ast.Gt, ast.GtE)):
+        return {"name": name, "minimum": comparator.value}
+    return None
 
 
 def _route_data(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, JsonValue] | None:
@@ -342,3 +405,84 @@ def _is_redacted_marker(value: JsonValue) -> bool:
         or value is True
         or (isinstance(value, str) and value in {"", "***"})
     )
+
+
+def _sanitize_evidence_value(value: JsonValue, key: str = "") -> tuple[JsonValue, bool]:
+    if isinstance(value, dict):
+        result: dict[str, JsonValue] = {}
+        changed = False
+        for child_key, child in value.items():
+            if _SECRET_KEY.search(child_key) and not _is_redacted_marker(child):
+                result[child_key] = "***"
+                changed = True
+                continue
+            result[child_key], child_changed = _sanitize_evidence_value(child, child_key)
+            changed = changed or child_changed
+        return result, changed
+    if isinstance(value, list):
+        result_list: list[JsonValue] = []
+        changed = False
+        for child in value:
+            sanitized, child_changed = _sanitize_evidence_value(child, key)
+            result_list.append(sanitized)
+            changed = changed or child_changed
+        return result_list, changed
+    if isinstance(value, str) and _looks_sensitive_value(value):
+        return "***", True
+    return value, False
+
+
+def _looks_sensitive_value(value: str) -> bool:
+    if value in {"", "***"} or value.startswith("secret://") or "{{secret." in value:
+        return False
+    return bool(
+        _EMAIL_VALUE.search(value)
+        or _BEARER_VALUE.fullmatch(value)
+        or _BASIC_VALUE.fullmatch(value)
+        or _JWT_VALUE.fullmatch(value)
+        or _CARD_VALUE.search(value)
+        or _AWS_ACCESS_KEY.fullmatch(value)
+        or _PHONE_VALUE.fullmatch(value)
+        or "-----BEGIN " in value
+        or _url_contains_userinfo(value)
+        or _high_entropy_credential(value)
+    )
+
+
+def _url_contains_userinfo(value: str) -> bool:
+    if "://" not in value:
+        return False
+    parsed = urlsplit(value)
+    return parsed.username is not None or parsed.password is not None
+
+
+def _safe_source_enum_value(value: str | int | float | bool) -> bool:
+    if not isinstance(value, str):
+        return True
+    return len(value) <= 80 and not _looks_sensitive_value(value)
+
+
+def _high_entropy_credential(value: str) -> bool:
+    if not 32 <= len(value) <= 512 or re.fullmatch(r"[A-Za-z0-9_+/=-]+", value) is None:
+        return False
+    return (
+        any(character.islower() for character in value)
+        and any(character.isupper() for character in value)
+        and any(character.isdigit() for character in value)
+    )
+
+
+def _validate_repository_identity(value: str) -> None:
+    if value.startswith("git@"):
+        # The leading `git@` is the only allowed at-sign for SCP syntax.
+        if value.count("@") != 1 or "?" in value or "#" in value or "://" in value:
+            raise ValueError("repository URL must not contain credentials, query, or fragment")
+        return
+    parsed = urlsplit(value)
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("repository URL must not contain credentials, query, or fragment")

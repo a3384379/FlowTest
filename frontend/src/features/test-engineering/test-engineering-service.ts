@@ -12,7 +12,15 @@ export type ScenarioCandidate = {
   kind: string
   title: string
   request_body: Record<string, unknown>
-  mutations: Array<{ path: string; operation: string; value: unknown }>
+  request: {
+    path_parameters: Record<string, unknown>
+    query_parameters: Record<string, unknown>
+    headers: Record<string, unknown>
+    cookies: Record<string, unknown>
+    body: unknown
+    auth_disabled: boolean
+  }
+  mutations: Array<{ location: string; path: string; operation: string; value: unknown }>
   expected_category: string
   negative: boolean
   evidence_refs: string[]
@@ -70,6 +78,8 @@ export type TestEngineeringGeneration = {
   fingerprint: string
   design: TestDesignDocument
   persisted: false
+  contract_completeness: string
+  contract_fingerprint: string
 }
 
 export type TestEngineeringProposal = {
@@ -80,6 +90,8 @@ export type TestEngineeringProposal = {
   design: TestDesignDocument
   scenario_ids: string[]
   applied: boolean
+  contract_completeness: string
+  contract_fingerprint: string
 }
 
 export type TestEngineeringApplyResult = {

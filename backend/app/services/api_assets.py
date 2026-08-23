@@ -1,3 +1,4 @@
+import re
 from base64 import b64encode
 from dataclasses import dataclass, field, replace
 from typing import cast
@@ -19,6 +20,13 @@ from app.domain.api_assets import (
     render_template,
 )
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
+from app.domain.test_engineering import (
+    ContractAuth,
+    ContractParameter,
+    ContractRequestBody,
+    OperationContract,
+    fingerprint_contract,
+)
 from app.models.access import Folder, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.service_targets import Service, ServiceEndpoint
@@ -436,6 +444,7 @@ class APIAssetService:
         version_number: int | None = None,
         workflow_variables: dict[str, str] | None = None,
         dataset_variables: dict[str, str] | None = None,
+        auth_disabled: bool = False,
     ) -> PreparedRequest:
         _definition, api_version = await self.get_detail(
             actor=actor,
@@ -457,6 +466,7 @@ class APIAssetService:
             runtime_headers=runtime_headers,
             workflow_variables=workflow_variables or {},
             dataset_variables=dataset_variables or {},
+            api_headers_override=headers_override,
         )
         variables = target.variables
         try:
@@ -488,13 +498,14 @@ class APIAssetService:
                     for name, value in headers_override.items()
                 }
             )
-            _apply_auth(
-                api_version.auth_kind,
-                api_version.auth_config,
-                api_headers,
-                query,
-                variables,
-            )
+            if not auth_disabled:
+                _apply_auth(
+                    api_version.auth_kind,
+                    api_version.auth_config,
+                    api_headers,
+                    query,
+                    variables,
+                )
             if headers_override is not None:
                 target = replace(
                     target,
@@ -544,7 +555,7 @@ class APIAssetService:
         redacted_request = _redacted_request(
             prepared,
             secret_values=target.secret_values,
-            auth_kind=AuthKind(api_version.auth_kind),
+            auth_kind=(AuthKind.NONE if auth_disabled else AuthKind(api_version.auth_kind)),
             auth_config=api_version.auth_config,
         )
         target_snapshot = target.snapshot(
@@ -625,6 +636,7 @@ class APIAssetService:
         *, definition_id: UUID, version: int, actor_id: UUID, request: APIVersionSpec
     ) -> APIVersion:
         _validate_headers(request.headers)
+        contract = _partial_contract(request)
         return APIVersion(
             api_definition_id=definition_id,
             version=version,
@@ -657,6 +669,9 @@ class APIAssetService:
                 }
                 for assertion in request.assertions
             ],
+            canonical_contract=contract.model_dump(mode="json", by_alias=True),
+            contract_fingerprint=fingerprint_contract(contract),
+            contract_completeness=contract.completeness,
             created_by_id=actor_id,
         )
 
@@ -846,3 +861,77 @@ def _validate_headers(headers: dict[str, str]) -> None:
     for name in headers:
         if not name.strip() or any(character in name for character in "\r\n:"):
             raise AppError(code="INVALID_HEADER_NAME", message="Header 名称不合法", status_code=422)
+
+
+def _partial_contract(request: APIVersionSpec) -> OperationContract:
+    parameters: list[ContractParameter] = []
+    for match in re.finditer(r"\{\{([A-Za-z_][A-Za-z0-9_.-]*)\}\}", request.path):
+        parameters.append(
+            ContractParameter(
+                name=match.group(1), location="path", required=True, schema={"type": "string"}
+            )
+        )
+    parameters.extend(
+        ContractParameter(
+            name=item.name,
+            location="query",
+            required=False,
+            schema={"type": "string"},
+        )
+        for item in request.query_parameters
+    )
+    parameters.extend(
+        ContractParameter(
+            name=name,
+            location="header",
+            required=False,
+            schema={"type": "string"},
+        )
+        for name in sorted(request.headers)
+    )
+    request_body = (
+        ContractRequestBody(schema=_schema_from_example(request.body))
+        if request.body is not None
+        else None
+    )
+    auth_location = request.auth_config.get("in")
+    return OperationContract(
+        operation=f"manual_{request.method.value.lower()}_operation",
+        method=request.method.value,
+        path=request.path,
+        auth=ContractAuth(
+            required=request.auth_kind is not AuthKind.NONE,
+            kind=request.auth_kind.value,
+            location=(
+                auth_location
+                if auth_location in {"header", "query", "cookie"}
+                else ("header" if request.auth_kind is not AuthKind.NONE else None)
+            ),
+            name=request.auth_config.get("name"),
+        ),
+        parameters=parameters,
+        request_body=request_body,
+        request=request_body.schema_ if request_body is not None else {},
+        responses={},
+        completeness="partial",
+    )
+
+
+def _schema_from_example(value: JsonValue) -> dict[str, JsonValue]:
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, list):
+        items = _schema_from_example(value[0]) if value else {}
+        return {"type": "array", "items": items}
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "properties": {str(name): _schema_from_example(child) for name, child in value.items()},
+        }
+    if value is None:
+        return {}
+    return {"type": "string"}

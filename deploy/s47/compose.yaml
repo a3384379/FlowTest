@@ -1,6 +1,6 @@
 # Isolated local/CI overlay for the S47 functional-completion smoke.
 # The base stack keeps its developer ports; this overlay removes every host
-# binding except the API under test so existing FlowTest stacks are untouched.
+# binding except the isolated API/UI/mock-target ports used by the acceptance test.
 services:
   postgres:
     ports: !override []
@@ -12,7 +12,8 @@ services:
     ports: !override []
 
   mock-target:
-    ports: !override []
+    ports: !override
+      - "127.0.0.1:${FLOWTEST_S47_TARGET_PORT:-38048}:8080"
 
   backend:
     ports: !override

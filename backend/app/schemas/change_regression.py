@@ -40,11 +40,21 @@ class ChangeRegressionRunCreate(BaseModel):
         return self
 
 
+class ChangeRegressionMaterializationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_definition_id: UUID
+    environment_id: UUID
+    endpoint_variant: str | None = Field(default=None, min_length=1, max_length=80)
+    scenario_ids: list[str] = Field(default_factory=list, max_length=1000)
+
+
 class ChangeRegressionReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: dict[str, JsonValue] | None = None
     note: str = Field(default="", max_length=2000)
+    materialization: ChangeRegressionMaterializationInput | None = None
 
 
 class ChangeRegressionApproval(BaseModel):

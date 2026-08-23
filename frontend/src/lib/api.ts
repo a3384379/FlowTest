@@ -540,7 +540,10 @@ export type FlowSpecNode = {
 
 export type FlowSpec = {
   schema_version: 'flowtest-flow-spec-v1'
-  fingerprint_version: 'flowtest-flow-spec-fingerprint-v1' | 'flowtest-flow-spec-fingerprint-v2'
+  fingerprint_version:
+    | 'flowtest-flow-spec-fingerprint-v1'
+    | 'flowtest-flow-spec-fingerprint-v2'
+    | 'flowtest-flow-spec-fingerprint-v3'
   project_id: string | null
   name: string
   description: string
@@ -556,6 +559,10 @@ export type FlowSpec = {
     name: string
     method: string
     path: string
+    version_strategy?: 'pinned' | 'current' | null
+    source_version?: number | null
+    api_version?: number | null
+    contract_fingerprint?: string | null
   }>
   nodes: FlowSpecNode[]
   edges: WorkflowEdge[]

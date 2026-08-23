@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.api_assets import APIVersionSpec
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.importers.contracts import (
     ImportChange,
     ImportedOperation,
@@ -574,7 +575,13 @@ class ImportService:
         )
         self._assets.add(definition)
         await self._session.flush()
-        version = _version_model(definition.id, 1, actor.id, operation.request)
+        version = _version_model(
+            definition.id,
+            1,
+            actor.id,
+            operation.request,
+            operation.canonical_contract,
+        )
         self._assets.add(version)
         await self._session.flush()
         return definition, version
@@ -602,6 +609,7 @@ class ImportService:
             definition.current_version,
             actor.id,
             operation.request,
+            operation.canonical_contract,
         )
         self._assets.add(version)
         await self._session.flush()
@@ -697,7 +705,11 @@ def _version_model(
     version: int,
     actor_id: UUID,
     request: APIVersionSpec,
+    contract: OperationContract | None,
 ) -> APIVersion:
+    contract_payload = (
+        contract.model_dump(mode="json", by_alias=True) if contract is not None else {}
+    )
     return APIVersion(
         api_definition_id=definition_id,
         version=version,
@@ -714,6 +726,9 @@ def _version_model(
         auth_config=request.auth_config,
         extraction_rules=[],
         assertions=[],
+        canonical_contract=contract_payload,
+        contract_fingerprint=fingerprint_contract(contract) if contract is not None else None,
+        contract_completeness=contract.completeness if contract is not None else "partial",
         variables=request.variables,
         created_by_id=actor_id,
     )

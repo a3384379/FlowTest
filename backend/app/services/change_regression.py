@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -19,6 +21,8 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.change_regression import (
     ChangeRegressionStatus,
+    existing_semantic_values,
+    gap_covered_values,
     missing_test_design,
     regression_fingerprint,
     transition_status,
@@ -26,16 +30,19 @@ from app.domain.change_regression import (
 from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.tasking import TestPlanTrigger
 from app.domain.test_design import TestDesignDocument, fingerprint_design, sensitive_paths
+from app.domain.test_engineering import OperationContract
 from app.engine.results import NodeResult
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
+from app.models.api_assets import APIDefinition, APIVersion
 from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
 from app.models.contracts import DeploymentCompatibilityCheck
 from app.models.quality_intelligence import ReleaseRisk
 from app.models.release_gate import ReleasePolicy
 from app.models.tasking import TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
+from app.models.test_assets import TestCase
 from app.models.test_design import ChangeSetApproval, TestDesign
-from app.models.workflows import WorkflowNodeExecution
+from app.models.workflows import Workflow, WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.change_regression import (
     ChangeRegressionBundle,
@@ -50,6 +57,8 @@ from app.services.impact import ImpactService
 from app.services.projects import ProjectService
 from app.services.release_gate import ReleaseGateService
 from app.services.tasking import TestPlanService
+from app.services.test_engineering import TestEngineeringService
+from app.services.test_engineering_proposals import TestEngineeringProposalService
 from app.tasking.dispatch import TestPlanDispatcher
 
 
@@ -98,26 +107,36 @@ class ChangeRegressionService:
             ).all()
         )
         execution_assets = _execution_assets(selected_assets, plan_items)
-        gaps = cast(list[dict[str, JsonValue]], impact.coverage.gaps)
-        missing_tests: list[dict[str, JsonValue]] = (
-            [
-                {
-                    "position": index,
-                    "change_key": str(gap.get("change_key", index)),
-                    "source_key": str(gap.get("source_key", "")),
-                    "title": (
-                        f"补齐覆盖：{str(gap.get('label') or gap.get('source_key') or index)[:160]}"
-                    ),
-                    "confidence": 0.65,
-                    "content": missing_test_design(
-                        gap=gap, source_ref=payload.source_ref, position=index
-                    ),
-                }
-                for index, gap in enumerate(gaps, start=1)
-            ]
-            if payload.generate_missing_tests
-            else []
-        )
+        asset_gaps = cast(list[dict[str, JsonValue]], impact.coverage.gaps)
+        gaps = _missing_test_targets(impact, asset_gaps)
+        semantic_coverage = await self._existing_semantic_coverage(project_id)
+        missing_tests: list[dict[str, JsonValue]] = []
+        if payload.generate_missing_tests:
+            for index, gap in enumerate(gaps, start=1):
+                covered_values = gap_covered_values(gap, semantic_coverage)
+                contract = await self._current_contract_for_gap(project_id, gap)
+                content = missing_test_design(
+                    gap=gap,
+                    source_ref=payload.source_ref,
+                    position=index,
+                    current_contract=contract,
+                    covered_values=covered_values,
+                )
+                if not content.get("scenarios"):
+                    continue
+                missing_tests.append(
+                    {
+                        "position": index,
+                        "change_key": str(gap.get("change_key", index)),
+                        "source_key": str(gap.get("source_key", "")),
+                        "title": (
+                            "补齐覆盖："
+                            f"{str(gap.get('label') or gap.get('source_key') or index)[:160]}"
+                        ),
+                        "confidence": 0.65 if contract is None else 0.9,
+                        "content": content,
+                    }
+                )
         selection_summary: dict[str, JsonValue] = {
             "strategy": "impact_selection_intersection_v1",
             "impact_selected_asset_count": len(selected_assets),
@@ -127,8 +146,12 @@ class ChangeRegressionService:
                 JsonValue, sorted({str(item.get("target_type")) for item in selected_assets})
             ),
             "execution_assets": cast(JsonValue, execution_assets),
-            "coverage_gap_count": len(gaps),
+            "asset_coverage_gap_count": len(asset_gaps),
+            "semantic_change_target_count": len(gaps),
+            "coverage_gap_count": len(asset_gaps),
             "missing_test_generation": payload.generate_missing_tests,
+            "semantic_coverage_known_paths": len(semantic_coverage),
+            "semantic_gap_count": len(missing_tests),
         }
         fingerprint = regression_fingerprint(
             source_fingerprint=impact.run.source_fingerprint,
@@ -349,14 +372,39 @@ class ChangeRegressionService:
         document = self._review_document(item=item, decision=decision, payload=payload)
         materialized_id: UUID | None = None
         if decision == "accept":
-            materialized_id = await self._materialize_design(
-                project_id=project_id,
-                change_set_id=run.change_set_id,
-                item=item,
-                document=document,
-                actor=actor,
-            )
-            item.materialized_resource_type = "test_design"
+            change_set = await self._change_sets.get_change_set_for_update(run.change_set_id)
+            if change_set is None:
+                raise AppError(
+                    code="CHANGE_REGRESSION_CHANGE_SET_MISSING",
+                    message="变更回归 ChangeSet 不存在",
+                    status_code=409,
+                )
+            if payload.materialization is None:
+                materialized_id = await self._materialize_design(
+                    project_id=project_id,
+                    change_set_id=run.change_set_id,
+                    item=item,
+                    document=document,
+                    actor=actor,
+                )
+                item.materialized_resource_type = "test_design"
+            else:
+                target = payload.materialization
+                bundle_result = await TestEngineeringProposalService(
+                    self._session
+                ).materialize_reviewed_design(
+                    actor=actor,
+                    project_id=project_id,
+                    change_set=change_set,
+                    title=item.title,
+                    design=document,
+                    api_definition_id=target.api_definition_id,
+                    environment_id=target.environment_id,
+                    endpoint_variant=target.endpoint_variant,
+                    scenario_ids=target.scenario_ids,
+                )
+                materialized_id = bundle_result.test_design_id
+                item.materialized_resource_type = "test_design_bundle"
             item.materialized_resource_id = materialized_id
         item.proposed_content = document.model_dump(mode="json")
         item.review_status = "accepted" if decision == "accept" else "rejected"
@@ -846,6 +894,113 @@ class ChangeRegressionService:
         ]
         return cast(dict[str, JsonValue], triage_failures(signals).model_dump(mode="json"))
 
+    async def _existing_semantic_coverage(self, project_id: UUID) -> dict[str, set[str]]:
+        models = list(
+            (
+                await self._session.scalars(
+                    select(TestDesign).where(TestDesign.project_id == project_id)
+                )
+            ).all()
+        )
+        documents: list[TestDesignDocument] = []
+        for model in models:
+            try:
+                documents.append(
+                    TestDesignDocument.model_validate(
+                        {
+                            "intent": model.intent,
+                            "knowledge_graph": model.knowledge_graph,
+                            "state_model": model.state_model or None,
+                            "scenarios": model.scenarios,
+                            "oracles": model.oracles,
+                            "coverage": model.coverage,
+                            "evidence_refs": model.evidence_refs,
+                            "warnings": model.warnings,
+                            "confidence": model.confidence,
+                            "review_requirements": model.review_requirements,
+                            "test_case_refs": model.test_case_refs,
+                        }
+                    )
+                )
+            except ValueError:
+                # An opaque legacy design is unknown coverage, never implicitly covered.
+                continue
+        coverage = existing_semantic_values(documents)
+        test_cases = list(
+            (
+                await self._session.scalars(
+                    select(TestCase).where(TestCase.project_id == project_id)
+                )
+            ).all()
+        )
+        workflow_ids = {
+            workflow_id
+            for case in test_cases
+            if (workflow_id := _test_case_workflow_id(case.draft_definition)) is not None
+        }
+        workflows = (
+            list(
+                (
+                    await self._session.scalars(
+                        select(Workflow).where(
+                            Workflow.project_id == project_id,
+                            Workflow.id.in_(workflow_ids),
+                        )
+                    )
+                ).all()
+            )
+            if workflow_ids
+            else []
+        )
+        for workflow in workflows:
+            _merge_workflow_semantics(coverage, workflow.draft_definition)
+        return coverage
+
+    async def _current_contract_for_gap(
+        self, project_id: UUID, gap: dict[str, JsonValue]
+    ) -> OperationContract | None:
+        source_key = str(gap.get("source_key") or "")
+        parts = source_key.split(maxsplit=1)
+        if len(parts) != 2 or not parts[1].startswith("/"):
+            return None
+        method, path = parts[0].upper(), parts[1]
+        definitions = list(
+            (
+                await self._session.scalars(
+                    select(APIDefinition)
+                    .join(
+                        APIVersion,
+                        (APIVersion.api_definition_id == APIDefinition.id)
+                        & (APIVersion.version == APIDefinition.current_version),
+                    )
+                    .where(
+                        APIDefinition.project_id == project_id,
+                        APIDefinition.is_active.is_(True),
+                        APIVersion.method == method,
+                    )
+                )
+            ).all()
+        )
+        matches = [
+            definition
+            for definition in definitions
+            if _semantic_path(await self._current_path(definition)) == _semantic_path(path)
+        ]
+        if len(matches) != 1:
+            return None
+        return await TestEngineeringService(self._session).contract_for_api(
+            project_id=project_id, definition_id=matches[0].id
+        )
+
+    async def _current_path(self, definition: APIDefinition) -> str:
+        version = await self._session.scalar(
+            select(APIVersion).where(
+                APIVersion.api_definition_id == definition.id,
+                APIVersion.version == definition.current_version,
+            )
+        )
+        return version.path if version is not None else ""
+
 
 def _triage_signals(
     item: TestPlanRunItem, nodes: list[WorkflowNodeExecution]
@@ -883,7 +1038,8 @@ def _node_triage_signal(item: TestPlanRunItem, node: WorkflowNodeExecution) -> F
         http_status=(
             observation.response.status_code if observation and observation.response else None
         ),
-        affected_service=request_url.hostname if request_url is not None else None,
+        affected_service=observation.request.service_key if observation is not None else None,
+        endpoint_variant=observation.request.endpoint_variant if observation is not None else None,
         affected_operation=(
             f"{observation.request.method} {request_url.path}"
             if observation is not None and request_url is not None
@@ -907,6 +1063,105 @@ def _validated_node_result(value: dict[str, Any] | None) -> NodeResult | None:
 _CONTRACT_ASSERTION_NAMES = frozenset(
     {"response_schema", "schema", "contract", "json_schema", "openapi_schema"}
 )
+
+
+def _semantic_path(value: str) -> str:
+    return re.sub(r"\{\{[^}]+\}\}|\{[^}]+\}", "{}", value)
+
+
+def _missing_test_targets(
+    impact: ImpactRunBundle, asset_gaps: list[dict[str, JsonValue]]
+) -> list[dict[str, JsonValue]]:
+    """Keep asset coverage and test semantic coverage as independent dimensions."""
+
+    by_key = {str(gap.get("change_key")): gap for gap in asset_gaps}
+    ordered_keys = [str(gap.get("change_key")) for gap in asset_gaps]
+    for raw_change in impact.run.changes:
+        change = cast(dict[str, JsonValue], raw_change)
+        if not _is_semantic_test_target(change):
+            continue
+        key = str(change.get("key") or change.get("change_key"))
+        if key in by_key:
+            continue
+        normalized = {**change, "change_key": key, "reason": "测试语义覆盖需独立核对"}
+        by_key[key] = normalized
+        ordered_keys.append(key)
+    return [by_key[key] for key in ordered_keys]
+
+
+def _is_semantic_test_target(change: dict[str, JsonValue]) -> bool:
+    semantic_type = str(change.get("semantic_type") or "")
+    return str(change.get("source_kind")) == "openapi" and semantic_type in {
+        "minimum_changed",
+        "maximum_changed",
+        "minLength_changed",
+        "maxLength_changed",
+        "minItems_changed",
+        "maxItems_changed",
+        "enum_changed",
+    }
+
+
+def _test_case_workflow_id(definition: dict[str, Any]) -> UUID | None:
+    try:
+        return UUID(str(definition["workflow_id"]))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def _merge_workflow_semantics(coverage: dict[str, set[str]], definition: dict[str, Any]) -> None:
+    nodes = definition.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    variables = definition.get("variables")
+    if isinstance(variables, dict):
+        for name, value in variables.items():
+            _add_semantic_value(coverage, f"path.{name}", value)
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("type") != "api":
+            continue
+        config = node.get("config")
+        if not isinstance(config, dict):
+            continue
+        overrides = config.get("request_overrides")
+        if not isinstance(overrides, dict):
+            continue
+        _merge_override_semantics(coverage, overrides)
+
+
+def _merge_override_semantics(coverage: dict[str, set[str]], overrides: dict[str, Any]) -> None:
+    query = overrides.get("query_parameters")
+    if isinstance(query, list):
+        for parameter in query:
+            if isinstance(parameter, dict) and isinstance(parameter.get("name"), str):
+                _add_semantic_value(coverage, f"query.{parameter['name']}", parameter.get("value"))
+    headers = overrides.get("headers")
+    if isinstance(headers, dict):
+        for name, value in headers.items():
+            _add_semantic_value(coverage, f"header.{name}", value)
+    body = overrides.get("body")
+    if isinstance(body, dict) and body.get("kind") == "json":
+        _flatten_semantic_values(coverage, "body", body.get("value"))
+
+
+def _flatten_semantic_values(coverage: dict[str, set[str]], path: str, value: object) -> None:
+    if isinstance(value, dict):
+        for name, child in value.items():
+            _flatten_semantic_values(coverage, f"{path}.{name}", child)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _flatten_semantic_values(coverage, path, child)
+        return
+    _add_semantic_value(coverage, path, value)
+
+
+def _add_semantic_value(coverage: dict[str, set[str]], path: str, value: object) -> None:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return
+    coverage.setdefault(path, set()).add(encoded)
 
 
 def _selected_assets(impact: ImpactRunBundle) -> list[dict[str, JsonValue]]:

@@ -26,7 +26,7 @@ const targetService: RequestService = {
 
 const spec: FlowSpec = {
   schema_version: 'flowtest-flow-spec-v1',
-  fingerprint_version: 'flowtest-flow-spec-fingerprint-v2',
+  fingerprint_version: 'flowtest-flow-spec-fingerprint-v3',
   project_id: '00000000-0000-4000-8000-000000008099',
   name: '订单流程',
   description: '',
@@ -39,6 +39,9 @@ const spec: FlowSpec = {
       name: 'Create Order',
       method: 'POST',
       path: '/orders',
+      version_strategy: 'pinned',
+      source_version: 1,
+      contract_fingerprint: 'a'.repeat(64),
     },
   ],
   nodes: [
@@ -109,12 +112,17 @@ describe('FlowSpecReviewDialog', () => {
     await browser.click((await screen.findAllByText('订单服务 · orders')).at(-1)!)
     await browser.click(screen.getByRole('combobox', { name: 'Operation Mapping orders.create' }))
     await browser.click((await screen.findAllByText(`${apiDefinition.name} · v1`)).at(-1)!)
+    await browser.type(
+      screen.getByRole('spinbutton', { name: 'Operation Version Mapping orders.create' }),
+      '1',
+    )
     await browser.click(screen.getByRole('button', { name: '创建 ChangeSet Draft' }))
 
     await waitFor(() =>
       expect(importPayload).toMatchObject({
         service_mappings: { 'service.orders': targetService.id },
         operation_mappings: { 'orders.create': apiDefinition.id },
+        operation_version_mappings: { 'orders.create': 1 },
       }),
     )
     await browser.click(await screen.findByRole('button', { name: '接受 Mapping 与 Diff' }))

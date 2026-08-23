@@ -18,6 +18,7 @@ from app.domain.test_design import (
     OracleSpec,
     ScenarioCandidate,
     ScenarioMutation,
+    ScenarioRequest,
     TestDesignDocument,
 )
 from app.domain.test_engineering import GenerationPolicy, OperationContract, TestEngineeringEngine
@@ -77,7 +78,12 @@ def regression_fingerprint(
 
 
 def missing_test_design(
-    *, gap: dict[str, JsonValue], source_ref: str, position: int
+    *,
+    gap: dict[str, JsonValue],
+    source_ref: str,
+    position: int,
+    current_contract: OperationContract | None = None,
+    covered_values: set[str] | None = None,
 ) -> dict[str, JsonValue]:
     """Generate an evidence-backed Test Design draft for an uncovered change."""
 
@@ -85,12 +91,14 @@ def missing_test_design(
     digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:12]
     source_key = str(gap.get("source_key") or raw_key)[:240]
     label = str(gap.get("label") or source_key)[:240]
-    contract = _change_contract(gap=gap, digest=digest, source_ref=source_ref)
+    contract = current_contract or _change_contract(gap=gap, digest=digest, source_ref=source_ref)
+    generation_contract = _focused_change_contract(contract, gap) if current_contract else contract
     generated = TestEngineeringEngine().generate(
-        contract=contract,
+        contract=generation_contract,
         policy=GenerationPolicy(max_scenarios=30, pairwise_enabled=False),
     )
     scenarios = _change_scenarios(generated, gap)
+    scenarios = _exclude_covered_scenarios(scenarios, covered_values or set())
     oracles = _extend_oracle_scope(generated, scenarios)
     coverage = _change_coverage(generated, gap, scenarios)
     document = generated.model_copy(
@@ -120,6 +128,55 @@ def missing_test_design(
     return cast(dict[str, JsonValue], document.model_dump(mode="json"))
 
 
+def _focused_change_contract(
+    contract: OperationContract, gap: dict[str, JsonValue]
+) -> OperationContract:
+    """Limit generation to the changed body field while retaining actual response oracles."""
+
+    field_path, constraint = _constraint_target(gap)
+    if not field_path or constraint is None:
+        return contract
+    leaf = _schema_at_path(contract.body_schema, field_path)
+    if leaf is None:
+        return contract
+    focused_schema = _nested_schema(field_path, leaf)
+    request_body = contract.request_body
+    if request_body is not None:
+        request_body = request_body.model_copy(update={"schema_": focused_schema})
+    return contract.model_copy(
+        update={
+            "parameters": [],
+            "request_body": request_body,
+            "request": focused_schema,
+        }
+    )
+
+
+def _schema_at_path(
+    schema: dict[str, JsonValue], field_path: list[str]
+) -> dict[str, JsonValue] | None:
+    current: JsonValue = schema
+    for name in field_path:
+        if not isinstance(current, dict):
+            return None
+        properties = current.get("properties")
+        if not isinstance(properties, dict):
+            return None
+        current = properties.get(name)
+    return current if isinstance(current, dict) else None
+
+
+def _nested_schema(field_path: list[str], leaf: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    current = deepcopy(leaf)
+    for name in reversed(field_path):
+        current = {
+            "type": "object",
+            "required": [name],
+            "properties": {name: current},
+        }
+    return current
+
+
 def _change_contract(
     *, gap: dict[str, JsonValue], digest: str, source_ref: str
 ) -> OperationContract:
@@ -133,10 +190,7 @@ def _change_contract(
             "method": method,
             "path": path,
             "request": request,
-            "responses": {
-                "200": {"description": "回归行为符合当前契约"},
-                "400": {"description": "输入超出当前契约边界"},
-            },
+            "responses": {},
             "source_ref": source_ref[:512] or f"change://{digest}",
             "revision": str(gap.get("change_key") or digest)[:160],
         }
@@ -192,7 +246,17 @@ def _constraint_schema_type(constraint: str) -> str:
 def _change_scenarios(
     generated: TestDesignDocument, gap: dict[str, JsonValue]
 ) -> list[ScenarioCandidate]:
-    scenarios = [_label_generated_boundary(item, gap) for item in generated.scenarios]
+    field_path, constraint = _constraint_target(gap)
+    if constraint is None:
+        return list(generated.scenarios)
+    mutation_path = f"body.{'.'.join(field_path)}" if field_path else _mutation_path(generated)
+    scenarios = []
+    for item in generated.scenarios:
+        if not any(mutation.path == mutation_path for mutation in item.mutations):
+            continue
+        labeled = _label_generated_boundary(item, gap)
+        if {"new_legal_boundary", "new_illegal_boundary"}.intersection(labeled.tags):
+            scenarios.append(labeled)
     scenarios.extend(_historical_boundary_scenarios(generated, gap))
     by_id = {scenario.id: scenario for scenario in scenarios}
     return [by_id[key] for key in sorted(by_id)]
@@ -202,14 +266,21 @@ def _label_generated_boundary(
     scenario: ScenarioCandidate, gap: dict[str, JsonValue]
 ) -> ScenarioCandidate:
     semantic_type = str(gap.get("semantic_type") or "")
-    mapping = {
-        "number_at_max": "new_legal_boundary",
-        "number_above_max": "new_illegal_boundary",
-        "number_at_min": "new_legal_boundary",
-        "number_below_min": "new_illegal_boundary",
-    }
+    mapping = (
+        {
+            "number_at_max": "new_legal_boundary",
+            "number_above_max": "new_illegal_boundary",
+        }
+        if semantic_type == "maximum_changed"
+        else {
+            "number_at_min": "new_legal_boundary",
+            "number_below_min": "new_illegal_boundary",
+        }
+        if semantic_type == "minimum_changed"
+        else {}
+    )
     label = mapping.get(scenario.kind)
-    if label is None or not semantic_type.endswith("_changed"):
+    if label is None:
         return scenario
     return scenario.model_copy(update={"tags": sorted({*scenario.tags, "change-impact", label})})
 
@@ -228,7 +299,8 @@ def _historical_boundary_scenarios(
         "maximum" if semantic_type == "maximum_changed" else "minimum"
     )
     base = _base_request(generated)
-    mutation_path = _mutation_path(generated)
+    field_path, _constraint = _constraint_target(gap)
+    mutation_path = f"body.{'.'.join(field_path)}" if field_path else _mutation_path(generated)
     adjacent = before + 1 if direction == "maximum" else before - 1
     return [
         _historical_scenario(base, mutation_path, before, after, direction, "historical_boundary"),
@@ -256,7 +328,8 @@ def _historical_scenario(
         kind=f"change_{kind}",
         title=f"{path}: 历史边界值 {value} 在当前契约下应{validity_label}",
         request_body=body,
-        mutations=[ScenarioMutation(path=path, operation="set", value=value)],
+        request=ScenarioRequest(body=body),
+        mutations=[ScenarioMutation(path=path, location="body", operation="set", value=value)],
         expected_category="success" if valid else "invalid_request",
         negative=not valid,
         tags=["generated", "change-impact", kind],
@@ -286,6 +359,38 @@ def _set_nested(target: dict[str, JsonValue], path: str, value: JsonValue) -> No
         cursor = child
     if parts:
         cursor[parts[-1]] = value
+
+
+def existing_semantic_values(documents: list[TestDesignDocument]) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for document in documents:
+        for scenario in document.scenarios:
+            for mutation in scenario.mutations:
+                if mutation.operation == "omit":
+                    continue
+                result.setdefault(mutation.path, set()).add(_semantic_value(mutation.value))
+    return result
+
+
+def gap_covered_values(gap: dict[str, JsonValue], coverage: dict[str, set[str]]) -> set[str]:
+    field_path, _constraint = _constraint_target(gap)
+    path = f"body.{'.'.join(field_path)}" if field_path else "body.value"
+    return set(coverage.get(path, set()))
+
+
+def _exclude_covered_scenarios(
+    scenarios: list[ScenarioCandidate], covered_values: set[str]
+) -> list[ScenarioCandidate]:
+    return [
+        scenario
+        for scenario in scenarios
+        if not scenario.mutations
+        or _semantic_value(scenario.mutations[0].value) not in covered_values
+    ]
+
+
+def _semantic_value(value: JsonValue | None) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _extend_oracle_scope(

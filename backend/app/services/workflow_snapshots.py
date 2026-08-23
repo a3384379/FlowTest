@@ -544,8 +544,9 @@ class WorkflowSnapshotBuilder:
         body_override = overrides.body.value if overrides.body is not None else None
         node_headers = {
             **runtime_headers,
-            **(overrides.headers or {}),
+            **({} if overrides.replace_headers else (overrides.headers or {})),
         }
+        header_override = overrides.headers if overrides.replace_headers else None
         raw = await self._api_assets.preview(
             actor=actor,
             project_id=project_id,
@@ -556,12 +557,13 @@ class WorkflowSnapshotBuilder:
             body_override=body_override,
             use_body_override=use_body_override,
             query_parameters_override=query_override,
-            headers_override=None,
+            headers_override=header_override,
             service_override=config.service_override,
             endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
+            auth_disabled=overrides.auth_disabled,
             redact=False,
         )
         redacted = await self._api_assets.preview(
@@ -574,12 +576,13 @@ class WorkflowSnapshotBuilder:
             body_override=body_override,
             use_body_override=use_body_override,
             query_parameters_override=query_override,
-            headers_override=None,
+            headers_override=header_override,
             service_override=config.service_override,
             endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
+            auth_disabled=overrides.auth_disabled,
             redact=True,
         )
         return raw, redacted

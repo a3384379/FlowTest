@@ -52,6 +52,7 @@ export type FailureTriageResult = {
   confidence: number
   reason_codes: string[]
   affected_service: string | null
+  endpoint_variant?: string | null
   affected_operation: string | null
   evidence_refs: string[]
   retry_signal: boolean

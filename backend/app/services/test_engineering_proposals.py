@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 from uuid import UUID
 
@@ -10,13 +12,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.evidence import EvidenceBundle
 from app.domain.test_design import (
+    OracleSpec,
     ScenarioCandidate,
     TestDesignDocument,
     fingerprint_design,
     normalized_design,
 )
-from app.domain.test_engineering import TestEngineeringEngine
+from app.domain.test_engineering import (
+    GenerationPolicy,
+    OperationContract,
+    TestEngineeringEngine,
+    fingerprint_contract,
+)
 from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -83,7 +92,9 @@ class TestEngineeringProposalService:
                 status_code=422,
             )
         design = TestEngineeringEngine().generate(
-            contract=contract, policy=payload.generation_policy
+            contract=contract,
+            policy=payload.generation_policy,
+            additional_evidence=payload.additional_evidence,
         )
         scenario_ids = _selected_scenarios(design, payload.scenario_ids)
         fingerprint = fingerprint_design(design)
@@ -95,13 +106,23 @@ class TestEngineeringProposalService:
             title=payload.title.strip(),
             status="draft",
             source_snapshot={
-                "schema_version": "s47-test-engineering-proposal-v1",
+                "schema_version": "s47-test-engineering-proposal-v2",
                 "api_definition_id": str(definition.id),
                 "api_version": api_version,
                 "environment_id": str(payload.environment_id),
                 "endpoint_variant": endpoint_variant,
                 "scenario_ids": scenario_ids,
                 "design_fingerprint": fingerprint,
+                "contract_fingerprint": fingerprint_contract(contract),
+                "api_contract_fingerprint": fingerprint_contract(api_contract),
+                "evidence_fingerprints": sorted(
+                    _evidence_fingerprint(bundle) for bundle in payload.additional_evidence
+                ),
+                "additional_evidence": [
+                    bundle.model_dump(mode="json") for bundle in payload.additional_evidence
+                ],
+                "generation_policy": payload.generation_policy.model_dump(mode="json"),
+                "contract": contract.model_dump(mode="json", by_alias=True),
             },
             source_fingerprint=fingerprint,
             source_type="rest",
@@ -181,6 +202,7 @@ class TestEngineeringProposalService:
         change_set, item = await self._proposal(change_set_id, project_id, for_update=True)
         _require_applicable(change_set, item)
         design, scenario_ids = _proposal_content(item)
+        _validate_frozen_generation(change_set, design)
         api_id, environment_id, expected_version, endpoint_variant = _proposal_targets(
             change_set.source_snapshot
         )
@@ -190,6 +212,19 @@ class TestEngineeringProposalService:
             raise AppError(
                 code="TEST_ENGINEERING_TARGET_STALE",
                 message="目标 API 版本已变化,请重新生成 Proposal",
+                status_code=409,
+            )
+        current_contract = await TestEngineeringService(self._session).contract_for_api(
+            project_id=project_id, definition_id=definition.id
+        )
+        expected_api_contract = change_set.source_snapshot.get("api_contract_fingerprint")
+        if (
+            not isinstance(expected_api_contract, str)
+            or fingerprint_contract(current_contract) != expected_api_contract
+        ):
+            raise AppError(
+                code="TEST_ENGINEERING_TARGET_STALE",
+                message="目标 API canonical contract 已变化,请重新生成 Proposal",
                 status_code=409,
             )
         endpoint_variant = await self._endpoint_variant(
@@ -208,6 +243,7 @@ class TestEngineeringProposalService:
             definition=definition,
             environment_id=environment_id,
             endpoint_variant=endpoint_variant,
+            api_version=expected_version,
         )
         item.materialized_resource_type = "test_design"
         item.materialized_resource_id = materialized.test_design_id
@@ -226,6 +262,43 @@ class TestEngineeringProposalService:
         await self._session.commit()
         return materialized
 
+    async def materialize_reviewed_design(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        change_set: AIChangeSet,
+        title: str,
+        design: TestDesignDocument,
+        api_definition_id: UUID,
+        environment_id: UUID,
+        endpoint_variant: str | None,
+        scenario_ids: list[str],
+    ) -> TestEngineeringMaterialization:
+        """Reuse the reviewed Test Engineering materializer for another ChangeSet flow."""
+
+        definition, api_version = await self._target_api(project_id, api_definition_id)
+        await self._target_environment(project_id, environment_id)
+        resolved_variant = await self._endpoint_variant(
+            project_id=project_id,
+            environment_id=environment_id,
+            service_id=definition.service_id,
+            requested=endpoint_variant,
+        )
+        selected_ids = scenario_ids or [scenario.id for scenario in design.scenarios]
+        return await self._materialize(
+            actor=actor,
+            project_id=project_id,
+            change_set=change_set,
+            title=title,
+            design=design,
+            scenarios=_scenario_models(design, selected_ids),
+            definition=definition,
+            environment_id=environment_id,
+            endpoint_variant=resolved_variant,
+            api_version=api_version,
+        )
+
     async def _materialize(
         self,
         *,
@@ -238,12 +311,14 @@ class TestEngineeringProposalService:
         definition: APIDefinition,
         environment_id: UUID,
         endpoint_variant: str | None,
+        api_version: int,
     ) -> TestEngineeringMaterialization:
         await self._ensure_unique_design(project_id, title)
         workflow_ids: list[UUID] = []
         test_case_ids: list[UUID] = []
         for scenario in scenarios:
             expected_status = _expected_status(design, scenario)
+            scenario_oracles = _scenario_oracles(design, scenario)
             workflow = await WorkflowService(self._session).create(
                 actor=actor,
                 project_id=project_id,
@@ -251,7 +326,12 @@ class TestEngineeringProposalService:
                 description=f"由 Test Engineering Proposal {change_set.id} 生成",
                 folder_id=None,
                 definition=_scenario_workflow(
-                    definition.id, scenario, expected_status, endpoint_variant
+                    definition.id,
+                    api_version,
+                    scenario,
+                    expected_status,
+                    scenario_oracles,
+                    endpoint_variant,
                 ),
                 commit=False,
             )
@@ -276,6 +356,7 @@ class TestEngineeringProposalService:
             change_set=change_set,
             title=title,
             design=design,
+            scenarios=scenarios,
             test_case_ids=test_case_ids,
         )
         self._session.add(model)
@@ -298,9 +379,10 @@ class TestEngineeringProposalService:
         if for_update:
             query = query.with_for_update()
         change_set = (await self._session.execute(query)).scalar_one_or_none()
-        if change_set is None or change_set.source_snapshot.get("schema_version") != (
-            "s47-test-engineering-proposal-v1"
-        ):
+        if change_set is None or change_set.source_snapshot.get("schema_version") not in {
+            "s47-test-engineering-proposal-v1",
+            "s47-test-engineering-proposal-v2",
+        }:
             raise AppError(
                 code="TEST_ENGINEERING_PROPOSAL_NOT_FOUND",
                 message="测试工程 Proposal 不存在",
@@ -410,20 +492,6 @@ def _selected_scenarios(design: TestDesignDocument, requested: list[str]) -> lis
                 message=f"Scenario 不存在: {', '.join(unknown)}",
                 status_code=422,
             )
-        unsupported = sorted(
-            scenario.id
-            for scenario in design.scenarios
-            if scenario.id in requested and scenario.kind == "auth_missing"
-        )
-        if unsupported:
-            raise AppError(
-                code="TEST_ENGINEERING_SCENARIO_NOT_MATERIALIZABLE",
-                message=(
-                    "auth_missing Scenario 尚无法安全物化: 现有 Workflow API 节点"
-                    "不支持显式禁用定义级认证"
-                ),
-                status_code=422,
-            )
         return list(dict.fromkeys(requested))
     happy = next((item.id for item in design.scenarios if item.kind == "happy_path"), None)
     if happy is None:
@@ -509,6 +577,9 @@ def _expected_status(design: TestDesignDocument, scenario: ScenarioCandidate) ->
         if oracle.kind == "status"
         and scenario.id in oracle.applies_to
         and isinstance(oracle.expected, int)
+        and oracle.deterministic
+        and not oracle.requires_review
+        and oracle.operator == "equals"
     ]
     if len(matches) != 1:
         raise AppError(
@@ -519,54 +590,173 @@ def _expected_status(design: TestDesignDocument, scenario: ScenarioCandidate) ->
     return cast(int, matches[0].expected)
 
 
+def _scenario_oracles(design: TestDesignDocument, scenario: ScenarioCandidate) -> list[OracleSpec]:
+    result = [oracle for oracle in design.oracles if scenario.id in oracle.applies_to]
+    comparison_operators = {
+        "equals",
+        "not_equals",
+        "contains",
+        "exists",
+        "matches",
+    }
+    unsupported = [
+        oracle.id
+        for oracle in result
+        if oracle.kind not in {"status", "schema", "json_path", "expression"}
+        or (
+            oracle.kind in {"json_path", "expression"}
+            and oracle.operator not in comparison_operators
+        )
+        or oracle.requires_review
+        or not oracle.deterministic
+    ]
+    if unsupported:
+        raise AppError(
+            code="TEST_ENGINEERING_ORACLE_NOT_EXECUTABLE",
+            message=f"Scenario {scenario.id} 包含不可执行 Oracle",
+            status_code=422,
+            details={"oracle_ids": sorted(unsupported)},
+        )
+    return result
+
+
 def _scenario_workflow(
     api_definition_id: UUID,
+    api_version: int,
     scenario: ScenarioCandidate,
     expected_status: int,
+    oracles: list[OracleSpec],
     endpoint_variant: str | None,
 ) -> WorkflowDefinition:
+    if scenario.requires_review or not scenario.deterministic:
+        raise AppError(
+            code="TEST_ENGINEERING_SCENARIO_NOT_MATERIALIZABLE",
+            message="Scenario 包含未解决证据冲突或前置条件,仅可保留为 Design",
+            status_code=422,
+            details={"scenario_id": scenario.id},
+        )
+    if any(
+        mutation.location == "path" and mutation.operation == "omit"
+        for mutation in scenario.mutations
+    ):
+        raise AppError(
+            code="TEST_ENGINEERING_SCENARIO_NOT_MATERIALIZABLE",
+            message="必填 path 参数 omission 无法表示为真实 HTTP 请求",
+            status_code=422,
+            details={"scenario_id": scenario.id, "location": "path"},
+        )
+    request_overrides = _request_overrides(scenario)
     request_config: dict[str, Any] = {
         "api_definition_id": str(api_definition_id),
+        "api_version": api_version,
         "expected_statuses": [expected_status],
-        "request_overrides": {"body": {"kind": "json", "value": scenario.request_body}},
+        "request_overrides": request_overrides,
     }
     if endpoint_variant is not None:
         request_config["endpoint_variant"] = endpoint_variant
+    nodes = [
+        _workflow_node("start", "start", "Start", 0, {}),
+        _workflow_node("request", "api", scenario.title, 200, request_config),
+        _workflow_node(
+            "assert_status",
+            "assert",
+            "Status Oracle",
+            400,
+            {
+                "source_node_id": "request",
+                "expression": "status_code",
+                "operator": "equals",
+                "expected": expected_status,
+            },
+        ),
+    ]
+    edges: list[dict[str, str]] = [
+        {"id": "start-request", "source": "start", "target": "request"},
+        {"id": "request-assert", "source": "request", "target": "assert_status"},
+    ]
+    previous = "assert_status"
+    schema_oracles = [oracle for oracle in oracles if oracle.kind == "schema"]
+    for index, oracle in enumerate(schema_oracles, start=1):
+        node_id = f"assert_schema_{index}"
+        nodes.append(
+            _workflow_node(
+                node_id,
+                "assert",
+                "Response Schema Oracle",
+                400 + index * 150,
+                {
+                    "source_node_id": "request",
+                    "expression": "body",
+                    "operator": "equals",
+                    "expected": oracle.expected,
+                    "assertion_type": "json_schema",
+                },
+            )
+        )
+        edges.append({"id": f"{previous}-{node_id}", "source": previous, "target": node_id})
+        previous = node_id
+    comparison_oracles = [
+        oracle for oracle in oracles if oracle.kind in {"json_path", "expression"}
+    ]
+    for index, oracle in enumerate(comparison_oracles, start=1):
+        node_id = f"assert_expression_{index}"
+        nodes.append(
+            _workflow_node(
+                node_id,
+                "assert",
+                "Response Expression Oracle",
+                550 + index * 150,
+                {
+                    "source_node_id": "request",
+                    "expression": oracle.expression,
+                    "operator": oracle.operator,
+                    "expected": oracle.expected,
+                },
+            )
+        )
+        edges.append({"id": f"{previous}-{node_id}", "source": previous, "target": node_id})
+        previous = node_id
+    nodes.append(_workflow_node("end", "end", "End", 700, {}))
+    edges.append({"id": f"{previous}-end", "source": previous, "target": "end"})
     return WorkflowDefinition.model_validate(
         {
             "schema_version": "1.0",
-            "variables": {},
-            "nodes": [
-                _workflow_node("start", "start", "Start", 0, {}),
-                _workflow_node(
-                    "request",
-                    "api",
-                    scenario.title,
-                    200,
-                    request_config,
-                ),
-                _workflow_node(
-                    "assert_status",
-                    "assert",
-                    "Status Oracle",
-                    400,
-                    {
-                        "source_node_id": "request",
-                        "expression": "status_code",
-                        "operator": "equals",
-                        "expected": expected_status,
-                    },
-                ),
-                _workflow_node("end", "end", "End", 600, {}),
-            ],
-            "edges": [
-                {"id": "start-request", "source": "start", "target": "request"},
-                {"id": "request-assert", "source": "request", "target": "assert_status"},
-                {"id": "assert-end", "source": "assert_status", "target": "end"},
-            ],
+            "variables": {
+                name: _request_value(value)
+                for name, value in scenario.request.path_parameters.items()
+            },
+            "nodes": nodes,
+            "edges": edges,
             "settings": {},
         }
     )
+
+
+def _request_overrides(scenario: ScenarioCandidate) -> dict[str, Any]:
+    headers = {name: _request_value(value) for name, value in scenario.request.headers.items()}
+    if scenario.request.cookies:
+        headers["Cookie"] = "; ".join(
+            f"{name}={_request_value(value)}"
+            for name, value in sorted(scenario.request.cookies.items())
+        )
+    overrides: dict[str, Any] = {
+        "query_parameters": [
+            {"name": name, "value": _request_value(value), "enabled": True}
+            for name, value in scenario.request.query_parameters.items()
+        ],
+        "headers": headers,
+        "replace_headers": True,
+        "auth_disabled": scenario.request.auth_disabled,
+    }
+    if scenario.request.body is not None:
+        overrides["body"] = {"kind": "json", "value": scenario.request.body}
+    return overrides
+
+
+def _request_value(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _workflow_node(
@@ -588,9 +778,21 @@ def _test_design_model(
     change_set: AIChangeSet,
     title: str,
     design: TestDesignDocument,
+    scenarios: list[ScenarioCandidate],
     test_case_ids: list[UUID],
 ) -> TestDesign:
-    payload = design.model_dump(mode="json")
+    selected_ids = {scenario.id for scenario in scenarios}
+    approved_design = design.model_copy(
+        update={
+            "scenarios": scenarios,
+            "oracles": [
+                oracle
+                for oracle in design.oracles
+                if not oracle.applies_to or selected_ids.intersection(oracle.applies_to)
+            ],
+        }
+    )
+    payload = approved_design.model_dump(mode="json")
     return TestDesign(
         project_id=project_id,
         name=title,
@@ -602,11 +804,11 @@ def _test_design_model(
         oracles=cast(list[dict[str, Any]], payload["oracles"]),
         coverage=cast(dict[str, Any], payload["coverage"]),
         evidence_refs=cast(list[dict[str, Any]], payload["evidence_refs"]),
-        warnings=list(design.warnings),
-        confidence=design.confidence,
-        review_requirements=list(design.review_requirements),
+        warnings=list(approved_design.warnings),
+        confidence=approved_design.confidence,
+        review_requirements=list(approved_design.review_requirements),
         test_case_refs=[f"testcase://{value}" for value in test_case_ids],
-        fingerprint=fingerprint_design(design),
+        fingerprint=fingerprint_design(approved_design),
         source_change_set_id=change_set.id,
         created_by_id=actor.id,
         reviewed_by_id=actor.id,
@@ -617,6 +819,56 @@ def _test_design_model(
 def _asset_name(title: str, scenario: ScenarioCandidate, suffix: str) -> str:
     prefix = f"{title} - {scenario.kind} - {suffix}"
     return f"{prefix[:190]}-{scenario.id[-8:]}"[:200]
+
+
+def _evidence_fingerprint(bundle: EvidenceBundle) -> str:
+    payload = bundle.model_dump(mode="json")
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode()).hexdigest()
+
+
+def _validate_frozen_generation(change_set: AIChangeSet, design: TestDesignDocument) -> None:
+    snapshot = change_set.source_snapshot
+    design_fingerprint = fingerprint_design(design)
+    if (
+        snapshot.get("design_fingerprint") != design_fingerprint
+        or change_set.source_fingerprint != design_fingerprint
+    ):
+        raise _invalid_frozen_proposal("生成设计 Fingerprint 不匹配")
+    try:
+        contract = OperationContract.model_validate(snapshot.get("contract"))
+        policy = GenerationPolicy.model_validate(snapshot.get("generation_policy"))
+    except (TypeError, ValueError, ValidationError) as error:
+        raise _invalid_frozen_proposal("冻结的 Contract 或生成策略无效") from error
+    if fingerprint_contract(contract) != snapshot.get("contract_fingerprint"):
+        raise _invalid_frozen_proposal("冻结的 Contract Fingerprint 不匹配")
+    if snapshot.get("schema_version") == "s47-test-engineering-proposal-v1":
+        return
+    try:
+        raw_evidence = snapshot.get("additional_evidence")
+        if not isinstance(raw_evidence, list):
+            raise TypeError("additional_evidence must be a list")
+        evidence = [EvidenceBundle.model_validate(item) for item in raw_evidence]
+    except (TypeError, ValueError, ValidationError) as error:
+        raise _invalid_frozen_proposal("冻结的 Evidence 无效") from error
+    evidence_fingerprints = sorted(_evidence_fingerprint(bundle) for bundle in evidence)
+    if evidence_fingerprints != snapshot.get("evidence_fingerprints"):
+        raise _invalid_frozen_proposal("冻结的 Evidence Fingerprint 不匹配")
+    regenerated = TestEngineeringEngine().generate(
+        contract=contract,
+        policy=policy,
+        additional_evidence=evidence,
+    )
+    if fingerprint_design(regenerated) != design_fingerprint:
+        raise _invalid_frozen_proposal("冻结输入无法重现生成设计")
+
+
+def _invalid_frozen_proposal(message: str) -> AppError:
+    return AppError(
+        code="TEST_ENGINEERING_PROPOSAL_INVALID",
+        message=message,
+        status_code=409,
+    )
 
 
 def _view(change_set: AIChangeSet, item: AIChangeItem) -> TestEngineeringProposalView:

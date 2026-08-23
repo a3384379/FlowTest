@@ -51,6 +51,7 @@ class RequestTargetResolver:
         runtime_headers: dict[str, str],
         workflow_variables: dict[str, str],
         dataset_variables: dict[str, str],
+        api_headers_override: dict[str, str] | None = None,
     ) -> ResolvedRequestTarget:
         project = await self._session.get(Project, project_id)
         if project is None:
@@ -103,10 +104,13 @@ class RequestTargetResolver:
             tls_verify = endpoint.tls_verify
             proxy_ref = endpoint.proxy_ref
 
+        selected_api_headers = (
+            dict(version.headers) if api_headers_override is None else api_headers_override
+        )
         api_secret_refs = _secret_refs_from_values(
             version.path,
             version.query_parameters,
-            version.headers,
+            selected_api_headers,
             version.variables,
             version.body,
             version.auth_config,
@@ -139,7 +143,7 @@ class RequestTargetResolver:
                     HeaderScope.PROJECT: project.headers,
                     HeaderScope.ENVIRONMENT: environment.headers,
                     HeaderScope.SERVICE_ENDPOINT: endpoint_headers,
-                    HeaderScope.API: dict(version.headers),
+                    HeaderScope.API: selected_api_headers,
                     HeaderScope.RUNTIME: runtime_headers,
                 },
                 variables,

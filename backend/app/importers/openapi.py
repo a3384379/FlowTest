@@ -1,7 +1,7 @@
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import cast
+from typing import Literal, cast
 
 from app.domain.api_assets import (
     APIVersionSpec,
@@ -10,6 +10,13 @@ from app.domain.api_assets import (
     HttpMethod,
     JsonValue,
     QueryParameterSpec,
+)
+from app.domain.test_engineering import (
+    ContractAuth,
+    ContractParameter,
+    ContractRequestBody,
+    ContractResponse,
+    OperationContract,
 )
 from app.importers.contracts import (
     ImportedOperation,
@@ -55,6 +62,16 @@ def parse_openapi(
                     description=description,
                     request=request,
                     target_base_url=target_base_url,
+                    canonical_contract=_operation_contract(
+                        document=document,
+                        operation=operation,
+                        parameters=common_parameters + _sequence(operation.get("parameters")),
+                        request=request,
+                        schemes=schemes,
+                        default_security=default_security,
+                        source_type=source_type,
+                        operation_name=name,
+                    ),
                 )
             )
     return tuple(operations)
@@ -95,6 +112,252 @@ def _operation_request(
         auth_kind=auth_kind,
         auth_config=auth_config,
     )
+
+
+def _operation_contract(
+    *,
+    document: Mapping[str, object],
+    operation: Mapping[str, object],
+    parameters: list[object],
+    request: APIVersionSpec,
+    schemes: Mapping[str, object],
+    default_security: list[object],
+    source_type: ImportSourceType,
+    operation_name: str,
+) -> OperationContract:
+    contract_parameters = _contract_parameters(document, parameters, source_type)
+    request_body = _contract_request_body(document, operation, parameters, source_type)
+    auth = _contract_auth(operation, schemes, default_security)
+    responses = _contract_responses(document, operation, source_type)
+    info = _mapping(document.get("info"))
+    revision = _text(info.get("version")) or None
+    return OperationContract(
+        operation=_contract_operation_name(operation_name),
+        method=request.method.value,
+        path=request.path,
+        auth=auth,
+        parameters=contract_parameters,
+        request_body=request_body,
+        request=request_body.schema_ if request_body is not None else {},
+        responses=responses,
+        source_ref=f"openapi://{_contract_operation_name(operation_name)}",
+        revision=revision,
+        completeness="complete",
+    )
+
+
+def _contract_parameters(
+    document: Mapping[str, object],
+    parameters: list[object],
+    source_type: ImportSourceType,
+) -> list[ContractParameter]:
+    result: list[ContractParameter] = []
+    for raw_parameter in parameters:
+        parameter = _resolved_mapping(document, raw_parameter)
+        location = _text(parameter.get("in"))
+        name = _text(parameter.get("name"))
+        if location not in {"path", "query", "header", "cookie"} or not name:
+            continue
+        schema = (
+            _resolved_schema(document, parameter.get("schema"))
+            if source_type is ImportSourceType.OPENAPI3
+            else _swagger_parameter_schema(document, parameter)
+        )
+        result.append(
+            ContractParameter(
+                name=name,
+                location=cast(Literal["path", "query", "header", "cookie"], location),
+                required=location == "path" or parameter.get("required") is True,
+                schema=schema,
+                style=_text(parameter.get("style")) or None,
+                explode=(
+                    parameter.get("explode") if isinstance(parameter.get("explode"), bool) else None
+                ),
+                source_ref=f"openapi-parameter://{location}/{name}",
+            )
+        )
+    unique: dict[tuple[str, str], ContractParameter] = {}
+    for contract_parameter in result:
+        unique[(contract_parameter.location, contract_parameter.name.lower())] = contract_parameter
+    return list(unique.values())
+
+
+def _contract_request_body(
+    document: Mapping[str, object],
+    operation: Mapping[str, object],
+    parameters: list[object],
+    source_type: ImportSourceType,
+) -> ContractRequestBody | None:
+    if source_type is ImportSourceType.OPENAPI3:
+        request_body = _resolved_mapping(document, operation.get("requestBody"))
+        content = _mapping(request_body.get("content"))
+        for media_type in sorted(content, key=lambda value: ("json" not in value, value)):
+            media = _mapping(content[media_type])
+            schema = _resolved_schema(document, media.get("schema"))
+            if schema:
+                return ContractRequestBody(
+                    required=request_body.get("required") is True,
+                    content_type=media_type,
+                    schema=schema,
+                )
+        return None
+    for raw_parameter in parameters:
+        parameter = _resolved_mapping(document, raw_parameter)
+        if parameter.get("in") == "body":
+            return ContractRequestBody(
+                required=parameter.get("required") is True,
+                schema=_resolved_schema(document, parameter.get("schema")),
+            )
+    return None
+
+
+def _contract_responses(
+    document: Mapping[str, object],
+    operation: Mapping[str, object],
+    source_type: ImportSourceType,
+) -> dict[str, ContractResponse]:
+    result: dict[str, ContractResponse] = {}
+    for status, raw_response in _mapping(operation.get("responses")).items():
+        if re.fullmatch(r"[1-5][0-9]{2}|default", status) is None:
+            continue
+        response = _resolved_mapping(document, raw_response)
+        schema: dict[str, JsonValue] | None = None
+        content_type: str | None = None
+        if source_type is ImportSourceType.OPENAPI3:
+            content = _mapping(response.get("content"))
+            for media_type in sorted(content, key=lambda value: ("json" not in value, value)):
+                content_type = content_type or media_type
+                candidate = _resolved_schema(document, _mapping(content[media_type]).get("schema"))
+                if candidate:
+                    schema = candidate
+                    content_type = media_type
+                    break
+        else:
+            candidate = _resolved_schema(document, response.get("schema"))
+            schema = candidate or None
+            produces = _sequence(operation.get("produces")) or _sequence(document.get("produces"))
+            content_type = _text(produces[0]) if produces else None
+        result[status] = ContractResponse(
+            description=_text(response.get("description")),
+            content_type=content_type,
+            schema=schema,
+        )
+    return result
+
+
+def _contract_auth(
+    operation: Mapping[str, object],
+    schemes: Mapping[str, object],
+    default_security: list[object],
+) -> ContractAuth:
+    security = _sequence(operation.get("security")) if "security" in operation else default_security
+    if not security or not _mapping(security[0]):
+        return ContractAuth()
+    scheme_name = next(iter(_mapping(security[0])))
+    scheme = _mapping(schemes.get(scheme_name))
+    scheme_type = _text(scheme.get("type"))
+    http_scheme = _text(scheme.get("scheme")).lower()
+    if scheme_type == "apiKey":
+        location = _text(scheme.get("in"))
+        return ContractAuth(
+            required=True,
+            kind="api_key",
+            location=location if location in {"header", "query", "cookie"} else "header",
+            name=_text(scheme.get("name")) or "X-API-Key",
+            source_ref=f"openapi-security://{scheme_name}",
+        )
+    if http_scheme == "bearer":
+        return ContractAuth(
+            required=True,
+            kind="bearer",
+            location="header",
+            name="Authorization",
+            source_ref=f"openapi-security://{scheme_name}",
+        )
+    if http_scheme == "basic" or scheme_type == "basic":
+        return ContractAuth(
+            required=True,
+            kind="basic",
+            location="header",
+            name="Authorization",
+            source_ref=f"openapi-security://{scheme_name}",
+        )
+    if scheme_type in {"oauth2", "openIdConnect"}:
+        return ContractAuth(
+            required=True,
+            kind="oauth2",
+            location="header",
+            name="Authorization",
+            source_ref=f"openapi-security://{scheme_name}",
+        )
+    return ContractAuth(required=True, kind="other", source_ref=f"openapi-security://{scheme_name}")
+
+
+def _swagger_parameter_schema(
+    document: Mapping[str, object], parameter: Mapping[str, object]
+) -> dict[str, JsonValue]:
+    schema: dict[str, JsonValue] = {}
+    for key in (
+        "type",
+        "format",
+        "enum",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "minItems",
+        "maxItems",
+        "uniqueItems",
+        "items",
+    ):
+        if key in parameter:
+            schema[key] = _json_value(parameter[key])
+    if "items" in schema:
+        schema["items"] = _resolved_schema(document, parameter.get("items"))
+    return schema
+
+
+def _resolved_mapping(document: Mapping[str, object], value: object) -> Mapping[str, object]:
+    mapping = _mapping(value)
+    reference = _text(mapping.get("$ref"))
+    if not reference.startswith("#/"):
+        return mapping
+    current: object = document
+    for part in reference[2:].split("/"):
+        if not isinstance(current, Mapping):
+            return {}
+        current = current.get(part.replace("~1", "/").replace("~0", "~"))
+    return _mapping(current)
+
+
+def _resolved_schema(
+    document: Mapping[str, object], value: object, *, depth: int = 0
+) -> dict[str, JsonValue]:
+    if depth > 12:
+        return {}
+    schema = _resolved_mapping(document, value)
+    result: dict[str, JsonValue] = {}
+    for key, item in schema.items():
+        if key == "$ref":
+            continue
+        if key == "properties" and isinstance(item, Mapping):
+            result[key] = {
+                str(name): _resolved_schema(document, child, depth=depth + 1)
+                for name, child in item.items()
+            }
+        elif key == "items":
+            result[key] = _resolved_schema(document, item, depth=depth + 1)
+        else:
+            result[key] = _json_value(item)
+    return result
+
+
+def _contract_operation_name(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.:-]", "_", value).strip("_")
+    if not normalized or (not normalized[0].isalpha() and normalized[0] != "_"):
+        normalized = f"operation_{normalized}"
+    return normalized[:240]
 
 
 def _body(

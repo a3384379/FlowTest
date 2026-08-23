@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.test_design import TestDesignDocument, fingerprint_design
-from app.domain.test_engineering import OperationContract, TestEngineeringEngine
+from app.domain.test_engineering import (
+    ContractAuth,
+    ContractParameter,
+    ContractRequestBody,
+    OperationContract,
+    TestEngineeringEngine,
+)
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion
 from app.repositories.api_assets import APIAssetRepository
@@ -47,6 +53,7 @@ class TestEngineeringService:
         design = TestEngineeringEngine().generate(
             contract=contract,
             policy=payload.generation_policy,
+            additional_evidence=payload.additional_evidence,
         )
         return design, fingerprint_design(design)
 
@@ -62,16 +69,49 @@ class TestEngineeringService:
         if version is None:
             raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
         service_key = await self._service_key(project_id, definition)
+        if version.canonical_contract:
+            try:
+                stored = OperationContract.model_validate(version.canonical_contract)
+            except ValueError as error:
+                raise AppError(
+                    code="API_CANONICAL_CONTRACT_INVALID",
+                    message="API 版本的 canonical contract 无法解析",
+                    status_code=409,
+                ) from error
+            return stored.model_copy(
+                update={
+                    "service": service_key,
+                    "source_ref": (
+                        stored.source_ref
+                        or f"api-definition://{definition.id}/version/{version.version}"
+                    ),
+                    "revision": stored.revision or str(version.version),
+                    "completeness": version.contract_completeness,
+                }
+            )
+        body_schema = _request_schema(version)
         return OperationContract(
             operation=_operation_name(definition),
             method=version.method,
             path=urlsplit(version.path).path or "/",
             service=service_key,
-            auth={"required": version.auth_kind != "none"},
-            request=_request_schema(version),
+            auth=ContractAuth(
+                required=version.auth_kind != "none",
+                kind=version.auth_kind,
+                location=(
+                    version.auth_config.get("in")
+                    if version.auth_config.get("in") in {"header", "query", "cookie"}
+                    else ("header" if version.auth_kind != "none" else None)
+                ),
+                name=version.auth_config.get("name"),
+            ),
+            parameters=_version_parameters(version),
+            request_body=(ContractRequestBody(schema=body_schema) if body_schema else None),
+            request=body_schema,
             responses={},
             source_ref=f"api-definition://{definition.id}/version/{version.version}",
             revision=str(version.version),
+            completeness="legacy_partial",
         )
 
     async def _service_key(self, project_id: UUID, definition: APIDefinition) -> str | None:
@@ -93,25 +133,35 @@ def _operation_name(definition: APIDefinition) -> str:
 
 
 def _request_schema(version: APIVersion) -> dict[str, JsonValue]:
-    properties: dict[str, JsonValue] = {}
-    required: list[JsonValue] = []
-    for parameter in version.query_parameters:
-        name = parameter.get("name")
-        if not isinstance(name, str):
-            continue
-        properties[name] = {
-            "type": cast(JsonValue, parameter.get("type", "string")),
-        }
-        if parameter.get("required") is True:
-            required.append(name)
     if isinstance(version.body, dict):
-        for name, value in sorted(version.body.items()):
-            properties[str(name)] = _inferred_schema(cast(JsonValue, value))
-    return {
-        "type": "object",
-        "required": required,
-        "properties": properties,
-    }
+        return _inferred_schema(cast(JsonValue, version.body))
+    return {}
+
+
+def _version_parameters(version: APIVersion) -> list[ContractParameter]:
+    parameters = [
+        ContractParameter(
+            name=str(item["name"]),
+            location="query",
+            required=item.get("required") is True,
+            schema={"type": cast(JsonValue, item.get("type", "string"))},
+        )
+        for item in version.query_parameters
+        if isinstance(item.get("name"), str)
+    ]
+    parameters.extend(
+        ContractParameter(
+            name=name,
+            location="header",
+            schema={"type": "string"},
+        )
+        for name in sorted(version.headers)
+    )
+    parameters.extend(
+        ContractParameter(name=name, location="path", required=True, schema={"type": "string"})
+        for name in re.findall(r"\{\{([A-Za-z_][A-Za-z0-9_.-]*)\}\}", version.path)
+    )
+    return parameters
 
 
 def _inferred_schema(value: JsonValue) -> dict[str, JsonValue]:

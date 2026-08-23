@@ -12,10 +12,10 @@
 | Organization/Tenant | 支持 | 支持 | 支持 | 组织边界、审计和 Service Account 语义一致 |
 | Durable Command/Checkpoint | 支持 | 支持 | 受 Standalone 调度边界约束 | 幂等、Fence 和已完成节点跳过规则一致 |
 | MCP Read/Controlled Write | stdio/HTTP Gateway | HTTP Gateway | 本机 stdio/HTTP Gateway | Gateway 只调用 Application API，不直连数据库 |
-| Test Engineering/Evidence | 支持 | 支持 | 支持 | 生成与审核语义一致；物化复用 Workflow/TestCase |
-| FlowSpec Portable Mapping | 支持 | 支持 | 支持 | v1 Schema 兼容；v2 指纹不依赖实例 UUID |
+| Test Engineering/Evidence | 支持 | 支持 | 支持 | Canonical Contract、位置生成与审核语义一致；物化复用 Workflow/TestCase |
+| FlowSpec Portable Mapping | 支持 | 支持 | 支持 | v1 Schema 兼容；v3 指纹不依赖 UUID 并保留 pinned/current |
 | Performance/Environment Lab | 可按 Feature Flag 启用 | 明确关闭 | 明确关闭 | 不支持档位必须启动时拒绝配置 |
-| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0041` |
+| Transfer | 导入/导出 | 导入/导出 | `standalone-compact-transfer-v1` | Manifest 版本冻结；当前 head `20260823_0042` |
 
 ## 数据与版本边界
 
@@ -28,8 +28,12 @@
   Scenario、Evidence Ref、Warning、Confidence 和 Review Requirement。升级会将无真实重加密证据却
   被标记为 `migrated` 的 Key Version 恢复为 `planned`；降级仅用于 Schema 兼容回滚，
   不能当作真实密钥数据回滚。
-- 旧 FlowSpec 未带 `fingerprint_version` 时按 `flowtest-flow-spec-fingerprint-v1` 验证；新导出使用
-  `flowtest-flow-spec-fingerprint-v2`。两者都保持 `flowtest-flow-spec-v1` Schema，因此不修改
+- S47.1 迁移 `20260823_0042` 的回滚目标是 `20260823_0041`；它为 `api_versions` 增加
+  Canonical Contract、fingerprint 和 completeness，并对 PostgreSQL/Standalone 旧版本做安全
+  partial backfill。Backfill 不复制 Header/Query 值、不伪造 response status。
+- 旧 FlowSpec 未带 `fingerprint_version` 时按 `flowtest-flow-spec-fingerprint-v1` 验证；v2 保持
+  原指纹投影；新导出使用 `flowtest-flow-spec-fingerprint-v3` 并保存版本策略。三者都保持
+  `flowtest-flow-spec-v1` Schema，因此不修改
   `/api/v1` 路由版本。
 - Transfer Manifest 版本保持 `standalone-compact-transfer-v1`；新增表必须通过显式表清单和
   数据分类验证，不能静默改变旧包含义。

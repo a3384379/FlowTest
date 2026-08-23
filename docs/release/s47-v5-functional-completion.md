@@ -55,8 +55,8 @@ flowchart LR
 - 物化前会将 API 绑定的 Service 与目标环境的 Endpoint Variant 一起校验并固化到
   Proposal 快照。只有一个可用 Variant 时可自动选择；多个 Variant 时 API/UI 要求
   明确选择，避免生成“可物化但不可执行”的 Workflow。
-- `auth_missing` 能生成且进入 Coverage，但现有 Workflow API 节点不能安全禁用定义级
-  认证；Apply 因此显式返回 `TEST_ENGINEERING_SCENARIO_NOT_MATERIALIZABLE`，不伪造可执行。
+- `auth_missing` 通过节点级 `auth_disabled` 安全物化；Runtime 会跳过定义级认证，Snapshot 只保存
+  模式、不保存 Secret，并由真实 Mock Target 验证 Authorization/API Key/Cookie 未发送。
 
 ## 3. Scenario、Oracle 与 Coverage 语义
 
@@ -75,11 +75,13 @@ Coverage 同时记录各维度目标、已覆盖 Evidence/Scenario 和未覆盖 
 
 ## 4. FlowSpec 兼容与可移植性
 
-- Schema 版本继续为 `flowtest-flow-spec-v1`。新导出使用
-  `flowtest-flow-spec-fingerprint-v2`，指纹的语义投影排除 project/workflow/asset UUID。
+- Schema 版本继续为 `flowtest-flow-spec-v1`。S47.1 新导出使用
+  `flowtest-flow-spec-fingerprint-v3`，指纹的语义投影排除 project/workflow/asset UUID，
+  并加入 pinned/current、source version 与 contract fingerprint。
 - 不带 `fingerprint_version` 的旧 FlowSpec 按 `flowtest-flow-spec-fingerprint-v1` 解析和验证，
   不会因新指纹算法被误判为篡改。
-- v2 显式保存 portable Service、Operation、Target/Variant、Dependency 和 Binding。导入者
+- v3 显式保存 portable Service、Operation、Target/Variant、Dependency、Binding 和 API Version
+  Strategy。导入者
   必须将 Service/Operation 逻辑键映射到目标项目资产；缺失、歧义或跨项目映射会
   成为 compatibility blocker，不会在 Apply 时静默丢弃。
 - UI 支持粘贴/导出 JSON、Validate/Compatibility、Service/Operation Mapping、Diff、
@@ -119,9 +121,11 @@ Coverage 同时记录各维度目标、已覆盖 Evidence/Scenario 和未覆盖 
 
 ## 8. 迁移与运行档位
 
-Alembic head 从 `20260823_0040` 升级为 `20260823_0041`。迁移为 `test_designs`
+S47 的 Alembic head 从 `20260823_0040` 升级为 `20260823_0041`；S47.1 再升级为
+`20260823_0042`。0041 为 `test_designs`
 增加 `scenarios`、`evidence_refs`、`warnings`、`confidence`、`review_requirements`，
-提供完整 downgrade。Standalone SQLite 增量 Schema 和 Transfer 明确表/列处理同步到新 head。
+提供完整 downgrade；0042 为 `api_versions` 增加 canonical contract、fingerprint 和 completeness，
+并安全 backfill 旧版本。Standalone SQLite 增量 Schema 和 Transfer 明确表/列处理同步到新 head。
 
 迁移同时将无真实重加密证据却标记为 `migrated` 的 Organization Key Version 恢复为
 `planned`。当前 Key Rotation 仅可创建计划，Apply/Rollback 明确返回 409；它在真实
@@ -147,7 +151,8 @@ Alembic head 从 `20260823_0040` 升级为 `20260823_0041`。迁移为 `test_des
 已知未完成项：
 
 1. Key Rotation 真实重加密/校验/回滚未实现，是明确 GA blocker。
-2. `auth_missing` 可生成和审核，但在 Workflow 支持安全禁用定义级认证前不可物化。
+2. 完整 value-partition pairwise covering array 与显式 State Model 尚未实现；State 开关会返回
+   unavailable，不会静默声称支持。
 3. Source Evidence 当前仅支持有界 Python AST 快照；DataProfile 是 typed 脱敏适配入口，
    不代表已经对任意外部数据库建立生产连接。
 4. 远程 CI、Windows 72 小时试点、14 日 RC 和人工签署尚无 S47 证据。
@@ -155,3 +160,11 @@ Alembic head 从 `20260823_0040` 升级为 `20260823_0041`。迁移为 `test_des
 当前发布判定为 **LOCAL FUNCTIONAL COMPLETION VERIFIED / NOT GA READY**。本地全量
 门槛、真实迁移往返、Compose 主链路与 Playwright UI 主路径已通过，可进入 V5
 功能完成审核。Key Rotation 和上述外部/时间型门槛未完成，因此不等于 GA Ready。
+
+## 11. S47.1 语义正确性补充
+
+S47.1 在上述 S47 主链路上补齐 OpenAPI/Swagger Canonical Contract 持久化、参数位置、Evidence
+Projection/Conflict、Path/Query/Header/Body/Auth 真实物化、Response Schema Assert、FlowSpec
+pinned/current v3 指纹、独立 Test Semantic Coverage、value-level Evidence Redaction、HTTP 5xx
+upstream 分类和 0041 downgrade truth fix。详细审计矩阵、Schema、迁移和剩余风险见
+[S47.1 语义正确性与证据闭环](s47-1-semantic-correctness.md)。

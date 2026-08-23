@@ -36,10 +36,6 @@ def downgrade() -> None:
         batch.drop_column("warnings")
         batch.drop_column("evidence_refs")
         batch.drop_column("scenarios")
-    op.execute(
-        sa.text(
-            "UPDATE organization_key_versions "
-            "SET migration_status = 'migrated', migrated_at = activated_at "
-            "WHERE status = 'active' AND migration_status = 'planned'"
-        )
-    )
+    # The previous migration state cannot be reconstructed after the upgrade
+    # normalized it. Keep key versions honestly marked `planned`; claiming that
+    # every active key was migrated would fabricate operational state.
