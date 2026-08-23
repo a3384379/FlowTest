@@ -7,7 +7,8 @@
 | 项目 | 值 |
 | --- | --- |
 | Branch | `codex/v5.0` |
-| Reviewed SHA | `1a2ada2e0716221fa2c1046630c60b3b00cc85d1` |
+| Start SHA | `1a2ada2e0716221fa2c1046630c60b3b00cc85d1` |
+| Remote Code Evidence SHA | `839d4dbcead073d4639906fda3f592751fb1dc7e` |
 | Migration Before | `20260823_0042` |
 | Migration After | `20260823_0043` |
 | FlowSpec Schema | `flowtest-flow-spec-v1` |
@@ -162,16 +163,34 @@ Change Regression 展示 Asset Mapping、Project Known 和 Current TestPlan 三�
 
 ## 15. Remote CI Results
 
-本地提交前状态为 `PENDING`。提交推送后更新 Draft PR，并在本节记录本次 SHA 对应 Workflow、Run ID、Conclusion、失败 Job/Step 和 URL。全部远程 Workflow 完成并通过前，`MERGE_TO_MAIN` 必须为 `NO-GO`。
+代码证据提交 `839d4dbcead073d4639906fda3f592751fb1dc7e` 的 Draft PR 远端矩阵全部完成并通过：
+
+| Workflow | Run ID | Conclusion | Failed Job/Step | URL |
+| --- | ---: | --- | --- | --- |
+| Backend CI | 32637129945 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129945 |
+| Frontend CI | 32637129858 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129858 |
+| Security CI | 32637129848 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129848 |
+| Compose Smoke Test | 32637129857 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129857 |
+| Standalone Windows Bundle | 32637129851 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129851 |
+| V2 to V3 Upgrade CI | 32637129859 | SUCCESS | — | https://github.com/a3384379/FlowTest/actions/runs/32637129859 |
+
+Compose 的 `smoke` 和 `compact-smoke` 两个 Job 都成功；完整 Smoke 同时通过了 S19 不可变工作流 Flaky 验证、S47.2、容量和备份恢复。表中 Windows 结果是 GitHub-hosted Windows Bundle 构建验证，不等同于用户环境 Windows 实机验收。
 
 ## 16. Remaining Risks
 
-- P0：本地已无已知 P0；Remote CI 尚待提交后验证。
+- P0：本地与代码证据 SHA 的 Remote CI 均无已知 P0。
 - P1：完整 covering array、显式 State Engine 和完整 Knowledge Graph 未实现。
-- P2：Compact 长时运行尚未执行；不影响本地功能闭环判断，但不得被记为已验证。
+- P2：本地 Compact 长时运行未执行；远端 Compact Smoke 已通过，但不能替代连续长时运行。
 - External：Windows 实机、连续 Standalone/Compact 运行、RC 观察和安全审批仍需外部证据。
 - GA Blocker：真实 Key Rotation 尚未实现。
 
 ## 17. Release Decision
 
-允许的最高结论是 `READY_FOR_V5_FUNCTIONAL_COMPLETION_REVIEW`；`GA_READY: NO`。
+```text
+READY_FOR_V5_FUNCTIONAL_COMPLETION_REVIEW
+MERGE_TO_MAIN: GO
+RC_READY: YES
+GA_READY: NO
+```
+
+这里的 `MERGE_TO_MAIN: GO` 仅表示功能与自动化门禁允许进入人工合并评审；本文不授权也未执行 Merge、Tag 或 Release，Draft PR 状态保持不变。
