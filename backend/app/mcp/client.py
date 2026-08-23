@@ -112,6 +112,19 @@ class MCPReadGatewayClient:
             resource_uri=resource_uri,
         )
 
+    async def inspect_change_impact(
+        self,
+        project_id: UUID | str,
+        impact_run_id: UUID | str,
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._get(
+            f"/api/v1/mcp/read/projects/{project_id}/change-impact/{impact_run_id}",
+            token=token,
+            resource_uri=None,
+        )
+
     async def inspect_workflow(
         self,
         workflow_id: UUID | str,
@@ -136,6 +149,104 @@ class MCPReadGatewayClient:
             f"/api/v1/mcp/read/runs/{execution_id}/evidence",
             token=token,
             resource_uri=resource_uri,
+        )
+
+    async def generate_test_design(
+        self,
+        project_id: UUID | str,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/test-design/generate",
+            payload=payload,
+            token=token,
+        )
+
+    async def analyze_test_coverage(
+        self,
+        project_id: UUID | str,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/coverage/analyze",
+            payload=payload,
+            token=token,
+        )
+
+    async def inspect_source_evidence(
+        self,
+        project_id: UUID | str,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/evidence/source",
+            payload=payload,
+            token=token,
+        )
+
+    async def inspect_data_profile(
+        self,
+        project_id: UUID | str,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/evidence/data-profile",
+            payload=payload,
+            token=token,
+        )
+
+    async def validate_flow_spec(
+        self,
+        project_id: UUID | str,
+        spec: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/flow-spec/validate",
+            payload={"spec": dict(spec)},
+            token=token,
+        )
+
+    async def diff_flow_specs(
+        self,
+        project_id: UUID | str,
+        *,
+        before: Mapping[str, Any] | None,
+        after: Mapping[str, Any],
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        payload: dict[str, Any] = {"after": dict(after)}
+        if before is not None:
+            payload["before"] = dict(before)
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/flow-spec/diff",
+            payload=payload,
+            token=token,
+        )
+
+    async def export_flow_spec(
+        self,
+        project_id: UUID | str,
+        workflow_id: UUID | str,
+        *,
+        version: int | None = None,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        params = {"version": version} if version is not None else None
+        return await self._get(
+            f"/api/v1/mcp/read/projects/{project_id}/flow-spec/workflows/{workflow_id}/export",
+            params=params,
+            token=token,
+            resource_uri=None,
         )
 
     async def propose_test_design(
@@ -190,6 +301,40 @@ class MCPReadGatewayClient:
         payload: Mapping[str, Any],
         token: str | None,
     ) -> MCPControlledWriteEnvelope:
+        response = await self._request_post(path=path, payload=payload, token=token)
+        try:
+            return MCPControlledWriteEnvelope.model_validate(response.json())
+        except (ValueError, ValidationError) as error:
+            raise MCPGatewayError(
+                code="MCP_GATEWAY_INVALID_RESPONSE",
+                status_code=502,
+                message="MCP 应用网关返回格式无效",
+            ) from error
+
+    async def _post_read(
+        self,
+        path: str,
+        *,
+        payload: Mapping[str, Any],
+        token: str | None,
+    ) -> MCPReadEnvelope:
+        response = await self._request_post(path=path, payload=payload, token=token)
+        try:
+            return MCPReadEnvelope.model_validate(response.json())
+        except (ValueError, ValidationError) as error:
+            raise MCPGatewayError(
+                code="MCP_GATEWAY_INVALID_RESPONSE",
+                status_code=502,
+                message="MCP 应用网关返回格式无效",
+            ) from error
+
+    async def _request_post(
+        self,
+        *,
+        path: str,
+        payload: Mapping[str, Any],
+        token: str | None,
+    ) -> httpx.Response:
         headers = {
             "X-MCP-Client-Version": self._client_version,
             "Content-Type": "application/json",
@@ -207,14 +352,7 @@ class MCPReadGatewayClient:
             ) from error
         if response.is_error:
             raise _gateway_error(response)
-        try:
-            return MCPControlledWriteEnvelope.model_validate(response.json())
-        except (ValueError, ValidationError) as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_INVALID_RESPONSE",
-                status_code=502,
-                message="MCP 应用网关返回格式无效",
-            ) from error
+        return response
 
 
 def _validate_base_url(value: str) -> str:

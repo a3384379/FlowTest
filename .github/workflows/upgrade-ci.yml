@@ -22,6 +22,7 @@ on:
       - "scripts/storage_transfer.py"
       - "scripts/verify_v2_v3_data.py"
       - "scripts/verify_v2_v3_upgrade.sh"
+  workflow_dispatch:
 
 permissions:
   contents: read

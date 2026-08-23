@@ -666,6 +666,21 @@ async def test_service_target_management_update_and_connectivity(
     )
     assert listed_services.status_code == 200
     assert any(item["id"] == service_id for item in listed_services.json())
+    impact_preview = await asset_client.get(
+        f"/api/v1/projects/{project['id']}/services/{service_id}/impact-preview",
+        headers=headers,
+    )
+    assert impact_preview.status_code == 200, impact_preview.text
+    assert impact_preview.json() == {
+        "strategy": "request_target_dependency_v1",
+        "service_id": service_id,
+        "service_key": "billing",
+        "affected_apis": [],
+        "affected_workflows": [],
+        "affected_test_plans": [],
+        "affected_scheduled_runs": [],
+        "affected_release_gates": [],
+    }
 
     endpoint_response = await asset_client.post(
         f"/api/v1/projects/{project['id']}/environments/{environment['id']}/service-endpoints",

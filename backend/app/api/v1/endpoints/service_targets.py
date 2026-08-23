@@ -10,6 +10,7 @@ from app.schemas.service_targets import (
     ServiceEndpointResponse,
     ServiceEndpointUpdate,
     ServiceResponse,
+    ServiceTargetImpactPreviewResponse,
     ServiceUpdate,
 )
 from app.services.service_targets import ServiceTargetService
@@ -69,6 +70,24 @@ async def update_service(
         enabled=payload.enabled,
     )
     return ServiceResponse.model_validate(service)
+
+
+@router.get(
+    "/services/{service_id}/impact-preview",
+    response_model=ServiceTargetImpactPreviewResponse,
+)
+async def preview_service_target_impact(
+    project_id: UUID,
+    service_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ServiceTargetImpactPreviewResponse:
+    preview = await ServiceTargetService(session).impact_preview(
+        actor=current_user,
+        project_id=project_id,
+        service_id=service_id,
+    )
+    return ServiceTargetImpactPreviewResponse.model_validate(preview)
 
 
 @router.get(

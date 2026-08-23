@@ -25,6 +25,7 @@ on:
       - "scripts/smoke_s28.py"
       - "scripts/smoke_s29.py"
       - "scripts/smoke_s30.py"
+      - "scripts/smoke_s47.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -57,6 +58,7 @@ on:
       - "scripts/smoke_s28.py"
       - "scripts/smoke_s29.py"
       - "scripts/smoke_s30.py"
+      - "scripts/smoke_s47.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -64,6 +66,7 @@ on:
       - "scripts/capacity_s19.py"
       - "scripts/capacity_s29.py"
       - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read

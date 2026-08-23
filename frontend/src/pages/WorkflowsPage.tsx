@@ -26,12 +26,14 @@ import {
 import { useState } from 'react'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
+import FlowSpecReviewDialog from '../features/workflows/FlowSpecReviewDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
 import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
 
 export default function WorkflowsPage() {
   const [createOpen, setCreateOpen] = useState(false)
+  const [flowSpecOpen, setFlowSpecOpen] = useState(false)
   const state = useWorkflows()
 
   async function create(input: Parameters<typeof state.addWorkflow>[0]) {
@@ -41,7 +43,11 @@ export default function WorkflowsPage() {
 
   return (
     <>
-      <WorkflowHeading state={state} onCreate={() => setCreateOpen(true)} />
+      <WorkflowHeading
+        state={state}
+        onCreate={() => setCreateOpen(true)}
+        onFlowSpec={() => setFlowSpecOpen(true)}
+      />
       <WorkflowWorkspace state={state} />
       <RunConsoleCard state={state} />
       <DebugResultCard result={state.debugResult} />
@@ -63,6 +69,15 @@ export default function WorkflowsPage() {
         onClose={() => setCreateOpen(false)}
         onCreate={create}
       />
+      {state.projectId && state.workflowId ? (
+        <FlowSpecReviewDialog
+          open={flowSpecOpen}
+          projectId={state.projectId}
+          workflowId={state.workflowId}
+          apis={state.apis.data?.items ?? []}
+          onClose={() => setFlowSpecOpen(false)}
+        />
+      ) : null}
     </>
   )
 }
@@ -102,7 +117,15 @@ function RunConsoleCard({ state }: { state: WorkflowState }) {
   )
 }
 
-function WorkflowHeading({ state, onCreate }: { state: WorkflowState; onCreate: () => void }) {
+function WorkflowHeading({
+  state,
+  onCreate,
+  onFlowSpec,
+}: {
+  state: WorkflowState
+  onCreate: () => void
+  onFlowSpec: () => void
+}) {
   return (
     <div className="page-heading">
       <div>
@@ -138,6 +161,9 @@ function WorkflowHeading({ state, onCreate }: { state: WorkflowState; onCreate: 
           onClick={onCreate}
         >
           新建工作流
+        </Button>
+        <Button disabled={!state.workflowId} onClick={onFlowSpec}>
+          FlowSpec 导入 / Mapping
         </Button>
       </Space>
     </div>

@@ -215,6 +215,40 @@ async def test_scheduler_resumes_completed_nodes_and_continues_attempt_numbers()
 
 
 @pytest.mark.asyncio
+async def test_scheduler_retry_resets_failed_node_budget_without_reusing_attempt_number() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api", max_retries=1)],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+    first = await WorkflowScheduler(ControlledExecutor({"api": {"failures": 2}})).run(definition)
+    first_by_id = {record.node_id: record for record in first.records}
+    assert first_by_id["api"].status is NodeStatus.FAILED
+    assert first_by_id["api"].attempts == 2
+
+    resumed = await WorkflowScheduler(ControlledExecutor({"api": {"failures": 1}})).run(
+        definition,
+        resume_records=(first_by_id["start"],),
+        resume_attempts={"start": 1, "api": 2},
+    )
+    assert resumed.status == "failed"
+    assert resumed.records[1].attempts == 3
+
+    retried_executor = ControlledExecutor({"api": {"failures": 1}})
+    retried = await WorkflowScheduler(retried_executor).run(
+        definition,
+        resume_records=(first_by_id["start"],),
+        resume_attempts={"start": 1, "api": 2},
+        reset_retry_budget=True,
+    )
+    assert retried.status == "passed"
+    assert retried_executor.attempts == {"api": 2, "end": 1}
+    assert retried.records[1].attempts == 4
+
+
+@pytest.mark.asyncio
 async def test_scheduler_restores_checkpoint_output_and_emits_snapshot() -> None:
     definition = workflow(
         middle_nodes=[api_node("api")],

@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from enum import StrEnum
 from hashlib import sha256
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -30,7 +30,8 @@ from app.engine.contracts import (
 )
 
 FLOW_SPEC_SCHEMA_VERSION = "flowtest-flow-spec-v1"
-FLOW_SPEC_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v1"
+FLOW_SPEC_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v2"
+FLOW_SPEC_LEGACY_FINGERPRINT_VERSION = "flowtest-flow-spec-fingerprint-v1"
 
 
 class FlowSpecParameterSource(StrEnum):
@@ -38,6 +39,13 @@ class FlowSpecParameterSource(StrEnum):
     RUNTIME = "runtime"
     CONSTANT = "constant"
     SECRET_REF = "secret_ref"  # noqa: S105
+
+
+class FlowSpecNodeTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service_ref: str | None = Field(default=None, min_length=1, max_length=160)
+    endpoint_variant: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class FlowSpecNode(BaseModel):
@@ -54,6 +62,25 @@ class FlowSpecNode(BaseModel):
     bindings: list[CapabilityBinding] | None = None
     depends_on: list[str] = Field(default_factory=list, max_length=128)
     operation_ref: str | None = Field(default=None, max_length=300)
+    target: FlowSpecNodeTarget | None = None
+
+
+class FlowSpecService(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=200)
+    service_type: str = Field(default="http", min_length=1, max_length=32)
+
+
+class FlowSpecOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str = Field(min_length=1, max_length=300)
+    service_ref: str | None = Field(default=None, min_length=1, max_length=160)
+    name: str = Field(default="", max_length=200)
+    method: str = Field(pattern=r"^[A-Z]+$", min_length=3, max_length=16)
+    path: str = Field(min_length=1, max_length=2048)
 
 
 class FlowSpecEdge(BaseModel):
@@ -128,10 +155,15 @@ class FlowSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = FLOW_SPEC_SCHEMA_VERSION
+    fingerprint_version: Literal[
+        "flowtest-flow-spec-fingerprint-v1", "flowtest-flow-spec-fingerprint-v2"
+    ] = "flowtest-flow-spec-fingerprint-v2"
     project_id: UUID | None = None
     name: str = Field(default="Imported Flow", min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)
     source_evidence: list[str] = Field(default_factory=list, max_length=200)
+    services: list[FlowSpecService] = Field(default_factory=list, max_length=500)
+    operations: list[FlowSpecOperation] = Field(default_factory=list, max_length=1000)
     nodes: list[FlowSpecNode] = Field(min_length=1, max_length=1000)
     edges: list[FlowSpecEdge] = Field(default_factory=list, max_length=2000)
     variables: dict[str, str] = Field(default_factory=dict)
@@ -142,6 +174,13 @@ class FlowSpec(BaseModel):
     cleanup: list[FlowSpecCleanup] = Field(default_factory=list, max_length=200)
     security_policy: FlowSpecSecurityPolicy = Field(default_factory=FlowSpecSecurityPolicy)
     confidence: FlowSpecConfidence = Field(default_factory=FlowSpecConfidence)
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_legacy_fingerprint_version(cls, value: object) -> object:
+        if isinstance(value, Mapping) and "fingerprint_version" not in value:
+            return {**value, "fingerprint_version": FLOW_SPEC_LEGACY_FINGERPRINT_VERSION}
+        return value
 
     @model_validator(mode="after")
     def validate_schema_version(self) -> FlowSpec:
@@ -250,10 +289,7 @@ def normalize_flow_spec(spec: FlowSpec | Mapping[str, object]) -> FlowSpec:
         else dict(spec)
     )
     normalized = FlowSpec.model_validate(raw)
-    nodes = [
-        node.model_copy(update={"depends_on": sorted(set(node.depends_on))})
-        for node in normalized.nodes
-    ]
+    nodes, dependency_edges = _canonicalize_dependencies(normalized.nodes, normalized.edges)
     nodes.sort(key=lambda item: item.id)
     edges = [
         edge.model_copy(
@@ -270,7 +306,7 @@ def normalize_flow_spec(spec: FlowSpec | Mapping[str, object]) -> FlowSpec:
                 )
             }
         )
-        for edge in normalized.edges
+        for edge in [*normalized.edges, *dependency_edges]
     ]
     edges.sort(key=lambda item: item.id)
     return normalized.model_copy(
@@ -278,6 +314,8 @@ def normalize_flow_spec(spec: FlowSpec | Mapping[str, object]) -> FlowSpec:
             "name": normalized.name.strip(),
             "description": normalized.description.strip(),
             "source_evidence": sorted(set(item.strip() for item in normalized.source_evidence)),
+            "services": sorted(normalized.services, key=lambda item: item.ref),
+            "operations": sorted(normalized.operations, key=lambda item: item.ref),
             "nodes": nodes,
             "edges": edges,
             "bindings": sorted(
@@ -307,8 +345,10 @@ def flow_spec_fingerprint(spec: FlowSpec) -> str:
     payload.pop("project_id", None)
     payload.pop("source_evidence", None)
     payload.pop("confidence", None)
+    payload.pop("fingerprint_version", None)
+    version = normalized.fingerprint_version
     canonical = json.dumps(
-        {"version": FLOW_SPEC_FINGERPRINT_VERSION, "spec": payload},
+        {"version": version, "spec": payload},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -402,32 +442,145 @@ def _unknown_node_issues(
 
 
 def _validate_semantic_references(spec: FlowSpec) -> list[FlowSpecIssue]:
+    service_refs = [service.ref for service in spec.services]
+    operation_refs = [operation.ref for operation in spec.operations]
     issues: list[FlowSpecIssue] = []
+    if len(service_refs) != len(set(service_refs)):
+        issues.append(
+            FlowSpecIssue(
+                code="DUPLICATE_SERVICE_REF",
+                message="Service portable ref 必须唯一",
+                path="$.services",
+            )
+        )
+    if len(operation_refs) != len(set(operation_refs)):
+        issues.append(
+            FlowSpecIssue(
+                code="DUPLICATE_OPERATION_REF",
+                message="Operation portable ref 必须唯一",
+                path="$.operations",
+            )
+        )
+    known_services = set(service_refs)
+    for index, operation in enumerate(spec.operations):
+        if operation.service_ref is not None and operation.service_ref not in known_services:
+            issues.append(
+                FlowSpecIssue(
+                    code="UNKNOWN_SERVICE_REF",
+                    message=f"Operation 引用了未知 Service {operation.service_ref}",
+                    path=f"$.operations[{index}].service_ref",
+                )
+            )
+    issues.extend(_validate_node_semantics(spec, known_services))
+    issues.extend(
+        FlowSpecIssue(
+            code="INVALID_BINDING",
+            message="绑定必须同时声明 from 和 to",
+            path=f"$.bindings[{index}]",
+        )
+        for index, binding in enumerate(spec.bindings)
+        if not binding.get("from") or not binding.get("to")
+    )
     node_ids = {node.id for node in spec.nodes}
-    for index, binding in enumerate(spec.bindings):
-        if not binding.get("from") or not binding.get("to"):
-            issues.append(
-                FlowSpecIssue(
-                    code="INVALID_BINDING",
-                    message="绑定必须同时声明 from 和 to",
-                    path=f"$.bindings[{index}]",
-                )
-            )
-    for index, assertion in enumerate(spec.assertions):
-        if assertion.node_id not in node_ids:
-            issues.append(
-                FlowSpecIssue(
-                    code="UNKNOWN_NODE_REFERENCE",
-                    message=f"断言节点 {assertion.node_id} 不存在",
-                    path=f"$.assertions[{index}].node_id",
-                )
-            )
+    issues.extend(
+        FlowSpecIssue(
+            code="UNKNOWN_NODE_REFERENCE",
+            message=f"断言节点 {assertion.node_id} 不存在",
+            path=f"$.assertions[{index}].node_id",
+        )
+        for index, assertion in enumerate(spec.assertions)
+        if assertion.node_id not in node_ids
+    )
     return issues
+
+
+def _validate_node_semantics(spec: FlowSpec, known_services: set[str]) -> list[FlowSpecIssue]:
+    issues: list[FlowSpecIssue] = []
+    operations = {operation.ref: operation for operation in spec.operations}
+    dependency_edges = {(edge.source, edge.target): edge for edge in spec.edges}
+    for index, node in enumerate(spec.nodes):
+        operation = operations.get(node.operation_ref or "")
+        issues.extend(_dependency_conflicts(node, index, dependency_edges))
+        issues.extend(_operation_reference_issues(node, index, operation))
+        issues.extend(_target_reference_issues(node, index, operation, known_services))
+    return issues
+
+
+def _dependency_conflicts(
+    node: FlowSpecNode,
+    index: int,
+    edges: Mapping[tuple[str, str], FlowSpecEdge],
+) -> list[FlowSpecIssue]:
+    return [
+        FlowSpecIssue(
+            code="DEPENDENCY_EDGE_CONFLICT",
+            message="depends_on 不能覆盖带条件或字段映射的显式边",
+            path=f"$.nodes[{index}].depends_on",
+        )
+        for dependency in node.depends_on
+        if (edge := edges.get((dependency, node.id))) is not None
+        and (edge.condition is not None or bool(edge.mappings))
+    ]
+
+
+def _operation_reference_issues(
+    node: FlowSpecNode, index: int, operation: FlowSpecOperation | None
+) -> list[FlowSpecIssue]:
+    if node.operation_ref is None:
+        return []
+    if _FLOW_NODE_TYPES.get(node.kind) is not NodeType.API:
+        return [
+            FlowSpecIssue(
+                code="OPERATION_REF_NODE_KIND_INVALID",
+                message="operation_ref 只能用于 HTTP/API 节点",
+                path=f"$.nodes[{index}].operation_ref",
+            )
+        ]
+    if operation is None:
+        return [
+            FlowSpecIssue(
+                code="UNKNOWN_OPERATION_REF",
+                message=f"节点引用了未知 Operation {node.operation_ref}",
+                path=f"$.nodes[{index}].operation_ref",
+            )
+        ]
+    return []
+
+
+def _target_reference_issues(
+    node: FlowSpecNode,
+    index: int,
+    operation: FlowSpecOperation | None,
+    known_services: set[str],
+) -> list[FlowSpecIssue]:
+    if node.target is None or node.target.service_ref is None:
+        return []
+    if node.target.service_ref not in known_services:
+        return [
+            FlowSpecIssue(
+                code="UNKNOWN_SERVICE_REF",
+                message=f"节点引用了未知 Service {node.target.service_ref}",
+                path=f"$.nodes[{index}].target.service_ref",
+            )
+        ]
+    if operation is not None and operation.service_ref not in {None, node.target.service_ref}:
+        return [
+            FlowSpecIssue(
+                code="OPERATION_SERVICE_CONFLICT",
+                message="节点 Target Service 与 Operation Service 不一致",
+                path=f"$.nodes[{index}].target.service_ref",
+            )
+        ]
+    return []
 
 
 def _validate_workflow_graph(spec: FlowSpec) -> list[FlowSpecIssue]:
     try:
-        definition = flow_spec_to_workflow_definition(spec)
+        definition = flow_spec_to_workflow_definition(
+            spec,
+            operation_mappings={operation.ref: UUID(int=1) for operation in spec.operations},
+            service_keys={service.ref: service.ref for service in spec.services},
+        )
         for node in definition.nodes:
             if node.type is not NodeType.CAPABILITY:
                 parse_node_config(node)
@@ -482,6 +635,7 @@ def assess_flow_spec_compatibility(spec: FlowSpec) -> FlowSpecCompatibilityResul
                 path="$.confidence",
             )
         )
+    blockers.extend(_unsupported_semantic_blockers(spec))
     validation = validate_flow_spec(spec)
     blockers.extend(validation.issues)
     warnings.extend(validation.warnings)
@@ -501,6 +655,10 @@ def workflow_definition_to_flow_spec(
     name: str = "Imported Flow",
     description: str = "",
     source_evidence: list[str] | None = None,
+    operation_refs: Mapping[str, str] | None = None,
+    node_targets: Mapping[str, FlowSpecNodeTarget] | None = None,
+    services: list[FlowSpecService] | None = None,
+    operations: list[FlowSpecOperation] | None = None,
 ) -> FlowSpec:
     nodes = []
     for node in definition.nodes:
@@ -514,12 +672,19 @@ def workflow_definition_to_flow_spec(
             bindings = node.bindings
             kind = "capability"
         else:
-            config = node.config
+            config = dict(node.config)
             capability_id = None
             capability_version = None
             configuration = None
             bindings = None
             kind = _FLOW_NODE_KIND[node.type]
+        operation_ref = (operation_refs or {}).get(node.id)
+        target = (node_targets or {}).get(node.id)
+        if operation_ref is not None:
+            config.pop("api_definition_id", None)
+            config.pop("api_version", None)
+            config.pop("service_override", None)
+            config.pop("endpoint_variant", None)
         nodes.append(
             FlowSpecNode(
                 id=node.id,
@@ -531,14 +696,19 @@ def workflow_definition_to_flow_spec(
                 capability_version=capability_version,
                 configuration=configuration,
                 bindings=bindings,
+                operation_ref=operation_ref,
+                target=target,
             )
         )
     return normalize_flow_spec(
         FlowSpec(
+            fingerprint_version=FLOW_SPEC_FINGERPRINT_VERSION,
             project_id=project_id,
             name=name,
             description=description,
             source_evidence=source_evidence or [],
+            services=services or [],
+            operations=operations or [],
             nodes=nodes,
             edges=[
                 FlowSpecEdge.model_validate(edge.model_dump(mode="json"))
@@ -554,33 +724,146 @@ def workflow_definition_to_flow_spec(
     )
 
 
-def flow_spec_to_workflow_definition(spec: FlowSpec) -> WorkflowDefinition:
-    nodes: list[WorkflowNode] = []
-    for node in spec.nodes:
-        node_type = _FLOW_NODE_TYPES.get(node.kind)
-        if node_type is None:
-            raise ValueError(f"Unsupported FlowSpec node kind: {node.kind}")
-        nodes.append(
-            WorkflowNode(
-                id=node.id,
-                type=node_type,
-                name=node.name,
-                position=node.position,
-                config=node.config,
-                capability_id=node.capability_id,
-                capability_version=node.capability_version,
-                configuration=node.configuration,
-                bindings=node.bindings,
-            )
-        )
+def flow_spec_to_workflow_definition(
+    spec: FlowSpec,
+    *,
+    operation_mappings: Mapping[str, UUID] | None = None,
+    service_keys: Mapping[str, str] | None = None,
+) -> WorkflowDefinition:
+    nodes = [
+        _flow_spec_node_to_workflow_node(node, operation_mappings or {}, service_keys or {})
+        for node in spec.nodes
+    ]
     edges = [WorkflowEdge.model_validate(edge.model_dump(mode="json")) for edge in spec.edges]
+    variables = dict(spec.variables)
+    for parameter in spec.parameters:
+        if parameter.source in {FlowSpecParameterSource.RUNTIME, FlowSpecParameterSource.CONSTANT}:
+            variables[parameter.name] = parameter.value or variables.get(parameter.name, "")
     return WorkflowDefinition(
         schema_version="1.0",
-        variables=dict(spec.variables),
+        variables=variables,
         nodes=nodes,
         edges=edges,
         settings=spec.settings,
     )
+
+
+def _flow_spec_node_to_workflow_node(
+    node: FlowSpecNode,
+    operation_mappings: Mapping[str, UUID],
+    service_keys: Mapping[str, str],
+) -> WorkflowNode:
+    node_type = _FLOW_NODE_TYPES.get(node.kind)
+    if node_type is None:
+        raise ValueError(f"Unsupported FlowSpec node kind: {node.kind}")
+    config = dict(node.config)
+    if node.operation_ref is not None:
+        mapped_operation = operation_mappings.get(node.operation_ref)
+        if mapped_operation is None:
+            raise ValueError(f"Operation {node.operation_ref} has no target mapping")
+        config["api_definition_id"] = str(mapped_operation)
+    if node.target is not None and node.target.service_ref is not None:
+        service_key = service_keys.get(node.target.service_ref)
+        if service_key is None:
+            raise ValueError(f"Service {node.target.service_ref} has no target mapping")
+        config["service_override"] = service_key
+    if node.target is not None and node.target.endpoint_variant is not None:
+        config["endpoint_variant"] = node.target.endpoint_variant
+    return WorkflowNode(
+        id=node.id,
+        type=node_type,
+        name=node.name,
+        position=node.position,
+        config=config,
+        capability_id=node.capability_id,
+        capability_version=node.capability_version,
+        configuration=node.configuration,
+        bindings=node.bindings,
+    )
+
+
+def _canonicalize_dependencies(
+    nodes: list[FlowSpecNode], edges: list[FlowSpecEdge]
+) -> tuple[list[FlowSpecNode], list[FlowSpecEdge]]:
+    """Translate dependency sugar into stable edges without losing edge semantics."""
+
+    explicit_pairs = {(edge.source, edge.target): edge for edge in edges}
+    normalized_nodes: list[FlowSpecNode] = []
+    generated_edges: list[FlowSpecEdge] = []
+    for node in nodes:
+        remaining_dependencies: list[str] = []
+        for dependency in sorted(set(node.depends_on)):
+            explicit = explicit_pairs.get((dependency, node.id))
+            if explicit is None:
+                digest = sha256(f"{dependency}->{node.id}".encode()).hexdigest()[:20]
+                generated_edges.append(
+                    FlowSpecEdge(
+                        id=f"dependency-{digest}",
+                        source=dependency,
+                        target=node.id,
+                    )
+                )
+            elif explicit.condition is not None or explicit.mappings:
+                remaining_dependencies.append(dependency)
+        normalized_nodes.append(node.model_copy(update={"depends_on": remaining_dependencies}))
+    return normalized_nodes, generated_edges
+
+
+def _unsupported_semantic_blockers(spec: FlowSpec) -> list[FlowSpecIssue]:
+    """Report every valid FlowSpec field the execution graph cannot represent."""
+
+    blockers: list[FlowSpecIssue] = []
+    unsupported_sections = (
+        (spec.bindings, "UNSUPPORTED_GLOBAL_BINDINGS", "$.bindings", "全局绑定"),
+        (spec.assertions, "UNSUPPORTED_GLOBAL_ASSERTIONS", "$.assertions", "全局断言"),
+        (spec.cleanup, "UNSUPPORTED_CLEANUP", "$.cleanup", "清理操作"),
+    )
+    for value, code, path, label in unsupported_sections:
+        if value:
+            blockers.append(
+                FlowSpecIssue(
+                    code=code,
+                    message=f"当前工作流定义无法无损表达{label}",
+                    path=path,
+                )
+            )
+    for index, parameter in enumerate(spec.parameters):
+        if parameter.source not in {
+            FlowSpecParameterSource.RUNTIME,
+            FlowSpecParameterSource.CONSTANT,
+        }:
+            blockers.append(
+                FlowSpecIssue(
+                    code="UNSUPPORTED_PARAMETER_SOURCE",
+                    message=f"当前工作流定义不支持参数来源 {parameter.source.value}",
+                    path=f"$.parameters[{index}].source",
+                )
+            )
+        if parameter.description:
+            blockers.append(
+                FlowSpecIssue(
+                    code="UNSUPPORTED_PARAMETER_DESCRIPTION",
+                    message="工作流变量无法保留参数描述",
+                    path=f"$.parameters[{index}].description",
+                )
+            )
+    if spec.security_policy.max_requests != 20:
+        blockers.append(
+            FlowSpecIssue(
+                code="UNSUPPORTED_SECURITY_POLICY",
+                message="工作流定义无法保留 max_requests 安全策略",
+                path="$.security_policy.max_requests",
+            )
+        )
+    if spec.security_policy.allow_private_network:
+        blockers.append(
+            FlowSpecIssue(
+                code="UNSUPPORTED_SECURITY_POLICY",
+                message="工作流定义无法保留私网访问安全策略",
+                path="$.security_policy.allow_private_network",
+            )
+        )
+    return blockers
 
 
 def _collect_secret_issues(value: JsonValue, path: str, issues: list[FlowSpecIssue]) -> None:

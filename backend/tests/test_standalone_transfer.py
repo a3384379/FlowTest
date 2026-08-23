@@ -81,6 +81,7 @@ async def _seed_source(data_root: Path, *, include_artifact: bool = True) -> dic
     child_folder_id = uuid4()
     secret_id = uuid4()
     artifact_id = uuid4()
+    test_design_id = uuid4()
     artifact_key = f"projects/{project_id}/artifacts/{artifact_id}"
     content = b"standalone-transfer-test"
     async with engine.begin() as connection:
@@ -150,6 +151,38 @@ async def _seed_source(data_root: Path, *, include_artifact: bool = True) -> dic
                 created_by_id=user_id,
             )
         )
+        await connection.execute(
+            Base.metadata.tables["test_designs"]
+            .insert()
+            .values(
+                id=test_design_id,
+                project_id=project_id,
+                name="S47 Transfer Design",
+                status="approved",
+                intent={"key": "orders.create"},
+                knowledge_graph={"nodes": [], "edges": []},
+                state_model={},
+                scenarios=[{"id": "scenario_happy_path", "kind": "happy_path"}],
+                oracles=[{"id": "oracle_status", "expected": 200}],
+                coverage={"entries": [{"dimension": "endpoint", "covered": True}]},
+                evidence_refs=[
+                    {
+                        "id": "contract-orders",
+                        "source_type": "contract",
+                        "source_ref": "contract://orders.create",
+                        "revision": "s47",
+                    }
+                ],
+                warnings=[],
+                confidence=1,
+                review_requirements=[],
+                test_case_refs=[],
+                fingerprint="4" * 64,
+                created_by_id=user_id,
+                reviewed_by_id=user_id,
+                review_note="S47 transfer fixture",
+            )
+        )
         if include_artifact:
             await connection.execute(
                 Base.metadata.tables["artifacts"]
@@ -175,6 +208,7 @@ async def _seed_source(data_root: Path, *, include_artifact: bool = True) -> dic
         "user_id": user_id,
         "project_id": project_id,
         "folder_id": folder_id,
+        "test_design_id": test_design_id,
         "artifact_key": artifact_key,
     }
 
@@ -192,7 +226,7 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
         "status": "exported",
         "schema_version": "standalone-compact-transfer-v1",
         "tables": 80,
-        "rows": 6,
+        "rows": 7,
         "excluded_tables": 9,
         "artifacts": 1,
     }
@@ -264,11 +298,20 @@ async def test_standalone_transfer_imports_self_reference_into_empty_database(
             .order_by(Base.metadata.tables["folders"].c.name)
         )
         folder_rows = folders.all()
+        design = (
+            await connection.execute(
+                select(Base.metadata.tables["test_designs"]).where(
+                    Base.metadata.tables["test_designs"].c.id == identifiers["test_design_id"]
+                )
+            )
+        ).one()
     await target_engine.dispose()
     assert imported["status"] == "imported"
     assert project == "Transfer Project"
     assert secret_row.ciphertext == b"ciphertext"
     assert folder_rows[0].parent_id is not None
+    assert design.scenarios[0]["kind"] == "happy_path"
+    assert design.evidence_refs[0]["source_ref"] == "contract://orders.create"
 
 
 @pytest.mark.asyncio

@@ -270,6 +270,8 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
 def _controlled_write_payload(context: dict[str, Any], *, objective: str) -> dict[str, Any]:
     return {
         "project_id": str(context["project_id"]),
+        "idempotency_key": "payment-design-v1",
+        "dry_run": False,
         "title": "支付 Test Design",
         "source_ref": "mcp://controlled-writes/payment-design",
         "confidence": 0.72,
@@ -343,6 +345,19 @@ async def test_mcp_controlled_write_requires_review_approval_and_redacts(
     }
     payload = _controlled_write_payload(mcp_context, objective="验证支付成功且不泄漏凭据")
 
+    preview_payload = dict(payload)
+    preview_payload["dry_run"] = True
+    preview = await client.post(
+        "/api/v1/mcp/write/change-sets",
+        headers=write_headers,
+        json=preview_payload,
+    )
+    assert preview.status_code == 202, preview.text
+    assert preview.json()["data"]["preview"] is True
+    assert preview.json()["data"]["persisted"] is False
+    async with mcp_context["sessions"]() as session:
+        assert await session.scalar(select(AIChangeSet.id)) is None
+
     read_scope_response = await client.post(
         "/api/v1/mcp/write/change-sets",
         headers={"Authorization": f"Bearer {mcp_context['token']}"},
@@ -366,6 +381,20 @@ async def test_mcp_controlled_write_requires_review_approval_and_redacts(
     assert len(proposed_body["data"]["items"]) == 2
     assert all(item["review_status"] == "pending" for item in proposed_body["data"]["items"])
     assert "secret://payments/token" in proposed.text
+
+    repeated = await client.post(
+        "/api/v1/mcp/write/change-sets", headers=write_headers, json=payload
+    )
+    assert repeated.status_code == 202, repeated.text
+    assert repeated.json()["data"]["id"] == change_set_id
+    conflicting_payload = _controlled_write_payload(mcp_context, objective="验证另一个非敏感目标")
+    conflict = await client.post(
+        "/api/v1/mcp/write/change-sets",
+        headers=write_headers,
+        json=conflicting_payload,
+    )
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
 
     design_item = proposed_body["data"]["items"][0]
     blocked = await client.post(
@@ -561,6 +590,44 @@ async def test_mcp_read_gateway_is_tenant_scoped_and_redacted(mcp_context: dict[
 
 
 @pytest.mark.asyncio
+async def test_mcp_generates_design_and_coverage_without_domain_writes(
+    mcp_context: dict[str, Any],
+) -> None:
+    client = mcp_context["client"]
+    headers = {"Authorization": f"Bearer {mcp_context['token']}"}
+    payload = {"api_definition_id": str(mcp_context["definition_id"])}
+
+    generated = await client.post(
+        f"/api/v1/mcp/read/projects/{mcp_context['project_id']}/test-design/generate",
+        headers=headers,
+        json=payload,
+    )
+    coverage = await client.post(
+        f"/api/v1/mcp/read/projects/{mcp_context['project_id']}/coverage/analyze",
+        headers=headers,
+        json=payload,
+    )
+
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["data"]["persisted"] is False
+    assert generated.json()["data"]["design"]["scenarios"]
+    assert coverage.status_code == 200, coverage.text
+    assert coverage.json()["data"]["entries"]
+    for secret in ("4111111111111111", "contract-secret", "token=do-not-return"):
+        assert secret not in generated.text
+    async with mcp_context["sessions"]() as session:
+        assert await session.scalar(select(DesignModel.id)) is None
+        assert await session.scalar(select(AIChangeSet.id)) is None
+
+    cross_tenant = await client.post(
+        f"/api/v1/mcp/read/projects/{mcp_context['other_project_id']}/test-design/generate",
+        headers=headers,
+        json=payload,
+    )
+    assert cross_tenant.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_mcp_scope_and_authentication_fail_safely(mcp_context: dict[str, Any]) -> None:
     client = mcp_context["client"]
     missing = await client.get("/api/v1/mcp/read/projects")
@@ -623,13 +690,22 @@ async def test_mcp_sdk_registration_and_transports() -> None:
         tools = await server.list_tools()
         assert [tool.name for tool in tools] == sorted(tool.name for tool in tools)
         assert [tool.name for tool in tools] == [
+            "flowtest.analyze_test_coverage",
+            "flowtest.diff_flowspec",
             "flowtest.discover_services",
+            "flowtest.export_flowspec",
+            "flowtest.generate_test_design",
+            "flowtest.inspect_change_impact",
             "flowtest.inspect_contract",
+            "flowtest.inspect_data_profile",
             "flowtest.inspect_flow",
             "flowtest.inspect_project",
             "flowtest.inspect_run_evidence",
+            "flowtest.inspect_source_evidence",
+            "flowtest.inspect_test_evidence",
             "flowtest.list_projects",
             "flowtest.propose_test_design",
+            "flowtest.validate_flowspec",
         ]
         templates = await server.list_resource_templates()
         assert [template.uri_template for template in templates] == sorted(
@@ -648,6 +724,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
                 "confidence": 0.9,
                 "risk_level": "low",
                 "design": {"intent": "safe-design"},
+                "idempotency_key": "sdk-design-v1",
             },
         )
         assert write_result.is_error is False
@@ -657,9 +734,37 @@ async def test_mcp_sdk_registration_and_transports() -> None:
                 "flowtest.inspect_contract",
                 {"project_id": "project-1", "api_definition_id": "api-1"},
             ),
+            (
+                "flowtest.inspect_change_impact",
+                {"project_id": "project-1", "impact_run_id": "impact-1"},
+            ),
             ("flowtest.inspect_flow", {"workflow_id": "workflow-1"}),
             ("flowtest.inspect_project", {"project_id": "project-1"}),
             ("flowtest.inspect_run_evidence", {"execution_id": "run-1"}),
+            (
+                "flowtest.generate_test_design",
+                {"project_id": "project-1", "api_definition_id": "api-1"},
+            ),
+            (
+                "flowtest.analyze_test_coverage",
+                {"project_id": "project-1", "api_definition_id": "api-1"},
+            ),
+            (
+                "flowtest.inspect_test_evidence",
+                {"project_id": "project-1", "api_definition_id": "api-1"},
+            ),
+            (
+                "flowtest.diff_flowspec",
+                {"project_id": "project-1", "before": None, "after": {"version": "v1"}},
+            ),
+            (
+                "flowtest.export_flowspec",
+                {"project_id": "project-1", "workflow_id": "workflow-1"},
+            ),
+            (
+                "flowtest.validate_flowspec",
+                {"project_id": "project-1", "spec": {"version": "v1"}},
+            ),
         ):
             result = await server.call_tool(name, arguments)
             assert result.is_error is False

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 from uuid import UUID
 
@@ -14,6 +16,8 @@ from app.domain.flow_spec import (
     FlowSpec,
     FlowSpecCompatibilityResult,
     FlowSpecDiffItem,
+    FlowSpecNodeTarget,
+    FlowSpecOperation,
     FlowSpecValidationResult,
     assess_flow_spec_compatibility,
     diff_flow_specs,
@@ -23,10 +27,15 @@ from app.domain.flow_spec import (
     validate_flow_spec,
     workflow_definition_to_flow_spec,
 )
-from app.engine.contracts import WorkflowDefinition
+from app.domain.flow_spec import FlowSpecService as PortableService
+from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
+from app.models.api_assets import APIDefinition, APIVersion
+from app.models.service_targets import Service
 from app.models.workflows import Workflow
+from app.repositories.api_assets import APIAssetRepository
+from app.repositories.service_targets import ServiceTargetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.flow_spec import FlowSpecImportRequest
 from app.services.audit import AuditService
@@ -64,6 +73,19 @@ class FlowSpecChangeSetView:
     diff: tuple[FlowSpecDiffItem, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedFlowSpecMappings:
+    service_ids: Mapping[str, UUID]
+    service_keys: Mapping[str, str]
+    operation_ids: Mapping[str, UUID]
+
+    def snapshot(self) -> dict[str, dict[str, str]]:
+        return {
+            "services": {key: str(value) for key, value in self.service_ids.items()},
+            "operations": {key: str(value) for key, value in self.operation_ids.items()},
+        }
+
+
 class FlowSpecService:
     """Application service for portable FlowSpec parsing and reviewed imports."""
 
@@ -71,6 +93,8 @@ class FlowSpecService:
         self._session = session
         self._projects = ProjectService(session)
         self._workflows = WorkflowRepository(session)
+        self._api_assets = APIAssetRepository(session)
+        self._targets = ServiceTargetRepository(session)
         self._audit = AuditService(session)
 
     async def export(
@@ -97,12 +121,12 @@ class FlowSpecService:
             definition = _load_definition(published.definition)
             evidence = [f"workflow://{workflow.id}/version/{published.version}"]
         pipeline = self._pipeline(
-            workflow_definition_to_flow_spec(
-                definition,
+            await self._portable_spec(
+                definition=definition,
                 project_id=project_id,
                 name=workflow.name,
                 description=workflow.description,
-                source_evidence=evidence,
+                evidence=evidence,
             )
         )
         _require_pipeline_exportable(pipeline)
@@ -141,6 +165,12 @@ class FlowSpecService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         pipeline = self._pipeline(payload.spec)
         _require_pipeline_importable(pipeline)
+        mappings = await self._resolve_mappings(
+            project_id=project_id,
+            spec=pipeline.spec,
+            service_mappings=payload.service_mappings,
+            operation_mappings=payload.operation_mappings,
+        )
         target = await self._target_workflow(project_id, payload.workflow_id)
         target_snapshot = None
         target_revision = None
@@ -154,6 +184,7 @@ class FlowSpecService:
             target_workflow_id=target.id if target is not None else None,
             target_revision=target_revision,
             target_spec=before,
+            resource_mappings=mappings,
         )
         change_set = AIChangeSet(
             project_id=project_id,
@@ -197,6 +228,8 @@ class FlowSpecService:
                 "source_fingerprint": pipeline.fingerprint,
                 "target_workflow_id": str(target.id) if target is not None else None,
                 "requires_review": pipeline.compatibility.requires_review,
+                "service_mapping_count": len(mappings.service_ids),
+                "operation_mapping_count": len(mappings.operation_ids),
             },
         )
         await self._session.commit()
@@ -314,6 +347,11 @@ class FlowSpecService:
             )
         pipeline = self._pipeline(_spec_from_item(item))
         _require_pipeline_importable(pipeline)
+        mappings = await self._mappings_from_snapshot(
+            project_id=project_id,
+            spec=pipeline.spec,
+            snapshot=change_set.source_snapshot,
+        )
         target_id = item.target_resource_id
         workflow: Workflow
         if target_id is None:
@@ -323,7 +361,11 @@ class FlowSpecService:
                 name=pipeline.spec.name,
                 description=pipeline.spec.description,
                 folder_id=None,
-                definition=flow_spec_to_workflow_definition(pipeline.spec),
+                definition=flow_spec_to_workflow_definition(
+                    pipeline.spec,
+                    operation_mappings=mappings.operation_ids,
+                    service_keys=mappings.service_keys,
+                ),
                 commit=False,
             )
         else:
@@ -363,7 +405,11 @@ class FlowSpecService:
                 description=pipeline.spec.description,
                 folder_id=None,
                 change_folder=False,
-                definition=flow_spec_to_workflow_definition(pipeline.spec),
+                definition=flow_spec_to_workflow_definition(
+                    pipeline.spec,
+                    operation_mappings=mappings.operation_ids,
+                    service_keys=mappings.service_keys,
+                ),
                 commit=False,
             )
         item.materialized_resource_type = "workflow"
@@ -399,6 +445,167 @@ class FlowSpecService:
             fingerprint=flow_spec_fingerprint(normalized),
             validation=validation,
             compatibility=compatibility,
+        )
+
+    async def _resolve_mappings(
+        self,
+        *,
+        project_id: UUID,
+        spec: FlowSpec,
+        service_mappings: Mapping[str, UUID],
+        operation_mappings: Mapping[str, UUID],
+    ) -> ResolvedFlowSpecMappings:
+        _reject_unknown_mapping_refs(
+            requested=service_mappings,
+            known={service.ref for service in spec.services},
+            kind="Service",
+        )
+        _reject_unknown_mapping_refs(
+            requested=operation_mappings,
+            known={operation.ref for operation in spec.operations},
+            kind="Operation",
+        )
+        service_ids: dict[str, UUID] = {}
+        service_keys: dict[str, str] = {}
+        for service_spec in spec.services:
+            service = await self._resolve_service_mapping(
+                project_id=project_id,
+                portable_ref=service_spec.ref,
+                requested_id=service_mappings.get(service_spec.ref),
+            )
+            service_ids[service_spec.ref] = service.id
+            service_keys[service_spec.ref] = service.service_key
+        operation_ids: dict[str, UUID] = {}
+        for operation in spec.operations:
+            definition = await self._resolve_operation_mapping(
+                project_id=project_id,
+                operation=operation,
+                requested_id=operation_mappings.get(operation.ref),
+                service_ids=service_ids,
+            )
+            operation_ids[operation.ref] = definition.id
+        return ResolvedFlowSpecMappings(
+            service_ids=service_ids,
+            service_keys=service_keys,
+            operation_ids=operation_ids,
+        )
+
+    async def _resolve_service_mapping(
+        self, *, project_id: UUID, portable_ref: str, requested_id: UUID | None
+    ) -> Service:
+        service = (
+            await self._targets.get_service(requested_id)
+            if requested_id is not None
+            else await self._targets.find_service_by_key(
+                project_id=project_id, service_key=portable_ref
+            )
+        )
+        if service is None or service.project_id != project_id:
+            raise _mapping_error(
+                code="FLOWSPEC_SERVICE_MAPPING_INVALID",
+                message=f"Service {portable_ref} 未映射到目标项目资源",
+                path=f"$.service_mappings.{portable_ref}",
+            )
+        return service
+
+    async def _resolve_operation_mapping(
+        self,
+        *,
+        project_id: UUID,
+        operation: FlowSpecOperation,
+        requested_id: UUID | None,
+        service_ids: Mapping[str, UUID],
+    ) -> APIDefinition:
+        if requested_id is not None:
+            definition = await self._api_assets.get_definition(requested_id)
+            candidates = [definition] if definition is not None else []
+        else:
+            candidates = await self._operation_candidates(
+                project_id=project_id,
+                operation=operation,
+                service_id=service_ids.get(operation.service_ref or ""),
+            )
+        if len(candidates) != 1 or candidates[0].project_id != project_id:
+            raise _mapping_error(
+                code="FLOWSPEC_OPERATION_MAPPING_INVALID",
+                message=f"Operation {operation.ref} 无法唯一映射到目标项目 API",
+                path=f"$.operation_mappings.{operation.ref}",
+            )
+        definition = candidates[0]
+        await self._validate_operation_mapping(
+            definition=definition,
+            operation=operation,
+            expected_service_id=service_ids.get(operation.service_ref or ""),
+        )
+        return definition
+
+    async def _operation_candidates(
+        self,
+        *,
+        project_id: UUID,
+        operation: FlowSpecOperation,
+        service_id: UUID | None,
+    ) -> list[APIDefinition]:
+        query = (
+            select(APIDefinition)
+            .join(
+                APIVersion,
+                (APIVersion.api_definition_id == APIDefinition.id)
+                & (APIVersion.version == APIDefinition.current_version),
+            )
+            .where(
+                APIDefinition.project_id == project_id,
+                APIDefinition.is_active.is_(True),
+                APIVersion.method == operation.method,
+                APIVersion.path == operation.path,
+            )
+        )
+        if service_id is not None:
+            query = query.where(APIDefinition.service_id == service_id)
+        candidates = list((await self._session.scalars(query)).all())
+        semantic_key = operation.ref.rsplit(":", 1)[-1]
+        exact = [item for item in candidates if item.import_key == semantic_key]
+        return exact if exact else candidates
+
+    async def _validate_operation_mapping(
+        self,
+        *,
+        definition: APIDefinition,
+        operation: FlowSpecOperation,
+        expected_service_id: UUID | None,
+    ) -> None:
+        version = await self._api_assets.get_version(
+            definition_id=definition.id, version=definition.current_version
+        )
+        if version is None or (version.method, version.path) != (
+            operation.method,
+            operation.path,
+        ):
+            raise _mapping_error(
+                code="FLOWSPEC_OPERATION_SEMANTICS_MISMATCH",
+                message=f"Operation {operation.ref} 的 method/path 与目标 API 不一致",
+                path=f"$.operation_mappings.{operation.ref}",
+            )
+        if expected_service_id is not None and definition.service_id != expected_service_id:
+            raise _mapping_error(
+                code="FLOWSPEC_OPERATION_SERVICE_MISMATCH",
+                message=f"Operation {operation.ref} 与目标 Service 不一致",
+                path=f"$.operation_mappings.{operation.ref}",
+            )
+
+    async def _mappings_from_snapshot(
+        self,
+        *,
+        project_id: UUID,
+        spec: FlowSpec,
+        snapshot: Mapping[str, Any],
+    ) -> ResolvedFlowSpecMappings:
+        service_mappings, operation_mappings = _mapping_ids(snapshot)
+        return await self._resolve_mappings(
+            project_id=project_id,
+            spec=spec,
+            service_mappings=service_mappings,
+            operation_mappings=operation_mappings,
         )
 
     async def _target_workflow(self, project_id: UUID, workflow_id: UUID | None) -> Workflow | None:
@@ -462,6 +669,112 @@ class FlowSpecService:
             source_evidence=[f"workflow://{workflow.id}/draft/{workflow.draft_revision}"],
         )
 
+    async def _portable_spec(
+        self,
+        *,
+        definition: WorkflowDefinition,
+        project_id: UUID,
+        name: str,
+        description: str,
+        evidence: list[str],
+    ) -> FlowSpec:
+        operation_refs: dict[str, str] = {}
+        targets: dict[str, FlowSpecNodeTarget] = {}
+        services: dict[str, PortableService] = {}
+        operations: dict[str, FlowSpecOperation] = {}
+        for node in definition.nodes:
+            if node.type is not NodeType.API:
+                continue
+            config = ApiNodeConfig.model_validate(node.config)
+            api_definition, api_version = await self._portable_api_asset(
+                project_id=project_id, config=config
+            )
+            service = await self._portable_target_service(
+                project_id=project_id,
+                service_override=config.service_override,
+                definition_service_id=api_definition.service_id,
+            )
+            service_ref = service.service_key if service is not None else None
+            operation_ref = _portable_operation_ref(
+                service_ref=service_ref,
+                definition=api_definition,
+                version=api_version,
+            )
+            operation_refs[node.id] = operation_ref
+            targets[node.id] = FlowSpecNodeTarget(
+                service_ref=service_ref,
+                endpoint_variant=config.endpoint_variant,
+            )
+            operations[operation_ref] = FlowSpecOperation(
+                ref=operation_ref,
+                service_ref=service_ref,
+                name=api_definition.name,
+                method=api_version.method,
+                path=api_version.path,
+            )
+            if service is not None:
+                services[service.service_key] = PortableService(
+                    ref=service.service_key,
+                    name=service.name,
+                    service_type=service.service_type,
+                )
+        return workflow_definition_to_flow_spec(
+            definition,
+            project_id=project_id,
+            name=name,
+            description=description,
+            source_evidence=evidence,
+            operation_refs=operation_refs,
+            node_targets=targets,
+            services=list(services.values()),
+            operations=list(operations.values()),
+        )
+
+    async def _portable_api_asset(
+        self, *, project_id: UUID, config: ApiNodeConfig
+    ) -> tuple[APIDefinition, APIVersion]:
+        definition = await self._api_assets.get_definition(config.api_definition_id)
+        if definition is None or definition.project_id != project_id:
+            raise AppError(
+                code="FLOWSPEC_API_NOT_FOUND",
+                message="工作流引用的 API 定义不存在于当前项目",
+                status_code=422,
+            )
+        version_number = config.api_version or definition.current_version
+        version = await self._api_assets.get_version(
+            definition_id=definition.id, version=version_number
+        )
+        if version is None:
+            raise AppError(
+                code="FLOWSPEC_API_VERSION_NOT_FOUND",
+                message="工作流引用的 API 版本不存在",
+                status_code=422,
+            )
+        return definition, version
+
+    async def _portable_target_service(
+        self,
+        *,
+        project_id: UUID,
+        service_override: str | None,
+        definition_service_id: UUID | None,
+    ) -> Service | None:
+        if service_override is not None:
+            service = await self._targets.find_service_by_key(
+                project_id=project_id, service_key=service_override
+            )
+        elif definition_service_id is not None:
+            service = await self._targets.get_service(definition_service_id)
+        else:
+            return None
+        if service is None or service.project_id != project_id:
+            raise AppError(
+                code="FLOWSPEC_SERVICE_NOT_FOUND",
+                message="工作流引用的 Service 不存在于当前项目",
+                status_code=422,
+            )
+        return service
+
 
 def _load_definition(value: dict[str, Any]) -> WorkflowDefinition:
     try:
@@ -474,12 +787,23 @@ def _load_definition(value: dict[str, Any]) -> WorkflowDefinition:
         ) from error
 
 
+def _portable_operation_ref(
+    *, service_ref: str | None, definition: APIDefinition, version: APIVersion
+) -> str:
+    semantic_key = definition.import_key
+    if semantic_key is None:
+        payload = f"{version.method}:{version.path}".encode()
+        semantic_key = sha256(payload).hexdigest()[:20]
+    return f"operation:{service_ref or 'unbound'}:{semantic_key}"
+
+
 def _source_snapshot(
     *,
     pipeline: FlowSpecPipeline,
     target_workflow_id: UUID | None,
     target_revision: int | None,
     target_spec: FlowSpec | None,
+    resource_mappings: ResolvedFlowSpecMappings,
 ) -> dict[str, Any]:
     return {
         "flow_spec": _spec_json(pipeline.spec),
@@ -488,7 +812,59 @@ def _source_snapshot(
         "target_workflow_id": str(target_workflow_id) if target_workflow_id is not None else None,
         "target_revision": target_revision,
         "target_spec": _spec_json(target_spec) if target_spec is not None else None,
+        "resource_mappings": resource_mappings.snapshot(),
     }
+
+
+def _mapping_ids(
+    snapshot: Mapping[str, Any],
+) -> tuple[dict[str, UUID], dict[str, UUID]]:
+    raw = snapshot.get("resource_mappings")
+    if not isinstance(raw, dict):
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec 变更集缺少资源映射快照",
+            path="$.resource_mappings",
+        )
+    return _uuid_mapping(raw.get("services")), _uuid_mapping(raw.get("operations"))
+
+
+def _uuid_mapping(value: object) -> dict[str, UUID]:
+    if not isinstance(value, dict):
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec 资源映射快照无效",
+            path="$.resource_mappings",
+        )
+    try:
+        return {str(key): UUID(str(item)) for key, item in value.items()}
+    except (TypeError, ValueError, AttributeError) as error:
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_SNAPSHOT_INVALID",
+            message="FlowSpec 资源映射快照包含无效 UUID",
+            path="$.resource_mappings",
+        ) from error
+
+
+def _reject_unknown_mapping_refs(
+    *, requested: Mapping[str, UUID], known: set[str], kind: str
+) -> None:
+    unknown = sorted(set(requested) - known)
+    if unknown:
+        raise _mapping_error(
+            code="FLOWSPEC_MAPPING_UNKNOWN_REF",
+            message=f"{kind} 映射包含 FlowSpec 未声明的 ref: {', '.join(unknown)}",
+            path=f"$.{kind.lower()}_mappings",
+        )
+
+
+def _mapping_error(*, code: str, message: str, path: str) -> AppError:
+    return AppError(
+        code=code,
+        message=message,
+        status_code=422,
+        details={"blockers": [{"code": code, "message": message, "path": path}]},
+    )
 
 
 def _spec_json(spec: FlowSpec) -> dict[str, JsonValue]:

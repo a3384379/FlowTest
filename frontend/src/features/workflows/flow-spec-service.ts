@@ -51,6 +51,10 @@ export async function importFlowSpec(
   spec: FlowSpec,
   workflowId?: string,
   sourceRef?: string,
+  mappings?: {
+    service_mappings: Record<string, string>
+    operation_mappings: Record<string, string>
+  },
 ): Promise<FlowSpecChangeSetDetail> {
   const response = await apiClient.post<FlowSpecChangeSetDetail>(
     `/projects/${projectId}/flow-specs/imports`,
@@ -58,6 +62,7 @@ export async function importFlowSpec(
       spec,
       ...(workflowId ? { workflow_id: workflowId } : {}),
       ...(sourceRef ? { source_ref: sourceRef } : {}),
+      ...(mappings ?? {}),
     },
   )
   return response.data

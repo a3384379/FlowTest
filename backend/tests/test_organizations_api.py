@@ -383,6 +383,10 @@ async def test_organization_governance_quota_audit_and_key_lifecycle(
         f"/api/v1/organizations/{organization_id}/security", headers=scoped_headers
     )
     assert security.status_code == 200, security.text
+    assert security.json()["capability_name"] == "Key Lifecycle Metadata / Rotation Plan"
+    assert security.json()["capability_mode"] == "metadata_plan_only"
+    assert security.json()["ciphertext_reencryption_available"] is False
+    assert security.json()["ga_blocker"] == "REAL_KEY_ROTATION_NOT_IMPLEMENTED"
     initial_version_id = security.json()["key_versions"][0]["id"]
     prepared = await client.post(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/prepare",
@@ -396,14 +400,22 @@ async def test_organization_governance_quota_audit_and_key_lifecycle(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/apply",
         headers=scoped_headers,
     )
-    assert applied.status_code == 200, applied.text
-    assert applied.json()["migration_status"] == "migrated"
+    assert applied.status_code == 409, applied.text
+    assert applied.json()["error"]["code"] == "KEY_ROTATION_REENCRYPTION_UNAVAILABLE"
+    assert applied.json()["error"]["details"]["ciphertext_reencryption_completed"] is False
     rolled_back = await client.post(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/rollback",
         headers=scoped_headers,
     )
-    assert rolled_back.status_code == 200, rolled_back.text
-    assert rolled_back.json()["id"] == initial_version_id
+    assert rolled_back.status_code == 409, rolled_back.text
+    assert rolled_back.json()["error"]["code"] == "KEY_ROTATION_ROLLBACK_UNAVAILABLE"
+    security_after = await client.get(
+        f"/api/v1/organizations/{organization_id}/security", headers=scoped_headers
+    )
+    assert security_after.json()["active_key_version"] == 1
+    assert security_after.json()["key_versions"][0]["id"] == prepared_version_id
+    assert security_after.json()["key_versions"][0]["migration_status"] == "planned"
+    assert security_after.json()["key_versions"][1]["id"] == initial_version_id
 
     support_bundle = await client.get(
         f"/api/v1/organizations/{organization_id}/support-bundle/redaction",

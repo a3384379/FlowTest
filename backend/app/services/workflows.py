@@ -96,7 +96,7 @@ from app.runner.results import (
 from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
-from app.services.durable_execution import checkpoint_to_node_record
+from app.services.durable_execution import DurableExecutionService, checkpoint_to_node_record
 from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
@@ -601,6 +601,9 @@ class WorkflowService:
         checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
             execution.id
         )
+        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
+            execution.id
+        )
         checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
         resume_attempts = {
             node_id: max(item.attempt for item in checkpoint_history if item.node_id == node_id)
@@ -648,6 +651,7 @@ class WorkflowService:
                         context=context,
                         resume_records=resume_records,
                         resume_attempts=resume_attempts,
+                        reset_retry_budget=reset_retry_budget,
                     )
             finally:
                 await node_executor.close()
@@ -1563,6 +1567,7 @@ class WorkflowService:
         context: ExecutionContext | None = None,
         resume_records: tuple[NodeRunRecord, ...] = (),
         resume_attempts: dict[str, int] | None = None,
+        reset_retry_budget: bool = False,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
@@ -1577,6 +1582,7 @@ class WorkflowService:
                 on_node_status=on_node_status,
                 resume_records=resume_records,
                 resume_attempts=resume_attempts,
+                reset_retry_budget=reset_retry_budget,
             )
         )
         try:

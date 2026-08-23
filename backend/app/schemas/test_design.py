@@ -22,6 +22,8 @@ class MCPControlledWriteCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: UUID
+    idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[\x21-\x7e]+$")
+    dry_run: bool = True
     title: AssetName
     source_ref: str | None = Field(default=None, max_length=512)
     confidence: float = Field(ge=0, le=1)

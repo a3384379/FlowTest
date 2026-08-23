@@ -39,6 +39,7 @@ from app.schemas.test_design import (
     MCPTestCaseDraft,
 )
 from app.services.audit import AuditService
+from app.services.idempotency import IdempotencyService
 from app.services.projects import ProjectService
 from app.services.test_assets import TestCaseService
 
@@ -57,6 +58,40 @@ class MCPControlledWriteService:
         self._audit = AuditService(session)
 
     async def propose(
+        self,
+        *,
+        actor: User,
+        payload: MCPControlledWriteCreate,
+        call: MCPReadCall,
+    ) -> MCPControlledWriteEnvelope:
+        self._require_write_scope()
+        await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        self._reject_sensitive(payload.model_dump(mode="json"))
+        source_ref = _source_ref(payload.source_ref)
+        governance = evaluate_governance(
+            confidence=payload.confidence,
+            risk_level=payload.risk_level,
+            design=payload.design,
+        )
+        if payload.dry_run:
+            return _preview_envelope(payload, governance, source_ref)
+        context = get_tenant_context()
+        actor_key = (
+            f"service-account:{context.service_account_id}"
+            if context is not None and context.service_account_id is not None
+            else f"user:{actor.id}"
+        )
+        response = await IdempotencyService(self._session).run(
+            key=payload.idempotency_key,
+            project_id=payload.project_id,
+            actor_key=actor_key,
+            operation=call.operation,
+            request_payload=payload.model_dump(mode="json"),
+            action=lambda: self._propose_draft(actor=actor, payload=payload, call=call),
+        )
+        return MCPControlledWriteEnvelope.model_validate(response)
+
+    async def _propose_draft(
         self,
         *,
         actor: User,
@@ -364,9 +399,20 @@ class MCPControlledWriteService:
                 status="approved",
                 intent=_json_object(design.intent.model_dump(mode="json")),
                 knowledge_graph=_json_object(design.knowledge_graph.model_dump(mode="json")),
-                state_model=_json_object(design.state_model.model_dump(mode="json")),
+                state_model=(
+                    _json_object(design.state_model.model_dump(mode="json"))
+                    if design.state_model is not None
+                    else {}
+                ),
+                scenarios=cast(list[dict[str, Any]], design.model_dump(mode="json")["scenarios"]),
                 oracles=cast(list[dict[str, Any]], design.model_dump(mode="json")["oracles"]),
                 coverage=_json_object(design.coverage.model_dump(mode="json")),
+                evidence_refs=cast(
+                    list[dict[str, Any]], design.model_dump(mode="json")["evidence_refs"]
+                ),
+                warnings=list(design.warnings),
+                confidence=design.confidence,
+                review_requirements=list(design.review_requirements),
                 test_case_refs=list(design.test_case_refs),
                 fingerprint=fingerprint_design(design),
                 source_change_set_id=change_set.id,
@@ -517,6 +563,34 @@ def _review_status(items: list[AIChangeItem]) -> str:
     if pending:
         return "partially_reviewed" if accepted or rejected else "draft"
     return "accepted" if accepted else "rejected"
+
+
+def _preview_envelope(
+    payload: MCPControlledWriteCreate, governance: Any, source_ref: str
+) -> MCPControlledWriteEnvelope:
+    return MCPControlledWriteEnvelope(
+        data={
+            "preview": True,
+            "persisted": False,
+            "project_id": str(payload.project_id),
+            "title": payload.title,
+            "source_ref": source_ref,
+            "design_fingerprint": fingerprint_design(payload.design),
+            "item_count": len(payload.test_cases) + 1,
+            "governance": {
+                "confidence": governance.confidence,
+                "risk_level": governance.risk_level,
+                "requires_review": governance.requires_review,
+                "manual_approval_required": governance.manual_approval_required,
+                "reason_codes": list(governance.reason_codes),
+            },
+        },
+        evidence_refs=[{"uri": source_ref, "kind": "controlled-write-preview", "version": "s47"}],
+        confidence=payload.confidence,
+        redactions=["secret_values", "pii_values", "authorization_values"],
+        trace_id=get_trace_id(),
+        warnings=["dry_run=true,未创建 ChangeSet。", *_warnings(governance)],
+    )
 
 
 def _envelope(

@@ -32,7 +32,6 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import {
-  applyKeyRotation,
   createOrganization,
   createServiceAccount,
   getOrganizationGovernance,
@@ -45,7 +44,6 @@ import {
   listServiceAccounts,
   prepareKeyRotation,
   revokeServiceAccount,
-  rollbackKeyRotation,
   rotateServiceAccount,
   updateOrganizationGovernance,
   upsertOrganizationMember,
@@ -58,7 +56,7 @@ import {
   type ServiceAccount,
 } from '../features/organizations/organization-service'
 import { setOrganizationId } from '../lib/api'
-import { rotationAction, type SecurityKeyVersion } from './organization-governance-rotation'
+import type { SecurityKeyVersion } from './organization-governance-rotation'
 
 const quotaDimensions: Array<{ key: QuotaDimension; label: string; unit?: string }> = [
   { key: 'project_count', label: '项目数' },
@@ -307,10 +305,7 @@ function OrganizationWorkspace({
     workspace.accountMutation.isPending ||
     workspace.rotateMutation.isPending ||
     workspace.revokeMutation.isPending
-  const securityPending =
-    workspace.prepareMutation.isPending ||
-    workspace.applyMutation.isPending ||
-    workspace.rollbackMutation.isPending
+  const securityPending = workspace.prepareMutation.isPending
 
   if (isLoading) return <div className="page-loading">正在加载组织治理...</div>
   if (isError) return <Alert showIcon type="error" title="组织治理数据加载失败" />
@@ -412,8 +407,6 @@ function OrganizationTabs({
               supportBundle={workspace.supportBundle.data}
               canRotate={canRotate}
               onPrepare={(input) => workspace.prepareMutation.mutate(input)}
-              onApply={(id) => workspace.applyMutation.mutate(id)}
-              onRollback={(id) => workspace.rollbackMutation.mutate(id)}
               pending={securityPending}
             />
           ),
@@ -514,25 +507,9 @@ function useOrganizationWorkspace({
     mutationFn: (input: KeyRotationFormValues) => prepareKeyRotation(organization.id, input),
     onSuccess: async () => {
       await invalidate('organization-security')
-      onMessage('success', '密钥迁移计划已创建')
+      onMessage('success', 'Key Lifecycle Rotation Plan 已创建')
     },
-    onError: () => onMessage('error', '密钥迁移计划创建失败'),
-  })
-  const applyMutation = useMutation({
-    mutationFn: (keyVersionId: string) => applyKeyRotation(organization.id, keyVersionId),
-    onSuccess: async () => {
-      await invalidate('organization-security', 'organization-governance')
-      onMessage('success', '密钥迁移已应用')
-    },
-    onError: () => onMessage('error', '密钥迁移应用失败'),
-  })
-  const rollbackMutation = useMutation({
-    mutationFn: (keyVersionId: string) => rollbackKeyRotation(organization.id, keyVersionId),
-    onSuccess: async () => {
-      await invalidate('organization-security', 'organization-governance')
-      onMessage('success', '密钥迁移已回滚')
-    },
-    onError: () => onMessage('error', '密钥迁移回滚失败'),
+    onError: () => onMessage('error', 'Key Lifecycle Rotation Plan 创建失败'),
   })
   return {
     governance,
@@ -548,8 +525,6 @@ function useOrganizationWorkspace({
     revokeMutation,
     governanceMutation,
     prepareMutation,
-    applyMutation,
-    rollbackMutation,
   }
 }
 
@@ -941,8 +916,6 @@ function SecurityTab({
   supportBundle,
   canRotate,
   onPrepare,
-  onApply,
-  onRollback,
   pending,
 }: {
   audit: Array<{
@@ -954,6 +927,10 @@ function SecurityTab({
   }>
   security?: {
     active_key_version: number
+    capability_name: 'Key Lifecycle Metadata / Rotation Plan'
+    capability_mode: 'metadata_plan_only'
+    ciphertext_reencryption_available: false
+    ga_blocker: 'REAL_KEY_ROTATION_NOT_IMPLEMENTED'
     key_versions: Array<{
       id: string
       version: number
@@ -974,8 +951,6 @@ function SecurityTab({
   }
   canRotate: boolean
   onPrepare: (input: KeyRotationFormValues) => void
-  onApply: (id: string) => void
-  onRollback: (id: string) => void
   pending: boolean
 }) {
   return (
@@ -986,8 +961,6 @@ function SecurityTab({
             security={security}
             canRotate={canRotate}
             onPrepare={onPrepare}
-            onApply={onApply}
-            onRollback={onRollback}
             pending={pending}
           />
         </Col>
@@ -1004,15 +977,11 @@ function KeyRotationCard({
   security,
   canRotate,
   onPrepare,
-  onApply,
-  onRollback,
   pending,
 }: {
   security?: SecurityView
   canRotate: boolean
   onPrepare: (input: KeyRotationFormValues) => void
-  onApply: (id: string) => void
-  onRollback: (id: string) => void
   pending: boolean
 }) {
   const [form] = Form.useForm<KeyRotationFormValues>()
@@ -1021,7 +990,7 @@ function KeyRotationCard({
       title={
         <Space>
           <KeyOutlined />
-          密钥版本与迁移
+          Key Lifecycle Metadata / Rotation Plan
         </Space>
       }
     >
@@ -1030,7 +999,17 @@ function KeyRotationCard({
           v{security?.active_key_version ?? '-'}
         </Descriptions.Item>
         <Descriptions.Item label="密钥材料">外部密钥提供方（只保存引用与指纹）</Descriptions.Item>
+        <Descriptions.Item label="Capability Mode">
+          {security?.capability_mode ?? 'metadata_plan_only'}
+        </Descriptions.Item>
       </Descriptions>
+      <Alert
+        type="warning"
+        showIcon
+        className="page-alert"
+        title="真实 Key Rotation 尚未实现"
+        description="当前只记录密钥引用、指纹和 Rotation Plan，不执行旧密文解密、新密钥重加密、检查点或可验证回滚。该项为 GA Blocker。"
+      />
       {canRotate && (
         <Form form={form} layout="vertical" onFinish={onPrepare}>
           <Form.Item
@@ -1048,39 +1027,25 @@ function KeyRotationCard({
             <Input placeholder="64 位十六进制指纹" />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={pending}>
-            创建迁移计划
+            创建 Rotation Plan
           </Button>
         </Form>
       )}
-      <KeyVersionTable
-        versions={security?.key_versions ?? []}
-        canRotate={canRotate}
-        onApply={onApply}
-        onRollback={onRollback}
-        pending={pending}
-      />
+      <KeyVersionTable versions={security?.key_versions ?? []} />
     </Card>
   )
 }
 
 type SecurityView = {
   active_key_version: number
+  capability_name: 'Key Lifecycle Metadata / Rotation Plan'
+  capability_mode: 'metadata_plan_only'
+  ciphertext_reencryption_available: false
+  ga_blocker: 'REAL_KEY_ROTATION_NOT_IMPLEMENTED'
   key_versions: SecurityKeyVersion[]
 }
 
-function KeyVersionTable({
-  versions,
-  canRotate,
-  onApply,
-  onRollback,
-  pending,
-}: {
-  versions: SecurityView['key_versions']
-  canRotate: boolean
-  onApply: (id: string) => void
-  onRollback: (id: string) => void
-  pending: boolean
-}) {
+function KeyVersionTable({ versions }: { versions: SecurityView['key_versions'] }) {
   return (
     <Table
       rowKey="id"
@@ -1091,11 +1056,20 @@ function KeyVersionTable({
         { title: '版本', render: (_, item) => `v${item.version}` },
         { title: '引用', dataIndex: 'key_reference', ellipsis: true },
         { title: '指纹', dataIndex: 'key_fingerprint', ellipsis: true },
-        { title: '迁移', dataIndex: 'migration_status' },
+        {
+          title: 'Plan Status',
+          dataIndex: 'migration_status',
+          render: (value: string) => (
+            <Space>
+              <Tag>{value}</Tag>
+              <Typography.Text type="secondary">不代表密文重加密</Typography.Text>
+            </Space>
+          ),
+        },
         { title: '状态', dataIndex: 'status' },
         {
           title: '操作',
-          render: (_, item) => rotationAction(item, canRotate, onApply, onRollback, pending),
+          render: () => <Tag color="warning">仅元数据计划</Tag>,
         },
       ]}
     />

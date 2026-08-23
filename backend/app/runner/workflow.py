@@ -43,6 +43,7 @@ class RemoteWorkflowExecutor:
         cancellation: CancellationToken,
         on_progress: RunnerProgressCallback | None = None,
         resume_checkpoints: dict[str, list[RunnerCheckpointResume]] | None = None,
+        reset_retry_budget: bool = False,
     ) -> RunnerExecutionResult:
         if isinstance(plan, WorkflowBatchPlan):
             semaphore = asyncio.Semaphore(plan.concurrency)
@@ -57,6 +58,7 @@ class RemoteWorkflowExecutor:
                         resume_checkpoints=(resume_checkpoints or {}).get(
                             str(child.execution_id), []
                         ),
+                        reset_retry_budget=reset_retry_budget,
                     )
                     return RunnerBatchChildResult(
                         execution_id=child.execution_id,
@@ -74,6 +76,7 @@ class RemoteWorkflowExecutor:
             cancellation=cancellation,
             on_progress=on_progress,
             resume_checkpoints=(resume_checkpoints or {}).get(str(plan.execution_id), []),
+            reset_retry_budget=reset_retry_budget,
         )
         return RunnerSingleExecutionResult(
             execution_id=plan.execution_id,
@@ -88,6 +91,7 @@ class RemoteWorkflowExecutor:
         cancellation: CancellationToken,
         on_progress: RunnerProgressCallback | None,
         resume_checkpoints: list[RunnerCheckpointResume],
+        reset_retry_budget: bool,
     ) -> WorkflowRunResult:
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
@@ -131,6 +135,7 @@ class RemoteWorkflowExecutor:
                     on_node_status=publish,
                     resume_records=resume_records,
                     resume_attempts=resume_attempts,
+                    reset_retry_budget=reset_retry_budget,
                 )
             finally:
                 await node_executor.close()

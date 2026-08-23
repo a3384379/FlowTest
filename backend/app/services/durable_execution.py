@@ -147,7 +147,46 @@ class DurableExecutionService:
         command.error_code = error_code
         command.error_message = error_message
         command.completed_at = datetime.now(UTC)
+        execution = await self._session.scalar(
+            select(WorkflowExecution)
+            .where(WorkflowExecution.id == command.execution_id)
+            .with_for_update()
+        )
+        if execution is not None and execution.status in {"queued", "running"}:
+            execution.status = "failed"
+            execution.error_code = error_code
+            execution.error_message = error_message
+            execution.completed_at = command.completed_at
+            children = list(
+                (
+                    await self._session.scalars(
+                        select(WorkflowExecution)
+                        .where(
+                            WorkflowExecution.parent_execution_id == execution.id,
+                            WorkflowExecution.status.in_(("queued", "running")),
+                        )
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for child in children:
+                child.status = "failed"
+                child.error_code = error_code
+                child.error_message = error_message
+                child.completed_at = command.completed_at
+        self._audit.record(
+            actor_user_id=command.created_by_id,
+            project_id=command.project_id,
+            action="execution.command.dispatch_failed",
+            resource_type="execution_command",
+            resource_id=command.id,
+            details={"execution_id": str(command.execution_id), "error_code": error_code},
+        )
         await self._session.commit()
+
+    async def reset_retry_budget(self, execution_id: UUID) -> bool:
+        command = await self._repository.latest_recovery_command(execution_id)
+        return command is not None and command.command_type == ExecutionCommandType.RETRY.value
 
     async def mark_execution_command_completed(
         self, execution_id: UUID, *, execution_status: str

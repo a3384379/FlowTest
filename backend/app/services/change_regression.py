@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -22,8 +23,10 @@ from app.domain.change_regression import (
     regression_fingerprint,
     transition_status,
 )
+from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.tasking import TestPlanTrigger
 from app.domain.test_design import TestDesignDocument, fingerprint_design, sensitive_paths
+from app.engine.results import NodeResult
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
@@ -32,6 +35,7 @@ from app.models.quality_intelligence import ReleaseRisk
 from app.models.release_gate import ReleasePolicy
 from app.models.tasking import TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_design import ChangeSetApproval, TestDesign
+from app.models.workflows import WorkflowNodeExecution
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.change_regression import (
     ChangeRegressionBundle,
@@ -444,9 +448,18 @@ class ChangeRegressionService:
             status="approved",
             intent=document.intent.model_dump(mode="json"),
             knowledge_graph=document.knowledge_graph.model_dump(mode="json"),
-            state_model=document.state_model.model_dump(mode="json"),
+            state_model=(
+                document.state_model.model_dump(mode="json")
+                if document.state_model is not None
+                else {}
+            ),
+            scenarios=document.model_dump(mode="json")["scenarios"],
             oracles=document.model_dump(mode="json")["oracles"],
             coverage=document.coverage.model_dump(mode="json"),
+            evidence_refs=document.model_dump(mode="json")["evidence_refs"],
+            warnings=list(document.warnings),
+            confidence=document.confidence,
+            review_requirements=list(document.review_requirements),
             test_case_refs=list(document.test_case_refs),
             fingerprint=fingerprint_design(document),
             source_change_set_id=change_set_id,
@@ -804,14 +817,96 @@ class ChangeRegressionService:
                 )
             ).all()
         )
-        return {
-            "algorithm_version": "s45-failure-triage-v1",
-            "execution_status": run.status,
-            "failed_item_count": sum(item.status == "failed" for item in items),
-            "cancelled_item_count": sum(item.status == "cancelled" for item in items),
-            "retry_attempt_count": sum(max(item.attempts - 1, 0) for item in items),
-            "has_error_messages": any(bool(item.error_message) for item in items),
-        }
+        execution_ids = [item.workflow_execution_id for item in items if item.workflow_execution_id]
+        nodes = (
+            list(
+                (
+                    await self._session.scalars(
+                        select(WorkflowNodeExecution).where(
+                            WorkflowNodeExecution.workflow_execution_id.in_(execution_ids)
+                        )
+                    )
+                ).all()
+            )
+            if execution_ids
+            else []
+        )
+        nodes_by_execution: dict[UUID, list[WorkflowNodeExecution]] = {}
+        for node in nodes:
+            nodes_by_execution.setdefault(node.workflow_execution_id, []).append(node)
+        signals = [
+            signal
+            for item in items
+            for signal in _triage_signals(
+                item,
+                nodes_by_execution.get(item.workflow_execution_id, [])
+                if item.workflow_execution_id
+                else [],
+            )
+        ]
+        return cast(dict[str, JsonValue], triage_failures(signals).model_dump(mode="json"))
+
+
+def _triage_signals(
+    item: TestPlanRunItem, nodes: list[WorkflowNodeExecution]
+) -> list[FailureSignal]:
+    if not nodes:
+        return [
+            FailureSignal(
+                evidence_ref=(f"flowtest://test-plan-runs/{item.test_plan_run_id}/items/{item.id}"),
+                item_status=item.status,
+                attempts=item.attempts,
+            )
+        ]
+    return [_node_triage_signal(item, node) for node in nodes]
+
+
+def _node_triage_signal(item: TestPlanRunItem, node: WorkflowNodeExecution) -> FailureSignal:
+    result = _validated_node_result(node.result)
+    observation = result.observations[-1] if result and result.observations else None
+    request_url = urlsplit(observation.request.url) if observation else None
+    error = result.error if result is not None else None
+    assertions = list(result.assertions) if result is not None else []
+    assertion_failed = node.node_type == "assert" or any(
+        not assertion.passed for assertion in assertions
+    )
+    contract_assertion_failed = any(
+        not assertion.passed and assertion.name.lower() in _CONTRACT_ASSERTION_NAMES
+        for assertion in assertions
+    )
+    return FailureSignal(
+        evidence_ref=(f"flowtest://runs/{node.workflow_execution_id}/nodes/{node.node_id}"),
+        item_status=node.status if node.status in {"failed", "cancelled"} else item.status,
+        attempts=max(item.attempts, node.attempts),
+        error_code=node.error_code or (error.code if error is not None else None),
+        retryable=error.retryable if error is not None else False,
+        http_status=(
+            observation.response.status_code if observation and observation.response else None
+        ),
+        affected_service=request_url.hostname if request_url is not None else None,
+        affected_operation=(
+            f"{observation.request.method} {request_url.path}"
+            if observation is not None and request_url is not None
+            else None
+        ),
+        response_received=bool(observation and observation.response),
+        assertion_failed=assertion_failed,
+        contract_assertion_failed=contract_assertion_failed,
+    )
+
+
+def _validated_node_result(value: dict[str, Any] | None) -> NodeResult | None:
+    if value is None:
+        return None
+    try:
+        return NodeResult.model_validate(value)
+    except ValueError:
+        return None
+
+
+_CONTRACT_ASSERTION_NAMES = frozenset(
+    {"response_schema", "schema", "contract", "json_schema", "openapi_schema"}
+)
 
 
 def _selected_assets(impact: ImpactRunBundle) -> list[dict[str, JsonValue]]:

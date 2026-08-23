@@ -1,6 +1,17 @@
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Empty, Input, InputNumber, Select, Space, Typography } from 'antd'
-import type { ReactNode } from 'react'
+import {
+  Alert,
+  Button,
+  Empty,
+  Input,
+  InputNumber,
+  Radio,
+  Select,
+  Space,
+  Tag,
+  Typography,
+} from 'antd'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import type {
   ApiDefinition,
@@ -11,8 +22,14 @@ import type {
   WorkflowEdge,
   WorkflowFieldMapping,
   WorkflowNode,
+  RequestService,
+  ServiceEndpoint,
 } from '../lib/api'
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
+import {
+  listRequestServices,
+  listServiceEndpoints,
+} from '../features/service-targets/service-target-service'
 import WorkflowApiRequestEditor from './WorkflowApiRequestEditor'
 
 type InspectorProps = {
@@ -1239,6 +1256,7 @@ function ApiFields({
   editable: boolean
   onUpdate: (node: WorkflowNode) => void
 }) {
+  const api = apis.find((item) => item.id === stringConfig(node, 'api_definition_id'))
   return (
     <>
       <Field label="接口">
@@ -1260,19 +1278,11 @@ function ApiFields({
           }}
         />
       </Field>
-      <TextConfig
-        label="Service Override（可选）"
-        configKey="service_override"
-        fallback=""
+      <RequestTargetFields
+        projectId={projectId}
+        environmentId={environmentId}
         node={node}
-        editable={editable}
-        onUpdate={onUpdate}
-      />
-      <TextConfig
-        label="Endpoint Variant（可选）"
-        configKey="endpoint_variant"
-        fallback=""
-        node={node}
+        api={api}
         editable={editable}
         onUpdate={onUpdate}
       />
@@ -1280,7 +1290,7 @@ function ApiFields({
         projectId={projectId}
         environmentId={environmentId}
         node={node}
-        api={apis.find((api) => api.id === stringConfig(node, 'api_definition_id'))}
+        api={api}
         artifacts={artifacts}
         editable={editable}
         onUpdate={onUpdate}
@@ -1305,6 +1315,280 @@ function ApiFields({
       </Field>
     </>
   )
+}
+
+function RequestTargetFields({
+  projectId,
+  environmentId,
+  node,
+  api,
+  editable,
+  onUpdate,
+}: {
+  projectId?: string | null
+  environmentId?: string | null
+  node: WorkflowNode
+  api: ApiDefinition | undefined
+  editable: boolean
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  const targetData = useRequestTargetData(projectId, environmentId)
+  const selection = useMemo(
+    () => resolveRequestTarget(node, api, targetData.services, targetData.endpoints),
+    [api, node, targetData.endpoints, targetData.services],
+  )
+
+  return (
+    <Field label="请求目标">
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+        <RequestTargetModeSelector
+          node={node}
+          editable={editable}
+          loading={targetData.loading}
+          services={targetData.services}
+          selection={selection}
+          onUpdate={onUpdate}
+        />
+        <Select
+          aria-label="Endpoint Variant"
+          disabled={!editable || !selection.selectedService}
+          loading={targetData.loading}
+          value={selection.selectedVariant}
+          options={selection.variants.map(endpointOption)}
+          onChange={(variant) => onUpdate(updateNodeConfig(node, 'endpoint_variant', variant))}
+        />
+        <RequestTargetStatus
+          api={api}
+          loading={targetData.loading}
+          error={targetData.error}
+          selection={selection}
+        />
+      </Space>
+    </Field>
+  )
+}
+
+type RequestTargetMode = 'inherit' | 'override'
+
+type RequestTargetSelection = {
+  mode: RequestTargetMode
+  overrideKey: string
+  inherited: RequestService | undefined
+  overridden: RequestService | undefined
+  selectedService: RequestService | undefined
+  selectedVariant: string
+  selectedEndpoint: ServiceEndpoint | undefined
+  variants: ServiceEndpoint[]
+}
+
+function resolveRequestTarget(
+  node: WorkflowNode,
+  api: ApiDefinition | undefined,
+  services: RequestService[],
+  endpoints: ServiceEndpoint[],
+): RequestTargetSelection {
+  const overrideKey = stringConfig(node, 'service_override')
+  const mode: RequestTargetMode = overrideKey ? 'override' : 'inherit'
+  const inherited = services.find((service) => service.id === api?.service_id)
+  const overridden = services.find((service) => service.service_key === overrideKey)
+  const selectedService = mode === 'override' ? overridden : inherited
+  const variants = endpoints.filter((endpoint) => endpoint.service_id === selectedService?.id)
+  const selectedVariant = stringConfig(node, 'endpoint_variant', 'default') || 'default'
+  return {
+    mode,
+    overrideKey,
+    inherited,
+    overridden,
+    selectedService,
+    selectedVariant,
+    selectedEndpoint: variants.find((endpoint) => endpoint.variant === selectedVariant),
+    variants,
+  }
+}
+
+function RequestTargetModeSelector({
+  node,
+  editable,
+  loading,
+  services,
+  selection,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  editable: boolean
+  loading: boolean
+  services: RequestService[]
+  selection: RequestTargetSelection
+  onUpdate: (node: WorkflowNode) => void
+}) {
+  return (
+    <>
+      <Radio.Group
+        aria-label="请求目标模式"
+        disabled={!editable}
+        value={selection.mode}
+        onChange={(event) => onUpdate(changeRequestTargetMode(node, event.target.value, services))}
+      >
+        <Space orientation="vertical">
+          <Radio value="inherit">继承接口默认 Service</Radio>
+          <Typography.Text type="secondary">
+            {serviceLabel(selection.inherited, '未配置默认 Service')}
+          </Typography.Text>
+          <Radio value="override">覆盖 Service</Radio>
+        </Space>
+      </Radio.Group>
+      {selection.mode === 'override' ? (
+        <Space wrap>
+          <Select
+            aria-label="覆盖 Service"
+            disabled={!editable}
+            loading={loading}
+            value={selection.overridden?.service_key}
+            style={{ minWidth: 240 }}
+            options={services.map(serviceOption)}
+            onChange={(serviceKey) =>
+              onUpdate(
+                updateNodeConfigs(node, {
+                  service_override: serviceKey,
+                  endpoint_variant: 'default',
+                }),
+              )
+            }
+          />
+          <Tag color="gold">Override</Tag>
+        </Space>
+      ) : null}
+    </>
+  )
+}
+
+function RequestTargetStatus({
+  api,
+  loading,
+  error,
+  selection,
+}: {
+  api: ApiDefinition | undefined
+  loading: boolean
+  error: boolean
+  selection: RequestTargetSelection
+}) {
+  const warning = requestTargetWarning(api, selection, loading)
+  return (
+    <>
+      {warning ? <Alert type="warning" showIcon title={warning} /> : null}
+      {error ? <Alert type="error" showIcon title="请求目标加载失败" /> : null}
+      <Typography.Text>
+        最终目标：{selection.selectedEndpoint?.base_url ?? '待解析'}
+      </Typography.Text>
+    </>
+  )
+}
+
+function changeRequestTargetMode(
+  node: WorkflowNode,
+  mode: RequestTargetMode,
+  services: RequestService[],
+): WorkflowNode {
+  if (mode === 'inherit') {
+    return withoutNodeConfigs(node, ['service_override', 'endpoint_variant'])
+  }
+  return updateNodeConfigs(node, {
+    service_override: services.find((service) => service.enabled)?.service_key,
+    endpoint_variant: 'default',
+  })
+}
+
+function serviceLabel(service: RequestService | undefined, fallback: string): string {
+  return service ? `${service.name} · ${service.service_key}` : fallback
+}
+
+function serviceOption(service: RequestService) {
+  return {
+    value: service.service_key,
+    label: `${service.name} · ${service.service_key}${service.enabled ? '' : ' · 已停用'}`,
+    disabled: !service.enabled,
+  }
+}
+
+function endpointOption(endpoint: ServiceEndpoint) {
+  return {
+    value: endpoint.variant,
+    label: `${endpoint.variant}${endpoint.enabled ? '' : ' · 已停用'}`,
+    disabled: !endpoint.enabled,
+  }
+}
+
+function useRequestTargetData(projectId?: string | null, environmentId?: string | null) {
+  const key = projectId && environmentId ? `${projectId}:${environmentId}` : ''
+  const [state, setState] = useState<{
+    key: string
+    services: RequestService[]
+    endpoints: ServiceEndpoint[]
+    error: boolean
+  }>({ key: '', services: [], endpoints: [], error: false })
+  useEffect(() => {
+    let active = true
+    if (!projectId || !environmentId || !key) return
+    void Promise.all([
+      listRequestServices(projectId),
+      listServiceEndpoints(projectId, environmentId),
+    ])
+      .then(([nextServices, nextEndpoints]) => {
+        if (!active) return
+        setState({ key, services: nextServices, endpoints: nextEndpoints, error: false })
+      })
+      .catch(() => {
+        if (active) setState({ key, services: [], endpoints: [], error: true })
+      })
+    return () => {
+      active = false
+    }
+  }, [environmentId, key, projectId])
+  const loaded = state.key === key
+  return {
+    services: loaded ? state.services : [],
+    endpoints: loaded ? state.endpoints : [],
+    loading: Boolean(key && !loaded),
+    error: loaded && state.error,
+  }
+}
+
+function requestTargetWarning(
+  api: ApiDefinition | undefined,
+  selection: RequestTargetSelection,
+  loading: boolean,
+): string | null {
+  if (loading) return null
+  return (
+    inheritanceWarning(api, selection) ??
+    overrideWarning(selection) ??
+    serviceWarning(selection.selectedService) ??
+    endpointWarning(selection.selectedEndpoint)
+  )
+}
+
+function inheritanceWarning(
+  api: ApiDefinition | undefined,
+  selection: RequestTargetSelection,
+): string | null {
+  return selection.mode === 'inherit' && !api?.service_id ? '当前 API 未绑定默认 Service' : null
+}
+
+function overrideWarning(selection: RequestTargetSelection): string | null {
+  return selection.mode === 'override' && selection.overrideKey && !selection.selectedService
+    ? '已配置的 Service Override 已不存在'
+    : null
+}
+
+function serviceWarning(service: RequestService | undefined): string | null {
+  if (!service) return '请求 Service 无法解析'
+  return service.enabled ? null : `Service ${service.name} 已停用`
+}
+
+function endpointWarning(endpoint: ServiceEndpoint | undefined): string | null {
+  if (!endpoint) return '所选 Endpoint Variant 缺失'
+  return endpoint.enabled ? null : `Endpoint Variant ${endpoint.variant} 已停用`
 }
 
 function SourceAndExpression({
@@ -1534,6 +1818,12 @@ function updateNodeConfig(node: WorkflowNode, key: string, value: unknown): Work
 
 function updateNodeConfigs(node: WorkflowNode, values: Record<string, unknown>): WorkflowNode {
   return { ...node, config: { ...node.config, ...values } }
+}
+
+function withoutNodeConfigs(node: WorkflowNode, keys: string[]): WorkflowNode {
+  const config = { ...node.config }
+  for (const key of keys) delete config[key]
+  return { ...node, config }
 }
 
 function upstreamNodes(definition: WorkflowDefinition, targetId: string): WorkflowNode[] {

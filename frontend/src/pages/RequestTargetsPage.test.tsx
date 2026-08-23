@@ -63,12 +63,26 @@ describe('RequestTargetsPage', () => {
     let endpointPayload: Record<string, unknown> | null = null
     let defaultPayload: Record<string, unknown> | null = null
     let apiPayload: Record<string, unknown> | null = null
+    let serviceUpdatePayload: Record<string, unknown> | null = null
     server.use(
       projectHandlers(),
       http.get(`/api/v1/projects/${project.id}/environments`, () =>
         HttpResponse.json(environments),
       ),
       http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json(services)),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () =>
+        HttpResponse.json([
+          {
+            id: 'secret-1',
+            project_id: project.id,
+            environment_id: null,
+            name: 'orders-token',
+            created_by_id: user.id,
+            created_at: '2026-08-22T08:00:00Z',
+            updated_at: '2026-08-22T08:00:00Z',
+          },
+        ]),
+      ),
       http.get(
         `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
         () => HttpResponse.json(endpoints),
@@ -81,6 +95,23 @@ describe('RequestTargetsPage', () => {
         const created = { ...service, id: '00000000-0000-4000-8000-000000004003' }
         services = [...services, created]
         return HttpResponse.json(created, { status: 201 })
+      }),
+      http.get(`/api/v1/projects/${project.id}/services/${service.id}/impact-preview`, () =>
+        HttpResponse.json({
+          strategy: 'request_target_dependency_v1',
+          service_id: service.id,
+          service_key: service.service_key,
+          affected_apis: [{ id: api.id, name: api.name, reason: 'API 默认 Service' }],
+          affected_workflows: [],
+          affected_test_plans: [],
+          affected_scheduled_runs: [],
+          affected_release_gates: [],
+        }),
+      ),
+      http.patch(`/api/v1/projects/${project.id}/services/${service.id}`, async ({ request }) => {
+        serviceUpdatePayload = (await request.json()) as Record<string, unknown>
+        services = [{ ...service, ...serviceUpdatePayload } as RequestService]
+        return HttpResponse.json(services[0])
       }),
       http.post(
         `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
@@ -136,6 +167,14 @@ describe('RequestTargetsPage', () => {
     await waitFor(() =>
       expect(apiPayload).toEqual({ service_id: '00000000-0000-4000-8000-000000004003' }),
     )
+
+    await browser.click(screen.getAllByRole('button', { name: /影响预览 \/ 编辑/ })[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('保存前请确认下游影响')).toBeInTheDocument()
+    expect(within(dialog).getByText(`1: ${api.name}`)).toBeInTheDocument()
+    await browser.click(within(dialog).getByRole('switch', { name: 'Enable / Disable Service' }))
+    await browser.click(within(dialog).getByRole('button', { name: '保存变更' }))
+    await waitFor(() => expect(serviceUpdatePayload).toMatchObject({ enabled: false }))
   })
 
   it('shows a standard error envelope when the target data cannot be loaded', async () => {
@@ -154,6 +193,7 @@ describe('RequestTargetsPage', () => {
         ),
       ),
       http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/apis`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),

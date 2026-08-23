@@ -10,6 +10,8 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.evidence import EvidenceRef, EvidenceSourceType
+
 TEST_DESIGN_SCHEMA_VERSION = "1.0"
 LOW_CONFIDENCE_THRESHOLD = 0.8
 HIGH_RISK_LEVELS = frozenset({"high", "critical"})
@@ -45,6 +47,9 @@ class TestIntent(BaseModel):
     actors: list[str] = Field(default_factory=list, max_length=20)
     preconditions: list[str] = Field(default_factory=list, max_length=50)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    confidence: float = Field(default=1, ge=0, le=1)
+    deterministic: bool = True
 
 
 class KnowledgeNode(BaseModel):
@@ -125,21 +130,89 @@ class OracleSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(pattern=_IDENTIFIER, min_length=1, max_length=120)
-    kind: Literal["status", "json_path", "schema", "expression"]
+    kind: Literal[
+        "status",
+        "json_path",
+        "schema",
+        "expression",
+        "state_transition",
+        "database_invariant",
+        "cross_api_consistency",
+    ]
     expression: str = Field(min_length=1, max_length=1000)
-    operator: Literal["equals", "not_equals", "contains", "matches", "exists"] = "equals"
+    operator: Literal[
+        "equals",
+        "not_equals",
+        "contains",
+        "matches",
+        "exists",
+        "non_success",
+        "in",
+        "not_in",
+        "validates",
+        "transitions",
+    ] = "equals"
     expected: JsonValue | None = None
     confidence: float = Field(ge=0, le=1)
     source_ref: str | None = Field(default=None, max_length=512)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    source_type: EvidenceSourceType | None = None
+    deterministic: bool = True
+    requires_review: bool = False
+    applies_to: list[str] = Field(default_factory=list, max_length=500)
+
+
+class ScenarioMutation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=512)
+    operation: Literal["set", "omit", "null", "invalid_type", "duplicate"]
+    value: JsonValue | None = None
+
+
+class ScenarioCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=_IDENTIFIER, min_length=1, max_length=120)
+    kind: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=240)
+    request_body: dict[str, JsonValue] = Field(default_factory=dict, max_length=500)
+    mutations: list[ScenarioMutation] = Field(default_factory=list, max_length=20)
+    expected_category: Literal["success", "invalid_request", "unauthorized", "review"]
+    negative: bool = False
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    confidence: float = Field(default=1, ge=0, le=1)
+    deterministic: bool = True
+    requires_review: bool = False
+    tags: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CoverageEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_ref: str = Field(min_length=1, max_length=240)
+    dimension: Literal[
+        "endpoint",
+        "required_field",
+        "parameter",
+        "boundary",
+        "enum",
+        "type_negative",
+        "format",
+        "response_status",
+        "schema",
+        "authorization",
+        "state",
+        "transition",
+        "database_constraint",
+        "change_impact",
+    ] = "endpoint"
     requirement: str = Field(min_length=1, max_length=1000)
     covered: bool = False
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    reason: str = Field(default="", max_length=1000)
+    recommended_scenario_kind: str | None = Field(default=None, max_length=80)
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
 
 
 class CoverageModel(BaseModel):
@@ -157,6 +230,10 @@ class CoverageModel(BaseModel):
             return 100.0
         return round(self.covered_count * 100 / len(self.entries), 2)
 
+    @property
+    def gaps(self) -> list[CoverageEntry]:
+        return [entry for entry in self.entries if not entry.covered]
+
 
 class TestDesignDocument(BaseModel):
     """A normalized design document; it is not a replacement for TestCase rows."""
@@ -166,10 +243,15 @@ class TestDesignDocument(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     intent: TestIntent
     knowledge_graph: KnowledgeGraph = Field(default_factory=KnowledgeGraph)
-    state_model: StateModel
+    state_model: StateModel | None = None
+    scenarios: list[ScenarioCandidate] = Field(default_factory=list, max_length=1000)
     oracles: list[OracleSpec] = Field(min_length=1, max_length=200)
     coverage: CoverageModel = Field(default_factory=CoverageModel)
     test_case_refs: list[str] = Field(default_factory=list, max_length=100)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=2000)
+    warnings: list[str] = Field(default_factory=list, max_length=100)
+    confidence: float = Field(default=1, ge=0, le=1)
+    review_requirements: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_oracles(self) -> TestDesignDocument:

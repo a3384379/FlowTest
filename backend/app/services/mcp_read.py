@@ -18,14 +18,24 @@ from uuid import UUID
 from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.context import get_tenant_context, get_trace_id
 from app.core.errors import AppError
+from app.domain.evidence import (
+    DataProfile,
+    EvidenceBundle,
+    PythonSourceEvidenceProvider,
+    SourceSnapshot,
+    data_profile_evidence,
+)
+from app.domain.flow_spec import FlowSpec
 from app.domain.mcp_read import (
     MCP_READ_SCOPE,
     EvidenceRef,
     MCPReadCall,
     MCPReadEnvelope,
 )
+from app.domain.test_design import normalized_design
 from app.models.access import Project, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.service_targets import Service, ServiceEndpoint
@@ -33,8 +43,12 @@ from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecut
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
 from app.repositories.workflows import WorkflowRepository
+from app.schemas.test_engineering import TestEngineeringGenerateRequest
 from app.services.audit import AuditService
+from app.services.flow_spec import FlowSpecService
+from app.services.impact import ImpactService
 from app.services.projects import ProjectService
+from app.services.test_engineering import TestEngineeringService
 from app.services.workflows import WorkflowService
 
 MAX_CONTRACTS = 100
@@ -295,6 +309,252 @@ class MCPReadService:
                 "node.result",
                 "node.error_message",
             ],
+        )
+
+    async def generate_test_design(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        payload: TestEngineeringGenerateRequest,
+        coverage_only: bool = False,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        design, fingerprint = await TestEngineeringService(self._session).generate(
+            actor=actor, project_id=project_id, payload=payload
+        )
+        data = (
+            cast(JsonValue, design.coverage.model_dump(mode="json"))
+            if coverage_only
+            else cast(
+                JsonValue,
+                {
+                    "fingerprint": fingerprint,
+                    "design": normalized_design(design),
+                    "persisted": False,
+                },
+            )
+        )
+        refs = [
+            EvidenceRef(
+                uri=ref.source_ref,
+                kind=ref.source_type.value,
+                version=ref.revision,
+            )
+            for ref in design.evidence_refs[:200]
+        ]
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data=data,
+            evidence_refs=refs,
+            confidence=design.confidence,
+            warnings=design.warnings,
+        )
+
+    async def inspect_source_evidence(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        snapshot: SourceSnapshot,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        bundle = PythonSourceEvidenceProvider().analyze(snapshot)
+        return await self._evidence_envelope(actor, project_id, call, bundle)
+
+    async def inspect_data_profile(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        profile: DataProfile,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._evidence_envelope(
+            actor, project_id, call, data_profile_evidence(profile)
+        )
+
+    async def validate_flow_spec(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        spec: FlowSpec,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        pipeline = await FlowSpecService(self._session).validate(
+            actor=actor, project_id=project_id, spec=spec
+        )
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data=cast(
+                JsonValue,
+                {
+                    "fingerprint": pipeline.fingerprint,
+                    "spec": pipeline.spec.model_dump(mode="json"),
+                    "validation": pipeline.validation.model_dump(mode="json"),
+                    "compatibility": pipeline.compatibility.model_dump(mode="json"),
+                },
+            ),
+            evidence_refs=[
+                EvidenceRef(
+                    uri=f"flowtest://flowspec/{pipeline.fingerprint}",
+                    kind="flow-spec-validation",
+                    version=pipeline.spec.fingerprint_version,
+                )
+            ],
+        )
+
+    async def diff_flow_specs(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        before: FlowSpec | None,
+        after: FlowSpec,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        result = await FlowSpecService(self._session).diff(
+            actor=actor, project_id=project_id, before=before, after=after
+        )
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data={
+                "before_fingerprint": result.before_fingerprint,
+                "after_fingerprint": result.after_fingerprint,
+                "changes": cast(
+                    list[JsonValue], [item.model_dump(mode="json") for item in result.changes]
+                ),
+            },
+            evidence_refs=[
+                EvidenceRef(
+                    uri=f"flowtest://flowspec/{result.after_fingerprint}",
+                    kind="flow-spec-diff",
+                    version="v1",
+                )
+            ],
+        )
+
+    async def export_flow_spec(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        version: int | None,
+        call: MCPReadCall,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        exported = await FlowSpecService(self._session).export(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            version=version,
+        )
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data={
+                "workflow_id": str(workflow_id),
+                "version": version,
+                "fingerprint": exported.pipeline.fingerprint,
+                "spec": cast(JsonValue, exported.pipeline.spec.model_dump(mode="json")),
+                "validation": cast(JsonValue, exported.pipeline.validation.model_dump(mode="json")),
+                "compatibility": cast(
+                    JsonValue, exported.pipeline.compatibility.model_dump(mode="json")
+                ),
+            },
+            evidence_refs=[
+                EvidenceRef(
+                    uri=f"flowtest://flowspec/{exported.pipeline.fingerprint}",
+                    kind="flow-spec-export",
+                    version=exported.pipeline.spec.fingerprint_version,
+                )
+            ],
+            redactions=["secret_values", "instance_resource_ids"],
+        )
+
+    async def inspect_change_impact(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        impact_run_id: UUID,
+        call: MCPReadCall,
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        bundle = await ImpactService(
+            self._session, enabled=settings.feature_impact_engine_enabled
+        ).get_run(actor=actor, project_id=project_id, run_id=impact_run_id)
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data=cast(
+                JsonValue,
+                {
+                    "impact_run_id": str(bundle.run.id),
+                    "source_ref": bundle.run.source_ref,
+                    "source_fingerprint": bundle.run.source_fingerprint,
+                    "changes": bundle.run.changes,
+                    "summary": bundle.run.summary,
+                    "selected_assets": bundle.selection.selected_assets,
+                    "coverage": {
+                        "total_changes": bundle.coverage.total_changes,
+                        "covered_changes": bundle.coverage.covered_changes,
+                        "coverage_percent": bundle.coverage.coverage_percent,
+                        "gaps": bundle.coverage.gaps,
+                    },
+                },
+            ),
+            evidence_refs=[
+                EvidenceRef(
+                    uri=f"flowtest://change-impact/{bundle.run.id}",
+                    kind="structured-change-impact",
+                    version="v2",
+                )
+            ],
+            redactions=["git_diff", "request_values", "secret_values", "pii_values"],
+        )
+
+    async def _evidence_envelope(
+        self,
+        actor: User,
+        project_id: UUID,
+        call: MCPReadCall,
+        bundle: EvidenceBundle,
+    ) -> MCPReadEnvelope:
+        refs = [
+            EvidenceRef(
+                uri=finding.source_ref,
+                kind=finding.kind,
+                version=finding.revision,
+            )
+            for finding in bundle.findings[:200]
+        ]
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            project_id=project_id,
+            data=cast(JsonValue, bundle.model_dump(mode="json")),
+            evidence_refs=refs,
+            confidence=min((item.confidence for item in bundle.findings), default=1),
+            redactions=["source.content", "raw_rows", "secret_values", "pii_values"],
+            warnings=bundle.warnings,
         )
 
     def _require_scope(self) -> None:

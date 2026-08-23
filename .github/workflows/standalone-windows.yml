@@ -1,9 +1,15 @@
 name: Standalone Windows Bundle
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/standalone-windows.yml"
+      - "backend/**"
+      - "frontend/**"
+      - "deploy/standalone/**"
+      - "scripts/storage_transfer.py"
   push:
-    branches:
-      - codex/standalone-runtime
+    branches: [main]
   workflow_dispatch:
 
 permissions:

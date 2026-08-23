@@ -45,6 +45,20 @@ export type MissingTestProposal = {
   materialized_resource_id: string | null
 }
 
+export type FailureTriageResult = {
+  algorithm_version: 's47-failure-triage-v2'
+  primary_classification: string
+  secondary_candidates: string[]
+  confidence: number
+  reason_codes: string[]
+  affected_service: string | null
+  affected_operation: string | null
+  evidence_refs: string[]
+  retry_signal: boolean
+  recommended_action: string
+  recommended_regression: string[]
+}
+
 export type ChangeRegressionSummary = {
   id: string
   project_id: string
@@ -76,7 +90,7 @@ export type ChangeRegressionRun = Omit<
   selection_summary: Record<string, unknown>
   missing_tests: MissingTestProposal[]
   evidence: Record<string, unknown>
-  failure_triage: Record<string, unknown>
+  failure_triage: FailureTriageResult | Record<string, unknown>
   approved_by_id: string | null
   approved_at: string | null
   stages: ChangeRegressionStage[]

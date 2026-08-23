@@ -532,14 +532,31 @@ export type FlowSpecNode = {
   bindings?: Array<{ input: string; expression: string }> | null
   depends_on: string[]
   operation_ref?: string | null
+  target?: {
+    service_ref: string | null
+    endpoint_variant: string | null
+  } | null
 }
 
 export type FlowSpec = {
   schema_version: 'flowtest-flow-spec-v1'
+  fingerprint_version: 'flowtest-flow-spec-fingerprint-v1' | 'flowtest-flow-spec-fingerprint-v2'
   project_id: string | null
   name: string
   description: string
   source_evidence: string[]
+  services: Array<{
+    ref: string
+    name: string
+    service_type: string
+  }>
+  operations: Array<{
+    ref: string
+    service_ref: string | null
+    name: string
+    method: string
+    path: string
+  }>
   nodes: FlowSpecNode[]
   edges: WorkflowEdge[]
   variables: Record<string, string>

@@ -145,6 +145,31 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_upgrades_s47_test_design_columns(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's47-schema.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text("CREATE TABLE test_designs (id VARCHAR(36) PRIMARY KEY)")
+        )
+        await standalone_schema._ensure_s47_test_design_columns(connection)
+        columns = await connection.execute(
+            standalone_schema.text("PRAGMA table_info(test_designs)")
+        )
+
+    await test_engine.dispose()
+    definitions = {str(row[1]): (str(row[2]), int(row[3]), row[4]) for row in columns.fetchall()}
+    assert set(definitions) >= {
+        "scenarios",
+        "evidence_refs",
+        "warnings",
+        "confidence",
+        "review_requirements",
+    }
+    assert definitions["scenarios"] == ("JSON", 1, "'[]'")
+    assert definitions["confidence"] == ("FLOAT", 1, "1")
+
+
+@pytest.mark.asyncio
 async def test_standalone_schema_rebuilds_legacy_change_set_tables(tmp_path) -> None:
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy-change-sets.db'}")
     async with test_engine.begin() as connection:

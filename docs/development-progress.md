@@ -1,12 +1,37 @@
 # FlowTest 开发进度
 
 最后更新：2026-08-23（Asia/Shanghai）
-状态：仓库已公开；V5 S46 GA 稳定性与发布收口已完成本地等价验收，提交后暂停等待用户确认；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+状态：仓库已公开；V5 S47 正确性修复与功能闭环已通过本地全量、真实迁移往返、隔离 Compose 与 Playwright 验收，可进入功能完成审核，但 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 进行中：V5 S47 正确性修复与功能闭环
+
+1. S47 在独立 `codex/v5.0` 工作树对 S37～S46 实现先做事实审计，确认并修复
+   FlowSpec 跨实例丢失 Service/Operation/Target 语义、批次子项 Checkpoint 粒度错误、
+   Resume/Retry 语义重叠、Dispatch 失败孤儿状态、变更边界泛化和结构化失败归因缺失。
+2. 新增 typed Evidence Contract 和确定性 Test Engineering Engine，从契约证据生成 Test Intent、
+   Scenario、Oracle、Coverage/Gap 和审核要求；新增 Generate → Proposal → Review → Apply 闭环，
+   Apply 复用现有 Workflow/TestCase 执行资产，不创建只能展示的平行模型。
+3. FlowSpec 保持 `flowtest-flow-spec-v1` Schema，新增 `flowtest-flow-spec-fingerprint-v2`；旧文档
+   缺省按 v1 指纹解析，v2 指纹排除实例 UUID，并通过显式 Service/Operation Mapping
+   落地多服务工作流。
+4. MCP 只读面增加生成、覆盖、源码/DataProfile/Test Evidence、FlowSpec Diff/Validate 和
+   Change Impact 工具；受控写入默认 `dry_run=true`，必须提供幂等键，仍只能产生 Draft。
+5. 前端新增“测试工程”和 FlowSpec 审核映射界面，补齐 Service/Endpoint Variant
+   类型化编辑、连通性、Secret Ref、Impact Preview，失败归因页面升级到 v2 结构化证据。
+6. 新增可回滚迁移 `20260823_0041`，扩展 `test_designs` 的 Scenario/Evidence/Warning/
+   Confidence/Review Requirement，并将过去被误标为已完成的 Key Rotation 迁移状态
+   恢复为 `planned`。真实重加密 Apply/Rollback 仍未实现，是 GA blocker，UI/API 不再声称已完成。
+7. 本地 Backend 全量 `440 passed / 3 skipped`（Coverage `90.06%`），Frontend
+   `56 files / 211 tests`（Branch `80.10%`），PostgreSQL `0041 → 0040 → 0041`
+   往返无 drift；隔离 Compose 通过多 Service FlowSpec、MCP、生成式物化和真实执行
+   Smoke，Playwright 通过 Test Engineering Generate → Draft → Review → Apply 主路径。
+   未执行的远程 CI、Windows x64 72 小时试点、14 日 RC 观察与人工签署不记为通过。完整事实见
+   [S47 V5 功能闭环记录](release/s47-v5-functional-completion.md)。
 
 ## 当前恢复点
 

@@ -1,5 +1,8 @@
 """Organization governance, quota enforcement and key lifecycle services."""
 
+# Product copy intentionally uses Chinese punctuation.
+# ruff: noqa: RUF001
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time
@@ -247,80 +250,48 @@ class OrganizationGovernanceService:
     async def apply_key_rotation(
         self, *, actor: User, organization_id: UUID, key_version_id: UUID
     ) -> OrganizationKeyVersion:
-        organization = await self._orgs.authorize(
+        await self._orgs.authorize(
             actor=actor, organization_id=organization_id, capability="rotate_keys"
         )
-        policy, _created = await self._ensure_records(organization_id, actor.id)
+        await self._ensure_records(organization_id, actor.id)
         version = await self._get_key_version(organization_id, key_version_id)
         if version.status != "pending" or version.migration_status != "planned":
             raise AppError(
-                code="KEY_ROTATION_NOT_PENDING", message="密钥版本不在待迁移状态", status_code=409
+                code="KEY_LIFECYCLE_PLAN_NOT_PENDING",
+                message="Key Lifecycle Plan 不在待确认状态",
+                status_code=409,
             )
-        active = await self._active_key(organization_id, policy.active_key_version)
-        now = datetime.now(UTC)
-        version.status = "active"
-        version.migration_status = "migrated"
-        version.activated_at = now
-        version.migrated_at = now
-        active.status = "retiring"
-        policy.active_key_version = version.version
-        self._audit.record(
-            actor_user_id=actor.id,
-            organization_id=organization.organization.id,
-            project_id=None,
-            action="organization.key_rotation_applied",
-            resource_type="organization_key_version",
-            resource_id=version.id,
-            details={"version": version.version, "previous_version": active.version},
+        raise AppError(
+            code="KEY_ROTATION_REENCRYPTION_UNAVAILABLE",
+            message=(
+                "当前仅支持 Key Lifecycle Metadata / Rotation Plan，"
+                "未实现密文重加密、检查点与可验证回滚"
+            ),
+            status_code=409,
+            details={
+                "capability_mode": "metadata_plan_only",
+                "ciphertext_reencryption_completed": False,
+                "ga_blocker": "REAL_KEY_ROTATION_NOT_IMPLEMENTED",
+            },
         )
-        await self._session.commit()
-        await self._session.refresh(version)
-        return version
 
     async def rollback_key_rotation(
         self, *, actor: User, organization_id: UUID, key_version_id: UUID
     ) -> OrganizationKeyVersion:
-        organization = await self._orgs.authorize(
+        await self._orgs.authorize(
             actor=actor, organization_id=organization_id, capability="rotate_keys"
         )
-        policy, _created = await self._ensure_records(organization_id, actor.id)
-        version = await self._get_key_version(organization_id, key_version_id)
-        if version.status != "active" or version.previous_version is None:
-            raise AppError(
-                code="KEY_ROTATION_NOT_ROLLBACKABLE",
-                message="当前密钥版本没有可回滚的迁移记录",
-                status_code=409,
-            )
-        previous = await self._session.scalar(
-            select(OrganizationKeyVersion).where(
-                OrganizationKeyVersion.organization_id == organization_id,
-                OrganizationKeyVersion.version == version.previous_version,
-            )
+        await self._ensure_records(organization_id, actor.id)
+        await self._get_key_version(organization_id, key_version_id)
+        raise AppError(
+            code="KEY_ROTATION_ROLLBACK_UNAVAILABLE",
+            message="未执行真实密文轮换，因此不存在可验证的密文回滚",
+            status_code=409,
+            details={
+                "capability_mode": "metadata_plan_only",
+                "ciphertext_reencryption_completed": False,
+            },
         )
-        if previous is None:
-            raise AppError(
-                code="KEY_ROTATION_PREVIOUS_NOT_FOUND",
-                message="密钥回滚目标不存在",
-                status_code=409,
-            )
-        now = datetime.now(UTC)
-        version.status = "rolled_back"
-        version.migration_status = "rolled_back"
-        version.rolled_back_at = now
-        previous.status = "active"
-        policy.active_key_version = previous.version
-        self._audit.record(
-            actor_user_id=actor.id,
-            organization_id=organization.organization.id,
-            project_id=None,
-            action="organization.key_rotation_rolled_back",
-            resource_type="organization_key_version",
-            resource_id=version.id,
-            details={"version": version.version, "restored_version": previous.version},
-        )
-        await self._session.commit()
-        await self._session.refresh(previous)
-        return previous
 
     async def support_bundle_redaction(
         self, *, actor: User, organization_id: UUID
@@ -400,10 +371,10 @@ class OrganizationGovernanceService:
                     "key_reference": "settings:data_encryption_key",
                     "key_fingerprint": sha256(settings.data_encryption_key.encode()).hexdigest(),
                     "status": "active",
-                    "migration_status": "migrated",
+                    "migration_status": "planned",
                     "created_by_id": actor_id,
                     "activated_at": now,
-                    "migrated_at": now,
+                    "migrated_at": None,
                 },
                 conflict_columns=("organization_id", "version"),
             )

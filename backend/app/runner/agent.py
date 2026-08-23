@@ -6,7 +6,7 @@ import platform
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import JsonValue
@@ -98,7 +98,7 @@ class RunnerAgent:
                     raise ValueError("Runner plan digest mismatch")
                 plan = decode_execution_plan(lease.task.plan)
 
-                async def progress(_execution_id: object, update: NodeStatusUpdate) -> None:
+                async def progress(execution_id: UUID, update: NodeStatusUpdate) -> None:
                     acknowledgment = await self._control_plane.progress(
                         lease.lease_id,
                         lease.task.fencing_token,
@@ -110,7 +110,11 @@ class RunnerAgent:
                         and update.status.is_terminal
                         and hasattr(self._control_plane, "checkpoint")
                     ):
-                        checkpoint = _checkpoint_payload(lease, update)
+                        checkpoint = _checkpoint_payload(
+                            lease,
+                            update,
+                            execution_id=execution_id,
+                        )
                         acknowledgment = await self._control_plane.checkpoint(
                             lease.lease_id, checkpoint
                         )
@@ -127,6 +131,7 @@ class RunnerAgent:
                     cancellation=cancellation,
                     on_progress=progress,
                     resume_checkpoints=lease.task.resume_checkpoints,
+                    reset_retry_budget=lease.task.reset_retry_budget,
                 )
                 await self._control_plane.complete(lease.lease_id, lease.task.fencing_token, result)
             except httpx.HTTPStatusError as error:
@@ -237,7 +242,10 @@ def _progress_percent(update: NodeStatusUpdate) -> float:
 
 
 def _checkpoint_payload(
-    lease: RunnerLeaseResponse, update: NodeStatusUpdate
+    lease: RunnerLeaseResponse,
+    update: NodeStatusUpdate,
+    *,
+    execution_id: UUID | None = None,
 ) -> RunnerCheckpointRequest:
     result = update.result
     if result is None:
@@ -249,7 +257,7 @@ def _checkpoint_payload(
         extracted = {}
     input_hash = update.input_hash or _sha256(f"{update.node_id}:{snapshot!r}")
     return RunnerCheckpointRequest(
-        execution_id=lease.task.execution_id,
+        execution_id=execution_id or lease.task.execution_id,
         node_id=update.node_id,
         node_type=update.node_type,
         name=update.name,

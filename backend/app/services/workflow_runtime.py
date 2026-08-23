@@ -21,6 +21,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
+    ApiNodeConfig,
     FieldMapping,
     ForEachNodeConfig,
     MappingTargetLocation,
@@ -260,6 +261,11 @@ class WorkflowNodeExecutor:
         return prepared
 
     async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, ApiNodeConfig):
+            raise NodeExecutionError(
+                code="INVALID_API_CONFIG", message=f"节点 {node.name} 的 API 配置无效"
+            )
         prepared = self._requests[node.id]
         try:
             resolved_mappings = resolve_field_mappings(
@@ -355,6 +361,15 @@ class WorkflowNodeExecutor:
             JsonValue,
             [item.model_dump(mode="json") for item in mapping_trace],
         )
+        if config.expected_statuses is not None:
+            if response.status_code in config.expected_statuses:
+                return output
+            raise NodeExecutionError(
+                code="HTTP_UNEXPECTED_STATUS",
+                message=f"目标接口返回未预期状态 {response.status_code}",
+                category=(RetryCategory.SERVER_ERROR if response.status_code >= 500 else None),
+                output=output,
+            )
         if response.status_code >= 500:
             raise NodeExecutionError(
                 code="HTTP_5XX",

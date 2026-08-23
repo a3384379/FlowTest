@@ -165,7 +165,19 @@ describe('ChangeRegressionPage', () => {
           title: String(createPayload.title),
           status: 'evidence_ready',
           missing_tests: [],
-          failure_triage: { failed_item_count: 1, retry_attempt_count: 1 },
+          failure_triage: {
+            algorithm_version: 's47-failure-triage-v2',
+            primary_classification: 'SERVICE_ENDPOINT_FAILURE',
+            secondary_candidates: ['FLAKY'],
+            confidence: 0.95,
+            reason_codes: ['ENDPOINT_OR_SERVER_FAILURE'],
+            affected_service: 'orders',
+            affected_operation: 'POST /orders',
+            evidence_refs: ['execution://run/item/1'],
+            retry_signal: true,
+            recommended_action: '检查 Service Endpoint 健康、变体与服务状态',
+            recommended_regression: ['目标服务健康回归'],
+          },
         }
         return HttpResponse.json(currentRun, { status: 201 })
       }),
@@ -192,6 +204,9 @@ describe('ChangeRegressionPage', () => {
       generate_missing_tests: true,
     })
     expect(await screen.findByText('执行失败已生成 Failure Triage 证据')).toBeVisible()
+    expect(screen.getByText('SERVICE_ENDPOINT_FAILURE')).toBeVisible()
+    expect(screen.getByText('orders')).toBeVisible()
+    expect(screen.getByText('建议回归：目标服务健康回归')).toBeVisible()
   })
 
   it('reports review decisions and action failures through the hook', async () => {

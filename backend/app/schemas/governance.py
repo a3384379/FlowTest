@@ -114,6 +114,12 @@ class OrganizationSecurityResponse(BaseModel):
     organization_id: UUID
     active_key_version: int
     key_versions: list[OrganizationKeyVersionResponse]
+    capability_name: Literal["Key Lifecycle Metadata / Rotation Plan"] = (
+        "Key Lifecycle Metadata / Rotation Plan"
+    )
+    capability_mode: Literal["metadata_plan_only"] = "metadata_plan_only"
+    ciphertext_reencryption_available: Literal[False] = False
+    ga_blocker: Literal["REAL_KEY_ROTATION_NOT_IMPLEMENTED"] = "REAL_KEY_ROTATION_NOT_IMPLEMENTED"
 
 
 class RunnerGovernancePoolSummary(BaseModel):

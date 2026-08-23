@@ -14,10 +14,13 @@ import {
 
 const spec = {
   schema_version: 'flowtest-flow-spec-v1' as const,
+  fingerprint_version: 'flowtest-flow-spec-fingerprint-v2' as const,
   project_id: project.id,
   name: workflow.name,
   description: workflow.description,
   source_evidence: [],
+  services: [],
+  operations: [],
   nodes: [],
   edges: [],
   variables: {},

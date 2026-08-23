@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from time import perf_counter
+from typing import Protocol
 from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.network import OutboundNetworkPolicy
 from app.models.access import Project, User
-from app.models.api_assets import Environment
+from app.models.api_assets import APIDefinition, Environment
+from app.models.release_gate import ReleasePolicy
 from app.models.service_targets import Service, ServiceEndpoint
+from app.models.tasking import TestPlan, TestPlanItem
+from app.models.workflows import Workflow
 from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
@@ -129,6 +134,94 @@ class ServiceTargetService:
         return await self._targets.list_endpoints(
             project_id=project_id,
             environment_id=environment_id,
+        )
+
+    async def impact_preview(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        service_id: UUID,
+    ) -> dict[str, object]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        service = await self._get_service(project_id=project_id, service_id=service_id)
+        apis = list(
+            (
+                await self._session.scalars(
+                    select(APIDefinition).where(
+                        APIDefinition.project_id == project_id,
+                        APIDefinition.service_id == service_id,
+                    )
+                )
+            ).all()
+        )
+        workflows = list(
+            (
+                await self._session.scalars(
+                    select(Workflow).where(Workflow.project_id == project_id)
+                )
+            ).all()
+        )
+        api_ids = {str(api.id) for api in apis}
+        affected_workflows = [
+            workflow
+            for workflow in workflows
+            if _workflow_uses_service(workflow.draft_definition, service.service_key, api_ids)
+        ]
+        workflow_ids = {workflow.id for workflow in affected_workflows}
+        plans = await self._affected_plans(project_id, workflow_ids)
+        release_policies = (
+            list(
+                (
+                    await self._session.scalars(
+                        select(ReleasePolicy).where(
+                            ReleasePolicy.project_id == project_id,
+                            ReleasePolicy.enabled.is_(True),
+                        )
+                    )
+                ).all()
+            )
+            if plans
+            else []
+        )
+        return {
+            "strategy": "request_target_dependency_v1",
+            "service_id": service.id,
+            "service_key": service.service_key,
+            "affected_apis": [_impact_item(api, "API 默认 Service") for api in apis],
+            "affected_workflows": [
+                _impact_item(workflow, "Workflow 节点继承或覆盖 Service")
+                for workflow in affected_workflows
+            ],
+            "affected_test_plans": [
+                _impact_item(plan, "Test Plan 包含受影响 Workflow") for plan in plans
+            ],
+            "affected_scheduled_runs": [
+                _impact_item(plan, "Test Plan 已配置定时触发")
+                for plan in plans
+                if plan.schedule_interval_seconds is not None or plan.schedule_cron is not None
+            ],
+            "affected_release_gates": [
+                _impact_item(policy, "受影响 Test Plan 可作为发布门禁证据")
+                for policy in release_policies
+            ],
+        }
+
+    async def _affected_plans(self, project_id: UUID, workflow_ids: set[UUID]) -> list[TestPlan]:
+        if not workflow_ids:
+            return []
+        return list(
+            (
+                await self._session.scalars(
+                    select(TestPlan)
+                    .join(TestPlanItem, TestPlanItem.test_plan_id == TestPlan.id)
+                    .where(
+                        TestPlan.project_id == project_id,
+                        TestPlanItem.workflow_id.in_(workflow_ids),
+                    )
+                    .distinct()
+                )
+            ).all()
         )
 
     async def create_endpoint(
@@ -454,6 +547,40 @@ def _health_url(endpoint: ServiceEndpoint) -> str:
     base_url = endpoint.base_url.rstrip("/") + "/"
     path = endpoint.health_check_path or ""
     return urljoin(base_url, path.lstrip("/"))
+
+
+def _workflow_uses_service(
+    definition: dict[str, object], service_key: str, api_ids: set[str]
+) -> bool:
+    nodes = definition.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+    return any(_node_uses_service(node, service_key, api_ids) for node in nodes)
+
+
+def _node_uses_service(node: object, service_key: str, api_ids: set[str]) -> bool:
+    if not isinstance(node, dict):
+        return False
+    config = node.get("config")
+    if not isinstance(config, dict):
+        return False
+    return (
+        config.get("service_override") == service_key
+        or str(config.get("api_definition_id")) in api_ids
+    )
+
+
+class _ImpactNamed(Protocol):
+    id: UUID
+    name: str
+
+
+def _impact_item(item: _ImpactNamed, reason: str) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "reason": reason,
+    }
 
 
 def _validate_headers(headers: dict[str, str]) -> None:

@@ -31,6 +31,21 @@ class DurableExecutionRepository:
             ).all()
         )
 
+    async def latest_recovery_command(self, execution_id: UUID) -> ExecutionCommand | None:
+        return cast(
+            ExecutionCommand | None,
+            await self._session.scalar(
+                select(ExecutionCommand)
+                .where(
+                    ExecutionCommand.execution_id == execution_id,
+                    ExecutionCommand.command_type.in_(("resume", "retry")),
+                    ExecutionCommand.status.in_(("accepted", "dispatched")),
+                )
+                .order_by(ExecutionCommand.created_at.desc())
+                .limit(1)
+            ),
+        )
+
     async def get_checkpoint(
         self,
         *,

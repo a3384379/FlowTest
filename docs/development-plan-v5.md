@@ -199,3 +199,31 @@ MCP 编排器应严格按以下阶段运行：
 5. 以真实迁移、失败恢复、容量和安全证据作为阶段退出条件，不用单元测试数量替代公司试点和时间性观察。
 
 该文件是 V5 设计草案，不代表已经创建 V5 代码分支、正式标签或改变 V4 发布门槛。
+
+## S47 实现校正（2026-08-23）
+
+S47 以已实现代码为事实源，校正了上述早期草案的里程碑命名和能力边界：
+
+- 主链路固定为 `Evidence → Test Engineering → ChangeSet Draft → Human Review →
+  Workflow/TestCase → Durable Execution → Run Evidence`。TestDesign 是可审核的设计聚合，
+  Workflow/TestCase 仍是物化和执行事实源。
+- Evidence 必须带 `source_ref`/revision/confidence/deterministic 并受条数和字节预算限制。
+  契约、有界 Python AST 源码快照和已脱敏 DataProfile 都通过 typed provider 进入，
+  不执行导入的源码，不读取样本原值。
+- 生成器对 required/nullable、number min/max、string min/max/enum/pattern、array min/max、
+  类型错误、缺失认证和可选 pairwise 场景做确定性生成；每个 Scenario/Oracle
+  都指向 Evidence Ref，低置信度或无契约的 Oracle 必须人工复核。
+- FlowSpec 保留 v1 Schema 并新增 v2 跨实例指纹。Service/Operation/Target 使用可移植逻辑键，
+  导入时通过显式 Mapping 解析为目标实例 UUID；未解析引用会阻止 Apply，不得默默降级。
+- Resume 在同一 Execution 中保留已完成 Checkpoint 并继续 Attempt；Retry 创建新
+  Execution 并从新计划。批次执行按子项写 Checkpoint，所有上报必须验证
+  Lease/Fence，Dispatch 失败必须补偿为可观测终态。
+- MCP 保留 Read/Controlled Write 边界。写工具必须使用幂等键，默认
+  `dry_run=true`，且最多生成 Draft；不新增自动发布、执行、删除、权限变更或 Credential
+  工具。
+- Key Rotation 采用如实能力模型：当前只有元数据计划，没有真实数据重加密、分批进度、
+  验证和回滚。完成前 API 显式拒绝 Apply/Rollback，页面标注“未实现”，该项仍为 GA blocker。
+
+S47 不改变 Windows 72 小时试点、14 日 RC 观察、真实备份恢复和人工签署门槛。
+实际验收证据、未完成项和发布判定见
+[S47 V5 功能闭环记录](release/s47-v5-functional-completion.md)。

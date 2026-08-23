@@ -264,6 +264,7 @@ class ApiNodeConfig(BaseModel):
         pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
         max_length=80,
     )
+    expected_statuses: tuple[int, ...] | None = Field(default=None, min_length=1, max_length=20)
     request_overrides: ApiNodeRequestOverrides = Field(default_factory=ApiNodeRequestOverrides)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     max_retries: int = Field(default=0, ge=0, le=3)
@@ -278,6 +279,11 @@ class ApiNodeConfig(BaseModel):
     def validate_retry_categories(self) -> "ApiNodeConfig":
         if len(self.retry_on) != len(set(self.retry_on)):
             raise ValueError("Retry categories must be unique")
+        if self.expected_statuses is not None:
+            if len(self.expected_statuses) != len(set(self.expected_statuses)):
+                raise ValueError("Expected statuses must be unique")
+            if any(status < 100 or status > 599 for status in self.expected_statuses):
+                raise ValueError("Expected statuses must be valid HTTP status codes")
         return self
 
 

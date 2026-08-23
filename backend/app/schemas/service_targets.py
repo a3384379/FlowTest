@@ -105,3 +105,20 @@ class ServiceEndpointConnectivityResponse(BaseModel):
     latency_ms: float | None
     redirect: bool
     error_code: str | None = None
+
+
+class ServiceTargetImpactItem(BaseModel):
+    id: UUID
+    name: str
+    reason: str
+
+
+class ServiceTargetImpactPreviewResponse(BaseModel):
+    strategy: str
+    service_id: UUID
+    service_key: str
+    affected_apis: list[ServiceTargetImpactItem]
+    affected_workflows: list[ServiceTargetImpactItem]
+    affected_test_plans: list[ServiceTargetImpactItem]
+    affected_scheduled_runs: list[ServiceTargetImpactItem]
+    affected_release_gates: list[ServiceTargetImpactItem]

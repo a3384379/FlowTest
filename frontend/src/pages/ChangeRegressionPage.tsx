@@ -20,6 +20,7 @@ import {
 import type {
   ChangeRegressionRun,
   ChangeRegressionStatus,
+  FailureTriageResult,
   MissingTestProposal,
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
@@ -286,13 +287,74 @@ function RunDetail({
         )}
       </Space>
       {Object.keys(run.failure_triage).length > 0 && (
-        <Alert
-          type="warning"
-          message="执行失败已生成 Failure Triage 证据"
-          description={JSON.stringify(run.failure_triage)}
-        />
+        <FailureTriagePanel value={run.failure_triage} />
       )}
     </Space>
+  )
+}
+
+function FailureTriagePanel({ value }: { value: ChangeRegressionRun['failure_triage'] }) {
+  if (!isFailureTriageV2(value)) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="历史 Failure Triage 证据不含 S47 结构化分类"
+        description="请重新执行回归以生成 classification、confidence、evidence refs 和建议动作。"
+      />
+    )
+  }
+  return (
+    <Card
+      size="small"
+      title="Failure Triage v2"
+      extra={<Tag color="red">{value.primary_classification}</Tag>}
+    >
+      <Space orientation="vertical" style={{ width: '100%' }}>
+        <Descriptions size="small" bordered column={2}>
+          <Descriptions.Item label="Confidence">
+            {(value.confidence * 100).toFixed(0)}%
+          </Descriptions.Item>
+          <Descriptions.Item label="Retry Signal">
+            {value.retry_signal ? '是' : '否'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Affected Service">
+            {value.affected_service ?? '未定位'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Affected Operation">
+            {value.affected_operation ?? '未定位'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Evidence Refs">{value.evidence_refs.length}</Descriptions.Item>
+          <Descriptions.Item label="Secondary">
+            {value.secondary_candidates.join(', ') || '无'}
+          </Descriptions.Item>
+        </Descriptions>
+        <Alert
+          showIcon
+          type="warning"
+          title="执行失败已生成 Failure Triage 证据"
+          description={value.recommended_action}
+        />
+        <Space wrap>
+          {value.reason_codes.map((reason) => (
+            <Tag key={reason}>{reason}</Tag>
+          ))}
+        </Space>
+        {value.recommended_regression.length ? (
+          <Typography.Text>建议回归：{value.recommended_regression.join('、')}</Typography.Text>
+        ) : null}
+      </Space>
+    </Card>
+  )
+}
+
+function isFailureTriageV2(
+  value: ChangeRegressionRun['failure_triage'],
+): value is FailureTriageResult {
+  return (
+    value.algorithm_version === 's47-failure-triage-v2' &&
+    typeof value.primary_classification === 'string' &&
+    Array.isArray(value.evidence_refs)
   )
 }
 

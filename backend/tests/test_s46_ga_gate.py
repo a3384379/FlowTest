@@ -92,11 +92,20 @@ async def test_mcp_red_team_surface_has_no_uncontrolled_mutation_tools() -> None
         for name in names
     )
     assert names == {
+        "flowtest.analyze_test_coverage",
+        "flowtest.diff_flowspec",
         "flowtest.discover_services",
+        "flowtest.export_flowspec",
+        "flowtest.generate_test_design",
+        "flowtest.inspect_change_impact",
         "flowtest.inspect_contract",
+        "flowtest.inspect_data_profile",
         "flowtest.inspect_flow",
         "flowtest.inspect_project",
         "flowtest.inspect_run_evidence",
+        "flowtest.inspect_source_evidence",
+        "flowtest.inspect_test_evidence",
         "flowtest.list_projects",
         "flowtest.propose_test_design",
+        "flowtest.validate_flowspec",
     }

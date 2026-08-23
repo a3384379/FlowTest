@@ -2,7 +2,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
@@ -30,8 +39,15 @@ class TestDesign(UuidPrimaryKeyMixin, TimestampMixin, Base):
     intent: Mapped[dict[str, Any]] = mapped_column(JSON)
     knowledge_graph: Mapped[dict[str, Any]] = mapped_column(JSON)
     state_model: Mapped[dict[str, Any]] = mapped_column(JSON)
+    scenarios: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
     oracles: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     coverage: Mapped[dict[str, Any]] = mapped_column(JSON)
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    confidence: Mapped[float] = mapped_column(Float, default=1, server_default="1")
+    review_requirements: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     test_case_refs: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     source_change_set_id: Mapped[UUID | None] = mapped_column(

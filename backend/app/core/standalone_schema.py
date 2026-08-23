@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0040"
+BASELINE_REVISION = "20260823_0041"
 
 
 async def initialize_standalone_database() -> None:
@@ -56,6 +56,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_governance_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
     await _ensure_s42_controlled_write_tables(connection)
+    await _ensure_s47_test_design_columns(connection)
     await _ensure_change_regression_tables(connection)
     await _add_column_if_missing(
         connection,
@@ -101,7 +102,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE flowtest_standalone_meta SET value = :revision "
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039')"
+            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
+            "'20260823_0040')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -110,7 +112,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "UPDATE alembic_version SET version_num = :revision "
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
-            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039')"
+            "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
+            "'20260823_0040')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -125,6 +128,22 @@ async def _ensure_s42_controlled_write_tables(connection: AsyncConnection) -> No
     for model in (TestDesign, ChangeSetApproval):
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
+
+
+async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
+    for column, definition in (
+        ("scenarios", "JSON NOT NULL DEFAULT '[]'"),
+        ("evidence_refs", "JSON NOT NULL DEFAULT '[]'"),
+        ("warnings", "JSON NOT NULL DEFAULT '[]'"),
+        ("confidence", "FLOAT NOT NULL DEFAULT 1"),
+        ("review_requirements", "JSON NOT NULL DEFAULT '[]'"),
+    ):
+        await _add_column_if_missing(
+            connection,
+            table="test_designs",
+            column=column,
+            definition=definition,
+        )
 
 
 async def _ensure_change_regression_tables(connection: AsyncConnection) -> None:

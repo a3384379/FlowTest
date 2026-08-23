@@ -38,6 +38,7 @@ from app.api.v1.endpoints.service_targets import router as service_targets_route
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
 from app.api.v1.endpoints.test_assets import router as test_assets_router
+from app.api.v1.endpoints.test_engineering import router as test_engineering_router
 from app.api.v1.endpoints.users import router as users_router
 from app.api.v1.endpoints.workflow_events import router as workflow_events_router
 from app.api.v1.endpoints.workflows import router as workflows_router
@@ -81,6 +82,7 @@ api_router.include_router(organizations_router, tags=["organizations"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])
+api_router.include_router(test_engineering_router, tags=["test-engineering"])
 api_router.include_router(reporting_router, tags=["reports"])
 api_router.include_router(runner_fabric_admin_router, tags=["runner-fabric"])
 api_router.include_router(runner_control_router, tags=["runner-control"])

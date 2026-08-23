@@ -3,13 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import { user } from '../test/fixtures'
 import { server } from '../test/server'
 import OrganizationGovernancePage from './OrganizationGovernancePage'
-import { rotationAction } from './organization-governance-rotation'
 
 const organizationId = '00000000-0000-4000-8000-000000000701'
 
@@ -31,7 +30,11 @@ describe('OrganizationGovernancePage', () => {
     expect(screen.getByText('Runner 容量')).toBeVisible()
 
     await browser.click(screen.getByRole('tab', { name: /审计与安全/ }))
-    expect(await screen.findByText('密钥版本与迁移')).toBeVisible()
+    expect(await screen.findByText('Key Lifecycle Metadata / Rotation Plan')).toBeVisible()
+    expect(screen.getByText('真实 Key Rotation 尚未实现')).toBeVisible()
+    expect(screen.getByText(/GA Blocker/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Rollback' })).not.toBeInTheDocument()
     expect(screen.getByText(/Support Bundle 只生成经过字段级脱敏的诊断清单/)).toBeVisible()
     expect(screen.getByText('data_encryption_key')).toBeVisible()
   })
@@ -87,7 +90,7 @@ describe('OrganizationGovernancePage', () => {
             key_reference: 'external:data-encryption-key',
             key_fingerprint: 'b'.repeat(64),
             status: 'pending',
-            migration_status: 'prepared',
+            migration_status: 'planned',
             previous_version: 1,
             created_by_id: user.id,
             activated_at: null,
@@ -105,7 +108,7 @@ describe('OrganizationGovernancePage', () => {
     await browser.click(screen.getByText('审计与安全'))
     const panel = screen.getByRole('tabpanel')
     await browser.type(within(panel).getByPlaceholderText('64 位十六进制指纹'), 'b'.repeat(64))
-    await browser.click(within(panel).getByRole('button', { name: '创建迁移计划' }))
+    await browser.click(within(panel).getByRole('button', { name: '创建 Rotation Plan' }))
 
     await waitFor(() =>
       expect(submitted).toEqual({
@@ -113,63 +116,6 @@ describe('OrganizationGovernancePage', () => {
         key_fingerprint: 'b'.repeat(64),
       }),
     )
-  })
-
-  it('covers key rotation action guards', () => {
-    const onApply = vi.fn()
-    const onRollback = vi.fn()
-    const baseItem = {
-      id: 'key-guard-701',
-      version: 1,
-      key_reference: 'external:key',
-      key_fingerprint: 'a'.repeat(64),
-      migration_status: 'migrated',
-      previous_version: null,
-      created_at: '2026-08-22T00:00:00Z',
-    }
-    const view = render(
-      <>{rotationAction({ ...baseItem, status: 'active' }, false, onApply, onRollback, false)}</>,
-    )
-    expect(view.container).toBeEmptyDOMElement()
-
-    view.rerender(
-      <>
-        {rotationAction(
-          { ...baseItem, id: 'key-pending-guard', status: 'pending' },
-          true,
-          onApply,
-          onRollback,
-          false,
-        )}
-      </>,
-    )
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeVisible()
-
-    view.rerender(
-      <>
-        {rotationAction(
-          { ...baseItem, id: 'key-active-guard', version: 2, status: 'active' },
-          true,
-          onApply,
-          onRollback,
-          false,
-        )}
-      </>,
-    )
-    expect(screen.getByRole('button', { name: 'Rollback' })).toBeVisible()
-
-    view.rerender(
-      <>
-        {rotationAction(
-          { ...baseItem, id: 'key-active-v1-guard', status: 'active' },
-          true,
-          onApply,
-          onRollback,
-          false,
-        )}
-      </>,
-    )
-    expect(view.container).toBeEmptyDOMElement()
   })
 })
 
@@ -211,6 +157,10 @@ function installHandlers() {
       HttpResponse.json({
         organization_id: organizationId,
         active_key_version: 1,
+        capability_name: 'Key Lifecycle Metadata / Rotation Plan',
+        capability_mode: 'metadata_plan_only',
+        ciphertext_reencryption_available: false,
+        ga_blocker: 'REAL_KEY_ROTATION_NOT_IMPLEMENTED',
         key_versions: [
           {
             id: 'key-701',
@@ -219,11 +169,11 @@ function installHandlers() {
             key_reference: 'settings:data_encryption_key',
             key_fingerprint: 'a'.repeat(64),
             status: 'active',
-            migration_status: 'migrated',
+            migration_status: 'planned',
             previous_version: null,
             created_by_id: user.id,
             activated_at: '2026-08-22T00:00:00Z',
-            migrated_at: '2026-08-22T00:00:00Z',
+            migrated_at: null,
             rolled_back_at: null,
             created_at: '2026-08-22T00:00:00Z',
             updated_at: '2026-08-22T00:00:00Z',

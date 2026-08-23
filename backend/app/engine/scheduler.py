@@ -196,6 +196,7 @@ class WorkflowScheduler:
         selected_node_ids: frozenset[str] | None = None,
         resume_records: tuple[NodeRunRecord, ...] = (),
         resume_attempts: dict[str, int] | None = None,
+        reset_retry_budget: bool = False,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
@@ -235,6 +236,7 @@ class WorkflowScheduler:
                 run_context,
                 self._run_node,
                 attempt_offsets,
+                reset_retry_budget,
             )
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
@@ -295,13 +297,16 @@ class WorkflowScheduler:
         context: ExecutionContext,
         default_timeout_seconds: int,
         initial_attempts: int = 0,
+        reset_retry_budget: bool = False,
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
         input_hash = _input_hash(node.id, context.snapshot())
         policy = _execution_policy(node, default_timeout_seconds)
         attempts = initial_attempts
+        budget_attempts = 0 if reset_retry_budget else initial_attempts
         while True:
             attempts += 1
+            budget_attempts += 1
             failure: NodeExecutionError
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
@@ -344,7 +349,7 @@ class WorkflowScheduler:
                     input_hash=input_hash,
                 )
 
-            if attempts > policy.max_retries or failure.category not in policy.retry_on:
+            if budget_attempts > policy.max_retries or failure.category not in policy.retry_on:
                 return _failed_record(
                     node,
                     attempts,
@@ -444,9 +449,10 @@ def _schedule_ready(
     active: dict[asyncio.Task[NodeRunRecord], str],
     context: ExecutionContext,
     runner: Callable[
-        [WorkflowNode, ExecutionContext, int, int], Coroutine[Any, Any, NodeRunRecord]
+        [WorkflowNode, ExecutionContext, int, int, bool], Coroutine[Any, Any, NodeRunRecord]
     ],
     attempt_offsets: dict[str, int],
+    reset_retry_budget: bool,
 ) -> None:
     capacity = definition.settings.concurrency - len(active)
     if capacity <= 0:
@@ -467,6 +473,7 @@ def _schedule_ready(
                 context,
                 definition.settings.default_timeout_seconds,
                 attempt_offsets.get(node.id, 0),
+                reset_retry_budget,
             )
         )
         active[task] = node.id

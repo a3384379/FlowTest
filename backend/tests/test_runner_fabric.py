@@ -69,7 +69,7 @@ from app.services.runner_fabric import RunnerFabricService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflow_snapshots import PreparedExecution
-from app.services.workflows import WorkflowRunPlan, WorkflowService
+from app.services.workflows import WorkflowBatchPlan, WorkflowRunPlan, WorkflowService
 
 
 def test_pool_advisory_lock_key_is_stable_and_signed() -> None:
@@ -376,6 +376,8 @@ async def test_durable_command_and_checkpoint_edge_cases(
             idempotency_key=None,
             payload={},
         )
+        execution.status = "running"
+        await session.commit()
         await durable.mark_failed(
             command.id,
             error_code="WORKER_CRASHED",
@@ -384,6 +386,9 @@ async def test_durable_command_and_checkpoint_edge_cases(
         failed_command = await session.get(ExecutionCommand, command.id)
         assert failed_command is not None
         assert failed_command.status == "failed"
+        await session.refresh(execution)
+        assert execution.status == "failed"
+        assert execution.error_code == "WORKER_CRASHED"
         with pytest.raises(AppError) as missing_dispatch:
             await durable.mark_dispatched(uuid4())
         assert missing_dispatch.value.code == "EXECUTION_COMMAND_NOT_FOUND"
@@ -924,6 +929,32 @@ async def test_runner_agent_executes_claim_and_reports_digest_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_agent_reports_batch_checkpoints_for_actual_child_executions() -> None:
+    first = _plan_fixture()
+    second = replace(first, execution_id=uuid4())
+    batch = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=first.actor_id,
+        project_id=first.project_id,
+        workflow_version=first.workflow_version,
+        children=(first, second),
+        concurrency=2,
+    )
+    lease = _lease_fixture(batch)
+    control = FakeControlPlane(leases=[])
+
+    await RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=control
+    )._execute(lease)
+
+    assert {item.execution_id for item in control.checkpoints} == {
+        first.execution_id,
+        second.execution_id,
+    }
+    assert lease.task.execution_id not in {item.execution_id for item in control.checkpoints}
+
+
+@pytest.mark.asyncio
 async def test_runner_agent_retries_transient_control_plane_failure() -> None:
     plan = _plan_fixture()
     lease = _lease_fixture(plan)
@@ -1264,7 +1295,7 @@ def _plan_fixture() -> WorkflowRunPlan:
     )
 
 
-def _lease_fixture(plan: WorkflowRunPlan) -> RunnerLeaseResponse:
+def _lease_fixture(plan: WorkflowRunPlan | WorkflowBatchPlan) -> RunnerLeaseResponse:
     acquired_at = datetime.now(UTC)
     encoded = encode_execution_plan(plan)
     return RunnerLeaseResponse(

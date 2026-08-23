@@ -62,6 +62,8 @@ class ChangeItem:
     detail: str
     before: JsonValue = None
     after: JsonValue = None
+    semantic_type: str = "schema_changed"
+    field_path: str | None = None
 
     def as_json(self) -> dict[str, JsonValue]:
         return {
@@ -74,6 +76,8 @@ class ChangeItem:
             "detail": self.detail,
             "before": self.before,
             "after": self.after,
+            "semantic_type": self.semantic_type,
+            "field_path": self.field_path,
         }
 
 
@@ -179,11 +183,9 @@ def diff_openapi(
     old_by_key = {item.key: item for item in baseline}
     new_by_key = {item.key: item for item in current}
     changes: list[ChangeItem] = []
-    breaking_operation_keys: set[str] = set()
     for item in breaking_changes(baseline, current):
         operation = old_by_key[item.operation_key]
         source_key = f"{operation.method} {operation.path}"
-        breaking_operation_keys.add(item.operation_key)
         changes.append(
             _change(
                 SourceKind.OPENAPI,
@@ -195,6 +197,8 @@ def diff_openapi(
                 item.before,
                 item.after,
                 discriminator=item.code,
+                semantic_type=_contract_change_type(item.code),
+                field_path=item.path,
             )
         )
     for key in sorted(new_by_key.keys() - old_by_key.keys()):
@@ -208,12 +212,16 @@ def diff_openapi(
                 ChangeSeverity.INFO,
                 source_key,
                 "新增 OpenAPI 操作",
+                semantic_type="operation_added",
             )
         )
     for key in sorted(old_by_key.keys() & new_by_key.keys()):
         old = old_by_key[key]
         new = new_by_key[key]
-        if key in breaking_operation_keys or _operation_signature(old) == _operation_signature(new):
+        structured = _structured_operation_changes(old, new)
+        changes.extend(structured)
+        already_described = any(item.source_key == f"{new.method} {new.path}" for item in changes)
+        if already_described or _operation_signature(old) == _operation_signature(new):
             continue
         source_key = f"{new.method} {new.path}"
         changes.append(
@@ -224,6 +232,7 @@ def diff_openapi(
                 ChangeSeverity.WARNING,
                 source_key,
                 "OpenAPI 请求或响应结构发生兼容性变更",
+                semantic_type="schema_changed",
             )
         )
     return _bounded_changes(changes)
@@ -375,6 +384,13 @@ def build_impact_evidence(
                 "source_kind": change.source_kind.value,
                 "source_key": change.source_key,
                 "label": change.label,
+                "change_type": change.change_type.value,
+                "severity": change.severity.value,
+                "semantic_type": change.semantic_type,
+                "field_path": change.field_path,
+                "detail": change.detail,
+                "before": change.before,
+                "after": change.after,
                 "reason": "没有显式资产映射覆盖此变更",
             },
         )
@@ -556,6 +572,231 @@ def _append_message_shapes(
         _append_message_shapes(result, f"{message_name}.", nested)
 
 
+def _structured_operation_changes(old: Any, new: Any) -> list[ChangeItem]:
+    source_key = f"{new.method} {new.path}"
+    changes = [
+        *_field_presence_changes(
+            source_key, old.request_signature, new.request_signature, "request"
+        ),
+        *_field_presence_changes(
+            source_key, old.response_signature, new.response_signature, "response"
+        ),
+        *_required_relaxations(source_key, old.request_signature, new.request_signature),
+        *_constraint_changes(source_key, old.request_signature, new.request_signature, "request"),
+        *_constraint_changes(
+            source_key, old.response_signature, new.response_signature, "response"
+        ),
+        *_response_status_changes(source_key, old.response_signature, new.response_signature),
+    ]
+    if old.service_target != new.service_target:
+        changes.append(
+            _change(
+                SourceKind.OPENAPI,
+                source_key,
+                ChangeType.CHANGED,
+                ChangeSeverity.WARNING,
+                f"{source_key} · Service Target",
+                "Service Target 发生变更",
+                old.service_target,
+                new.service_target,
+                discriminator="SERVICE_TARGET_CHANGED",
+                semantic_type="service_target_changed",
+                field_path="service_target",
+            )
+        )
+    return changes
+
+
+def _field_presence_changes(
+    source_key: str,
+    before_signature: dict[str, JsonValue],
+    after_signature: dict[str, JsonValue],
+    location: str,
+) -> list[ChangeItem]:
+    before = _json_mapping(before_signature.get("types"))
+    after = _json_mapping(after_signature.get("types"))
+    changes: list[ChangeItem] = []
+    for field in sorted(after.keys() - before.keys()):
+        changes.append(
+            _semantic_change(
+                source_key,
+                f"{location}.{field}",
+                "field_added",
+                ChangeType.ADDED,
+                ChangeSeverity.INFO,
+                None,
+                after[field],
+            )
+        )
+    if location == "request":
+        for field in sorted(before.keys() - after.keys()):
+            changes.append(
+                _semantic_change(
+                    source_key,
+                    f"{location}.{field}",
+                    "field_removed",
+                    ChangeType.DELETED,
+                    ChangeSeverity.WARNING,
+                    before[field],
+                    None,
+                )
+            )
+    return changes
+
+
+def _required_relaxations(
+    source_key: str,
+    before_signature: dict[str, JsonValue],
+    after_signature: dict[str, JsonValue],
+) -> list[ChangeItem]:
+    before = set(_json_strings(before_signature.get("required")))
+    after = set(_json_strings(after_signature.get("required")))
+    return [
+        _semantic_change(
+            source_key,
+            f"request.required.{field}",
+            "required_changed",
+            ChangeType.CHANGED,
+            ChangeSeverity.INFO,
+            True,
+            False,
+        )
+        for field in sorted(before - after)
+    ]
+
+
+def _constraint_changes(
+    source_key: str,
+    before_signature: dict[str, JsonValue],
+    after_signature: dict[str, JsonValue],
+    location: str,
+) -> list[ChangeItem]:
+    before = _nested_json_mapping(before_signature.get("constraints"))
+    after = _nested_json_mapping(after_signature.get("constraints"))
+    changes: list[ChangeItem] = []
+    for field in sorted(before.keys() | after.keys()):
+        old_constraints = before.get(field, {})
+        new_constraints = after.get(field, {})
+        for constraint in sorted(old_constraints.keys() | new_constraints.keys()):
+            old_value = old_constraints.get(constraint)
+            new_value = new_constraints.get(constraint)
+            if old_value == new_value:
+                continue
+            changes.append(
+                _semantic_change(
+                    source_key,
+                    f"{location}.{field}.{constraint}",
+                    _constraint_semantic_type(constraint),
+                    ChangeType.CHANGED,
+                    _constraint_severity(constraint, old_value, new_value),
+                    old_value,
+                    new_value,
+                )
+            )
+    return changes
+
+
+def _response_status_changes(
+    source_key: str,
+    before_signature: dict[str, JsonValue],
+    after_signature: dict[str, JsonValue],
+) -> list[ChangeItem]:
+    before = set(_json_strings(before_signature.get("all_codes")))
+    after = set(_json_strings(after_signature.get("all_codes")))
+    return [
+        _semantic_change(
+            source_key,
+            f"responses.{code}",
+            "response_status_changed",
+            ChangeType.ADDED,
+            ChangeSeverity.INFO,
+            None,
+            code,
+        )
+        for code in sorted(after - before)
+    ]
+
+
+def _semantic_change(
+    source_key: str,
+    field_path: str,
+    semantic_type: str,
+    change_type: ChangeType,
+    severity: ChangeSeverity,
+    before: JsonValue,
+    after: JsonValue,
+) -> ChangeItem:
+    return _change(
+        SourceKind.OPENAPI,
+        source_key,
+        change_type,
+        severity,
+        f"{source_key} · {field_path}",
+        f"结构化变更: {field_path}",
+        before,
+        after,
+        discriminator=f"{semantic_type}:{field_path}",
+        semantic_type=semantic_type,
+        field_path=field_path,
+    )
+
+
+def _contract_change_type(code: str) -> str:
+    return {
+        "OPERATION_REMOVED": "operation_removed",
+        "REQUEST_REQUIRED_ADDED": "required_changed",
+        "REQUEST_TYPE_CHANGED": "type_changed",
+        "RESPONSE_TYPE_CHANGED": "type_changed",
+        "SUCCESS_RESPONSE_REMOVED": "response_status_changed",
+        "RESPONSE_FIELD_REMOVED": "field_removed",
+    }.get(code, "schema_changed")
+
+
+def _constraint_semantic_type(constraint: str) -> str:
+    if constraint == "enum":
+        return "enum_changed"
+    if constraint in {"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"}:
+        return f"{constraint}_changed"
+    return "schema_changed"
+
+
+def _constraint_severity(constraint: str, before: JsonValue, after: JsonValue) -> ChangeSeverity:
+    if constraint == "enum" and isinstance(before, list) and isinstance(after, list):
+        return (
+            ChangeSeverity.BREAKING
+            if set(map(str, before)) - set(map(str, after))
+            else ChangeSeverity.WARNING
+        )
+    if constraint in {"minimum", "minLength", "minItems"}:
+        return _numeric_constraint_severity(before, after, increase_breaks=True)
+    if constraint in {"maximum", "maxLength", "maxItems"}:
+        return _numeric_constraint_severity(before, after, increase_breaks=False)
+    return ChangeSeverity.WARNING
+
+
+def _numeric_constraint_severity(
+    before: JsonValue, after: JsonValue, *, increase_breaks: bool
+) -> ChangeSeverity:
+    if not isinstance(before, (int, float)) or not isinstance(after, (int, float)):
+        return ChangeSeverity.WARNING
+    breaking = after > before if increase_breaks else after < before
+    return ChangeSeverity.BREAKING if breaking else ChangeSeverity.WARNING
+
+
+def _json_mapping(value: JsonValue) -> dict[str, JsonValue]:
+    return value if isinstance(value, dict) else {}
+
+
+def _nested_json_mapping(value: JsonValue) -> dict[str, dict[str, JsonValue]]:
+    return {
+        str(key): child for key, child in _json_mapping(value).items() if isinstance(child, dict)
+    }
+
+
+def _json_strings(value: JsonValue) -> list[str]:
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def _change(
     source_kind: SourceKind,
     source_key: str,
@@ -567,6 +808,8 @@ def _change(
     after: JsonValue = None,
     *,
     discriminator: str = "",
+    semantic_type: str = "schema_changed",
+    field_path: str | None = None,
 ) -> ChangeItem:
     digest = hashlib.sha256(
         f"{source_kind.value}|{source_key}|{change_type.value}|{discriminator}|{detail}".encode()
@@ -581,6 +824,8 @@ def _change(
         detail=detail,
         before=before,
         after=after,
+        semantic_type=semantic_type,
+        field_path=field_path,
     )
 
 

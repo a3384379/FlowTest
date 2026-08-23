@@ -128,6 +128,7 @@ class RunnerLeaseTaskResponse(BaseModel):
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
     resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
+    reset_retry_budget: bool = False
 
 
 class RunnerCheckpointResume(BaseModel):

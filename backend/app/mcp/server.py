@@ -53,6 +53,9 @@ def create_mcp_server(
 
 
 def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    _register_coverage_tool(server, client)
+    _register_flow_spec_diff_tool(server, client)
+
     @server.tool(
         name="flowtest.discover_services",
         description="Read service and endpoint variants visible in one project.",
@@ -71,6 +74,10 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             )
         )
 
+    _register_flow_spec_export_tool(server, client)
+    _register_generate_tool(server, client)
+    _register_change_impact_tool(server, client)
+
     @server.tool(
         name="flowtest.inspect_contract",
         description="Read current API contract structure without request values or secrets.",
@@ -88,6 +95,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
                 token=_request_token(ctx, client),
             )
         )
+
+    _register_data_profile_tool(server, client)
 
     @server.tool(
         name="flowtest.inspect_flow",
@@ -128,6 +137,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             client.inspect_run_evidence(execution_id, token=_request_token(ctx, client))
         )
 
+    _register_evidence_tools(server, client)
+
     @server.tool(
         name="flowtest.list_projects",
         description="List projects visible in the authenticated organization.",
@@ -157,6 +168,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         confidence: float,
         risk_level: str,
         design: dict[str, Any],
+        idempotency_key: str,
+        dry_run: bool = True,
         test_cases: list[dict[str, Any]] | None = None,
         source_ref: str | None = None,
         ctx: Context = None,  # type: ignore[assignment]
@@ -167,12 +180,198 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             "confidence": confidence,
             "risk_level": risk_level,
             "design": design,
+            "idempotency_key": idempotency_key,
+            "dry_run": dry_run,
             "test_cases": test_cases or [],
         }
         if source_ref is not None:
             payload["source_ref"] = source_ref
         return await _tool_payload(
             client.propose_test_design(payload, token=_request_token(ctx, client))
+        )
+
+    _register_flow_spec_validate_tool(server, client)
+
+
+def _register_flow_spec_diff_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.diff_flowspec",
+        description="Compare two portable FlowSpecs without persistence.",
+        structured_output=True,
+    )
+    async def diff_flowspec(
+        project_id: str,
+        after: dict[str, Any],
+        before: dict[str, Any] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.diff_flow_specs(
+                project_id,
+                before=before,
+                after=after,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_flow_spec_export_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.export_flowspec",
+        description="Export a portable, validated FlowSpec from a workflow.",
+        structured_output=True,
+    )
+    async def export_flowspec(
+        project_id: str,
+        workflow_id: str,
+        version: int | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.export_flow_spec(
+                project_id,
+                workflow_id,
+                version=version,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_flow_spec_validate_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.validate_flowspec",
+        description="Validate and normalize a portable FlowSpec without persistence.",
+        structured_output=True,
+    )
+    async def validate_flowspec(
+        project_id: str,
+        spec: dict[str, Any],
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.validate_flow_spec(project_id, spec, token=_request_token(ctx, client))
+        )
+
+
+def _register_coverage_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.analyze_test_coverage",
+        description="Generate dimension-level coverage and explicit gaps without persistence.",
+        structured_output=True,
+    )
+    async def analyze_test_coverage(
+        project_id: str,
+        api_definition_id: str,
+        generation_policy: dict[str, Any] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.analyze_test_coverage(
+                project_id,
+                {
+                    "api_definition_id": api_definition_id,
+                    "generation_policy": generation_policy or {},
+                },
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_change_impact_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_change_impact",
+        description="Inspect structured contract changes, coverage gaps, and selected assets.",
+        structured_output=True,
+    )
+    async def inspect_change_impact(
+        project_id: str,
+        impact_run_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_change_impact(
+                project_id,
+                impact_run_id,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.generate_test_design",
+        description=(
+            "Generate scenarios, oracles, coverage, and evidence from an API contract; read-only."
+        ),
+        structured_output=True,
+    )
+    async def generate_test_design(
+        project_id: str,
+        api_definition_id: str,
+        generation_policy: dict[str, Any] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.generate_test_design(
+                project_id,
+                {
+                    "api_definition_id": api_definition_id,
+                    "generation_policy": generation_policy or {},
+                },
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_data_profile_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_data_profile",
+        description=(
+            "Inspect a typed, masked data profile without accepting credentials or raw rows."
+        ),
+        structured_output=True,
+    )
+    async def inspect_data_profile(
+        project_id: str,
+        profile: dict[str, Any],
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_data_profile(project_id, profile, token=_request_token(ctx, client))
+        )
+
+
+def _register_evidence_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_source_evidence",
+        description="Analyze a bounded allow-listed Python repository snapshot through AST only.",
+        structured_output=True,
+    )
+    async def inspect_source_evidence(
+        project_id: str,
+        snapshot: dict[str, Any],
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_source_evidence(project_id, snapshot, token=_request_token(ctx, client))
+        )
+
+    @server.tool(
+        name="flowtest.inspect_test_evidence",
+        description="Inspect evidence-backed generated test semantics without persistence.",
+        structured_output=True,
+    )
+    async def inspect_test_evidence(
+        project_id: str,
+        api_definition_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.generate_test_design(
+                project_id,
+                {"api_definition_id": api_definition_id},
+                token=_request_token(ctx, client),
+            )
         )
 
 

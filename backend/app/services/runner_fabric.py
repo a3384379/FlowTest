@@ -379,6 +379,9 @@ class RunnerFabricService:
         )
         encoded = encode_execution_plan(plan)
         resume_checkpoints = await self._resume_checkpoints(plan)
+        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
+            task.execution_id
+        )
         await self._session.commit()
         return RunnerLeaseResponse(
             lease_id=lease.id,
@@ -396,6 +399,7 @@ class RunnerFabricService:
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
                 resume_checkpoints=resume_checkpoints,
+                reset_retry_budget=reset_retry_budget,
             ),
         )
 
@@ -446,7 +450,13 @@ class RunnerFabricService:
             fencing_token=payload.fencing_token,
             now=datetime.now(UTC),
         )
-        if payload.execution_id != task.execution_id:
+        plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
+        allowed_execution_ids = (
+            {child.execution_id for child in plan.children}
+            if isinstance(plan, WorkflowBatchPlan)
+            else {plan.execution_id}
+        )
+        if payload.execution_id not in allowed_execution_ids:
             raise AppError(
                 code="RUNNER_CHECKPOINT_EXECUTION_MISMATCH",
                 message="Checkpoint 不属于当前 Runner 执行",

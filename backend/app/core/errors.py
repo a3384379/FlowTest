@@ -96,7 +96,7 @@ def _safe_validation_errors(error: RequestValidationError) -> list[dict[str, Any
 
     safe_errors: list[dict[str, Any]] = []
     for item in error.errors():
-        safe_item = redact(dict(item))
+        safe_item = _json_safe_validation_value(redact(dict(item)))
         location = item.get("loc", ())
         if isinstance(location, (list, tuple)) and any(
             _is_sensitive_location_part(str(part)) for part in location
@@ -104,6 +104,16 @@ def _safe_validation_errors(error: RequestValidationError) -> list[dict[str, Any
             safe_item["input"] = "***"
         safe_errors.append(safe_item)
     return safe_errors
+
+
+def _json_safe_validation_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe_validation_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_validation_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 def _is_sensitive_location_part(value: str) -> bool:
