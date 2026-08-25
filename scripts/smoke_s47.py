@@ -724,7 +724,7 @@ def _wait_for_change_regression_evidence(
             token=token,
         )
         if run["status"] == "evidence_ready":
-            return cast(dict[str, Any], run)
+            return run
         if run["status"] in {"blocked", "failed"}:
             raise RuntimeError(f"S47.4 renewed waiver execution failed: {run}")
         time.sleep(0.5)
