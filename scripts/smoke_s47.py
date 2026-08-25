@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
 from urllib.request import urlopen
 
@@ -507,7 +509,7 @@ def _verify_change_regression(
         for mutation in cast(list[dict[str, Any]], scenario["mutations"])
         if mutation["path"] == "body.quantity"
     }
-    if values != {101, 999, 1000}:
+    if values != {100, 101, 999, 1000}:
         raise RuntimeError(
             f"S47.3 Oracle-aware coverage did not preserve current-contract requirements: {design}"
         )
@@ -516,11 +518,38 @@ def _verify_change_regression(
     target = cast(dict[str, Any], scope["target"])
     if (
         operation["api_definition_id"] != api_definition_id
+        or operation["api_version"] != 2
+        or not operation["contract_fingerprint"]
         or operation["method"] != "POST"
         or target["location"] != "body"
         or target["field_path"] != ["quantity"]
+        or scope["project_known_coverage"] != "missing"
     ):
-        raise RuntimeError(f"S47.2 regression lost operation/location identity: {scope}")
+        raise RuntimeError(f"S47.4 v1 coverage suppressed v2 or lost operation identity: {scope}")
+    selected_run = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{run['id']}/operation-selection",
+        {
+            "change_key": scope["change_key"],
+            "api_definition_id": api_definition_id,
+            "api_version": operation["api_version"],
+        },
+        token=token,
+    )
+    regeneration = cast(
+        list[dict[str, Any]],
+        selected_run["selection_summary"]["operation_regenerations"],
+    )[0]
+    if (
+        regeneration["status"] != "regenerated"
+        or regeneration["contract_fingerprint"] != operation["contract_fingerprint"]
+        or regeneration["scenario_count"] <= 0
+        or regeneration["oracle_count"] <= 0
+    ):
+        raise RuntimeError(f"S47.4 Operation selection did not regenerate Proposal: {selected_run}")
+    missing = cast(list[dict[str, Any]], selected_run["missing_tests"])
+    design = cast(dict[str, Any], missing[0]["proposed_content"])
+    scenarios = cast(list[dict[str, Any]], design["scenarios"])
     workflows_before = _workflow_ids(client, token, project_id)
     _expect_error_code(
         lambda: client.json(
@@ -612,24 +641,94 @@ def _verify_current_plan_gate(
         ),
         "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED",
     )
+    expiry = (datetime.now(UTC) + timedelta(seconds=3)).isoformat()
     for gap in gaps:
-        client.json(
+        first_revision = client.json(
             "POST",
             f"/projects/{project_id}/change-regressions/{scoped_run['id']}/semantic-gap-waivers",
             {
                 "gap_key": gap["gap_key"],
-                "reason": "S47.3 Compose 人工逐项风险豁免验证",
+                "reason": "S47.4 Compose 首次临时人工逐项风险豁免",
+                "expires_at": expiry,
             },
             token=token,
         )
+        active = [
+            item
+            for item in first_revision["semantic_gap_waivers"]
+            if item["active"] and item["gap_key"] == gap["gap_key"]
+        ]
+        if len(active) != 1 or active[0]["revision"] != 1:
+            raise RuntimeError(f"S47.4 first waiver revision was not active: {first_revision}")
+    time.sleep(3.5)
+    renewed_run = scoped_run
+    for gap in gaps:
+        renewed_run = client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{scoped_run['id']}/semantic-gap-waivers",
+            {
+                "gap_key": gap["gap_key"],
+                "reason": "S47.4 原豁免过期后人工复核并续签补偿性回归",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+            token=token,
+        )
+    active_revisions = [item for item in renewed_run["semantic_gap_waivers"] if item["active"]]
+    if (
+        {item["revision"] for item in active_revisions} != {2}
+        or not all(item["supersedes_waiver_id"] for item in active_revisions)
+        or len(renewed_run["semantic_gap_waivers"]) != len(gaps) * 2
+    ):
+        raise RuntimeError(f"S47.4 waiver revision lifecycle was incorrect: {renewed_run}")
     approved = client.json(
         "POST",
         f"/projects/{project_id}/change-regressions/{scoped_run['id']}/approve",
-        {"note": "S47.3 audited per-gap waivers"},
+        {"note": "S47.4 audited renewed per-gap waivers"},
         token=token,
     )
     if approved["selection_summary"]["waived_current_plan_gap_count"] != len(gaps):
-        raise RuntimeError(f"S47.3 waivers did not close the plan gate: {approved}")
+        raise RuntimeError(f"S47.4 waivers did not close the plan gate: {approved}")
+    client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{scoped_run['id']}/execute",
+        token=token,
+    )
+    evidence_ready = _wait_for_change_regression_evidence(
+        client, token, project_id, str(scoped_run["id"])
+    )
+    released = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{scoped_run['id']}/release-gate",
+        token=token,
+    )
+    release_waivers = cast(list[dict[str, Any]], released["evidence"]["semantic_gap_waivers"])
+    if (
+        evidence_ready["status"] != "evidence_ready"
+        or released["status"] != "passed"
+        or {item["revision"] for item in release_waivers} != {2}
+    ):
+        raise RuntimeError(f"S47.4 renewed waiver release evidence was incorrect: {released}")
+
+
+def _wait_for_change_regression_evidence(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        run = client.json(
+            "GET",
+            f"/projects/{project_id}/change-regressions/{run_id}",
+            token=token,
+        )
+        if run["status"] == "evidence_ready":
+            return cast(dict[str, Any], run)
+        if run["status"] in {"blocked", "failed"}:
+            raise RuntimeError(f"S47.4 renewed waiver execution failed: {run}")
+        time.sleep(0.5)
+    raise RuntimeError("S47.4 renewed waiver execution timed out")
 
 
 def _expect_error_code(action: Callable[[], object], code: str) -> None:
@@ -702,6 +801,45 @@ def _verify_mcp_dry_run(
         token=mcp_token,
     )
     _assert_no_contract_sentinels(sensitive_read, "MCP response")
+    source_evidence = client.json(
+        "POST",
+        f"/mcp/read/projects/{project_id}/evidence/source",
+        {
+            "repository_url": "https://example.test/s47-4-conditional.git",
+            "commit": "abcdef1234567",
+            "allowlist_paths": ["app"],
+            "files": [
+                {
+                    "path": "app/limits.py",
+                    "language": "python",
+                    "content": (
+                        "def validate_limit(mode, limit):\n"
+                        '    if mode == "special":\n'
+                        "        assert limit <= 10\n"
+                    ),
+                }
+            ],
+        },
+        token=mcp_token,
+    )
+    findings = cast(list[dict[str, Any]], source_evidence["data"]["findings"])
+    conditional = [
+        finding
+        for finding in findings
+        if finding["structured_data"].get("context") == "conditional-assert"
+    ]
+    if (
+        len(conditional) != 1
+        or conditional[0]["kind"] != "supporting_condition"
+        or conditional[0]["deterministic"] is not False
+        or conditional[0]["structured_data"].get("requires_review") is not True
+        or any(
+            finding["kind"] == "validation_constraint"
+            and finding["structured_data"].get("maximum") == 10
+            for finding in findings
+        )
+    ):
+        raise RuntimeError(f"S47.4 conditional AST leaked a global boundary: {source_evidence}")
     key = f"s47-preview-{secrets.token_hex(8)}"
     payload = {
         "project_id": project_id,

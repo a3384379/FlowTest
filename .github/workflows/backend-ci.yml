@@ -133,10 +133,14 @@ jobs:
           PYTHONPATH=. uv run python ../scripts/verify_s47_3_contract_migration.py prepare
           uv run alembic upgrade 20260823_0044
           PYTHONPATH=. uv run python ../scripts/verify_s47_3_contract_migration.py verify
-          uv run alembic downgrade 20260823_0043
+          PYTHONPATH=. uv run python ../scripts/verify_s47_4_waiver_migration.py prepare
+          uv run alembic upgrade 20260823_0045
+          PYTHONPATH=. uv run python ../scripts/verify_s47_4_waiver_migration.py verify
+          uv run alembic downgrade 20260823_0044
           PYTHONPATH=. uv run python ../scripts/verify_s47_3_contract_migration.py verify
-          uv run alembic upgrade 20260823_0044
+          uv run alembic upgrade 20260823_0045
           PYTHONPATH=. uv run python ../scripts/verify_s47_3_contract_migration.py verify
+          PYTHONPATH=. uv run python ../scripts/verify_s47_4_waiver_migration.py verify
           uv run alembic current
           uv run alembic check
           uv run alembic downgrade base

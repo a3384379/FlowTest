@@ -306,7 +306,7 @@ def test_change_regression_helper_edges_preserve_scope_and_transition_truth() ->
         normalized_path="/orders",
         contract_fingerprint="a" * 64,
     )
-    same_operation = identity.model_copy(
+    different_operation = identity.model_copy(
         update={
             "portable_operation_ref": "orders.create.alias",
             "contract_fingerprint": "b" * 64,
@@ -319,13 +319,21 @@ def test_change_regression_helper_edges_preserve_scope_and_transition_truth() ->
         before=100,
         after=999,
     )
-    fact = _coverage_fact(same_operation, "999", "invalid_request", "status:422")
-    fact = fact.model_copy(update={"operation_identity": same_operation, "test_plan_id": "plan-1"})
+    fact = _coverage_fact(identity, "999", "invalid_request", "status:422")
+    fact = fact.model_copy(update={"operation_identity": identity, "test_plan_id": "plan-1"})
 
-    assert identity.semantic_prefix == "orders.create|orders|POST|/orders"
+    assert identity.semantic_prefix.startswith("orders.create|v=portable|contract=")
     assert fact.target_key.endswith("|body|quantity")
     assert fact.coverage_token.startswith("999|invalid_request|")
     assert semantic_coverage_tokens([fact], identity, target) == {fact.coverage_token}
+    assert (
+        semantic_coverage_tokens(
+            [fact.model_copy(update={"operation_identity": different_operation})],
+            identity,
+            target,
+        )
+        == set()
+    )
     assert change_constraint_target({"field_path": "response.200.maximum"}) is None
     assert change_constraint_target({"field_path": "request.query.page"}) is None
 

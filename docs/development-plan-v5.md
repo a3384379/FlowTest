@@ -278,3 +278,15 @@ Canonical Keyword 严格值校验、敏感 Enum Hash 删除、Decimal MultipleOf
 FlowSpec v1/v2 继续是 Development-only / Unsupported Compatibility；Pairwise 仍是 Bounded，State Model
 仍是 Unavailable/Experimental，Knowledge Graph 仍是 Basic，Key Rotation 仍是 Planned Metadata Only。
 详细记录见 [S47.3 最终语义完整性闭环](release/s47-3-final-semantic-integrity.md)。
+
+## S47.4 最终人工评审修复（2026-08-25）
+
+S47.4 不扩展 V5 功能边界，只收紧已有语义链路：Coverage 必须同时匹配 API
+Definition、Version、Contract Fingerprint、Service、Method、Path 和 Portable Ref；嵌套条件中的
+AST 证据不能提升为全局约束；Operation 人工选择后重新生成并冻结 Proposal；
+Waiver 支持不可覆盖的 Revision/Supersede；Workflow Assert 必须在执行图中对请求节点必达。
+
+`20260823_0045` 仅为 Waiver 生命周期增加持久化约束，Standalone、Transfer 和 Windows
+Bundle 同步。详细见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。
+Pairwise 仍为 Bounded，State Model 仍为 Unavailable/Experimental，Knowledge Graph 仍为
+Basic，Key Rotation 仍为 Planned Metadata Only，`GA_READY: NO`。

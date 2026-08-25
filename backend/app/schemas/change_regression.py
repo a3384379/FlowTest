@@ -102,6 +102,8 @@ class SemanticGapWaiverResponse(BaseModel):
 
     id: UUID
     gap_key: str
+    revision: int
+    supersedes_waiver_id: UUID | None
     reason: str
     approved_by_id: UUID
     approved_at: datetime
@@ -109,6 +111,7 @@ class SemanticGapWaiverResponse(BaseModel):
     operation_identity: dict[str, JsonValue]
     semantic_requirement: dict[str, JsonValue]
     requirement_fingerprint: str
+    active: bool = False
 
 
 class ChangeRegressionStageResponse(BaseModel):

@@ -380,8 +380,16 @@ jobs:
         run: python3 scripts/smoke_s30.py
       - name: Verify S31 global search and immutable release gate flow
         run: python3 scripts/smoke_s31.py
-      - name: Verify S47.3 semantic gate, contract security, suppression, MCP, and FlowSpec v3
+      - name: Verify isolated S14 before S47
+        run: >-
+          pnpm --dir frontend exec playwright test
+          e2e/s14-management-workbench.spec.ts --project=chromium --no-deps
+      - name: Verify S47.4 semantic identity, lifecycle, graph, security, MCP, and FlowSpec v3
         run: python3 scripts/smoke_s47.py
+      - name: Verify isolated S14 after S47
+        run: >-
+          pnpm --dir frontend exec playwright test
+          e2e/s14-management-workbench.spec.ts --project=chromium --no-deps
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |
           docker compose stop redpanda

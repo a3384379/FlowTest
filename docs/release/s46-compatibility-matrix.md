@@ -40,6 +40,9 @@
 - S47.3 迁移 `20260823_0044` 的回滚目标是 `20260823_0043`；它新增逐 Gap Waiver 持久化、
   删除历史敏感 Enum Hash、清理非法 Keyword 并重算指纹。降级只删除 Waiver Schema，
   安全净化不可逆，不恢复原值或 Hash。
+- S47.4 迁移 `20260823_0045` 的回滚目标是 `20260823_0044`；它为 Semantic Gap Waiver
+  增加 Revision、Supersedes 自引用、约束和索引。降级为表示层有损：同一 Run/Gap 仅保留
+  最高 Revision 以恢复 0044 唯一约束，不会恢复被净化的敏感数据。
 - Transfer Manifest 版本保持 `standalone-compact-transfer-v1`；新增表必须通过显式表清单和
   数据分类验证，不能静默改变旧包含义。
 - MCP、AI、REST、CLI 只经过 Application Service；MCP 关闭时普通 Web/API/Standalone/Compact

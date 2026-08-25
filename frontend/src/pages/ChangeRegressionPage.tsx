@@ -208,7 +208,7 @@ function RunDetail({
           {run.release_decision_id ?? '尚未评估'}
         </Descriptions.Item>
       </Descriptions>
-      <CoverageDimensionsPanel run={run} />
+      <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
       {run.missing_tests.length > 0 && (
@@ -309,15 +309,35 @@ function RunDetail({
   )
 }
 
-function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
+function CoverageDimensionsPanel({
+  run,
+  state,
+}: {
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+}) {
   const scopes = run.selection_summary.semantic_coverage_scopes ?? []
+  const regenerations = run.selection_summary.operation_regenerations ?? []
   const assetGapCount = run.selection_summary.asset_coverage_gap_count
+  const [operationInputs, setOperationInputs] = useState<
+    Record<string, { apiDefinitionId?: string; apiVersion?: string }>
+  >({})
   const coverageStatus = (dimension: 'project_known_coverage' | 'current_test_plan_coverage') => {
     if (!scopes.length) return '无语义变更目标'
     return scopes.every((scope) => scope[dimension] === 'covered') ? 'covered' : 'missing'
   }
   return (
     <Card size="small" title="Coverage Scope / 位置化语义缺口">
+      {regenerations.map((item) => (
+        <Alert
+          key={item.change_key}
+          type={item.status === 'regenerated' ? 'success' : 'info'}
+          showIcon
+          title={item.status === 'regenerated' ? 'Proposal 已重新生成' : '旧 Proposal 已失效'}
+          description={`Contract ${item.contract_fingerprint.slice(0, 12)} · Design ${item.design_fingerprint.slice(0, 12)} · ${item.scenario_count} Scenario / ${item.oracle_count} Oracle`}
+          style={{ marginBottom: 12 }}
+        />
+      ))}
       <Descriptions size="small" bordered column={3}>
         <Descriptions.Item label="Asset Mapping Coverage">
           <CoverageStatus
@@ -339,16 +359,25 @@ function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
           dataSource={scopes}
           columns={[
             {
-              title: 'Operation',
+              title: 'Service / Operation',
               render: (_: unknown, scope: SemanticCoverageScope) =>
                 scope.operation
-                  ? `${scope.operation.service_key} · ${scope.operation.method} ${scope.operation.normalized_path} · v${scope.operation.api_version ?? '?'}`
+                  ? `${scope.operation.service_key} · ${scope.operation.method} ${scope.operation.normalized_path}`
                   : 'unresolved',
             },
             {
-              title: 'Contract',
+              title: 'API / Version',
               render: (_: unknown, scope: SemanticCoverageScope) =>
-                scope.operation?.contract_fingerprint.slice(0, 12) ?? 'unresolved',
+                scope.operation
+                  ? `${scope.operation.api_definition_id ?? 'portable'} · v${scope.operation.api_version ?? '?'}`
+                  : 'unresolved',
+            },
+            {
+              title: 'Contract / Portable Ref',
+              render: (_: unknown, scope: SemanticCoverageScope) =>
+                scope.operation
+                  ? `${scope.operation.contract_fingerprint.slice(0, 12)} · ${scope.operation.portable_operation_ref}`
+                  : 'unresolved',
             },
             {
               title: 'Location',
@@ -388,6 +417,65 @@ function CoverageDimensionsPanel({ run }: { run: ChangeRegressionRun }) {
                 scope.oracle_sources
                   .map((source) => `${source.source_type}:${source.source_ref}`)
                   .join(', ') || '待审核',
+            },
+            {
+              title: 'Operation Selection',
+              render: (_: unknown, scope: SemanticCoverageScope) => {
+                if (!scope.requires_review) return <Tag color="green">Frozen</Tag>
+                const input = operationInputs[scope.change_key] ?? {}
+                const version = Number(input.apiVersion)
+                return (
+                  <Space orientation="vertical" size={4}>
+                    <Input
+                      size="small"
+                      aria-label={`API Definition ${scope.change_key}`}
+                      placeholder="API Definition UUID"
+                      value={input.apiDefinitionId}
+                      onChange={(event) =>
+                        setOperationInputs((current) => ({
+                          ...current,
+                          [scope.change_key]: {
+                            ...current[scope.change_key],
+                            apiDefinitionId: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                    <Input
+                      size="small"
+                      type="number"
+                      min={1}
+                      aria-label={`API Version ${scope.change_key}`}
+                      placeholder="Pinned API Version"
+                      value={input.apiVersion}
+                      onChange={(event) =>
+                        setOperationInputs((current) => ({
+                          ...current,
+                          [scope.change_key]: {
+                            ...current[scope.change_key],
+                            apiVersion: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                    <Button
+                      size="small"
+                      loading={state.acting}
+                      disabled={!input.apiDefinitionId || !Number.isInteger(version) || version < 1}
+                      onClick={() =>
+                        void state.selectOperation({
+                          runId: run.id,
+                          changeKey: scope.change_key,
+                          apiDefinitionId: input.apiDefinitionId ?? '',
+                          apiVersion: version,
+                        })
+                      }
+                    >
+                      冻结并重新生成 Proposal
+                    </Button>
+                  </Space>
+                )
+              },
             },
           ]}
         />
@@ -450,11 +538,46 @@ function SemanticPlanGatePanel({
             environmentId={environmentId}
             reason={reasons[gap.gap_key] ?? ''}
             expiry={expiries[gap.gap_key]}
+            latestWaiver={latestGapWaiver(run, gap.gap_key)}
             onReason={(value) => setReasons((current) => ({ ...current, [gap.gap_key]: value }))}
             onExpiry={(value) => setExpiries((current) => ({ ...current, [gap.gap_key]: value }))}
           />
         ))}
       </Space>
+      {run.semantic_gap_waivers.length > 0 ? (
+        <>
+          <Divider titlePlacement="left">Waiver Revision History</Divider>
+          <Table
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={run.semantic_gap_waivers}
+            columns={[
+              { title: 'Gap', dataIndex: 'gap_key', ellipsis: true },
+              { title: 'Revision', dataIndex: 'revision', width: 82 },
+              {
+                title: 'Supersedes',
+                dataIndex: 'supersedes_waiver_id',
+                render: (value: string | null) => value?.slice(0, 12) ?? '-',
+              },
+              { title: 'Approved By', dataIndex: 'approved_by_id', ellipsis: true },
+              { title: 'Approved At', dataIndex: 'approved_at' },
+              {
+                title: 'Expires At',
+                dataIndex: 'expires_at',
+                render: (value: string | null) => value ?? '不过期',
+              },
+              {
+                title: 'State',
+                dataIndex: 'active',
+                render: (active: boolean) => (
+                  <Tag color={active ? 'green' : 'default'}>{active ? 'Active' : 'Expired'}</Tag>
+                ),
+              },
+            ]}
+          />
+        </>
+      ) : null}
     </Card>
   )
 }
@@ -466,6 +589,7 @@ function SemanticGapCard({
   environmentId,
   reason,
   expiry,
+  latestWaiver,
   onReason,
   onExpiry,
 }: {
@@ -475,6 +599,7 @@ function SemanticGapCard({
   environmentId?: string
   reason: string
   expiry?: string
+  latestWaiver?: ChangeRegressionRun['semantic_gap_waivers'][number]
   onReason: (value: string) => void
   onExpiry: (value: string) => void
 }) {
@@ -494,6 +619,9 @@ function SemanticGapCard({
         <Descriptions.Item label="Oracle Set">
           {gap.semantic_requirement.oracle_set_fingerprint?.slice(0, 12) ?? 'unknown'}
         </Descriptions.Item>
+        <Descriptions.Item label="Oracle Reachability">
+          <OracleReachability values={gap.oracle_reachability} />
+        </Descriptions.Item>
         <Descriptions.Item label="Existing Asset">
           <SemanticGapExistingAsset
             gap={gap}
@@ -510,6 +638,11 @@ function SemanticGapCard({
         </Descriptions.Item>
       </Descriptions>
       <SemanticGapWaiverAction gap={gap} run={run} state={state} reason={reason} expiry={expiry} />
+      {!gap.waiver && latestWaiver ? (
+        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+          Revision {latestWaiver.revision} 已失效；新豁免会创建下一 Revision，并保留历史记录。
+        </Typography.Text>
+      ) : null}
     </Card>
   )
 }
@@ -577,7 +710,12 @@ function SemanticGapReason({
   return (
     <Space orientation="vertical" size={0}>
       <Typography.Text>{gap.waiver.reason}</Typography.Text>
-      <Typography.Text type="secondary">Approver: {gap.waiver.approved_by}</Typography.Text>
+      <Typography.Text type="secondary">
+        Revision {gap.waiver.revision} · Approver: {gap.waiver.approved_by}
+      </Typography.Text>
+      <Typography.Text type="secondary">
+        Supersedes: {gap.waiver.supersedes_waiver_id?.slice(0, 12) ?? '-'}
+      </Typography.Text>
     </Space>
   )
 }
@@ -630,8 +768,37 @@ function SemanticGapWaiverAction({
         })
       }
     >
-      人工豁免
+      {latestGapWaiver(run, gap.gap_key) ? 'Renew Waiver' : '人工豁免'}
     </Button>
+  )
+}
+
+function latestGapWaiver(run: ChangeRegressionRun, gapKey: string) {
+  return run.semantic_gap_waivers
+    .filter((waiver) => waiver.gap_key === gapKey)
+    .sort((left, right) => right.revision - left.revision)[0]
+}
+
+function OracleReachability({ values }: { values: CurrentPlanGap['oracle_reachability'] }) {
+  if (!values.length) return <Tag>Unknown Graph</Tag>
+  const labels: Record<(typeof values)[number], string> = {
+    direct_oracle: 'Direct Oracle',
+    unconditional_assert: 'Unconditional Assert',
+    conditional_assert: 'Conditional Assert',
+    disconnected_assert: 'Disconnected Assert',
+    unknown_graph: 'Unknown Graph',
+  }
+  return (
+    <Space wrap>
+      {values.map((value) => (
+        <Tag
+          key={value}
+          color={value === 'direct_oracle' || value === 'unconditional_assert' ? 'green' : 'orange'}
+        >
+          {labels[value]}
+        </Tag>
+      ))}
+    </Space>
   )
 }
 
@@ -662,7 +829,11 @@ function CoverageStatus({ value }: { value: string }) {
           ? 'orange'
           : normalized === 'MISSING'
             ? 'red'
-            : 'default'
+            : normalized === 'VERSION_MISMATCH'
+              ? 'magenta'
+              : normalized === 'CONTRACT_MISMATCH'
+                ? 'volcano'
+                : 'default'
   return <Tag color={color}>{value}</Tag>
 }
 

@@ -173,3 +173,11 @@ flowchart LR
     Materialization --> Execution
     Execution --> ReleaseEvidence
 ```
+
+## 19. S47.4 后续评审校正
+
+S47.4 将 Operation Coverage 从 S47.3 的 Service/Route 身份继续收紧到 API Definition、Version 和
+Contract Fingerprint；条件分支 AST 仅作 supporting evidence；Workflow Assert 必须证明必达。
+同时补齐 Operation Selection 重生成、Waiver Revision/Supersede、0045 迁移和
+`S14→S47→S14` 顺序隔离。本文中 S14 顺序失败已有根因与修复，最终事实见
+[S47.4 最终评审修复](s47-4-final-review-fix.md)。

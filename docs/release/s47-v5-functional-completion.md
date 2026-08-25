@@ -191,3 +191,14 @@ S47.3 将覆盖语义扩展为 Oracle-aware Token，将 Current TestPlan Gap 升
 并关闭多 Service Operation、物化绑定、AST 控制流、约束可满足性、Canonical Keyword、
 敏感 Enum Hash、Decimal MultipleOf 和 0044 迁移确定性问题。S47.2 的旧结论以
 [S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md)和其最终 HEAD Remote CI 为准。
+
+## S47.4 最终评审补充
+
+S47.4 进一步收紧 Operation Coverage 的 API Version/Contract Fingerprint 身份，阻止嵌套条件
+AST 证据成为全局约束，并闭环 Operation Selection 后 Proposal 重生成、Waiver
+Revision/Supersede、Published Workflow Assert 必达分析与 E2E 顺序隔离。S47.3 及更早文档
+中的合并判定不再单独作为当前证据；以
+[S47.4 最终评审修复](s47-4-final-review-fix.md)和精确 HEAD 的 PR CI 证据评论为准。
+
+PR 仍为 Draft，仍需人工 Review；Pairwise/State Model/Knowledge Graph/Key Rotation 能力边界
+不变，`RC_READY: NO`，`GA_READY: NO`。

@@ -258,3 +258,9 @@ S47.2 不为旧格式增加迁移复杂度。最终事实与测试结果见
 
 S47.1 的 Value/Category 覆盖结论已被 S47.3 的 Oracle Set Fingerprint Token 收紧；Current TestPlan Gap
 已从建议升级为硬门禁。最终事实见 [S47.3 记录](s47-3-final-semantic-integrity.md)。
+
+## S47.4 后续评审校正
+
+S47.3 后复审确认 Coverage 还必须包含 API Version 和 Contract Fingerprint，Workflow Assert
+还必须证明执行图必达。最终实现、0045 迁移、E2E 顺序隔离和当前 PR 证据见
+[S47.4 记录](s47-4-final-review-fix.md)。本文不单独授权 Merge、Tag 或 Release。

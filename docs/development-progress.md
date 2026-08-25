@@ -913,3 +913,24 @@ State Model 未实现并明确不可用，Knowledge Graph 只表达可追溯 Evi
 
 详细证据见 [S47.3 最终语义完整性闭环](release/s47-3-final-semantic-integrity.md)。真实 Key Rotation、
 Windows 实机、长时运行、RC 观察和安全审批未完成，`GA_READY` 仍为 `NO`。
+
+## S47.4 V5 最终评审修复（2026-08-25）
+
+- Operation Coverage 统一比较 API Definition/Version/Fingerprint/Service/Route/Portable Ref，
+  v1 不再覆盖 v2，Contract 指纹变化不再算已覆盖，跨实例 Portable 等价仍可匹配。
+- Python AST 证据记录条件深度和分支上下文；If/Try/Loop/Match 中的局部约束仅作
+  `supporting_condition`，不进入全局 Boundary/Oracle。
+- 多 Service 歧义经人工选择后，使用所选 API 固定版本和 Canonical Contract 重新生成
+  Proposal，显式绑定 Change Item，已审核/已物化项不允许静默改写。
+- 过期 Waiver 可续签为新 Revision，保留历史和 Supersede 链；同一 Gap 仅最高有效
+  Revision 进入 Release Evidence，Service Token 仍无权豁免。
+- Published Workflow Assert 增加图可达性分析：线性和 post-join 必达可形成覆盖；条件分支仅
+  Partial，断开节点不计覆盖，循环不确定时要求 Review。
+- `20260823_0045` 增加 Waiver Revision/Supersede 持久化；真实 PostgreSQL 完成
+  `0044→0045→0044→0045` 和 `alembic check`。
+- 隔离 Compose 中三轮 `S14→S47→S14` 全部通过。根因是管理面板成功后全局 Query
+  invalidation 使共享 loading 状态阻止后续 Secret 提交；已改为项目级定向失效并为 E2E
+  创建独立项目。
+
+详细证据见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。本地门禁不替代最终
+HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据未完成，`GA_READY: NO`。

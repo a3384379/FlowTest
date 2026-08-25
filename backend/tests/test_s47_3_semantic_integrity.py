@@ -305,9 +305,15 @@ def validate_nested(x):
             files=[{"path": "app/conservative.py", "language": "python", "content": source}],
         )
     )
-    constraints = [item for item in bundle.findings if item.kind == "validation_constraint"]
-    assert len(constraints) == 2
-    assert {item.structured_data.get("name") for item in constraints} == {"x"}
+    conditional = [
+        item
+        for item in bundle.findings
+        if item.structured_data.get("context") == "conditional-assert"
+    ]
+    assert len(conditional) == 2
+    assert {item.structured_data.get("name") for item in conditional} == {"x"}
+    assert all(item.kind == "supporting_condition" for item in conditional)
+    assert all(not item.deterministic and item.confidence <= 0.5 for item in conditional)
 
 
 @pytest.mark.parametrize(

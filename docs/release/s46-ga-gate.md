@@ -122,3 +122,19 @@ FlowSpec v3 是 V5 唯一正式基线；开发期 v1/v2 兼容明确不属于 S4
 详细证据见 [S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md)。Required Remote CI
 未全部通过时 `MERGE_TO_MAIN: NO-GO`；无论本地和 CI 结果如何，真实 Key Rotation 和外部门槛
 未完成时 `GA_READY: NO`。
+
+## S47.4 最终评审门槛
+
+| Gate | 必须通过的证据 | 阻断条件 |
+|---|---|---|
+| Operation Semantics | 统一匹配 Definition/Version/Fingerprint/Service/Route/Portable Ref | v1 覆盖 v2，或指纹变化仍算 Covered |
+| Conditional Evidence | 顶层约束与 If/Try/Loop/Match 嵌套证据 Golden | 局部分支约束被投影为全局 Boundary |
+| Selection Regeneration | 人工选择后使用固定 Canonical Contract 重生成并冻结绑定 | 旧 synthetic proposal 可直接物化 |
+| Waiver Lifecycle | Revision/Supersede/过期续签/最高有效版/审计/发布证据 | 覆盖历史豁免或释放过期版 |
+| Assert Reachability | Linear/Disconnected/Conditional/Post-join/Cycle 图语义 Golden | 断开或条件 Assert 算 Complete |
+| Order Independence | 隔离环境重复 `S14→S47→S14` | 顺序导致 loading/项目状态污染 |
+| Migration 0045 | PostgreSQL `0044→0045→0044→0045`、Standalone、Transfer、check | Revision 丢失或 Schema Drift |
+
+最终证据见 [S47.4 最终评审修复](s47-4-final-review-fix.md)。PR #40 保持 Draft；
+当前 HEAD 的 Required CI 未全绿前 `MERGE_TO_MAIN: NO-GO`；真实 Key Rotation 和外部门槛
+未完成，因此无论自动化结果如何都是 `GA_READY: NO`。

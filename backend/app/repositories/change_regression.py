@@ -45,19 +45,23 @@ class ChangeRegressionRepository:
                 await self._session.scalars(
                     select(SemanticGapWaiver)
                     .where(SemanticGapWaiver.regression_run_id == run_id)
-                    .order_by(SemanticGapWaiver.approved_at, SemanticGapWaiver.gap_key)
+                    .order_by(SemanticGapWaiver.gap_key, SemanticGapWaiver.revision)
                 )
             ).all()
         )
 
     async def find_waiver(self, run_id: UUID, gap_key: str) -> SemanticGapWaiver | None:
+        """Return the latest immutable revision for one semantic gap."""
+
         return cast(
             SemanticGapWaiver | None,
             await self._session.scalar(
-                select(SemanticGapWaiver).where(
+                select(SemanticGapWaiver)
+                .where(
                     SemanticGapWaiver.regression_run_id == run_id,
                     SemanticGapWaiver.gap_key == gap_key,
                 )
+                .order_by(SemanticGapWaiver.revision.desc())
             ),
         )
 

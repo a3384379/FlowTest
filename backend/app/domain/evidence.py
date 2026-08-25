@@ -413,37 +413,164 @@ def _source_constraint_candidates(tree: ast.AST) -> list[_SourceConstraint]:
 
 
 def _statements_constraints(
-    statements: list[ast.stmt], *, validator: bool
+    statements: list[ast.stmt],
+    *,
+    validator: bool,
+    conditional_depth: int = 0,
+    branch_kind: str | None = None,
 ) -> list[_SourceConstraint]:
     candidates: list[_SourceConstraint] = []
     for statement in statements:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         if isinstance(statement, ast.Assert):
-            candidates.extend(_condition_constraints(statement.test, truth=True, context="assert"))
+            candidates.extend(
+                _contextual_constraints(
+                    statement.test,
+                    truth=True,
+                    context="assert",
+                    conditional_depth=conditional_depth,
+                    branch_kind=branch_kind,
+                )
+            )
             continue
         if isinstance(statement, ast.Return) and validator and statement.value is not None:
             candidates.extend(
-                _condition_constraints(statement.value, truth=True, context="validator-return")
+                _contextual_constraints(
+                    statement.value,
+                    truth=True,
+                    context="validator-return",
+                    conditional_depth=conditional_depth,
+                    branch_kind=branch_kind,
+                )
             )
             continue
         if isinstance(statement, ast.If):
-            candidates.extend(_if_constraints(statement, validator=validator))
-            candidates.extend(_statements_constraints(statement.body, validator=validator))
-            candidates.extend(_statements_constraints(statement.orelse, validator=validator))
+            candidates.extend(
+                _if_constraints(
+                    statement,
+                    validator=validator,
+                    conditional_depth=conditional_depth,
+                    branch_kind=branch_kind,
+                )
+            )
+            candidates.extend(
+                _statements_constraints(
+                    statement.body,
+                    validator=validator,
+                    conditional_depth=conditional_depth + 1,
+                    branch_kind="if-body",
+                )
+            )
+            candidates.extend(
+                _statements_constraints(
+                    statement.orelse,
+                    validator=validator,
+                    conditional_depth=conditional_depth + 1,
+                    branch_kind="if-else",
+                )
+            )
             continue
-        nested = _nested_statement_lists(statement)
-        for children in nested:
-            candidates.extend(_statements_constraints(children, validator=validator))
+        for nested_kind, children in _nested_statement_contexts(statement):
+            candidates.extend(
+                _statements_constraints(
+                    children,
+                    validator=validator,
+                    conditional_depth=conditional_depth + 1,
+                    branch_kind=nested_kind,
+                )
+            )
     return candidates
 
 
-def _if_constraints(statement: ast.If, *, validator: bool) -> list[_SourceConstraint]:
+def _if_constraints(
+    statement: ast.If,
+    *,
+    validator: bool,
+    conditional_depth: int,
+    branch_kind: str | None,
+) -> list[_SourceConstraint]:
     if _body_terminates_with_raise(statement.body):
-        return _condition_constraints(statement.test, truth=False, context="guard-raise")
+        return _contextual_constraints(
+            statement.test,
+            truth=False,
+            context="guard-raise",
+            conditional_depth=conditional_depth,
+            branch_kind=branch_kind,
+        )
     if validator and _body_returns_false(statement.body):
-        return _condition_constraints(statement.test, truth=False, context="guard-return-false")
-    return _supporting_conditions(statement.test)
+        return _contextual_constraints(
+            statement.test,
+            truth=False,
+            context="guard-return-false",
+            conditional_depth=conditional_depth,
+            branch_kind=branch_kind,
+        )
+    return _supporting_conditions(
+        statement.test,
+        conditional_depth=conditional_depth,
+        branch_kind=branch_kind,
+    )
+
+
+def _contextual_constraints(
+    expression: ast.expr,
+    *,
+    truth: bool,
+    context: str,
+    conditional_depth: int,
+    branch_kind: str | None,
+) -> list[_SourceConstraint]:
+    if conditional_depth == 0:
+        return _condition_constraints(expression, truth=truth, context=context)
+    return _conditional_constraints(
+        expression,
+        truth=truth,
+        context=f"conditional-{context}",
+        conditional_depth=conditional_depth,
+        branch_kind=branch_kind,
+    )
+
+
+def _conditional_constraints(
+    expression: ast.expr,
+    *,
+    truth: bool,
+    context: str,
+    conditional_depth: int,
+    branch_kind: str | None,
+) -> list[_SourceConstraint]:
+    constraints = _comparison_constraints(expression, truth=truth)
+    return [
+        _SourceConstraint(
+            node=node,
+            kind="supporting_condition",
+            data={
+                **constraint,
+                "context": context,
+                "conditional": True,
+                "conditional_depth": conditional_depth,
+                "branch_kind": branch_kind,
+                "requires_review": True,
+            },
+            confidence=0.5,
+            deterministic=False,
+        )
+        for node, constraint in constraints
+    ]
+
+
+def _comparison_constraints(
+    expression: ast.expr, *, truth: bool
+) -> list[tuple[ast.Compare, dict[str, JsonValue]]]:
+    if isinstance(expression, ast.UnaryOp) and isinstance(expression.op, ast.Not):
+        return _comparison_constraints(expression.operand, truth=not truth)
+    return [
+        (node, constraint)
+        for node in ast.walk(expression)
+        if isinstance(node, ast.Compare)
+        and (constraint := _comparison_constraint(node, truth=truth)) is not None
+    ]
 
 
 def _condition_constraints(
@@ -490,7 +617,12 @@ def _condition_constraints(
     ]
 
 
-def _supporting_conditions(expression: ast.expr) -> list[_SourceConstraint]:
+def _supporting_conditions(
+    expression: ast.expr,
+    *,
+    conditional_depth: int = 0,
+    branch_kind: str | None = None,
+) -> list[_SourceConstraint]:
     return [
         _SourceConstraint(
             node=node,
@@ -498,6 +630,9 @@ def _supporting_conditions(expression: ast.expr) -> list[_SourceConstraint]:
             data={
                 **constraint,
                 "context": "supporting-condition",
+                "conditional": conditional_depth > 0,
+                "conditional_depth": conditional_depth,
+                "branch_kind": branch_kind,
                 "requires_review": True,
             },
             confidence=0.5,
@@ -592,17 +727,27 @@ def _body_returns_false(statements: list[ast.stmt]) -> bool:
     return isinstance(value, ast.Constant) and value.value is False
 
 
-def _nested_statement_lists(statement: ast.stmt) -> list[list[ast.stmt]]:
-    result: list[list[ast.stmt]] = []
-    for name in ("body", "orelse", "finalbody"):
-        value = getattr(statement, name, None)
-        if isinstance(value, list):
-            result.append([item for item in value if isinstance(item, ast.stmt)])
-    handlers = getattr(statement, "handlers", None)
-    if isinstance(handlers, list):
-        result.extend(
-            handler.body for handler in handlers if isinstance(handler, ast.ExceptHandler)
-        )
+def _nested_statement_contexts(statement: ast.stmt) -> list[tuple[str, list[ast.stmt]]]:
+    if isinstance(statement, (ast.Try, ast.TryStar)):
+        return _try_statement_contexts(statement)
+    if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
+        return [("loop-body", statement.body), ("loop-else", statement.orelse)]
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return [("with-body", statement.body)]
+    if isinstance(statement, ast.Match):
+        return [("match-case", case.body) for case in statement.cases]
+    return []
+
+
+def _try_statement_contexts(
+    statement: ast.Try | ast.TryStar,
+) -> list[tuple[str, list[ast.stmt]]]:
+    result = [
+        ("try-body", statement.body),
+        ("try-else", statement.orelse),
+        ("try-finally", statement.finalbody),
+    ]
+    result.extend(("except-body", handler.body) for handler in statement.handlers)
     return result
 
 

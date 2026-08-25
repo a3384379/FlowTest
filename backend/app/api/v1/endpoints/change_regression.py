@@ -320,6 +320,7 @@ async def evaluate_change_regression_release(
 
 def _response(bundle: ChangeRegressionBundle) -> ChangeRegressionRunResponse:
     run = bundle.run
+    active_waiver_ids = _active_waiver_ids(run.selection_summary)
     return ChangeRegressionRunResponse(
         id=run.id,
         project_id=run.project_id,
@@ -365,7 +366,9 @@ def _response(bundle: ChangeRegressionBundle) -> ChangeRegressionRunResponse:
         evidence=cast(dict[str, object], run.evidence),
         failure_triage=cast(dict[str, object], run.failure_triage),
         semantic_gap_waivers=[
-            SemanticGapWaiverResponse.model_validate(waiver)
+            SemanticGapWaiverResponse.model_validate(waiver).model_copy(
+                update={"active": str(waiver.id) in active_waiver_ids}
+            )
             for waiver in bundle.semantic_gap_waivers
         ],
         approved_by_id=run.approved_by_id,
@@ -375,6 +378,19 @@ def _response(bundle: ChangeRegressionBundle) -> ChangeRegressionRunResponse:
         updated_at=run.updated_at,
         stages=[ChangeRegressionStageResponse.model_validate(stage) for stage in bundle.stages],
     )
+
+
+def _active_waiver_ids(summary: dict[str, object]) -> set[str]:
+    gaps = summary.get("current_plan_gaps")
+    if not isinstance(gaps, list):
+        return set()
+    return {
+        str(waiver["id"])
+        for gap in gaps
+        if isinstance(gap, dict)
+        and isinstance((waiver := gap.get("waiver")), dict)
+        and waiver.get("id") is not None
+    }
 
 
 def _bearer_token(value: str | None) -> str:

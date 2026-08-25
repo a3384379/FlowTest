@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0044"
+BASELINE_REVISION = "20260823_0045"
 
 
 async def initialize_standalone_database() -> None:

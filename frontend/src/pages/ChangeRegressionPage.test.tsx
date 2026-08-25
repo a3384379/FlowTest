@@ -167,7 +167,8 @@ describe('ChangeRegressionPage', () => {
     expect(screen.getByText('Asset Mapping Coverage')).toBeVisible()
     expect(screen.getByText('Project Known Semantic Coverage')).toBeVisible()
     expect(screen.getByText('Current Test Plan Semantic Coverage')).toBeVisible()
-    expect(screen.getByText('orders · GET /orders · v2')).toBeVisible()
+    expect(screen.getByText('orders · GET /orders')).toBeVisible()
+    expect(screen.getByText(/00000000-0000-4000-8000-000000003010 · v2/)).toBeVisible()
     expect(screen.getByText('100 → 999')).toBeVisible()
     expect(screen.getByText('contract:openapi://orders/GET')).toBeVisible()
     await waitFor(() => expect(screen.getByRole('button', { name: '人工批准' })).toBeVisible())
@@ -265,6 +266,7 @@ describe('ChangeRegressionPage', () => {
       coverage_status: 'MISSING' as const,
       project_known_coverage: asset ? ('COVERED' as const) : ('MISSING' as const),
       current_test_plan_coverage: 'MISSING' as const,
+      oracle_reachability: ['conditional_assert' as const],
       recommended_existing_assets: asset
         ? [{ target_type: 'workflow' as const, target_id: plan.items[0].target_id }]
         : [],
@@ -290,6 +292,7 @@ describe('ChangeRegressionPage', () => {
 
     await waitFor(() => expect(document.body.textContent).toContain('1 个当前计划语义缺口尚未解决'))
     expect(document.body.textContent).toContain('Add to Plan · workflow')
+    expect(document.body.textContent).toContain('Conditional Assert')
     expect(buttonByText('人工批准')).toBeDisabled()
     expect(
       document.querySelector('input[placeholder="至少 10 字，说明发布风险与补偿措施"]'),
@@ -322,8 +325,12 @@ describe('ChangeRegressionPage', () => {
             coverage_status: 'WAIVED',
             project_known_coverage: 'MISSING',
             current_test_plan_coverage: 'WAIVED',
+            oracle_reachability: ['direct_oracle'],
             recommended_existing_assets: [],
             waiver: {
+              id: '00000000-0000-4000-8000-000000003099',
+              revision: 2,
+              supersedes_waiver_id: '00000000-0000-4000-8000-000000003098',
               reason: '人工确认风险并安排补偿回归',
               approved_by: user.id,
               approved_at: '2026-08-23T01:30:00Z',
@@ -332,6 +339,22 @@ describe('ChangeRegressionPage', () => {
           },
         ],
       },
+      semantic_gap_waivers: [
+        {
+          id: '00000000-0000-4000-8000-000000003099',
+          gap_key: 'gap-waiver',
+          revision: 2,
+          supersedes_waiver_id: '00000000-0000-4000-8000-000000003098',
+          reason: '人工确认风险并安排补偿回归',
+          approved_by_id: user.id,
+          approved_at: '2026-08-23T01:30:00Z',
+          expires_at: null,
+          operation_identity: {},
+          semantic_requirement: {},
+          requirement_fingerprint: 'd'.repeat(64),
+          active: true,
+        },
+      ],
     }
     installHandlers(
       () => waivedRun,
@@ -342,7 +365,82 @@ describe('ChangeRegressionPage', () => {
     expect(document.body.textContent).toContain('不过期')
     expect(document.body.textContent).toContain('无精确匹配资产')
     expect(document.body.textContent).toContain('WAIVED')
+    expect(document.body.textContent).toContain('Revision 2')
+    expect(document.body.textContent).toContain('Active')
     expect(buttonByText('人工批准')).toBeEnabled()
+  })
+
+  it('shows version mismatch, regeneration evidence and expired waiver renewal', async () => {
+    const operation = baseRun.selection_summary.semantic_coverage_scopes?.[0]?.operation ?? null
+    const target = baseRun.selection_summary.semantic_coverage_scopes?.[0]?.target ?? null
+    const reviewRun: ChangeRegressionRun = {
+      ...structuredClone(baseRun),
+      selection_summary: {
+        ...structuredClone(baseRun.selection_summary),
+        unresolved_current_plan_gap_count: 1,
+        operation_regenerations: [
+          {
+            change_key: 'openapi:orders:query.page.maximum',
+            item_id: itemId,
+            status: 'regenerated',
+            old_design_fingerprint: '1'.repeat(64),
+            design_fingerprint: '2'.repeat(64),
+            contract_fingerprint: 'b'.repeat(64),
+            scenario_count: 4,
+            oracle_count: 2,
+          },
+        ],
+        current_plan_gaps: [
+          {
+            change_key: 'openapi:orders:query.page.maximum',
+            gap_key: 'gap-renew',
+            operation,
+            target,
+            semantic_requirement: {
+              semantic_value: '999',
+              expected_category: 'success',
+              oracle_set_fingerprint: 'c'.repeat(64),
+            },
+            requirement_fingerprint: 'd'.repeat(64),
+            coverage_status: 'VERSION_MISMATCH',
+            project_known_coverage: 'VERSION_MISMATCH',
+            current_test_plan_coverage: 'VERSION_MISMATCH',
+            oracle_reachability: ['unknown_graph'],
+            recommended_existing_assets: [],
+            waiver: null,
+          },
+        ],
+      },
+      semantic_gap_waivers: [
+        {
+          id: '00000000-0000-4000-8000-000000003098',
+          gap_key: 'gap-renew',
+          revision: 1,
+          supersedes_waiver_id: null,
+          reason: '历史人工豁免现已过期',
+          approved_by_id: user.id,
+          approved_at: '2026-08-22T01:30:00Z',
+          expires_at: '2026-08-22T02:30:00Z',
+          operation_identity: {},
+          semantic_requirement: {},
+          requirement_fingerprint: 'd'.repeat(64),
+          active: false,
+        },
+      ],
+    }
+    installHandlers(
+      () => reviewRun,
+      () => undefined,
+    )
+    renderPage()
+
+    expect(await screen.findByText('Proposal 已重新生成')).toBeVisible()
+    expect(document.body.textContent).toContain('4 Scenario / 2 Oracle')
+    expect(document.body.textContent).toContain('VERSION_MISMATCH')
+    expect(document.body.textContent).toContain('Unknown Graph')
+    expect(buttonByText('Renew Waiver')).toBeDisabled()
+    expect(document.body.textContent).toContain('Revision 1 已失效')
+    expect(document.body.textContent).toContain('Expired')
   })
 
   it('shows unresolved semantic targets and truthful empty triage fields', async () => {
@@ -391,7 +489,7 @@ describe('ChangeRegressionPage', () => {
 
     expect(await screen.findByText('订单变更回归')).toBeVisible()
     expect(screen.getByText('unknown')).toBeVisible()
-    expect(screen.getAllByText('unresolved')).toHaveLength(5)
+    expect(screen.getAllByText('unresolved')).toHaveLength(6)
     expect(screen.getByText('-')).toBeVisible()
     expect(screen.getAllByText('无').length).toBeGreaterThanOrEqual(3)
     expect(screen.getByText('待审核')).toBeVisible()
@@ -405,6 +503,7 @@ describe('ChangeRegressionPage', () => {
     let rejectCalls = 0
     const addPayloads: unknown[] = []
     const waiverPayloads: unknown[] = []
+    const operationPayloads: unknown[] = []
     const queuedRun = { ...baseRun, status: 'queued' as const }
     server.use(
       http.get('/api/v1/projects', () => HttpResponse.json(page([project]))),
@@ -424,6 +523,13 @@ describe('ChangeRegressionPage', () => {
       http.post(
         `/api/v1/projects/${project.id}/change-regressions/${runId}/change-set-items/${itemId}/accept`,
         () => HttpResponse.json(baseRun),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/change-regressions/${runId}/operation-selection`,
+        async ({ request }) => {
+          operationPayloads.push(await request.json())
+          return HttpResponse.json(baseRun)
+        },
       ),
       http.post(
         `/api/v1/projects/${project.id}/change-regressions/${runId}/change-set-items/${itemId}/reject`,
@@ -502,6 +608,14 @@ describe('ChangeRegressionPage', () => {
         }),
       ).resolves.toBe(true)
       await expect(
+        result.current.selectOperation({
+          runId,
+          changeKey: 'openapi:orders:query.page.maximum',
+          apiDefinitionId: '00000000-0000-4000-8000-000000003010',
+          apiVersion: 2,
+        }),
+      ).resolves.toBe(true)
+      await expect(
         result.current.waiveGap({
           runId,
           gapKey: 'expiring-gap',
@@ -541,6 +655,13 @@ describe('ChangeRegressionPage', () => {
         gap_key: 'expiring-gap',
         reason: '人工确认风险并安排补偿回归',
         expires_at: '2026-08-24T00:00:00Z',
+      },
+    ])
+    expect(operationPayloads).toEqual([
+      {
+        change_key: 'openapi:orders:query.page.maximum',
+        api_definition_id: '00000000-0000-4000-8000-000000003010',
+        api_version: 2,
       },
     ])
   })

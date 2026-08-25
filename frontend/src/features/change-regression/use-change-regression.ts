@@ -15,6 +15,7 @@ import {
   listChangeRegressionPolicies,
   listChangeRegressions,
   reviewMissingTest,
+  selectChangeRegressionOperation,
   waiveSemanticGap,
   type ChangeRegressionInput,
 } from './change-regression-service'
@@ -92,6 +93,19 @@ export function useChangeRegression() {
     mutationFn: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
       waiveSemanticGap(required(projectId), input.runId, waiverInput(input)),
   })
+  const selectOperation = useMutation({
+    mutationFn: (input: {
+      runId: string
+      changeKey: string
+      apiDefinitionId: string
+      apiVersion: number
+    }) =>
+      selectChangeRegressionOperation(required(projectId), input.runId, {
+        change_key: input.changeKey,
+        api_definition_id: input.apiDefinitionId,
+        api_version: input.apiVersion,
+      }),
+  })
 
   async function refresh() {
     await Promise.all([
@@ -164,8 +178,15 @@ export function useChangeRegression() {
     }) => runAction(() => addToPlan.mutateAsync(input), '已有测试已加入当前计划'),
     waiveGap: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
       runAction(() => waive.mutateAsync(input), '语义缺口已记录人工豁免'),
+    selectOperation: (input: {
+      runId: string
+      changeKey: string
+      apiDefinitionId: string
+      apiVersion: number
+    }) =>
+      runAction(() => selectOperation.mutateAsync(input), 'Operation 已冻结，Proposal 已重新生成'),
     creating: create.isPending,
-    acting: mutationPending(review, approve, execute, release, addToPlan, waive),
+    acting: mutationPending(review, approve, execute, release, addToPlan, waive, selectOperation),
   }
 }
 

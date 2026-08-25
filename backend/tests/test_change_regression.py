@@ -22,6 +22,7 @@ from app.models import Base, SemanticGapWaiver
 from app.models import TestCase as ORMTestCase
 from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
+from app.models.ai import AIChangeItem
 from app.services.change_regression import (
     _add_semantic_value,
     _merge_workflow_semantics,
@@ -440,9 +441,9 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         for mutation in scenario["mutations"]
         if mutation["path"] == "body.quantity"
     }
-    # 101 carried an invalid-request oracle under the previous maximum. It now
-    # expects success, so value-only matching must not hide the changed semantic.
-    assert values == {101, 999, 1000}
+    # The published workflows are pinned to API v1. Even unchanged value/oracle
+    # semantics from v1 cannot suppress the current API v2 requirements.
+    assert values == {100, 101, 999, 1000}
     semantic_scope = body["selection_summary"]["semantic_coverage_scopes"][0]
     assert "999|invalid_request" not in semantic_scope["project_known_values"]
     status_oracles = {
@@ -451,6 +452,39 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     assert status_oracles == {201, 422}
 
     item_id = body["missing_tests"][0]["item_id"]
+    async with context.sessions() as session:
+        synthetic_item = await session.get(AIChangeItem, UUID(item_id))
+        assert synthetic_item is not None
+        synthetic_item.proposed_content = {"synthetic_contract": True}
+        await session.commit()
+    selected_operation = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{body['id']}/operation-selection",
+        headers=headers,
+        json={
+            "change_key": semantic_scope["change_key"],
+            "api_definition_id": api_definition_id,
+            "api_version": semantic_scope["operation"]["api_version"],
+        },
+    )
+    assert selected_operation.status_code == 200, selected_operation.text
+    body = selected_operation.json()
+    regeneration = body["selection_summary"]["operation_regenerations"][0]
+    assert regeneration["status"] == "regenerated"
+    assert regeneration["old_design_fingerprint"] != regeneration["design_fingerprint"]
+    assert (
+        regeneration["contract_fingerprint"] == semantic_scope["operation"]["contract_fingerprint"]
+    )
+    assert regeneration["scenario_count"] > 0
+    assert regeneration["oracle_count"] > 0
+    regenerated_item = body["missing_tests"][0]
+    assert regenerated_item["item_id"] == item_id
+    assert regenerated_item["review_status"] == "pending"
+    draft = regenerated_item["proposed_content"]
+    assert {oracle["expected"] for oracle in draft["oracles"] if oracle["kind"] == "status"} == {
+        201,
+        422,
+    }
+
     wrong_target = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{body['id']}"
         f"/change-set-items/{item_id}/accept",
@@ -483,6 +517,19 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     accepted_item = accepted.json()["missing_tests"][0]
     assert accepted_item["materialized_resource_type"] == "test_design_bundle"
     assert accepted_item["materialized_resource_id"]
+    locked_selection = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{body['id']}/operation-selection",
+        headers=headers,
+        json={
+            "change_key": semantic_scope["change_key"],
+            "api_definition_id": api_definition_id,
+            "api_version": semantic_scope["operation"]["api_version"],
+        },
+    )
+    assert locked_selection.status_code == 409
+    assert locked_selection.json()["error"]["code"] == (
+        "CHANGE_REGRESSION_OPERATION_SELECTION_LOCKED"
+    )
     async with context.sessions() as session:
         materialized_design = await session.get(
             ORMTestDesign, UUID(accepted_item["materialized_resource_id"])
@@ -572,6 +619,18 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
             },
         )
         assert waived.status_code == 201, waived.text
+    duplicate_waiver = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}"
+        "/semantic-gap-waivers",
+        headers=headers,
+        json={
+            "gap_key": unresolved_gaps[0]["gap_key"],
+            "reason": "有效豁免不能通过重复请求覆盖其不可变审批记录",
+            "expires_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+        },
+    )
+    assert duplicate_waiver.status_code == 409
+    assert duplicate_waiver.json()["error"]["code"] == ("CHANGE_REGRESSION_PLAN_GAP_ALREADY_WAIVED")
     approved_with_waivers = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{scoped_body['id']}/approve",
         headers=headers,
@@ -649,12 +708,44 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     )
     assert blocked_execute.status_code == 409
     assert blocked_execute.json()["error"]["code"] == "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED"
-    blocked_release = await context.client.post(
+    renewed_body = expiry_body
+    for gap in expiry_gaps:
+        renewed = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}"
+            "/semantic-gap-waivers",
+            headers=headers,
+            json={
+                "gap_key": gap["gap_key"],
+                "reason": "原豁免过期后由人工重新评估并续签当前语义风险",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+            },
+        )
+        assert renewed.status_code == 201, renewed.text
+        renewed_body = renewed.json()
+    active_revisions = [
+        waiver for waiver in renewed_body["semantic_gap_waivers"] if waiver["active"] is True
+    ]
+    assert {waiver["revision"] for waiver in active_revisions} == {2}
+    assert all(waiver["supersedes_waiver_id"] for waiver in active_revisions)
+    assert len(renewed_body["semantic_gap_waivers"]) == len(expiry_gaps) * 2
+
+    renewed_execute = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}/execute",
+        headers=headers,
+    )
+    assert renewed_execute.status_code == 202, renewed_execute.text
+    await PlanRunCoordinator(context.sessions, context.events).run(
+        UUID(renewed_execute.json()["test_plan_run_id"])
+    )
+    renewed_release = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{expiry_body['id']}/release-gate",
         headers=headers,
     )
-    assert blocked_release.status_code == 200, blocked_release.text
-    assert blocked_release.json()["status"] == "blocked"
+    assert renewed_release.status_code == 200, renewed_release.text
+    assert renewed_release.json()["status"] == "passed"
+    assert {
+        waiver["revision"] for waiver in renewed_release.json()["evidence"]["semantic_gap_waivers"]
+    } == {2}
 
     for workflow_id in [*generated_workflow_ids[1:], *materialized_workflow_ids]:
         added_mapping = await context.client.post(

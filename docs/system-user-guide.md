@@ -1191,3 +1191,38 @@ MCP 上线前：
 - [ ] 远程 HTTP 使用 TLS、来源限制和 `Authorization: Bearer ...`。
 - [ ] 下游完整处理 Evidence、Confidence、Redactions、Warnings 和 Trace ID。
 - [ ] 所有写入先 dry-run，真实提案只创建 Draft 并由人工 Review。
+
+## 15. S47.4 变更回归审核操作
+
+### 15.1 如何理解 Operation Coverage
+
+变更回归页的“已覆盖”不只表示 Method/Path 一样。系统同时核对 API Definition、
+API Version、Contract Fingerprint、Service、Method、归一化 Path、Portable Operation Ref，
+以及值、预期分类和 Oracle Set。因此：
+
+- 同一 API 的 v1 测试不会代替 v2 测试。
+- 版本号相同但 Contract Fingerprint 不同时，状态为 `CONTRACT_MISMATCH`。
+- Version 不同时，状态为 `VERSION_MISMATCH`。
+- 没有确定性且对请求必达的 Assert 时，只能是 `PARTIAL/UNKNOWN`，不是 `COVERED`。
+
+### 15.2 处理多 Service Operation 歧义
+
+当两个 Service 都有相同 Method/Path 时，页面会显示 Service、API ID、Version、Path、
+Portable Ref 和 Contract Fingerprint，并保持 Review Blocker。审核人需选择明确的 API
+Definition 和固定版本。确认后系统会使用该版本的 Canonical Contract 重新生成
+TestDesign，页面显示旧/新设计指纹、场景数和 Oracle 数。不能直接物化旧的合成草案。
+
+### 15.3 续签过期 Semantic Gap Waiver
+
+豁免仍必须逐 Gap 操作，Reason 必填，且只能由人工用户创建。过期后选择
+“Renew Waiver”会创建 Revision 2（或下一 Revision），不会覆盖 Revision 1。历史表会显示
+Revision、Supersedes、Approver、Approved At、Expiry 和 Active/Expired。同一 Gap 只有最高且
+未过期、仍匹配当前 Contract Requirement 的 Revision 可通过 Approve/Execute/Release Gate；
+Waiver 状态仍是 `WAIVED`，永远不显示为 `COVERED`。
+
+### 15.4 Workflow Assert 覆盖规则
+
+系统只读取 Published Workflow Version，且 Assert 必须能从具体 Request Node 沿执行图必然
+到达：线性 Assert 和分支汇合后的 Assert 可以形成完整覆盖；只在某个分支中的 Assert
+是 Partial；与 Request 断开的 Assert 不计覆盖；循环存在无法证明必达的路径时显示
+Unknown/Requires Review。在审批前应展开 Oracle Reachability 列核对这一状态。

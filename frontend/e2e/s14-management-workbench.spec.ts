@@ -1,10 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { administratorEmail, authenticate } from './support/auth'
 
-test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => {
+test('S14 团队、测试资产与 API 工作台主路径', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  const suffix = Date.now().toString()
+  const suffix = `${Date.now()}-${testInfo.retry}`
   const environmentName = `S14 环境 ${suffix}`
   const apiName = `S14 接口 ${suffix}`
   const renamedApiName = `${apiName} 已重命名`
@@ -16,8 +16,9 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
 
   await page.goto('/')
   await authenticate(page)
+  const projectId = await createIsolatedProject(page.request, suffix)
+  await page.goto(`/projects/${projectId}/apis`)
 
-  await page.getByRole('link', { name: '接口管理' }).click()
   await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
   await createEnvironment(page, environmentName)
   await createApi(page, apiName)
@@ -32,6 +33,21 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
   await manageTeam(page, teamName)
   await expect(page.locator('body')).not.toContainText(secretValue)
 })
+
+async function createIsolatedProject(request: APIRequestContext, suffix: string): Promise<string> {
+  const refresh = await request.post('/api/v1/auth/refresh')
+  expect(refresh.ok(), await refresh.text()).toBeTruthy()
+  const token = ((await refresh.json()) as { access_token: string }).access_token
+  const created = await request.post('/api/v1/projects', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      name: `S14 隔离项目 ${suffix}`,
+      description: 'S14 顺序独立浏览器验收',
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  return ((await created.json()) as { id: string }).id
+}
 
 async function createEnvironment(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: '新建环境' }).click()
@@ -138,7 +154,7 @@ async function updateProjectConfiguration(page: import('@playwright/test').Page,
   )
   await saveButton.click()
   expect((await saved).ok()).toBeTruthy()
-  await expect(saveButton).toBeEnabled()
+  await expect(saveButton).not.toHaveClass(/ant-btn-loading/)
 }
 
 async function writeSecret(page: import('@playwright/test').Page, name: string, value: string) {
@@ -146,12 +162,14 @@ async function writeSecret(page: import('@playwright/test').Page, name: string, 
   const panel = page.getByRole('tabpanel', { name: 'Secret' })
   await panel.getByPlaceholder('Secret 名称').fill(name)
   await panel.getByPlaceholder('仅写入，不可读回').fill(value)
+  const saveButton = panel.getByRole('button', { name: '写入 Secret' })
+  await expect(saveButton).not.toHaveClass(/ant-btn-loading/)
   const saved = page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' && response.url().endsWith('/secrets') && response.ok(),
   )
-  await panel.getByRole('button', { name: '写入 Secret' }).click()
-  await saved
+  await saveButton.click()
+  expect((await saved).ok()).toBeTruthy()
   await expect(panel.getByRole('row').filter({ hasText: name })).toContainText('已加密 · 不可读回')
 }
 

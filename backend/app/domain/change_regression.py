@@ -82,7 +82,12 @@ class OperationIdentity(BaseModel):
     @property
     def semantic_prefix(self) -> str:
         instance = self.api_definition_id or self.portable_operation_ref
-        return f"{instance}|{self.service_key}|{self.method}|{self.normalized_path}"
+        version = str(self.api_version) if self.api_definition_id is not None else "portable"
+        return (
+            f"{instance}|v={version}|contract={self.contract_fingerprint}"
+            f"|service={self.service_key}|method={self.method}|path={self.normalized_path}"
+            f"|operation={self.portable_operation_ref}"
+        )
 
 
 class SemanticCoverageFact(BaseModel):
@@ -97,6 +102,16 @@ class SemanticCoverageFact(BaseModel):
     oracle_identity: str | None = Field(default=None, max_length=240)
     oracle_identities: tuple[str, ...] = Field(default=(), max_length=100)
     oracle_set_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    oracle_reachability: tuple[
+        Literal[
+            "direct_oracle",
+            "unconditional_assert",
+            "conditional_assert",
+            "disconnected_assert",
+            "unknown_graph",
+        ],
+        ...,
+    ] = ()
     source_asset_type: Literal["test_case", "workflow", "test_design"]
     source_asset_id: str = Field(min_length=1, max_length=160)
     test_plan_id: str | None = Field(default=None, max_length=160)
@@ -756,25 +771,53 @@ def semantic_coverage_tokens(
         fact.coverage_token
         for fact in facts
         if fact.complete
-        and _same_operation(fact.operation_identity, identity)
+        and same_operation_semantics(fact.operation_identity, identity)
         and fact.request_location == target.location
         and fact.field_path == field_path
         and (asset_scope is None or (fact.source_asset_type, fact.source_asset_id) in asset_scope)
     }
 
 
-def _same_operation(left: OperationIdentity, right: OperationIdentity) -> bool:
+def same_operation_semantics(left: OperationIdentity, right: OperationIdentity) -> bool:
+    """Compare instance-local or portable operation semantics without unsafe fallback."""
+
     if left.api_definition_id is not None and right.api_definition_id is not None:
-        return left.api_definition_id == right.api_definition_id
+        return (
+            left.api_definition_id,
+            left.api_version,
+            left.contract_fingerprint,
+            left.service_key,
+            left.method,
+            left.normalized_path,
+            left.portable_operation_ref,
+        ) == (
+            right.api_definition_id,
+            right.api_version,
+            right.contract_fingerprint,
+            right.service_key,
+            right.method,
+            right.normalized_path,
+            right.portable_operation_ref,
+        )
     return (
         left.service_key,
         left.method,
         left.normalized_path,
+        left.portable_operation_ref,
+        left.contract_fingerprint,
     ) == (
         right.service_key,
         right.method,
         right.normalized_path,
+        right.portable_operation_ref,
+        right.contract_fingerprint,
     )
+
+
+def _same_operation(left: OperationIdentity, right: OperationIdentity) -> bool:
+    """Compatibility alias for callers outside the coverage pipeline."""
+
+    return same_operation_semantics(left, right)
 
 
 def _extend_oracle_scope(

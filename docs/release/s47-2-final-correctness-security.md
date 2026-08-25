@@ -200,3 +200,10 @@ GA_READY: NO
 S47.2 完成后复审发现 Oracle-aware Coverage、Current Plan Gate、多 Service 身份、AST 控制流、
 Canonical Keyword 值校验、Enum Hash 和 MultipleOf 仍有缺口。本文的 GO 判定不再作为当前合并证据；
 以 [S47.3 最终语义完整性闭环](s47-3-final-semantic-integrity.md) 和最终 HEAD 的 Required CI 为准。
+
+## S47.4 取代说明
+
+S47.4 复审发现 S47.3 Coverage 匹配仍可跨 API Version/Contract Fingerprint，条件 AST 与
+Workflow Assert 必达性仍可制造过度覆盖。本文中旧 SHA 和 `MERGE_TO_MAIN: GO` 不再是当前
+合并证据；以 [S47.4 最终评审修复](s47-4-final-review-fix.md) 和 PR #40 的精确
+HEAD CI 证据为准。`RC_READY: NO`，`GA_READY: NO`。

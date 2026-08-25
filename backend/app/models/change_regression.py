@@ -139,8 +139,10 @@ class SemanticGapWaiver(UuidPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "regression_run_id",
             "gap_key",
-            name="uq_semantic_gap_waiver_run_gap",
+            "revision",
+            name="uq_semantic_gap_waiver_run_gap_revision",
         ),
+        CheckConstraint("revision >= 1", name="semantic_gap_waiver_revision_positive"),
     )
 
     regression_run_id: Mapped[UUID] = mapped_column(
@@ -156,6 +158,15 @@ class SemanticGapWaiver(UuidPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     gap_key: Mapped[str] = mapped_column(String(64), index=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    supersedes_waiver_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "semantic_gap_waivers.id",
+            name="fk_semantic_gap_waiver_supersedes",
+            ondelete="SET NULL",
+        ),
+        index=True,
+    )
     reason: Mapped[str] = mapped_column(Text)
     approved_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", name="fk_semantic_gap_waiver_approver", ondelete="RESTRICT")
