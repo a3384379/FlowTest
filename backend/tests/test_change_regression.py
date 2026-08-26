@@ -8,8 +8,8 @@ from uuid import UUID
 
 import pytest
 import respx
-from httpx import ASGITransport, AsyncClient, Response
-from sqlalchemy import select, update
+from httpx import ASGITransport, AsyncClient, Request, Response
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_test_plan_dispatcher, get_workflow_coordinator
@@ -23,7 +23,11 @@ from app.models import TestCase as ORMTestCase
 from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
 from app.models.ai import AIChangeItem
+from app.models.tasking import TestPlanItem as ORMTestPlanItem
+from app.models.tasking import TestPlanRunItem as ORMTestPlanRunItem
+from app.models.workflows import Workflow as ORMWorkflow
 from app.services.change_regression import (
+    ChangeRegressionService,
     _add_semantic_value,
     _merge_workflow_semantics,
     _test_case_workflow_id,
@@ -392,13 +396,21 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     assert inventory_published.status_code == 200, inventory_published.text
 
     baseline_run_id = await _create_contract_run(
-        context.client, headers, project_id, baseline_document, "orders-baseline.json"
+        context.client,
+        headers,
+        project_id,
+        baseline_document,
+        "orders-baseline.json",
     )
     current_document = _orders_openapi(maximum=999)
     current_import = await _upload_openapi(context.client, headers, project_id, current_document)
     assert current_import.status_code == 201, current_import.text
     current_run_id = await _create_contract_run(
-        context.client, headers, project_id, current_document, "orders-current.json"
+        context.client,
+        headers,
+        project_id,
+        current_document,
+        "orders-current.json",
     )
     mapping = await context.client.post(
         f"/api/v1/projects/{project_id}/impact/mappings",
@@ -450,6 +462,39 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         oracle["expected"] for oracle in draft["oracles"] if oracle["kind"] == "status"
     }
     assert status_oracles == {201, 422}
+
+    gate_only = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": "S47.5 semantic gate without draft generation",
+            "source_ref": "openapi://orders/maximum",
+            "candidate_ref": "contract:orders-v2-gate-only",
+            "openapi_diffs": [
+                {
+                    "baseline_run_id": baseline_run_id,
+                    "current_run_id": current_run_id,
+                }
+            ],
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+            "generate_missing_tests": False,
+        },
+    )
+    assert gate_only.status_code == 201, gate_only.text
+    gate_only_body = gate_only.json()
+    assert gate_only_body["change_set_id"] is None
+    assert gate_only_body["missing_tests"] == []
+    assert gate_only_body["selection_summary"]["missing_test_generation"] is False
+    assert gate_only_body["selection_summary"]["semantic_change_target_count"] == 1
+    assert gate_only_body["selection_summary"]["unresolved_current_plan_gap_count"] > 0
+    gate_only_approval = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{gate_only_body['id']}/approve",
+        headers=headers,
+        json={"note": "关闭 Draft 生成不能关闭语义门禁"},
+    )
+    assert gate_only_approval.status_code == 409, gate_only_approval.text
+    assert gate_only_approval.json()["error"]["code"] == ("CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED")
 
     item_id = body["missing_tests"][0]["item_id"]
     async with context.sessions() as session:
@@ -550,6 +595,65 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
             headers=headers,
         )
         assert materialized_published.status_code == 200, materialized_published.text
+
+    async with context.sessions() as session:
+        materialized_workflows = list(
+            (
+                await session.scalars(
+                    select(ORMWorkflow).where(
+                        ORMWorkflow.id.in_([UUID(value) for value in materialized_workflow_ids])
+                    )
+                )
+            ).all()
+        )
+    workflow_by_value = {
+        next(node for node in workflow.draft_definition["nodes"] if node["type"] == "api")[
+            "config"
+        ]["request_overrides"]["body"]["value"]["quantity"]: workflow
+        for workflow in materialized_workflows
+    }
+    same_run_body = accepted.json()
+    for gap in same_run_body["selection_summary"]["current_plan_gaps"]:
+        semantic_value = gap["semantic_requirement"]["semantic_value"]
+        generated_workflow = workflow_by_value[semantic_value]
+        added_generated = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{body['id']}/add-project-known-test",
+            headers=headers,
+            json={
+                "gap_key": gap["gap_key"],
+                "item": {
+                    "target_type": "workflow",
+                    "target_id": str(generated_workflow.id),
+                    "target_version": 1,
+                    "workflow_version": 1,
+                    "environment_id": environment_id,
+                },
+            },
+        )
+        assert added_generated.status_code == 200, added_generated.text
+        same_run_body = added_generated.json()
+    assert same_run_body["selection_summary"]["unresolved_current_plan_gap_count"] == 0
+    assert {
+        asset["status"]
+        for asset in same_run_body["selection_summary"]["generated_assets"]
+        if asset["target_type"] == "workflow"
+    } == {"added_to_plan"}
+    same_run_approved = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{body['id']}/approve",
+        headers=headers,
+        json={"note": "人工发布并显式加入本次计划后完成同 Run 闭环"},
+    )
+    assert same_run_approved.status_code == 200, same_run_approved.text
+    # Restore the shared fixture plan so the following cases can independently
+    # prove missing-plan and waiver behavior.
+    async with context.sessions() as session:
+        await session.execute(
+            delete(ORMTestPlanItem).where(
+                ORMTestPlanItem.test_plan_id == UUID(plan.json()["id"]),
+                ORMTestPlanItem.target_id.in_([UUID(value) for value in materialized_workflow_ids]),
+            )
+        )
+        await session.commit()
 
     scoped = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions",
@@ -808,6 +912,202 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         json={"note": "显式加入精确覆盖资产后批准"},
     )
     assert approved_after_add.status_code == 200, approved_after_add.text
+    respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"id": 7})
+    )
+
+    def orders_response(request: Request) -> Response:
+        payload = json.loads(request.content)
+        quantity = payload.get("quantity", 0)
+        return (
+            Response(422, json={"error": "invalid quantity"})
+            if quantity > 999
+            else Response(201, json={"id": f"order-{quantity}"})
+        )
+
+    respx.post("http://workflow.example.com/orders").mock(side_effect=orders_response)
+    executed_after_add = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{add_body['id']}/execute",
+        headers=headers,
+    )
+    assert executed_after_add.status_code == 202, executed_after_add.text
+    executed_plan_run_id = UUID(executed_after_add.json()["test_plan_run_id"])
+    await PlanRunCoordinator(context.sessions, context.events).run(executed_plan_run_id)
+    async with context.sessions() as session:
+        executed_items = list(
+            (
+                await session.scalars(
+                    select(ORMTestPlanRunItem).where(
+                        ORMTestPlanRunItem.test_plan_run_id == executed_plan_run_id
+                    )
+                )
+            ).all()
+        )
+        assert {item.status for item in executed_items} == {"passed"}, [
+            (str(item.target_id), item.status, item.error_message) for item in executed_items
+        ]
+        await session.execute(
+            delete(ORMTestPlanItem).where(ORMTestPlanItem.test_plan_id == UUID(plan.json()["id"]))
+        )
+        await session.commit()
+    release_from_snapshot = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{add_body['id']}/release-gate",
+        headers=headers,
+    )
+    assert release_from_snapshot.status_code == 200, release_from_snapshot.text
+    assert release_from_snapshot.json()["status"] == "passed", release_from_snapshot.text
+    assert (
+        release_from_snapshot.json()["evidence"]["semantic_plan_gate"]["semantic_coverage_basis"]
+        == "test_plan_run"
+    )
+    assert release_from_snapshot.json()["evidence"]["semantic_plan_gate"][
+        "semantic_coverage_test_plan_run_id"
+    ] == str(executed_plan_run_id)
+
+
+@pytest.mark.asyncio
+async def test_plan_and_release_coverage_scopes_use_pinned_snapshot_versions(
+    regression_context: RegressionContext,
+) -> None:
+    context = regression_context
+    headers = await _login_headers(context.client)
+    project_id, environment_id, workflow_id = await _create_workflow(context.client, headers)
+    created_case = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-cases",
+        headers=headers,
+        json={
+            "name": "S47.5 pinned case",
+            "definition": {
+                "workflow_id": workflow_id,
+                "workflow_version": 1,
+                "environment_id": environment_id,
+            },
+        },
+    )
+    assert created_case.status_code == 201, created_case.text
+    case_id = created_case.json()["id"]
+    published_case = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}/versions",
+        headers=headers,
+        json={"change_note": "Pinned to workflow v1"},
+    )
+    assert published_case.status_code == 200, published_case.text
+    plan = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "S47.5 pinned semantic coverage",
+            "items": [
+                {
+                    "workflow_id": workflow_id,
+                    "environment_id": environment_id,
+                    "workflow_version": 1,
+                },
+                {
+                    "target_type": "case",
+                    "target_id": case_id,
+                    "target_version": 1,
+                },
+            ],
+        },
+    )
+    assert plan.status_code == 201, plan.text
+    async with context.sessions() as session:
+        workflow = await session.get(ORMWorkflow, UUID(workflow_id))
+        assert workflow is not None
+        draft_v2 = dict(workflow.draft_definition)
+        draft_v2["nodes"] = [dict(node) for node in workflow.draft_definition["nodes"]]
+        draft_v2["nodes"][1] = {
+            **draft_v2["nodes"][1],
+            "name": "Published workflow v2",
+        }
+    saved = await context.client.patch(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}",
+        headers=headers,
+        json={"expected_revision": 1, "definition": draft_v2},
+    )
+    assert saved.status_code == 200, saved.text
+    published_v2 = await context.client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published_v2.status_code == 200, published_v2.text
+    assert published_v2.json()["version"] == 2
+    updated_case = await context.client.patch(
+        f"/api/v1/projects/{project_id}/test-cases/{case_id}",
+        headers=headers,
+        json={
+            "definition": {
+                "workflow_id": workflow_id,
+                "workflow_version": 2,
+                "environment_id": environment_id,
+            }
+        },
+    )
+    assert updated_case.status_code == 200, updated_case.text
+
+    async with context.sessions() as session:
+        plan_items = list(
+            (
+                await session.scalars(
+                    select(ORMTestPlanItem).where(
+                        ORMTestPlanItem.test_plan_id == UUID(plan.json()["id"])
+                    )
+                )
+            ).all()
+        )
+        service = ChangeRegressionService(session)
+        selected_assets = [{"target_type": "workflow", "target_id": workflow_id}]
+        plan_scope = await service._current_plan_scope(
+            selected_assets=selected_assets,
+            plan_items=plan_items,
+        )
+    assert plan_scope == {
+        ("workflow", workflow_id, 1, 1),
+        ("test_case", case_id, 1, 1),
+    }
+
+    queued = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan.json()['id']}/runs",
+        headers=headers,
+    )
+    assert queued.status_code == 202, queued.text
+    run_id = UUID(queued.json()["id"])
+    async with context.sessions() as session:
+        service = ChangeRegressionService(session)
+        assert (
+            await service._test_plan_run_scope(
+                selected_assets=selected_assets,
+                test_plan_run_id=run_id,
+            )
+            == set()
+        )
+        await session.execute(
+            update(ORMTestPlanRunItem)
+            .where(ORMTestPlanRunItem.test_plan_run_id == run_id)
+            .values(status="passed")
+        )
+        await session.flush()
+        assert await service._test_plan_run_scope(
+            selected_assets=selected_assets,
+            test_plan_run_id=run_id,
+        ) == {
+            ("workflow", workflow_id, 1, 1),
+            ("test_case", case_id, 1, 1),
+        }
+        await session.execute(
+            update(ORMTestPlanRunItem)
+            .where(ORMTestPlanRunItem.test_plan_run_id == run_id)
+            .values(status="quarantined")
+        )
+        await session.flush()
+        assert (
+            await service._test_plan_run_scope(
+                selected_assets=selected_assets,
+                test_plan_run_id=run_id,
+            )
+            == set()
+        )
 
 
 def test_existing_workflow_semantics_extracts_locations_and_treats_opaque_data_as_unknown() -> None:

@@ -52,6 +52,7 @@ from app.services.change_regression import (
     _review_status,
     _scope_requirements,
     _select_current_operation,
+    _selected_operation_matches,
     _semantic_requirement,
     _semantic_target,
     _target_from_scope,
@@ -88,6 +89,8 @@ def _coverage_fact(*identities: str) -> SemanticCoverageFact:
         oracle_set_fingerprint=fingerprint,
         source_asset_type="workflow",
         source_asset_id="workflow-1",
+        source_asset_version=1,
+        workflow_version=1,
     )
 
 
@@ -167,6 +170,28 @@ def test_multi_service_operation_resolution_never_picks_first_same_route() -> No
         )
         is None
     )
+
+
+def test_current_openapi_fingerprint_never_falls_back_to_route_equivalent_contract() -> None:
+    identity = _identity()
+    contract = OperationContract.model_validate(
+        {
+            "operation": identity.portable_operation_ref,
+            "service": identity.service_key,
+            "method": identity.method,
+            "path": identity.normalized_path,
+        }
+    )
+    gap = {
+        "method": identity.method,
+        "normalized_path": identity.normalized_path,
+        "service_key": identity.service_key,
+        "portable_operation_ref": identity.portable_operation_ref,
+        "current_contract_fingerprint": "b" * 64,
+    }
+
+    assert _select_current_operation([(identity, contract)], gap) is None
+    assert not _selected_operation_matches((identity, contract), gap, identity)
 
 
 def test_openapi_contract_metadata_matches_diff_source_key() -> None:
@@ -606,15 +631,15 @@ def test_change_regression_gate_helpers_keep_unknown_partial_and_waived_distinct
     assert _json_int(True) == 0
     assert _recommended_assets([fact], None, target, requirement) == []
     assert not _has_partial_coverage(
-        [fact], identity, target, "malformed", {("workflow", "workflow-1")}
+        [fact], identity, target, "malformed", {("workflow", "workflow-1", 1, 1)}
     )
 
     wrong_target = target.model_copy(update={"field_path": ("other",)})
     assert not _has_partial_coverage(
-        [fact], identity, wrong_target, requirement, {("workflow", "workflow-1")}
+        [fact], identity, wrong_target, requirement, {("workflow", "workflow-1", 1, 1)}
     )
     assert _has_partial_coverage(
-        [fact], identity, target, requirement, {("workflow", "workflow-1")}
+        [fact], identity, target, requirement, {("workflow", "workflow-1", 1, 1)}
     )
     portable = identity.model_copy(update={"api_definition_id": None})
     assert _coverage_operation_matches(portable, portable)

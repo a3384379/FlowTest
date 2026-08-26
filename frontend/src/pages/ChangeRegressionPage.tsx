@@ -129,7 +129,7 @@ export default function ChangeRegressionPage() {
               name="generate_missing_tests"
               label="生成缺失测试 Draft"
               valuePropName="checked"
-              extra="缺失覆盖会生成 Test Design 草案，不会自动发布或执行。"
+              extra="仅控制 Test Design 草案创建；语义覆盖分析与 Approve/Execute/Release 门禁始终执行。"
             >
               <Switch />
             </Form.Item>
@@ -528,6 +528,7 @@ function SemanticPlanGatePanel({
         </Descriptions.Item>
         <Descriptions.Item label="Unresolved">{unresolved}</Descriptions.Item>
       </Descriptions>
+      <SemanticCoverageBasis run={run} />
       <Space orientation="vertical" style={{ width: '100%' }} size={12}>
         {gaps.map((gap) => (
           <SemanticGapCard
@@ -579,6 +580,29 @@ function SemanticPlanGatePanel({
         </>
       ) : null}
     </Card>
+  )
+}
+
+function SemanticCoverageBasis({ run }: { run: ChangeRegressionRun }) {
+  const executionRunId = run.selection_summary.semantic_coverage_test_plan_run_id
+  const basis =
+    run.selection_summary.semantic_coverage_basis === 'test_plan_run'
+      ? `实际执行快照 · ${executionRunId?.slice(0, 12) ?? '-'}`
+      : '当前计划固定版本'
+  const generatedCount = run.selection_summary.generated_assets?.length ?? 0
+  return (
+    <>
+      <Typography.Paragraph type="secondary">Coverage Basis: {basis}</Typography.Paragraph>
+      {generatedCount > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          title={`Generated Assets · ${generatedCount}`}
+          description="物化资产必须先由人工发布，再按推荐的固定版本显式加入当前计划；系统不会自动发布或执行。"
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -679,11 +703,13 @@ function SemanticGapExistingAsset({
           gapKey: gap.gap_key,
           targetType: asset.target_type,
           targetId: asset.target_id,
+          targetVersion: asset.target_version,
+          workflowVersion: asset.workflow_version,
           environmentId,
         })
       }
     >
-      Add to Plan · {asset.target_type}
+      Add to Plan · {asset.target_type} v{asset.target_version}
     </Button>
   )
 }

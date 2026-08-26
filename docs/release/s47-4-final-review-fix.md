@@ -146,3 +146,8 @@ GA_READY: NO
 ```
 
 本文不构成 Merge、Tag、Release 或生产发布授权。
+# S47.5 后续复审说明
+
+S47.4 的指定修复和精确 SHA CI 证据有效，但后续代码复审发现 Missing Draft Toggle、固定计划
+版本、RunItem Release Evidence 与 Current Contract 回退问题。最终评审判定应继续参考
+`s47-5-release-evidence-integrity.md`，不能仅以 S47.4 全绿结论放行。

@@ -202,3 +202,9 @@ Revision/Supersede、Published Workflow Assert 必达分析与 E2E 顺序隔离�
 
 PR 仍为 Draft，仍需人工 Review；Pairwise/State Model/Knowledge Graph/Key Rotation 能力边界
 不变，`RC_READY: NO`，`GA_READY: NO`。
+# S47.5 补充门禁
+
+V5 Functional Completion Review 还要求 Missing Draft 开关不能关闭 Semantic Gate、Plan
+Coverage 使用固定版本、Release Coverage 使用 Passed RunItem Snapshot、Current OpenAPI
+Fingerprint 精确绑定，以及 Generated Asset 可在人工发布后同 Run 显式加入计划。实现和验证
+记录见 `s47-5-release-evidence-integrity.md`。

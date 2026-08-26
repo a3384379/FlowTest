@@ -772,6 +772,8 @@ def _coverage_fact(
             "oracle_identity": oracle,
             "source_asset_type": "workflow",
             "source_asset_id": str(uuid4()),
+            "source_asset_version": 1,
+            "workflow_version": 1,
         }
     )
 

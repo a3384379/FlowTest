@@ -138,3 +138,8 @@ FlowSpec v3 是 V5 唯一正式基线；开发期 v1/v2 兼容明确不属于 S4
 最终证据见 [S47.4 最终评审修复](s47-4-final-review-fix.md)。PR #40 保持 Draft；
 当前 HEAD 的 Required CI 未全绿前 `MERGE_TO_MAIN: NO-GO`；真实 Key Rotation 和外部门槛
 未完成，因此无论自动化结果如何都是 `GA_READY: NO`。
+# S47.5 Release Evidence Gate 补充
+
+GA/RC 证据不得使用资产 Current 或事后修改的 TestPlan 重新解释已完成运行。Release Coverage
+必须来自本次 Passed TestPlanRunItem Snapshot；Quarantined、Cancelled 和未执行项不可计为
+Covered。OpenAPI Current Contract Fingerprint 不匹配时必须阻断，不得回退旧 Route Contract。

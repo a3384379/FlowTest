@@ -268,7 +268,14 @@ describe('ChangeRegressionPage', () => {
       current_test_plan_coverage: 'MISSING' as const,
       oracle_reachability: ['conditional_assert' as const],
       recommended_existing_assets: asset
-        ? [{ target_type: 'workflow' as const, target_id: plan.items[0].target_id }]
+        ? [
+            {
+              target_type: 'workflow' as const,
+              target_id: plan.items[0].target_id,
+              target_version: plan.items[0].target_version,
+              workflow_version: plan.items[0].workflow_version ?? plan.items[0].target_version,
+            },
+          ]
         : [],
       waiver: null,
     })
@@ -589,6 +596,8 @@ describe('ChangeRegressionPage', () => {
           gapKey: 'workflow-gap',
           targetType: 'workflow',
           targetId: plan.items[0].target_id,
+          targetVersion: plan.items[0].target_version,
+          workflowVersion: plan.items[0].workflow_version ?? plan.items[0].target_version,
           environmentId: plan.items[0].environment_id ?? undefined,
         }),
       ).resolves.toBe(true)
@@ -598,6 +607,8 @@ describe('ChangeRegressionPage', () => {
           gapKey: 'case-gap',
           targetType: 'test_case',
           targetId: itemId,
+          targetVersion: 1,
+          workflowVersion: 1,
         }),
       ).resolves.toBe(true)
       await expect(
@@ -644,10 +655,15 @@ describe('ChangeRegressionPage', () => {
         item: {
           target_type: 'workflow',
           target_id: plan.items[0].target_id,
+          target_version: plan.items[0].target_version,
+          workflow_version: plan.items[0].workflow_version,
           environment_id: plan.items[0].environment_id,
         },
       },
-      { gap_key: 'case-gap', item: { target_type: 'case', target_id: itemId } },
+      {
+        gap_key: 'case-gap',
+        item: { target_type: 'case', target_id: itemId, target_version: 1 },
+      },
     ])
     expect(waiverPayloads).toEqual([
       { gap_key: 'permanent-gap', reason: '人工确认风险并安排补偿回归' },

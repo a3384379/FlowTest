@@ -82,6 +82,8 @@ export function useChangeRegression() {
       gapKey: string
       targetType: 'workflow' | 'test_case'
       targetId: string
+      targetVersion: number
+      workflowVersion: number
       environmentId?: string
     }) =>
       addProjectKnownTestToCurrentPlan(required(projectId), input.runId, {
@@ -174,6 +176,8 @@ export function useChangeRegression() {
       gapKey: string
       targetType: 'workflow' | 'test_case'
       targetId: string
+      targetVersion: number
+      workflowVersion: number
       environmentId?: string
     }) => runAction(() => addToPlan.mutateAsync(input), '已有测试已加入当前计划'),
     waiveGap: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
@@ -198,14 +202,22 @@ function required(value: string | null): string {
 function planItemInput(input: {
   targetType: 'workflow' | 'test_case'
   targetId: string
+  targetVersion: number
+  workflowVersion: number
   environmentId?: string
 }) {
   if (input.targetType === 'test_case') {
-    return { target_type: 'case' as const, target_id: input.targetId }
+    return {
+      target_type: 'case' as const,
+      target_id: input.targetId,
+      target_version: input.targetVersion,
+    }
   }
   return {
     target_type: 'workflow' as const,
     target_id: input.targetId,
+    target_version: input.targetVersion,
+    workflow_version: input.workflowVersion,
     environment_id: input.environmentId,
   }
 }

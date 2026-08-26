@@ -121,6 +121,8 @@ export type CurrentPlanGap = {
   recommended_existing_assets: Array<{
     target_type: 'workflow' | 'test_case'
     target_id: string
+    target_version: number
+    workflow_version: number
   }>
   waiver: {
     id: string
@@ -139,6 +141,17 @@ export type ChangeRegressionSelectionSummary = Record<string, unknown> & {
   semantic_coverage_scopes?: SemanticCoverageScope[]
   current_plan_recommendations?: Array<Record<string, unknown>>
   current_plan_gaps?: CurrentPlanGap[]
+  semantic_coverage_basis?: 'test_plan' | 'test_plan_run'
+  semantic_coverage_test_plan_run_id?: string | null
+  generated_assets?: Array<{
+    change_key: string
+    source_item_id: string
+    target_type: 'workflow' | 'test_case'
+    target_id: string
+    status: 'draft' | 'added_to_plan'
+    target_version?: number
+    workflow_version?: number
+  }>
   asset_mapping_gap_count?: number
   project_semantic_gap_count?: number
   current_test_plan_semantic_gap_count?: number
@@ -217,6 +230,8 @@ export async function addProjectKnownTestToCurrentPlan(
     item: {
       target_type: 'workflow' | 'case'
       target_id: string
+      target_version: number
+      workflow_version?: number
       environment_id?: string
     }
   },

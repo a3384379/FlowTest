@@ -8,6 +8,7 @@ from app.domain.change_regression import (
     SemanticCoverageFact,
     oracle_set_fingerprint,
     same_operation_semantics,
+    semantic_coverage_tokens,
 )
 from app.domain.evidence import PythonSourceEvidenceProvider, SourceSnapshot
 from app.services.change_regression import (
@@ -89,6 +90,8 @@ def test_coverage_diagnostics_distinguish_version_and_contract_mismatch() -> Non
         oracle_set_fingerprint=oracle_fingerprint,
         source_asset_type="workflow",
         source_asset_id="workflow-v1",
+        source_asset_version=1,
+        workflow_version=1,
     )
     target = ChangeConstraintTarget(
         location="body",
@@ -118,6 +121,50 @@ def test_coverage_diagnostics_distinguish_version_and_contract_mismatch() -> Non
         )
         == "CONTRACT_MISMATCH"
     )
+
+
+def test_coverage_asset_scope_requires_pinned_asset_and_workflow_versions() -> None:
+    target = ChangeConstraintTarget(
+        location="body",
+        field_path=("quantity",),
+        constraint="maximum",
+        before=99,
+        after=100,
+    )
+    fact_v1 = SemanticCoverageFact(
+        operation_identity=_identity(),
+        request_location="body",
+        field_path="quantity",
+        semantic_value="100",
+        scenario_kind="number_at_max",
+        expected_category="success",
+        oracle_identities=("status:200",),
+        oracle_set_fingerprint=oracle_set_fingerprint(("status:200",)),
+        source_asset_type="workflow",
+        source_asset_id="workflow-pinned",
+        source_asset_version=1,
+        workflow_version=1,
+    )
+    fact_v2 = fact_v1.model_copy(
+        update={
+            "semantic_value": "999",
+            "source_asset_version": 2,
+            "workflow_version": 2,
+        }
+    )
+
+    assert semantic_coverage_tokens(
+        [fact_v1, fact_v2],
+        _identity(),
+        target,
+        asset_scope={("workflow", "workflow-pinned", 1, 1)},
+    ) == {fact_v1.coverage_token}
+    assert semantic_coverage_tokens(
+        [fact_v1, fact_v2],
+        _identity(),
+        target,
+        asset_scope={("workflow", "workflow-pinned", 2, 2)},
+    ) == {fact_v2.coverage_token}
 
 
 def test_nested_source_constraints_are_conditional_review_evidence() -> None:

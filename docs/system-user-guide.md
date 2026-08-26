@@ -1226,3 +1226,21 @@ Waiver 状态仍是 `WAIVED`，永远不显示为 `COVERED`。
 到达：线性 Assert 和分支汇合后的 Assert 可以形成完整覆盖；只在某个分支中的 Assert
 是 Partial；与 Request 断开的 Assert 不计覆盖；循环存在无法证明必达的路径时显示
 Unknown/Requires Review。在审批前应展开 Oracle Reachability 列核对这一状态。
+# S47.5：固定版本计划与实际执行证据
+
+创建 Change Regression 时，“生成缺失测试 Draft”开关只决定是否创建供人工审核的草案。
+无论开关是否关闭，系统都会解析 Operation、生成语义需求、计算 Project/Current Plan
+Coverage，并在缺口未解决时阻断 Approve、Execute 和 Release Gate。
+
+审批和执行前，Current Plan Coverage 使用计划项保存的固定 `target_version` 与
+`workflow_version`，不会读取资产最新版本。TestCase 使用已发布的 TestCaseVersion Definition，
+不会读取 Draft。Release Gate 则只读取本次 TestPlanRun 的不可变 RunItem 快照；只有 Passed
+Item 算覆盖，Quarantined、Cancelled、Failed 或未执行 Item 均不算。
+
+Test Engineering 物化出的 Workflow/TestCase 会显示为 Generated Assets。先由人工发布资产，
+再在语义缺口的 Recommended Asset 中选择明确版本并执行 Add to Plan。系统会校验资产属于
+当前 Change Key、确实覆盖该 Requirement，并写入 Audit；不会自动发布或自动执行。
+
+若 OpenAPI Change 显示 Contract Mismatch，表示本次 Current Contract Fingerprint 在项目 API
+版本中没有精确对应项。请先导入/同步 Current OpenAPI，再重新分析或明确选择精确版本；系统
+不会再用相同 Service/Method/Path 的旧 Contract 代替。

@@ -114,6 +114,8 @@ class SemanticCoverageFact(BaseModel):
     ] = ()
     source_asset_type: Literal["test_case", "workflow", "test_design"]
     source_asset_id: str = Field(min_length=1, max_length=160)
+    source_asset_version: int = Field(ge=1)
+    workflow_version: int = Field(ge=1)
     test_plan_id: str | None = Field(default=None, max_length=160)
 
     @model_validator(mode="after")
@@ -149,6 +151,17 @@ class SemanticCoverageFact(BaseModel):
     def coverage_token(self) -> str:
         fingerprint = self.oracle_set_fingerprint or "unknown-oracle"
         return f"{self.semantic_value}|{self.expected_category}|{fingerprint}"
+
+    @property
+    def asset_key(self) -> tuple[str, str, int, int]:
+        """Return the immutable asset/version identity that produced this fact."""
+
+        return (
+            self.source_asset_type,
+            self.source_asset_id,
+            self.source_asset_version,
+            self.workflow_version,
+        )
 
 
 def oracle_set_fingerprint(identities: list[str] | tuple[str, ...]) -> str | None:
@@ -762,7 +775,7 @@ def semantic_coverage_tokens(
     identity: OperationIdentity,
     target: ChangeConstraintTarget,
     *,
-    asset_scope: set[tuple[str, str]] | None = None,
+    asset_scope: set[tuple[str, str, int, int]] | None = None,
 ) -> set[str]:
     """Select complete coverage for one operation/location/field and optional asset scope."""
 
@@ -774,7 +787,7 @@ def semantic_coverage_tokens(
         and same_operation_semantics(fact.operation_identity, identity)
         and fact.request_location == target.location
         and fact.field_path == field_path
-        and (asset_scope is None or (fact.source_asset_type, fact.source_asset_id) in asset_scope)
+        and (asset_scope is None or fact.asset_key in asset_scope)
     }
 
 

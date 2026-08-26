@@ -934,3 +934,13 @@ Windows 实机、长时运行、RC 观察和安全审批未完成，`GA_READY` �
 
 详细证据见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。本地门禁不替代最终
 HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据未完成，`GA_READY: NO`。
+# S47.5 Release Evidence Integrity Closure（2026-08-26）
+
+- Semantic Coverage 已与 Missing Draft 开关解耦；关闭草案生成仍计算并阻断 Plan Gap。
+- Plan Gate 使用 TestPlanItem 固定资产/Workflow 版本，TestCase 使用已发布 Version Definition。
+- Release Gate 使用本次 TestPlanRunItem 快照且只接受 Passed Item；Quarantined/Cancelled 不计覆盖。
+- Current OpenAPI Fingerprint 为权威身份，精确失败不再回退旧 Route Contract。
+- Generated Workflow/TestCase 经人工发布后可在同一 Run 显式加入计划并重新计算，不自动执行。
+- Migration Head 保持 0045；完整证据见 `docs/release/s47-5-release-evidence-integrity.md`。
+- 本地 Backend `571 passed / 3 skipped`、Frontend `215 passed`、隔离 PostgreSQL Migration
+  往返和隔离 S47 Compose Smoke 均通过；最终状态仍以精确 HEAD 远程 CI 为准。

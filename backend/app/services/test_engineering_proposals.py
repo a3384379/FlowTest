@@ -935,7 +935,8 @@ def _validate_change_regression_target(
             message="目标 API 版本已变化,必须重新审计变更",
             status_code=409,
         )
-    identity_contract = contract.model_copy(update={"service": contract.service or "unassigned"})
+    identity_service = None if frozen.service_key == "unassigned" else frozen.service_key
+    identity_contract = contract.model_copy(update={"service": identity_service})
     current_fingerprint = fingerprint_contract(identity_contract)
     if current_fingerprint != frozen.contract_fingerprint:
         raise AppError(

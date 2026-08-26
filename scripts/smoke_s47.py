@@ -424,6 +424,45 @@ def _review_and_apply_generation(
     )
 
 
+def _verify_missing_draft_toggle_gate(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    run_payload: dict[str, Any],
+) -> None:
+    gate_only_payload = {
+        **run_payload,
+        "title": "S47.5 semantic gate without draft generation",
+        "candidate_ref": "contract:s47-5-gate-only",
+        "generate_missing_tests": False,
+    }
+    gate_only = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions",
+        gate_only_payload,
+        token=token,
+    )
+    gate_only_summary = cast(dict[str, Any], gate_only["selection_summary"])
+    if (
+        gate_only.get("change_set_id") is not None
+        or gate_only.get("missing_tests") != []
+        or gate_only_summary.get("missing_test_generation") is not False
+        or int(gate_only_summary.get("unresolved_current_plan_gap_count", 0)) <= 0
+    ):
+        raise RuntimeError(
+            f"S47.5 generate_missing_tests=false bypassed semantic coverage: {gate_only}"
+        )
+    _expect_error_code(
+        lambda: client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{gate_only['id']}/approve",
+            {"note": "关闭 Draft 生成不能关闭语义门禁"},
+            token=token,
+        ),
+        "CHANGE_REGRESSION_PLAN_GAP_UNRESOLVED",
+    )
+
+
 def _verify_change_regression(
     client: APIClient,
     token: str,
@@ -496,6 +535,7 @@ def _verify_change_regression(
         run_payload,
         token=token,
     )
+    _verify_missing_draft_toggle_gate(client, token, project_id, run_payload)
     if run["selection_summary"]["asset_coverage_gap_count"] != 0:
         raise RuntimeError(f"S47.1 asset mapping was not covered: {run}")
     missing = cast(list[dict[str, Any]], run["missing_tests"])

@@ -136,98 +136,98 @@ class ChangeRegressionService:
         current_plan_scope = await self._current_plan_scope(
             selected_assets=selected_assets,
             plan_items=plan_items,
-            project_id=project_id,
         )
         missing_tests: list[dict[str, JsonValue]] = []
         semantic_scope_results: list[dict[str, JsonValue]] = []
         plan_recommendations: list[dict[str, JsonValue]] = []
-        if payload.generate_missing_tests:
-            for index, gap in enumerate(gaps, start=1):
-                resolved = await self._current_contract_for_gap(
-                    project_id, gap, selected_assets=selected_assets
+        for index, gap in enumerate(gaps, start=1):
+            resolved = await self._current_contract_for_gap(
+                project_id, gap, selected_assets=selected_assets
+            )
+            contract, identity = resolved if resolved is not None else (None, None)
+            target = change_constraint_target(gap)
+            project_values = (
+                semantic_coverage_tokens(semantic_coverage, identity, target)
+                if identity is not None and target is not None
+                else set()
+            )
+            current_plan_values = (
+                semantic_coverage_tokens(
+                    semantic_coverage,
+                    identity,
+                    target,
+                    asset_scope=current_plan_scope,
                 )
-                contract, identity = resolved if resolved is not None else (None, None)
-                target = change_constraint_target(gap)
-                project_values = (
-                    semantic_coverage_tokens(semantic_coverage, identity, target)
-                    if identity is not None and target is not None
-                    else set()
-                )
-                current_plan_values = (
-                    semantic_coverage_tokens(
-                        semantic_coverage,
-                        identity,
-                        target,
-                        asset_scope=current_plan_scope,
-                    )
-                    if identity is not None and target is not None
-                    else set()
-                )
-                content = missing_test_design(
+                if identity is not None and target is not None
+                else set()
+            )
+            content = missing_test_design(
+                gap=gap,
+                source_ref=payload.source_ref,
+                position=index,
+                current_contract=contract,
+                covered_values=project_values,
+            )
+            plan_content = missing_test_design(
+                gap=gap,
+                source_ref=payload.source_ref,
+                position=index,
+                current_contract=contract,
+                covered_values=current_plan_values,
+            )
+            semantic_scope_results.append(
+                _semantic_scope_result(
                     gap=gap,
-                    source_ref=payload.source_ref,
-                    position=index,
-                    current_contract=contract,
-                    covered_values=project_values,
+                    identity=identity,
+                    target=target,
+                    project_content=content,
+                    current_plan_content=plan_content,
+                    project_values=project_values,
+                    current_plan_values=current_plan_values,
                 )
-                plan_content = missing_test_design(
-                    gap=gap,
-                    source_ref=payload.source_ref,
-                    position=index,
-                    current_contract=contract,
-                    covered_values=current_plan_values,
+            )
+            if not content.get("scenarios"):
+                review_requirements = content.get("review_requirements")
+                unresolved = (
+                    isinstance(review_requirements, list)
+                    and "change_target_unresolved" in review_requirements
                 )
-                semantic_scope_results.append(
-                    _semantic_scope_result(
-                        gap=gap,
-                        identity=identity,
-                        target=target,
-                        project_content=content,
-                        current_plan_content=plan_content,
-                        project_values=project_values,
-                        current_plan_values=current_plan_values,
+                if unresolved and payload.generate_missing_tests:
+                    missing_tests.append(
+                        {
+                            "position": index,
+                            "change_key": str(gap.get("change_key", index)),
+                            "source_key": str(gap.get("source_key", "")),
+                            "title": f"待定位变更：{_change_label(gap, index)}",
+                            "confidence": 0.5,
+                            "content": content,
+                        }
                     )
-                )
-                if not content.get("scenarios"):
-                    review_requirements = content.get("review_requirements")
-                    if (
-                        isinstance(review_requirements, list)
-                        and "change_target_unresolved" in review_requirements
-                    ):
-                        missing_tests.append(
-                            {
-                                "position": index,
-                                "change_key": str(gap.get("change_key", index)),
-                                "source_key": str(gap.get("source_key", "")),
-                                "title": f"待定位变更：{_change_label(gap, index)}",
-                                "confidence": 0.5,
-                                "content": content,
-                            }
-                        )
-                        continue
-                    if plan_content.get("scenarios"):
-                        plan_recommendations.append(
-                            {
-                                "change_key": str(gap.get("change_key") or index),
-                                "action": "add_project_known_test_to_current_plan",
-                                "operation": identity.model_dump(mode="json") if identity else None,
-                                "target": target.model_dump(mode="json") if target else None,
-                            }
-                        )
                     continue
-                missing_tests.append(
-                    {
-                        "position": index,
-                        "change_key": str(gap.get("change_key", index)),
-                        "source_key": str(gap.get("source_key", "")),
-                        "title": (
-                            "补齐覆盖："
-                            f"{str(gap.get('label') or gap.get('source_key') or index)[:160]}"
-                        ),
-                        "confidence": 0.65 if contract is None else 0.9,
-                        "content": content,
-                    }
-                )
+                if plan_content.get("scenarios"):
+                    plan_recommendations.append(
+                        {
+                            "change_key": str(gap.get("change_key") or index),
+                            "action": "add_project_known_test_to_current_plan",
+                            "operation": identity.model_dump(mode="json") if identity else None,
+                            "target": target.model_dump(mode="json") if target else None,
+                        }
+                    )
+                continue
+            if not payload.generate_missing_tests:
+                continue
+            missing_tests.append(
+                {
+                    "position": index,
+                    "change_key": str(gap.get("change_key", index)),
+                    "source_key": str(gap.get("source_key", "")),
+                    "title": (
+                        f"补齐覆盖：{str(gap.get('label') or gap.get('source_key') or index)[:160]}"
+                    ),
+                    "confidence": 0.65 if contract is None else 0.9,
+                    "content": content,
+                }
+            )
         selection_summary: dict[str, JsonValue] = {
             "strategy": "impact_selection_intersection_v1",
             "impact_selected_asset_count": len(selected_assets),
@@ -258,6 +258,7 @@ class ChangeRegressionService:
             "semantic_coverage_scopes": cast(JsonValue, semantic_scope_results),
             "semantic_targets": cast(JsonValue, gaps),
             "current_plan_recommendations": cast(JsonValue, plan_recommendations),
+            "generated_assets": [],
         }
         fingerprint = regression_fingerprint(
             source_fingerprint=impact.run.source_fingerprint,
@@ -497,37 +498,75 @@ class ChangeRegressionService:
             str(target_id),
         )
         recommendations = gap.get("recommended_existing_assets")
-        allowed = (
-            {
-                (str(item.get("target_type")), str(item.get("target_id")))
+        recommended = (
+            [
+                item
                 for item in recommendations
                 if isinstance(item, dict)
-            }
+                and (str(item.get("target_type")), str(item.get("target_id"))) == requested
+                and (
+                    payload.item.target_version is None
+                    or _positive_int(item.get("target_version")) == payload.item.target_version
+                )
+            ]
             if isinstance(recommendations, list)
-            else set()
+            else []
         )
+        versions = {
+            (
+                _positive_int(item.get("target_version")),
+                _positive_int(item.get("workflow_version")),
+            )
+            for item in recommended
+        }
+        if len(versions) != 1:
+            raise AppError(
+                code="CHANGE_REGRESSION_PLAN_ASSET_VERSION_AMBIGUOUS",
+                message="所选测试必须绑定唯一的已发布资产版本",
+                status_code=409,
+            )
+        target_version, workflow_version = versions.pop()
+        if target_version is None or workflow_version is None:
+            raise AppError(
+                code="CHANGE_REGRESSION_PLAN_ASSET_VERSION_AMBIGUOUS",
+                message="所选测试缺少可验证的固定版本",
+                status_code=409,
+            )
         selected = {
             (str(item.get("target_type")), str(item.get("target_id")))
             for item in run.selected_assets
             if isinstance(item, dict)
         }
-        if requested not in allowed or requested not in selected:
+        generated = _generated_asset_scope(run.selection_summary, str(gap.get("change_key") or ""))
+        if requested not in selected and requested not in generated:
             raise AppError(
                 code="CHANGE_REGRESSION_PLAN_ASSET_MISMATCH",
                 message="所选测试不属于当前影响范围，或不能覆盖指定语义缺口",
                 status_code=409,
             )
+        pinned_item = payload.item.model_copy(
+            update={
+                "target_version": target_version,
+                "workflow_version": workflow_version if requested[0] == "workflow" else None,
+            }
+        )
         await TestPlanService(self._session).add_item(
             actor=actor,
             project_id=project_id,
             plan_id=run.test_plan_id,
-            item=payload.item,
+            item=pinned_item,
         )
         run = await self._repository.get_run_for_update(run_id)
         if run is None:
             raise AppError(
                 code="CHANGE_REGRESSION_NOT_FOUND", message="变更回归运行不存在", status_code=404
             )
+        _mark_generated_asset_added(
+            run,
+            requested=requested,
+            target_version=target_version,
+            workflow_version=workflow_version,
+        )
         await self._recalculate_plan_gaps(run)
         self._audit.record(
             actor_user_id=actor.id,
@@ -539,6 +578,9 @@ class ChangeRegressionService:
                 "gap_key": payload.gap_key,
                 "target_type": requested[0],
                 "target_id": requested[1],
+                "target_version": target_version,
+                "workflow_version": workflow_version,
+                "generated_asset": requested in generated,
                 "automatic_execute": False,
             },
         )
@@ -609,7 +651,6 @@ class ChangeRegressionService:
         current_plan_scope = await self._current_plan_scope(
             selected_assets=cast(list_type[dict[str, JsonValue]], run.selected_assets),
             plan_items=plan_items,
-            project_id=project_id,
         )
         project_tokens = semantic_coverage_tokens(semantic_coverage, identity, target)
         plan_tokens = semantic_coverage_tokens(
@@ -828,7 +869,12 @@ class ChangeRegressionService:
         await self._session.commit()
         return await self._required_bundle(run.id)
 
-    async def _recalculate_plan_gaps(self, run: ChangeRegressionRun) -> dict[str, JsonValue]:
+    async def _recalculate_plan_gaps(
+        self,
+        run: ChangeRegressionRun,
+        *,
+        use_execution_evidence: bool = False,
+    ) -> dict[str, JsonValue]:
         summary = cast(dict[str, JsonValue], dict(run.selection_summary))
         raw_scopes = summary.get("semantic_coverage_scopes")
         scopes = (
@@ -837,18 +883,26 @@ class ChangeRegressionService:
             else []
         )
         facts = await self._existing_semantic_coverage(run.project_id)
-        plan_items = list(
-            (
-                await self._session.scalars(
-                    select(TestPlanItem).where(TestPlanItem.test_plan_id == run.test_plan_id)
-                )
-            ).all()
-        )
-        plan_scope = await self._current_plan_scope(
-            selected_assets=cast(list_type[dict[str, JsonValue]], run.selected_assets),
-            plan_items=plan_items,
-            project_id=run.project_id,
-        )
+        selected_assets = _coverage_selected_assets(run)
+        if use_execution_evidence:
+            plan_scope = await self._test_plan_run_scope(
+                selected_assets=selected_assets,
+                test_plan_run_id=run.test_plan_run_id,
+            )
+            coverage_basis = "test_plan_run"
+        else:
+            plan_items = list(
+                (
+                    await self._session.scalars(
+                        select(TestPlanItem).where(TestPlanItem.test_plan_id == run.test_plan_id)
+                    )
+                ).all()
+            )
+            plan_scope = await self._current_plan_scope(
+                selected_assets=selected_assets,
+                plan_items=plan_items,
+            )
+            coverage_basis = "test_plan"
         waivers = await self._repository.list_waivers(run.id)
         now = datetime.now(UTC)
         gap_details: list[dict[str, JsonValue]] = []
@@ -982,6 +1036,10 @@ class ChangeRegressionService:
                     ],
                 ),
                 "plan_gate_evaluated_at": now.isoformat(),
+                "semantic_coverage_basis": coverage_basis,
+                "semantic_coverage_test_plan_run_id": (
+                    str(run.test_plan_run_id) if use_execution_evidence else None
+                ),
             }
         )
         run.selection_summary = summary
@@ -1092,6 +1150,13 @@ class ChangeRegressionService:
                 )
                 materialized_id = bundle_result.test_design_id
                 item.materialized_resource_type = "test_design_bundle"
+                _record_generated_assets(
+                    run,
+                    change_key=_change_key_for_item(change_set, item),
+                    item_id=item.id,
+                    workflow_ids=bundle_result.workflow_ids,
+                    test_case_ids=bundle_result.test_case_ids,
+                )
             item.materialized_resource_id = materialized_id
         item.proposed_content = document.model_dump(mode="json")
         item.review_status = "accepted" if decision == "accept" else "rejected"
@@ -1374,7 +1439,7 @@ class ChangeRegressionService:
             raise AppError(
                 code="CHANGE_REGRESSION_NOT_FOUND", message="变更回归运行不存在", status_code=404
             )
-        plan_gate = await self._recalculate_plan_gaps(run)
+        plan_gate = await self._recalculate_plan_gaps(run, use_execution_evidence=True)
         if _json_int(plan_gate.get("unresolved_current_plan_gap_count")) > 0:
             run.status = "blocked"
             run.evidence = {
@@ -1646,12 +1711,15 @@ class ChangeRegressionService:
     async def _existing_semantic_coverage(
         self, project_id: UUID
     ) -> list_type[SemanticCoverageFact]:
-        """Extract only executable workflow facts with an operation identity and oracle."""
+        """Extract immutable facts for every published asset version in the project."""
 
         test_cases = list_type(
             (
                 await self._session.scalars(
-                    select(TestCase).where(TestCase.project_id == project_id)
+                    select(TestCase).where(
+                        TestCase.project_id == project_id,
+                        TestCase.current_version.is_not(None),
+                    )
                 )
             ).all()
         )
@@ -1665,28 +1733,64 @@ class ChangeRegressionService:
                 )
             ).all()
         )
+        workflow_ids = [workflow.id for workflow in workflows]
+        workflow_versions = (
+            list_type(
+                (
+                    await self._session.scalars(
+                        select(WorkflowVersion).where(WorkflowVersion.workflow_id.in_(workflow_ids))
+                    )
+                ).all()
+            )
+            if workflow_ids
+            else []
+        )
+        case_ids = [case.id for case in test_cases]
+        case_versions = (
+            list_type(
+                (
+                    await self._session.scalars(
+                        select(TestCaseVersion).where(TestCaseVersion.test_case_id.in_(case_ids))
+                    )
+                ).all()
+            )
+            if case_ids
+            else []
+        )
         facts: list_type[SemanticCoverageFact] = []
-        workflows_by_id = {workflow.id: workflow for workflow in workflows}
-        for case in test_cases:
-            workflow_id = _test_case_workflow_id(case.draft_definition)
-            workflow = workflows_by_id.get(workflow_id) if workflow_id is not None else None
-            if workflow is None:
+        cases_by_id = {case.id: case for case in test_cases}
+        versions_by_ref = {
+            (version.workflow_id, version.version): version for version in workflow_versions
+        }
+        for case_version in sorted(
+            case_versions, key=lambda item: (str(item.test_case_id), item.version)
+        ):
+            case = cases_by_id.get(case_version.test_case_id)
+            workflow_ref = _test_case_workflow_ref(case_version.definition)
+            workflow_version = versions_by_ref.get(workflow_ref) if workflow_ref else None
+            if case is None or workflow_version is None:
                 continue
             facts.extend(
                 await self._workflow_semantic_facts(
                     project_id=project_id,
-                    workflow=workflow,
+                    workflow_definition=workflow_version.definition,
                     source_asset_type="test_case",
                     source_asset_id=case.id,
+                    source_asset_version=case_version.version,
+                    workflow_version=workflow_version.version,
                 )
             )
-        for workflow in workflows:
+        for workflow_version in sorted(
+            workflow_versions, key=lambda item: (str(item.workflow_id), item.version)
+        ):
             facts.extend(
                 await self._workflow_semantic_facts(
                     project_id=project_id,
-                    workflow=workflow,
+                    workflow_definition=workflow_version.definition,
                     source_asset_type="workflow",
-                    source_asset_id=workflow.id,
+                    source_asset_id=workflow_version.workflow_id,
+                    source_asset_version=workflow_version.version,
+                    workflow_version=workflow_version.version,
                 )
             )
         return facts
@@ -1695,21 +1799,12 @@ class ChangeRegressionService:
         self,
         *,
         project_id: UUID,
-        workflow: Workflow,
+        workflow_definition: dict[str, Any],
         source_asset_type: Literal["test_case", "workflow"],
         source_asset_id: UUID,
+        source_asset_version: int,
+        workflow_version: int,
     ) -> list_type[SemanticCoverageFact]:
-        if workflow.current_version is None:
-            return []
-        published = await self._session.scalar(
-            select(WorkflowVersion).where(
-                WorkflowVersion.workflow_id == workflow.id,
-                WorkflowVersion.version == workflow.current_version,
-            )
-        )
-        if published is None:
-            return []
-        workflow_definition = published.definition
         facts: list_type[SemanticCoverageFact] = []
         for raw_node in _workflow_api_nodes(workflow_definition):
             config = _mapping(raw_node.get("config"))
@@ -1751,6 +1846,8 @@ class ChangeRegressionService:
                     oracle_reachability=oracle_reachability,
                     source_asset_type=source_asset_type,
                     source_asset_id=str(source_asset_id),
+                    source_asset_version=source_asset_version,
+                    workflow_version=workflow_version,
                 )
             )
         return facts
@@ -1760,43 +1857,123 @@ class ChangeRegressionService:
         *,
         selected_assets: list_type[dict[str, JsonValue]],
         plan_items: list_type[TestPlanItem],
-        project_id: UUID,
-    ) -> set[tuple[str, str]]:
+    ) -> set[tuple[str, str, int, int]]:
+        """Resolve plan coverage from the immutable versions pinned on each plan item."""
+
         selected = {
             (str(asset.get("target_type")), str(asset.get("target_id")))
             for asset in selected_assets
         }
-        scope: set[tuple[str, str]] = set()
-        case_ids = [item.target_id for item in plan_items if item.target_type == "case"]
-        cases = (
+        scope: set[tuple[str, str, int, int]] = set()
+        case_refs = {
+            (item.target_id, item.target_version)
+            for item in plan_items
+            if item.target_type == "case"
+        }
+        case_versions = (
             list_type(
                 (
                     await self._session.scalars(
-                        select(TestCase).where(
-                            TestCase.project_id == project_id,
-                            TestCase.id.in_(case_ids),
+                        select(TestCaseVersion).where(
+                            TestCaseVersion.test_case_id.in_([case_id for case_id, _ in case_refs])
                         )
                     )
                 ).all()
             )
-            if case_ids
+            if case_refs
             else []
         )
-        cases_by_id = {case.id: case for case in cases}
+        versions_by_ref = {
+            (version.test_case_id, version.version): version
+            for version in case_versions
+            if (version.test_case_id, version.version) in case_refs
+        }
         for item in plan_items:
             if item.target_type == "workflow":
                 key = ("workflow", str(item.target_id))
-                if key in selected:
-                    scope.add(key)
+                if key in selected and item.workflow_version is not None:
+                    scope.add(
+                        (
+                            "workflow",
+                            str(item.target_id),
+                            item.target_version,
+                            item.workflow_version,
+                        )
+                    )
                 continue
             if item.target_type != "case":
                 continue
             case_key = ("test_case", str(item.target_id))
-            case = cases_by_id.get(item.target_id)
-            workflow_id = _test_case_workflow_id(case.draft_definition) if case else None
-            workflow_key = ("workflow", str(workflow_id)) if workflow_id else None
-            if case_key in selected or (workflow_key is not None and workflow_key in selected):
-                scope.add(case_key)
+            version = versions_by_ref.get((item.target_id, item.target_version))
+            workflow_ref = _test_case_workflow_ref(version.definition) if version else None
+            workflow_key = ("workflow", str(workflow_ref[0])) if workflow_ref else None
+            if workflow_ref is not None and (
+                case_key in selected or (workflow_key is not None and workflow_key in selected)
+            ):
+                scope.add(
+                    (
+                        "test_case",
+                        str(item.target_id),
+                        item.target_version,
+                        workflow_ref[1],
+                    )
+                )
+        return scope
+
+    async def _test_plan_run_scope(
+        self,
+        *,
+        selected_assets: list_type[dict[str, JsonValue]],
+        test_plan_run_id: UUID | None,
+    ) -> set[tuple[str, str, int, int]]:
+        """Resolve release evidence only from passed immutable run-item snapshots."""
+
+        if test_plan_run_id is None:
+            return set()
+        run_items = list_type(
+            (
+                await self._session.scalars(
+                    select(TestPlanRunItem).where(
+                        TestPlanRunItem.test_plan_run_id == test_plan_run_id,
+                        TestPlanRunItem.status == "passed",
+                    )
+                )
+            ).all()
+        )
+        selected = {
+            (str(asset.get("target_type")), str(asset.get("target_id")))
+            for asset in selected_assets
+        }
+        scope: set[tuple[str, str, int, int]] = set()
+        for item in run_items:
+            if item.target_type == "workflow":
+                if ("workflow", str(item.target_id)) in selected:
+                    scope.add(
+                        (
+                            "workflow",
+                            str(item.target_id),
+                            item.target_version,
+                            item.workflow_version,
+                        )
+                    )
+                continue
+            if item.target_type != "case":
+                continue
+            definition = _mapping(item.target_snapshot.get("definition"))
+            workflow_ref = _test_case_workflow_ref(definition)
+            if workflow_ref is None or workflow_ref != (item.workflow_id, item.workflow_version):
+                continue
+            case_key = ("test_case", str(item.target_id))
+            workflow_key = ("workflow", str(item.workflow_id))
+            if case_key in selected or workflow_key in selected:
+                scope.add(
+                    (
+                        "test_case",
+                        str(item.target_id),
+                        item.target_version,
+                        item.workflow_version,
+                    )
+                )
         return scope
 
     async def _current_contract_for_gap(
@@ -1975,7 +2152,8 @@ class ChangeRegressionService:
                 contract = OperationContract.model_validate(version.canonical_contract)
             except ValueError:
                 return None
-            contract = contract.model_copy(update={"service": service_key})
+            if definition.service_id is not None:
+                contract = contract.model_copy(update={"service": service_key})
         else:
             contract = await TestEngineeringService(self._session).contract_for_api(
                 project_id=project_id,
@@ -2131,6 +2309,13 @@ def _selected_operation_matches(
     identity, _ = resolved
     if not _operation_matches_route(identity, gap):
         return False
+    current_fingerprint = gap.get("current_contract_fingerprint")
+    if (
+        isinstance(current_fingerprint, str)
+        and current_fingerprint
+        and current_fingerprint != identity.contract_fingerprint
+    ):
+        return False
     if frozen_identity is not None and same_operation_semantics(identity, frozen_identity):
         return True
     service_key = gap.get("service_key")
@@ -2156,15 +2341,17 @@ def _select_current_operation(
     gap: dict[str, JsonValue],
 ) -> tuple[OperationContract, OperationIdentity] | None:
     fingerprint = gap.get("current_contract_fingerprint")
-    if isinstance(fingerprint, str):
+    if isinstance(fingerprint, str) and fingerprint:
         matches = [
             item
             for item in current
             if item[0].contract_fingerprint == fingerprint
             and _operation_matches_route(item[0], gap)
         ]
-        if matches:
-            return _unique_current_operation(matches)
+        # An OpenAPI current-contract identity is authoritative. Falling back to
+        # a route-equivalent older contract would generate and release against
+        # the wrong Oracle while remaining internally self-consistent.
+        return _unique_current_operation(matches)
     service_key = gap.get("service_key")
     if isinstance(service_key, str) and service_key:
         matches = [
@@ -2403,6 +2590,132 @@ def _frozen_operation(change_set: AIChangeSet, item: AIChangeItem) -> OperationI
         return OperationIdentity.model_validate(operation)
     except ValueError:
         return None
+
+
+def _change_key_for_item(change_set: AIChangeSet, item: AIChangeItem) -> str:
+    bindings = change_set.source_snapshot.get("item_bindings")
+    if not isinstance(bindings, list):
+        return ""
+    binding = next(
+        (
+            entry
+            for entry in bindings
+            if isinstance(entry, dict) and entry.get("item_id") == str(item.id)
+        ),
+        None,
+    )
+    return str(binding.get("change_key") or "") if isinstance(binding, dict) else ""
+
+
+def _record_generated_assets(
+    run: ChangeRegressionRun,
+    *,
+    change_key: str,
+    item_id: UUID,
+    workflow_ids: list[UUID],
+    test_case_ids: list[UUID],
+) -> None:
+    summary = cast(dict[str, JsonValue], dict(run.selection_summary))
+    raw_existing = summary.get("generated_assets")
+    existing = (
+        [cast(dict[str, JsonValue], dict(item)) for item in raw_existing if isinstance(item, dict)]
+        if isinstance(raw_existing, list)
+        else []
+    )
+    generated: list[dict[str, JsonValue]] = [
+        {
+            "change_key": change_key,
+            "source_item_id": str(item_id),
+            "target_type": asset_type,
+            "target_id": str(asset_id),
+            "status": "draft",
+        }
+        for asset_type, asset_ids in (
+            ("workflow", workflow_ids),
+            ("test_case", test_case_ids),
+        )
+        for asset_id in asset_ids
+    ]
+    summary["generated_assets"] = cast(
+        JsonValue,
+        _deduplicate_generated_assets([*existing, *generated]),
+    )
+    run.selection_summary = summary
+
+
+def _deduplicate_generated_assets(
+    assets: list[dict[str, JsonValue]],
+) -> list[dict[str, JsonValue]]:
+    by_key: dict[tuple[str, str], dict[str, JsonValue]] = {}
+    for asset in assets:
+        key = (str(asset.get("target_type") or ""), str(asset.get("target_id") or ""))
+        if all(key):
+            by_key[key] = asset
+    return [by_key[key] for key in sorted(by_key)]
+
+
+def _generated_asset_scope(summary: dict[str, Any], change_key: str) -> set[tuple[str, str]]:
+    assets = summary.get("generated_assets")
+    if not isinstance(assets, list):
+        return set()
+    return {
+        (str(asset.get("target_type")), str(asset.get("target_id")))
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("change_key") == change_key
+    }
+
+
+def _coverage_selected_assets(run: ChangeRegressionRun) -> list[dict[str, JsonValue]]:
+    selected = [
+        cast(dict[str, JsonValue], dict(asset))
+        for asset in run.selected_assets
+        if isinstance(asset, dict)
+    ]
+    generated = run.selection_summary.get("generated_assets")
+    if isinstance(generated, list):
+        selected.extend(
+            {
+                "target_type": str(asset.get("target_type")),
+                "target_id": str(asset.get("target_id")),
+                "source": "generated",
+            }
+            for asset in generated
+            if isinstance(asset, dict)
+        )
+    by_key = {
+        (str(asset.get("target_type")), str(asset.get("target_id"))): asset for asset in selected
+    }
+    return [by_key[key] for key in sorted(by_key)]
+
+
+def _mark_generated_asset_added(
+    run: ChangeRegressionRun,
+    *,
+    requested: tuple[str, str],
+    target_version: int,
+    workflow_version: int,
+) -> None:
+    summary = cast(dict[str, JsonValue], dict(run.selection_summary))
+    raw_assets = summary.get("generated_assets")
+    if not isinstance(raw_assets, list):
+        return
+    updated: list[dict[str, JsonValue]] = []
+    for raw_asset in raw_assets:
+        if not isinstance(raw_asset, dict):
+            continue
+        asset = cast(dict[str, JsonValue], dict(raw_asset))
+        key = (str(asset.get("target_type")), str(asset.get("target_id")))
+        if key == requested:
+            asset.update(
+                {
+                    "status": "added_to_plan",
+                    "target_version": target_version,
+                    "workflow_version": workflow_version,
+                }
+            )
+        updated.append(asset)
+    summary["generated_assets"] = cast(JsonValue, updated)
+    run.selection_summary = summary
 
 
 def _mapping(value: object) -> dict[str, Any]:
@@ -2656,6 +2969,8 @@ def _workflow_node_facts(
     ],
     source_asset_type: Literal["test_case", "workflow"],
     source_asset_id: str,
+    source_asset_version: int,
+    workflow_version: int,
 ) -> list[SemanticCoverageFact]:
     values: list[tuple[Literal["path", "query", "header", "cookie", "body"], str, object]] = []
     variables = definition.get("variables")
@@ -2692,6 +3007,8 @@ def _workflow_node_facts(
             oracle_reachability=oracle_reachability,
             source_asset_type=source_asset_type,
             source_asset_id=source_asset_id,
+            source_asset_version=source_asset_version,
+            workflow_version=workflow_version,
         )
         for location, field_path, value in values
     ]
@@ -3021,13 +3338,23 @@ def _recommended_assets(
     if identity is None or target is None:
         return []
     assets = {
-        (fact.source_asset_type, fact.source_asset_id)
+        (
+            fact.source_asset_type,
+            fact.source_asset_id,
+            fact.source_asset_version,
+            fact.workflow_version,
+        )
         for fact in facts
         if requirement in semantic_coverage_tokens([fact], identity, target)
     }
     return [
-        {"target_type": asset_type, "target_id": asset_id}
-        for asset_type, asset_id in sorted(assets)
+        {
+            "target_type": asset_type,
+            "target_id": asset_id,
+            "target_version": source_version,
+            "workflow_version": workflow_version,
+        }
+        for asset_type, asset_id, source_version, workflow_version in sorted(assets)
     ]
 
 
@@ -3036,14 +3363,14 @@ def _has_partial_coverage(
     identity: OperationIdentity,
     target: ChangeConstraintTarget,
     requirement: str,
-    asset_scope: set[tuple[str, str]],
+    asset_scope: set[tuple[str, str, int, int]],
 ) -> bool:
     try:
         semantic_value, category, _ = requirement.rsplit("|", 2)
     except ValueError:
         return False
     for fact in facts:
-        if (fact.source_asset_type, fact.source_asset_id) not in asset_scope:
+        if fact.asset_key not in asset_scope:
             continue
         if fact.request_location != target.location or fact.field_path != ".".join(
             target.field_path
@@ -3061,7 +3388,7 @@ def _coverage_identity_mismatch_status(
     identity: OperationIdentity,
     target: ChangeConstraintTarget,
     requirement: str,
-    asset_scope: set[tuple[str, str]] | None,
+    asset_scope: set[tuple[str, str, int, int]] | None,
 ) -> Literal["VERSION_MISMATCH", "CONTRACT_MISMATCH"] | None:
     candidates = [
         fact
@@ -3070,7 +3397,7 @@ def _coverage_identity_mismatch_status(
         and fact.coverage_token == requirement
         and fact.request_location == target.location
         and fact.field_path == ".".join(target.field_path)
-        and (asset_scope is None or (fact.source_asset_type, fact.source_asset_id) in asset_scope)
+        and (asset_scope is None or fact.asset_key in asset_scope)
     ]
     if any(
         _same_definition_different_version(fact.operation_identity, identity) for fact in candidates
@@ -3089,7 +3416,7 @@ def _current_gap_status(
     identity: OperationIdentity | None,
     target: ChangeConstraintTarget | None,
     requirement: str,
-    asset_scope: set[tuple[str, str]],
+    asset_scope: set[tuple[str, str, int, int]],
     matching_waiver: SemanticGapWaiver | None,
     covered: bool,
 ) -> str:
@@ -3237,6 +3564,21 @@ def _test_case_workflow_id(definition: dict[str, Any]) -> UUID | None:
         return UUID(str(definition["workflow_id"]))
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
+
+
+def _test_case_workflow_ref(definition: dict[str, Any]) -> tuple[UUID, int] | None:
+    try:
+        workflow_id = UUID(str(definition["workflow_id"]))
+        workflow_version = definition["workflow_version"]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    if (
+        not isinstance(workflow_version, int)
+        or isinstance(workflow_version, bool)
+        or workflow_version < 1
+    ):
+        return None
+    return workflow_id, workflow_version
 
 
 def _merge_workflow_semantics(coverage: dict[str, set[str]], definition: dict[str, Any]) -> None:

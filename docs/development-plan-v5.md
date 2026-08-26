@@ -290,3 +290,9 @@ Waiver 支持不可覆盖的 Revision/Supersede；Workflow Assert 必须在执�
 Bundle 同步。详细见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。
 Pairwise 仍为 Bounded，State Model 仍为 Unavailable/Experimental，Knowledge Graph 仍为
 Basic，Key Rotation 仍为 Planned Metadata Only，`GA_READY: NO`。
+# S47.5 — Release Evidence Integrity Closure
+
+S47.5 关闭 Missing Draft Toggle、Plan 固定版本、RunItem Release Evidence、Current Contract
+Fingerprint 和 Generated Asset 同 Run 闭环问题。它不新增 V5 大功能，Migration Head 保持
+0045。完成条件以精确 HEAD 的 Backend、Frontend、Security、Compose、Upgrade 和 Windows
+Standalone 工作流为准，PR #40 继续保持 Draft。

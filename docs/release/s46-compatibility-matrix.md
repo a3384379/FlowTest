@@ -54,3 +54,6 @@
 - 较新迁移执行后不能只切换旧镜像完成安全回滚；必须先停止写入、处理 Worker/Lease，再执行兼容的
   downgrade 或恢复完整备份。
 - 本地 macOS/ARM、CI 和短时 Soak 不等于 Windows x64 公司云桌面 72 小时试点或生产容量承诺。
+| S47.5 Plan/Run Evidence | 固定 TestPlanItem 版本；Release 使用 Passed RunItem Snapshot | Supported |
+| S47.5 Current Contract Binding | OpenAPI Current Fingerprint 精确匹配；旧 Route 不回退 | Supported |
+| Generated Asset Same-Run | 人工发布后显式加入；不自动 Publish/Execute | Supported |
