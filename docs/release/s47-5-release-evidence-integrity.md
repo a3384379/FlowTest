@@ -94,6 +94,8 @@ Operation Identity 仍使用 `service_key=unassigned`，避免同一 OpenAPI 因
 - Backend：Ruff、Mypy、Import Linter 通过；`571 passed / 3 skipped`，覆盖率 `90.08%`。
 - Frontend：`56` 个测试文件、`215` 个测试通过；Statements `86.15%`，生产构建通过。
 - Security：Python/PNPM 依赖审计均无已知漏洞。
+- Frontend Runtime：构建时升级 Alpine `libcrypto3/libssl3` 到仓库修复版本，不以 Grype
+  Ignore 规避可修复的 High 漏洞。
 - PostgreSQL：`0042→0043→0044→0045→0044→0045`、`downgrade base→upgrade head`
   和 `alembic check` 通过。
 - Compose：独立 Project、端口和 Volume 中 `scripts/smoke_s47.py` 通过，结束后已执行
