@@ -549,7 +549,7 @@ function TemplateDialog({
 }
 
 const fixtureImage =
-  'nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3'
+  'cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33'
 
 function templateFormValues(base?: EnvironmentTemplateVersion): TemplateForm {
   return base ? versionFormValues(base) : defaultTemplateFormValues
@@ -570,8 +570,8 @@ const defaultTemplateFormValues: TemplateForm = {
   cpu_millicores: 250,
   memory_megabytes: 128,
   pids_limit: 64,
-  user_id: 101,
-  group_id: 101,
+  user_id: 65532,
+  group_id: 65532,
 }
 
 function versionFormValues(base: EnvironmentTemplateVersion): TemplateForm {

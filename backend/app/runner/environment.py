@@ -195,6 +195,10 @@ def _service_arguments(
         "5",
         "--tmpfs",
         "/tmp:size=64m,mode=1777",  # noqa: S108 - isolated container tmpfs
+        "--tmpfs",
+        "/run:size=4m,mode=1777,noexec,nosuid",
+        "--tmpfs",
+        "/var/lib/nginx/tmp:size=16m,mode=1777,noexec,nosuid",
         "--label",
         f"flowtest.environment.instance={instance_id}",
         "--label",
