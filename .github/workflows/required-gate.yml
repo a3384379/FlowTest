@@ -13,6 +13,10 @@ permissions:
   pull-requests: read
   statuses: write
 
+concurrency:
+  group: required-gate-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   controller:
     name: Required Gate Controller
@@ -74,13 +78,25 @@ jobs:
       - name: Complete trusted Required Gate status
         if: always()
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           state='failure'
           description='路径选择的子门禁失败'
-          if [[ "${GATE_OUTCOME}" == 'success' ]]; then
+          metadata_current='true'
+          if [[ -n "${PR_NUMBER}" ]]; then
+            current_refs="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq '[.base.sha, .head.sha] | join(" ")')"
+            if [[ "${current_refs}" != "${BASE_SHA} ${HEAD_SHA}" ]]; then
+              metadata_current='false'
+              description='PR 基线或 Head 已变更'
+            fi
+          fi
+          if [[ "${GATE_OUTCOME}" == 'success' && "${metadata_current}" == 'true' ]]; then
             state='success'
             description='路径选择的子门禁全部成功'
           fi
