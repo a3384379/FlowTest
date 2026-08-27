@@ -26,6 +26,20 @@ def _keys(plan) -> set[str]:
     return {spec.key for spec in plan.required}
 
 
+class _CheckClient:
+    def __init__(self, check_runs: list[dict], workflow_runs: dict[int, dict]) -> None:
+        self._check_runs = check_runs
+        self._workflow_runs = workflow_runs
+        self.workflow_run_calls: list[int] = []
+
+    def check_runs(self, _sha: str) -> list[dict]:
+        return self._check_runs
+
+    def workflow_run(self, run_id: int) -> dict:
+        self.workflow_run_calls.append(run_id)
+        return self._workflow_runs[run_id]
+
+
 def test_required_gate_marks_irrelevant_checks_as_no_op() -> None:
     plan = required_gate.build_gate_plan(["docs/release/notes.md"])
 
@@ -69,6 +83,79 @@ def test_required_gate_allows_normal_pr_and_trusted_push_paths() -> None:
         ["backend/app/services/projects.py"], "pull_request_target"
     )
     required_gate.enforce_trusted_governance([".github/workflows/required-gate.yml"], "push")
+
+
+def test_required_gate_skips_newer_same_name_check_from_untrusted_app() -> None:
+    sha = "trusted-head"
+    workflow_path = ".github/workflows/security-ci.yml"
+    client = _CheckClient(
+        check_runs=[
+            {
+                "id": 200,
+                "name": "source-and-images",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://github.com/a3384379/FlowTest/actions/runs/2001/job/20",
+                "app": {"id": 99999},
+            },
+            {
+                "id": 100,
+                "name": "source-and-images",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://github.com/a3384379/FlowTest/actions/runs/1001/job/10",
+                "app": {"id": required_gate.GITHUB_ACTIONS_APP_ID},
+            },
+        ],
+        workflow_runs={
+            1001: {
+                "path": workflow_path,
+                "event": "pull_request",
+                "head_sha": sha,
+            },
+            2001: {
+                "path": workflow_path,
+                "event": "pull_request",
+                "head_sha": sha,
+            },
+        },
+    )
+    security_spec = next(spec for spec in required_gate.GATE_SPECS if spec.key == "security")
+
+    states = required_gate._check_states(client, (security_spec,), sha, {})
+
+    assert states == {"Security CI/source-and-images": "success"}
+    assert client.workflow_run_calls == [1001]
+
+
+def test_required_gate_fails_closed_without_github_actions_check() -> None:
+    sha = "trusted-head"
+    client = _CheckClient(
+        check_runs=[
+            {
+                "id": 200,
+                "name": "source-and-images",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://github.com/a3384379/FlowTest/actions/runs/2001/job/20",
+                "app": {"id": 99999},
+            },
+            {
+                "id": 100,
+                "name": "source-and-images",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://github.com/a3384379/FlowTest/actions/runs/1001/job/10",
+            },
+        ],
+        workflow_runs={},
+    )
+    security_spec = next(spec for spec in required_gate.GATE_SPECS if spec.key == "security")
+
+    states = required_gate._check_states(client, (security_spec,), sha, {})
+
+    assert states == {"Security CI/source-and-images": "pending"}
+    assert client.workflow_run_calls == []
 
 
 def test_required_gate_path_rules_match_child_workflow_triggers() -> None:
