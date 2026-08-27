@@ -6,11 +6,13 @@
 - 开发分支：`codex/v5.0`。
 - 开始 SHA：`793f00f6b3b47b808b703011b0bef0b14a425860`。
 - 同步的 main Base：`c1b688df64f41a283d5261455a0116a8de04c867`。
+- 最终 Branch HEAD：`5c056d2ad37affc2e60f74a910e44364401e0292`。
 - Pull Request：[#40](https://github.com/a3384379/FlowTest/pull/40)。
 - Migration Head：`20260823_0045`。
-- 最终 Branch HEAD、Merge Commit 和合并后 main CI 由 PR #40 的
-  `V5 autonomous acceptance evidence` 评论和任务最终报告记录。Git 提交不在自身内写入
-  一个伪造的“自引用最终 SHA”。
+- 合并方式：Squash Merge；合并时间：`2026-08-27T08:14:24Z`。
+- V5 Merge Commit：`68fbde4b634589d13f263ed0d5a7827ca79aa3b0`。
+- PR Head 与 V5 Merge Commit 的 Tree 均为
+  `bb46985409592bd3d18cb4880c377f64fc05f82a`，内容完全一致。
 
 S47.7 不扩展 V5 功能面，只完成最终需求核对、独立自动审计、缺陷修复、
 真实用户链路验收和合并收口。开发代码不等待人工 Reviewer，但不绕过分支保护、
@@ -116,12 +118,31 @@ Release Evidence 基础为 `runtime_node_evidence`，没有使用 Waiver。运�
   `80.11%`、Functions `85.27%`、Lines `88.37%`；Build/Audit 通过。
 - PostgreSQL：Empty→0045、0045→0044→0045、Current 和 Alembic Check 通过，无 Drift。
 - Compose/Playwright：独立端口与数据卷的 `S14→S47.7→S14` 通过，资源已精确清理。
-- Remote CI：仓库文档提交时尚未产生自身的最终 SHA；不预写成 PASS。推送后的精确
-  Run ID/SHA/Conclusion/URL 固化在 PR #40 验收证据评论和最终任务报告中。
+- PR Head `5c056d2ad37affc2e60f74a910e44364401e0292` 的全部 Required CI 通过：
 
-在 P0/P1 清零、本地门禁全通过、精确 HEAD 的 Required CI 全绿、Base 未过期且
-GitHub 报告 Mergeable 后，将 PR #40 从 Draft 转为 Ready，再依仓库策略 Squash Merge。
-不使用 Admin/Force Merge，不降低分支保护。如 main CI 失败，只通过新分支和 PR 修复。
+| Workflow | Run ID | Conclusion |
+|---|---:|---|
+| Backend CI | [33050495590](https://github.com/a3384379/FlowTest/actions/runs/33050495590) | success |
+| Frontend CI | [33050495572](https://github.com/a3384379/FlowTest/actions/runs/33050495572) | success |
+| Security CI | [33050495584](https://github.com/a3384379/FlowTest/actions/runs/33050495584) | success |
+| Compose Smoke Test | [33050495630](https://github.com/a3384379/FlowTest/actions/runs/33050495630) | success |
+| V2 to V3 Upgrade CI | [33050495568](https://github.com/a3384379/FlowTest/actions/runs/33050495568) | success |
+| Standalone Windows Bundle | [33050495648](https://github.com/a3384379/FlowTest/actions/runs/33050495648) | success |
+
+- V5 Merge Commit `68fbde4b634589d13f263ed0d5a7827ca79aa3b0` 的全部 main Push CI 通过：
+
+| Workflow | Run ID | Conclusion |
+|---|---:|---|
+| Backend CI | [33053160539](https://github.com/a3384379/FlowTest/actions/runs/33053160539) | success |
+| Frontend CI | [33053160475](https://github.com/a3384379/FlowTest/actions/runs/33053160475) | success |
+| Security CI | [33053160524](https://github.com/a3384379/FlowTest/actions/runs/33053160524) | success |
+| Compose Smoke Test | [33053160493](https://github.com/a3384379/FlowTest/actions/runs/33053160493) | success |
+| V2 to V3 Upgrade CI | [33053160476](https://github.com/a3384379/FlowTest/actions/runs/33053160476) | success |
+| Standalone Windows Bundle | [33053160446](https://github.com/a3384379/FlowTest/actions/runs/33053160446) | success |
+
+P0/P1 清零、本地门禁全通过、精确 HEAD 的 Required CI 全绿、Base 未过期且
+GitHub 报告 Mergeable 后，PR #40 已从 Draft 转为 Ready，并依仓库策略 Squash Merge。
+过程未使用 Admin/Force Merge，也未降低分支保护；合并后 main CI 全部成功。
 
 ## 9. Remaining Risks 与功能判定
 
@@ -138,3 +159,7 @@ Key Rotation = Planned Metadata Only
 FlowSpec v1/v2 = Development-only / Unsupported Compatibility
 GA_READY = NO
 ```
+
+最终功能判定：V5 功能目标达到，四轮自动 Review 通过，PR #40 已合并，合并后 main
+Required CI 全部通过。V5 可作为 RC Candidate；因上述外部验证和 GA Blocker，
+`RC_READY` 与 `GA_READY` 继续为 `NO`。
