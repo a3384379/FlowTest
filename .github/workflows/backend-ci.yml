@@ -34,9 +34,7 @@ on:
       - "scripts/capacity_workflow.py"
       - "scripts/capacity_s19.py"
       - "scripts/capacity_s29.py"
-      - "scripts/required_gate.py"
       - ".github/workflows/backend-ci.yml"
-      - ".github/workflows/required-gate.yml"
   push:
     branches: [main]
     paths:
@@ -71,9 +69,7 @@ on:
       - "scripts/capacity_workflow.py"
       - "scripts/capacity_s19.py"
       - "scripts/capacity_s29.py"
-      - "scripts/required_gate.py"
       - ".github/workflows/backend-ci.yml"
-      - ".github/workflows/required-gate.yml"
   workflow_dispatch:
 
 permissions:
