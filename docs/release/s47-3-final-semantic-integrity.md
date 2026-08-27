@@ -181,3 +181,11 @@ Contract Fingerprint；条件分支 AST 仅作 supporting evidence；Workflow As
 同时补齐 Operation Selection 重生成、Waiver Revision/Supersede、0045 迁移和
 `S14→S47→S14` 顺序隔离。本文中 S14 顺序失败已有根因与修复，最终事实见
 [S47.4 最终评审修复](s47-4-final-review-fix.md)。
+
+## 20. S47.7 最终验收索引
+
+Oracle-aware Token、Current Plan Gate、Operation Identity、AST/Canonical/MultipleOf 语义继续有效。
+S47.7 在 Release 阶段将已分配 Service 收紧为 Runtime Observation 精确匹配，并确保聚焦
+Change Scenario 使用完整 Current Contract 的有效请求基线。开发代码的人工 Reviewer
+不再是合并条件；精确 HEAD 自动门禁仍为必要条件。见
+[S47.7 自主功能验收](v5-autonomous-functional-acceptance.md)。

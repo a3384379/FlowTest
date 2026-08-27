@@ -19,7 +19,7 @@ from app.core.database import get_session
 from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.main import app
-from app.models import Base, SemanticGapWaiver
+from app.models import AuditLog, Base, ReleaseDecision, SemanticGapWaiver
 from app.models import TestCase as ORMTestCase
 from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
@@ -253,6 +253,17 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert running.json()["status"] == "running"
     evidence_before = running.json()["evidence"]
     stages_before = running.json()["stages"]
+    async with context.sessions() as session:
+        release_audits_before = list(
+            (
+                await session.scalars(
+                    select(AuditLog).where(
+                        AuditLog.resource_id == UUID(run["id"]),
+                        AuditLog.action == "change_regression.release_evaluated",
+                    )
+                )
+            ).all()
+        )
     early_release = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{run['id']}/release-gate",
         headers=headers,
@@ -268,6 +279,20 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert unchanged.json()["release_decision_id"] is None
     assert unchanged.json()["evidence"] == evidence_before
     assert unchanged.json()["stages"] == stages_before
+    async with context.sessions() as session:
+        release_audits_after_pending = list(
+            (
+                await session.scalars(
+                    select(AuditLog).where(
+                        AuditLog.resource_id == UUID(run["id"]),
+                        AuditLog.action == "change_regression.release_evaluated",
+                    )
+                )
+            ).all()
+        )
+    assert [item.id for item in release_audits_after_pending] == [
+        item.id for item in release_audits_before
+    ]
     finish_request.set()
     await plan_task
     decision = await context.client.post(
@@ -284,6 +309,67 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
         "evidence",
         "release_gate",
     }
+    async with context.sessions() as session:
+        release_decision = await session.get(ReleaseDecision, UUID(final["release_decision_id"]))
+        assert release_decision is not None
+        decision_fingerprint = release_decision.fingerprint
+        matching_decisions = list(
+            (
+                await session.scalars(
+                    select(ReleaseDecision).where(
+                        ReleaseDecision.test_plan_run_id == test_plan_run_id
+                    )
+                )
+            ).all()
+        )
+        release_audits = list(
+            (
+                await session.scalars(
+                    select(AuditLog).where(
+                        AuditLog.resource_id == UUID(run["id"]),
+                        AuditLog.action == "change_regression.release_evaluated",
+                    )
+                )
+            ).all()
+        )
+    assert len(matching_decisions) == 1
+    assert len(release_audits) == len(release_audits_before) + 1
+
+    repeated = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{run['id']}/release-gate",
+        headers=headers,
+    )
+    assert repeated.status_code == 200, repeated.text
+    repeated_final = repeated.json()
+    assert repeated_final["status"] == final["status"]
+    assert repeated_final["release_decision_id"] == final["release_decision_id"]
+    assert repeated_final["evidence"] == final["evidence"]
+    assert repeated_final["stages"] == final["stages"]
+    async with context.sessions() as session:
+        repeated_decision = await session.get(ReleaseDecision, UUID(final["release_decision_id"]))
+        repeated_decisions = list(
+            (
+                await session.scalars(
+                    select(ReleaseDecision).where(
+                        ReleaseDecision.test_plan_run_id == test_plan_run_id
+                    )
+                )
+            ).all()
+        )
+        repeated_audits = list(
+            (
+                await session.scalars(
+                    select(AuditLog).where(
+                        AuditLog.resource_id == UUID(run["id"]),
+                        AuditLog.action == "change_regression.release_evaluated",
+                    )
+                )
+            ).all()
+        )
+    assert repeated_decision is not None
+    assert repeated_decision.fingerprint == decision_fingerprint
+    assert len(repeated_decisions) == 1
+    assert [item.id for item in repeated_audits] == [item.id for item in release_audits]
 
     missing = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions",

@@ -634,6 +634,24 @@ def _verify_change_regression(
             f"/projects/{project_id}/workflows/{workflow_id}/versions",
             token=token,
         )
+        client.json(
+            "POST",
+            f"/projects/{project_id}/impact/mappings",
+            {
+                "source_kind": "openapi",
+                "source_selector": "POST /tenants/{tenantId}/orders",
+                "target_type": "workflow",
+                "target_id": workflow_id,
+            },
+            token=token,
+        )
+    _verify_runtime_release_evidence(
+        client,
+        token,
+        assets,
+        run_payload,
+        mapped_workflow_id,
+    )
     scoped_payload = {
         **run_payload,
         "title": "S47.2 current TestPlan semantic scope",
@@ -661,6 +679,167 @@ def _verify_change_regression(
         raise RuntimeError(f"S47.2 current TestPlan scope was incorrect: {scoped_run}")
     _verify_current_plan_gate(client, token, project_id, scoped_run)
     return str(scoped_run["id"])
+
+
+def _verify_runtime_release_evidence(
+    client: APIClient,
+    token: str,
+    assets: dict[str, Any],
+    run_payload: dict[str, Any],
+    baseline_workflow_id: str,
+) -> None:
+    project_id = str(assets["project"]["id"])
+    runtime_plan = client.json(
+        "POST",
+        f"/projects/{project_id}/test-plans",
+        {
+            "name": f"S47.7 Runtime Evidence {secrets.token_hex(4)}",
+            "items": [
+                {
+                    "workflow_id": baseline_workflow_id,
+                    "environment_id": assets["environment"]["id"],
+                }
+            ],
+        },
+        token=token,
+    )
+    runtime_run = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions",
+        {
+            **run_payload,
+            "title": "S47.7 runtime release evidence",
+            "candidate_ref": "contract:s47-7-runtime-evidence",
+            "test_plan_id": runtime_plan["id"],
+        },
+        token=token,
+    )
+    selected = {
+        (str(asset["target_type"]), str(asset["target_id"]))
+        for asset in cast(list[dict[str, Any]], runtime_run["selected_assets"])
+    }
+    gaps = cast(
+        list[dict[str, Any]],
+        runtime_run["selection_summary"]["current_plan_gaps"],
+    )
+    if not gaps:
+        raise RuntimeError("S47.7 runtime evidence run did not identify current-plan gaps")
+    for gap in gaps:
+        recommended = next(
+            (
+                asset
+                for asset in cast(list[dict[str, Any]], gap["recommended_existing_assets"])
+                if (str(asset["target_type"]), str(asset["target_id"])) in selected
+            ),
+            None,
+        )
+        if recommended is None:
+            raise RuntimeError(f"S47.7 selected runtime asset was not recommended: {gap}")
+        runtime_run = client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{runtime_run['id']}/add-project-known-test",
+            {
+                "gap_key": gap["gap_key"],
+                "item": {
+                    "target_type": (
+                        "case" if recommended["target_type"] == "test_case" else "workflow"
+                    ),
+                    "target_id": recommended["target_id"],
+                    "target_version": recommended["target_version"],
+                    "workflow_version": recommended["workflow_version"],
+                    "environment_id": (
+                        assets["environment"]["id"]
+                        if recommended["target_type"] == "workflow"
+                        else None
+                    ),
+                    "runtime_variables": {"tenantId": "00000000-0000-4000-8000-000000000047"},
+                },
+            },
+            token=token,
+        )
+    if runtime_run["selection_summary"]["unresolved_current_plan_gap_count"] != 0:
+        raise RuntimeError(f"S47.7 add-to-plan did not close all gaps: {runtime_run}")
+    client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{runtime_run['id']}/approve",
+        {"note": "S47.7 runtime evidence assets reviewed and pinned"},
+        token=token,
+    )
+    executed = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{runtime_run['id']}/execute",
+        token=token,
+    )
+    plan_run_id = str(executed["test_plan_run_id"])
+    plan_run = _wait_for_s47_plan_run(client, token, project_id, plan_run_id)
+    if plan_run["run"]["status"] != "passed":
+        failures = [
+            {
+                "target_id": item["target_id"],
+                "status": item["status"],
+                "error_message": item["error_message"],
+            }
+            for item in cast(list[dict[str, Any]], plan_run["items"])
+            if item["status"] != "passed"
+        ]
+        raise RuntimeError(f"S47.7 runtime TestPlan execution failed: {failures}")
+    _wait_for_change_regression_evidence(
+        client,
+        token,
+        project_id,
+        str(runtime_run["id"]),
+    )
+    released = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{runtime_run['id']}/release-gate",
+        token=token,
+    )
+    plan_gate = cast(dict[str, Any], released["evidence"]["semantic_plan_gate"])
+    runtime_coverage = cast(dict[str, Any], plan_gate["runtime_coverage"])
+    released_gaps = cast(list[dict[str, Any]], plan_gate["current_plan_gaps"])
+    executed_item_count = len(cast(list[dict[str, Any]], plan_run["items"]))
+    if (
+        released["status"] != "passed"
+        or plan_gate["semantic_coverage_basis"] != "runtime_node_evidence"
+        or any(gap["coverage_status"] != "COVERED" for gap in released_gaps)
+        or int(runtime_coverage["passed_run_item_count"]) != executed_item_count
+        or int(runtime_coverage["selected_run_item_count"]) != executed_item_count
+        or int(runtime_coverage["workflow_execution_count"]) != executed_item_count
+        or int(runtime_coverage["passed_api_node_count"]) < executed_item_count
+        or int(runtime_coverage["matched_semantic_fact_count"]) < len(gaps)
+        or released["evidence"]["semantic_gap_waivers"]
+    ):
+        raise RuntimeError(f"S47.7 release did not use exact runtime node evidence: {released}")
+    repeated = client.json(
+        "POST",
+        f"/projects/{project_id}/change-regressions/{runtime_run['id']}/release-gate",
+        token=token,
+    )
+    if (
+        repeated["release_decision_id"] != released["release_decision_id"]
+        or repeated["evidence"] != released["evidence"]
+        or repeated["stages"] != released["stages"]
+    ):
+        raise RuntimeError(f"S47.7 repeated release evaluation was not stable: {repeated}")
+
+
+def _wait_for_s47_plan_run(
+    client: APIClient,
+    token: str,
+    project_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        detail = client.json(
+            "GET",
+            f"/projects/{project_id}/test-plan-runs/{run_id}",
+            token=token,
+        )
+        if detail["run"]["status"] not in {"queued", "running"}:
+            return detail
+        time.sleep(0.25)
+    raise RuntimeError("S47.7 runtime TestPlan execution timed out")
 
 
 def _verify_current_plan_gate(

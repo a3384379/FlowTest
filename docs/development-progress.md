@@ -959,3 +959,18 @@ HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据�
 - 页面展示 Runtime Node Evidence 基础、实际匹配 Fact/API Node/Execution 数量和 Replace Version 动作。
 - Migration Head 保持 `20260823_0045`；本地与远程完整门禁记录见
   [S47.6 Runtime Release Evidence Closure](release/s47-6-runtime-release-evidence.md)。
+
+# S47.7 Autonomous Functional Acceptance & Merge（2026-08-27）
+
+- 同步 `origin/main` 后完成 Requirement/Correctness/Security/User Flow 四轮独立自动审计。
+- Runtime Coverage 对已分配 Service 改为与 Observation 精确匹配；legacy `unassigned`
+  仍保留兼容语义。
+- 已完成 Release Gate 的重复评估返回同一不可变 Decision/Evidence/Stage，不被后续
+  Plan 修改或 Waiver 过期重新解释。
+- Change Regression Missing Test 仍聚焦变更字段生成，但物化请求现在保留完整
+  Current Contract 的其他必填字段；独立 Compose 中 5 个固定版本工作流实际通过。
+- Credentialed CORS 拒绝通配符、非 HTTP(S)、UserInfo、Query、Fragment 和非根 Path。
+- 独立 `S14→S47.7→S14` 通过，Release Evidence 基于 Runtime Node Observation 且无 Waiver。
+- 开发代码合并不再等待人工 Reviewer；仍必须通过本地门禁、精确 HEAD Remote CI
+  和分支保护。完整记录见
+  [V5 自主功能验收](release/v5-autonomous-functional-acceptance.md)。

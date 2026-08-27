@@ -207,3 +207,10 @@ S47.4 复审发现 S47.3 Coverage 匹配仍可跨 API Version/Contract Fingerpri
 Workflow Assert 必达性仍可制造过度覆盖。本文中旧 SHA 和 `MERGE_TO_MAIN: GO` 不再是当前
 合并证据；以 [S47.4 最终评审修复](s47-4-final-review-fix.md) 和 PR #40 的精确
 HEAD CI 证据为准。`RC_READY: NO`，`GA_READY: NO`。
+
+## S47.7 最终验收索引
+
+S47.2 的安全净化和跨层 Suppression 结论仍有效。S47.7 进一步拒绝 Credentialed
+CORS 的通配符、非 HTTP(S)、UserInfo、Query、Fragment 和非根 Path Origin。历史上
+“等待人工合并评审”的治理由 S47.7 自动审计与客观门禁取代；分支保护与安全扫描仍
+不可绕过。详见 [S47.7 记录](v5-autonomous-functional-acceptance.md)。

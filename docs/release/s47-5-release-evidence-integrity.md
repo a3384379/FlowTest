@@ -128,3 +128,11 @@ WorkflowVersion、TestCaseVersion、TestPlanItem、TestPlanRunItem 与 JSON Evid
 RC_READY: NO
 GA_READY: NO
 ```
+
+## 12. S47.7 后续收口
+
+S47.5 的 RunItem Snapshot、Current Contract Fingerprint 和 Generated Asset Same-Run 结论仍有效。
+S47.7 额外保证已分配 Service 的 Runtime Observation 精确匹配，已完成 Release Decision
+重复调用不重解释事后 Plan/Waiver，且 Missing Test 物化保留完整请求基线。
+本文历史上对 Draft/人工签署的要求由 S47.7 自动验收治理取代；`GA_READY: NO`
+不变。见 [S47.7 记录](v5-autonomous-functional-acceptance.md)。

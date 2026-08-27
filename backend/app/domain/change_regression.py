@@ -31,6 +31,7 @@ from app.domain.test_engineering import (
     GenerationPolicy,
     OperationContract,
     TestEngineeringEngine,
+    rebase_scenario_on_contract_request,
 )
 
 ChangeRegressionStatus = Literal[
@@ -297,6 +298,11 @@ def missing_test_design(
         policy=GenerationPolicy(max_scenarios=30, pairwise_enabled=False),
     )
     scenarios = _change_scenarios(generated, gap)
+    if current_contract is not None and not unresolved_target:
+        scenarios = [
+            rebase_scenario_on_contract_request(contract=current_contract, scenario=scenario)
+            for scenario in scenarios
+        ]
     candidate_oracles = _extend_oracle_scope(generated, scenarios)
     scenarios = _exclude_covered_scenarios(
         scenarios,

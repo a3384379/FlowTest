@@ -151,3 +151,10 @@ GA_READY: NO
 S47.4 的指定修复和精确 SHA CI 证据有效，但后续代码复审发现 Missing Draft Toggle、固定计划
 版本、RunItem Release Evidence 与 Current Contract 回退问题。最终评审判定应继续参考
 `s47-5-release-evidence-integrity.md`，不能仅以 S47.4 全绿结论放行。
+
+# S47.7 治理取代与最终校正
+
+本文的“人工 Review/签署”是 S47.4 当时的历史阶段结论，不再是 V5 功能合并条件。
+S47.7 要求 Codex 独立完成 Requirement/Correctness/Security/User Flow 四轮审计，并仅在
+精确 HEAD Required CI 和分支保护允许时合并。产品内 TestDesign Review/Waiver 仍需授权人工
+用户执行。最终证据见 [S47.7 记录](v5-autonomous-functional-acceptance.md)。

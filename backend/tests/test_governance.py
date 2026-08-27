@@ -49,6 +49,33 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "https://user:password@example.com",
+        "https://example.com/api",
+        "https://example.com?token=value",
+        "https://example.com:invalid",
+        "https://example.com:",
+        " https://example.com",
+        "file:///tmp/flowtest",
+    ],
+)
+def test_credentialed_cors_requires_an_explicit_http_origin(origin: str) -> None:
+    with pytest.raises(ValidationError, match="CORS 来源"):
+        Settings(_env_file=None, cors_origins=[origin])
+
+    configured = Settings(
+        _env_file=None,
+        cors_origins=["https://flowtest.example.com", "http://localhost:5173"],
+    )
+    assert configured.cors_origins == [
+        "https://flowtest.example.com",
+        "http://localhost:5173",
+    ]
+
+
 def test_retention_default_does_not_exceed_system_limit() -> None:
     with pytest.raises(ValidationError, match="默认保留天数"):
         Settings(_env_file=None, retention_default_days=31, retention_max_days=30)

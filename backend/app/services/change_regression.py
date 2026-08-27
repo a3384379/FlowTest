@@ -1476,6 +1476,11 @@ class ChangeRegressionService:
                 code="CHANGE_REGRESSION_NOT_FOUND", message="变更回归运行不存在", status_code=404
             )
         test_plan_run = await self._terminal_release_test_plan_run(run)
+        # A completed release decision is immutable evidence for this exact
+        # TestPlanRun. Re-evaluating timestamps or expired waivers would
+        # reinterpret history and make an idempotent release call unstable.
+        if bundle.release_decision is not None:
+            return await self._required_bundle(run.id)
         plan_gate = await self._recalculate_plan_gaps(run, use_execution_evidence=True)
         active_waiver_evidence = [
             _waiver_evidence(waiver)
@@ -1522,15 +1527,6 @@ class ChangeRegressionService:
                     )
                 },
             )
-            await self._session.commit()
-            return await self._required_bundle(run.id)
-        if bundle.release_decision is not None:
-            run.evidence = {
-                **run.evidence,
-                "semantic_plan_gate": cast(dict[str, Any], plan_gate),
-                "semantic_gap_waivers": active_waiver_evidence,
-            }
-            run.status = "passed" if bundle.release_decision.status == "pass" else "blocked"
             await self._session.commit()
             return await self._required_bundle(run.id)
         decision = await ReleaseGateService(self._session).create_decision(
@@ -3126,11 +3122,8 @@ def _runtime_request_matches_fact(
 ) -> bool:
     if request.method.upper() != fact.operation_identity.method:
         return False
-    if (
-        request.service_key is not None
-        and fact.operation_identity.service_key != "unassigned"
-        and request.service_key != fact.operation_identity.service_key
-    ):
+    expected_service_key = fact.operation_identity.service_key
+    if expected_service_key != "unassigned" and request.service_key != expected_service_key:
         return False
     parsed = urlsplit(request.url)
     if not _path_template_matches(fact.operation_identity.normalized_path, parsed.path):

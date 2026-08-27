@@ -1276,3 +1276,18 @@ Suite 计划项在审批与执行前按固定 SuiteVersion 展开到其中固定
 Suite Draft 不会改变覆盖。若 Gap 是 `VERSION_MISMATCH` 或 `CONTRACT_MISMATCH`，页面显示
 “Replace Plan Version”，人工确认后替换同一计划资产的固定版本、写入 Audit 并重新计算；系统
 仍不会自动执行。
+
+### S47.7 发布证据与生成请求补充说明
+
+对于明确绑定 Service 的 Operation，实际 HTTP Observation 必须带有并精确匹配该
+`service_key`；缺失或匹配到另一 Service 都不计入 Release Coverage。仅从旧
+`Environment.base_url` 路径迁移的 `unassigned` Operation 保留非约束兼容。
+
+已生成 Release Decision 的终态回归运行重复调用 Release Gate 时，系统在确认关联
+TestPlanRun 仍为终态后返回同一 Decision、Evidence 和 Stage，不会用事后 Plan
+修改或 Waiver 过期重写历史结论。
+
+Change Regression 为单个变更字段生成 Boundary Scenario 时，最终请求以完整当前
+Canonical Contract 的有效请求为基线，再叠加目标变异。因此不会因为只测
+`quantity` 而丢失同一 Body 中其他必填字段。这些基准值不会被误认为新的
+变更覆盖 Requirement，Coverage Token 仍只跟踪目标字段、值、分类和 Oracle Set。

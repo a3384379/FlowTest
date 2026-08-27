@@ -30,6 +30,7 @@ from app.domain.impact import (
 )
 from app.domain.protocols import ProtoSourceFile, compile_proto_sources, validate_graphql_sdl
 from app.domain.test_design import TestDesignDocument as DesignDocument
+from app.domain.test_engineering import OperationContract
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -270,6 +271,61 @@ def test_contract_boundary_change_generates_concrete_missing_tests() -> None:
     assert all(
         entry.covered for entry in design.coverage.entries if entry.dimension == "change_impact"
     )
+
+
+def test_change_scenarios_keep_unrelated_required_request_fields() -> None:
+    contract = OperationContract.model_validate(
+        {
+            "operation": "orders.create",
+            "method": "POST",
+            "path": "/orders",
+            "request_body": {
+                "required": True,
+                "schema": {
+                    "type": "object",
+                    "required": ["quantity", "type", "profile"],
+                    "properties": {
+                        "quantity": {"type": "integer", "minimum": 1, "maximum": 999},
+                        "type": {"type": "string", "enum": ["STANDARD", "EXPRESS"]},
+                        "profile": {
+                            "type": "object",
+                            "required": ["display_name"],
+                            "properties": {"display_name": {"type": "string", "minLength": 1}},
+                        },
+                    },
+                },
+            },
+            "responses": {
+                "201": {"description": "created"},
+                "422": {"description": "invalid request"},
+            },
+        }
+    )
+
+    design = DesignDocument.model_validate(
+        missing_test_design(
+            gap={
+                "change_key": "orders-quantity-maximum",
+                "source_key": "POST /orders",
+                "label": "quantity maximum changed",
+                "semantic_type": "maximum_changed",
+                "field_path": "request.body.quantity.maximum",
+                "before": 100,
+                "after": 999,
+            },
+            source_ref="openapi://orders/current",
+            position=1,
+            current_contract=contract,
+        )
+    )
+
+    assert design.scenarios
+    for scenario in design.scenarios:
+        assert scenario.request.body == {
+            "profile": {"display_name": "x"},
+            "quantity": scenario.mutations[0].value,
+            "type": "STANDARD",
+        }
 
 
 @pytest.mark.asyncio

@@ -136,3 +136,18 @@ RC 连续观察、安全审批和人工签署未完成：
 RC_READY: NO
 GA_READY: NO
 ```
+
+## 13. S47.7 最终审计补充
+
+S47.7 对本文链路做了三项最终收紧：
+
+1. 已分配 Service 的 Semantic Fact 必须与实际 Request Observation 的 `service_key`
+   精确匹配，缺失 Service 不再计覆盖。
+2. 在 TestPlanRun 仍为终态的前提下，已有 Release Decision 的重复评估返回同一
+   Decision/Evidence/Stage，后续 Plan 修改或 Waiver 过期不重写历史。
+3. 真实 Compose 链路物化的变更边界 Workflow 使用完整 Current Contract 请求基线，
+   5 个固定版本 Workflow 均通过实际 HTTP 执行并形成无 Waiver 的 Runtime Evidence。
+
+独立 Compose 中 `S14→S47.7→S14` 通过。本文当时的 Draft/人工签署说明由 S47.7
+自动验收治理取代，但 Required CI/分支保护仍不可绕过。最终证据见
+[S47.7 记录](v5-autonomous-functional-acceptance.md)。

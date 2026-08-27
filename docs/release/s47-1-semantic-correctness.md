@@ -264,3 +264,10 @@ S47.1 的 Value/Category 覆盖结论已被 S47.3 的 Oracle Set Fingerprint Tok
 S47.3 后复审确认 Coverage 还必须包含 API Version 和 Contract Fingerprint，Workflow Assert
 还必须证明执行图必达。最终实现、0045 迁移、E2E 顺序隔离和当前 PR 证据见
 [S47.4 记录](s47-4-final-review-fix.md)。本文不单独授权 Merge、Tag 或 Release。
+
+## S47.7 最终验收索引
+
+S47.1 的历史语义修复保持有效；最终验收还确认了已分配 Service 的 Runtime
+Observation 必须精确匹配，且聚焦变更场景物化时保留完整 Current Contract 必填请求。
+开发代码合并不再等待人工 Reviewer，但不改变产品内人工审核语义或 GA 边界。
+当前依据见 [S47.7 记录](v5-autonomous-functional-acceptance.md)。

@@ -304,3 +304,14 @@ S47.6 不增加 V5 功能面，只校正 Release Gate 的证据时序和粒度�
 Oracle 结果计算 Release Coverage。Failed/Cancelled 执行固定阻断；Suite 按固定版本展开；版本或
 Contract 不匹配的计划项通过显式 Replace Version 闭环。Migration Head 保持 0045，最终状态以精确
 HEAD 的远程 CI 和人工 Review 为准。
+
+# S47.7 — Autonomous Functional Acceptance & Merge
+
+S47.7 取代上一段的合并治理描述：本项目采用 Vibe Coding，开发代码不再以人工
+Reviewer 为合并前置。Codex 负责四轮独立自动审计、缺陷修复、完整本地门禁、精确
+HEAD 远程 CI、PR Ready、合并和 main CI。仍禁止绕过 Required Checks/分支保护或使用
+Admin/Force Merge。产品内 TestDesign Review 和 Waiver 人工权限语义不变。
+
+本轮还收紧 Runtime Service Identity、Release Decision 幂等不可变性、聚焦变更场景的
+完整请求基线和 Credentialed CORS 配置。证据见
+[V5 自主功能验收](release/v5-autonomous-functional-acceptance.md)。

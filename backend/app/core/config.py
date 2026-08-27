@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "FlowTest-Change-Me-123!"  # noqa: S105
     secure_cookies: bool = False
     data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"
     s3_secret_key: str = "flowtest-local-secret"  # noqa: S105
@@ -147,8 +147,31 @@ class Settings(BaseSettings):
         self._validate_environment_lab()
         self._validate_runtime_profile()
         self._validate_pact_broker()
+        self._validate_cors()
         self._validate_production()
         return self
+
+    def _validate_cors(self) -> None:
+        for origin in self.cors_origins:
+            try:
+                parsed = urlsplit(origin)
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError("CORS 来源必须是显式、无凭据和路径的 HTTP/HTTPS Origin") from exc
+            if (
+                origin.strip() == "*"
+                or origin.strip() != origin
+                or any(ord(character) < 33 for character in origin)
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.netloc.endswith(":")
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValueError("CORS 来源必须是显式、无凭据和路径的 HTTP/HTTPS Origin")
 
     def _validate_runtime_profile(self) -> None:
         profile = describe_runtime_profile(self.runtime_profile)

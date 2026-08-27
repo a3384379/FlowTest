@@ -70,6 +70,7 @@ def _api_node(
     headers: dict[str, str] | None = None,
     body: object = None,
     response_status: int = 422,
+    service_key: str | None = "orders",
 ) -> WorkflowNodeExecution:
     now = datetime.now(UTC)
     observation = NodeObservation(
@@ -79,7 +80,7 @@ def _api_node(
             url=url,
             headers=headers or {},
             body=body,
-            service_key="orders",
+            service_key=service_key,
         ),
         response=HttpResponseSnapshot(
             status_code=response_status,
@@ -139,6 +140,31 @@ def test_runtime_release_coverage_requires_actual_value_and_status_oracle() -> N
         fact,
         [_api_node(body={"quantity": 1000}, response_status=400)],
     )
+
+
+def test_runtime_release_coverage_requires_exact_service_observation() -> None:
+    fact = _fact()
+
+    assert _runtime_fact_is_covered(fact, [_api_node(body={"quantity": 1000})])
+    assert not _runtime_fact_is_covered(
+        fact,
+        [_api_node(body={"quantity": 1000}, service_key=None)],
+    )
+    assert not _runtime_fact_is_covered(
+        fact,
+        [_api_node(body={"quantity": 1000}, service_key="gateway")],
+    )
+
+
+def test_dataset_rows_only_cover_values_from_their_passed_child_observation() -> None:
+    passed_row = _api_node(body={"quantity": 999}, response_status=422)
+    failed_row = _api_node(status="failed", body={"quantity": 1000})
+
+    assert _runtime_fact_is_covered(
+        _fact(semantic_value="999"),
+        [passed_row],
+    )
+    assert not _runtime_fact_is_covered(_fact(), [failed_row])
 
 
 def test_skipped_request_and_skipped_assert_do_not_form_release_coverage() -> None:

@@ -143,3 +143,11 @@ FlowSpec v3 是 V5 唯一正式基线；开发期 v1/v2 兼容明确不属于 S4
 GA/RC 证据不得使用资产 Current 或事后修改的 TestPlan 重新解释已完成运行。Release Coverage
 必须来自本次 Passed TestPlanRunItem Snapshot；Quarantined、Cancelled 和未执行项不可计为
 Covered。OpenAPI Current Contract Fingerprint 不匹配时必须阻断，不得回退旧 Route Contract。
+
+# S47.7 自主验收治理补充
+
+开发代码不再以缺少人工 Reviewer 为 Merge Blocker。合并条件改为：四轮自动审计
+P0/P1 清零、完整本地门禁、精确 HEAD Required CI、Base 同步、PR Mergeable 和分支保护。
+仍禁止 Admin/Force Merge 或降低检查。这不改变产品运行中 TestDesign Review/Waiver 的人工
+业务语义，也不改变 `GA_READY: NO`。详见
+[V5 自主功能验收](v5-autonomous-functional-acceptance.md)。

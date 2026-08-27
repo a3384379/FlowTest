@@ -384,7 +384,7 @@ jobs:
         run: >-
           pnpm --dir frontend exec playwright test
           e2e/s14-management-workbench.spec.ts --project=chromium --no-deps
-      - name: Verify S47.5 release evidence, lifecycle, security, MCP, and FlowSpec v3
+      - name: Verify S47.7 runtime release evidence, lifecycle, security, MCP, and FlowSpec v3
         run: python3 scripts/smoke_s47.py
       - name: Verify isolated S14 after S47
         run: >-

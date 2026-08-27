@@ -216,3 +216,11 @@ API Node、最终 Request Observation 与实际 Passed Assert 形成语义覆盖
 Passed 不足以证明分支内节点已执行。Failed/Cancelled 执行固定阻断，Suite 预执行覆盖按
 固定版本展开，旧版计划项需人工 Replace Version。实现与验证记录见
 `s47-6-runtime-release-evidence.md`。
+
+# S47.7 最终取代说明
+
+本文早期“PR 保持 Draft、等待人工 Review”是历史阶段结论，不再是当前合并治理。
+S47.7 以需求符合性、正确性、安全性和真实用户闭环四轮自动审计，加上本地与精确
+HEAD 远程门禁作为合并依据。修复的最终缺口包括 Runtime Service 身份、Release
+Decision 幂等不可变、完整请求基线和 Credentialed CORS。详见
+[V5 自主功能验收](v5-autonomous-functional-acceptance.md)。

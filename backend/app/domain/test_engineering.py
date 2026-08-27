@@ -234,6 +234,29 @@ class TestEngineeringEngine:
         )
 
 
+def rebase_scenario_on_contract_request(
+    *, contract: OperationContract, scenario: ScenarioCandidate
+) -> ScenarioCandidate:
+    """Apply a focused scenario mutation to the complete valid contract request."""
+
+    evidence = contract_evidence(contract)
+    fields = _field_constraints(_merge_evidence(contract, [evidence]))
+    request = _valid_request(fields)
+    for mutation in scenario.mutations:
+        _apply_request_mutation(
+            request,
+            mutation.path,
+            mutation.operation,
+            mutation.value,
+        )
+    return scenario.model_copy(
+        update={
+            "request": request,
+            "request_body": request.body if isinstance(request.body, dict) else {},
+        }
+    )
+
+
 class ConstraintConsistencyValidator:
     """Reject merged constraints that cannot describe any legal request value."""
 

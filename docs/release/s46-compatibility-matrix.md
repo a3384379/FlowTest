@@ -57,3 +57,11 @@
 | S47.5 Plan/Run Evidence | 固定 TestPlanItem 版本；Release 使用 Passed RunItem Snapshot | Supported |
 | S47.5 Current Contract Binding | OpenAPI Current Fingerprint 精确匹配；旧 Route 不回退 | Supported |
 | Generated Asset Same-Run | 人工发布后显式加入；不自动 Publish/Execute | Supported |
+| S47.7 Runtime Service Evidence | 已分配 Service 必须与 HTTP Observation 精确匹配 | Supported |
+| S47.7 Focused Change Request | 聚焦变异叠加到完整 Current Contract 有效请求 | Supported |
+
+## S47.7 合并治理说明
+
+开发代码的人工 Reviewer 不是兼容性或合并门禁；精确 HEAD 的自动审计、Remote CI 和
+分支保护仍是必要条件。Standalone/Compact/Full 仍使用同一业务语义，本轮未引入新
+Migration，Head 保持 `20260823_0045`。
