@@ -11,11 +11,16 @@ async def _public_address(_hostname: str, _port: int) -> tuple[str, ...]:
     return ("93.184.216.34",)
 
 
-def _fetcher(handler: httpx.MockTransport) -> HttpImportDocumentFetcher:
+def _fetcher(
+    handler: httpx.MockTransport,
+    *,
+    peer_address: str = "93.184.216.34",
+) -> HttpImportDocumentFetcher:
     return HttpImportDocumentFetcher(
         request_timeout_seconds=2,
         guard=OutboundRequestGuard(resolver=_public_address),
         transport=handler,
+        peer_address_provider=lambda _response: peer_address,
     )
 
 
@@ -215,3 +220,274 @@ async def test_url_fetcher_blocks_loopback_before_request() -> None:
         )
     assert error.value.code == "OUTBOUND_REQUEST_BLOCKED"
     assert requested is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "peer_address",
+    ("127.0.0.1", "169.254.1.10", "10.0.0.10", "1.1.1.1"),
+)
+async def test_url_fetcher_rejects_connected_peer_that_differs_from_validated_dns(
+    peer_address: str,
+) -> None:
+    fetcher = _fetcher(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"openapi": "3.0.3"})),
+        peer_address=peer_address,
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="https://api.example.com/openapi.json",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=4096,
+        )
+
+    assert rejected.value.code == "DNS_REBINDING_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_revalidates_connected_peer_after_redirect() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/docs":
+            return httpx.Response(302, headers={"Location": "/openapi.json"})
+        return httpx.Response(200, json={"openapi": "3.0.3"})
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=_public_address),
+        transport=httpx.MockTransport(handler),
+        peer_address_provider=lambda response: (
+            "127.0.0.1" if response.request.url.path == "/openapi.json" else "93.184.216.34"
+        ),
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="https://api.example.com/docs",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=4096,
+        )
+
+    assert rejected.value.code == "DNS_REBINDING_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_blocks_redirect_to_private_network_before_request() -> None:
+    requested_hosts: list[str] = []
+
+    async def addresses(hostname: str, _port: int) -> tuple[str, ...]:
+        return ("10.0.0.10",) if hostname == "private.example.com" else ("93.184.216.34",)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_hosts.append(request.url.host)
+        return httpx.Response(
+            302,
+            headers={"Location": "https://private.example.com/openapi.json"},
+        )
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=addresses),
+        transport=httpx.MockTransport(handler),
+        peer_address_provider=lambda _response: "93.184.216.34",
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="https://api.example.com/docs",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=4096,
+        )
+
+    assert rejected.value.code == "OUTBOUND_REQUEST_BLOCKED"
+    assert requested_hosts == ["api.example.com"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rebound_path",
+    ("/swagger-initializer.js", "/v3/api-docs/swagger-config", "/v3/api-docs"),
+)
+async def test_url_fetcher_revalidates_swagger_discovery_assets_and_final_document(
+    rebound_path: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/docs":
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/html"},
+                text='<script src="/swagger-initializer.js"></script>',
+            )
+        if request.url.path == "/swagger-initializer.js":
+            return httpx.Response(
+                200,
+                text="SwaggerUIBundle({configUrl: '/v3/api-docs/swagger-config'});",
+            )
+        if request.url.path == "/v3/api-docs/swagger-config":
+            return httpx.Response(200, json={"url": "/v3/api-docs"})
+        return httpx.Response(200, json={"openapi": "3.0.3"})
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=_public_address),
+        transport=httpx.MockTransport(handler),
+        peer_address_provider=lambda response: (
+            "10.0.0.10" if response.request.url.path == rebound_path else "93.184.216.34"
+        ),
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="https://api.example.com/docs",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=8192,
+        )
+
+    assert rejected.value.code == "DNS_REBINDING_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_allows_matching_private_peer_from_explicit_cidr() -> None:
+    async def private_address(_hostname: str, _port: int) -> tuple[str, ...]:
+        return ("10.0.0.10",)
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=private_address),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"openapi": "3.0.3"})
+        ),
+        peer_address_provider=lambda _response: "10.0.0.10",
+    )
+
+    fetched = await fetcher.fetch(
+        url="https://private.example.com/openapi.json",
+        network_policy=OutboundNetworkPolicy(allowed_private_cidrs=("10.0.0.0/24",)),
+        maximum_bytes=4096,
+    )
+
+    assert fetched.resolved_url == "https://private.example.com/openapi.json"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata_peer",
+    ("169.254.169.254", "::ffff:169.254.169.254", "fd00:ec2::254"),
+)
+async def test_url_fetcher_blocks_metadata_peer_when_policy_is_disabled(
+    metadata_peer: str,
+) -> None:
+    async def metadata_address(_hostname: str, _port: int) -> tuple[str, ...]:
+        return (metadata_peer,)
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=metadata_address),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={})),
+        peer_address_provider=lambda _response: metadata_peer,
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="http://metadata.internal/openapi.json",
+            network_policy=OutboundNetworkPolicy(enabled=False),
+            maximum_bytes=4096,
+        )
+
+    assert rejected.value.code == "OUTBOUND_REQUEST_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_normalizes_ipv4_mapped_peer_address() -> None:
+    fetcher = _fetcher(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"openapi": "3.0.3"})),
+        peer_address="::ffff:93.184.216.34",
+    )
+
+    fetched = await fetcher.fetch(
+        url="https://api.example.com/openapi.json",
+        network_policy=OutboundNetworkPolicy(),
+        maximum_bytes=4096,
+    )
+
+    assert fetched.resolved_url == "https://api.example.com/openapi.json"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_validates_ipv6_connected_peers() -> None:
+    async def ipv6_address(_hostname: str, _port: int) -> tuple[str, ...]:
+        return ("2606:4700:4700::1111",)
+
+    success = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=ipv6_address),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"openapi": "3.0.3"})
+        ),
+        peer_address_provider=lambda _response: "2606:4700:4700::1111",
+    )
+    fetched = await success.fetch(
+        url="https://ipv6.example.com/openapi.json",
+        network_policy=OutboundNetworkPolicy(),
+        maximum_bytes=4096,
+    )
+    assert fetched.resolved_url == "https://ipv6.example.com/openapi.json"
+
+    rebound = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=ipv6_address),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={})),
+        peer_address_provider=lambda _response: "::1",
+    )
+    with pytest.raises(AppError) as rejected:
+        await rebound.fetch(
+            url="https://ipv6.example.com/openapi.json",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=4096,
+        )
+    assert rejected.value.code == "DNS_REBINDING_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_fails_closed_when_connected_peer_is_unavailable() -> None:
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=_public_address),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={})),
+    )
+
+    with pytest.raises(AppError) as rejected:
+        await fetcher.fetch(
+            url="https://api.example.com/openapi.json",
+            network_policy=OutboundNetworkPolicy(),
+            maximum_bytes=4096,
+        )
+
+    assert rejected.value.code == "OUTBOUND_PEER_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_url_fetcher_reads_default_peer_from_httpx_network_stream() -> None:
+    class NetworkStream:
+        def get_extra_info(self, name: str) -> tuple[str, int] | None:
+            return ("93.184.216.34", 443) if name == "server_addr" else None
+
+    fetcher = HttpImportDocumentFetcher(
+        request_timeout_seconds=2,
+        guard=OutboundRequestGuard(resolver=_public_address),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"openapi": "3.0.3"},
+                extensions={"network_stream": NetworkStream()},
+            )
+        ),
+    )
+
+    fetched = await fetcher.fetch(
+        url="https://api.example.com/openapi.json",
+        network_policy=OutboundNetworkPolicy(),
+        maximum_bytes=4096,
+    )
+
+    assert fetched.resolved_url == "https://api.example.com/openapi.json"

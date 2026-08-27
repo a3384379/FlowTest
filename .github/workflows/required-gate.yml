@@ -1,0 +1,43 @@
+name: Required Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+jobs:
+  required:
+    name: Required Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Resolve changed paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          changed_paths="${RUNNER_TEMP}/flowtest-required-gate-paths.txt"
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            git show --pretty=format: --name-only "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
+          else
+            git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
+          fi
+          echo "FLOWTEST_GATE_PATHS_FILE=${changed_paths}" >>"${GITHUB_ENV}"
+      - name: Wait for path-selected child gates
+        env:
+          FLOWTEST_GATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/required_gate.py
+          --sha "${FLOWTEST_GATE_SHA}"
+          --paths-file "${FLOWTEST_GATE_PATHS_FILE}"

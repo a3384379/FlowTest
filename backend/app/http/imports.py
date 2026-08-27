@@ -1,6 +1,8 @@
 import hashlib
+import ipaddress
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
@@ -53,6 +55,9 @@ class _CandidateSeed:
     url: str
 
 
+PeerAddressProvider = Callable[[httpx.Response], str | None]
+
+
 class _SwaggerScriptParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -87,10 +92,12 @@ class HttpImportDocumentFetcher:
         request_timeout_seconds: float,
         guard: OutboundRequestGuard | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        peer_address_provider: PeerAddressProvider | None = None,
     ) -> None:
         self._timeout = request_timeout_seconds
         self._guard = guard or OutboundRequestGuard()
         self._transport = transport
+        self._peer_address_provider = peer_address_provider or _httpx_peer_address
 
     async def discover(
         self,
@@ -286,7 +293,7 @@ class HttpImportDocumentFetcher:
     ) -> _RetrievedResource:
         current_url = url
         for redirect_count in range(MAX_REDIRECTS + 1):
-            await self._guard.enforce(current_url, network_policy)
+            validated_addresses = await self._guard.enforce(current_url, network_policy)
             async with client.stream(
                 "GET",
                 current_url,
@@ -297,6 +304,10 @@ class HttpImportDocumentFetcher:
                     )
                 },
             ) as response:
+                _validate_connected_peer(
+                    self._peer_address_provider(response),
+                    validated_addresses,
+                )
                 if response.status_code in REDIRECT_STATUSES:
                     current_url = _redirect_target(
                         current_url,
@@ -321,6 +332,71 @@ class HttpImportDocumentFetcher:
             message=f"接口文档地址重定向超过 {MAX_REDIRECTS} 次",
             status_code=422,
         )
+
+
+def _httpx_peer_address(response: httpx.Response) -> str | None:
+    """Read the connected socket address exposed by HTTPX's network stream."""
+
+    stream = response.extensions.get("network_stream")
+    get_extra_info = getattr(stream, "get_extra_info", None)
+    if not callable(get_extra_info):
+        return None
+    server_address = get_extra_info("server_addr")
+    if (
+        not isinstance(server_address, tuple)
+        or not server_address
+        or not isinstance(server_address[0], str)
+    ):
+        return None
+    return server_address[0]
+
+
+def _validate_connected_peer(
+    peer_address: str | None,
+    validated_addresses: tuple[str, ...],
+) -> None:
+    try:
+        if peer_address is None:
+            raise ValueError("missing peer address")
+        peer = _canonical_address(ipaddress.ip_address(peer_address))
+        validated = {
+            _canonical_address(ipaddress.ip_address(value)) for value in validated_addresses
+        }
+    except ValueError as error:
+        raise AppError(
+            code="OUTBOUND_PEER_UNAVAILABLE",
+            message="无法验证接口文档地址的实际连接端",
+            status_code=422,
+        ) from error
+    if _is_metadata_address(peer):
+        raise AppError(
+            code="OUTBOUND_REQUEST_BLOCKED",
+            message="接口文档地址不能连接云元数据服务",
+            status_code=422,
+        )
+    if peer not in validated:
+        raise AppError(
+            code="DNS_REBINDING_BLOCKED",
+            message="接口文档地址的实际连接端与安全校验结果不一致",
+            status_code=422,
+        )
+
+
+def _is_metadata_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    return address in {
+        ipaddress.ip_address("169.254.169.254"),
+        ipaddress.ip_address("fd00:ec2::254"),
+    }
+
+
+def _canonical_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
 
 
 def _script_candidates(script: str, base_url: str) -> tuple[list[_CandidateSeed], list[str]]:
