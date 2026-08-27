@@ -116,6 +116,9 @@ class SemanticCoverageFact(BaseModel):
     source_asset_id: str = Field(min_length=1, max_length=160)
     source_asset_version: int = Field(ge=1)
     workflow_version: int = Field(ge=1)
+    request_node_id: str | None = Field(default=None, min_length=1, max_length=128)
+    request_path_template: str | None = Field(default=None, min_length=1, max_length=2048)
+    oracle_node_ids: tuple[str, ...] = Field(default=(), max_length=100)
     test_plan_id: str | None = Field(default=None, max_length=160)
 
     @model_validator(mode="after")

@@ -384,6 +384,17 @@ describe('ChangeRegressionPage', () => {
       ...structuredClone(baseRun),
       selection_summary: {
         ...structuredClone(baseRun.selection_summary),
+        semantic_coverage_basis: 'runtime_node_evidence',
+        semantic_coverage_test_plan_run_id: '00000000-0000-4000-8000-000000003088',
+        runtime_coverage: {
+          evidence_chain:
+            'test_plan_run_item>workflow_execution>workflow_node_execution>node_result_observation',
+          passed_run_item_count: 1,
+          selected_run_item_count: 1,
+          workflow_execution_count: 1,
+          passed_api_node_count: 1,
+          matched_semantic_fact_count: 0,
+        },
         unresolved_current_plan_gap_count: 1,
         operation_regenerations: [
           {
@@ -413,7 +424,14 @@ describe('ChangeRegressionPage', () => {
             project_known_coverage: 'VERSION_MISMATCH',
             current_test_plan_coverage: 'VERSION_MISMATCH',
             oracle_reachability: ['unknown_graph'],
-            recommended_existing_assets: [],
+            recommended_existing_assets: [
+              {
+                target_type: 'workflow',
+                target_id: plan.items[0].target_id,
+                target_version: 2,
+                workflow_version: 2,
+              },
+            ],
             waiver: null,
           },
         ],
@@ -444,6 +462,9 @@ describe('ChangeRegressionPage', () => {
     expect(await screen.findByText('Proposal 已重新生成')).toBeVisible()
     expect(document.body.textContent).toContain('4 Scenario / 2 Oracle')
     expect(document.body.textContent).toContain('VERSION_MISMATCH')
+    expect(document.body.textContent).toContain('Replace Plan Version · workflow v2')
+    expect(document.body.textContent).toContain('Coverage Basis: 实际节点证据')
+    expect(document.body.textContent).toContain('Runtime Match: 0 facts · 1 passed API nodes')
     expect(document.body.textContent).toContain('Unknown Graph')
     expect(buttonByText('Renew Waiver')).toBeDisabled()
     expect(document.body.textContent).toContain('Revision 1 已失效')

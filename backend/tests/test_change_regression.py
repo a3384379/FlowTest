@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -24,8 +25,10 @@ from app.models import TestDesign as ORMTestDesign
 from app.models.access import User
 from app.models.ai import AIChangeItem
 from app.models.tasking import TestPlanItem as ORMTestPlanItem
+from app.models.tasking import TestPlanRun as ORMTestPlanRun
 from app.models.tasking import TestPlanRunItem as ORMTestPlanRunItem
 from app.models.workflows import Workflow as ORMWorkflow
+from app.schemas.tasking import TestPlanItemInput as PlanItemInput
 from app.services.change_regression import (
     ChangeRegressionService,
     _add_semantic_value,
@@ -33,6 +36,7 @@ from app.services.change_regression import (
     _test_case_workflow_id,
 )
 from app.services.execution_events import ExecutionEvent
+from app.services.tasking import TestPlanService as PlanService
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 
@@ -228,10 +232,44 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert queued.status_code == 202, queued.text
     test_plan_run_id = UUID(queued.json()["test_plan_run_id"])
     assert context.queue.test_plan_run_ids == [test_plan_run_id]
-    respx.get("http://workflow.example.com/users/v1").mock(
-        return_value=Response(200, json={"id": 7})
+    request_started = asyncio.Event()
+    finish_request = asyncio.Event()
+
+    async def delayed_response(_request: Request) -> Response:
+        request_started.set()
+        await finish_request.wait()
+        return Response(200, json={"id": 7})
+
+    respx.get("http://workflow.example.com/users/v1").mock(side_effect=delayed_response)
+    plan_task = asyncio.create_task(
+        PlanRunCoordinator(context.sessions, context.events).run(test_plan_run_id)
     )
-    await PlanRunCoordinator(context.sessions, context.events).run(test_plan_run_id)
+    await asyncio.wait_for(request_started.wait(), timeout=5)
+    running = await context.client.get(
+        f"/api/v1/projects/{project_id}/change-regressions/{run['id']}",
+        headers=headers,
+    )
+    assert running.status_code == 200, running.text
+    assert running.json()["status"] == "running"
+    evidence_before = running.json()["evidence"]
+    stages_before = running.json()["stages"]
+    early_release = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{run['id']}/release-gate",
+        headers=headers,
+    )
+    assert early_release.status_code == 409, early_release.text
+    assert early_release.json()["error"]["code"] == "CHANGE_REGRESSION_EXECUTION_PENDING"
+    unchanged = await context.client.get(
+        f"/api/v1/projects/{project_id}/change-regressions/{run['id']}",
+        headers=headers,
+    )
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["status"] == "running"
+    assert unchanged.json()["release_decision_id"] is None
+    assert unchanged.json()["evidence"] == evidence_before
+    assert unchanged.json()["stages"] == stages_before
+    finish_request.set()
+    await plan_task
     decision = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{run['id']}/release-gate",
         headers=headers,
@@ -280,6 +318,99 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     )
     assert approved_missing.status_code == 200, approved_missing.text
     assert approved_missing.json()["status"] == "approved"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("execution_status", "error_code"),
+    [
+        ("failed", "CHANGE_REGRESSION_EXECUTION_FAILED"),
+        ("cancelled", "CHANGE_REGRESSION_EXECUTION_CANCELLED"),
+    ],
+)
+async def test_failed_or_cancelled_execution_is_an_explicit_release_blocker(
+    regression_context: RegressionContext,
+    execution_status: str,
+    error_code: str,
+) -> None:
+    context = regression_context
+    headers = await _login_headers(context.client)
+    project_id, environment_id, workflow_id = await _create_workflow(context.client, headers)
+    plan = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": f"S47.6 {execution_status} plan",
+            "items": [{"workflow_id": workflow_id, "environment_id": environment_id}],
+        },
+    )
+    policy = await context.client.post(
+        f"/api/v1/projects/{project_id}/release-policies",
+        headers=headers,
+        json={
+            "name": f"S47.6 relaxed {execution_status} policy",
+            "require_quality_gate": False,
+            "require_contract_compatibility": False,
+            "require_impact_evidence": False,
+            "require_release_risk": False,
+        },
+    )
+    mapping = await context.client.post(
+        f"/api/v1/projects/{project_id}/impact/mappings",
+        headers=headers,
+        json={
+            "source_kind": "git",
+            "source_selector": "backend/*",
+            "target_type": "workflow",
+            "target_id": workflow_id,
+        },
+    )
+    assert plan.status_code == policy.status_code == mapping.status_code == 201
+    created = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions",
+        headers=headers,
+        json={
+            "title": f"S47.6 {execution_status} release policy",
+            "source_ref": "github://flowtest/runtime-release",
+            "candidate_ref": f"commit:{execution_status}",
+            "git_diff": _git_diff("backend/orders.py"),
+            "test_plan_id": plan.json()["id"],
+            "release_policy_id": policy.json()["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    approved = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{run_id}/approve",
+        headers=headers,
+        json={"note": "验证非成功执行的硬阻断策略"},
+    )
+    assert approved.status_code == 200, approved.text
+    executed = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{run_id}/execute",
+        headers=headers,
+    )
+    assert executed.status_code == 202, executed.text
+    async with context.sessions() as session:
+        await session.execute(
+            update(ORMTestPlanRun)
+            .where(ORMTestPlanRun.id == UUID(executed.json()["test_plan_run_id"]))
+            .values(status=execution_status, completed_at=datetime.now(UTC))
+        )
+        await session.commit()
+    release = await context.client.post(
+        f"/api/v1/projects/{project_id}/change-regressions/{run_id}/release-gate",
+        headers=headers,
+    )
+    assert release.status_code == 200, release.text
+    assert release.json()["status"] == "blocked"
+    assert release.json()["release_decision_id"] is None
+    assert release.json()["evidence"]["execution_outcome"] == {
+        "code": error_code,
+        "test_plan_run_id": executed.json()["test_plan_run_id"],
+        "status": execution_status,
+        "release_eligible": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -958,7 +1089,13 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
     assert release_from_snapshot.json()["status"] == "passed", release_from_snapshot.text
     assert (
         release_from_snapshot.json()["evidence"]["semantic_plan_gate"]["semantic_coverage_basis"]
-        == "test_plan_run"
+        == "runtime_node_evidence"
+    )
+    assert (
+        release_from_snapshot.json()["evidence"]["semantic_plan_gate"]["runtime_coverage"][
+            "matched_semantic_fact_count"
+        ]
+        == 4
     )
     assert release_from_snapshot.json()["evidence"]["semantic_plan_gate"][
         "semantic_coverage_test_plan_run_id"
@@ -992,6 +1129,31 @@ async def test_plan_and_release_coverage_scopes_use_pinned_snapshot_versions(
         json={"change_note": "Pinned to workflow v1"},
     )
     assert published_case.status_code == 200, published_case.text
+    suite = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-suites",
+        headers=headers,
+        json={
+            "name": "S47.6 pinned suite",
+            "definition": {"items": [{"test_case_id": case_id, "test_case_version": 1}]},
+        },
+    )
+    assert suite.status_code == 201, suite.text
+    suite_id = suite.json()["id"]
+    published_suite = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-suites/{suite_id}/versions",
+        headers=headers,
+        json={"change_note": "Pinned suite v1"},
+    )
+    assert published_suite.status_code == 200, published_suite.text
+    suite_plan = await context.client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "S47.6 suite semantic scope",
+            "items": [{"target_type": "suite", "target_id": suite_id, "target_version": 1}],
+        },
+    )
+    assert suite_plan.status_code == 201, suite_plan.text
     plan = await context.client.post(
         f"/api/v1/projects/{project_id}/test-plans",
         headers=headers,
@@ -1062,10 +1224,24 @@ async def test_plan_and_release_coverage_scopes_use_pinned_snapshot_versions(
             selected_assets=selected_assets,
             plan_items=plan_items,
         )
+        suite_plan_items = list(
+            (
+                await session.scalars(
+                    select(ORMTestPlanItem).where(
+                        ORMTestPlanItem.test_plan_id == UUID(suite_plan.json()["id"])
+                    )
+                )
+            ).all()
+        )
+        suite_scope = await service._current_plan_scope(
+            selected_assets=selected_assets,
+            plan_items=suite_plan_items,
+        )
     assert plan_scope == {
         ("workflow", workflow_id, 1, 1),
         ("test_case", case_id, 1, 1),
     }
+    assert suite_scope == {("test_case", case_id, 1, 1)}
 
     queued = await context.client.post(
         f"/api/v1/projects/{project_id}/test-plans/{plan.json()['id']}/runs",
@@ -1082,6 +1258,32 @@ async def test_plan_and_release_coverage_scopes_use_pinned_snapshot_versions(
             )
             == set()
         )
+    async with context.sessions() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        await PlanService(session).replace_item_version(
+            actor=actor,
+            project_id=UUID(project_id),
+            plan_id=UUID(plan.json()["id"]),
+            item=PlanItemInput.model_validate(
+                {
+                    "target_type": "workflow",
+                    "target_id": workflow_id,
+                    "target_version": 2,
+                    "workflow_version": 2,
+                    "environment_id": environment_id,
+                }
+            ),
+        )
+        replaced_items = await session.scalars(
+            select(ORMTestPlanItem).where(
+                ORMTestPlanItem.test_plan_id == UUID(plan.json()["id"]),
+                ORMTestPlanItem.target_type == "workflow",
+            )
+        )
+        replaced = replaced_items.one()
+        assert (replaced.target_version, replaced.workflow_version) == (2, 2)
+        service = ChangeRegressionService(session)
         await session.execute(
             update(ORMTestPlanRunItem)
             .where(ORMTestPlanRunItem.test_plan_run_id == run_id)

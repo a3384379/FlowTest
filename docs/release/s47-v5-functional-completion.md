@@ -208,3 +208,11 @@ V5 Functional Completion Review 还要求 Missing Draft 开关不能关闭 Seman
 Coverage 使用固定版本、Release Coverage 使用 Passed RunItem Snapshot、Current OpenAPI
 Fingerprint 精确绑定，以及 Generated Asset 可在人工发布后同 Run 显式加入计划。实现和验证
 记录见 `s47-5-release-evidence-integrity.md`。
+
+# S47.6 运行时发布证据补充
+
+Release Gate 必须在 TestPlanRun 终止后评估，并且只能由本次实际执行的 Passed
+API Node、最终 Request Observation 与实际 Passed Assert 形成语义覆盖。整个 RunItem
+Passed 不足以证明分支内节点已执行。Failed/Cancelled 执行固定阻断，Suite 预执行覆盖按
+固定版本展开，旧版计划项需人工 Replace Version。实现与验证记录见
+`s47-6-runtime-release-evidence.md`。

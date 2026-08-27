@@ -944,3 +944,18 @@ HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据�
 - Migration Head 保持 0045；完整证据见 `docs/release/s47-5-release-evidence-integrity.md`。
 - 本地 Backend `571 passed / 3 skipped`、Frontend `215 passed`、隔离 PostgreSQL Migration
   往返和隔离 S47 Compose Smoke 均通过；最终状态仍以精确 HEAD 远程 CI 为准。
+
+# S47.6 Runtime Release Evidence Closure（2026-08-27）
+
+- Release Gate 先锁定并验证 TestPlanRun 终态；Queued/Running 返回 409，不修改 Change Regression
+  状态、Evidence、Stage 或 Release Decision。
+- Release Coverage 从 Passed RunItem 继续追踪 WorkflowExecution、实际 Passed API Node、最终 HTTP
+  Request Observation 和实际 Passed Assert；Skipped/Cancelled/未进入分支、运行时值不匹配及未执行
+  Dataset Row 不计覆盖。
+- Failed/Cancelled TestPlanRun 成为不受宽松 Release Policy 绕过的明确硬阻断，并保存安全的执行结果
+  代码；Failed Run 继续生成 Failure Triage。
+- Current Plan Coverage 按固定 SuiteVersion 展开 TestCaseVersion；VERSION_MISMATCH 与
+  CONTRACT_MISMATCH 支持人工 Replace Plan Item Version、审计和重新计算。
+- 页面展示 Runtime Node Evidence 基础、实际匹配 Fact/API Node/Execution 数量和 Replace Version 动作。
+- Migration Head 保持 `20260823_0045`；本地与远程完整门禁记录见
+  [S47.6 Runtime Release Evidence Closure](release/s47-6-runtime-release-evidence.md)。

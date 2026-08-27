@@ -296,3 +296,11 @@ S47.5 关闭 Missing Draft Toggle、Plan 固定版本、RunItem Release Evidence
 Fingerprint 和 Generated Asset 同 Run 闭环问题。它不新增 V5 大功能，Migration Head 保持
 0045。完成条件以精确 HEAD 的 Backend、Frontend、Security、Compose、Upgrade 和 Windows
 Standalone 工作流为准，PR #40 继续保持 Draft。
+
+# S47.6 — Runtime Release Evidence Closure
+
+S47.6 不增加 V5 功能面，只校正 Release Gate 的证据时序和粒度：执行未终止时返回 409 且不写
+最终状态；终止后从 RunItem 追踪到实际 Workflow/Node/Observation/Assert，以最终请求值和实际
+Oracle 结果计算 Release Coverage。Failed/Cancelled 执行固定阻断；Suite 按固定版本展开；版本或
+Contract 不匹配的计划项通过显式 Replace Version 闭环。Migration Head 保持 0045，最终状态以精确
+HEAD 的远程 CI 和人工 Review 为准。

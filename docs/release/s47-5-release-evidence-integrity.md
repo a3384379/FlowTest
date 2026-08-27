@@ -49,6 +49,9 @@ Project Coverage 可读取项目全部已发布不可变版本；Current Plan �
 
 ## 5. Release Evidence Basis
 
+> S47.6 复审校正：本节记录的 Passed RunItem 粒度只是 S47.5 阶段证据，不再是当前
+> Release Coverage 的最终粒度。当前实现以 S47.6 的 Runtime Node Evidence 为准。
+
 Approve 和 Execute 前使用固定的 `TestPlanItem`。Release Gate 改用本次
 `TestPlanRunItem`：
 

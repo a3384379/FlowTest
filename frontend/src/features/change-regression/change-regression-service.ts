@@ -141,8 +141,16 @@ export type ChangeRegressionSelectionSummary = Record<string, unknown> & {
   semantic_coverage_scopes?: SemanticCoverageScope[]
   current_plan_recommendations?: Array<Record<string, unknown>>
   current_plan_gaps?: CurrentPlanGap[]
-  semantic_coverage_basis?: 'test_plan' | 'test_plan_run'
+  semantic_coverage_basis?: 'test_plan' | 'test_plan_run' | 'runtime_node_evidence'
   semantic_coverage_test_plan_run_id?: string | null
+  runtime_coverage?: {
+    evidence_chain: string
+    passed_run_item_count: number
+    selected_run_item_count: number
+    workflow_execution_count: number
+    passed_api_node_count: number
+    matched_semantic_fact_count: number
+  }
   generated_assets?: Array<{
     change_key: string
     source_item_id: string

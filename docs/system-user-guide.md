@@ -1244,3 +1244,35 @@ Test Engineering 物化出的 Workflow/TestCase 会显示为 Generated Assets。
 若 OpenAPI Change 显示 Contract Mismatch，表示本次 Current Contract Fingerprint 在项目 API
 版本中没有精确对应项。请先导入/同步 Current OpenAPI，再重新分析或明确选择精确版本；系统
 不会再用相同 Service/Method/Path 的旧 Contract 代替。
+
+# S47.6：运行时发布证据
+
+Approve 和 Execute 前仍使用当前 TestPlan 的固定版本做“预计覆盖”检查。Release Gate 不再仅凭
+整个 Workflow/TestCase Run Item 已通过就认定覆盖，而是沿本次执行证据链逐节点核对：
+
+```text
+TestPlanRunItem
+→ WorkflowExecution（含已实际运行的数据集子执行）
+→ WorkflowNodeExecution
+→ NodeResult / HTTP Observation
+```
+
+只有 API Node 实际执行且状态为 `passed`、最终 Method/Path/Service 和请求值与语义需求一致、
+Response Status 与 Oracle 一致，并且关联的 Assert Node 实际执行且通过，才显示为 Release
+Coverage。最终请求值取自 HTTP Observation，因此 TestPlan 的 Runtime Variable、Runtime Header、
+节点 Mapping、Query、Cookie、Body、Path 和数据集行造成的变化都会反映在结果中。敏感值被脱敏后
+无法证明精确相等时，系统采用安全的未覆盖结果，不会用静态默认值补偿。
+
+以下情况均不能形成最终发布覆盖：API/Assert 被条件分支跳过、节点失败或取消、运行时值与计划
+语义不一致、某个数据集行未执行、缺少成功 HTTP Observation。页面的 Coverage Basis 会显示
+“实际节点证据”，并列出匹配 Fact、Passed API Node 和 Workflow Execution 数量。
+
+TestPlanRun 仍处于 Queued/Running 时调用 Release Gate 会返回
+`409 CHANGE_REGRESSION_EXECUTION_PENDING`，不会写入 Blocked 状态、Release Evidence 或
+Release Decision。运行完成后可再次评估。Failed 或 Cancelled 的 Change Regression 执行始终
+阻断发布，即使 Release Policy 未启用 Quality Gate，也不会隐式放行。
+
+Suite 计划项在审批与执行前按固定 SuiteVersion 展开到其中固定的 TestCaseVersion；后续修改
+Suite Draft 不会改变覆盖。若 Gap 是 `VERSION_MISMATCH` 或 `CONTRACT_MISMATCH`，页面显示
+“Replace Plan Version”，人工确认后替换同一计划资产的固定版本、写入 Audit 并重新计算；系统
+仍不会自动执行。

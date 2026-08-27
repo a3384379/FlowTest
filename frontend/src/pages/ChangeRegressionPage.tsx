@@ -585,14 +585,19 @@ function SemanticPlanGatePanel({
 
 function SemanticCoverageBasis({ run }: { run: ChangeRegressionRun }) {
   const executionRunId = run.selection_summary.semantic_coverage_test_plan_run_id
-  const basis =
-    run.selection_summary.semantic_coverage_basis === 'test_plan_run'
-      ? `实际执行快照 · ${executionRunId?.slice(0, 12) ?? '-'}`
-      : '当前计划固定版本'
+  const basis = coverageBasisLabel(run.selection_summary.semantic_coverage_basis, executionRunId)
   const generatedCount = run.selection_summary.generated_assets?.length ?? 0
+  const runtime = run.selection_summary.runtime_coverage
   return (
     <>
       <Typography.Paragraph type="secondary">Coverage Basis: {basis}</Typography.Paragraph>
+      {runtime ? (
+        <Typography.Paragraph type="secondary">
+          Runtime Match: {runtime.matched_semantic_fact_count} facts ·{' '}
+          {runtime.passed_api_node_count} passed API nodes · {runtime.workflow_execution_count}{' '}
+          workflow executions
+        </Typography.Paragraph>
+      ) : null}
       {generatedCount > 0 ? (
         <Alert
           type="info"
@@ -604,6 +609,19 @@ function SemanticCoverageBasis({ run }: { run: ChangeRegressionRun }) {
       ) : null}
     </>
   )
+}
+
+function coverageBasisLabel(
+  basis: ChangeRegressionRun['selection_summary']['semantic_coverage_basis'],
+  executionRunId?: string | null,
+): string {
+  if (basis === 'runtime_node_evidence') {
+    return `实际节点证据 · ${executionRunId?.slice(0, 12) ?? '-'}`
+  }
+  if (basis === 'test_plan_run') {
+    return `历史执行快照 · ${executionRunId?.slice(0, 12) ?? '-'}`
+  }
+  return '当前计划固定版本'
 }
 
 function SemanticGapCard({
@@ -693,6 +711,7 @@ function SemanticGapExistingAsset({
 }) {
   const asset = gap.recommended_existing_assets[0]
   if (!asset) return <>无精确匹配资产</>
+  const replacing = ['VERSION_MISMATCH', 'CONTRACT_MISMATCH'].includes(gap.coverage_status)
   return (
     <Button
       size="small"
@@ -709,7 +728,8 @@ function SemanticGapExistingAsset({
         })
       }
     >
-      Add to Plan · {asset.target_type} v{asset.target_version}
+      {replacing ? 'Replace Plan Version' : 'Add to Plan'} · {asset.target_type} v
+      {asset.target_version}
     </Button>
   )
 }

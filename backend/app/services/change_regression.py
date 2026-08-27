@@ -12,7 +12,7 @@ from builtins import list as list_type
 from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from typing import Any, Literal, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, parse_qs, unquote, urlsplit
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -43,7 +43,7 @@ from app.domain.failure_triage import FailureSignal, triage_failures
 from app.domain.tasking import TestPlanTrigger
 from app.domain.test_design import TestDesignDocument, fingerprint_design, sensitive_paths
 from app.domain.test_engineering import ContractParameter, OperationContract, fingerprint_contract
-from app.engine.results import NodeResult
+from app.engine.results import HttpRequestSnapshot, NodeResult
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion
@@ -57,9 +57,19 @@ from app.models.quality_intelligence import ReleaseRisk
 from app.models.release_gate import ReleasePolicy
 from app.models.service_targets import Service
 from app.models.tasking import TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
-from app.models.test_assets import TestCase, TestCaseVersion
+from app.models.test_assets import (
+    TestCase,
+    TestCaseVersion,
+    TestSuiteVersion,
+    TestSuiteVersionItem,
+)
 from app.models.test_design import ChangeSetApproval, TestDesign
-from app.models.workflows import Workflow, WorkflowNodeExecution, WorkflowVersion
+from app.models.workflows import (
+    Workflow,
+    WorkflowExecution,
+    WorkflowNodeExecution,
+    WorkflowVersion,
+)
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.change_regression import (
     ChangeRegressionBundle,
@@ -485,7 +495,13 @@ class ChangeRegressionService:
             )
         gap_state = await self._recalculate_plan_gaps(run)
         gap = _find_gap(gap_state, payload.gap_key)
-        if gap is None or gap.get("coverage_status") not in {"MISSING", "PARTIAL"}:
+        supported_statuses = {
+            "MISSING",
+            "PARTIAL",
+            "VERSION_MISMATCH",
+            "CONTRACT_MISMATCH",
+        }
+        if gap is None or gap.get("coverage_status") not in supported_statuses:
             raise AppError(
                 code="CHANGE_REGRESSION_PLAN_GAP_NOT_FOUND",
                 message="当前计划中不存在可由已有测试补齐的语义缺口",
@@ -550,12 +566,22 @@ class ChangeRegressionService:
                 "workflow_version": workflow_version if requested[0] == "workflow" else None,
             }
         )
-        await TestPlanService(self._session).add_item(
-            actor=actor,
-            project_id=project_id,
-            plan_id=run.test_plan_id,
-            item=pinned_item,
-        )
+        replacing = gap.get("coverage_status") in {"VERSION_MISMATCH", "CONTRACT_MISMATCH"}
+        plan_service = TestPlanService(self._session)
+        if replacing:
+            await plan_service.replace_item_version(
+                actor=actor,
+                project_id=project_id,
+                plan_id=run.test_plan_id,
+                item=pinned_item,
+            )
+        else:
+            await plan_service.add_item(
+                actor=actor,
+                project_id=project_id,
+                plan_id=run.test_plan_id,
+                item=pinned_item,
+            )
         run = await self._repository.get_run_for_update(run_id)
         if run is None:
             raise AppError(
@@ -571,7 +597,11 @@ class ChangeRegressionService:
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
-            action="change_regression.plan_gap_asset_added",
+            action=(
+                "change_regression.plan_gap_asset_version_replaced"
+                if replacing
+                else "change_regression.plan_gap_asset_added"
+            ),
             resource_type="change_regression_run",
             resource_id=run.id,
             details={
@@ -581,6 +611,7 @@ class ChangeRegressionService:
                 "target_version": target_version,
                 "workflow_version": workflow_version,
                 "generated_asset": requested in generated,
+                "version_replaced": replacing,
                 "automatic_execute": False,
             },
         )
@@ -884,13 +915,17 @@ class ChangeRegressionService:
         )
         facts = await self._existing_semantic_coverage(run.project_id)
         selected_assets = _coverage_selected_assets(run)
+        runtime_summary: dict[str, JsonValue] = {}
         if use_execution_evidence:
-            plan_scope = await self._test_plan_run_scope(
+            plan_facts, runtime_summary = await self._test_plan_runtime_facts(
+                facts=facts,
                 selected_assets=selected_assets,
                 test_plan_run_id=run.test_plan_run_id,
             )
-            coverage_basis = "test_plan_run"
+            plan_scope = {fact.asset_key for fact in plan_facts}
+            coverage_basis = "runtime_node_evidence"
         else:
+            plan_facts = facts
             plan_items = list(
                 (
                     await self._session.scalars(
@@ -926,7 +961,7 @@ class ChangeRegressionService:
                 else set()
             )
             plan_tokens = (
-                semantic_coverage_tokens(facts, identity, target, asset_scope=plan_scope)
+                semantic_coverage_tokens(plan_facts, identity, target, asset_scope=plan_scope)
                 if identity is not None and target is not None
                 else set()
             )
@@ -950,7 +985,7 @@ class ChangeRegressionService:
                 if not covered:
                     current_gap_count += 1
                 status = _current_gap_status(
-                    facts=facts,
+                    facts=plan_facts,
                     identity=identity,
                     target=target,
                     requirement=requirement,
@@ -1040,6 +1075,7 @@ class ChangeRegressionService:
                 "semantic_coverage_test_plan_run_id": (
                     str(run.test_plan_run_id) if use_execution_evidence else None
                 ),
+                "runtime_coverage": cast(JsonValue, runtime_summary),
             }
         )
         run.selection_summary = summary
@@ -1439,18 +1475,28 @@ class ChangeRegressionService:
             raise AppError(
                 code="CHANGE_REGRESSION_NOT_FOUND", message="变更回归运行不存在", status_code=404
             )
+        test_plan_run = await self._terminal_release_test_plan_run(run)
         plan_gate = await self._recalculate_plan_gaps(run, use_execution_evidence=True)
+        active_waiver_evidence = [
+            _waiver_evidence(waiver)
+            for waiver in _active_waivers(
+                await self._repository.list_waivers(run.id), datetime.now(UTC)
+            )
+        ]
+        if test_plan_run.status in {"failed", "cancelled"}:
+            return await self._block_release_for_execution_outcome(
+                actor=actor,
+                run=run,
+                test_plan_run=test_plan_run,
+                plan_gate=plan_gate,
+                active_waiver_evidence=active_waiver_evidence,
+            )
         if _json_int(plan_gate.get("unresolved_current_plan_gap_count")) > 0:
             run.status = "blocked"
             run.evidence = {
                 **run.evidence,
                 "semantic_plan_gate": cast(dict[str, Any], plan_gate),
-                "semantic_gap_waivers": [
-                    _waiver_evidence(waiver)
-                    for waiver in _active_waivers(
-                        await self._repository.list_waivers(run.id), datetime.now(UTC)
-                    )
-                ],
+                "semantic_gap_waivers": active_waiver_evidence,
             }
             await self._stage(
                 run,
@@ -1478,12 +1524,6 @@ class ChangeRegressionService:
             )
             await self._session.commit()
             return await self._required_bundle(run.id)
-        active_waiver_evidence = [
-            _waiver_evidence(waiver)
-            for waiver in _active_waivers(
-                await self._repository.list_waivers(run.id), datetime.now(UTC)
-            )
-        ]
         if bundle.release_decision is not None:
             run.evidence = {
                 **run.evidence,
@@ -1493,19 +1533,6 @@ class ChangeRegressionService:
             run.status = "passed" if bundle.release_decision.status == "pass" else "blocked"
             await self._session.commit()
             return await self._required_bundle(run.id)
-        if run.test_plan_run_id is None:
-            raise AppError(
-                code="CHANGE_REGRESSION_EXECUTION_MISSING",
-                message="变更回归尚未产生执行证据",
-                status_code=409,
-            )
-        test_plan_run = await self._session.get(TestPlanRun, run.test_plan_run_id)
-        if test_plan_run is None or test_plan_run.status not in {"passed", "failed", "cancelled"}:
-            raise AppError(
-                code="CHANGE_REGRESSION_EXECUTION_PENDING",
-                message="测试计划仍在执行，完成后才能评估发布门禁",
-                status_code=409,
-            )
         decision = await ReleaseGateService(self._session).create_decision(
             actor=actor,
             project_id=project_id,
@@ -1530,15 +1557,6 @@ class ChangeRegressionService:
             "semantic_gap_waivers": active_waiver_evidence,
         }
         run.release_decision_id = decision.id
-        if test_plan_run.status == "failed":
-            run.failure_triage = await self._failure_triage(test_plan_run)
-            await self._stage(
-                run,
-                actor=actor,
-                stage="failure_triage",
-                status="completed",
-                details=run.failure_triage,
-            )
         await self._stage(
             run,
             actor=actor,
@@ -1582,6 +1600,93 @@ class ChangeRegressionService:
             )
         del bundle
         return result
+
+    async def _terminal_release_test_plan_run(self, run: ChangeRegressionRun) -> TestPlanRun:
+        """Validate execution completion before any release projection mutates the run."""
+
+        if run.test_plan_run_id is None:
+            raise AppError(
+                code="CHANGE_REGRESSION_EXECUTION_MISSING",
+                message="变更回归尚未产生执行证据",
+                status_code=409,
+            )
+        test_plan_run = await self._session.scalar(
+            select(TestPlanRun).where(TestPlanRun.id == run.test_plan_run_id).with_for_update()
+        )
+        if test_plan_run is None:
+            raise AppError(
+                code="CHANGE_REGRESSION_EXECUTION_MISSING",
+                message="变更回归执行证据不存在",
+                status_code=409,
+            )
+        if test_plan_run.status not in {"passed", "failed", "cancelled"}:
+            raise AppError(
+                code="CHANGE_REGRESSION_EXECUTION_PENDING",
+                message="测试计划仍在执行，完成后才能评估发布门禁",
+                status_code=409,
+                details={
+                    "test_plan_run_id": str(test_plan_run.id),
+                    "execution_status": test_plan_run.status,
+                },
+            )
+        return test_plan_run
+
+    async def _block_release_for_execution_outcome(
+        self,
+        *,
+        actor: User,
+        run: ChangeRegressionRun,
+        test_plan_run: TestPlanRun,
+        plan_gate: dict[str, JsonValue],
+        active_waiver_evidence: list_type[dict[str, JsonValue]],
+    ) -> ChangeRegressionBundle:
+        code = (
+            "CHANGE_REGRESSION_EXECUTION_FAILED"
+            if test_plan_run.status == "failed"
+            else "CHANGE_REGRESSION_EXECUTION_CANCELLED"
+        )
+        run.status = "blocked"
+        run.evidence = {
+            **run.evidence,
+            "semantic_plan_gate": cast(dict[str, Any], plan_gate),
+            "semantic_gap_waivers": active_waiver_evidence,
+            "execution_outcome": {
+                "code": code,
+                "test_plan_run_id": str(test_plan_run.id),
+                "status": test_plan_run.status,
+                "release_eligible": False,
+            },
+        }
+        if test_plan_run.status == "failed":
+            run.failure_triage = await self._failure_triage(test_plan_run)
+            await self._stage(
+                run,
+                actor=actor,
+                stage="failure_triage",
+                status="completed",
+                details=run.failure_triage,
+            )
+        await self._stage(
+            run,
+            actor=actor,
+            stage="release_gate",
+            status="blocked",
+            details={
+                "reason": "execution_not_passed",
+                "code": code,
+                "execution_status": test_plan_run.status,
+            },
+        )
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=run.project_id,
+            action="change_regression.release_blocked_by_execution_outcome",
+            resource_type="change_regression_run",
+            resource_id=run.id,
+            details={"code": code, "execution_status": test_plan_run.status},
+        )
+        await self._session.commit()
+        return await self._required_bundle(run.id)
 
     async def _get_authorized_bundle(
         self, *, actor: User, project_id: UUID, run_id: UUID
@@ -1827,10 +1932,11 @@ class ChangeRegressionService:
                 continue
             identity, contract = resolved
             node_id = raw_node.get("id")
+            request_node_id = str(node_id) if isinstance(node_id, str) else ""
             category, oracle_identities, oracle_conflict, oracle_reachability = (
                 _workflow_oracle_semantics(
                     workflow_definition,
-                    str(node_id) if isinstance(node_id, str) else "",
+                    request_node_id,
                     config,
                 )
             )
@@ -1848,6 +1954,11 @@ class ChangeRegressionService:
                     source_asset_id=str(source_asset_id),
                     source_asset_version=source_asset_version,
                     workflow_version=workflow_version,
+                    request_node_id=request_node_id,
+                    oracle_node_ids=_workflow_oracle_node_ids(
+                        workflow_definition,
+                        request_node_id,
+                    ),
                 )
             )
         return facts
@@ -1865,11 +1976,13 @@ class ChangeRegressionService:
             for asset in selected_assets
         }
         scope: set[tuple[str, str, int, int]] = set()
+        suite_case_refs = await self._suite_plan_case_refs(plan_items)
         case_refs = {
             (item.target_id, item.target_version)
             for item in plan_items
             if item.target_type == "case"
         }
+        case_refs.update(ref for refs in suite_case_refs.values() for ref in refs)
         case_versions = (
             list_type(
                 (
@@ -1889,36 +2002,50 @@ class ChangeRegressionService:
             if (version.test_case_id, version.version) in case_refs
         }
         for item in plan_items:
-            if item.target_type == "workflow":
-                key = ("workflow", str(item.target_id))
-                if key in selected and item.workflow_version is not None:
-                    scope.add(
-                        (
-                            "workflow",
-                            str(item.target_id),
-                            item.target_version,
-                            item.workflow_version,
-                        )
-                    )
-                continue
-            if item.target_type != "case":
-                continue
-            case_key = ("test_case", str(item.target_id))
-            version = versions_by_ref.get((item.target_id, item.target_version))
-            workflow_ref = _test_case_workflow_ref(version.definition) if version else None
-            workflow_key = ("workflow", str(workflow_ref[0])) if workflow_ref else None
-            if workflow_ref is not None and (
-                case_key in selected or (workflow_key is not None and workflow_key in selected)
-            ):
-                scope.add(
-                    (
-                        "test_case",
-                        str(item.target_id),
-                        item.target_version,
-                        workflow_ref[1],
+            scope.update(_plan_item_scope_entries(item, selected, versions_by_ref, suite_case_refs))
+        return scope
+
+    async def _suite_plan_case_refs(
+        self, plan_items: list_type[TestPlanItem]
+    ) -> dict[tuple[UUID, int], tuple[tuple[UUID, int], ...]]:
+        suite_refs = {
+            (item.target_id, item.target_version)
+            for item in plan_items
+            if item.target_type == "suite"
+        }
+        if not suite_refs:
+            return {}
+        versions = list_type(
+            (
+                await self._session.scalars(
+                    select(TestSuiteVersion).where(
+                        TestSuiteVersion.test_suite_id.in_([suite_id for suite_id, _ in suite_refs])
                     )
                 )
-        return scope
+            ).all()
+        )
+        versions_by_id = {
+            version.id: (version.test_suite_id, version.version)
+            for version in versions
+            if (version.test_suite_id, version.version) in suite_refs
+        }
+        if not versions_by_id:
+            return {}
+        items = list_type(
+            (
+                await self._session.scalars(
+                    select(TestSuiteVersionItem).where(
+                        TestSuiteVersionItem.test_suite_version_id.in_(versions_by_id)
+                    )
+                )
+            ).all()
+        )
+        grouped: dict[tuple[UUID, int], list[tuple[UUID, int]]] = {}
+        for item in items:
+            ref = versions_by_id.get(item.test_suite_version_id)
+            if ref is not None:
+                grouped.setdefault(ref, []).append((item.test_case_id, item.test_case_version))
+        return {ref: tuple(values) for ref, values in grouped.items()}
 
     async def _test_plan_run_scope(
         self,
@@ -1975,6 +2102,160 @@ class ChangeRegressionService:
                     )
                 )
         return scope
+
+    async def _test_plan_runtime_facts(
+        self,
+        *,
+        facts: list_type[SemanticCoverageFact],
+        selected_assets: list_type[dict[str, JsonValue]],
+        test_plan_run_id: UUID | None,
+    ) -> tuple[list_type[SemanticCoverageFact], dict[str, JsonValue]]:
+        """Project release coverage from passed nodes and their persisted observations."""
+
+        if test_plan_run_id is None:
+            return [], _runtime_coverage_summary()
+        run_items = list_type(
+            (
+                await self._session.scalars(
+                    select(TestPlanRunItem).where(
+                        TestPlanRunItem.test_plan_run_id == test_plan_run_id,
+                        TestPlanRunItem.status == "passed",
+                    )
+                )
+            ).all()
+        )
+        selected = {
+            (str(asset.get("target_type")), str(asset.get("target_id")))
+            for asset in selected_assets
+        }
+        item_assets = {
+            item.id: asset_key
+            for item in run_items
+            if (asset_key := _run_item_asset_key(item, selected)) is not None
+        }
+        roots = {
+            item.workflow_execution_id
+            for item in run_items
+            if item.id in item_assets and item.workflow_execution_id is not None
+        }
+        executions, roots_by_execution = await self._workflow_execution_tree(roots)
+        execution_ids = {execution.id for execution in executions}
+        nodes = (
+            list_type(
+                (
+                    await self._session.scalars(
+                        select(WorkflowNodeExecution).where(
+                            WorkflowNodeExecution.workflow_execution_id.in_(execution_ids)
+                        )
+                    )
+                ).all()
+            )
+            if execution_ids
+            else []
+        )
+        nodes_by_execution: dict[UUID, list_type[WorkflowNodeExecution]] = {}
+        for node in nodes:
+            nodes_by_execution.setdefault(node.workflow_execution_id, []).append(node)
+        workflow_refs = {(item.workflow_id, item.workflow_version) for item in run_items}
+        workflow_versions = list_type(
+            (
+                await self._session.scalars(
+                    select(WorkflowVersion).where(
+                        WorkflowVersion.workflow_id.in_([ref[0] for ref in workflow_refs])
+                    )
+                )
+            ).all()
+        )
+        workflow_version_ids = {
+            (version.workflow_id, version.version): version.id
+            for version in workflow_versions
+            if (version.workflow_id, version.version) in workflow_refs
+        }
+        executions_by_root: dict[UUID, list_type[WorkflowExecution]] = {}
+        for execution in executions:
+            root_id = roots_by_execution.get(execution.id)
+            if root_id is not None and execution.status == "passed":
+                executions_by_root.setdefault(root_id, []).append(execution)
+        matched: list_type[SemanticCoverageFact] = []
+        matched_keys: set[tuple[str, str, int, int, str, str, str]] = set()
+        for item in run_items:
+            asset_key = item_assets.get(item.id)
+            if asset_key is None or item.workflow_execution_id is None:
+                continue
+            expected_version_id = workflow_version_ids.get(
+                (item.workflow_id, item.workflow_version)
+            )
+            item_executions = [
+                execution
+                for execution in executions_by_root.get(item.workflow_execution_id, [])
+                if execution.workflow_id == item.workflow_id
+                and execution.workflow_version_id == expected_version_id
+            ]
+            candidate_facts = [fact for fact in facts if fact.asset_key == asset_key]
+            for fact in candidate_facts:
+                if not any(
+                    _runtime_fact_is_covered(
+                        fact,
+                        nodes_by_execution.get(execution.id, []),
+                    )
+                    for execution in item_executions
+                ):
+                    continue
+                key = (
+                    *fact.asset_key,
+                    fact.request_node_id or "",
+                    fact.target_key,
+                    fact.coverage_token,
+                )
+                if key not in matched_keys:
+                    matched_keys.add(key)
+                    matched.append(fact)
+        return matched, _runtime_coverage_summary(
+            passed_run_item_count=len(run_items),
+            selected_run_item_count=len(item_assets),
+            workflow_execution_count=len(executions),
+            passed_api_node_count=sum(
+                node.status == "passed" and node.node_type == "api" for node in nodes
+            ),
+            matched_semantic_fact_count=len(matched),
+        )
+
+    async def _workflow_execution_tree(
+        self, root_ids: set[UUID]
+    ) -> tuple[list_type[WorkflowExecution], dict[UUID, UUID]]:
+        if not root_ids:
+            return [], {}
+        roots = list_type(
+            (
+                await self._session.scalars(
+                    select(WorkflowExecution).where(WorkflowExecution.id.in_(root_ids))
+                )
+            ).all()
+        )
+        executions = list(roots)
+        root_by_execution = {execution.id: execution.id for execution in roots}
+        pending = set(root_by_execution)
+        while pending:
+            children = list_type(
+                (
+                    await self._session.scalars(
+                        select(WorkflowExecution).where(
+                            WorkflowExecution.parent_execution_id.in_(pending)
+                        )
+                    )
+                ).all()
+            )
+            pending = set()
+            for child in children:
+                if child.id in root_by_execution or child.parent_execution_id is None:
+                    continue
+                root_id = root_by_execution.get(child.parent_execution_id)
+                if root_id is None:
+                    continue
+                root_by_execution[child.id] = root_id
+                executions.append(child)
+                pending.add(child.id)
+        return executions, root_by_execution
 
     async def _current_contract_for_gap(
         self,
@@ -2665,6 +2946,302 @@ def _generated_asset_scope(summary: dict[str, Any], change_key: str) -> set[tupl
     }
 
 
+def _run_item_asset_key(
+    item: TestPlanRunItem,
+    selected: set[tuple[str, str]],
+) -> tuple[str, str, int, int] | None:
+    if item.target_type == "workflow":
+        if ("workflow", str(item.target_id)) not in selected:
+            return None
+        return ("workflow", str(item.target_id), item.target_version, item.workflow_version)
+    if item.target_type != "case":
+        return None
+    definition = _mapping(item.target_snapshot.get("definition"))
+    workflow_ref = _test_case_workflow_ref(definition)
+    if workflow_ref is None or workflow_ref != (item.workflow_id, item.workflow_version):
+        return None
+    if ("test_case", str(item.target_id)) not in selected and (
+        "workflow",
+        str(item.workflow_id),
+    ) not in selected:
+        return None
+    return ("test_case", str(item.target_id), item.target_version, item.workflow_version)
+
+
+def _case_plan_scope_entry(
+    selected: set[tuple[str, str]],
+    versions_by_ref: dict[tuple[UUID, int], TestCaseVersion],
+    case_id: UUID,
+    case_version: int,
+) -> tuple[str, str, int, int] | None:
+    version = versions_by_ref.get((case_id, case_version))
+    workflow_ref = _test_case_workflow_ref(version.definition) if version is not None else None
+    if workflow_ref is None:
+        return None
+    if ("test_case", str(case_id)) not in selected and (
+        "workflow",
+        str(workflow_ref[0]),
+    ) not in selected:
+        return None
+    return ("test_case", str(case_id), case_version, workflow_ref[1])
+
+
+def _plan_item_scope_entries(
+    item: TestPlanItem,
+    selected: set[tuple[str, str]],
+    versions_by_ref: dict[tuple[UUID, int], TestCaseVersion],
+    suite_case_refs: dict[tuple[UUID, int], tuple[tuple[UUID, int], ...]],
+) -> set[tuple[str, str, int, int]]:
+    if item.target_type == "workflow":
+        if ("workflow", str(item.target_id)) in selected and item.workflow_version is not None:
+            return {
+                (
+                    "workflow",
+                    str(item.target_id),
+                    item.target_version,
+                    item.workflow_version,
+                )
+            }
+        return set()
+    case_refs = (
+        suite_case_refs.get((item.target_id, item.target_version), ())
+        if item.target_type == "suite"
+        else ((item.target_id, item.target_version),)
+        if item.target_type == "case"
+        else ()
+    )
+    return {
+        entry
+        for case_id, case_version in case_refs
+        if (
+            entry := _case_plan_scope_entry(
+                selected,
+                versions_by_ref,
+                case_id,
+                case_version,
+            )
+        )
+        is not None
+    }
+
+
+def _runtime_coverage_summary(
+    *,
+    passed_run_item_count: int = 0,
+    selected_run_item_count: int = 0,
+    workflow_execution_count: int = 0,
+    passed_api_node_count: int = 0,
+    matched_semantic_fact_count: int = 0,
+) -> dict[str, JsonValue]:
+    return {
+        "evidence_chain": (
+            "test_plan_run_item>workflow_execution>workflow_node_execution>node_result_observation"
+        ),
+        "passed_run_item_count": passed_run_item_count,
+        "selected_run_item_count": selected_run_item_count,
+        "workflow_execution_count": workflow_execution_count,
+        "passed_api_node_count": passed_api_node_count,
+        "matched_semantic_fact_count": matched_semantic_fact_count,
+    }
+
+
+def _runtime_fact_is_covered(
+    fact: SemanticCoverageFact,
+    nodes: list_type[WorkflowNodeExecution],
+) -> bool:
+    if not fact.complete or fact.request_node_id is None:
+        return False
+    by_id = {node.node_id: node for node in nodes}
+    request_node = by_id.get(fact.request_node_id)
+    result = _passed_node_result(request_node, expected_type="api")
+    if result is None:
+        return False
+    observation = next(
+        (
+            item
+            for item in reversed(result.observations)
+            if item.response is not None and item.error_code is None
+        ),
+        None,
+    )
+    if observation is None or not _runtime_request_matches_fact(fact, observation.request):
+        return False
+    response = observation.response
+    if response is None or not _runtime_oracles_match(fact, response.status_code):
+        return False
+    return all(
+        _passed_assert_node(by_id.get(node_id), source_node_id=fact.request_node_id)
+        for node_id in fact.oracle_node_ids
+    )
+
+
+def _passed_node_result(
+    node: WorkflowNodeExecution | None,
+    *,
+    expected_type: str,
+) -> NodeResult | None:
+    if node is None or node.node_type != expected_type or node.status != "passed":
+        return None
+    result = _validated_node_result(node.result)
+    return result if result is not None and result.status.value == "passed" else None
+
+
+def _passed_assert_node(
+    node: WorkflowNodeExecution | None,
+    *,
+    source_node_id: str,
+) -> bool:
+    result = _passed_node_result(node, expected_type="assert")
+    output = result.output if result is not None else None
+    return (
+        isinstance(output, dict)
+        and output.get("passed") is True
+        and output.get("source_node_id") == source_node_id
+    )
+
+
+def _runtime_oracles_match(fact: SemanticCoverageFact, status_code: int) -> bool:
+    for identity in fact.oracle_identities:
+        if identity.startswith("status:"):
+            if identity != f"status:{status_code}":
+                return False
+            continue
+        if identity.startswith("status_set:"):
+            statuses = {
+                int(value)
+                for value in identity.removeprefix("status_set:").split(",")
+                if value.isdigit()
+            }
+            if status_code not in statuses:
+                return False
+            continue
+        if not fact.oracle_node_ids:
+            return False
+    return True
+
+
+def _runtime_request_matches_fact(
+    fact: SemanticCoverageFact,
+    request: HttpRequestSnapshot,
+) -> bool:
+    if request.method.upper() != fact.operation_identity.method:
+        return False
+    if (
+        request.service_key is not None
+        and fact.operation_identity.service_key != "unassigned"
+        and request.service_key != fact.operation_identity.service_key
+    ):
+        return False
+    parsed = urlsplit(request.url)
+    if not _path_template_matches(fact.operation_identity.normalized_path, parsed.path):
+        return False
+    actual = _runtime_request_value(fact, parsed, request.headers, request.body)
+    return actual is not _RUNTIME_VALUE_MISSING and _semantic_values_equal(
+        fact.semantic_value,
+        actual,
+    )
+
+
+_RUNTIME_VALUE_MISSING = object()
+
+
+def _runtime_request_value(
+    fact: SemanticCoverageFact,
+    parsed_url: SplitResult,
+    headers: dict[str, str],
+    body: JsonValue,
+) -> object:
+    if fact.request_location == "query":
+        values = parse_qs(parsed_url.query, keep_blank_values=True).get(fact.field_path)
+        return values[0] if values and len(values) == 1 else values or _RUNTIME_VALUE_MISSING
+    if fact.request_location == "header":
+        return next(
+            (value for name, value in headers.items() if name.lower() == fact.field_path.lower()),
+            _RUNTIME_VALUE_MISSING,
+        )
+    if fact.request_location == "cookie":
+        cookie_header = next(
+            (value for name, value in headers.items() if name.lower() == "cookie"),
+            None,
+        )
+        return _runtime_cookie_value(cookie_header, fact.field_path)
+    if fact.request_location == "path":
+        return _runtime_path_value(
+            fact.request_path_template or fact.operation_identity.normalized_path,
+            parsed_url.path,
+            fact.field_path,
+        )
+    return _nested_runtime_value(body, fact.field_path)
+
+
+def _path_template_matches(template: str, actual: str) -> bool:
+    expected_parts = [unquote(part) for part in template.strip("/").split("/") if part]
+    actual_parts = [unquote(part) for part in actual.strip("/").split("/") if part]
+    if len(expected_parts) != len(actual_parts):
+        return False
+    return all(
+        (part.startswith("{") and part.endswith("}")) or part == value
+        for part, value in zip(expected_parts, actual_parts, strict=True)
+    )
+
+
+def _runtime_path_value(template: str, actual: str, field_path: str) -> object:
+    expected_parts = [unquote(part) for part in template.strip("/").split("/") if part]
+    actual_parts = [unquote(part) for part in actual.strip("/").split("/") if part]
+    for expected, value in zip(expected_parts, actual_parts, strict=False):
+        if expected == "{" + field_path + "}":
+            return value
+    return _RUNTIME_VALUE_MISSING
+
+
+def _runtime_cookie_value(header: str | None, field_path: str) -> object:
+    if header is None:
+        return _RUNTIME_VALUE_MISSING
+    cookie = SimpleCookie()
+    try:
+        cookie.load(header)
+    except CookieError:
+        return _RUNTIME_VALUE_MISSING
+    value = cookie.get(field_path)
+    return value.value if value is not None else _RUNTIME_VALUE_MISSING
+
+
+def _nested_runtime_value(value: JsonValue, field_path: str) -> object:
+    current: object = value
+    for part in field_path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+            continue
+        return _RUNTIME_VALUE_MISSING
+    return current
+
+
+def _semantic_values_equal(encoded_expected: str, actual: object) -> bool:
+    try:
+        expected = json.loads(encoded_expected)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(actual, str):
+        actual = _coerce_runtime_scalar(actual, expected)
+    return _encoded_semantic_value(actual) == _encoded_semantic_value(expected)
+
+
+def _coerce_runtime_scalar(value: str, expected: object) -> object:
+    try:
+        if isinstance(expected, bool) and value.lower() in {"true", "false"}:
+            return value.lower() == "true"
+        if isinstance(expected, int) and not isinstance(expected, bool):
+            return int(value)
+        if isinstance(expected, float):
+            return float(value)
+    except ValueError:
+        return value
+    return value
+
+
 def _coverage_selected_assets(run: ChangeRegressionRun) -> list[dict[str, JsonValue]]:
     selected = [
         cast(dict[str, JsonValue], dict(asset))
@@ -2819,6 +3396,31 @@ def _workflow_oracle_semantics(
     return category, tuple(sorted(identities)), False, tuple(sorted(reachability))
 
 
+def _workflow_oracle_node_ids(definition: dict[str, Any], request_node_id: str) -> tuple[str, ...]:
+    """Return assertions that must actually pass for the static Oracle set to count."""
+
+    raw_nodes = definition.get("nodes")
+    if not isinstance(raw_nodes, list):
+        return ()
+    result: list[str] = []
+    for raw_node in raw_nodes:
+        node = _mapping(raw_node)
+        node_id = node.get("id")
+        config = _mapping(node.get("config"))
+        if (
+            node.get("type") != "assert"
+            or not isinstance(node_id, str)
+            or config.get("source_node_id") != request_node_id
+            or _workflow_assert_reachability(definition, request_node_id, node_id)
+            != "unconditional_assert"
+        ):
+            continue
+        _target, identities = _assert_oracle_identities(config)
+        if identities:
+            result.append(node_id)
+    return tuple(sorted(set(result)))
+
+
 def _workflow_assert_reachability(
     definition: dict[str, Any], request_node_id: str, assert_node_id: str
 ) -> Literal[
@@ -2971,6 +3573,8 @@ def _workflow_node_facts(
     source_asset_id: str,
     source_asset_version: int,
     workflow_version: int,
+    request_node_id: str,
+    oracle_node_ids: tuple[str, ...],
 ) -> list[SemanticCoverageFact]:
     values: list[tuple[Literal["path", "query", "header", "cookie", "body"], str, object]] = []
     variables = definition.get("variables")
@@ -3009,6 +3613,9 @@ def _workflow_node_facts(
             source_asset_id=source_asset_id,
             source_asset_version=source_asset_version,
             workflow_version=workflow_version,
+            request_node_id=request_node_id or None,
+            request_path_template=contract.path,
+            oracle_node_ids=oracle_node_ids,
         )
         for location, field_path, value in values
     ]

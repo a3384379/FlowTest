@@ -179,7 +179,7 @@ export function useChangeRegression() {
       targetVersion: number
       workflowVersion: number
       environmentId?: string
-    }) => runAction(() => addToPlan.mutateAsync(input), '已有测试已加入当前计划'),
+    }) => runAction(() => addToPlan.mutateAsync(input), '当前计划的固定测试版本已更新'),
     waiveGap: (input: { runId: string; gapKey: string; reason: string; expiresAt?: string }) =>
       runAction(() => waive.mutateAsync(input), '语义缺口已记录人工豁免'),
     selectOperation: (input: {
