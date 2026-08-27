@@ -53,6 +53,15 @@ class FlowSpecRunPolicy(BaseModel):
     force_cancel_skips_cleanup: bool = False
 
 
+class FlowSpecBindingV2(BaseModel):
+    """Strict portable binding used by the v2 top-level contract."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    from_path: str = Field(alias="from", min_length=1, max_length=2048)
+    to_path: str = Field(alias="to", min_length=1, max_length=2048)
+
+
 class FlowSpecCleanupV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -85,7 +94,7 @@ class FlowSpecV2(BaseModel):
     edges: list[FlowSpecEdge] = Field(default_factory=list, max_length=2000)
     variables: dict[str, str] = Field(default_factory=dict)
     settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
-    bindings: list[dict[str, str]] = Field(default_factory=list, max_length=2000)
+    bindings: list[FlowSpecBindingV2] = Field(default_factory=list, max_length=2000)
     parameters: list[FlowSpecParameter] = Field(default_factory=list, max_length=1000)
     assertions: list[FlowSpecAssertion] = Field(default_factory=list, max_length=2000)
     cleanup: list[FlowSpecCleanupV2] = Field(default_factory=list, max_length=200)
@@ -115,7 +124,9 @@ def normalize_flow_spec_v2(spec: FlowSpecV2 | Mapping[str, object]) -> FlowSpecV
             "operations": normalized_v1.operations,
             "nodes": normalized_v1.nodes,
             "edges": normalized_v1.edges,
-            "bindings": normalized_v1.bindings,
+            "bindings": [
+                FlowSpecBindingV2.model_validate(binding) for binding in normalized_v1.bindings
+            ],
             "parameters": normalized_v1.parameters,
             "assertions": normalized_v1.assertions,
             "cleanup": sorted(
@@ -167,7 +178,7 @@ def downgrade_flow_spec_v2_to_v1(spec: FlowSpecV2) -> FlowSpec:
 
 def flow_spec_v2_fingerprint(spec: FlowSpecV2) -> str:
     normalized = normalize_flow_spec_v2(spec)
-    payload = cast(dict[str, JsonValue], normalized.model_dump(mode="json"))
+    payload = cast(dict[str, JsonValue], normalized.model_dump(mode="json", by_alias=True))
     for excluded in (
         "project_id",
         "source_evidence",
@@ -186,12 +197,11 @@ def flow_spec_v2_fingerprint(spec: FlowSpecV2) -> str:
 
 
 def validate_flow_spec_v2(spec: FlowSpecV2) -> FlowSpecValidationResult:
-    normalized = normalize_flow_spec_v2(spec)
-    base = validate_flow_spec(_v1_projection(normalized))
+    base = validate_flow_spec(_v1_projection(spec))
     issues = list(base.issues)
-    known_nodes = {node.id for node in normalized.nodes}
-    known_operations = {operation.ref for operation in normalized.operations}
-    for index, cleanup in enumerate(normalized.cleanup):
+    known_nodes = {node.id for node in spec.nodes}
+    known_operations = {operation.ref for operation in spec.operations}
+    for index, cleanup in enumerate(spec.cleanup):
         if cleanup.operation_ref not in known_operations:
             issues.append(
                 FlowSpecIssue(
@@ -209,8 +219,8 @@ def validate_flow_spec_v2(spec: FlowSpecV2) -> FlowSpecValidationResult:
                     path=f"$.cleanup[{index}].cleanup_for",
                 )
             )
-    request_budget = normalized.run_policy.request_budget
-    if request_budget is not None and request_budget > normalized.security_policy.max_requests:
+    request_budget = spec.run_policy.request_budget
+    if request_budget is not None and request_budget > spec.security_policy.max_requests:
         issues.append(
             FlowSpecIssue(
                 code="REQUEST_BUDGET_EXCEEDS_SECURITY_POLICY",
@@ -218,8 +228,8 @@ def validate_flow_spec_v2(spec: FlowSpecV2) -> FlowSpecValidationResult:
                 path="$.run_policy.request_budget",
             )
         )
-    cleanup_budget = normalized.run_policy.cleanup_request_budget
-    if cleanup_budget is not None and cleanup_budget > normalized.security_policy.max_requests:
+    cleanup_budget = spec.run_policy.cleanup_request_budget
+    if cleanup_budget is not None and cleanup_budget > spec.security_policy.max_requests:
         issues.append(
             FlowSpecIssue(
                 code="CLEANUP_REQUEST_BUDGET_EXCEEDS_SECURITY_POLICY",
@@ -243,6 +253,7 @@ def _v1_projection(spec: FlowSpecV2) -> FlowSpec:
         {"operation_ref": item.operation_ref, "best_effort": item.best_effort}
         for item in spec.cleanup
     ]
+    payload["bindings"] = [{"from": item.from_path, "to": item.to_path} for item in spec.bindings]
     payload.pop("plan_metadata", None)
     payload.pop("run_policy", None)
     return FlowSpec.model_validate(payload)

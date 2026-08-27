@@ -112,6 +112,13 @@ def test_flowspec_v2_rejects_unknown_fields_and_lossy_downgrade() -> None:
     raw = _load_mapping("login-create-query.flowspec-v2.json")
     with pytest.raises(ValidationError):
         FlowSpecV2.model_validate({**raw, "future_runtime_switch": True})
+    with pytest.raises(ValidationError):
+        FlowSpecV2.model_validate(
+            {
+                **raw,
+                "bindings": [{"from": "$.login.token", "to": "$.create.token", "form": "typo"}],
+            }
+        )
     with pytest.raises(ValidationError, match="cleanup IDs must be unique"):
         FlowSpecV2.model_validate(
             {
@@ -155,6 +162,25 @@ def test_flowspec_v2_rejects_unknown_fields_and_lossy_downgrade() -> None:
     )
     with pytest.raises(ValueError, match="cannot represent"):
         downgrade_flow_spec_v2_to_v1(custom_identity)
+
+
+def test_flowspec_v2_validation_paths_preserve_submitted_order() -> None:
+    raw = _load_mapping("login-create-query.flowspec-v2.json")
+    spec = FlowSpecV2.model_validate(
+        {
+            **raw,
+            "cleanup": [
+                {"id": "z-first", "operation_ref": "orders.missing"},
+                {"id": "a-second", "operation_ref": "orders.create"},
+            ],
+        }
+    )
+
+    validation = validate_flow_spec_v2(spec)
+
+    assert [
+        issue.path for issue in validation.issues if issue.code == "UNKNOWN_CLEANUP_OPERATION"
+    ] == ["$.cleanup[0].operation_ref"]
 
 
 def test_v1_workflow_round_trip_preserves_semantic_fingerprint() -> None:
