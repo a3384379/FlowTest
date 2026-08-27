@@ -287,6 +287,7 @@ function handlers(overrides: Partial<V3FeatureFlags> = {}) {
     contract_hub: true,
     impact_engine: true,
     quality_intelligence: true,
+    integration_flow: false,
     pact_broker: false,
     ...overrides,
   }

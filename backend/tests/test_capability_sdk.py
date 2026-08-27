@@ -383,6 +383,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         "contract_hub": False,
         "impact_engine": False,
         "quality_intelligence": False,
+        "integration_flow": False,
         "pact_broker": False,
     }
 

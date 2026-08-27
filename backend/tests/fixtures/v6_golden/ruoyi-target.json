@@ -1,0 +1,12 @@
+{
+  "fixture_id": "ruoyi-full-target-v1",
+  "target_type": "java_spring_full",
+  "source_ref": "local-sibling://RuoYi",
+  "source_revision_policy": "explicit commit required before evaluation",
+  "compose_file": "deploy/ruoyi/compose.yaml",
+  "image": "flowtest-ruoyi:4.8.3",
+  "database_profile": "mysql-8.4/ry",
+  "expected_chain": ["route", "dto", "service", "mapper_or_entity", "table"],
+  "execute_analyzed_code": false,
+  "ci_required": false
+}

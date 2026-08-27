@@ -612,7 +612,7 @@ wheels = [
 
 [[package]]
 name = "flowtest-backend"
-version = "3.0.0b3.dev29"
+version = "6.0.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

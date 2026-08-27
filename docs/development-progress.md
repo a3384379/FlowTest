@@ -1,7 +1,9 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-23（Asia/Shanghai）
-状态：仓库已公开；V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
+最后更新：2026-08-28（Asia/Shanghai）
+状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
+当前在独立 `codex/s48-contract-freeze` 分支完成 S48 本地契约冻结，等待精确 Head Remote CI 和合并后
+Main Green；尚未进入 S49，也不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
@@ -9,6 +11,40 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 进行中：V6 S48 Contract Freeze 与 Governance Baseline
+
+### Implemented（当前分支）
+
+- 正式起点固定为 `main@6370c6c8b44db51ce7717bc73eaf41f259c9df1b`，Alembic 单 Head 与
+  Standalone Revision 均为 `20260823_0045`；Backend `6.0.0.dev0`、API/Frontend `6.0.0-dev.0`，
+  Release 保持未发布。
+- 完整 V6 方案已复制为 `docs/development-plan-v6.md`；新增 10 份 ADR，冻结外部 LLM、Context Revision、
+  Evidence、Proposal Reuse、Plan、FlowSpec v2、Cleanup、Preview、数据分类和 MCP Scope。
+- 新增 FlowSpec v2 纯领域契约、确定性 v1→v2、受守卫 v2→v1、新 Fingerprint 与 Golden Contract；现有
+  v1 Import/Fingerprint/Workflow/Snapshot 不改写。
+- Golden Set 固定 HTTP、Login→Create→Query、WorkflowDefinition、AIChangeSet、MCP Tools、TestDesign、
+  OperationIdentity、Snapshot、Standalone Transfer、DB Profile、小型 Java/Spring 与 RuoYi Target。
+- Evaluation 标注/统计契约已固定。唯一新 Flag 为 `integration_flow`，Full/Compact/Standalone/Compatibility/
+  Upgrade 默认均关闭；没有预建未来空 Flag。
+- 本地 Backend 四项门禁通过：`637 passed / 4 skipped`，Coverage `90.21%`；Frontend 四项门禁通过：
+  `56 files / 215 tests`，Statements `86.15%`、Branches `80.11%`、Functions `85.27%`、Lines `88.37%`。
+- 本分支镜像在隔离 Compose 替代端口全部健康，相关 Playwright 登录 Setup 与 S22 能力/安全/深链
+  `2 passed`，随后已清理临时容器、网络和数据卷。依赖 CI Smoke 种子与显式旧 Feature Flag 的全量 E2E
+  诊断不记为通过，最终以 Remote Compose Workflow 完整前置结果为准。
+
+### Intentionally Out of Scope
+
+- S48 不增加数据库表或 Migration，不实现 Context/Evidence 持久化、Compiler、Proposal UI、Cleanup Runtime、
+  Preview Runtime、自动 Publish、生产执行或内置 Java Provider。
+- 不创建 Tag、Release，不把本地测试写成远程 CI，不宣称真实 Key Rotation、公司试点或人工签署完成。
+
+### Review 与 External Validation / 下一门槛
+
+- Requirement、Correctness/Data Consistency/Concurrency、Security/Tenant/Secret/SSRF、End-to-End User Flow
+  四类当前代码 Review 均未发现 P1/P2；S48 没有新增 Runtime/UI，相关 Compose Playwright 已按上述适用范围通过。
+- 提交独立 S48 PR，等待精确 Head 的全部适用 Workflow 终态，关闭 P1/P2 与 Review Thread 后普通合并。
+- 等待合并后 Main Push Checks 全绿，才可从最新 Main 创建 S49 分支。
 
 ## 进行中：V5 S47 正确性修复与功能闭环
 

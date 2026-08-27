@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "workflow": {
+    "id": "00000000-0000-0000-0000-000000000030",
+    "version_id": "00000000-0000-0000-0000-000000000031",
+    "version": 1,
+    "fingerprint": "7777777777777777777777777777777777777777777777777777777777777777",
+    "definition": {
+      "schema_version": "1.0",
+      "variables": {},
+      "nodes": [
+        {"id": "start", "type": "start", "name": "Start", "position": {"x": 0, "y": 0}, "config": {}},
+        {"id": "end", "type": "end", "name": "End", "position": {"x": 200, "y": 0}, "config": {}}
+      ],
+      "edges": [{"id": "start-end", "source": "start", "target": "end", "condition": null, "mappings": []}],
+      "settings": {"fail_fast": true, "concurrency": 20, "default_timeout_seconds": 30}
+    }
+  },
+  "environment": {"id": "00000000-0000-0000-0000-000000000032", "name": "Golden Sandbox"},
+  "apis": {},
+  "subflows": {},
+  "data_nodes": {},
+  "protocol_nodes": {},
+  "event_nodes": {},
+  "capabilities": {},
+  "dataset": null,
+  "runtime": {"variables": {}, "headers": {}}
+}

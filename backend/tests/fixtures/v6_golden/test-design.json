@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "intent": {
+    "key": "orders.create",
+    "objective": "Create an order and verify its stable identity",
+    "actors": ["customer"],
+    "preconditions": ["sandbox environment is available"],
+    "acceptance_criteria": ["created order can be queried by id"],
+    "evidence_refs": ["contract.orders.create"],
+    "confidence": 1.0,
+    "deterministic": true
+  },
+  "knowledge_graph": {"nodes": [], "edges": []},
+  "state_model": null,
+  "scenarios": [],
+  "oracles": [
+    {
+      "id": "status.created",
+      "kind": "status",
+      "expression": "status_code",
+      "operator": "equals",
+      "expected": 201,
+      "confidence": 1.0,
+      "source_ref": "contract://golden/orders/create",
+      "evidence_refs": ["contract.orders.create"],
+      "source_type": "contract",
+      "deterministic": true,
+      "requires_review": false,
+      "applies_to": []
+    }
+  ],
+  "coverage": {"entries": []},
+  "test_case_refs": [],
+  "evidence_refs": [],
+  "warnings": [],
+  "confidence": 1.0,
+  "review_requirements": []
+}
