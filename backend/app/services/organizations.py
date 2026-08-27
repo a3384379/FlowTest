@@ -242,6 +242,13 @@ class OrganizationService:
             user_id=user_id,
         )
         if member is None:
+            from app.domain.governance import QuotaDimension
+            from app.services.organization_governance import OrganizationQuotaService
+
+            await OrganizationQuotaService(self._session).enforce(
+                organization_id=organization.id,
+                dimension=QuotaDimension.USER_COUNT,
+            )
             member = OrganizationMember(
                 organization_id=organization.id,
                 user_id=user_id,

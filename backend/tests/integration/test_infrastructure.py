@@ -1,19 +1,30 @@
+import asyncio
 import os
 import socket
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from redis.asyncio import Redis
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.database import check_database
+from app.core.errors import AppError
 from app.core.redis import check_redis
+from app.core.security import password_service
 from app.core.storage import check_storage, ensure_storage_bucket
 from app.domain.data_nodes import CredentialKind
+from app.domain.governance import QuotaDimension
 from app.domain.network import OutboundNetworkPolicy
+from app.domain.tenant import OrganizationRole
+from app.models.access import AuditLog, User
+from app.models.governance import OrganizationGovernance
+from app.models.organizations import Organization, OrganizationMember
 from app.services.credentials import CredentialMaterial
 from app.services.data_nodes import InfrastructureDataNodeRunner
 from app.services.execution_events import (
@@ -21,6 +32,8 @@ from app.services.execution_events import (
     ExecutionEventType,
     RedisExecutionEventBus,
 )
+from app.services.organization_governance import OrganizationQuotaService
+from app.services.organizations import OrganizationService
 
 pytestmark = [
     pytest.mark.integration,
@@ -118,6 +131,138 @@ async def test_data_nodes_execute_real_postgres_and_redis_reads() -> None:
     finally:
         await client.delete(key)
         await client.aclose()
+
+
+async def test_postgres_serializes_concurrent_organization_member_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quota_engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    quota_sessions = async_sessionmaker(quota_engine, expire_on_commit=False)
+    suffix = uuid4().hex
+    actor_id: UUID
+    organization_id: UUID
+    target_ids: list[UUID]
+    async with quota_sessions() as session:
+        actor = User(
+            email=f"quota-admin-{suffix}@example.com",
+            display_name="Integration quota administrator",
+            password_hash=password_service.hash("integration-password-123!"),
+            is_active=True,
+            is_system_admin=True,
+            requires_password_change=False,
+        )
+        targets = [
+            User(
+                email=f"quota-target-{index}-{suffix}@example.com",
+                display_name=f"Integration quota target {index}",
+                password_hash=password_service.hash("integration-password-123!"),
+                is_active=True,
+                is_system_admin=False,
+                requires_password_change=False,
+            )
+            for index in range(2)
+        ]
+        session.add_all([actor, *targets])
+        await session.flush()
+        organization = Organization(
+            name="Integration member quota",
+            slug=f"integration-member-quota-{suffix}",
+            description="",
+            enabled=True,
+            created_by_id=actor.id,
+        )
+        session.add(organization)
+        await session.flush()
+        session.add(
+            OrganizationGovernance(
+                organization_id=organization.id,
+                quota_policies={
+                    QuotaDimension.USER_COUNT.value: {
+                        "mode": "hard_limit",
+                        "limit": 1,
+                        "warn_at": None,
+                    }
+                },
+                runner_policy={},
+                active_key_version=1,
+            )
+        )
+        await session.commit()
+        actor_id = actor.id
+        organization_id = organization.id
+        target_ids = [target.id for target in targets]
+
+    original_usage = OrganizationQuotaService._usage
+    second_count_observed = asyncio.Event()
+    count_calls = 0
+    count_lock = asyncio.Lock()
+
+    async def synchronized_usage(
+        quota_service: OrganizationQuotaService,
+        current_organization_id: UUID,
+        dimension: QuotaDimension,
+    ) -> int:
+        nonlocal count_calls
+        usage = await original_usage(quota_service, current_organization_id, dimension)
+        async with count_lock:
+            count_calls += 1
+            if count_calls >= 2:
+                second_count_observed.set()
+        try:
+            await asyncio.wait_for(second_count_observed.wait(), timeout=0.5)
+        except TimeoutError:
+            second_count_observed.set()
+        return usage
+
+    monkeypatch.setattr(OrganizationQuotaService, "_usage", synchronized_usage)
+
+    async def add_member(user_id: UUID) -> OrganizationMember:
+        async with quota_sessions() as session:
+            actor = await session.get(User, actor_id)
+            assert actor is not None
+            return await OrganizationService(session).upsert_member(
+                actor=actor,
+                organization_id=organization_id,
+                user_id=user_id,
+                role=OrganizationRole.MEMBER,
+            )
+
+    try:
+        outcomes = await asyncio.gather(
+            *(add_member(user_id) for user_id in target_ids),
+            return_exceptions=True,
+        )
+        successes = [outcome for outcome in outcomes if isinstance(outcome, OrganizationMember)]
+        failures = [outcome for outcome in outcomes if isinstance(outcome, AppError)]
+        assert len(successes) == 1
+        assert len(failures) == 1
+        assert failures[0].code == "ORGANIZATION_QUOTA_EXCEEDED"
+        async with quota_sessions() as session:
+            member_count = await session.scalar(
+                select(func.count())
+                .select_from(OrganizationMember)
+                .where(OrganizationMember.organization_id == organization_id)
+            )
+        assert member_count == 1
+    finally:
+        async with quota_sessions() as session:
+            await session.execute(
+                delete(AuditLog).where(AuditLog.organization_id == organization_id)
+            )
+            await session.execute(
+                delete(OrganizationMember).where(
+                    OrganizationMember.organization_id == organization_id
+                )
+            )
+            await session.execute(
+                delete(OrganizationGovernance).where(
+                    OrganizationGovernance.organization_id == organization_id
+                )
+            )
+            await session.execute(delete(Organization).where(Organization.id == organization_id))
+            await session.execute(delete(User).where(User.id.in_([actor_id, *target_ids])))
+            await session.commit()
+        await quota_engine.dispose()
 
 
 class IntegrationOutboundGuard:

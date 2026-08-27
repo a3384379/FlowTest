@@ -30,6 +30,7 @@ from app.models.ai import AIJob
 from app.models.artifacts import Artifact
 from app.models.capabilities import Runner, RunnerPool
 from app.models.governance import OrganizationGovernance, OrganizationKeyVersion
+from app.models.organizations import Organization
 from app.models.workflows import WorkflowExecution
 from app.repositories.organizations import OrganizationRepository
 from app.schemas.governance import RunnerGovernancePolicy
@@ -447,6 +448,7 @@ class OrganizationQuotaService:
     ) -> QuotaDecision | None:
         if organization_id is None:
             return None
+        await self._lock_organization(organization_id)
         usage = await self._usage(organization_id, dimension)
         policy = await self._session.get(OrganizationGovernance, organization_id)
         rules = parse_quota_policies(policy.quota_policies if policy else {})
@@ -466,6 +468,11 @@ class OrganizationQuotaService:
                 },
             )
         return decision
+
+    async def _lock_organization(self, organization_id: UUID) -> None:
+        await self._session.scalar(
+            select(Organization.id).where(Organization.id == organization_id).with_for_update()
+        )
 
     async def validate_runner_pool(
         self, *, organization_id: UUID | None, runner_type: str, runtime: str

@@ -65,6 +65,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_s42_controlled_write_tables(connection)
     await _ensure_s47_test_design_columns(connection)
     await _ensure_change_regression_tables(connection)
+    await _ensure_semantic_gap_waiver_revision_schema(connection)
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -130,7 +131,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE key = 'schema_baseline' AND value IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043')"
+            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
+            "'20260823_0044')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -140,7 +142,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "WHERE version_num IN "
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
-            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043')"
+            "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
+            "'20260823_0044')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -361,6 +364,83 @@ async def _ensure_change_regression_tables(connection: AsyncConnection) -> None:
     for model in (ChangeRegressionRun, ChangeRegressionStage, SemanticGapWaiver):
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
+
+
+async def _ensure_semantic_gap_waiver_revision_schema(
+    connection: AsyncConnection,
+) -> None:
+    """Rebuild the 0044 waiver table with immutable revision semantics."""
+
+    from app.models.change_regression import SemanticGapWaiver
+
+    table = cast(Table, SemanticGapWaiver.__table__)
+    result = await connection.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'semantic_gap_waivers'")
+    )
+    row = result.first()
+    table_sql = str(row[0]) if row and row[0] else ""
+    columns_result = await connection.execute(text("PRAGMA table_info(semantic_gap_waivers)"))
+    columns = {str(column[1]) for column in columns_result.fetchall()}
+    if not table_sql:
+        return
+    if _waiver_revision_schema_is_current(table_sql, columns):
+        await _ensure_table_indexes(connection, table)
+        return
+
+    await _drop_table_indexes(connection, "semantic_gap_waivers")
+    await connection.execute(
+        text("ALTER TABLE semantic_gap_waivers RENAME TO semantic_gap_waivers_0044_legacy")
+    )
+    if "revision" not in columns:
+        await connection.execute(
+            text(
+                "ALTER TABLE semantic_gap_waivers_0044_legacy "
+                "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+    else:
+        await connection.execute(
+            text("UPDATE semantic_gap_waivers_0044_legacy SET revision = 1 WHERE revision IS NULL")
+        )
+    if "supersedes_waiver_id" not in columns:
+        await connection.execute(
+            text(
+                "ALTER TABLE semantic_gap_waivers_0044_legacy "
+                "ADD COLUMN supersedes_waiver_id CHAR(32)"
+            )
+        )
+    await connection.execute(CreateTable(table))
+    await connection.execute(
+        text(
+            "INSERT INTO semantic_gap_waivers ("
+            "regression_run_id, project_id, gap_key, revision, supersedes_waiver_id, reason, "
+            "approved_by_id, approved_at, expires_at, operation_identity, "
+            "semantic_requirement, requirement_fingerprint, id, created_at, updated_at) "
+            "SELECT regression_run_id, project_id, gap_key, "
+            "revision, supersedes_waiver_id, reason, approved_by_id, approved_at, expires_at, "
+            "operation_identity, semantic_requirement, requirement_fingerprint, id, "
+            "created_at, updated_at FROM semantic_gap_waivers_0044_legacy"
+        )
+    )
+    await connection.execute(text("DROP TABLE semantic_gap_waivers_0044_legacy"))
+    await _ensure_table_indexes(connection, table)
+
+
+def _waiver_revision_schema_is_current(table_sql: str, columns: set[str]) -> bool:
+    required_columns = {"revision", "supersedes_waiver_id"}
+    required_contracts = (
+        "uq_semantic_gap_waiver_run_gap_revision",
+        "revision >= 1",
+        "fk_semantic_gap_waiver_supersedes",
+    )
+    return required_columns.issubset(columns) and all(
+        contract in table_sql for contract in required_contracts
+    )
+
+
+async def _ensure_table_indexes(connection: AsyncConnection, table: Table) -> None:
+    for index in table.indexes:
+        await connection.execute(CreateIndex(index, if_not_exists=True))
 
 
 async def _rebuild_s42_change_item_table_if_needed(connection: AsyncConnection) -> None:

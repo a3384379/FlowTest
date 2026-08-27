@@ -470,18 +470,24 @@ class ProjectService:
                 raise AppError(
                     code="ORGANIZATION_FORBIDDEN", message="没有所需的组织权限", status_code=403
                 )
-            return await OrganizationContextService(self._session).resolve(
+            tenant = await OrganizationContextService(self._session).resolve(
                 actor=actor,
                 requested_organization_id=organization_id,
             )
-        if context is not None:
-            return context
-        member = await OrganizationContextService(self._session).ensure_default_for_user(actor)
-        resolved = await OrganizationContextService(self._session).resolve(
-            actor=actor,
-            requested_organization_id=member.organization_id,
-        )
-        return resolved
+        elif context is not None:
+            tenant = context
+        else:
+            organization_context = OrganizationContextService(self._session)
+            member = await organization_context.ensure_default_for_user(actor)
+            tenant = await organization_context.resolve(
+                actor=actor,
+                requested_organization_id=member.organization_id,
+            )
+        if not tenant.allows("create_project"):
+            raise AppError(
+                code="ORGANIZATION_FORBIDDEN", message="没有所需的组织权限", status_code=403
+            )
+        return tenant
 
     async def _authorize_owner(self, *, actor: User, project_id: UUID) -> None:
         await self.authorize(

@@ -1,17 +1,20 @@
 import asyncio
 import json
+import shutil
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core import standalone_schema
 from app.core.config import Settings
 from app.core.storage import LocalObjectStorage
 from app.domain.runtime_profiles import RuntimeProfile, describe_runtime_profile
+from app.models import Base
 from app.services.execution_events import (
     ExecutionEvent,
     ExecutionEventType,
@@ -105,6 +108,223 @@ async def test_standalone_schema_bootstrap_records_revision(tmp_path, monkeypatc
         )
     await test_engine.dispose()
     assert value == standalone_schema.BASELINE_REVISION
+
+
+@pytest.mark.asyncio
+async def test_standalone_schema_upgrades_0044_waivers_and_survives_restore(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "standalone-0044.db"
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
+    waiver_id = uuid4().hex
+    regression_run_id = uuid4().hex
+    project_id = uuid4().hex
+    approver_id = uuid4().hex
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(standalone_schema.text("DROP TABLE semantic_gap_waivers"))
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE semantic_gap_waivers ("
+                "regression_run_id CHAR(32) NOT NULL, project_id CHAR(32) NOT NULL, "
+                "gap_key VARCHAR(64) NOT NULL, reason TEXT NOT NULL, "
+                "approved_by_id CHAR(32) NOT NULL, approved_at DATETIME NOT NULL, "
+                "expires_at DATETIME, operation_identity JSON NOT NULL, "
+                "semantic_requirement JSON NOT NULL, "
+                "requirement_fingerprint VARCHAR(64) NOT NULL, id CHAR(32) PRIMARY KEY, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "CONSTRAINT uq_semantic_gap_waiver_run_gap "
+                "UNIQUE (regression_run_id, gap_key), "
+                "CONSTRAINT fk_semantic_gap_waiver_run FOREIGN KEY (regression_run_id) "
+                "REFERENCES change_regression_runs (id) ON DELETE CASCADE, "
+                "CONSTRAINT fk_semantic_gap_waiver_project FOREIGN KEY (project_id) "
+                "REFERENCES projects (id) ON DELETE CASCADE, "
+                "CONSTRAINT fk_semantic_gap_waiver_approver FOREIGN KEY (approved_by_id) "
+                "REFERENCES users (id) ON DELETE RESTRICT)"
+            )
+        )
+        for index_sql in (
+            "CREATE INDEX ix_semantic_gap_waivers_approved_at "
+            "ON semantic_gap_waivers (approved_at)",
+            "CREATE INDEX ix_semantic_gap_waivers_expires_at ON semantic_gap_waivers (expires_at)",
+            "CREATE INDEX ix_semantic_gap_waivers_gap_key ON semantic_gap_waivers (gap_key)",
+            "CREATE INDEX ix_semantic_gap_waivers_project_id ON semantic_gap_waivers (project_id)",
+            "CREATE INDEX ix_semantic_gap_waivers_regression_run_id "
+            "ON semantic_gap_waivers (regression_run_id)",
+            "CREATE INDEX ix_semantic_gap_waivers_requirement_fingerprint "
+            "ON semantic_gap_waivers (requirement_fingerprint)",
+        ):
+            await connection.execute(standalone_schema.text(index_sql))
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO semantic_gap_waivers ("
+                "regression_run_id, project_id, gap_key, reason, approved_by_id, approved_at, "
+                "operation_identity, semantic_requirement, requirement_fingerprint, id) "
+                "VALUES (:run_id, :project_id, 'missing-status-assertion', 'historical reason', "
+                ":approver_id, CURRENT_TIMESTAMP, '{}', '{}', :fingerprint, :waiver_id)"
+            ),
+            {
+                "run_id": regression_run_id,
+                "project_id": project_id,
+                "approver_id": approver_id,
+                "fingerprint": "a" * 64,
+                "waiver_id": waiver_id,
+            },
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE flowtest_standalone_meta "
+                "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO flowtest_standalone_meta VALUES ('schema_baseline', '20260823_0044')"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text("INSERT INTO alembic_version VALUES ('20260823_0044')")
+        )
+
+    monkeypatch.setattr(standalone_schema, "engine", test_engine)
+    await standalone_schema.initialize_standalone_database()
+    await standalone_schema.initialize_standalone_database()
+
+    superseding_id = uuid4().hex
+    async with test_engine.begin() as connection:
+        columns = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA table_info(semantic_gap_waivers)")
+                )
+            ).fetchall()
+        }
+        historical = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT reason, revision, supersedes_waiver_id "
+                    "FROM semantic_gap_waivers WHERE id = :waiver_id"
+                ),
+                {"waiver_id": waiver_id},
+            )
+        ).one()
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO semantic_gap_waivers ("
+                "regression_run_id, project_id, gap_key, revision, supersedes_waiver_id, "
+                "reason, approved_by_id, approved_at, operation_identity, "
+                "semantic_requirement, requirement_fingerprint, id) "
+                "VALUES (:run_id, :project_id, 'missing-status-assertion', 2, :previous_id, "
+                "'superseding reason', :approver_id, CURRENT_TIMESTAMP, '{}', '{}', "
+                ":fingerprint, :waiver_id)"
+            ),
+            {
+                "run_id": regression_run_id,
+                "project_id": project_id,
+                "previous_id": waiver_id,
+                "approver_id": approver_id,
+                "fingerprint": "b" * 64,
+                "waiver_id": superseding_id,
+            },
+        )
+        baseline = await connection.scalar(
+            standalone_schema.text(
+                "SELECT value FROM flowtest_standalone_meta WHERE key = 'schema_baseline'"
+            )
+        )
+        alembic_revision = await connection.scalar(
+            standalone_schema.text("SELECT version_num FROM alembic_version")
+        )
+        table_sql = await connection.scalar(
+            standalone_schema.text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'semantic_gap_waivers'"
+            )
+        )
+        indexes = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA index_list(semantic_gap_waivers)")
+                )
+            ).fetchall()
+        }
+        foreign_keys = {
+            (str(row[2]), str(row[3]), str(row[4]), str(row[6]))
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA foreign_key_list(semantic_gap_waivers)")
+                )
+            ).fetchall()
+        }
+
+    assert {"revision", "supersedes_waiver_id"}.issubset(columns)
+    assert historical == ("historical reason", 1, None)
+    assert baseline == standalone_schema.BASELINE_REVISION
+    assert alembic_revision == standalone_schema.BASELINE_REVISION
+    assert "revision >= 1" in str(table_sql)
+    assert "ix_semantic_gap_waivers_supersedes_waiver_id" in indexes
+    assert (
+        "semantic_gap_waivers",
+        "supersedes_waiver_id",
+        "id",
+        "SET NULL",
+    ) in foreign_keys
+
+    duplicate_parameters = {
+        "run_id": regression_run_id,
+        "project_id": project_id,
+        "previous_id": waiver_id,
+        "approver_id": approver_id,
+        "fingerprint": "c" * 64,
+        "waiver_id": uuid4().hex,
+    }
+    insert_sql = standalone_schema.text(
+        "INSERT INTO semantic_gap_waivers ("
+        "regression_run_id, project_id, gap_key, revision, supersedes_waiver_id, "
+        "reason, approved_by_id, approved_at, operation_identity, semantic_requirement, "
+        "requirement_fingerprint, id) VALUES (:run_id, :project_id, "
+        "'missing-status-assertion', :revision, :previous_id, 'invalid', :approver_id, "
+        "CURRENT_TIMESTAMP, '{}', '{}', :fingerprint, :waiver_id)"
+    )
+    with pytest.raises(IntegrityError):
+        async with test_engine.begin() as connection:
+            await connection.execute(insert_sql, {**duplicate_parameters, "revision": 2})
+    with pytest.raises(IntegrityError):
+        async with test_engine.begin() as connection:
+            await connection.execute(
+                insert_sql,
+                {**duplicate_parameters, "revision": 0, "waiver_id": uuid4().hex},
+            )
+
+    await test_engine.dispose()
+    restored_path = tmp_path / "restored-standalone.db"
+    shutil.copy2(database_path, restored_path)
+    restored_engine = create_async_engine(f"sqlite+aiosqlite:///{restored_path}")
+    async with restored_engine.connect() as connection:
+        restored_rows = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT id, revision, supersedes_waiver_id FROM semantic_gap_waivers "
+                    "ORDER BY revision"
+                )
+            )
+        ).all()
+        restored_revision = await connection.scalar(
+            standalone_schema.text("SELECT version_num FROM alembic_version")
+        )
+    await restored_engine.dispose()
+
+    assert restored_rows == [(waiver_id, 1, None), (superseding_id, 2, waiver_id)]
+    assert restored_revision == standalone_schema.BASELINE_REVISION
 
 
 @pytest.mark.asyncio
