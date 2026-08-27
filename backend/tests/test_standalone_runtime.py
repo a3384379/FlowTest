@@ -111,6 +111,88 @@ async def test_standalone_schema_bootstrap_records_revision(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_upgrades_0045_context_tables(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's49-schema.db'}")
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        for table in (
+            "context_evidence_items",
+            "test_context_revisions",
+            "test_contexts",
+        ):
+            await connection.execute(standalone_schema.text(f"DROP TABLE {table}"))
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE flowtest_standalone_meta "
+                "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO flowtest_standalone_meta VALUES ('schema_baseline', '20260823_0045')"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text("INSERT INTO alembic_version VALUES ('20260823_0045')")
+        )
+
+    monkeypatch.setattr(standalone_schema, "engine", test_engine)
+    await standalone_schema.initialize_standalone_database()
+    await standalone_schema.initialize_standalone_database()
+
+    async with test_engine.connect() as connection:
+        tables = {
+            str(row[0])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("SELECT name FROM sqlite_master WHERE type = 'table'")
+                )
+            ).fetchall()
+        }
+        context_indexes = {
+            str(row[1])
+            for row in (
+                await connection.execute(standalone_schema.text("PRAGMA index_list(test_contexts)"))
+            ).fetchall()
+        }
+        evidence_indexes = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA index_list(context_evidence_items)")
+                )
+            ).fetchall()
+        }
+        baseline = await connection.scalar(
+            standalone_schema.text(
+                "SELECT value FROM flowtest_standalone_meta WHERE key = 'schema_baseline'"
+            )
+        )
+        alembic_revision = await connection.scalar(
+            standalone_schema.text("SELECT version_num FROM alembic_version")
+        )
+
+    await test_engine.dispose()
+    assert {
+        "test_contexts",
+        "test_context_revisions",
+        "context_evidence_items",
+    }.issubset(tables)
+    assert "ix_test_contexts_project_status" in context_indexes
+    assert "ix_context_evidence_source" in evidence_indexes
+    assert baseline == standalone_schema.BASELINE_REVISION
+    assert alembic_revision == standalone_schema.BASELINE_REVISION
+
+
+@pytest.mark.asyncio
 async def test_standalone_schema_upgrades_0044_waivers_and_survives_restore(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

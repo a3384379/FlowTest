@@ -225,7 +225,7 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
     assert exported == {
         "status": "exported",
         "schema_version": "standalone-compact-transfer-v1",
-        "tables": 81,
+        "tables": 84,
         "rows": 7,
         "excluded_tables": 9,
         "artifacts": 1,
