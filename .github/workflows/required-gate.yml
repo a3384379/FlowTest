@@ -1,0 +1,108 @@
+name: Required Gate Controller
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  controller:
+    name: Required Gate Controller
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Create trusted Required Gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state='pending' \
+            -f context='Required Gate' \
+            -f description='等待路径选择的子门禁' \
+            -f target_url="${details_url}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+      - name: Resolve changed paths from trusted metadata
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          changed_paths="${RUNNER_TEMP}/flowtest-required-gate-paths.txt"
+          if [[ -n "${PR_NUMBER}" ]]; then
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
+              --jq '.[] | (.filename, .previous_filename) | select(. != null)' \
+              | sort -u >"${changed_paths}"
+          elif [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            git show --pretty=format: --name-only "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
+          else
+            git diff --no-ext-diff --no-textconv --name-only \
+              "${BASE_SHA}" "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
+          fi
+          if [[ "$(wc -l <"${changed_paths}")" -ge 3000 ]]; then
+            echo '变更文件数达到 GitHub API 上限，Required Gate 拒绝继续' >&2
+            exit 1
+          fi
+          echo "FLOWTEST_GATE_PATHS_FILE=${changed_paths}" >>"${GITHUB_ENV}"
+      - id: gate
+        name: Wait for path-selected child gates
+        continue-on-error: true
+        env:
+          FLOWTEST_GATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/required_gate.py
+          --sha "${FLOWTEST_GATE_SHA}"
+          --paths-file "${FLOWTEST_GATE_PATHS_FILE}"
+          --event-name "${GITHUB_EVENT_NAME}"
+      - name: Complete trusted Required Gate status
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state='failure'
+          description='路径选择的子门禁失败'
+          metadata_current='true'
+          if [[ -n "${PR_NUMBER}" ]]; then
+            current_refs="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq '[.base.sha, .head.sha] | join(" ")')"
+            if [[ "${current_refs}" != "${BASE_SHA} ${HEAD_SHA}" ]]; then
+              metadata_current='false'
+              description='PR 基线或 Head 已变更'
+            fi
+          fi
+          if [[ "${GATE_OUTCOME}" == 'success' && "${metadata_current}" == 'true' ]]; then
+            state='success'
+            description='路径选择的子门禁全部成功'
+          fi
+          details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="${state}" \
+            -f context='Required Gate' \
+            -f description="${description}" \
+            -f target_url="${details_url}"
+          if [[ "${state}" != 'success' ]]; then
+            exit 1
+          fi
