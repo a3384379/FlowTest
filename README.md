@@ -2,7 +2,11 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S30/S31 已完成；V4 S32～S36 的 Compact 六服务、离线分发、事务式无外网升级、资源/兼容基线、隐私安全诊断与回滚证明已通过本地及 PR #38 远程自动化验收；S37 Standalone 无 Docker 运行时已通过 PR #39 七项远程检查`；Windows 云桌面 72 小时试点、Standalone→Compact 真实迁移和人工签署待执行。V5 设计草案见 [docs/development-plan-v5.md](docs/development-plan-v5.md)，不改变 V4 发布门槛。
+当前状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并，`main` 已启用无 Bypass 的 Required Gate；V6.0
+Core 正处于 S48 契约冻结阶段，运行时能力尚未交付，也没有 Alpha、Beta、RC、Tag 或 GitHub Release。
+Windows 云桌面 72 小时试点、Standalone→Compact 真实迁移、真实 Key Rotation 和人工签署仍待完成。
+正式开发范围见 [V6.0 完整开发方案](docs/development-plan-v6.md)，冻结事实见
+[V6.0 S48 契约基线](docs/release/v6-s48-contract-baseline.md)。
 
 ## 技术栈
 
@@ -24,8 +28,9 @@ FlowTest/
 ```
 
 领域边界及完整目录说明见 [docs/architecture.md](docs/architecture.md)，V1/V2 实施节奏见
-[docs/development-plan.md](docs/development-plan.md)；V5 设计草案见
-[docs/development-plan-v5.md](docs/development-plan-v5.md)。
+[docs/development-plan.md](docs/development-plan.md)；V5 历史方案见
+[docs/development-plan-v5.md](docs/development-plan-v5.md)，当前 V6.0 Core 方案见
+[docs/development-plan-v6.md](docs/development-plan-v6.md)。
 
 系统各模块的完整使用说明见 [FlowTest V5 系统使用手册](docs/system-user-guide.md)，其中详细介绍了
 接口管理、接口工作流、FlowSpec，以及对外 MCP 的 stdio/Streamable HTTP 接入与安全边界。

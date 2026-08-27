@@ -31,6 +31,7 @@ async def get_v3_feature_flags(current_user: CurrentUser) -> V3FeatureFlagsRespo
         contract_hub=settings.feature_contract_hub_enabled,
         impact_engine=settings.feature_impact_engine_enabled,
         quality_intelligence=settings.feature_quality_intelligence_enabled,
+        integration_flow=settings.feature_integration_flow_enabled,
         pact_broker=bool(settings.pact_broker_base_url),
     )
 

@@ -34,3 +34,13 @@
 30. Compact 事务式离线升级、自动回滚与目录激活
 31. Windows 云桌面 Standalone 无 Docker 运行时
 32. V5 运行档位演进与兼容护栏（提案）
+33. 外部 LLM 编排边界
+34. 不可变 TestContext Revision
+35. External Evidence Envelope
+36. 复用 AIChangeSet 与 FlowSpec Proposal 生命周期
+37. 版本化 Integration Test Plan
+38. FlowSpec v2 与 v1 兼容边界
+39. Cleanup / Compensation Runtime
+40. Sandbox Preview 安全边界
+41. V6 数据分类、保留与导出
+42. V6 MCP 最小权限 Scope
