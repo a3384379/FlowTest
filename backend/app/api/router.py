@@ -7,6 +7,7 @@ from app.api.v1.endpoints.api_exports import router as api_exports_router
 from app.api.v1.endpoints.artifacts import router as artifacts_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.capabilities import router as capabilities_router
+from app.api.v1.endpoints.change_regression import router as change_regression_router
 from app.api.v1.endpoints.contract_hub import router as contract_hub_router
 from app.api.v1.endpoints.contracts import router as contracts_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
@@ -15,10 +16,14 @@ from app.api.v1.endpoints.data_sources import router as data_sources_router
 from app.api.v1.endpoints.environment_lab import router as environment_lab_router
 from app.api.v1.endpoints.event_protocols import router as event_protocols_router
 from app.api.v1.endpoints.executions import router as executions_router
+from app.api.v1.endpoints.flow_spec import router as flow_spec_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.impact import router as impact_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
+from app.api.v1.endpoints.mcp_controlled_write import router as mcp_controlled_write_router
+from app.api.v1.endpoints.mcp_read import router as mcp_read_router
+from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
 from app.api.v1.endpoints.protocols import router as protocols_router
@@ -29,9 +34,11 @@ from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.runner_fabric import admin_router as runner_fabric_admin_router
 from app.api.v1.endpoints.runner_fabric import runner_router as runner_control_router
 from app.api.v1.endpoints.search import router as search_router
+from app.api.v1.endpoints.service_targets import router as service_targets_router
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
 from app.api.v1.endpoints.test_assets import router as test_assets_router
+from app.api.v1.endpoints.test_engineering import router as test_engineering_router
 from app.api.v1.endpoints.users import router as users_router
 from app.api.v1.endpoints.workflow_events import router as workflow_events_router
 from app.api.v1.endpoints.workflows import router as workflows_router
@@ -44,6 +51,7 @@ api_router.include_router(ai_router, tags=["ai"])
 api_router.include_router(ai_change_sets_router, tags=["ai-change-sets"])
 api_router.include_router(contracts_router, tags=["contracts"])
 api_router.include_router(contract_hub_router, tags=["contract-hub"])
+api_router.include_router(change_regression_router, tags=["change-regression"])
 api_router.include_router(dashboard_router, tags=["dashboard"])
 api_router.include_router(data_sources_router, tags=["data-sources"])
 api_router.include_router(mock_dispatch_router, tags=["mock-dispatch"])
@@ -55,10 +63,14 @@ api_router.include_router(environment_lab_router, tags=["environment-lab"])
 api_router.include_router(imports_router, tags=["imports"])
 api_router.include_router(impact_router, tags=["impact"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
+api_router.include_router(mcp_read_router, tags=["mcp-read"])
+api_router.include_router(mcp_controlled_write_router, tags=["mcp-controlled-write"])
 api_router.include_router(performance_router, tags=["performance"])
 api_router.include_router(artifacts_router, tags=["files"])
 api_router.include_router(api_assets_router, tags=["api-assets"])
+api_router.include_router(service_targets_router, tags=["service-targets"])
 api_router.include_router(api_exports_router, tags=["api-exports"])
+api_router.include_router(flow_spec_router, tags=["flow-spec"])
 api_router.include_router(users_router, tags=["users"])
 api_router.include_router(projects_router, tags=["projects"])
 api_router.include_router(protocols_router, tags=["protocols"])
@@ -66,9 +78,11 @@ api_router.include_router(quality_router, tags=["quality"])
 api_router.include_router(quality_intelligence_router, tags=["quality-intelligence"])
 api_router.include_router(release_gate_router, tags=["release-gate"])
 api_router.include_router(search_router, tags=["search"])
+api_router.include_router(organizations_router, tags=["organizations"])
 api_router.include_router(tasking_router, tags=["tasking"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])
+api_router.include_router(test_engineering_router, tags=["test-engineering"])
 api_router.include_router(reporting_router, tags=["reports"])
 api_router.include_router(runner_fabric_admin_router, tags=["runner-fabric"])
 api_router.include_router(runner_control_router, tags=["runner-control"])

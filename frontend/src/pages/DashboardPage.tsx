@@ -14,6 +14,7 @@ import { DashboardTrendChart } from '../features/dashboard/DashboardTrendChart'
 import { useDashboard } from '../features/dashboard/use-dashboard'
 import type { ImpactRunSummary } from '../features/impact/impact-service'
 import { projectPath } from '../features/projects/project-routing'
+import ProjectEmptyState from '../features/projects/ProjectEmptyState'
 import type { ReleaseDecision } from '../features/release-gate/release-gate-service'
 import type {
   FlakyRecord,
@@ -177,6 +178,7 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
 }
 
 function GlobalQualityOverview({ dashboard }: { dashboard: DashboardState }) {
+  if (dashboard.projects.data?.items.length === 0) return <ProjectEmptyState />
   const summary = dashboard.summary.data ?? emptySummary
   return (
     <>

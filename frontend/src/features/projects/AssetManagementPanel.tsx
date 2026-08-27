@@ -78,7 +78,15 @@ function useAssetManagement(projectId: string) {
   const mutation = useMutation({
     mutationFn: async (operation: () => Promise<unknown>) => operation(),
     onSuccess: async () => {
-      await queryClient.invalidateQueries()
+      await Promise.all(
+        [
+          ['folders', projectId],
+          ['project-configuration', projectId],
+          ['environments', projectId],
+          ['secrets', projectId],
+          ['project-audit', projectId],
+        ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      )
       void message.success('测试资产配置已保存')
     },
     onError: (error) => void message.error(apiErrorMessage(error)),

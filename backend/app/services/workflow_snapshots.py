@@ -1,7 +1,8 @@
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
-from app.domain.api_assets import BodyKind
+from app.domain.api_assets import BodyKind, QueryParameterSpec
 from app.domain.data_nodes import CredentialKind
 from app.domain.event_protocols import EventSourceKind
 from app.domain.protocols import ProtocolKind
@@ -19,6 +20,7 @@ from app.engine.capabilities import (
     legacy_node_adapter,
 )
 from app.engine.contracts import (
+    ApiNodeConfig,
     ForEachNodeConfig,
     NodeType,
     RedisNodeConfig,
@@ -79,6 +81,22 @@ class PreparedExecution:
 class PreparedWorkflow:
     snapshot: dict[str, JsonValue]
     runs: tuple[PreparedExecution, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RequestSuppression:
+    headers: frozenset[str] = frozenset()
+    query_parameters: frozenset[str] = frozenset()
+    cookies: frozenset[str] = frozenset()
+    auth_disabled: bool = False
+
+    def merge(self, other: "_RequestSuppression") -> "_RequestSuppression":
+        return _RequestSuppression(
+            headers=self.headers | other.headers,
+            query_parameters=self.query_parameters | other.query_parameters,
+            cookies=self.cookies | other.cookies,
+            auth_disabled=self.auth_disabled or other.auth_disabled,
+        )
 
 
 class WorkflowSnapshotBuilder:
@@ -475,6 +493,7 @@ class WorkflowSnapshotBuilder:
                 actor=actor,
                 project_id=project_id,
                 definition_id=config.api_definition_id,
+                version=config.api_version,
             )
             raw_request, redacted_request = await self._prepare_requests(
                 actor=actor,
@@ -486,14 +505,24 @@ class WorkflowSnapshotBuilder:
                 dataset_variables=_template_variables(dataset_variables),
                 runtime_variables=runtime_variables,
                 runtime_headers=runtime_headers,
+                config=config,
             )
-            body_kind = BodyKind(api_version.body_kind)
+            body_kind = (
+                config.request_overrides.body.kind
+                if config.request_overrides.body is not None
+                else BodyKind(api_version.body_kind)
+            )
             multipart = (
                 await self._prepare_multipart(project_id, raw_request)
                 if body_kind is BodyKind.MULTIPART
                 else None
             )
-            requests[node.id] = PreparedWorkflowRequest(raw_request, body_kind, multipart)
+            requests[node.id] = PreparedWorkflowRequest(
+                request=raw_request,
+                redacted_request=redacted_request,
+                body_kind=body_kind,
+                multipart=multipart,
+            )
             api_snapshots[node.id] = _api_snapshot(
                 api_definition,
                 api_version,
@@ -513,19 +542,49 @@ class WorkflowSnapshotBuilder:
         dataset_variables: dict[str, str],
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
+        config: ApiNodeConfig,
     ) -> tuple[PreparedRequest, PreparedRequest]:
+        overrides = config.request_overrides
+        query_override = (
+            tuple(
+                QueryParameterSpec(
+                    name=item.name,
+                    value=item.value,
+                    enabled=item.enabled,
+                )
+                for item in overrides.query_parameters
+            )
+            if overrides.query_parameters is not None
+            else None
+        )
+        use_body_override = overrides.body is not None
+        body_override = overrides.body.value if overrides.body is not None else None
+        node_headers = {
+            **runtime_headers,
+            **({} if overrides.replace_headers else (overrides.headers or {})),
+        }
+        header_override = overrides.headers if overrides.replace_headers else None
         raw = await self._api_assets.preview(
             actor=actor,
             project_id=project_id,
             definition_id=definition.id,
             environment_id=environment_id,
             runtime_variables=runtime_variables,
-            runtime_headers=runtime_headers,
-            body_override=None,
-            use_body_override=False,
+            runtime_headers=node_headers,
+            body_override=body_override,
+            use_body_override=use_body_override,
+            query_parameters_override=query_override,
+            headers_override=header_override,
+            service_override=config.service_override,
+            endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
+            auth_disabled=overrides.auth_disabled,
+            auth_mode=overrides.effective_auth_mode,
+            suppressed_headers=overrides.suppressed_headers,
+            suppressed_query_parameters=overrides.suppressed_query_parameters,
+            suppressed_cookies=overrides.suppressed_cookies,
             redact=False,
         )
         redacted = await self._api_assets.preview(
@@ -534,12 +593,21 @@ class WorkflowSnapshotBuilder:
             definition_id=definition.id,
             environment_id=environment_id,
             runtime_variables=runtime_variables,
-            runtime_headers=runtime_headers,
-            body_override=None,
-            use_body_override=False,
+            runtime_headers=node_headers,
+            body_override=body_override,
+            use_body_override=use_body_override,
+            query_parameters_override=query_override,
+            headers_override=header_override,
+            service_override=config.service_override,
+            endpoint_variant=config.endpoint_variant,
             version_number=version.version,
             workflow_variables=workflow_variables,
             dataset_variables=dataset_variables,
+            auth_disabled=overrides.auth_disabled,
+            auth_mode=overrides.effective_auth_mode,
+            suppressed_headers=overrides.suppressed_headers,
+            suppressed_query_parameters=overrides.suppressed_query_parameters,
+            suppressed_cookies=overrides.suppressed_cookies,
             redact=True,
         )
         return raw, redacted
@@ -585,6 +653,7 @@ def _snapshot(
     runtime_variables: dict[str, str],
     runtime_headers: dict[str, str],
 ) -> dict[str, JsonValue]:
+    suppression = _combined_suppression(apis)
     return {
         "schema_version": "1.0",
         "workflow": {
@@ -592,9 +661,9 @@ def _snapshot(
             "version_id": str(version.id),
             "version": version.version,
             "fingerprint": version.fingerprint,
-            "definition": version.definition,
+            "definition": _redacted_workflow_definition(version.definition, apis),
         },
-        "environment": _environment_snapshot(environment),
+        "environment": _environment_snapshot(environment, suppression),
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
         "data_nodes": _data_node_snapshots(data_nodes),
@@ -604,7 +673,12 @@ def _snapshot(
         "dataset": dataset,
         "runtime": cast(
             JsonValue,
-            redact({"variables": runtime_variables, "headers": runtime_headers}),
+            redact(
+                {
+                    "variables": runtime_variables,
+                    "headers": _without_suppressed_headers(runtime_headers, suppression),
+                }
+            ),
         ),
     }
 
@@ -625,7 +699,7 @@ def _nested_snapshot(
             "version_id": str(version.id),
             "version": version.version,
             "fingerprint": version.fingerprint,
-            "definition": version.definition,
+            "definition": _redacted_workflow_definition(version.definition, apis),
         },
         "apis": apis,
         "subflows": {node_id: prepared.snapshot for node_id, prepared in subflows.items()},
@@ -706,18 +780,20 @@ def _api_snapshot(
     version: APIVersion,
     request: PreparedRequest,
 ) -> JsonValue:
+    suppression = _request_suppression(request.target_snapshot)
     return {
         "definition_id": str(definition.id),
         "definition_name": definition.name,
         "version_id": str(version.id),
         "version": version.version,
-        "spec": cast(JsonValue, _redacted_api_spec(version)),
+        "spec": cast(JsonValue, _redacted_api_spec(version, suppression)),
         "prepared_request": {
             "method": request.method.value,
             "url": request.url,
             "headers": {item.name: item.value for item in request.headers},
             "body": request.body,
         },
+        "target": request.target_snapshot,
         "variables": {
             item.name: {"value": item.value, "source": item.source.value}
             for item in request.variables
@@ -734,7 +810,10 @@ def _template_variables(values: dict[str, JsonValue]) -> dict[str, str]:
     }
 
 
-def _environment_snapshot(environment: Environment) -> JsonValue:
+def _environment_snapshot(
+    environment: Environment,
+    suppression: _RequestSuppression,
+) -> JsonValue:
     return cast(
         JsonValue,
         redact(
@@ -743,14 +822,17 @@ def _environment_snapshot(environment: Environment) -> JsonValue:
                 "name": environment.name,
                 "base_url": environment.base_url,
                 "variables": environment.variables,
-                "headers": environment.headers,
+                "headers": _without_suppressed_headers(environment.headers, suppression),
                 "updated_at": environment.updated_at.isoformat(),
             }
         ),
     )
 
 
-def _redacted_api_spec(version: APIVersion) -> dict[str, object]:
+def _redacted_api_spec(
+    version: APIVersion,
+    suppression: _RequestSuppression,
+) -> dict[str, object]:
     auth_config = dict(version.auth_config)
     sensitive_auth_fields = {
         "bearer": {"token"},
@@ -766,12 +848,100 @@ def _redacted_api_spec(version: APIVersion) -> dict[str, object]:
             {
                 "method": version.method,
                 "path": version.path,
-                "query_parameters": version.query_parameters,
-                "headers": version.headers,
+                "query_parameters": [
+                    item
+                    for item in version.query_parameters
+                    if item.get("name") not in suppression.query_parameters
+                ],
+                "headers": _without_suppressed_headers(version.headers, suppression),
                 "body_kind": version.body_kind,
                 "body": version.body,
                 "auth_kind": version.auth_kind,
-                "auth_config": auth_config,
+                "auth_config": {} if suppression.auth_disabled else auth_config,
             }
         ),
     )
+
+
+def _combined_suppression(apis: dict[str, JsonValue]) -> _RequestSuppression:
+    combined = _RequestSuppression()
+    for snapshot in apis.values():
+        combined = combined.merge(_request_suppression(snapshot))
+    return combined
+
+
+def _request_suppression(snapshot: JsonValue) -> _RequestSuppression:
+    if not isinstance(snapshot, dict):
+        return _RequestSuppression()
+    target = snapshot.get("target", snapshot)
+    if not isinstance(target, dict):
+        return _RequestSuppression()
+    value = target.get("request_suppression")
+    if not isinstance(value, dict):
+        return _RequestSuppression()
+    return _RequestSuppression(
+        headers=frozenset(
+            str(item).lower() for item in _string_list(value.get("suppressed_header_names"))
+        ),
+        query_parameters=frozenset(_string_list(value.get("suppressed_query_parameter_names"))),
+        cookies=frozenset(_string_list(value.get("suppressed_cookie_names"))),
+        auth_disabled=value.get("auth_mode") == "disabled",
+    )
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _without_suppressed_headers(
+    headers: dict[str, str],
+    suppression: _RequestSuppression,
+) -> dict[str, str]:
+    remove_cookie_header = bool(suppression.cookies)
+    return {
+        name: value
+        for name, value in headers.items()
+        if name.lower() not in suppression.headers
+        and not (remove_cookie_header and name.lower() == "cookie")
+    }
+
+
+def _redacted_workflow_definition(
+    definition: dict[str, Any],
+    apis: dict[str, JsonValue],
+) -> dict[str, Any]:
+    result = deepcopy(definition)
+    nodes = result.get("nodes")
+    if not isinstance(nodes, list):
+        return result
+    for node in nodes:
+        _redact_node_suppressed_values(node, apis)
+    return result
+
+
+def _redact_node_suppressed_values(node: object, apis: dict[str, JsonValue]) -> None:
+    if not isinstance(node, dict):
+        return
+    node_id = node.get("id")
+    config = node.get("config")
+    if not isinstance(node_id, str) or not isinstance(config, dict):
+        return
+    overrides = config.get("request_overrides")
+    if not isinstance(overrides, dict):
+        return
+    suppression = _request_suppression(apis.get(node_id))
+    headers = overrides.get("headers")
+    if isinstance(headers, dict):
+        overrides["headers"] = _without_suppressed_headers(
+            {str(name): str(value) for name, value in headers.items()},
+            suppression,
+        )
+    query = overrides.get("query_parameters")
+    if isinstance(query, list):
+        overrides["query_parameters"] = [
+            item
+            for item in query
+            if not isinstance(item, dict) or item.get("name") not in suppression.query_parameters
+        ]

@@ -23,6 +23,7 @@ class RunnerNodeRecord(BaseModel):
     error_message: str | None = Field(default=None, max_length=1000)
     started_at: datetime | None
     completed_at: datetime
+    input_hash: str | None = None
 
     @classmethod
     def from_domain(cls, record: NodeRunRecord) -> "RunnerNodeRecord":
@@ -38,6 +39,7 @@ class RunnerNodeRecord(BaseModel):
             error_message=record.error_message,
             started_at=record.started_at,
             completed_at=record.completed_at,
+            input_hash=record.input_hash,
         )
 
     def to_domain(self) -> NodeRunRecord:
@@ -53,6 +55,7 @@ class RunnerNodeRecord(BaseModel):
             error_message=self.error_message,
             started_at=self.started_at,
             completed_at=self.completed_at,
+            input_hash=self.input_hash,
         )
 
 

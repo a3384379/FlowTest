@@ -74,3 +74,6 @@ def configure_logging() -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(settings.log_level.upper())
+    # httpx includes the complete request URL in INFO logs. Import document URLs may
+    # contain short-lived credentials, so only retain failures from the client.
+    logging.getLogger("httpx").setLevel(logging.WARNING)

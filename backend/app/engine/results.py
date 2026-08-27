@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.engine.contracts import NodeStatus
@@ -48,6 +51,51 @@ class NodeTrace(BaseModel):
     span_id: str = Field(pattern=r"^[0-9a-f]{16}$")
 
 
+class NodeInputMapping(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_node_id: str = Field(min_length=1, max_length=128)
+    source_path: str = Field(min_length=1, max_length=500)
+    target_location: str = Field(min_length=1, max_length=32)
+    target_key: str = Field(min_length=1, max_length=500)
+    value: JsonValue = None
+
+
+class HttpRequestSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    method: str = Field(min_length=1, max_length=16)
+    url: str = Field(min_length=1, max_length=4096)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: JsonValue = None
+    service_key: str | None = Field(default=None, max_length=160)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
+
+
+class HttpResponseSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status_code: int = Field(ge=100, le=599)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: JsonValue = None
+    size_bytes: int = Field(ge=0)
+
+
+class NodeObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["http"] = "http"
+    attempt: int = Field(ge=1)
+    request: HttpRequestSnapshot
+    response: HttpResponseSnapshot | None = None
+    mappings: tuple[NodeInputMapping, ...] = ()
+    duration_ms: float = Field(ge=0)
+    started_at: datetime
+    completed_at: datetime
+    error_code: str | None = Field(default=None, max_length=100)
+    error_message: str | None = Field(default=None, max_length=1000)
+
+
 class NodeResult(BaseModel):
     """Protocol-neutral result envelope persisted for every V3 capability attempt."""
 
@@ -59,6 +107,7 @@ class NodeResult(BaseModel):
     metrics: tuple[NodeMetric, ...] = ()
     artifacts: tuple[NodeArtifact, ...] = ()
     trace: NodeTrace | None = None
+    observations: tuple[NodeObservation, ...] = ()
     redacted_paths: tuple[str, ...] = ()
     error: NodeResultError | None = None
 
@@ -73,8 +122,13 @@ class NodeResult(BaseModel):
         return self
 
     @classmethod
-    def passed(cls, output: JsonValue) -> "NodeResult":
-        return cls(status=NodeStatus.PASSED, output=output)
+    def passed(
+        cls,
+        output: JsonValue,
+        *,
+        observations: tuple[NodeObservation, ...] = (),
+    ) -> "NodeResult":
+        return cls(status=NodeStatus.PASSED, output=output, observations=observations)
 
     @classmethod
     def failed(
@@ -84,10 +138,12 @@ class NodeResult(BaseModel):
         message: str,
         output: JsonValue = None,
         retryable: bool = False,
+        observations: tuple[NodeObservation, ...] = (),
     ) -> "NodeResult":
         return cls(
             status=NodeStatus.FAILED,
             output=output,
+            observations=observations,
             error=NodeResultError(
                 code=code,
                 message=message,

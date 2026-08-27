@@ -2,7 +2,7 @@
 
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
-当前状态：`V3.0 S30、S31 Release Gate/全局搜索、独立服务目录及质量指挥中心已完成；V2→V3 真实资产升级、回滚和再升级自动演练已通过本地与远程 CI`；V2/V3 的真实试点与连续 14 天 RC 仍是正式发布硬门槛。
+当前状态：`V3.0 S30/S31 已完成；V4 S32～S36 的 Compact 六服务、离线分发、事务式无外网升级、资源/兼容基线、隐私安全诊断与回滚证明已通过本地及 PR #38 远程自动化验收；S37 Standalone 无 Docker 运行时已通过 PR #39 七项远程检查`；Windows 云桌面 72 小时试点、Standalone→Compact 真实迁移和人工签署待执行。V5 设计草案见 [docs/development-plan-v5.md](docs/development-plan-v5.md)，不改变 V4 发布门槛。
 
 ## 技术栈
 
@@ -24,11 +24,52 @@ FlowTest/
 ```
 
 领域边界及完整目录说明见 [docs/architecture.md](docs/architecture.md)，V1/V2 实施节奏见
-[docs/development-plan.md](docs/development-plan.md)。
+[docs/development-plan.md](docs/development-plan.md)；V5 设计草案见
+[docs/development-plan-v5.md](docs/development-plan-v5.md)。
 
-## 本地启动
+系统各模块的完整使用说明见 [FlowTest V5 系统使用手册](docs/system-user-guide.md)，其中详细介绍了
+接口管理、接口工作流、FlowSpec，以及对外 MCP 的 stdio/Streamable HTTP 接入与安全边界。
+
+## 公司电脑快速运行
+
+如果公司 Windows 10 云桌面没有 WSL2、SLAT 或 Docker Desktop 条件，请使用
+[Standalone Windows 云桌面部署](docs/operations/standalone-company-quickstart.md)。该离线包把 Python
+运行时、依赖 wheels 和前端静态文件一起带入，云桌面不需要安装 Docker、WSL2、Node.js、uv、PostgreSQL、
+Redis 或 MinIO；解压后在 PowerShell 执行 `deploy\standalone\start.ps1` 和 `verify.ps1` 即可。
+
+公司内网试用优先使用 V4 Compact 档位。联网电脑安装 Docker Engine/Desktop、Compose v2、
+Git、OpenSSL 和 Curl 后，可直接从 GitHub 下载并启动：
+
+```bash
+git clone --branch main --single-branch https://github.com/a3384379/FlowTest.git
+cd FlowTest
+./deploy/compact/start.sh
+./deploy/compact/verify.sh
+```
+
+首次启动会构建或下载镜像，并在 `deploy/compact/.env` 生成权限为 `0600` 的随机管理员密码和服务密钥；
+该文件已被 Git 忽略，不得提交、上传或发到聊天/工单。启动完成后访问 <http://localhost:3000>，
+管理员可使用 `admin@flowtest.dev` 或账号别名 `admin` 登录。Windows 公司电脑请在 WSL2 中执行上述命令，并启用 Docker Desktop
+的 WSL 集成。
+
+详细的系统要求、首次登录、启停、内网开放、备份、升级及完全离线安装步骤见
+[公司电脑 Compact 快速部署](docs/operations/compact-company-quickstart.md)。GitHub 源码压缩包不包含
+Docker 镜像；完全无外网电脑必须使用受信工作站生成并校验的单架构离线包。成功的 Compact CI
+会短期保留已经完成冷导入、业务、升级回滚和兼容验收的 `amd64` 候选包，供公司试点下载；该候选
+不是正式 Release，仍须固定 Commit、校验 SHA-256 并完成公司审批。
+
+## 本地开发启动
 
 推荐安装：Python 3.13、Node.js 20.19+ 或 22.12+、Docker。
+
+Compact 只启动 6 个容器并自动生成随机密钥：
+
+```bash
+./deploy/compact/start.sh
+```
+
+完整边界和内网开放方式见 [小型化部署手册](deploy/compact/README.md)。需要全部 Worker、Redpanda、
+Mock、性能实验室和环境实验室时，继续使用下方 Full 开发栈。
 
 ```bash
 cp .env.example .env
@@ -46,8 +87,10 @@ docker compose up --build
 - gRPC/Reflection 目标服务：`localhost:50051`
 - MinIO Console：<http://localhost:9001>
 
-本地初始管理员为 `admin@flowtest.dev`，密码由
-`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置。首次登录后必须修改密码；生产部署不得沿用示例值。
+登录账号字段同时接受管理员邮箱和 `admin` 别名；别名会解析到
+`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`。Full/Compact 的密码由 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置，
+并按安装档位执行首次改密策略；Standalone 新包固定使用 `admin/admin` 且不强制首次改密。所有新建或
+主动修改的密码最低为 8 位；生产部署不得沿用示例值。
 
 S1 已提供 `/api/v1/auth`、`/api/v1/users`、`/api/v1/projects`、项目成员和任意层级目录接口。
 Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15 分钟。
@@ -61,7 +104,8 @@ S3 已提供 HTTPX 异步执行、GET/POST/PUT/PATCH/DELETE、响应与耗时查
 “创建项目与环境 → 创建 API → 发送请求 → 查看断言与历史”闭环；请求与响应中的认证信息、
 Cookie、Token、Password 和 Secret 会在持久化及展示前统一脱敏。
 
-S4 已提供 OpenAPI 3、Swagger 2、Postman Collection 导入和指纹去重；重导入返回
+S4 已提供 OpenAPI 3、Swagger 2、Postman Collection 导入和指纹去重；URL 导入可从
+Swagger UI、Springdoc、FastAPI 和 Knife4j 页面发现原始文档，并在多分组时先行选择。重导入返回
 `added/changed/deleted/unchanged`，变更接口自动创建不可变新版本，删除项只预览不自动停用。
 Bearer、Basic 和 Header/Query API Key 已接入真实请求执行。上传文件和二进制响应统一存放于
 MinIO，数据库只保留 Artifact 元数据与 SHA-256；支持 multipart 请求、受权下载、文件大小、
@@ -103,6 +147,11 @@ S10 已固定 System Admin、Project Owner、Editor、Viewer 四级权限，并�
 Merge；删除项只有明确选中才停用。API 调试、Workflow 与通知 Webhook 统一在 DNS 解析后执行
 域名/CIDR 校验，拒绝元数据、回环和未授权私网地址。执行入口统一支持 `Idempotency-Key`，登录、
 执行与普通写请求分别使用 Redis 限流桶。
+
+V4.0 轻量版新增项目级出站策略开关：Standalone 新项目默认关闭，允许本机 `localhost`/私网调试；
+开启后恢复严格的域名、CIDR、回环、元数据和保留地址校验。导入文档选择器、导入 Diff 和接口列表均使用
+固定高度滚动区域；接口列表支持名称/路径/说明搜索、HTTP 方法筛选和服务端分页。该策略也会随 Runner
+Lease 传递到远程工作节点，避免不同执行面出现安全语义不一致。
 
 S11 已提供项目级 1～3650 天保留策略和每日 90 天清理任务、Prometheus 指标、Compose 资源限制、
 Nginx TLS 接入模板、Critical/High 镜像漏洞门槛、容量测试以及 PostgreSQL/MinIO 备份恢复工具。

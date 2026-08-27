@@ -11,13 +11,28 @@ import {
   type Project,
 } from '../../lib/api'
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-export type BodyKind = 'none' | 'json' | 'multipart'
-export type AuthKind = 'none' | 'bearer' | 'basic' | 'api_key'
+export { createProject } from '../projects/project-service'
+export type { CreateProjectInput } from '../projects/project-service'
 
-export type CreateProjectInput = {
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type BodyKind = 'none' | 'json' | 'raw' | 'form' | 'multipart'
+export type AuthKind = 'none' | 'bearer' | 'basic' | 'api_key'
+export type ImportSourceType =
+  'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
+export type ImportPreviewInput =
+  | { kind: 'file'; file: File; sourceType: ImportSourceType }
+  | { kind: 'url'; url: string; sourceType: ImportSourceType; documentId?: string }
+
+export type ImportUrlDocument = {
+  id: string
   name: string
-  description: string
+  url: string
+}
+
+export type ImportUrlDiscovery = {
+  source_url: string
+  source_kind: 'document' | 'swagger_ui'
+  documents: ImportUrlDocument[]
 }
 
 export type CreateEnvironmentInput = {
@@ -58,11 +73,6 @@ export async function listProjects(): Promise<Page<Project>> {
   return response.data
 }
 
-export async function createProject(input: CreateProjectInput): Promise<Project> {
-  const response = await apiClient.post<Project>('/projects', input)
-  return response.data
-}
-
 export async function listEnvironments(projectId: string): Promise<Environment[]> {
   const response = await apiClient.get<Environment[]>(`/projects/${projectId}/environments`)
   return response.data
@@ -76,9 +86,17 @@ export async function createEnvironment(
   return response.data
 }
 
-export async function listApis(projectId: string): Promise<Page<ApiDefinition>> {
+export async function listApis(
+  projectId: string,
+  options: { page?: number; pageSize?: number; search?: string; method?: HttpMethod } = {},
+): Promise<Page<ApiDefinition>> {
   const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
-    params: { page: 1, page_size: 100 },
+    params: {
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 50,
+      ...(options.search?.trim() ? { search: options.search.trim() } : {}),
+      ...(options.method ? { method: options.method } : {}),
+    },
   })
   return response.data
 }
@@ -105,8 +123,28 @@ export async function createApi(projectId: string, input: CreateApiInput) {
   return response.data.definition
 }
 
-export async function getApiDetail(projectId: string, apiId: string): Promise<ApiDetail> {
-  return (await apiClient.get<ApiDetail>(`/projects/${projectId}/apis/${apiId}`)).data
+export async function getApiDetail(
+  projectId: string,
+  apiId: string,
+  version?: number,
+): Promise<ApiDetail> {
+  return (
+    await apiClient.get<ApiDetail>(`/projects/${projectId}/apis/${apiId}`, {
+      params: version ? { version } : undefined,
+    })
+  ).data
+}
+
+export async function updateApiDefinition(
+  projectId: string,
+  apiId: string,
+  input: { name?: string; service_id?: string | null },
+): Promise<ApiDefinition> {
+  const response = await apiClient.patch<ApiDefinition>(
+    `/projects/${projectId}/apis/${apiId}`,
+    input,
+  )
+  return response.data
 }
 
 export async function createApiVersion(
@@ -122,17 +160,42 @@ export async function previewApi(
   projectId: string,
   apiId: string,
   environmentId: string,
+  options: {
+    version?: number
+    queryParametersOverride?: ApiVersion['query_parameters']
+    headersOverride?: Record<string, string>
+    serviceOverride?: string
+    endpointVariant?: string
+    bodyOverride?: unknown
+    useBodyOverride?: boolean
+  } = {},
 ): Promise<{
   method: string
   url: string
   headers: Array<{ name: string; value: string; source: string }>
   body: unknown
+  target?: Record<string, unknown>
 }> {
   return (
     await apiClient.post(`/projects/${projectId}/apis/${apiId}/preview`, {
       environment_id: environmentId,
       runtime_variables: {},
       runtime_headers: {},
+      ...(options.serviceOverride ? { service_override: options.serviceOverride } : {}),
+      ...(options.endpointVariant ? { endpoint_variant: options.endpointVariant } : {}),
+      ...(options.version ? { version: options.version } : {}),
+      ...(options.queryParametersOverride !== undefined
+        ? { query_parameters_override: options.queryParametersOverride }
+        : {}),
+      ...(options.headersOverride !== undefined
+        ? { headers_override: options.headersOverride }
+        : {}),
+      ...(options.useBodyOverride !== undefined
+        ? {
+            body_override: options.bodyOverride,
+            use_body_override: options.useBodyOverride,
+          }
+        : {}),
     })
   ).data
 }
@@ -158,13 +221,37 @@ export async function exportApis(
 export async function previewApiDocument(
   projectId: string,
   file: File,
-  sourceType:
-    'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel' = 'auto',
+  sourceType: ImportSourceType = 'auto',
 ): Promise<ImportRun> {
   const form = new FormData()
   form.append('document', file)
   form.append('source_type', sourceType)
   const response = await apiClient.post<ImportRun>(`/projects/${projectId}/imports/preview`, form)
+  return response.data
+}
+
+export async function previewApiDocumentUrl(
+  projectId: string,
+  url: string,
+  sourceType: ImportSourceType = 'auto',
+  documentId?: string,
+): Promise<ImportRun> {
+  const response = await apiClient.post<ImportRun>(`/projects/${projectId}/imports/url/preview`, {
+    url,
+    source_type: sourceType,
+    ...(documentId ? { document_id: documentId } : {}),
+  })
+  return response.data
+}
+
+export async function discoverApiDocumentUrl(
+  projectId: string,
+  url: string,
+): Promise<ImportUrlDiscovery> {
+  const response = await apiClient.post<ImportUrlDiscovery>(
+    `/projects/${projectId}/imports/url/discover`,
+    { url },
+  )
   return response.data
 }
 

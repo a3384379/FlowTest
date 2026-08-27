@@ -1,4 +1,7 @@
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Annotated, cast
+from uuid import UUID
 
 import jwt
 from fastapi import Depends, Request
@@ -6,15 +9,25 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import reset_tenant_context, set_tenant_context
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
 from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
+from app.domain.mcp_read import MCP_READ_SCOPE
+from app.domain.runtime_profiles import RuntimeProfile
+from app.domain.tenant import TenantContext
 from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
+from app.http.imports import HttpImportDocumentFetcher
 from app.http.oidc import HttpOIDCProvider
+from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
+from app.models.organizations import ServiceAccount
 from app.repositories.access import UserRepository
+from app.services.mcp_controlled_write import MCP_WRITE_SCOPE
 from app.services.oidc import OIDCConfiguration, OIDCProvider
+from app.services.organizations import OrganizationContextService
+from app.services.service_accounts import ServiceAccountService
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -60,10 +73,21 @@ def get_pact_broker_source() -> PactBrokerSource | None:
 PactBroker = Annotated[PactBrokerSource | None, Depends(get_pact_broker_source)]
 
 
+def get_import_document_fetcher() -> ImportDocumentFetcher:
+    return HttpImportDocumentFetcher(request_timeout_seconds=settings.request_timeout_seconds)
+
+
+ImportDocumentFetcherDependency = Annotated[
+    ImportDocumentFetcher,
+    Depends(get_import_document_fetcher),
+]
+
+
 async def get_current_user(
+    request: Request,
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> User:
+) -> AsyncIterator[User]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AppError(code="AUTHENTICATION_REQUIRED", message="请先登录", status_code=401)
     try:
@@ -75,14 +99,26 @@ async def get_current_user(
     user = await UserRepository(session).get(claims.user_id)
     if user is None or not user.is_active:
         raise AppError(code="INVALID_ACCESS_TOKEN", message="访问令牌无效", status_code=401)
-    return user
+    requested_organization_id = _organization_header(request)
+    tenant = await OrganizationContextService(session).resolve(
+        actor=user,
+        requested_organization_id=requested_organization_id,
+    )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield user
+    finally:
+        reset_tenant_context(context_token)
 
 
 AuthenticatedUser = Annotated[User, Depends(get_current_user)]
 
 
 async def require_password_change_complete(authenticated_user: AuthenticatedUser) -> User:
-    if authenticated_user.requires_password_change:
+    if (
+        authenticated_user.requires_password_change
+        and settings.runtime_profile is not RuntimeProfile.STANDALONE
+    ):
         raise AppError(
             code="PASSWORD_CHANGE_REQUIRED",
             message="首次登录必须修改密码",
@@ -92,6 +128,92 @@ async def require_password_change_complete(authenticated_user: AuthenticatedUser
 
 
 CurrentUser = Annotated[User, Depends(require_password_change_complete)]
+
+
+@dataclass(frozen=True, slots=True)
+class MCPAuthenticatedPrincipal:
+    actor: User
+    account: ServiceAccount
+    tenant: TenantContext
+
+
+async def get_mcp_authenticated_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 需要服务账号令牌",
+            status_code=401,
+        )
+    account, tenant = await ServiceAccountService(session).authenticate(
+        credentials.credentials,
+        touch_last_used=False,
+    )
+    if MCP_READ_SCOPE not in tenant.scopes:
+        raise AppError(
+            code="MCP_SCOPE_REQUIRED",
+            message="服务账号缺少 MCP 只读权限",
+            status_code=403,
+        )
+    actor = await UserRepository(session).get(tenant.actor_id)
+    if actor is None or not actor.is_active:
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 服务账号关联用户不可用",
+            status_code=401,
+        )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
+    finally:
+        reset_tenant_context(context_token)
+
+
+async def get_mcp_write_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 需要服务账号令牌",
+            status_code=401,
+        )
+    account, tenant = await ServiceAccountService(session).authenticate(
+        credentials.credentials,
+        touch_last_used=False,
+    )
+    if MCP_WRITE_SCOPE not in tenant.scopes:
+        raise AppError(
+            code="MCP_SCOPE_REQUIRED",
+            message="服务账号缺少 MCP 受控写入权限",
+            status_code=403,
+        )
+    actor = await UserRepository(session).get(tenant.actor_id)
+    if actor is None or not actor.is_active:
+        raise AppError(
+            code="MCP_AUTHENTICATION_REQUIRED",
+            message="MCP 服务账号关联用户不可用",
+            status_code=401,
+        )
+    context_token = set_tenant_context(tenant)
+    try:
+        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
+    finally:
+        reset_tenant_context(context_token)
+
+
+MCPCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_authenticated_principal),
+]
+
+MCPWriteCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_write_principal),
+]
 
 
 async def require_system_admin(current_user: CurrentUser) -> User:
@@ -176,3 +298,17 @@ def get_environment_dispatcher(request: Request) -> EnvironmentTaskDispatcher:
 
 
 EnvironmentQueue = Annotated[EnvironmentTaskDispatcher, Depends(get_environment_dispatcher)]
+
+
+def _organization_header(request: Request) -> UUID | None:
+    value = request.headers.get("X-Organization-Id", "").strip()
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as error:
+        raise AppError(
+            code="INVALID_ORGANIZATION_ID",
+            message="组织 ID 无效",
+            status_code=400,
+        ) from error

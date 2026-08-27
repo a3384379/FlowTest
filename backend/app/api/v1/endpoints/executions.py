@@ -38,6 +38,8 @@ async def execute_api(
             runtime_headers=payload.runtime_headers,
             body_override=payload.body_override,
             use_body_override=payload.use_body_override,
+            service_override=payload.service_override,
+            endpoint_variant=payload.endpoint_variant,
             timeout_seconds=payload.timeout_seconds,
             assertions=tuple(
                 AssertionSpec(

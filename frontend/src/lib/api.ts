@@ -7,14 +7,24 @@ export const apiClient = axios.create({
 })
 
 let accessToken: string | null = null
+let organizationId: string | null = null
 
 export function setAccessToken(token: string | null) {
   accessToken = token
 }
 
+export function setOrganizationId(id: string | null) {
+  organizationId = id
+}
+
 apiClient.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  if (organizationId) {
+    config.headers['X-Organization-Id'] = organizationId
+  } else {
+    delete config.headers['X-Organization-Id']
   }
   return config
 })
@@ -40,6 +50,7 @@ export type User = {
 
 export type Project = {
   id: string
+  organization_id: string | null
   name: string
   description: string
   role: 'owner' | 'editor' | 'viewer' | null
@@ -82,6 +93,7 @@ export type Environment = {
   project_id: string
   name: string
   base_url: string
+  default_service_id?: string | null
   variables: Record<string, string>
   headers: Record<string, string>
 }
@@ -90,6 +102,7 @@ export type ApiDefinition = {
   id: string
   project_id: string
   folder_id: string | null
+  service_id?: string | null
   name: string
   description: string
   current_version: number
@@ -113,6 +126,7 @@ export type Execution = {
   request_url: string
   request_headers: Record<string, string>
   request_body: unknown
+  target_snapshot?: Record<string, unknown>
   response_status: number | null
   response_headers: Record<string, string>
   response_body: unknown
@@ -144,13 +158,55 @@ export type ImportItem = {
   change: ImportChange
   definition_id: string | null
   version: number
+  server_url?: string | null
+}
+
+export type RequestService = {
+  id: string
+  project_id: string
+  service_key: string
+  name: string
+  description: string
+  owner_team: string | null
+  service_type: 'http' | 'https' | 'grpc' | 'graphql' | 'other'
+  enabled: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ServiceEndpoint = {
+  id: string
+  project_id: string
+  environment_id: string
+  service_id: string
+  variant: string
+  base_url: string
+  enabled: boolean
+  connect_timeout_ms: number
+  read_timeout_ms: number
+  tls_verify: boolean
+  proxy_ref: string | null
+  headers: Record<string, string>
+  variables?: Record<string, string>
+  secret_refs: string[]
+  health_check_path: string | null
+  health_expected_status: number | null
+  revision: number
+  created_by_id: string
+  created_at: string
+  updated_at: string
 }
 
 export type ImportRun = {
   id: string
   project_id: string
+  source_kind: 'file' | 'url'
+  source_key: string
   source_type: 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
   source_name: string
+  source_url: string | null
+  document_url: string | null
   source_sha256: string
   added: number
   changed: number
@@ -173,6 +229,7 @@ export type ProjectPermission = {
 }
 
 export type ProjectSecurityPolicy = {
+  enabled: boolean
   allowed_hosts: string[]
   allowed_private_cidrs: string[]
 }
@@ -185,12 +242,58 @@ export type ProjectRetentionPolicy = {
 export type AuditLog = {
   id: string
   actor_user_id: string | null
+  organization_id: string | null
   project_id: string
   action: string
   resource_type: string
   resource_id: string | null
   details: Record<string, unknown>
   created_at: string
+}
+
+export type OrganizationRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export type Organization = {
+  id: string
+  name: string
+  slug: string
+  description: string
+  enabled: boolean
+  created_by_id: string | null
+  role: OrganizationRole | null
+  member_count: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type OrganizationMember = {
+  id: string
+  organization_id: string
+  user_id: string
+  role: OrganizationRole
+  created_at: string
+  updated_at: string
+}
+
+export type OrganizationServiceAccount = {
+  id: string
+  organization_id: string
+  name: string
+  account_key: string
+  token_prefix: string
+  scopes: string[]
+  enabled: boolean
+  created_by_id: string
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  metadata_json: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export type IssuedOrganizationServiceAccount = OrganizationServiceAccount & {
+  token: string
 }
 
 export type ProjectMember = {
@@ -333,6 +436,7 @@ export type ApiVersion = {
   path: string
   query_parameters: ApiRequestParameter[]
   headers: Record<string, string>
+  variables?: Record<string, string>
   body_kind: 'none' | 'json' | 'raw' | 'form' | 'multipart'
   body: unknown
   auth_kind: 'none' | 'bearer' | 'basic' | 'api_key'
@@ -416,6 +520,147 @@ export type WorkflowDefinition = {
   }
 }
 
+export type FlowSpecNode = {
+  id: string
+  kind: string
+  name: string
+  position: { x: number; y: number }
+  config: Record<string, unknown>
+  capability_id?: string | null
+  capability_version?: string | null
+  configuration?: Record<string, unknown> | null
+  bindings?: Array<{ input: string; expression: string }> | null
+  depends_on: string[]
+  operation_ref?: string | null
+  target?: {
+    service_ref: string | null
+    endpoint_variant: string | null
+  } | null
+}
+
+export type FlowSpec = {
+  schema_version: 'flowtest-flow-spec-v1'
+  fingerprint_version:
+    | 'flowtest-flow-spec-fingerprint-v1'
+    | 'flowtest-flow-spec-fingerprint-v2'
+    | 'flowtest-flow-spec-fingerprint-v3'
+  project_id: string | null
+  name: string
+  description: string
+  source_evidence: string[]
+  services: Array<{
+    ref: string
+    name: string
+    service_type: string
+  }>
+  operations: Array<{
+    ref: string
+    service_ref: string | null
+    name: string
+    method: string
+    path: string
+    version_strategy?: 'pinned' | 'current' | null
+    source_version?: number | null
+    api_version?: number | null
+    contract_fingerprint?: string | null
+  }>
+  nodes: FlowSpecNode[]
+  edges: WorkflowEdge[]
+  variables: Record<string, string>
+  settings: WorkflowDefinition['settings']
+  bindings: Array<Record<string, string>>
+  parameters: Array<{
+    name: string
+    source: 'synthetic_data' | 'runtime' | 'constant' | 'secret_ref'
+    value: string | null
+    secret_ref: string | null
+    description: string
+  }>
+  assertions: Array<{
+    node_id: string
+    kind: string
+    expected: unknown
+    schema_ref: string | null
+    query_ref: string | null
+  }>
+  cleanup: Array<{ operation_ref: string; best_effort: boolean }>
+  security_policy: {
+    secret_refs_only: boolean
+    max_requests: number
+    allow_private_network: boolean
+  }
+  confidence: { overall: number; unresolved: string[] }
+}
+
+export type FlowSpecIssue = { code: string; message: string; path: string }
+
+export type FlowSpecValidationResult = {
+  valid: boolean
+  issues: FlowSpecIssue[]
+  warnings: FlowSpecIssue[]
+  requires_review: boolean
+}
+
+export type FlowSpecDiff = {
+  before_fingerprint: string | null
+  after_fingerprint: string
+  changes: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type FlowSpecCompatibilityResult = {
+  compatible: boolean
+  source_schema_version: string
+  target_schema_version: string
+  blockers: FlowSpecIssue[]
+  warnings: FlowSpecIssue[]
+  requires_review: boolean
+}
+
+export type FlowSpecExport = {
+  workflow_id: string
+  version: number | null
+  draft_revision: number | null
+  fingerprint: string
+  spec: FlowSpec
+  validation: FlowSpecValidationResult
+  compatibility: FlowSpecCompatibilityResult
+}
+
+export type FlowSpecChangeSet = {
+  id: string
+  project_id: string
+  title: string
+  status: string
+  source_type: 'flow_spec'
+  source_ref: string | null
+  source_fingerprint: string
+  target_workflow_id: string | null
+  target_revision: number | null
+  target_snapshot_sha256: string | null
+  review_status: 'pending' | 'accepted' | 'rejected'
+  reviewed_by_id: string | null
+  reviewed_at: string | null
+  applied_at: string | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type FlowSpecChangeSetDetail = FlowSpecChangeSet & {
+  spec: FlowSpec
+  validation: FlowSpecValidationResult
+  compatibility: FlowSpecCompatibilityResult
+  diff: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type FlowSpecApplyResult = {
+  change_set_id: string
+  workflow_id: string
+  draft_revision: number
+  fingerprint: string
+  applied_at: string
+}
+
 export type Workflow = {
   id: string
   project_id: string
@@ -473,7 +718,7 @@ export type WorkflowExecution = {
   triggered_by_id: string
   parent_execution_id: string | null
   dataset_row_index: number | null
-  status: 'running' | 'passed' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   snapshot: Record<string, unknown>
   context: Record<string, unknown>
   error_code: string | null
@@ -502,6 +747,7 @@ export type NodeResult = {
     sha256: string
   }>
   trace: { trace_id: string; span_id: string } | null
+  observations?: WorkflowNodeObservation[]
   redacted_paths: string[]
   error: {
     code: string
@@ -509,6 +755,35 @@ export type NodeResult = {
     details: Record<string, unknown>
     retryable: boolean
   } | null
+}
+
+export type WorkflowNodeObservation = {
+  kind: 'http'
+  attempt: number
+  request: {
+    method: string
+    url: string
+    headers: Record<string, string>
+    body: unknown
+  }
+  response: {
+    status_code: number
+    headers: Record<string, string>
+    body: unknown
+    size_bytes: number
+  } | null
+  mappings: Array<{
+    source_node_id: string
+    source_path: string
+    target_location: string
+    target_key: string
+    value: unknown
+  }>
+  duration_ms: number
+  started_at: string
+  completed_at: string
+  error_code: string | null
+  error_message: string | null
 }
 
 export type WorkflowNodeExecution = {
@@ -522,6 +797,8 @@ export type WorkflowNodeExecution = {
   result?: NodeResult | null
   error_code: string | null
   error_message: string | null
+  started_at?: string | null
+  completed_at?: string
 }
 
 export type WorkflowExecutionDetail = {
@@ -754,6 +1031,7 @@ export type ReportNode = {
   status: WorkflowNodeExecution['status']
   attempts: number
   duration_ms: number | null
+  observations?: WorkflowNodeObservation[]
   request: unknown
   response: unknown
   extraction: unknown
@@ -805,7 +1083,7 @@ export type NotificationDelivery = {
   event_type: NotificationEvent
   resource_id: string
   status: 'pending' | 'delivered' | 'failed'
-  attempt: number
+  attempt?: number
   response_status: number | null
   error_message: string | null
   delivered_at: string | null
@@ -822,6 +1100,7 @@ export type ExecutionEvent = {
   node_type: string | null
   node_status: WorkflowNodeExecution['status'] | null
   result?: NodeResult | null
+  attempt: number
   attempts: number
   error_code: string | null
   error_message: string | null

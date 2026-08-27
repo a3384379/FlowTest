@@ -1,9 +1,10 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-from app.importers.contracts import ImportChange, ImportSourceType
+from app.importers.contracts import ImportChange, ImportSourceKind, ImportSourceType
 
 
 class ImportItemResponse(BaseModel):
@@ -14,6 +15,7 @@ class ImportItemResponse(BaseModel):
     change: ImportChange
     definition_id: UUID | None
     version: int
+    server_url: str | None = None
 
 
 class ImportRunResponse(BaseModel):
@@ -21,8 +23,12 @@ class ImportRunResponse(BaseModel):
 
     id: UUID
     project_id: UUID
+    source_kind: ImportSourceKind
+    source_key: str
     source_type: ImportSourceType
     source_name: str
+    source_url: str | None
+    document_url: str | None
     source_sha256: str
     added: int
     changed: int
@@ -39,3 +45,32 @@ class ImportRunResponse(BaseModel):
 
 class ImportMergeRequest(BaseModel):
     selected_keys: set[str] = Field(default_factory=set, max_length=2000)
+    service_id: UUID | None = None
+    environment_id: UUID | None = None
+    endpoint_variant: str = Field(
+        default="default",
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=80,
+    )
+
+
+class ImportUrlPreviewRequest(BaseModel):
+    url: HttpUrl
+    source_type: ImportSourceType = ImportSourceType.AUTO
+    document_id: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class ImportUrlDiscoveryRequest(BaseModel):
+    url: HttpUrl
+
+
+class ImportUrlDocumentResponse(BaseModel):
+    id: str
+    name: str
+    url: str
+
+
+class ImportUrlDiscoveryResponse(BaseModel):
+    source_url: str
+    source_kind: Literal["document", "swagger_ui"]
+    documents: list[ImportUrlDocumentResponse]

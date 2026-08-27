@@ -302,7 +302,7 @@ function EventTable({ events }: { events: FabricEvent[] }) {
       rowKey="id"
       size="small"
       dataSource={events}
-      pagination={{ pageSize: 20, hideOnSinglePage: true }}
+      pagination={{ pageSize: 100, hideOnSinglePage: true }}
       locale={{ emptyText: '暂无 Lease / Fencing 事件' }}
       columns={[
         { title: '时间', dataIndex: 'created_at', render: formatTime },

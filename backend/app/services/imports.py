@@ -4,6 +4,7 @@ import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +12,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.api_assets import APIVersionSpec
-from app.importers.contracts import ImportChange, ImportedOperation, ImportSourceType
+from app.domain.canonical_schemas import CanonicalSchemaValidationError
+from app.domain.test_engineering import OperationContract, fingerprint_contract
+from app.importers.contracts import (
+    ImportChange,
+    ImportedOperation,
+    ImportSourceKind,
+    ImportSourceType,
+)
 from app.importers.document import ImportDocumentError, parse_import_document
+from app.importers.sources import ImportDocumentFetcher, ImportUrlDiscovery
 from app.models.access import User
-from app.models.api_assets import APIDefinition, APIVersion
+from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.imports import ImportRun
+from app.models.service_targets import ServiceEndpoint
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.imports import ImportRepository
+from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -31,9 +42,10 @@ class ImportItemResult:
     change: ImportChange
     definition_id: UUID | None
     version: int
+    server_url: str | None = None
 
     def as_json(self) -> dict[str, str | int | None]:
-        return {
+        result = {
             "import_key": self.import_key,
             "name": self.name,
             "method": self.method,
@@ -42,16 +54,36 @@ class ImportItemResult:
             "definition_id": str(self.definition_id) if self.definition_id else None,
             "version": self.version,
         }
+        if self.server_url is not None:
+            result["server_url"] = self.server_url
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class ImportSourceIdentity:
+    kind: ImportSourceKind
+    key: str
+    name: str
+    url: str | None
+    document_url: str | None
 
 
 class ImportService:
-    def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        secrets: SecretBox = secret_box,
+        document_fetcher: ImportDocumentFetcher | None = None,
+    ) -> None:
         self._session = session
         self._assets = APIAssetRepository(session)
+        self._targets = ServiceTargetRepository(session)
         self._imports = ImportRepository(session)
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
         self._secrets = secrets
+        self._document_fetcher = document_fetcher
 
     async def import_document(
         self,
@@ -63,30 +95,36 @@ class ImportService:
         content: bytes,
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        source = _file_source(source_name)
         try:
             detected_type, operations = parse_import_document(content, source_type)
+        except CanonicalSchemaValidationError as error:
+            raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
             raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
         _ensure_unique_operations(operations)
-        normalized_source = _normalize_source_name(source_name)
         results = await self._apply_operations(
             actor=actor,
             project_id=project_id,
-            source_name=normalized_source,
+            source=source,
             operations=operations,
         )
         results.extend(
             await self._deleted_results(
                 project_id=project_id,
-                source_name=normalized_source,
+                source=source,
                 imported_keys={operation.import_key for operation in operations},
             )
         )
         counts = Counter(item.change for item in results)
         run = ImportRun(
             project_id=project_id,
+            source_kind=source.kind.value,
+            source_key=source.key,
             source_type=detected_type.value,
-            source_name=normalized_source,
+            source_name=source.name,
+            source_url=source.url,
+            document_url=source.document_url,
             source_sha256=hashlib.sha256(content).hexdigest(),
             added=counts[ImportChange.ADDED],
             changed=counts[ImportChange.CHANGED],
@@ -114,7 +152,8 @@ class ImportService:
             resource_id=run.id,
             details={
                 "source_type": detected_type.value,
-                "source_name": normalized_source,
+                "source_kind": source.kind.value,
+                "source_name": source.name,
                 "added": run.added,
                 "changed": run.changed,
                 "deleted": run.deleted,
@@ -135,15 +174,86 @@ class ImportService:
         content: bytes,
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        return await self._preview_content(
+            actor=actor,
+            project_id=project_id,
+            source=_file_source(source_name),
+            source_type=source_type,
+            content=content,
+        )
+
+    async def preview_url(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        url: str,
+        source_type: ImportSourceType,
+        maximum_bytes: int,
+        document_id: str | None = None,
+    ) -> ImportRun:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        if self._document_fetcher is None:
+            raise RuntimeError("URL import document fetcher is not configured")
+        policy = await self._projects.load_runtime_security_policy(project_id)
+        fetched = await self._document_fetcher.fetch(
+            url=url,
+            network_policy=policy,
+            maximum_bytes=maximum_bytes,
+            document_id=document_id,
+        )
+        return await self._preview_content(
+            actor=actor,
+            project_id=project_id,
+            source=_url_source(
+                requested_url=url,
+                source_page_url=fetched.source_page_url,
+                resolved_url=fetched.resolved_url,
+                source_name=fetched.source_name,
+                document_id=fetched.document_id,
+                discovered_from_page=fetched.discovered_from_page,
+            ),
+            source_type=source_type,
+            content=fetched.content,
+        )
+
+    async def discover_url(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        url: str,
+        maximum_bytes: int,
+    ) -> ImportUrlDiscovery:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        if self._document_fetcher is None:
+            raise RuntimeError("URL import document fetcher is not configured")
+        policy = await self._projects.load_runtime_security_policy(project_id)
+        return await self._document_fetcher.discover(
+            url=url,
+            network_policy=policy,
+            maximum_bytes=maximum_bytes,
+        )
+
+    async def _preview_content(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        source: ImportSourceIdentity,
+        source_type: ImportSourceType,
+        content: bytes,
+    ) -> ImportRun:
         try:
             detected_type, operations = parse_import_document(content, source_type)
+        except CanonicalSchemaValidationError as error:
+            raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
             raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
         _ensure_unique_operations(operations)
-        normalized_source = _normalize_source_name(source_name)
         results = await self._preview_operations(
             project_id=project_id,
-            source_name=normalized_source,
+            source=source,
             operations=operations,
         )
         counts = Counter(item.change for item in results)
@@ -155,8 +265,12 @@ class ImportService:
         run = ImportRun(
             id=run_id,
             project_id=project_id,
+            source_kind=source.kind.value,
+            source_key=source.key,
             source_type=detected_type.value,
-            source_name=normalized_source,
+            source_name=source.name,
+            source_url=source.url,
+            document_url=source.document_url,
             source_sha256=hashlib.sha256(content).hexdigest(),
             added=counts[ImportChange.ADDED],
             changed=counts[ImportChange.CHANGED],
@@ -178,7 +292,8 @@ class ImportService:
             resource_type="import_run",
             resource_id=run.id,
             details={
-                "source_name": normalized_source,
+                "source_kind": source.kind.value,
+                "source_name": source.name,
                 "added": run.added,
                 "changed": run.changed,
                 "deleted": run.deleted,
@@ -196,6 +311,9 @@ class ImportService:
         project_id: UUID,
         run_id: UUID,
         selected_keys: set[str],
+        service_id: UUID | None = None,
+        environment_id: UUID | None = None,
+        endpoint_variant: str = "default",
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         run = await self._imports.get(run_id)
@@ -209,9 +327,16 @@ class ImportService:
             )
         content = self._load_preview(run)
         _, operations = parse_import_document(content, ImportSourceType(run.source_type))
+        source = ImportSourceIdentity(
+            kind=ImportSourceKind(run.source_kind),
+            key=run.source_key,
+            name=run.source_name,
+            url=run.source_url,
+            document_url=run.document_url,
+        )
         current = await self._preview_operations(
             project_id=project_id,
-            source_name=run.source_name,
+            source=source,
             operations=operations,
         )
         if [item.as_json() for item in current] != run.results:
@@ -232,15 +357,24 @@ class ImportService:
         selected_operations = tuple(
             operation for operation in operations if operation.import_key in selected_keys
         )
+        await self._validate_import_target(
+            actor_id=actor.id,
+            project_id=project_id,
+            service_id=service_id,
+            environment_id=environment_id,
+            operations=selected_operations,
+            endpoint_variant=endpoint_variant,
+        )
         await self._apply_operations(
             actor=actor,
             project_id=project_id,
-            source_name=run.source_name,
+            source=source,
             operations=selected_operations,
+            service_id=service_id,
         )
         await self._deactivate_deleted(
             project_id=project_id,
-            source_name=run.source_name,
+            source=source,
             deleted_keys={
                 item.import_key
                 for item in current
@@ -278,7 +412,7 @@ class ImportService:
         self,
         *,
         project_id: UUID,
-        source_name: str,
+        source: ImportSourceIdentity,
         operations: tuple[ImportedOperation, ...],
     ) -> list[ImportItemResult]:
         results: list[ImportItemResult] = []
@@ -297,6 +431,7 @@ class ImportService:
                         change=ImportChange.ADDED,
                         definition_id=None,
                         version=0,
+                        server_url=operation.target_base_url,
                     )
                 )
                 continue
@@ -311,7 +446,7 @@ class ImportService:
         results.extend(
             await self._deleted_results(
                 project_id=project_id,
-                source_name=source_name,
+                source=source,
                 imported_keys={operation.import_key for operation in operations},
             )
         )
@@ -322,8 +457,9 @@ class ImportService:
         *,
         actor: User,
         project_id: UUID,
-        source_name: str,
+        source: ImportSourceIdentity,
         operations: tuple[ImportedOperation, ...],
+        service_id: UUID | None = None,
     ) -> list[ImportItemResult]:
         results: list[ImportItemResult] = []
         for operation in operations:
@@ -334,8 +470,9 @@ class ImportService:
                 definition, version = await self._create_definition(
                     actor=actor,
                     project_id=project_id,
-                    source_name=source_name,
+                    source=source,
                     operation=operation,
+                    service_id=service_id,
                 )
                 change = ImportChange.ADDED
             elif (
@@ -348,36 +485,108 @@ class ImportService:
                 definition, version = await self._update_definition(
                     actor=actor,
                     definition=existing,
-                    source_name=source_name,
+                    source=source,
                     operation=operation,
+                    service_id=service_id,
                 )
                 change = ImportChange.CHANGED
             results.append(_result(operation, change, definition, version.version))
         return results
+
+    async def _validate_import_target(
+        self,
+        *,
+        actor_id: UUID,
+        project_id: UUID,
+        service_id: UUID | None,
+        environment_id: UUID | None,
+        operations: tuple[ImportedOperation, ...],
+        endpoint_variant: str,
+    ) -> None:
+        if service_id is None:
+            if environment_id is not None:
+                raise AppError(
+                    code="IMPORT_TARGET_INVALID",
+                    message="指定环境 Endpoint 时必须同时指定 Service",
+                    status_code=422,
+                )
+            return
+        service = await self._targets.get_service(service_id)
+        if service is None or service.project_id != project_id:
+            raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        if environment_id is None:
+            return
+        environment = await self._session.get(Environment, environment_id)
+        if environment is None or environment.project_id != project_id:
+            raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        server_urls = {
+            operation.target_base_url
+            for operation in operations
+            if operation.target_base_url is not None
+        }
+        if len(server_urls) > 1:
+            raise AppError(
+                code="IMPORT_TARGET_AMBIGUOUS",
+                message="OpenAPI 文档包含多个 Server, 无法自动映射为单一 Endpoint",
+                status_code=422,
+            )
+        server_url = next(iter(server_urls), None)
+        if server_url is None:
+            return
+        _validate_server_url(server_url)
+        endpoint = await self._targets.find_endpoint(
+            environment_id=environment_id,
+            service_id=service_id,
+            variant=endpoint_variant,
+        )
+        if endpoint is None:
+            self._targets.add(
+                ServiceEndpoint(
+                    project_id=project_id,
+                    environment_id=environment_id,
+                    service_id=service_id,
+                    variant=endpoint_variant,
+                    base_url=server_url.rstrip("/"),
+                    created_by_id=actor_id,
+                )
+            )
+        elif endpoint.base_url != server_url.rstrip("/"):
+            endpoint.base_url = server_url.rstrip("/")
+            endpoint.revision += 1
+        await self._session.flush()
 
     async def _create_definition(
         self,
         *,
         actor: User,
         project_id: UUID,
-        source_name: str,
+        source: ImportSourceIdentity,
         operation: ImportedOperation,
+        service_id: UUID | None,
     ) -> tuple[APIDefinition, APIVersion]:
         definition = APIDefinition(
             project_id=project_id,
             folder_id=None,
+            service_id=service_id,
             name=operation.name,
             description=operation.description,
             current_version=1,
             is_active=True,
             import_key=operation.import_key,
             import_fingerprint=operation.content_fingerprint,
-            import_source=source_name,
+            import_source=source.name,
+            import_source_key=source.key,
             created_by_id=actor.id,
         )
         self._assets.add(definition)
         await self._session.flush()
-        version = _version_model(definition.id, 1, actor.id, operation.request)
+        version = _version_model(
+            definition.id,
+            1,
+            actor.id,
+            operation.request,
+            operation.canonical_contract,
+        )
         self._assets.add(version)
         await self._session.flush()
         return definition, version
@@ -387,13 +596,17 @@ class ImportService:
         *,
         actor: User,
         definition: APIDefinition,
-        source_name: str,
+        source: ImportSourceIdentity,
         operation: ImportedOperation,
+        service_id: UUID | None,
     ) -> tuple[APIDefinition, APIVersion]:
         definition.name = operation.name
         definition.description = operation.description
+        if service_id is not None:
+            definition.service_id = service_id
         definition.import_fingerprint = operation.content_fingerprint
-        definition.import_source = source_name
+        definition.import_source = source.name
+        definition.import_source_key = source.key
         definition.is_active = True
         definition.current_version += 1
         version = _version_model(
@@ -401,6 +614,7 @@ class ImportService:
             definition.current_version,
             actor.id,
             operation.request,
+            operation.canonical_contract,
         )
         self._assets.add(version)
         await self._session.flush()
@@ -418,11 +632,11 @@ class ImportService:
         self,
         *,
         project_id: UUID,
-        source_name: str,
+        source: ImportSourceIdentity,
         imported_keys: set[str],
     ) -> list[ImportItemResult]:
         previous = await self._assets.list_imported_definitions(
-            project_id=project_id, import_source=source_name
+            project_id=project_id, import_source_key=source.key
         )
         results: list[ImportItemResult] = []
         for definition in previous:
@@ -450,14 +664,14 @@ class ImportService:
         self,
         *,
         project_id: UUID,
-        source_name: str,
+        source: ImportSourceIdentity,
         deleted_keys: set[str],
     ) -> None:
         if not deleted_keys:
             return
         definitions = await self._assets.list_imported_definitions(
             project_id=project_id,
-            import_source=source_name,
+            import_source_key=source.key,
         )
         for definition in definitions:
             if definition.import_key in deleted_keys:
@@ -496,7 +710,11 @@ def _version_model(
     version: int,
     actor_id: UUID,
     request: APIVersionSpec,
+    contract: OperationContract | None,
 ) -> APIVersion:
+    contract_payload = (
+        contract.model_dump(mode="json", by_alias=True) if contract is not None else {}
+    )
     return APIVersion(
         api_definition_id=definition_id,
         version=version,
@@ -513,7 +731,20 @@ def _version_model(
         auth_config=request.auth_config,
         extraction_rules=[],
         assertions=[],
+        canonical_contract=contract_payload,
+        contract_fingerprint=fingerprint_contract(contract) if contract is not None else None,
+        contract_completeness=contract.completeness if contract is not None else "partial",
+        variables=request.variables,
         created_by_id=actor_id,
+    )
+
+
+def _canonical_contract_error(error: CanonicalSchemaValidationError) -> AppError:
+    return AppError(
+        code="CANONICAL_CONTRACT_INVALID",
+        message="Canonical Contract 包含非法 Schema Keyword Value",
+        status_code=422,
+        details={"issues": [issue.as_json() for issue in error.issues]},
     )
 
 
@@ -531,6 +762,7 @@ def _result(
         change=change,
         definition_id=definition.id,
         version=version,
+        server_url=operation.target_base_url,
     )
 
 
@@ -547,6 +779,71 @@ def _ensure_unique_operations(operations: tuple[ImportedOperation, ...]) -> None
 def _normalize_source_name(source_name: str) -> str:
     normalized = source_name.strip().replace("\\", "/").rsplit("/", 1)[-1]
     return normalized[:255] or "import-document"
+
+
+def _file_source(source_name: str) -> ImportSourceIdentity:
+    normalized = _normalize_source_name(source_name)
+    return ImportSourceIdentity(
+        kind=ImportSourceKind.FILE,
+        key=f"file:{normalized}",
+        name=normalized,
+        url=None,
+        document_url=None,
+    )
+
+
+def _url_source(
+    *,
+    requested_url: str,
+    source_page_url: str,
+    resolved_url: str,
+    source_name: str,
+    document_id: str,
+    discovered_from_page: bool,
+) -> ImportSourceIdentity:
+    canonical = _canonical_url(requested_url)
+    if discovered_from_page:
+        canonical = f"{canonical}#{document_id}"
+    name = source_name.strip()[:255] or "remote/openapi-document"
+    return ImportSourceIdentity(
+        kind=ImportSourceKind.URL,
+        key=f"url:{hashlib.sha256(canonical.encode()).hexdigest()}",
+        name=name,
+        url=_sanitized_url(source_page_url),
+        document_url=_sanitized_url(resolved_url),
+    )
+
+
+def _canonical_url(url: str) -> str:
+    parsed = urlsplit(url)
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port is not None and parsed.port != default_port else ""
+    path = parsed.path or "/"
+    return urlunsplit((scheme, f"{hostname}{port}", path, parsed.query, ""))
+
+
+def _sanitized_url(url: str) -> str:
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").lower()
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    return urlunsplit((parsed.scheme.lower(), f"{hostname}{port}", parsed.path, "", ""))[:2048]
+
+
+def _validate_server_url(url: str) -> None:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise AppError(
+            code="IMPORT_SERVER_INVALID",
+            message="OpenAPI Server 必须是无凭据的 HTTP/HTTPS 地址",
+            status_code=422,
+        )
 
 
 def _preview_associated_data(run_id: UUID) -> bytes:

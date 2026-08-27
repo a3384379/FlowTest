@@ -7,8 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.capabilities import RunnerType
+from app.domain.governance import QuotaDimension
 from app.domain.runner_fabric import (
     RunnerEventKind,
     RunnerProfile,
@@ -29,6 +31,8 @@ from app.models.runner_fabric import (
 from app.repositories.runner_fabric import RunnerFabricRepository
 from app.runner.results import RunnerExecutionResult
 from app.schemas.runner_fabric import (
+    RunnerCheckpointRequest,
+    RunnerCheckpointResume,
     RunnerFailRequest,
     RunnerHeartbeatRequest,
     RunnerLeaseAckResponse,
@@ -41,6 +45,11 @@ from app.schemas.runner_fabric import (
     RunnerRegisterResponse,
 )
 from app.services.audit import AuditService
+from app.services.durable_execution import (
+    DurableExecutionService,
+    checkpoint_to_runner_resume,
+)
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
@@ -59,13 +68,25 @@ class RunnerFabricService:
 
     async def create_pool(self, *, actor: User, payload: RunnerPoolCreate) -> RunnerPool:
         self._require_admin(actor)
+        await OrganizationQuotaService(self._session).validate_runner_pool(
+            organization_id=_organization_id(),
+            runner_type=payload.runner_type,
+            runtime=payload.runtime,
+        )
         normalized_name = payload.name.strip()
-        if await self._repository.find_pool_by_name(normalized_name) is not None:
+        if (
+            await self._repository.find_pool_by_name(
+                normalized_name,
+                organization_id=_organization_id(),
+            )
+            is not None
+        ):
             raise AppError(
                 code="RUNNER_POOL_EXISTS", message="Runner Pool 名称已存在", status_code=409
             )
         profile = self._pool_profile(payload)
         pool = RunnerPool(
+            organization_id=_organization_id(),
             name=normalized_name,
             runner_type=profile.runner_type.value,
             runtime=profile.runtime.value,
@@ -132,24 +153,24 @@ class RunnerFabricService:
 
     async def list_pools(self, *, actor: User) -> list[tuple[RunnerPool, list[Runner]]]:
         self._require_admin(actor)
-        pools = await self._repository.list_pools()
+        pools = await self._repository.list_pools(organization_id=_organization_id())
         return [(pool, await self._repository.list_runners(pool.id)) for pool in pools]
 
     async def overview(self, *, actor: User) -> dict[str, int]:
         self._require_admin(actor)
-        return await self._repository.counts()
+        return await self._repository.counts(organization_id=_organization_id())
 
     async def list_tasks(self, *, actor: User, limit: int) -> list[RunnerTask]:
         self._require_admin(actor)
-        return await self._repository.list_tasks(limit=limit)
+        return await self._repository.list_tasks(limit=limit, organization_id=_organization_id())
 
     async def list_leases(self, *, actor: User, limit: int) -> list[RunnerLeaseRecord]:
         self._require_admin(actor)
-        return await self._repository.list_leases(limit=limit)
+        return await self._repository.list_leases(limit=limit, organization_id=_organization_id())
 
     async def list_events(self, *, actor: User, limit: int) -> list[RunnerEvent]:
         self._require_admin(actor)
-        return await self._repository.list_events(limit=limit)
+        return await self._repository.list_events(limit=limit, organization_id=_organization_id())
 
     async def create_registration_token(
         self, *, actor: User, pool_id: UUID, expires_in_seconds: int
@@ -328,13 +349,19 @@ class RunnerFabricService:
             await self._session.commit()
             return None
         candidates = await self._repository.claim_candidates(
-            runner_type=pool.runner_type, available_at=now
+            runner_type=pool.runner_type,
+            available_at=now,
+            organization_id=pool.organization_id,
         )
         task = await self._select_candidate(candidates, runner, pool)
         if task is None:
             runner.last_seen_at = now
             await self._session.commit()
             return None
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=pool.organization_id,
+            dimension=QuotaDimension.RUNNER_CONCURRENCY,
+        )
         plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
         policy = await ProjectService(self._session).load_runtime_security_policy(task.project_id)
         lease = self._acquire(task=task, runner=runner, pool=pool, now=now)
@@ -351,6 +378,10 @@ class RunnerFabricService:
             details={"fencing_token": lease.fencing_token, "attempt": task.attempts},
         )
         encoded = encode_execution_plan(plan)
+        resume_checkpoints = await self._resume_checkpoints(plan)
+        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
+            task.execution_id
+        )
         await self._session.commit()
         return RunnerLeaseResponse(
             lease_id=lease.id,
@@ -364,8 +395,11 @@ class RunnerFabricService:
                 fencing_token=lease.fencing_token,
                 plan=encoded,
                 plan_sha256=hashlib.sha256(encoded.encode()).hexdigest(),
+                outbound_policy_enabled=policy.enabled,
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
+                resume_checkpoints=resume_checkpoints,
+                reset_retry_budget=reset_retry_budget,
             ),
         )
 
@@ -402,6 +436,46 @@ class RunnerFabricService:
             )
         await self._session.commit()
         return acknowledgment
+
+    async def checkpoint(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        payload: RunnerCheckpointRequest,
+    ) -> RunnerLeaseAckResponse:
+        runner, lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=payload.fencing_token,
+            now=datetime.now(UTC),
+        )
+        plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
+        allowed_execution_ids = (
+            {child.execution_id for child in plan.children}
+            if isinstance(plan, WorkflowBatchPlan)
+            else {plan.execution_id}
+        )
+        if payload.execution_id not in allowed_execution_ids:
+            raise AppError(
+                code="RUNNER_CHECKPOINT_EXECUTION_MISMATCH",
+                message="Checkpoint 不属于当前 Runner 执行",
+                status_code=409,
+            )
+        await DurableExecutionService(self._session).record_checkpoint(
+            project_id=task.project_id,
+            lease_id=lease.id,
+            runner_id=runner.id,
+            actor_user_id=None,
+            payload=payload,
+        )
+        runner.last_seen_at = datetime.now(UTC)
+        await self._session.commit()
+        return RunnerLeaseAckResponse(
+            task_status=task.status,
+            expires_at=lease.expires_at,
+            cancel_requested=await self._cancel_requested(task.execution_id),
+        )
 
     async def complete(
         self,
@@ -441,6 +515,10 @@ class RunnerFabricService:
             details={"fencing_token": fencing_token},
         )
         await self._session.commit()
+        await DurableExecutionService(self._session).mark_execution_command_completed(
+            task.execution_id,
+            execution_status=task.status,
+        )
         return RunnerLeaseAckResponse(task_status=task.status)
 
     async def fail(
@@ -516,6 +594,49 @@ class RunnerFabricService:
         expired = await self._reconcile_expired(now)
         offline = await self._reconcile_offline(now)
         return expired + offline
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool = False) -> RunnerTask:
+        """Requeue an existing durable task without creating a second Runner lease."""
+        self._require_enabled()
+        task = await self._repository.get_task_by_execution(plan.execution_id, lock=True)
+        if task is None:
+            return await self.enqueue(plan)
+        execution = await self._repository.get_execution(plan.execution_id, lock=True)
+        if execution is None:
+            raise AppError(
+                code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
+            )
+        if execution.status == "passed":
+            raise AppError(
+                code="EXECUTION_NOT_RECOVERABLE",
+                message="已成功完成的执行不能 Retry",
+                status_code=409,
+            )
+        if task.status == "leased":
+            raise AppError(
+                code="EXECUTION_ALREADY_ACTIVE",
+                message="执行仍持有活动 Lease",
+                status_code=409,
+            )
+        if not retry and task.attempts >= task.max_attempts:
+            raise AppError(
+                code="RUNNER_RETRY_EXHAUSTED",
+                message="Runner 重试次数已耗尽, 请使用 Retry Command 重置尝试次数",
+                status_code=409,
+            )
+        now = datetime.now(UTC)
+        task.status = "queued"
+        task.available_at = now
+        task.selected_runner_id = None
+        task.error_code = None
+        task.error_message = None
+        task.completed_at = None
+        if retry:
+            task.attempts = 0
+        await self._repository.set_execution_family_status(plan.execution_id, "queued")
+        await self._session.commit()
+        await self._session.refresh(task)
+        return task
 
     async def _reconcile_offline(self, now: datetime) -> int:
         count = 0
@@ -725,6 +846,20 @@ class RunnerFabricService:
         execution = await self._repository.get_execution(execution_id)
         return execution is not None and execution.cancel_requested_at is not None
 
+    async def _resume_checkpoints(
+        self, plan: WorkflowExecutionPlan
+    ) -> dict[str, list[RunnerCheckpointResume]]:
+        execution_ids = (
+            [child.execution_id for child in plan.children]
+            if isinstance(plan, WorkflowBatchPlan)
+            else [plan.execution_id]
+        )
+        checkpoints = await DurableExecutionService(self._session).checkpoint_history(execution_ids)
+        return {
+            str(execution_id): [checkpoint_to_runner_resume(item) for item in items]
+            for execution_id, items in checkpoints.items()
+        }
+
     async def _authenticate_runner(self, raw_token: str) -> Runner:
         self._require_enabled()
         _require_token_prefix(raw_token, RUNNER_TOKEN_PREFIX)
@@ -760,12 +895,22 @@ class RunnerFabricService:
             raise AppError(
                 code="RUNNER_POOL_NOT_FOUND", message="Runner Pool 不存在", status_code=404
             )
+        context = get_tenant_context()
+        if (
+            context is not None
+            and pool.organization_id is not None
+            and pool.organization_id != context.organization_id
+        ):
+            raise AppError(
+                code="RUNNER_POOL_NOT_FOUND", message="Runner Pool 不存在", status_code=404
+            )
         return pool
 
     async def _require_runner(self, runner_id: UUID, *, lock: bool = False) -> Runner:
         runner = await self._repository.get_runner(runner_id, lock=lock)
         if runner is None:
             raise AppError(code="RUNNER_NOT_FOUND", message="Runner 不存在", status_code=404)
+        await self._require_pool(runner.pool_id)
         return runner
 
     async def _require_task(self, task_id: UUID, *, lock: bool = False) -> RunnerTask:
@@ -894,6 +1039,11 @@ def _plan_runner_type(plan: WorkflowExecutionPlan) -> RunnerType:
             )
             types.append(manifest.runner_type if manifest is not None else RunnerType.PLUGIN)
     return select_runner_type(types)
+
+
+def _organization_id() -> UUID | None:
+    context = get_tenant_context()
+    return context.organization_id if context is not None else None
 
 
 def _new_token(prefix: str) -> str:

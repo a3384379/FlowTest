@@ -5,6 +5,7 @@ from starlette.requests import Request
 from app.core.config import Settings, settings
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.network import OutboundNetworkPolicy, OutboundPolicyError, validate_outbound_url
+from app.domain.runtime_profiles import RuntimeProfile
 from app.middleware import rate_limit as rate_limit_middleware
 from app.services.rate_limit import RedisRateLimiter
 
@@ -36,6 +37,44 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
     )
     assert configured.secure_cookies
 
+    with pytest.raises(ValidationError, match="生产环境"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            secret_key="production-signing-key-with-more-than-32-bytes",
+            bootstrap_admin_password="admin",
+            data_encryption_key="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+            s3_secret_key="production-object-storage-secret",
+            secure_cookies=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "https://user:password@example.com",
+        "https://example.com/api",
+        "https://example.com?token=value",
+        "https://example.com:invalid",
+        "https://example.com:",
+        " https://example.com",
+        "file:///tmp/flowtest",
+    ],
+)
+def test_credentialed_cors_requires_an_explicit_http_origin(origin: str) -> None:
+    with pytest.raises(ValidationError, match="CORS 来源"):
+        Settings(_env_file=None, cors_origins=[origin])
+
+    configured = Settings(
+        _env_file=None,
+        cors_origins=["https://flowtest.example.com", "http://localhost:5173"],
+    )
+    assert configured.cors_origins == [
+        "https://flowtest.example.com",
+        "http://localhost:5173",
+    ]
+
 
 def test_retention_default_does_not_exceed_system_limit() -> None:
     with pytest.raises(ValidationError, match="默认保留天数"):
@@ -59,6 +98,25 @@ def test_environment_lab_requires_exact_digest_allowlist() -> None:
         environment_image_allowlist=[image],
     )
     assert configured.environment_image_allowlist == [image]
+
+
+def test_compact_runtime_profile_rejects_missing_worker_runtimes() -> None:
+    configured = Settings(_env_file=None, runtime_profile="compact")
+    assert configured.runtime_profile is RuntimeProfile.COMPACT
+
+    with pytest.raises(ValidationError, match=r"compact.*performance_lab"):
+        Settings(
+            _env_file=None,
+            runtime_profile="compact",
+            feature_performance_lab_enabled=True,
+        )
+    with pytest.raises(ValidationError, match=r"compact.*environment_lab"):
+        Settings(
+            _env_file=None,
+            runtime_profile="compact",
+            feature_environment_lab_enabled=True,
+            environment_image_allowlist=[f"registry.example/fixture@sha256:{'a' * 64}"],
+        )
 
 
 def test_public_mock_dispatch_is_rate_limited_for_every_http_method() -> None:
@@ -167,6 +225,18 @@ async def test_outbound_policy_rejects_credentials_and_mixed_dns_answers() -> No
             OutboundNetworkPolicy(),
             resolver=mixed,
         )
+
+
+@pytest.mark.asyncio
+async def test_disabled_outbound_policy_allows_localhost_and_preserves_peer_resolution() -> None:
+    async def localhost(_host: str, _port: int) -> tuple[str, ...]:
+        return ("127.0.0.1", "::1")
+
+    assert await validate_outbound_url(
+        "http://localhost:8080/openapi.json",
+        OutboundNetworkPolicy(enabled=False),
+        resolver=localhost,
+    ) == ("127.0.0.1", "::1")
 
 
 class FakeRateClient:

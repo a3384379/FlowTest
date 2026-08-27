@@ -146,6 +146,39 @@ S22 的架构决策见 [`ADR 0018`](adr/0018-capability-sdk-and-runner-boundary.
 S12 的两周试点属于真实时间观察，不以短时自动化代替。记录和签署规则见
 [`docs/operations/soak-observation.md`](operations/soak-observation.md)。
 
+## V4.0 迭代路线
+
+V4 将“容易进入公司环境”提升为产品主线。Compact 继续在同一份 PostgreSQL Schema、Redis 协议和
+Artifact 格式上收缩 Docker 拓扑；S37 另增显式 Standalone 运行档位，复用领域服务但以 SQLite、本地
+附件和进程内队列适配没有虚拟化能力的 Windows 云桌面。Full 继续承担完整发布门槛，Compact 优先服务
+部门试用和功能回归，Standalone 只承担低并发功能验证。
+
+| 迭代 | 主要交付 | 状态 |
+|---|---|---|
+| S32 | Full/Compact 运行档位、6 容器 Compose、合并 Worker/Beat、密钥生成、备份恢复与小型化验收 | 本地与 PR #38 远程验收完成 |
+| S33 | 私有仓库镜像摘要、离线安装包、安装前检查和无外网升级 | ARM64 本地与 amd64 远程离线安装/升级验收完成 |
+| S34 | 负载资源基线、公司试点、长时运行和 Full↔Compact 升级兼容验收 | 容量/探针/双向兼容自动化完成；72 小时公司试点待执行 |
+| S35 | 隐私安全诊断包、故障交接和真实回滚证明 | ARM64 本地与 amd64 远程回滚验收完成 |
+| S36 | 事务式离线升级、自动回滚、升级证据和活动目录激活 | ARM64 本地与 amd64 远程失败/成功升级验收完成 |
+| S37 | Windows 云桌面 Standalone：SQLite、本地附件、进程内任务、PowerShell 离线包 | 核心代码、安装前检查、离线包、启动/验收、长时探针、迁移工具和公司试点模板已完成；PR #39 七项远程 CI 全绿，待 Windows x64 实机验收与真实迁移演练 |
+
+S32～S34 的运行档位、离线供应链与兼容基线分别见
+[`ADR 0026`](adr/0026-explicit-runtime-profiles-and-compact-deployment.md)、
+[`ADR 0027`](adr/0027-immutable-images-and-offline-distribution.md) 和
+[`ADR 0028`](adr/0028-profile-compatibility-and-compact-quality-baseline.md)。S35 的诊断字段白名单与
+回滚证据边界见 [`ADR 0029`](adr/0029-privacy-safe-support-and-rollback-evidence.md)。
+S36 的离线升级状态机与目录激活边界见
+[`ADR 0030`](adr/0030-transactional-offline-upgrade-and-activation.md)。
+S37 的无 Docker 单进程边界见 [`ADR 0031`](adr/0031-standalone-no-docker-runtime.md)。
+其自动化通过不等于 V4 发布，也不豁免 V2/V3 已有的真实试点和 RC 门槛。
+
+## V5.0 设计草案
+
+V5 以 V4 的三档运行边界为稳定底座，优先推进组织/租户隔离、可恢复 Command、HA 控制面、密钥轮换
+和插件生态；不把 Docker、Kubernetes 或云托管服务设为 Standalone 的硬前提。阶段、退出条件和兼容
+护栏见 [`docs/development-plan-v5.md`](development-plan-v5.md) 与
+[`ADR 0032`](adr/0032-v5-evolution-guardrails.md)。该草案不改变 V4 的真实试点、迁移和人工签署门槛。
+
 ## S26 完成清单
 
 1. Environment Template 只由系统管理员注册、创建不可变版本和停用；版本保存规范 JSON、SHA-256 与

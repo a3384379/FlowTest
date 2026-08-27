@@ -27,3 +27,10 @@
 23. Pact 契约仓、Service Graph 与发布证据
 24. 多源变更影响与确定性测试选择
 25. PostgreSQL Lease/Fencing 与隔离 Runner 执行面
+26. 显式 Full/Compact 运行档位与小型化部署边界
+27. 镜像唯一来源、私有仓库摘要与离线分发
+28. Full/Compact 数据兼容契约与 Compact 质量基线
+29. Compact 隐私安全诊断与可恢复回滚证据
+30. Compact 事务式离线升级、自动回滚与目录激活
+31. Windows 云桌面 Standalone 无 Docker 运行时
+32. V5 运行档位演进与兼容护栏（提案）

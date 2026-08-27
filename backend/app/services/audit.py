@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.context import get_trace_id
+from app.core.context import get_tenant_context, get_trace_id
 from app.core.logging import redact
 from app.models.access import AuditLog
 
@@ -17,6 +17,7 @@ class AuditService:
         self,
         *,
         actor_user_id: UUID | None,
+        organization_id: UUID | None = None,
         project_id: UUID | None,
         action: str,
         resource_type: str,
@@ -26,6 +27,7 @@ class AuditService:
         self._session.add(
             AuditLog(
                 actor_user_id=actor_user_id,
+                organization_id=organization_id or _context_organization_id(),
                 project_id=project_id,
                 action=action,
                 resource_type=resource_type,
@@ -37,3 +39,8 @@ class AuditService:
                 created_at=datetime.now(UTC),
             )
         )
+
+
+def _context_organization_id() -> UUID | None:
+    context = get_tenant_context()
+    return context.organization_id if context is not None else None

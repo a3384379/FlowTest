@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.ai import REDACTED, AIInputError, sanitize_ai_input
+from app.domain.governance import QuotaDimension
 from app.engine.contracts import AssertNodeConfig, NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
@@ -32,6 +33,7 @@ from app.schemas.ai_change_sets import (
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.services.ai import AIJobDispatcher
 from app.services.audit import AuditService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.test_assets import TestCaseService
 from app.services.workflows import WorkflowService
@@ -70,7 +72,13 @@ class AIChangeSetService:
         dispatcher: AIJobDispatcher,
     ) -> AIChangeSet:
         _require_enabled()
-        await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        access = await self._projects.authorize(
+            actor=actor, project_id=payload.project_id, editing=True
+        )
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=access.project.organization_id,
+            dimension=QuotaDimension.AI_REQUEST_COUNT,
+        )
         impact = await self._impacts.get_run_bundle(payload.impact_run_id)
         risk = await self._repository.get_risk(payload.release_risk_id)
         if impact is None or impact.run.project_id != payload.project_id:
@@ -111,6 +119,10 @@ class AIChangeSetService:
             status="generating",
             source_snapshot=sanitized.payload,
             source_fingerprint=sanitized.sha256,
+            source_type="ai",
+            source_ref=f"ai-job://{job.id}",
+            actor_type="user",
+            actor_id=actor.id,
             created_by_id=actor.id,
         )
         self._repository.add_change_set(change_set)
@@ -176,6 +188,10 @@ class AIChangeSetService:
         _require_enabled()
         change_set = await self._repository.get_change_set_for_update(change_set_id)
         if change_set is None:
+            raise AppError(
+                code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
+            )
+        if change_set.source_type != "ai":
             raise AppError(
                 code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
             )
@@ -394,7 +410,7 @@ class AIChangeSetService:
 
     async def _get_change_set(self, change_set_id: UUID) -> AIChangeSet:
         change_set = await self._repository.get_change_set(change_set_id)
-        if change_set is None:
+        if change_set is None or change_set.source_type != "ai":
             raise AppError(
                 code="AI_CHANGE_SET_NOT_FOUND", message="AI 变更集不存在", status_code=404
             )

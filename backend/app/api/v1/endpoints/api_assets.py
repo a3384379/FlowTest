@@ -7,6 +7,7 @@ from app.domain.api_assets import (
     APIAssertionSpec,
     APIVersionSpec,
     ExtractionRuleSpec,
+    HttpMethod,
     QueryParameterSpec,
 )
 from app.schemas.api_assets import (
@@ -110,6 +111,8 @@ async def update_environment(
         environment_id=environment_id,
         name=payload.name,
         base_url=str(payload.base_url) if payload.base_url is not None else None,
+        default_service_id=payload.default_service_id,
+        change_default_service="default_service_id" in payload.model_fields_set,
         variables=payload.variables,
         headers=payload.headers,
     )
@@ -150,12 +153,16 @@ async def list_api_definitions(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=200),
+    method: HttpMethod | None = None,
 ) -> Page[APIDefinitionResponse]:
     definitions, total = await APIAssetService(session).list_definitions(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        search=search,
+        method=method.value if method is not None else None,
     )
     return Page(
         items=[APIDefinitionResponse.model_validate(item) for item in definitions],
@@ -180,6 +187,7 @@ async def create_api_definition(
         actor=current_user,
         project_id=project_id,
         folder_id=payload.folder_id,
+        service_id=payload.service_id,
         name=payload.name,
         description=payload.description,
         request=_version_spec(payload.request),
@@ -226,6 +234,8 @@ async def update_api_definition(
         description=payload.description,
         folder_id=payload.folder_id,
         change_folder="folder_id" in payload.model_fields_set,
+        service_id=payload.service_id,
+        change_service="service_id" in payload.model_fields_set,
     )
     return APIDefinitionResponse.model_validate(definition)
 
@@ -283,6 +293,18 @@ async def preview_api_request(
         runtime_headers=payload.runtime_headers,
         body_override=payload.body_override,
         use_body_override=payload.use_body_override,
+        query_parameters_override=(
+            tuple(
+                QueryParameterSpec(name=item.name, value=item.value, enabled=item.enabled)
+                for item in payload.query_parameters_override
+            )
+            if payload.query_parameters_override is not None
+            else None
+        ),
+        headers_override=payload.headers_override,
+        service_override=payload.service_override,
+        endpoint_variant=payload.endpoint_variant,
+        version_number=payload.version,
     )
     return PreviewResponse(
         method=preview.method,
@@ -292,6 +314,7 @@ async def preview_api_request(
         variables=[
             ResolvedVariableResponse.model_validate(variable) for variable in preview.variables
         ],
+        target=preview.target_snapshot,
     )
 
 
@@ -304,6 +327,7 @@ def _version_spec(payload: APIVersionInput) -> APIVersionSpec:
             for item in payload.query_parameters
         ),
         headers=payload.headers,
+        variables=payload.variables,
         body_kind=payload.body_kind,
         body=payload.body,
         auth_kind=payload.auth.kind,

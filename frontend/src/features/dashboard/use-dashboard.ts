@@ -8,7 +8,7 @@ import { getReleaseRisk, listFlakyTests, listReleaseRisks } from '../quality/qua
 import { getDashboardSummary, listRecentExecutions } from './dashboard-service'
 
 export function useDashboard() {
-  const { projectId, currentProject } = useProjectContext()
+  const { projects, projectId, currentProject } = useProjectContext()
   const summary = useQuery({
     queryKey: ['dashboard-summary', projectId],
     queryFn: () => getDashboardSummary(projectId),
@@ -18,7 +18,7 @@ export function useDashboard() {
     queryFn: () => listRecentExecutions(projectId),
   })
   const evidence = useDashboardEvidence(projectId)
-  return { projectId, currentProject, summary, recent, ...evidence }
+  return { projects, projectId, currentProject, summary, recent, ...evidence }
 }
 
 function useDashboardEvidence(projectId: string | null) {

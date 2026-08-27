@@ -3,6 +3,8 @@ import json
 import re
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
+from datetime import UTC, datetime
+from time import perf_counter
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
@@ -12,12 +14,14 @@ from pydantic import JsonValue
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.core.logging import redact
 from app.domain.api_assets import BodyKind
 from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
+    ApiNodeConfig,
     FieldMapping,
     ForEachNodeConfig,
     MappingTargetLocation,
@@ -49,6 +53,12 @@ from app.engine.protocol_nodes import (
     PreparedProtocolNode,
     resolve_protocol_config,
 )
+from app.engine.results import (
+    HttpRequestSnapshot,
+    HttpResponseSnapshot,
+    NodeInputMapping,
+    NodeObservation,
+)
 from app.engine.scheduler import (
     ExecutionContext,
     NodeExecutionError,
@@ -64,6 +74,8 @@ from app.services.data_nodes import (
 from app.services.event_runtime import EventProtocolRunner
 from app.services.executions import (
     PreparedMultipart,
+    _redact_request_url,
+    _redact_response_headers,
     _response_body,
     _send_request,
 )
@@ -76,6 +88,7 @@ _DATA_VARIABLE = re.compile(r"^\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\}\}$")
 @dataclass(frozen=True, slots=True)
 class PreparedWorkflowRequest:
     request: PreparedRequest
+    redacted_request: PreparedRequest
     body_kind: BodyKind
     multipart: PreparedMultipart | None
 
@@ -248,18 +261,45 @@ class WorkflowNodeExecutor:
         return prepared
 
     async def _execute_api(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+        config = parse_node_config(node)
+        if not isinstance(config, ApiNodeConfig):
+            raise NodeExecutionError(
+                code="INVALID_API_CONFIG", message=f"节点 {node.name} 的 API 配置无效"
+            )
         prepared = self._requests[node.id]
         try:
+            resolved_mappings = resolve_field_mappings(
+                self._mappings.get(node.id, ()),
+                context,
+            )
             request, mapping_trace = _apply_mappings(
                 prepared.request,
-                resolve_field_mappings(self._mappings.get(node.id, ()), context),
+                resolved_mappings,
                 context,
+            )
+            redacted_request = _apply_redacted_mappings(
+                prepared.redacted_request,
+                resolved_mappings,
             )
         except MappingResolutionError as error:
             raise NodeExecutionError(code=error.code, message=error.message) from error
+        attempt = len(context.observations_of(node.id)) + 1
+        started_at = datetime.now(UTC)
+        started = perf_counter()
         try:
             await self._outbound_guard.enforce(request.url, self._network_policy)
         except AppError as error:
+            _record_http_observation(
+                context,
+                node_id=node.id,
+                attempt=attempt,
+                request=redacted_request,
+                mappings=mapping_trace,
+                started_at=started_at,
+                started=started,
+                error_code=error.code,
+                error_message=error.message,
+            )
             raise NodeExecutionError(code=error.code, message=error.message) from error
         try:
             response = await _send_request(
@@ -270,20 +310,66 @@ class WorkflowNodeExecutor:
                 multipart=prepared.multipart,
             )
         except httpx.TimeoutException as error:
+            _record_http_observation(
+                context,
+                node_id=node.id,
+                attempt=attempt,
+                request=redacted_request,
+                mappings=mapping_trace,
+                started_at=started_at,
+                started=started,
+                error_code="NETWORK_TIMEOUT",
+                error_message="目标接口请求超时",
+            )
             raise NodeExecutionError(
                 code="NETWORK_TIMEOUT",
                 message="目标接口请求超时",
                 category=RetryCategory.NETWORK_ERROR,
             ) from error
         except httpx.HTTPError as error:
+            _record_http_observation(
+                context,
+                node_id=node.id,
+                attempt=attempt,
+                request=redacted_request,
+                mappings=mapping_trace,
+                started_at=started_at,
+                started=started,
+                error_code="NETWORK_ERROR",
+                error_message="无法连接目标接口",
+            )
             raise NodeExecutionError(
                 code="NETWORK_ERROR",
                 message="无法连接目标接口",
                 category=RetryCategory.NETWORK_ERROR,
             ) from error
 
+        duration_ms = (perf_counter() - started) * 1000
+        _record_http_observation(
+            context,
+            node_id=node.id,
+            attempt=attempt,
+            request=redacted_request,
+            mappings=mapping_trace,
+            started_at=started_at,
+            started=started,
+            response=response,
+        )
         output = _response_output(response)
-        output["input_mappings"] = cast(JsonValue, mapping_trace)
+        output["duration_ms"] = duration_ms
+        output["input_mappings"] = cast(
+            JsonValue,
+            [item.model_dump(mode="json") for item in mapping_trace],
+        )
+        if config.expected_statuses is not None:
+            if response.status_code in config.expected_statuses:
+                return output
+            raise NodeExecutionError(
+                code="HTTP_UNEXPECTED_STATUS",
+                message=f"目标接口返回未预期状态 {response.status_code}",
+                category=(RetryCategory.SERVER_ERROR if response.status_code >= 500 else None),
+                output=output,
+            )
         if response.status_code >= 500:
             raise NodeExecutionError(
                 code="HTTP_5XX",
@@ -559,20 +645,12 @@ def _apply_mappings(
     request: PreparedRequest,
     mappings: tuple[ResolvedFieldMapping, ...],
     context: ExecutionContext,
-) -> tuple[PreparedRequest, list[dict[str, str]]]:
+) -> tuple[PreparedRequest, list[NodeInputMapping]]:
     changed = request
-    trace: list[dict[str, str]] = []
+    trace: list[NodeInputMapping] = []
     for mapping in mappings:
-        if mapping.location is MappingTargetLocation.QUERY:
-            changed = replace(changed, url=_set_query(changed.url, mapping.key, mapping.value))
-        elif mapping.location is MappingTargetLocation.HEADER:
-            changed = replace(
-                changed,
-                headers=_set_header(changed.headers, mapping.key, mapping.value),
-            )
-        elif mapping.location is MappingTargetLocation.BODY:
-            changed = replace(changed, body=_set_body(changed.body, mapping.key, mapping.value))
-        else:
+        changed = _apply_request_mapping(changed, mapping)
+        if mapping.location is MappingTargetLocation.VARIABLE:
             context.record_variable(
                 mapping.key,
                 mapping.value,
@@ -580,14 +658,103 @@ def _apply_mappings(
                 path=mapping.source_path,
             )
         trace.append(
-            {
-                "source_node_id": mapping.source_node_id,
-                "source_path": mapping.source_path,
-                "target_location": mapping.location.value,
-                "target_key": mapping.key,
-            }
+            NodeInputMapping(
+                source_node_id=mapping.source_node_id,
+                source_path=mapping.source_path,
+                target_location=mapping.location.value,
+                target_key=mapping.key,
+                value=_redacted_mapping_value(mapping),
+            )
         )
     return changed, trace
+
+
+def _apply_redacted_mappings(
+    request: PreparedRequest,
+    mappings: tuple[ResolvedFieldMapping, ...],
+) -> PreparedRequest:
+    changed = request
+    for mapping in mappings:
+        safe_mapping = replace(mapping, value=_redacted_mapping_value(mapping))
+        changed = _apply_request_mapping(changed, safe_mapping)
+    return changed
+
+
+def _apply_request_mapping(
+    request: PreparedRequest,
+    mapping: ResolvedFieldMapping,
+) -> PreparedRequest:
+    if mapping.location is MappingTargetLocation.QUERY:
+        return replace(request, url=_set_query(request.url, mapping.key, mapping.value))
+    if mapping.location is MappingTargetLocation.HEADER:
+        return replace(
+            request,
+            headers=_set_header(request.headers, mapping.key, mapping.value),
+        )
+    if mapping.location is MappingTargetLocation.BODY:
+        return replace(request, body=_set_body(request.body, mapping.key, mapping.value))
+    return request
+
+
+def _redacted_mapping_value(mapping: ResolvedFieldMapping) -> JsonValue:
+    safe = redact({mapping.key: mapping.value})
+    return cast(JsonValue, safe[mapping.key])
+
+
+def _record_http_observation(
+    context: ExecutionContext,
+    *,
+    node_id: str,
+    attempt: int,
+    request: PreparedRequest,
+    mappings: list[NodeInputMapping],
+    started_at: datetime,
+    started: float,
+    response: httpx.Response | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    context.record_observation(
+        node_id,
+        NodeObservation(
+            attempt=attempt,
+            request=_http_request_snapshot(request),
+            response=_http_response_snapshot(response) if response is not None else None,
+            mappings=tuple(mappings),
+            duration_ms=(perf_counter() - started) * 1000,
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            error_code=error_code,
+            error_message=error_message,
+        ),
+    )
+
+
+def _http_request_snapshot(request: PreparedRequest) -> HttpRequestSnapshot:
+    service_key = request.target_snapshot.get("service_key")
+    endpoint_variant = request.target_snapshot.get("endpoint_variant")
+    return HttpRequestSnapshot(
+        method=request.method.value,
+        url=_redact_request_url(request.url),
+        headers=cast(
+            dict[str, str],
+            redact({item.name: item.value for item in request.headers}),
+        ),
+        body=cast(JsonValue, redact(request.body)),
+        service_key=service_key if isinstance(service_key, str) else None,
+        endpoint_variant=endpoint_variant if isinstance(endpoint_variant, str) else None,
+    )
+
+
+def _http_response_snapshot(response: httpx.Response) -> HttpResponseSnapshot:
+    size_bytes = len(response.content)
+    body = _response_body(response) if size_bytes <= settings.inline_body_limit_bytes else None
+    return HttpResponseSnapshot(
+        status_code=response.status_code,
+        headers=_redact_response_headers(dict(response.headers)),
+        body=cast(JsonValue, redact(body)),
+        size_bytes=size_bytes,
+    )
 
 
 def _set_query(url: str, key: str, value: JsonValue) -> str:

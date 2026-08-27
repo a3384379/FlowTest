@@ -17,14 +17,17 @@ from app.core.config import settings
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.api_assets import BodyKind
 from app.domain.data_nodes import (
     CredentialKind,
     DataNodeValidationError,
     validate_read_only_sql,
     validate_redis_read,
 )
+from app.domain.durable_execution import is_resumable_checkpoint
 from app.domain.event_protocols import EventSourceKind
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
+from app.domain.governance import QuotaDimension
 from app.domain.protocols import (
     GrpcCallType,
     ProtocolKind,
@@ -35,6 +38,7 @@ from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
     ApiNodeConfig,
+    ApiNodeMultipartBody,
     AssertNodeConfig,
     ConditionNodeConfig,
     DatasetNodeConfig,
@@ -66,6 +70,7 @@ from app.engine.protocol_nodes import (
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    NodeRunRecord,
     NodeStatusCallback,
     WorkflowRunResult,
     WorkflowScheduler,
@@ -91,7 +96,9 @@ from app.runner.results import (
 from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
+from app.services.durable_execution import DurableExecutionService, checkpoint_to_node_record
 from app.services.event_sources import EventSourceService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import WorkflowNodeExecutor
@@ -269,6 +276,7 @@ class WorkflowService:
         workflow = await self._get_workflow_for_update(project_id, workflow_id)
         definition = self._load_definition(workflow.draft_definition)
         await self._validate_publishable(project_id, workflow.id, definition)
+        definition = await self._pin_api_versions(definition)
         next_version = (workflow.current_version or 0) + 1
         serialized = definition.model_dump(mode="json", exclude_none=True)
         published = WorkflowVersion(
@@ -293,6 +301,23 @@ class WorkflowService:
         await self._session.commit()
         await self._session.refresh(published)
         return published
+
+    async def _pin_api_versions(self, definition: WorkflowDefinition) -> WorkflowDefinition:
+        nodes: list[WorkflowNode] = []
+        for node in definition.nodes:
+            if node.effective_type is not NodeType.API:
+                nodes.append(node)
+                continue
+            config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
+            if not isinstance(config, ApiNodeConfig) or config.api_version is not None:
+                nodes.append(node)
+                continue
+            api_definition = await self._api_repository.get_definition(config.api_definition_id)
+            if api_definition is None:
+                nodes.append(node)
+                continue
+            nodes.append(_with_api_version(node, api_definition.current_version))
+        return definition.model_copy(update={"nodes": nodes})
 
     async def list_versions(
         self, *, actor: User, project_id: UUID, workflow_id: UUID
@@ -522,6 +547,10 @@ class WorkflowService:
                 status_code=429,
                 details={"limit": project.execution_concurrency_limit},
             )
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=project.organization_id,
+            dimension=QuotaDimension.EXECUTION_CONCURRENCY,
+        )
 
     async def load_execution_plan(self, execution_id: UUID) -> WorkflowExecutionPlan:
         from app.services.workflow_plan_codec import decode_execution_plan
@@ -567,6 +596,31 @@ class WorkflowService:
         if execution.cancel_requested_at is not None:
             token.cancel()
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
+        from app.repositories.durable_execution import DurableExecutionRepository
+
+        checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
+            execution.id
+        )
+        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
+            execution.id
+        )
+        checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
+        resume_attempts = {
+            node_id: max(item.attempt for item in checkpoint_history if item.node_id == node_id)
+            for node_id in {item.node_id for item in checkpoint_history}
+        }
+        context = ExecutionContext(
+            workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
+            dataset_variables=plan.prepared.dataset_variables,
+            runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+        )
+        for checkpoint in checkpoints:
+            context.restore_checkpoint(
+                node_id=checkpoint.node_id,
+                output=cast(JsonValue, checkpoint.output),
+                extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
+            )
+        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoints)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
                 client,
@@ -594,10 +648,16 @@ class WorkflowService:
                         dataset_variables=plan.prepared.dataset_variables,
                         runtime_variables=plan.runtime_variables,
                         on_node_status=on_node_status,
+                        context=context,
+                        resume_records=resume_records,
+                        resume_attempts=resume_attempts,
+                        reset_retry_budget=reset_retry_budget,
                     )
             finally:
                 await node_executor.close()
-        nodes = self._stage_run_result(execution=execution, plan=plan, result=result)
+        nodes = self._node_models(execution.id, result)
+        await self._workflows.replace_node_executions(execution.id, nodes)
+        self._stage_run_result(execution=execution, plan=plan, result=result)
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, nodes
@@ -612,6 +672,8 @@ class WorkflowService:
         if isinstance(plan, WorkflowRunPlan) and isinstance(submitted, RunnerSingleExecutionResult):
             self._validate_remote_execution_id(plan.execution_id, submitted.execution_id)
             execution = await self.load_execution_for_run(plan.execution_id)
+            nodes = self._node_models(execution.id, submitted.result.to_domain())
+            await self._workflows.replace_node_executions(execution.id, nodes)
             self._stage_run_result(
                 execution=execution,
                 plan=plan,
@@ -645,6 +707,8 @@ class WorkflowService:
         children: list[WorkflowExecution] = []
         for execution_id, child_plan in expected.items():
             execution = await self.load_execution_for_run(execution_id)
+            nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
+            await self._workflows.replace_node_executions(execution.id, nodes)
             self._stage_run_result(
                 execution=execution,
                 plan=child_plan,
@@ -661,9 +725,7 @@ class WorkflowService:
         execution: WorkflowExecution,
         plan: WorkflowRunPlan,
         result: WorkflowRunResult,
-    ) -> list[WorkflowNodeExecution]:
-        nodes = self._node_models(execution.id, result)
-        self._workflows.add_all(nodes)
+    ) -> None:
         execution.status = result.status.value
         execution.context = cast(dict[str, JsonValue], redact(result.context))
         execution.completed_at = datetime.now(UTC)
@@ -681,7 +743,6 @@ class WorkflowService:
             resource_id=execution.id,
             details={"status": result.status.value, "workflow_version": plan.workflow_version},
         )
-        return nodes
 
     @staticmethod
     def _validate_remote_execution_id(expected: UUID, received: UUID) -> None:
@@ -834,11 +895,18 @@ class WorkflowService:
         return execution
 
     async def list_executions(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        page: int,
+        page_size: int,
     ) -> tuple[list[WorkflowExecution], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._workflows.list_executions(
             project_id=project_id,
+            workflow_id=workflow_id,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
@@ -1145,14 +1213,7 @@ class WorkflowService:
         config: object,
     ) -> None:
         if isinstance(config, ApiNodeConfig):
-            definition_model = await self._api_repository.get_definition(config.api_definition_id)
-            if definition_model is None or definition_model.project_id != project_id:
-                raise AppError(
-                    code="WORKFLOW_API_NOT_FOUND",
-                    message=f"API 节点 {node.name} 引用的接口不存在",
-                    status_code=422,
-                    details={"node_id": node.id},
-                )
+            await self._validate_api_node_resource(project_id, node, config)
         if isinstance(config, DatasetNodeConfig):
             artifact = await self._session.get(Artifact, config.artifact_id)
             if artifact is None or artifact.project_id != project_id:
@@ -1164,6 +1225,46 @@ class WorkflowService:
                 )
         if isinstance(config, (SqlNodeConfig, RedisNodeConfig)):
             await self._validate_data_node(project_id, node, config)
+
+    async def _validate_api_node_resource(
+        self,
+        project_id: UUID,
+        node: WorkflowNode,
+        config: ApiNodeConfig,
+    ) -> None:
+        definition = await self._api_repository.get_definition(config.api_definition_id)
+        if definition is None or definition.project_id != project_id:
+            raise AppError(
+                code="WORKFLOW_API_NOT_FOUND",
+                message=f"API 节点 {node.name} 引用的接口不存在",
+                status_code=422,
+                details={"node_id": node.id},
+            )
+        if config.api_version is not None:
+            version = await self._api_repository.get_version(
+                definition_id=config.api_definition_id,
+                version=config.api_version,
+            )
+            if version is None:
+                raise AppError(
+                    code="WORKFLOW_API_VERSION_NOT_FOUND",
+                    message=f"API 节点 {node.name} 引用的接口版本不存在",
+                    status_code=422,
+                    details={"node_id": node.id, "api_version": config.api_version},
+                )
+        body_override = config.request_overrides.body
+        if body_override is None or body_override.kind is not BodyKind.MULTIPART:
+            return
+        multipart = ApiNodeMultipartBody.model_validate(body_override.value)
+        for file in multipart.files:
+            artifact = await self._session.get(Artifact, file.artifact_id)
+            if artifact is None or artifact.project_id != project_id:
+                raise AppError(
+                    code="ARTIFACT_NOT_FOUND",
+                    message=f"API 节点 {node.name} 引用的文件不存在",
+                    status_code=422,
+                    details={"node_id": node.id, "artifact_id": str(file.artifact_id)},
+                )
 
     def _validate_control_node(
         self,
@@ -1463,17 +1564,25 @@ class WorkflowService:
         dataset_variables: dict[str, JsonValue],
         runtime_variables: dict[str, str],
         on_node_status: NodeStatusCallback | None,
+        context: ExecutionContext | None = None,
+        resume_records: tuple[NodeRunRecord, ...] = (),
+        resume_attempts: dict[str, int] | None = None,
+        reset_retry_budget: bool = False,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
                 definition,
-                context=ExecutionContext(
+                context=context
+                or ExecutionContext(
                     workflow_variables=cast(dict[str, JsonValue], workflow_variables),
                     dataset_variables=dataset_variables,
                     runtime_variables=cast(dict[str, JsonValue], runtime_variables),
                 ),
                 cancellation=token,
                 on_node_status=on_node_status,
+                resume_records=resume_records,
+                resume_attempts=resume_attempts,
+                reset_retry_budget=reset_retry_budget,
             )
         )
         try:
@@ -1590,6 +1699,14 @@ class WorkflowService:
             )
             for record in result.records
         ]
+
+
+def _with_api_version(node: WorkflowNode, version: int) -> WorkflowNode:
+    if node.type is NodeType.CAPABILITY:
+        return node.model_copy(
+            update={"configuration": {**(node.configuration or {}), "api_version": version}}
+        )
+    return node.model_copy(update={"config": {**node.config, "api_version": version}})
 
 
 def _fingerprint(definition: dict[str, object]) -> str:

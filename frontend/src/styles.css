@@ -579,7 +579,7 @@ body {
 
 .workflow-designer-body {
   display: grid;
-  grid-template-columns: minmax(500px, 1fr) 280px;
+  grid-template-columns: minmax(540px, 1fr) 420px;
   min-height: 540px;
 }
 
@@ -597,6 +597,98 @@ body {
 
 .workflow-inspector h5 {
   margin-top: 0;
+}
+
+.workflow-inspector-heading {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.workflow-inspector-heading h5 {
+  margin-bottom: 0;
+}
+
+.workflow-runtime-toolbar {
+  justify-content: flex-start;
+}
+
+.workflow-snapshot-alert {
+  margin-bottom: 12px;
+}
+
+.workflow-run-inspector {
+  min-width: 0;
+  overflow: auto;
+}
+
+.workflow-run-inspector .ant-descriptions {
+  margin-bottom: 14px;
+}
+
+.workflow-attempt-select {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.workflow-runtime-payload {
+  min-width: 0;
+  margin-bottom: 14px;
+}
+
+.workflow-runtime-payload pre {
+  max-height: 260px;
+  padding: 10px;
+  margin: 6px 0 0;
+  overflow: auto;
+  color: #23324d;
+  background: #f6f8fb;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.workflow-request-line,
+.workflow-response-summary {
+  margin-bottom: 12px;
+}
+
+.workflow-request-line .ant-typography {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
+.workflow-request-base {
+  padding: 14px 0 4px;
+  margin-bottom: 4px;
+}
+
+.workflow-request-section {
+  width: 100%;
+}
+
+.workflow-request-section.is-readonly {
+  padding: 16px;
+  background: #f7f9fc;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+}
+
+.workflow-request-actions {
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid #e5eaf2;
+}
+
+.workflow-request-upgrade {
+  align-self: flex-start;
+  padding-inline: 0;
+}
+
+.workflow-redaction-note {
+  padding-top: 12px;
+  border-top: 1px solid #e5eaf2;
+  font-size: 12px;
 }
 
 .workflow-inspector label {
@@ -671,6 +763,12 @@ body {
 .flow-node-status {
   color: #64748b;
   font-size: 11px;
+  text-align: right;
+}
+
+.flow-node-status small {
+  margin-top: 4px;
+  color: inherit;
 }
 
 .flow-node-start {
@@ -712,8 +810,75 @@ body {
   margin: 18px 0 12px;
 }
 
+.import-source-picker {
+  margin-top: 18px;
+}
+
+.import-url-field {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid #d9e1ec;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.import-document-picker {
+  display: grid;
+  gap: 14px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid #d9e1ec;
+}
+
+.import-document-picker .ant-radio-group,
+.import-document-picker .ant-space {
+  width: 100%;
+}
+
+.import-document-options-scroll {
+  max-height: 280px;
+  padding-right: 8px;
+  overflow-y: auto;
+}
+
+.import-document-picker .ant-radio-wrapper {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.import-document-picker .ant-radio-wrapper-checked {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.import-document-option {
+  display: grid;
+  gap: 2px;
+}
+
+.import-result-sources {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.import-result-source {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
 .import-statistics {
   margin-bottom: 20px;
+}
+
+.import-result-filters {
+  margin-bottom: 12px;
 }
 
 .management-card {
@@ -748,6 +913,21 @@ body {
 .workbench-dynamic-row .ant-form-item {
   flex: 1;
   margin-bottom: 8px;
+}
+
+.body-mode-field {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.body-editor-toolbar .ant-form-item {
+  min-width: 160px;
+  margin-bottom: 0;
+}
+
+.body-raw-type,
+.body-field-kind {
+  min-width: 130px;
 }
 
 .assertion-select {

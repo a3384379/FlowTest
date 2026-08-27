@@ -3,6 +3,7 @@ import {
   AppstoreOutlined,
   ApartmentOutlined,
   BarChartOutlined,
+  BranchesOutlined,
   CodeOutlined,
   CloudServerOutlined,
   DashboardOutlined,
@@ -17,13 +18,13 @@ import {
   ToolOutlined,
   RobotOutlined,
   ShareAltOutlined,
+  TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import {
   Avatar,
   Breadcrumb,
   Button,
-  Empty,
   Layout,
   Menu,
   Select,
@@ -39,6 +40,7 @@ import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
+import ProjectEmptyState from './features/projects/ProjectEmptyState'
 import { projectPath, type ProjectSection } from './features/projects/project-routing'
 import { useProjectContext } from './features/projects/use-project-context'
 import GlobalSearch from './features/search/GlobalSearch'
@@ -52,7 +54,9 @@ const TestPlansPage = lazy(() => import('./pages/TestPlansPage'))
 const PerformanceLabPage = lazy(() => import('./pages/PerformanceLabPage'))
 const EnvironmentLabPage = lazy(() => import('./pages/EnvironmentLabPage'))
 const ContractHubPage = lazy(() => import('./pages/ContractHubPage'))
+const TestEngineeringPage = lazy(() => import('./pages/TestEngineeringPage'))
 const ImpactAnalysisPage = lazy(() => import('./pages/ImpactAnalysisPage'))
+const ChangeRegressionPage = lazy(() => import('./pages/ChangeRegressionPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const ReleaseGatePage = lazy(() => import('./pages/ReleaseGatePage'))
@@ -63,6 +67,8 @@ const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
 const ExecutionFabricPage = lazy(() => import('./pages/ExecutionFabricPage'))
 const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage'))
+const RequestTargetsPage = lazy(() => import('./pages/RequestTargetsPage'))
+const OrganizationGovernancePage = lazy(() => import('./pages/OrganizationGovernancePage'))
 
 const { Header, Content, Sider } = Layout
 
@@ -70,6 +76,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '质量总览',
   settings: '项目管理',
   services: '服务目录',
+  'request-targets': '请求目标',
   apis: '接口管理',
   protocols: '多协议工作台',
   assets: '测试资产',
@@ -79,7 +86,9 @@ const sectionLabels: Record<ProjectSection, string> = {
   performance: '性能实验室',
   environments: '环境实验室',
   contracts: '契约中心',
+  'test-engineering': '测试工程',
   impact: '影响分析',
+  'change-regression': '变更回归',
   quality: '质量中心',
   release: '发布门禁',
   ai: 'AI 助手',
@@ -87,6 +96,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   reports: '测试报告',
   platform: '平台管理',
   fabric: '分布式执行面',
+  organization: '组织治理',
 }
 
 export default function App() {
@@ -114,6 +124,8 @@ function AuthenticatedShell() {
   const logout = useAuthStore((state) => state.logout)
   const { projects, projectId, currentProject, section, selectProject, pathFor } =
     useProjectContext()
+  const hasNoProjects = isNoProjectView(projects.data?.items.length, projectId)
+  const isGlobalAdministration = isGlobalAdministrationSection(section)
   return (
     <Layout className="app-shell">
       <Sider width={224} theme="dark" className="sidebar">
@@ -129,6 +141,7 @@ function AuthenticatedShell() {
             navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
             navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
             navigationItem('services', <AppstoreOutlined />, pathFor('services')),
+            navigationItem('request-targets', <ShareAltOutlined />, pathFor('request-targets')),
             navigationItem('apis', <ApiOutlined />, pathFor('apis')),
             navigationItem('protocols', <CodeOutlined />, pathFor('protocols')),
             navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
@@ -138,12 +151,15 @@ function AuthenticatedShell() {
             navigationItem('performance', <ExperimentOutlined />, pathFor('performance')),
             navigationItem('environments', <CloudServerOutlined />, pathFor('environments')),
             navigationItem('contracts', <ShareAltOutlined />, pathFor('contracts')),
+            navigationItem('test-engineering', <ExperimentOutlined />, pathFor('test-engineering')),
             navigationItem('impact', <FileSearchOutlined />, pathFor('impact')),
+            navigationItem('change-regression', <BranchesOutlined />, pathFor('change-regression')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
             navigationItem('release', <SafetyCertificateOutlined />, pathFor('release')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
+            navigationItem('organization', <TeamOutlined />, '/organization'),
             ...(user?.is_system_admin
               ? [
                   navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'),
@@ -186,13 +202,43 @@ function AuthenticatedShell() {
             className="page-breadcrumb"
             items={breadcrumbItems(currentProject?.name ?? null, section)}
           />
-          <Suspense fallback={<PageLoading />}>
-            <ApplicationRoutes key={projectId ?? 'global'} />
-          </Suspense>
+          <AuthenticatedContent
+            hasNoProjects={hasNoProjects}
+            isGlobalAdministration={isGlobalAdministration}
+            projectId={projectId}
+          />
         </Content>
       </Layout>
     </Layout>
   )
+}
+
+function AuthenticatedContent({
+  hasNoProjects,
+  isGlobalAdministration,
+  projectId,
+}: {
+  hasNoProjects: boolean
+  isGlobalAdministration: boolean
+  projectId: string | null
+}) {
+  return (
+    <Suspense fallback={<PageLoading />}>
+      {hasNoProjects && !isGlobalAdministration ? (
+        <ProjectEmptyState />
+      ) : (
+        <ApplicationRoutes key={projectId ?? 'global'} />
+      )}
+    </Suspense>
+  )
+}
+
+function isNoProjectView(projectCount: number | undefined, projectId: string | null): boolean {
+  return projectCount === 0 && projectId === null
+}
+
+function isGlobalAdministrationSection(section: ProjectSection): boolean {
+  return section === 'platform' || section === 'fabric' || section === 'organization'
 }
 
 function ApplicationRoutes() {
@@ -203,6 +249,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/dashboard" element={<DashboardPage />} />
       <Route path="/projects/:projectId/settings" element={<ProjectsPage />} />
       <Route path="/projects/:projectId/services" element={<ServiceCatalogPage />} />
+      <Route path="/projects/:projectId/request-targets" element={<RequestTargetsPage />} />
       <Route path="/projects/:projectId/apis" element={<ApiConsolePage />} />
       <Route path="/projects/:projectId/protocols" element={<ProtocolWorkbenchPage />} />
       <Route path="/projects/:projectId/assets" element={<TestAssetsPage />} />
@@ -212,7 +259,9 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/performance" element={<PerformanceLabPage />} />
       <Route path="/projects/:projectId/environments" element={<EnvironmentLabPage />} />
       <Route path="/projects/:projectId/contracts" element={<ContractHubPage />} />
+      <Route path="/projects/:projectId/test-engineering" element={<TestEngineeringPage />} />
       <Route path="/projects/:projectId/impact" element={<ImpactAnalysisPage />} />
+      <Route path="/projects/:projectId/change-regression" element={<ChangeRegressionPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
       <Route path="/projects/:projectId/release" element={<ReleaseGatePage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
@@ -220,11 +269,13 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/platform" element={<PlatformCapabilitiesPage />} />
       <Route path="/execution-fabric" element={<ExecutionFabricPage />} />
+      <Route path="/organization" element={<OrganizationGovernancePage />} />
       <Route path="/projects/:projectId" element={<ProjectIndexRedirect />} />
       {(
         [
           'settings',
           'services',
+          'request-targets',
           'apis',
           'protocols',
           'assets',
@@ -234,7 +285,9 @@ function ApplicationRoutes() {
           'performance',
           'environments',
           'contracts',
+          'test-engineering',
           'impact',
+          'change-regression',
           'quality',
           'release',
           'ai',
@@ -257,7 +310,7 @@ function DefaultProjectRedirect({ section }: { section: ProjectSection }) {
   const { projects } = useProjectContext()
   if (projects.isLoading) return <PageLoading />
   const projectId = projects.data?.items.at(0)?.id
-  if (!projectId) return <Empty description="暂无可访问项目" />
+  if (!projectId) return <ProjectEmptyState />
   return <Navigate to={projectPath(projectId, section)} replace />
 }
 

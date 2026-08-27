@@ -2,13 +2,26 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.domain.api_assets import AuthKind, BodyKind, ExtractionKind, HttpMethod, JsonValue
 from app.domain.assertions import AssertionKind, ComparisonOperator
 from app.domain.scopes import HeaderScope, VariableScope
+from app.domain.test_engineering import OperationContract
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
+APIDefinitionName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+]
 
 
 class ProjectConfigurationUpdate(BaseModel):
@@ -30,6 +43,7 @@ class EnvironmentCreate(BaseModel):
 class EnvironmentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     base_url: HttpUrl | None = None
+    default_service_id: UUID | None = None
     variables: dict[VariableName, str] | None = None
     headers: dict[str, str] | None = None
 
@@ -41,6 +55,7 @@ class EnvironmentResponse(BaseModel):
     project_id: UUID
     name: str
     base_url: str
+    default_service_id: UUID | None
     variables: dict[str, str]
     headers: dict[str, str]
     created_by_id: UUID
@@ -105,6 +120,7 @@ class APIVersionInput(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     query_parameters: list[RequestParameter] = Field(default_factory=list, max_length=200)
     headers: dict[str, str] = Field(default_factory=dict)
+    variables: dict[VariableName, str] = Field(default_factory=dict)
     body_kind: BodyKind = BodyKind.NONE
     body: JsonValue = None
     auth: AuthConfiguration = Field(default_factory=AuthConfiguration)
@@ -119,16 +135,18 @@ class APIVersionInput(BaseModel):
 
 
 class APIDefinitionCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: APIDefinitionName
     description: str = Field(default="", max_length=4000)
     folder_id: UUID | None = None
+    service_id: UUID | None = None
     request: APIVersionInput
 
 
 class APIDefinitionUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: APIDefinitionName | None = None
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None
+    service_id: UUID | None = None
 
 
 class APIVersionResponse(BaseModel):
@@ -141,15 +159,24 @@ class APIVersionResponse(BaseModel):
     path: str
     query_parameters: list[RequestParameter]
     headers: dict[str, str]
+    variables: dict[str, str]
     body_kind: BodyKind
     body: JsonValue
     auth_kind: AuthKind
     auth_config: dict[str, str]
     extraction_rules: list[ExtractionRuleInput]
     assertions: list[APIVersionAssertionInput]
+    canonical_contract: OperationContract | None = None
+    contract_fingerprint: str | None = None
+    contract_completeness: str
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("canonical_contract", mode="before")
+    @classmethod
+    def normalize_empty_contract(cls, value: object) -> object:
+        return None if value == {} else value
 
 
 class APIDefinitionResponse(BaseModel):
@@ -158,6 +185,7 @@ class APIDefinitionResponse(BaseModel):
     id: UUID
     project_id: UUID
     folder_id: UUID | None
+    service_id: UUID | None
     name: str
     description: str
     current_version: int
@@ -174,8 +202,16 @@ class APIDetailResponse(BaseModel):
 
 class PreviewRequest(BaseModel):
     environment_id: UUID
+    service_override: str | None = Field(default=None, max_length=160)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
+    version: int | None = Field(default=None, ge=1)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
+    query_parameters_override: list[RequestParameter] | None = Field(
+        default=None,
+        max_length=200,
+    )
+    headers_override: dict[str, str] | None = None
     body_override: JsonValue = None
     use_body_override: bool = False
 
@@ -203,3 +239,4 @@ class PreviewResponse(BaseModel):
     headers: list[ResolvedHeaderResponse]
     body: JsonValue
     variables: list[ResolvedVariableResponse]
+    target: dict[str, JsonValue] = Field(default_factory=dict)

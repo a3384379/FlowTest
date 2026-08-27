@@ -13,6 +13,8 @@ from app.services.workflows import WorkflowExecutionPlan
 class WorkflowDispatcher(Protocol):
     async def start(self, plan: WorkflowExecutionPlan) -> None: ...
 
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool) -> None: ...
+
 
 class TestPlanDispatcher(Protocol):
     def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None: ...
@@ -45,6 +47,10 @@ class CeleryTaskDispatcher:
             priority=5,
             headers=current_trace_headers(),
         )
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool) -> None:
+        del retry
+        await self.start(plan)
 
     def start_test_plan(self, run_id: UUID, *, queue_name: str, priority: int) -> None:
         self._celery.send_task(
@@ -102,6 +108,9 @@ class RunnerFabricDispatcher:
         except AppError:
             await self._service.fail_enqueue(plan.execution_id)
             raise
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool) -> None:
+        await self._service.resume(plan, retry=retry)
 
 
 def _workflow_queue(plan: WorkflowExecutionPlan) -> str:

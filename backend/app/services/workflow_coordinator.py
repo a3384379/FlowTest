@@ -1,13 +1,20 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
+from pydantic import JsonValue
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.logging import redact
+from app.domain.durable_execution import checkpoint_input_hash
+from app.engine.results import NodeResult
 from app.engine.scheduler import NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
+from app.schemas.runner_fabric import RunnerCheckpointRequest
+from app.services.durable_execution import DurableExecutionService
 from app.services.execution_events import (
     ExecutionEvent,
     ExecutionEventBus,
@@ -37,6 +44,10 @@ class WorkflowRunCoordinator:
         task = asyncio.create_task(self._run(plan), name=f"workflow-{plan.execution_id}")
         self._tasks[plan.execution_id] = task
         task.add_done_callback(lambda _completed: self._tasks.pop(plan.execution_id, None))
+
+    async def resume(self, plan: WorkflowExecutionPlan, *, retry: bool) -> None:
+        del retry
+        await self.start(plan)
 
     async def run_now(self, plan: WorkflowExecutionPlan) -> None:
         """Run a persisted plan in the current worker event loop."""
@@ -89,6 +100,11 @@ class WorkflowRunCoordinator:
                 error_message=execution.error_message,
             )
         )
+        async with self._session_maker() as session:
+            await DurableExecutionService(session).mark_execution_command_completed(
+                plan.execution_id,
+                execution_status=execution.status,
+            )
 
     async def _execute_batch(self, plan: WorkflowBatchPlan) -> WorkflowExecution:
         semaphore = asyncio.Semaphore(plan.concurrency)
@@ -129,6 +145,11 @@ class WorkflowRunCoordinator:
             execution = await service.load_execution_for_run(plan.execution_id)
 
             async def publish_status(update: NodeStatusUpdate) -> None:
+                safe_result = (
+                    NodeResult.model_validate(redact(update.result.model_dump(mode="json")))
+                    if update.result is not None
+                    else None
+                )
                 await self._publish(
                     ExecutionEvent(
                         type=(
@@ -142,7 +163,7 @@ class WorkflowRunCoordinator:
                         node_name=update.name,
                         node_type=update.node_type.value,
                         node_status=update.status,
-                        result=update.result,
+                        result=safe_result,
                         attempt=update.attempts,
                         attempts=update.attempts,
                         fencing_token=0,
@@ -150,6 +171,41 @@ class WorkflowRunCoordinator:
                         error_message=update.error_message,
                     )
                 )
+                if safe_result is not None and update.status.is_terminal:
+                    snapshot = update.context_snapshot or {}
+                    extracted = snapshot.get("extracted_variables", {})
+                    if not isinstance(extracted, dict):
+                        extracted = {}
+                    # Node callbacks run concurrently with the cancellation poll and with
+                    # other scheduler callbacks.  Persist each checkpoint through its own
+                    # session so a checkpoint commit cannot race a refresh on the run
+                    # session or interleave transactions for sibling nodes.
+                    async with self._session_maker() as checkpoint_session:
+                        await DurableExecutionService(checkpoint_session).record_checkpoint(
+                            project_id=plan.project_id,
+                            lease_id=None,
+                            runner_id=None,
+                            actor_user_id=plan.actor_id,
+                            payload=RunnerCheckpointRequest(
+                                execution_id=plan.execution_id,
+                                node_id=update.node_id,
+                                node_type=update.node_type,
+                                name=update.name,
+                                status=update.status,
+                                attempts=max(1, update.attempts),
+                                output=safe_result.output,
+                                result=safe_result,
+                                error_code=update.error_code,
+                                error_message=update.error_message,
+                                started_at=None,
+                                finished_at=update.occurred_at,
+                                input_hash=update.input_hash
+                                or checkpoint_input_hash(update.node_id, snapshot),
+                                extracted_variables=cast(dict[str, JsonValue], redact(extracted)),
+                                snapshot_revision=1,
+                                fencing_token=0,
+                            ),
+                        )
 
             completed, _nodes = await service.run_prepared(
                 execution=execution,

@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,12 +36,22 @@ jobs:
           uv run --project backend pip-audit
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend audit --audit-level high
+      - name: Verify canonical contract leak prevention
+        working-directory: backend
+        run: >-
+          uv run pytest --no-cov
+          tests/test_s47_2_correctness_security.py::test_canonical_contract_redacts_nested_hints_and_sensitive_enum
+          tests/test_s47_3_semantic_integrity.py::test_strict_canonical_schema_rejects_invalid_keyword_values
+          tests/test_s47_3_semantic_integrity.py::test_historical_contract_cleanup_removes_enum_hashes_and_invalid_keywords
+          tests/test_imports_api.py::test_sensitive_openapi_hints_never_reach_api_design_or_audit
+          tests/test_standalone_runtime.py::test_standalone_s472_sanitizes_existing_contract_data_irreversibly
       - name: Lint operations scripts
         run: |
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt \
             koalaman/shellcheck-alpine@sha256:9955be09ea7f0dbf7ae942ac1f2094355bb30d96fffba0ec09f5432207544002 \
-            shellcheck scripts/backup.sh scripts/restore.sh scripts/verify_restore.sh \
-              scripts/verify_v2_v3_upgrade.sh
+            shellcheck -x -P deploy/compact \
+              scripts/backup.sh scripts/restore.sh scripts/verify_restore.sh \
+              scripts/verify_v2_v3_upgrade.sh deploy/compact/*.sh
       - name: Build release images
         run: |
           docker build -t flowtest-backend:ci backend
@@ -50,8 +61,8 @@ jobs:
           docker build --target runner-runtime -t flowtest-runner:ci backend
           docker build -t flowtest-frontend:ci frontend
           docker build -t flowtest-mock-target:ci mock-target
-          docker pull nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3
-          docker tag nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3 flowtest-environment-fixture:ci
+          docker pull cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33
+          docker tag cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33 flowtest-environment-fixture:ci
       - name: Scan backend image
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:

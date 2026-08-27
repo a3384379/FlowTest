@@ -18,6 +18,8 @@ class AssertionInput(BaseModel):
 
 class ExecuteAPIRequest(BaseModel):
     environment_id: UUID
+    service_override: str | None = Field(default=None, max_length=160)
+    endpoint_variant: str | None = Field(default=None, max_length=80)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
     body_override: JsonValue = None
@@ -56,6 +58,7 @@ class ExecutionResponse(BaseModel):
     request_url: str
     request_headers: dict[str, str]
     request_body: JsonValue
+    target_snapshot: dict[str, JsonValue]
     response_status: int | None
     response_headers: dict[str, str]
     response_body: JsonValue

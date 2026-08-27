@@ -1,6 +1,6 @@
 import {
-  ApiOutlined,
   DownloadOutlined,
+  EditOutlined,
   ImportOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -10,7 +10,10 @@ import {
   Card,
   Dropdown,
   Empty,
+  Form,
+  Input,
   InputNumber,
+  Modal,
   Select,
   Space,
   Table,
@@ -28,6 +31,7 @@ import type {
   CreateApiInput,
   CreateEnvironmentInput,
   CreateProjectInput,
+  HttpMethod,
 } from '../features/api-console/api-service'
 import { useApiConsole } from '../features/api-console/use-api-console'
 import type { ApiDefinition, Execution, ExecutionDetail } from '../lib/api'
@@ -37,7 +41,12 @@ type DialogState = 'project' | 'environment' | 'api' | null
 export default function ApiConsolePage() {
   const [dialog, setDialog] = useState<DialogState>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
   const consoleState = useApiConsole()
+  const currentDefinition = selectedApiDefinition(consoleState)
+  const artifacts = artifactItems(consoleState)
+  const apis = apiItems(consoleState)
+  const history = historyItems(consoleState)
 
   async function addProject(input: CreateProjectInput) {
     await consoleState.addProject(input)
@@ -134,21 +143,45 @@ export default function ApiConsolePage() {
         <Card
           title="接口列表"
           extra={
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              disabled={!canCreateAssets}
-              onClick={() => setDialog('api')}
-            >
-              新建接口
-            </Button>
+            <Space wrap>
+              <Input.Search
+                aria-label="搜索接口"
+                allowClear
+                placeholder="搜索名称、路径或说明"
+                value={consoleState.apiSearchInput}
+                onChange={(event) => consoleState.setApiSearchInput(event.target.value)}
+                style={{ width: 220 }}
+              />
+              <Select
+                aria-label="接口方法筛选"
+                allowClear
+                placeholder="全部方法"
+                value={consoleState.apiMethod ?? undefined}
+                onChange={(value?: HttpMethod) => consoleState.setApiMethod(value ?? null)}
+                options={httpMethods.map((method) => ({ value: method, label: method }))}
+                style={{ width: 120 }}
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={!canCreateAssets}
+                onClick={() => setDialog('api')}
+              >
+                新建接口
+              </Button>
+            </Space>
           }
         >
           <ApiTable
             loading={consoleState.apis.isLoading}
-            items={consoleState.apis.data?.items ?? []}
+            items={apis}
             selectedId={consoleState.apiId}
             onSelect={consoleState.setApiSelection}
+            onRename={setRenameTarget}
+            page={consoleState.apis.data?.page ?? consoleState.apiPage}
+            pageSize={consoleState.apis.data?.page_size ?? 50}
+            total={consoleState.apis.data?.total ?? 0}
+            onPageChange={consoleState.setApiPage}
           />
         </Card>
 
@@ -159,6 +192,8 @@ export default function ApiConsolePage() {
           previewing={consoleState.previewing}
           onSave={consoleState.saveVersion}
           onPreview={consoleState.previewRequest}
+          onRename={() => setRenameTarget(currentDefinition)}
+          artifacts={artifacts}
         />
       </div>
 
@@ -167,18 +202,14 @@ export default function ApiConsolePage() {
         className="runner-card"
         extra={<RunnerActions state={consoleState} enabled={canExecute} />}
       >
-        <RunnerContent
-          enabled={canExecute}
-          result={consoleState.result}
-          history={consoleState.history.data?.items ?? []}
-        />
+        <RunnerContent enabled={canExecute} result={consoleState.result} history={history} />
       </Card>
 
       <ArtifactPanel
         disabled={!canCreateAssets}
         loading={consoleState.artifacts.isLoading}
         uploading={consoleState.uploading}
-        items={consoleState.artifacts.data?.items ?? []}
+        items={artifacts}
         onUpload={consoleState.uploadFile}
         onDownload={consoleState.downloadFile}
       />
@@ -190,18 +221,25 @@ export default function ApiConsolePage() {
         onCreateProject={addProject}
         onCreateEnvironment={addEnvironment}
         onCreateApi={addApi}
-        artifacts={consoleState.artifacts.data?.items ?? []}
+        artifacts={artifacts}
       />
       <ImportDialog
         open={importOpen}
         importing={consoleState.importing}
         result={consoleState.lastImport}
+        onDiscover={consoleState.discoverImport}
         onPreview={consoleState.previewImport}
         onMerge={consoleState.mergeImport}
         onClose={() => {
           setImportOpen(false)
           consoleState.clearImportResult()
         }}
+      />
+      <RenameApiDialogContainer
+        target={renameTarget}
+        saving={consoleState.renamingApi}
+        onClose={() => setRenameTarget(null)}
+        onRename={consoleState.renameApi}
       />
     </>
   )
@@ -253,15 +291,38 @@ type ApiTableProps = {
   items: ApiDefinition[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onRename: (definition: ApiDefinition) => void
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
 }
 
-function ApiTable({ loading, items, selectedId, onSelect }: ApiTableProps) {
+function ApiTable({
+  loading,
+  items,
+  selectedId,
+  onSelect,
+  onRename,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: ApiTableProps) {
   return (
     <Table
       rowKey="id"
       size="small"
       loading={loading}
-      pagination={false}
+      pagination={{
+        current: page,
+        pageSize,
+        total,
+        showSizeChanger: false,
+        showTotal: (value) => `共 ${value} 个接口`,
+        onChange: onPageChange,
+      }}
+      scroll={{ y: 440 }}
       dataSource={items}
       locale={{ emptyText: '暂无接口' }}
       rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
@@ -277,15 +338,117 @@ function ApiTable({ loading, items, selectedId, onSelect }: ApiTableProps) {
         {
           title: '',
           width: 40,
-          render: () => <ApiOutlined className="table-action-icon" />,
+          render: (_: unknown, definition: ApiDefinition) => (
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              aria-label={`重命名接口 ${definition.name}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onRename(definition)
+              }}
+            />
+          ),
         },
       ]}
     />
   )
 }
 
+const httpMethods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
+function RenameApiDialogContainer({
+  target,
+  saving,
+  onClose,
+  onRename,
+}: {
+  target: ApiDefinition | null
+  saving: boolean
+  onClose: () => void
+  onRename: (targetId: string, name: string) => Promise<ApiDefinition>
+}) {
+  if (!target) return null
+
+  return (
+    <RenameApiDialog
+      target={target}
+      saving={saving}
+      onClose={onClose}
+      onRename={(name) => onRename(target.id, name)}
+    />
+  )
+}
+
+function RenameApiDialog({
+  target,
+  saving,
+  onClose,
+  onRename,
+}: {
+  target: ApiDefinition
+  saving: boolean
+  onClose: () => void
+  onRename: (name: string) => Promise<ApiDefinition>
+}) {
+  const [form] = Form.useForm<{ name: string }>()
+  const name = Form.useWatch('name', form)
+
+  async function submit(values: { name: string }) {
+    try {
+      await onRename(values.name.trim())
+      onClose()
+    } catch {
+      // Mutation errors are rendered by the shared API error message handler.
+    }
+  }
+
+  return (
+    <Modal
+      title="重命名接口"
+      open
+      okText="保存"
+      cancelText="取消"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: !name?.trim() || name.trim() === target.name }}
+      onOk={() => form.submit()}
+      onCancel={onClose}
+    >
+      <Form form={form} layout="vertical" initialValues={{ name: target.name }} onFinish={submit}>
+        <Form.Item
+          name="name"
+          label="接口名称"
+          rules={[
+            { required: true, whitespace: true, message: '请输入接口名称' },
+            { max: 200, message: '接口名称不能超过 200 位' },
+          ]}
+        >
+          <Input autoFocus maxLength={200} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
 function allSelected(values: Array<string | null>): boolean {
   return values.every(Boolean)
+}
+
+function selectedApiDefinition(state: ConsoleState): ApiDefinition | null {
+  return state.apiDetail.data ? state.apiDetail.data.definition : null
+}
+
+function artifactItems(state: ConsoleState) {
+  return state.artifacts.data?.items ?? []
+}
+
+function apiItems(state: ConsoleState) {
+  return state.apis.data?.items ?? []
+}
+
+function historyItems(state: ConsoleState) {
+  return state.history.data?.items ?? []
 }
 
 function projectOptions(items?: Array<{ id: string; name: string }>) {

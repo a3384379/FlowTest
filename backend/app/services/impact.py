@@ -1,5 +1,6 @@
 import hashlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import cast
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.canonical_schemas import CanonicalSchemaValidationError
 from app.domain.contracts import ContractSchemaError
 from app.domain.impact import (
     AssetMapping,
@@ -22,8 +24,11 @@ from app.domain.impact import (
     parse_git_diff,
     validate_selector,
 )
+from app.domain.test_engineering import fingerprint_contract
+from app.importers.contracts import ImportSourceType
+from app.importers.openapi import parse_openapi
 from app.models.access import User
-from app.models.contracts import ContractRun, PactContractVersion
+from app.models.contracts import ContractRun, PactContractVersion, ServiceCatalogEntry
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.performance import PerformanceScenario
 from app.models.protocols import SchemaArtifact
@@ -308,7 +313,7 @@ class ImpactService:
                 changes.update((item.key, item) for item in current_changes)
                 schema_summaries.append(item_summary)
             summary["schemas"] = cast(JsonValue, schema_summaries)
-        except (ImpactInputError, ContractSchemaError) as error:
+        except (ImpactInputError, ContractSchemaError, CanonicalSchemaValidationError) as error:
             raise AppError(
                 code="IMPACT_INPUT_INVALID", message=str(error), status_code=422
             ) from error
@@ -338,12 +343,34 @@ class ImpactService:
             cast(dict[str, JsonValue], baseline.schema_document),
             cast(dict[str, JsonValue], current.schema_document),
         )
-        return changes, {
+        service_key = await self._contract_service_key(current)
+        current_operations = _contract_operation_metadata(current, service_key)
+        baseline_operations = _contract_operation_metadata(baseline, service_key)
+        enriched = tuple(
+            _enrich_openapi_change(
+                change,
+                baseline=baseline_operations.get(change.source_key),
+                current=current_operations.get(change.source_key),
+                baseline_run=baseline,
+                current_run=current,
+                service_key=service_key,
+            )
+            for change in changes
+        )
+        return enriched, {
             "baseline_run_id": str(baseline.id),
             "current_run_id": str(current.id),
             "source_name": current.source_name,
             "change_count": len(changes),
         }
+
+    async def _contract_service_key(self, run: ContractRun) -> str | None:
+        if run.provider_service_id is None:
+            return None
+        service = await self._session.get(ServiceCatalogEntry, run.provider_service_id)
+        if service is None or service.project_id != run.project_id:
+            return None
+        return service.service_key
 
     async def _schema_changes(
         self, project_id: UUID, reference: SchemaDiffReference
@@ -433,6 +460,75 @@ class ImpactService:
             raise AppError(
                 code="IMPACT_ENGINE_DISABLED", message="影响分析能力尚未启用", status_code=409
             )
+
+
+@dataclass(frozen=True, slots=True)
+class _ContractOperationMetadata:
+    portable_operation_ref: str
+    method: str
+    normalized_path: str
+    contract_fingerprint: str
+
+
+def _contract_operation_metadata(
+    run: ContractRun, service_key: str | None
+) -> dict[str, _ContractOperationMetadata]:
+    source_type = (
+        ImportSourceType.SWAGGER2
+        if run.schema_document.get("swagger") == "2.0"
+        else ImportSourceType.OPENAPI3
+    )
+    operations = parse_openapi(run.schema_document, source_type)
+    result: dict[str, _ContractOperationMetadata] = {}
+    for operation in operations:
+        contract = operation.canonical_contract
+        if contract is None:
+            continue
+        if service_key is not None:
+            contract = contract.model_copy(update={"service": service_key})
+        method = operation.request.method.value
+        path = _semantic_operation_path(operation.request.path)
+        result[_openapi_source_key(method, operation.request.path)] = _ContractOperationMetadata(
+            portable_operation_ref=contract.operation,
+            method=method,
+            normalized_path=path,
+            contract_fingerprint=fingerprint_contract(contract),
+        )
+    return result
+
+
+def _enrich_openapi_change(
+    change: ChangeItem,
+    *,
+    baseline: _ContractOperationMetadata | None,
+    current: _ContractOperationMetadata | None,
+    baseline_run: ContractRun,
+    current_run: ContractRun,
+    service_key: str | None,
+) -> ChangeItem:
+    operation = current or baseline
+    return replace(
+        change,
+        portable_operation_ref=(operation.portable_operation_ref if operation else None),
+        service_key=service_key,
+        method=operation.method if operation else None,
+        normalized_path=operation.normalized_path if operation else None,
+        current_contract_fingerprint=(current.contract_fingerprint if current else None),
+        baseline_contract_fingerprint=(baseline.contract_fingerprint if baseline else None),
+        source_contract_run_id=str(baseline_run.id),
+        current_contract_run_id=str(current_run.id),
+    )
+
+
+def _semantic_operation_path(value: str) -> str:
+    return re.sub(r"\{\{[^}]+\}\}|\{[^}]+\}", "{}", value)
+
+
+def _openapi_source_key(method: str, path: str) -> str:
+    """Match importer template paths to the single-brace keys emitted by the diff engine."""
+
+    source_path = re.sub(r"\{\{([^{}]+)\}\}", r"{\1}", path)
+    return f"{method.upper()} {source_path}"
 
 
 def _mapping_key(

@@ -290,8 +290,8 @@ function CreateOrganizationEntities({ state }: { state: AccessState }) {
         <Form.Item name="display_name" rules={[{ required: true }]}>
           <Input placeholder="显示名" />
         </Form.Item>
-        <Form.Item name="password" rules={[{ required: true, min: 12 }]}>
-          <Input.Password placeholder="初始密码（至少 12 位）" />
+        <Form.Item name="password" rules={[{ required: true, min: 8 }]}>
+          <Input.Password placeholder="初始密码（至少 8 位）" />
         </Form.Item>
         <Button htmlType="submit" loading={state.pending}>
           创建用户

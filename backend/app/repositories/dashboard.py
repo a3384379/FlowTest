@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.elements import ColumnElement
@@ -46,10 +46,23 @@ class DashboardRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def accessible_project_ids(self, *, user_id: UUID, system_admin: bool) -> list[UUID]:
+    async def accessible_project_ids(
+        self,
+        *,
+        user_id: UUID,
+        system_admin: bool,
+        organization_id: UUID | None = None,
+    ) -> list[UUID]:
         query = select(Project.id)
         if not system_admin:
             query = query.join(ProjectMember).where(ProjectMember.user_id == user_id)
+        if organization_id is not None:
+            query = query.where(
+                or_(
+                    Project.organization_id == organization_id,
+                    Project.organization_id.is_(None),
+                )
+            )
         return list((await self._session.scalars(query)).all())
 
     async def counts(self, project_ids: list[UUID]) -> DashboardCounts:

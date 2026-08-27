@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/upgrade/compose.yaml"
 v2_ref="${FLOWTEST_UPGRADE_V2_REF:-v2.0.0-rc.1}"
 expected_v2_commit="06699d54bceee091a2efac838e426cf7ef5c9c9e"
+current_head_revision="20260823_0045"
 actual_v2_commit="$(git -C "${repo_root}" rev-parse "${v2_ref}^{commit}")"
 
 if [[ "${actual_v2_commit}" != "${expected_v2_commit}" ]]; then
@@ -123,7 +124,7 @@ echo "Upgrading V2 data in place to the current V3 head..."
 "${compose[@]}" --profile v2 stop v2-api v2-worker
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic upgrade head
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic check
-assert_revision 20260813_0028
+assert_revision "${current_head_revision}"
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-upgrade
 
@@ -139,8 +140,9 @@ echo "Re-upgrading the rolled-back data set to the current V3 head..."
 "${compose[@]}" --profile v2 stop v2-api v2-worker
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic upgrade head
 "${compose[@]}" --profile current run --rm --no-deps current-api alembic check
-assert_revision 20260813_0028
+assert_revision "${current_head_revision}"
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-reupgrade
 
-echo '{"status":"passed","baseline":"v2.0.0-rc.1","upgrade":"20260812_0018->20260813_0028","rollback":"20260813_0028->20260812_0018","reupgrade":"20260812_0018->20260813_0028"}'
+printf '{"status":"passed","baseline":"%s","upgrade":"20260812_0018->%s","rollback":"%s->20260812_0018","reupgrade":"20260812_0018->%s"}\n' \
+  "${v2_ref}" "${current_head_revision}" "${current_head_revision}" "${current_head_revision}"

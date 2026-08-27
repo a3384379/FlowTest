@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   apiErrorMessage,
@@ -14,9 +14,11 @@ import {
   createApiVersion,
   createEnvironment,
   createProject,
+  discoverApiDocumentUrl,
   downloadArtifact,
   mergeApiImport,
   previewApiDocument,
+  previewApiDocumentUrl,
   executeApi,
   exportApis,
   getApiDetail,
@@ -26,10 +28,13 @@ import {
   listExecutions,
   uploadArtifact,
   previewApi,
+  updateApiDefinition,
+  type ImportPreviewInput,
   type ApiVersionInput,
   type CreateApiInput,
   type CreateEnvironmentInput,
   type CreateProjectInput,
+  type HttpMethod,
 } from './api-service'
 
 export function useApiConsole() {
@@ -38,6 +43,10 @@ export function useApiConsole() {
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | null>(null)
+  const [apiSearchInput, setApiSearchInput] = useState('')
+  const [apiSearch, setApiSearch] = useState('')
+  const [apiMethod, setApiMethod] = useState<HttpMethod | null>(null)
+  const [apiPage, setApiPage] = useState(1)
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [result, setResult] = useState<ExecutionDetail | null>(null)
   const [lastImport, setLastImport] = useState<ImportRun | null>(null)
@@ -49,8 +58,14 @@ export function useApiConsole() {
   })
   const environmentId = selectedOrFirst(environmentSelection, environments.data)
   const apis = useQuery({
-    queryKey: ['apis', projectId],
-    queryFn: () => listApis(requiredId(projectId)),
+    queryKey: ['apis', projectId, apiPage, apiSearch, apiMethod],
+    queryFn: () =>
+      listApis(requiredId(projectId), {
+        page: apiPage,
+        pageSize: 50,
+        search: apiSearch,
+        method: apiMethod ?? undefined,
+      }),
     enabled: Boolean(projectId),
   })
   const apiId = selectedOrFirst(apiSelection, apis.data?.items)
@@ -94,17 +109,23 @@ export function useApiConsole() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const previewImportMutation = useMutation({
-    mutationFn: ({
-      file,
-      sourceType,
-    }: {
-      file: File
-      sourceType: 'auto' | 'openapi3' | 'swagger2' | 'postman' | 'har' | 'curl' | 'bruno' | 'excel'
-    }) => previewApiDocument(requiredId(projectId), file, sourceType),
+    mutationFn: (input: ImportPreviewInput) =>
+      input.kind === 'file'
+        ? previewApiDocument(requiredId(projectId), input.file, input.sourceType)
+        : previewApiDocumentUrl(
+            requiredId(projectId),
+            input.url,
+            input.sourceType,
+            input.documentId,
+          ),
     onSuccess: (value) => {
       setLastImport(value)
       void message.success('导入差异已生成，请选择需要合并的接口')
     },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const discoverImportMutation = useMutation({
+    mutationFn: (url: string) => discoverApiDocumentUrl(requiredId(projectId), url),
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const mergeImportMutation = useMutation({
@@ -137,6 +158,21 @@ export function useApiConsole() {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
+  const renameMutation = useMutation({
+    mutationFn: ({ apiId: targetApiId, name }: { apiId: string; name: string }) =>
+      updateApiDefinition(requiredId(projectId), targetApiId, { name }),
+    onSuccess: async (_definition, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['apis', projectId] }),
+        queryClient.invalidateQueries({
+          queryKey: ['api-detail', projectId, variables.apiId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['global-search'] }),
+      ])
+      void message.success('接口名称已更新')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
   const previewMutation = useMutation({
     mutationFn: () =>
       previewApi(requiredId(projectId), requiredId(apiId), requiredId(environmentId)),
@@ -149,10 +185,22 @@ export function useApiConsole() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setApiSearch(apiSearchInput.trim())
+      setApiPage(1)
+    }, 280)
+    return () => window.clearTimeout(timer)
+  }, [apiSearchInput])
+
   function selectProject(value: string) {
     selectContextProject(value)
     setEnvironmentSelection(null)
     setApiSelection(null)
+    setApiSearchInput('')
+    setApiSearch('')
+    setApiMethod(null)
+    setApiPage(1)
     setResult(null)
   }
 
@@ -197,6 +245,15 @@ export function useApiConsole() {
     apiId,
     apiDetail,
     setApiSelection,
+    apiSearchInput,
+    setApiSearchInput,
+    apiMethod,
+    setApiMethod: (value: HttpMethod | null) => {
+      setApiMethod(value)
+      setApiPage(1)
+    },
+    apiPage,
+    setApiPage,
     history,
     artifacts,
     expectedStatus,
@@ -204,9 +261,13 @@ export function useApiConsole() {
     result,
     lastImport,
     clearImportResult: () => setLastImport(null),
+    discoverImport: discoverImportMutation.mutateAsync,
     previewImport: previewImportMutation.mutateAsync,
     mergeImport: mergeImportMutation.mutateAsync,
-    importing: previewImportMutation.isPending || mergeImportMutation.isPending,
+    importing:
+      discoverImportMutation.isPending ||
+      previewImportMutation.isPending ||
+      mergeImportMutation.isPending,
     uploadFile: uploadMutation.mutateAsync,
     uploading: uploadMutation.isPending,
     downloadFile,
@@ -217,6 +278,9 @@ export function useApiConsole() {
     addApi,
     saveVersion: versionMutation.mutateAsync,
     savingVersion: versionMutation.isPending,
+    renameApi: (targetApiId: string, name: string) =>
+      renameMutation.mutateAsync({ apiId: targetApiId, name }),
+    renamingApi: renameMutation.isPending,
     previewRequest: previewMutation.mutateAsync,
     previewing: previewMutation.isPending,
     exportApis: exportMutation.mutate,
@@ -225,6 +289,7 @@ export function useApiConsole() {
       projectMutation.isPending,
       environmentMutation.isPending,
       apiMutation.isPending,
+      discoverImportMutation.isPending,
       previewImportMutation.isPending,
       mergeImportMutation.isPending,
       uploadMutation.isPending,
@@ -238,7 +303,7 @@ export type ApiConsoleDetail = ApiDetail
 type Identified = { id: string }
 
 function selectedOrFirst(selection: string | null, items?: Identified[]): string | null {
-  if (selection) return selection
+  if (selection && items?.some((item) => item.id === selection)) return selection
   return items?.at(0)?.id ?? null
 }
 

@@ -14,6 +14,7 @@ import {
   workflowExecutionDetail,
   workflowRunningExecution,
   workflowVersion,
+  workflowDefinition,
 } from '../test/fixtures'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
@@ -38,6 +39,9 @@ describe('WorkflowsPage', () => {
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get('/api/v1/grpc/descriptors', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get('/api/v1/event-sources', () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
@@ -79,7 +83,14 @@ describe('WorkflowsPage', () => {
       ),
       http.get(
         `/api/v1/projects/${project.id}/workflow-executions/${workflowRunningExecution.id}`,
-        () => HttpResponse.json(workflowExecutionDetail),
+        () =>
+          HttpResponse.json({
+            ...workflowExecutionDetail,
+            execution: {
+              ...workflowExecutionDetail.execution,
+              snapshot: { workflow: { version: 2, definition: workflowDefinition } },
+            },
+          }),
       ),
     )
     renderPage()
@@ -116,6 +127,11 @@ describe('WorkflowsPage', () => {
     await browser.click(screen.getAllByRole('button', { name: /重放/ })[1])
     expect(await screen.findByText('节点重放完成')).toBeInTheDocument()
     expect(screen.getByText('节点重放结果')).toBeVisible()
+
+    await browser.click(screen.getByRole('button', { name: /查看快照/ }))
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: /保存草稿/ })).not.toBeInTheDocument()
   })
 
   it('compares the latest two immutable workflow versions', async () => {
@@ -139,6 +155,9 @@ describe('WorkflowsPage', () => {
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get('/api/v1/grpc/descriptors', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get('/api/v1/event-sources', () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>

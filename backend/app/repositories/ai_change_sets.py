@@ -39,7 +39,7 @@ class AIChangeSetRepository:
     async def list_change_sets(
         self, *, project_id: UUID, offset: int, limit: int
     ) -> tuple[list[AIChangeSet], int]:
-        condition = AIChangeSet.project_id == project_id
+        condition = (AIChangeSet.project_id == project_id) & (AIChangeSet.source_type == "ai")
         items = list(
             (
                 await self._session.scalars(

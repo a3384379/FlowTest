@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.domain.runtime_profiles import RuntimeFeature, RuntimeProfile, describe_runtime_profile
+
 _ENVIRONMENT_IMAGE_DIGEST = re.compile(
     r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?/"
     r"[a-z0-9]+(?:[._/-][a-z0-9]+)*"
@@ -23,9 +25,14 @@ class Settings(BaseSettings):
     app_name: str = "FlowTest API"
     app_version: str = "3.0.0-beta.3-dev.29"
     environment: str = "local"
+    runtime_profile: RuntimeProfile = RuntimeProfile.FULL
     debug: bool = False
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
+    data_dir: str = ".flowtest-data"
+    frontend_dist_dir: str = ""
+    standalone_task_concurrency: int = Field(default=4, ge=1, le=32)
+    standalone_scheduler_enabled: bool = True
     database_url: str = "postgresql+asyncpg://flowtest:flowtest@localhost:5432/flowtest"
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
@@ -49,12 +56,16 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "FlowTest-Change-Me-123!"  # noqa: S105
     secure_cookies: bool = False
     data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"
     s3_secret_key: str = "flowtest-local-secret"  # noqa: S105
     s3_bucket: str = "flowtest-artifacts"
     request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    mcp_api_base_url: str = "http://localhost:8000"
+    mcp_service_account_token: str = ""
+    mcp_client_version: str = "flowtest-mcp-s41"
+    mcp_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
     artifact_limit_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
     feature_teams_enabled: bool = False
@@ -134,9 +145,51 @@ class Settings(BaseSettings):
         self._validate_vault()
         self._validate_ai()
         self._validate_environment_lab()
+        self._validate_runtime_profile()
         self._validate_pact_broker()
+        self._validate_cors()
         self._validate_production()
         return self
+
+    def _validate_cors(self) -> None:
+        for origin in self.cors_origins:
+            try:
+                parsed = urlsplit(origin)
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError("CORS 来源必须是显式、无凭据和路径的 HTTP/HTTPS Origin") from exc
+            if (
+                origin.strip() == "*"
+                or origin.strip() != origin
+                or any(ord(character) < 33 for character in origin)
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.netloc.endswith(":")
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValueError("CORS 来源必须是显式、无凭据和路径的 HTTP/HTTPS Origin")
+
+    def _validate_runtime_profile(self) -> None:
+        profile = describe_runtime_profile(self.runtime_profile)
+        enabled_features = (
+            (RuntimeFeature.PERFORMANCE_LAB, self.feature_performance_lab_enabled),
+            (RuntimeFeature.ENVIRONMENT_LAB, self.feature_environment_lab_enabled),
+        )
+        unavailable = set(profile.unavailable_features)
+        conflicts = [
+            feature.value
+            for feature, enabled in enabled_features
+            if enabled and feature in unavailable
+        ]
+        if conflicts:
+            names = ", ".join(conflicts)
+            raise ValueError(f"{profile.profile.value} 运行档位不支持启用: {names}")
+        if self.runtime_profile is RuntimeProfile.STANDALONE and self.feature_runner_fabric_enabled:
+            raise ValueError("standalone 运行档位不支持 Runner Fabric")
 
     def _validate_environment_lab(self) -> None:
         if not self.feature_environment_lab_enabled:
@@ -196,9 +249,12 @@ class Settings(BaseSettings):
         unsafe = (
             self.secret_key == "change-me-before-production-at-least-32-bytes"  # noqa: S105
             or self.bootstrap_admin_password == "FlowTest-Change-Me-123!"  # noqa: S105
+            or self.bootstrap_admin_password == "admin"  # noqa: S105
+            or self.bootstrap_admin_password == "123456"  # noqa: S105
             or self.data_encryption_key == "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
-            or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
         )
+        if self.runtime_profile is not RuntimeProfile.STANDALONE:
+            unsafe = unsafe or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
         if unsafe or not self.secure_cookies:
             raise ValueError("生产环境必须替换默认密钥、管理员密码并启用安全 Cookie")
         if self.feature_oidc_enabled:

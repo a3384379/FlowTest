@@ -1,9 +1,10 @@
 from enum import StrEnum
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.api_assets import BodyKind
 from app.domain.assertions import ComparisonOperator
 from app.domain.capabilities import CapabilityId, SemanticVersion
 
@@ -200,10 +201,98 @@ class WorkflowSettings(BaseModel):
     default_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
+class ApiNodeRequestParameter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    value: str = Field(default="", max_length=65536)
+    enabled: bool = True
+
+
+class ApiNodeBodyOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: BodyKind
+    value: JsonValue = None
+
+    @model_validator(mode="after")
+    def validate_body_shape(self) -> "ApiNodeBodyOverride":
+        if self.kind is BodyKind.MULTIPART:
+            ApiNodeMultipartBody.model_validate(self.value)
+        if self.kind is BodyKind.NONE and self.value is not None:
+            raise ValueError("A none body override must use a null value")
+        return self
+
+
+class ApiNodeMultipartFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(min_length=1, max_length=160)
+    artifact_id: UUID
+
+
+class ApiNodeMultipartBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: dict[str, str] = Field(default_factory=dict)
+    files: tuple[ApiNodeMultipartFile, ...] = Field(default=(), max_length=20)
+
+
+class ApiNodeRequestOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query_parameters: tuple[ApiNodeRequestParameter, ...] | None = Field(
+        default=None,
+        max_length=200,
+    )
+    headers: dict[str, str] | None = None
+    body: ApiNodeBodyOverride | None = None
+    replace_headers: bool = False
+    auth_disabled: bool = False
+    auth_mode: Literal["inherit", "disabled"] | None = None
+    suppressed_headers: tuple[str, ...] = Field(default=(), max_length=200)
+    suppressed_query_parameters: tuple[str, ...] = Field(default=(), max_length=200)
+    suppressed_cookies: tuple[str, ...] = Field(default=(), max_length=200)
+
+    @model_validator(mode="after")
+    def validate_suppression_names(self) -> "ApiNodeRequestOverrides":
+        groups = (
+            (self.suppressed_headers, True),
+            (self.suppressed_query_parameters, False),
+            (self.suppressed_cookies, False),
+        )
+        for names, case_insensitive in groups:
+            if any(not name.strip() or any(char in name for char in "\r\n:;") for name in names):
+                raise ValueError("request suppression names must be valid HTTP token names")
+            normalized = [name.lower() if case_insensitive else name for name in names]
+            if len(normalized) != len(set(normalized)):
+                raise ValueError("request suppression names must be unique")
+        return self
+
+    @property
+    def effective_auth_mode(self) -> Literal["inherit", "disabled"]:
+        if self.auth_mode is not None:
+            return self.auth_mode
+        return "disabled" if self.auth_disabled else "inherit"
+
+
 class ApiNodeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_definition_id: UUID
+    api_version: int | None = Field(default=None, ge=1)
+    service_override: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=160,
+    )
+    endpoint_variant: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$",
+        max_length=80,
+    )
+    expected_statuses: tuple[int, ...] | None = Field(default=None, min_length=1, max_length=20)
+    request_overrides: ApiNodeRequestOverrides = Field(default_factory=ApiNodeRequestOverrides)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     max_retries: int = Field(default=0, ge=0, le=3)
     retry_on: tuple[RetryCategory, ...] = Field(
@@ -217,6 +306,11 @@ class ApiNodeConfig(BaseModel):
     def validate_retry_categories(self) -> "ApiNodeConfig":
         if len(self.retry_on) != len(set(self.retry_on)):
             raise ValueError("Retry categories must be unique")
+        if self.expected_statuses is not None:
+            if len(self.expected_statuses) != len(set(self.expected_statuses)):
+                raise ValueError("Expected statuses must be unique")
+            if any(status < 100 or status > 599 for status in self.expected_statuses):
+                raise ValueError("Expected statuses must be valid HTTP status codes")
         return self
 
 
@@ -236,6 +330,7 @@ class AssertNodeConfig(BaseModel):
     expression: str = Field(min_length=1, max_length=500)
     operator: ComparisonOperator = ComparisonOperator.EQUALS
     expected: JsonValue = None
+    assertion_type: Literal["comparison", "json_schema"] = "comparison"
 
 
 class ConditionNodeConfig(BaseModel):

@@ -2,6 +2,7 @@ export type ProjectSection =
   | 'dashboard'
   | 'settings'
   | 'services'
+  | 'request-targets'
   | 'apis'
   | 'protocols'
   | 'assets'
@@ -11,7 +12,9 @@ export type ProjectSection =
   | 'performance'
   | 'environments'
   | 'contracts'
+  | 'test-engineering'
   | 'impact'
+  | 'change-regression'
   | 'quality'
   | 'release'
   | 'ai'
@@ -19,6 +22,7 @@ export type ProjectSection =
   | 'reports'
   | 'platform'
   | 'fabric'
+  | 'organization'
 
 export function projectPath(projectId: string, section: ProjectSection): string {
   return `/projects/${projectId}/${section}`
@@ -41,6 +45,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'dashboard',
     'settings',
     'services',
+    'request-targets',
     'apis',
     'protocols',
     'assets',
@@ -50,7 +55,9 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'performance',
     'environments',
     'contracts',
+    'test-engineering',
     'impact',
+    'change-regression',
     'quality',
     'release',
     'ai',
@@ -58,5 +65,6 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'reports',
     'platform',
     'fabric',
+    'organization',
   ].includes(value ?? '')
 }

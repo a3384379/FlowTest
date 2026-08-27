@@ -85,6 +85,9 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
+    organization_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL"), index=True
+    )
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default="{}")
@@ -94,6 +97,9 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     outbound_allowed_private_cidrs: Mapped[list[str]] = mapped_column(
         JSON, default=list, server_default="[]"
+    )
+    outbound_policy_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
     )
     retention_days: Mapped[int] = mapped_column(Integer, default=90, server_default="90")
     execution_concurrency_limit: Mapped[int] = mapped_column(
@@ -195,6 +201,9 @@ class AuditLog(UuidPrimaryKeyMixin, Base):
 
     actor_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    organization_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL"), index=True
     )
     project_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL"), index=True

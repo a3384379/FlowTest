@@ -12,6 +12,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    NodeRunRecord,
     NodeStatusUpdate,
     WorkflowRunResult,
     WorkflowScheduler,
@@ -24,6 +25,7 @@ from app.runner.results import (
     RunnerSingleExecutionResult,
     RunnerWorkflowResult,
 )
+from app.schemas.runner_fabric import RunnerCheckpointResume
 from app.services.workflow_runtime import WorkflowNodeExecutor
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowRunPlan
 
@@ -40,6 +42,8 @@ class RemoteWorkflowExecutor:
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
         on_progress: RunnerProgressCallback | None = None,
+        resume_checkpoints: dict[str, list[RunnerCheckpointResume]] | None = None,
+        reset_retry_budget: bool = False,
     ) -> RunnerExecutionResult:
         if isinstance(plan, WorkflowBatchPlan):
             semaphore = asyncio.Semaphore(plan.concurrency)
@@ -51,6 +55,10 @@ class RemoteWorkflowExecutor:
                         network_policy=network_policy,
                         cancellation=cancellation,
                         on_progress=on_progress,
+                        resume_checkpoints=(resume_checkpoints or {}).get(
+                            str(child.execution_id), []
+                        ),
+                        reset_retry_budget=reset_retry_budget,
                     )
                     return RunnerBatchChildResult(
                         execution_id=child.execution_id,
@@ -67,6 +75,8 @@ class RemoteWorkflowExecutor:
             network_policy=network_policy,
             cancellation=cancellation,
             on_progress=on_progress,
+            resume_checkpoints=(resume_checkpoints or {}).get(str(plan.execution_id), []),
+            reset_retry_budget=reset_retry_budget,
         )
         return RunnerSingleExecutionResult(
             execution_id=plan.execution_id,
@@ -80,6 +90,8 @@ class RemoteWorkflowExecutor:
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
         on_progress: RunnerProgressCallback | None,
+        resume_checkpoints: list[RunnerCheckpointResume],
+        reset_retry_budget: bool,
     ) -> WorkflowRunResult:
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
@@ -97,16 +109,33 @@ class RemoteWorkflowExecutor:
                 if on_progress is not None:
                     await on_progress(plan.execution_id, update)
 
+            context = ExecutionContext(
+                workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
+                dataset_variables=plan.prepared.dataset_variables,
+                runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+            )
+            resume_records = tuple(_resume_record(item) for item in resume_checkpoints)
+            resume_attempts = {
+                node_id: max(
+                    item.attempts for item in resume_checkpoints if item.node_id == node_id
+                )
+                for node_id in {item.node_id for item in resume_checkpoints}
+            }
+            for item in resume_checkpoints:
+                context.restore_checkpoint(
+                    node_id=item.node_id,
+                    output=item.output,
+                    extracted_variables=item.extracted_variables,
+                )
             try:
                 result = await WorkflowScheduler(TracingNodeExecutor(node_executor)).run(
                     plan.definition,
-                    context=ExecutionContext(
-                        workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
-                        dataset_variables=plan.prepared.dataset_variables,
-                        runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
-                    ),
+                    context=context,
                     cancellation=cancellation,
                     on_node_status=publish,
+                    resume_records=resume_records,
+                    resume_attempts=resume_attempts,
+                    reset_retry_budget=reset_retry_budget,
                 )
             finally:
                 await node_executor.close()
@@ -124,3 +153,20 @@ class RemoteWorkflowExecutor:
             ),
             context=cast(dict[str, JsonValue], redact(result.context)),
         )
+
+
+def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:
+    return NodeRunRecord(
+        node_id=checkpoint.node_id,
+        node_type=checkpoint.node_type,
+        name=checkpoint.name,
+        status=checkpoint.status,
+        attempts=checkpoint.attempts,
+        output=checkpoint.output,
+        result=checkpoint.result,
+        error_code=checkpoint.error_code,
+        error_message=checkpoint.error_message,
+        started_at=checkpoint.started_at,
+        completed_at=checkpoint.completed_at,
+        input_hash=checkpoint.input_hash,
+    )

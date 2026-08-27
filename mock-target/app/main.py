@@ -1,13 +1,14 @@
 import asyncio
 import json
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import (
     FastAPI,
     File,
     Header,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     WebSocket,
@@ -30,6 +31,13 @@ class OrderRequest(BaseModel):
     amount: int = Field(gt=0)
 
 
+class S471OrderRequest(BaseModel):
+    quantity: int
+    type: str
+    remark: str | None = None
+    profile: dict[str, str]
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -38,9 +46,7 @@ async def health() -> dict[str, str]:
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
     if payload.username != "tester" or payload.password != "flowtest":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return {"code": 0, "data": {"token": "mock-token", "user_id": "user-001"}}
 
 
@@ -49,9 +55,7 @@ async def current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     return {"code": 0, "data": {"id": "user-001", "name": "测试用户"}}
 
 
@@ -61,10 +65,112 @@ async def create_order(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     return {"code": 0, "data": {"id": str(uuid4()), **payload.model_dump()}}
+
+
+@app.post("/tenants/{tenant_id}/orders")
+async def create_s471_order(
+    tenant_id: str,
+    payload: S471OrderRequest,
+    dry_run: Annotated[str | None, Query(alias="dryRun")] = None,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-Id")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    app.state.last_s471_request = {
+        "tenant_id": tenant_id,
+        "dry_run": dry_run,
+        "tenant_header_present": x_tenant_id is not None,
+        "authorization_present": authorization is not None,
+        "body": payload.model_dump(),
+    }
+    try:
+        UUID(tenant_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Invalid tenant id") from error
+    if authorization != "Bearer mock-token":
+        raise HTTPException(status_code=401, detail="Missing token")
+    if x_tenant_id is None:
+        raise HTTPException(status_code=400, detail="Missing tenant header")
+    if dry_run not in {None, "true", "false"}:
+        raise HTTPException(status_code=400, detail="Invalid dryRun")
+    if not 1 <= payload.quantity <= 999:
+        raise HTTPException(status_code=400, detail="Invalid quantity")
+    if payload.type not in {"NORMAL", "PRIORITY"}:
+        raise HTTPException(status_code=400, detail="Invalid order type")
+    if payload.remark is not None and len(payload.remark) > 20:
+        raise HTTPException(status_code=400, detail="Invalid remark")
+    if not payload.profile.get("display_name"):
+        raise HTTPException(status_code=400, detail="Invalid profile")
+    return {"id": str(uuid4()), "accepted": True}
+
+
+@app.get("/s47-1/requests/last")
+async def last_s471_request() -> dict[str, object]:
+    request = getattr(app.state, "last_s471_request", None)
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=404, detail="No S47.1 request")
+    return request
+
+
+@app.post("/s47-2/inspect")
+async def inspect_s472_request(request: Request) -> dict[str, bool]:
+    cookie_names = set(request.cookies)
+    query_names = set(request.query_params)
+    receipt: dict[str, object] = {
+        "path": request.url.path,
+        "query_names": sorted(query_names),
+        "cookie_names": sorted(cookie_names),
+        "authorization_present": "authorization" in request.headers,
+        "tenant_header_present": "x-tenant-id" in request.headers,
+        "api_key_present": "api_key" in query_names,
+        "auth_cookie_present": bool({"session", "auth_session"}.intersection(cookie_names)),
+        "service_metadata": request.headers.get("x-service-metadata"),
+    }
+    app.state.last_s472_request = receipt
+    return {
+        "authorization_present": bool(receipt["authorization_present"]),
+        "tenant_header_present": bool(receipt["tenant_header_present"]),
+        "api_key_present": bool(receipt["api_key_present"]),
+        "auth_cookie_present": bool(receipt["auth_cookie_present"]),
+    }
+
+
+@app.get("/s47-2/requests/last")
+async def last_s472_request() -> dict[str, object]:
+    request = getattr(app.state, "last_s472_request", None)
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=404, detail="No S47.2 request")
+    return request
+
+
+@app.post("/s47-2/exclusive")
+async def exclusive_s472_boundary(request: Request) -> Response:
+    payload = await request.json()
+    upper = payload.get("upper") if isinstance(payload, dict) else None
+    lower = payload.get("lower") if isinstance(payload, dict) else None
+    valid = (
+        isinstance(upper, int)
+        and not isinstance(upper, bool)
+        and upper < 999
+        and isinstance(lower, int)
+        and not isinstance(lower, bool)
+        and lower > 1
+    )
+    app.state.last_s472_exclusive = {"body": payload, "valid": valid}
+    return Response(
+        json.dumps({"valid": valid}),
+        status_code=200 if valid else 400,
+        media_type="application/json",
+    )
+
+
+@app.get("/s47-2/exclusive/last")
+async def last_s472_exclusive() -> dict[str, object]:
+    receipt = getattr(app.state, "last_s472_exclusive", None)
+    if not isinstance(receipt, dict):
+        raise HTTPException(status_code=404, detail="No S47.2 exclusive request")
+    return receipt
 
 
 @app.post("/upload")
@@ -165,9 +271,7 @@ async def receive_flowtest_notification(request: Request) -> Response:
 async def last_flowtest_notification() -> dict[str, object]:
     notification = getattr(app.state, "last_notification", None)
     if not isinstance(notification, dict):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No notification"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notification")
     return notification
 
 
@@ -177,22 +281,14 @@ async def openai_compatible_completion(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer flowtest-mock-ai-key":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key")
     payload = await request.json()
     messages = payload.get("messages")
     if not isinstance(messages, list) or len(messages) < 2:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt"
-        )
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt")
     user_message = messages[-1]
-    if not isinstance(user_message, dict) or not isinstance(
-        user_message.get("content"), str
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt"
-        )
+    if not isinstance(user_message, dict) or not isinstance(user_message.get("content"), str):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt")
     prompt = json.loads(user_message["content"])
     encoded_prompt = json.dumps(prompt, ensure_ascii=False)
     if "must-not-reach-ai" in encoded_prompt:
@@ -208,9 +304,7 @@ async def openai_compatible_completion(
         )
     suggestions = _ai_suggestions(str(job_type))
     return {
-        "choices": [
-            {"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}
-        ],
+        "choices": [{"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}],
         "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
     }
 

@@ -7,6 +7,9 @@ on:
       - "frontend/**"
       - "mock-target/**"
       - "compose.yaml"
+      - "deploy/compact/**"
+      - "deploy/compatibility/**"
+      - "deploy/s47/**"
       - "scripts/smoke_s3.py"
       - "scripts/smoke_s4.py"
       - "scripts/smoke_s5.py"
@@ -29,6 +32,8 @@ on:
       - "scripts/smoke_s29.py"
       - "scripts/smoke_s30.py"
       - "scripts/smoke_s31.py"
+      - "scripts/smoke_s32.py"
+      - "scripts/smoke_s47.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -45,6 +50,9 @@ on:
       - "frontend/**"
       - "mock-target/**"
       - "compose.yaml"
+      - "deploy/compact/**"
+      - "deploy/compatibility/**"
+      - "deploy/s47/**"
       - "scripts/smoke_s3.py"
       - "scripts/smoke_s4.py"
       - "scripts/smoke_s5.py"
@@ -67,6 +75,8 @@ on:
       - "scripts/smoke_s29.py"
       - "scripts/smoke_s30.py"
       - "scripts/smoke_s31.py"
+      - "scripts/smoke_s32.py"
+      - "scripts/smoke_s47.py"
       - "scripts/verify_kafka_compat.py"
       - "scripts/storage_transfer.py"
       - "scripts/capacity_s11.py"
@@ -76,11 +86,169 @@ on:
       - "scripts/backup.sh"
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  compact-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13.15"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install Compact acceptance tooling
+        run: uv sync --project backend --locked
+      - name: Start and verify six-service Compact stack
+        run: ./deploy/compact/start.sh
+      - name: Verify Compact login, publish, and consolidated Worker flow
+        run: |
+          set -a
+          source deploy/compact/.env
+          set +a
+          FLOWTEST_SMOKE_API_URL=http://127.0.0.1:3000/api/v1 \
+          FLOWTEST_SMOKE_ADMIN_EMAIL="${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL}" \
+          FLOWTEST_SMOKE_ADMIN_PASSWORD="${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD}" \
+          FLOWTEST_SMOKE_TARGET_URL=http://backend:8000/api/v1 \
+            python3 scripts/smoke_s32.py
+      - name: Verify non-empty Compact backup and restore
+        run: |
+          backup_parent="$(mktemp -d)"
+          ./deploy/compact/backup.sh "${backup_parent}/snapshot"
+          FLOWTEST_RESTORE_CONFIRM=RESTORE \
+            ./deploy/compact/restore.sh "${backup_parent}/snapshot"
+      - name: Verify Compact Worker after recovery
+        run: |
+          set -a
+          source deploy/compact/.env
+          set +a
+          FLOWTEST_SMOKE_API_URL=http://127.0.0.1:3000/api/v1 \
+          FLOWTEST_SMOKE_ADMIN_EMAIL="${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL}" \
+          FLOWTEST_SMOKE_ADMIN_PASSWORD="${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD}" \
+          FLOWTEST_SMOKE_TARGET_URL=http://backend:8000/api/v1 \
+            python3 scripts/smoke_s32.py
+      - name: Export architecture-specific offline bundle
+        run: ./deploy/compact/export_offline_bundle.sh /tmp/flowtest-compact-ci-amd64.tar.gz ci
+      - name: Verify cold offline import without build or pull
+        run: |
+          docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml down --volumes
+          offline_parent="$(mktemp -d)"
+          tar -xzf /tmp/flowtest-compact-ci-amd64.tar.gz -C "${offline_parent}"
+          offline_root="$(find "${offline_parent}" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          while IFS=$'\t' read -r _ image_reference _; do
+            docker image rm "${image_reference}"
+          done <"${offline_root}/images.manifest"
+          "${offline_root}/deploy/compact/install_offline.sh"
+          echo "FLOWTEST_OFFLINE_ROOT=${offline_root}" >>"${GITHUB_ENV}"
+      - name: Verify business flow from offline images
+        run: |
+          set -a
+          source "${FLOWTEST_OFFLINE_ROOT}/deploy/compact/.env"
+          set +a
+          FLOWTEST_SMOKE_API_URL=http://127.0.0.1:3000/api/v1 \
+          FLOWTEST_SMOKE_ADMIN_EMAIL="${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL}" \
+          FLOWTEST_SMOKE_ADMIN_PASSWORD="${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD}" \
+          FLOWTEST_SMOKE_TARGET_URL=http://backend:8000/api/v1 \
+            python3 scripts/smoke_s32.py
+      - name: Verify offline upgrade auto-rollback and evidence
+        run: |
+          upgrade_parent="$(mktemp -d)"
+          if FLOWTEST_S36_FORCE_POST_START_FAILURE=1 \
+            "${FLOWTEST_OFFLINE_ROOT}/deploy/compact/upgrade_offline.sh" \
+            "${FLOWTEST_OFFLINE_ROOT}/deploy/compact" \
+            "${upgrade_parent}/failed-backup" \
+            "${upgrade_parent}/failed-evidence.json"; then
+            echo "强制失败升级不应返回成功" >&2
+            exit 1
+          fi
+          python3 -c \
+            'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"] == "rolled_back"; assert d["failure_stage"] == "forced_post_start"; assert d["rollback_status"] == "passed"' \
+            "${upgrade_parent}/failed-evidence.json"
+          "${FLOWTEST_OFFLINE_ROOT}/deploy/compact/verify.sh"
+          "${FLOWTEST_OFFLINE_ROOT}/deploy/compact/upgrade_offline.sh" \
+            "${FLOWTEST_OFFLINE_ROOT}/deploy/compact" \
+            "${upgrade_parent}/successful-backup" \
+            "${upgrade_parent}/successful-evidence.json"
+          python3 -c \
+            'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"] == "passed"; assert d["failure_stage"] == "none"; assert d["rollback_status"] == "not_required"' \
+            "${upgrade_parent}/successful-evidence.json"
+      - name: Verify Compact resource and Workflow baseline
+        env:
+          FLOWTEST_S34_API_REQUESTS: "200"
+          FLOWTEST_S34_API_CONCURRENCY: "10"
+          FLOWTEST_S34_WORKFLOW_REQUESTS: "8"
+          FLOWTEST_S34_WORKFLOW_CONCURRENCY: "2"
+          FLOWTEST_COMPACT_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/.env
+          FLOWTEST_COMPACT_IMAGE_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/images.env
+        run: ./deploy/compact/benchmark.sh /tmp/flowtest-s34-benchmark.json
+      - name: Verify Compact stability probe
+        env:
+          FLOWTEST_S34_SOAK_DURATION_SECONDS: "10"
+          FLOWTEST_S34_SOAK_INTERVAL_SECONDS: "2"
+          FLOWTEST_COMPACT_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/.env
+          FLOWTEST_COMPACT_IMAGE_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/images.env
+        run: ./deploy/compact/soak.sh /tmp/flowtest-s34-soak.json
+      - name: Verify privacy-safe Compact support bundle
+        env:
+          FLOWTEST_COMPACT_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/.env
+          FLOWTEST_COMPACT_IMAGE_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/images.env
+        run: |
+          support_parent="$(mktemp -d)"
+          support_directory="${support_parent}/support"
+          ./deploy/compact/collect_support_bundle.sh "${support_directory}"
+          set -a
+          source "${FLOWTEST_COMPACT_ENV_FILE}"
+          set +a
+          for sensitive_value in \
+            "${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD}" \
+            "${FLOWTEST_DATA_ENCRYPTION_KEY}" \
+            "${FLOWTEST_SECRET_KEY}" \
+            "${MINIO_ROOT_PASSWORD}"; do
+            if grep -R -F -q -- "${sensitive_value}" "${support_directory}"; then
+              echo "Compact 诊断目录包含部署凭据" >&2
+              exit 1
+            fi
+          done
+      - name: Verify bidirectional Full and Compact asset compatibility
+        env:
+          FLOWTEST_COMPACT_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/.env
+          FLOWTEST_COMPACT_IMAGE_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/images.env
+        run: ./deploy/compact/verify_profile_compatibility.sh /tmp/flowtest-s34-compatibility.json
+      - name: Verify Compact rollback and post-restore write
+        env:
+          FLOWTEST_COMPACT_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/.env
+          FLOWTEST_COMPACT_IMAGE_ENV_FILE: ${{ env.FLOWTEST_OFFLINE_ROOT }}/deploy/compact/images.env
+        run: |
+          rollback_parent="$(mktemp -d)"
+          ./deploy/compact/drill_rollback.sh \
+            "${rollback_parent}/baseline" \
+            "${rollback_parent}/evidence.json"
+          python3 -m json.tool "${rollback_parent}/evidence.json" >/dev/null
+      - name: Retain verified amd64 offline candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flowtest-compact-ci-amd64-${{ github.sha }}
+          path: |
+            /tmp/flowtest-compact-ci-amd64.tar.gz
+            /tmp/flowtest-compact-ci-amd64.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Print Compact logs on failure
+        if: failure()
+        run: docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml logs --no-color --tail=300
+      - name: Stop Compact stack
+        if: always()
+        run: docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml down --volumes
+
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -104,7 +272,7 @@ jobs:
       FLOWTEST_FEATURE_EVENT_PROTOCOLS_ENABLED: "true"
       FLOWTEST_FEATURE_PERFORMANCE_LAB_ENABLED: "true"
       FLOWTEST_FEATURE_ENVIRONMENT_LAB_ENABLED: "true"
-      FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '["nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3"]'
+      FLOWTEST_ENVIRONMENT_IMAGE_ALLOWLIST: '["cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33"]'
       FLOWTEST_AI_BASE_URL: http://mock-target:8080/v1
       FLOWTEST_AI_MODEL: flowtest-compose-model
       FLOWTEST_AI_API_KEY: flowtest-mock-ai-key
@@ -212,6 +380,16 @@ jobs:
         run: python3 scripts/smoke_s30.py
       - name: Verify S31 global search and immutable release gate flow
         run: python3 scripts/smoke_s31.py
+      - name: Verify isolated S14 before S47
+        run: >-
+          pnpm --dir frontend exec playwright test
+          e2e/s14-management-workbench.spec.ts --project=chromium --no-deps
+      - name: Verify S47.7 runtime release evidence, lifecycle, security, MCP, and FlowSpec v3
+        run: python3 scripts/smoke_s47.py
+      - name: Verify isolated S14 after S47
+        run: >-
+          pnpm --dir frontend exec playwright test
+          e2e/s14-management-workbench.spec.ts --project=chromium --no-deps
       - name: Verify Apache Kafka 4.3.1 compatibility
         run: |
           docker compose stop redpanda

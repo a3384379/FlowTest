@@ -1,12 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { administratorEmail, authenticate } from './support/auth'
 
-test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => {
+test('S14 团队、测试资产与 API 工作台主路径', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  const suffix = Date.now().toString()
+  const suffix = `${Date.now()}-${testInfo.retry}`
   const environmentName = `S14 环境 ${suffix}`
   const apiName = `S14 接口 ${suffix}`
+  const renamedApiName = `${apiName} 已重命名`
   const folderName = `S14 目录 ${suffix}`
   const renamedFolder = `${folderName} 已编辑`
   const secretName = `S14_SECRET_${suffix}`
@@ -15,12 +16,14 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
 
   await page.goto('/')
   await authenticate(page)
+  const projectId = await createIsolatedProject(page.request, suffix)
+  await page.goto(`/projects/${projectId}/apis`)
 
-  await page.getByRole('link', { name: '接口管理' }).click()
   await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
   await createEnvironment(page, environmentName)
   await createApi(page, apiName)
-  await editApiVersion(page, apiName)
+  await renameApi(page, apiName, renamedApiName)
+  await editApiVersion(page, renamedApiName)
 
   await page.getByRole('link', { name: '项目管理' }).click()
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
@@ -31,6 +34,21 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }) => 
   await expect(page.locator('body')).not.toContainText(secretValue)
 })
 
+async function createIsolatedProject(request: APIRequestContext, suffix: string): Promise<string> {
+  const refresh = await request.post('/api/v1/auth/refresh')
+  expect(refresh.ok(), await refresh.text()).toBeTruthy()
+  const token = ((await refresh.json()) as { access_token: string }).access_token
+  const created = await request.post('/api/v1/projects', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      name: `S14 隔离项目 ${suffix}`,
+      description: 'S14 顺序独立浏览器验收',
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  return ((await created.json()) as { id: string }).id
+}
+
 async function createEnvironment(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: '新建环境' }).click()
   const dialog = page.getByRole('dialog', { name: '新建环境' })
@@ -38,6 +56,20 @@ async function createEnvironment(page: import('@playwright/test').Page, name: st
   await dialog.getByLabel('基础 URL').fill('http://mock-target.test:8080')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
   await expect(page.getByText(name, { exact: true })).toBeVisible()
+}
+
+async function renameApi(
+  page: import('@playwright/test').Page,
+  currentName: string,
+  renamedName: string,
+) {
+  await workbench(page, currentName).getByRole('button', { name: '重命名接口' }).click()
+  const dialog = page.getByRole('dialog', { name: '重命名接口' })
+  await dialog.getByLabel('接口名称').fill(renamedName)
+  await dialog.getByRole('button', { name: /保\s*存/ }).click()
+  await expect(page.getByText('接口名称已更新').last()).toBeVisible()
+  await expect(workbench(page, renamedName)).toBeVisible()
+  await expect(workbench(page, renamedName).getByText('v1', { exact: true })).toBeVisible()
 }
 
 async function createApi(page: import('@playwright/test').Page, name: string) {
@@ -53,9 +85,20 @@ async function createApi(page: import('@playwright/test').Page, name: string) {
 async function editApiVersion(page: import('@playwright/test').Page, apiName: string) {
   const panel = workbench(page, apiName)
   await panel.getByRole('tab', { name: 'Params' }).click()
-  await panel.getByRole('button', { name: '添加一行' }).click()
-  await panel.getByPlaceholder('参数名').fill('source')
-  await panel.getByPlaceholder('值或 {{变量}}').fill('s14')
+  await panel.getByRole('button', { name: '批量编辑' }).click()
+  await panel.getByLabel('批量编辑 Params').fill('source: s14\n# disabled: ignored')
+  await panel.getByRole('button', { name: '应用并返回表格' }).click()
+
+  await panel.getByRole('tab', { name: 'Headers' }).click()
+  await panel.getByRole('button', { name: '批量编辑' }).click()
+  await panel.getByLabel('批量编辑 Headers').fill('X-S14-Bulk: enabled')
+  await panel.getByRole('button', { name: '应用并返回表格' }).click()
+
+  await panel.getByRole('tab', { name: 'Body' }).click()
+  await panel.getByText('raw', { exact: true }).click()
+  await panel.getByLabel('raw 数据类型').click()
+  await page.getByText('Text', { exact: true }).last().click()
+  await panel.getByLabel('原始 Body').fill('s14 raw payload')
 
   await panel.getByRole('tab', { name: '提取' }).click()
   await panel.getByRole('button', { name: '添加一行' }).click()
@@ -72,6 +115,9 @@ async function editApiVersion(page: import('@playwright/test').Page, apiName: st
   const preview = page.getByRole('dialog', { name: '最终请求预览（Secret 已脱敏）' })
   await expect(preview).toContainText('http://mock-target.test:8080/echo')
   await expect(preview).toContainText('source')
+  await expect(preview).toContainText('X-S14-Bulk')
+  await expect(preview).toContainText('text/plain')
+  await expect(preview).toContainText('s14 raw payload')
   await page.keyboard.press('Escape')
 }
 
@@ -108,7 +154,7 @@ async function updateProjectConfiguration(page: import('@playwright/test').Page,
   )
   await saveButton.click()
   expect((await saved).ok()).toBeTruthy()
-  await expect(saveButton).toBeEnabled()
+  await expect(saveButton).not.toHaveClass(/ant-btn-loading/)
 }
 
 async function writeSecret(page: import('@playwright/test').Page, name: string, value: string) {
@@ -116,12 +162,14 @@ async function writeSecret(page: import('@playwright/test').Page, name: string, 
   const panel = page.getByRole('tabpanel', { name: 'Secret' })
   await panel.getByPlaceholder('Secret 名称').fill(name)
   await panel.getByPlaceholder('仅写入，不可读回').fill(value)
+  const saveButton = panel.getByRole('button', { name: '写入 Secret' })
+  await expect(saveButton).not.toHaveClass(/ant-btn-loading/)
   const saved = page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' && response.url().endsWith('/secrets') && response.ok(),
   )
-  await panel.getByRole('button', { name: '写入 Secret' }).click()
-  await saved
+  await saveButton.click()
+  expect((await saved).ok()).toBeTruthy()
   await expect(panel.getByRole('row').filter({ hasText: name })).toContainText('已加密 · 不可读回')
 }
 

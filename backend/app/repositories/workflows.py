@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflows import (
@@ -98,16 +98,24 @@ class WorkflowRepository:
         return await self._session.get(WorkflowExecution, execution_id)
 
     async def list_executions(
-        self, *, project_id: UUID, offset: int, limit: int
+        self,
+        *,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        offset: int,
+        limit: int,
     ) -> tuple[list[WorkflowExecution], int]:
+        criteria = [
+            WorkflowExecution.project_id == project_id,
+            WorkflowExecution.parent_execution_id.is_(None),
+        ]
+        if workflow_id is not None:
+            criteria.append(WorkflowExecution.workflow_id == workflow_id)
         items = list(
             (
                 await self._session.scalars(
                     select(WorkflowExecution)
-                    .where(
-                        WorkflowExecution.project_id == project_id,
-                        WorkflowExecution.parent_execution_id.is_(None),
-                    )
+                    .where(*criteria)
                     .order_by(WorkflowExecution.started_at.desc())
                     .offset(offset)
                     .limit(limit)
@@ -115,12 +123,7 @@ class WorkflowRepository:
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count())
-            .select_from(WorkflowExecution)
-            .where(
-                WorkflowExecution.project_id == project_id,
-                WorkflowExecution.parent_execution_id.is_(None),
-            )
+            select(func.count()).select_from(WorkflowExecution).where(*criteria)
         )
         return items, int(total or 0)
 
@@ -156,3 +159,13 @@ class WorkflowRepository:
                 )
             ).all()
         )
+
+    async def replace_node_executions(
+        self, execution_id: UUID, entities: Sequence[WorkflowNodeExecution]
+    ) -> None:
+        await self._session.execute(
+            delete(WorkflowNodeExecution).where(
+                WorkflowNodeExecution.workflow_execution_id == execution_id
+            )
+        )
+        self.add_all(entities)

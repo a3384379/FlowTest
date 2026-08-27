@@ -167,6 +167,118 @@ class TestPlanService:
         plan = await self._get_project_plan(project_id, plan_id)
         return TestPlanDetail(plan, await self._tasks.list_plan_items(plan.id))
 
+    async def add_item(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        plan_id: UUID,
+        item: TestPlanItemInput,
+    ) -> TestPlanDetail:
+        """Explicitly append one validated, pinned asset to an existing plan."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        plan = await self._get_project_plan(project_id, plan_id)
+        existing = await self._tasks.list_plan_items(plan.id)
+        target_id = item.target_id or item.workflow_id
+        if target_id is None:
+            raise AppError(
+                code="INVALID_TEST_PLAN_ITEM",
+                message="测试计划项缺少目标",
+                status_code=422,
+            )
+        if any(
+            current.target_type == item.target_type.value and current.target_id == target_id
+            for current in existing
+        ):
+            raise AppError(
+                code="TEST_PLAN_ITEM_EXISTS",
+                message="测试资产已在当前计划中",
+                status_code=409,
+            )
+        if item.target_type is TestTargetType.WORKFLOW:
+            models = await self._build_items(project_id, plan.id, [item])
+            model = models[0]
+            model.position = len(existing)
+        else:
+            model = await self._build_asset_item(
+                plan.id,
+                len(existing),
+                project_id,
+                item,
+            )
+        self._tasks.add(model)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="test_plan.item_added",
+            resource_type="test_plan",
+            resource_id=plan.id,
+            details={
+                "target_type": model.target_type,
+                "target_id": str(model.target_id),
+                "target_version": model.target_version,
+            },
+        )
+        await self._session.commit()
+        return TestPlanDetail(plan, [*existing, model])
+
+    async def replace_item_version(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        plan_id: UUID,
+        item: TestPlanItemInput,
+    ) -> TestPlanDetail:
+        """Explicitly replace one plan target with another validated immutable version."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        plan = await self._get_project_plan(project_id, plan_id)
+        existing = await self._tasks.list_plan_items(plan.id)
+        target_id = item.target_id or item.workflow_id
+        matches = [
+            current
+            for current in existing
+            if current.target_type == item.target_type.value and current.target_id == target_id
+        ]
+        if len(matches) != 1:
+            raise AppError(
+                code="TEST_PLAN_ITEM_REPLACEMENT_UNAVAILABLE",
+                message="当前计划中不存在唯一可替换的测试资产",
+                status_code=409,
+            )
+        replacement = (
+            (await self._build_items(project_id, plan.id, [item]))[0]
+            if item.target_type is TestTargetType.WORKFLOW
+            else await self._build_asset_item(plan.id, matches[0].position, project_id, item)
+        )
+        current = matches[0]
+        old_version = current.target_version
+        current.target_version = replacement.target_version
+        current.workflow_id = replacement.workflow_id
+        current.environment_id = replacement.environment_id
+        current.workflow_version = replacement.workflow_version
+        current.max_retries = replacement.max_retries
+        current.runtime_variables = replacement.runtime_variables
+        current.runtime_headers = replacement.runtime_headers
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="test_plan.item_version_replaced",
+            resource_type="test_plan",
+            resource_id=plan.id,
+            details={
+                "target_type": current.target_type,
+                "target_id": str(current.target_id),
+                "old_target_version": old_version,
+                "target_version": current.target_version,
+                "workflow_version": current.workflow_version,
+            },
+        )
+        await self._session.commit()
+        return TestPlanDetail(plan, existing)
+
     async def update(
         self,
         *,

@@ -9,6 +9,7 @@ import {
   createApiVersion,
   createEnvironment,
   createProject,
+  discoverApiDocumentUrl,
   downloadArtifact,
   executeApi,
   exportApis,
@@ -20,7 +21,9 @@ import {
   listExecutions,
   listProjects,
   previewApiDocument,
+  previewApiDocumentUrl,
   previewApi,
+  updateApiDefinition,
   uploadArtifact,
 } from './api-service'
 
@@ -108,6 +111,7 @@ describe('API console service', () => {
   })
 
   it('loads, versions, previews, and exports an API workbench document', async () => {
+    const previewPayloads: unknown[] = []
     const version = {
       id: 'version-1',
       api_definition_id: apiDefinition.id,
@@ -135,6 +139,10 @@ describe('API console service', () => {
       http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
         HttpResponse.json(detail),
       ),
+      http.patch(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, async ({ request }) => {
+        expect(await request.json()).toEqual({ name: '查询订单详情' })
+        return HttpResponse.json({ ...apiDefinition, name: '查询订单详情' })
+      }),
       http.post(
         `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/versions`,
         async ({ request }) => {
@@ -145,17 +153,16 @@ describe('API console service', () => {
       http.post(
         `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/preview`,
         async ({ request }) => {
-          expect(await request.json()).toEqual({
-            environment_id: environment.id,
-            runtime_variables: {},
-            runtime_headers: {},
-          })
+          previewPayloads.push(await request.json())
           return HttpResponse.json(preview)
         },
       ),
     )
 
     expect(await getApiDetail(project.id, apiDefinition.id)).toEqual(detail)
+    expect(
+      await updateApiDefinition(project.id, apiDefinition.id, { name: '查询订单详情' }),
+    ).toMatchObject({ name: '查询订单详情' })
     expect(
       await createApiVersion(project.id, apiDefinition.id, {
         method: version.method,
@@ -170,6 +177,32 @@ describe('API console service', () => {
       }),
     ).toMatchObject({ version: 2 })
     expect(await previewApi(project.id, apiDefinition.id, environment.id)).toEqual(preview)
+    expect(
+      await previewApi(project.id, apiDefinition.id, environment.id, {
+        version: 1,
+        queryParametersOverride: [],
+        headersOverride: { 'X-Node': 'custom' },
+        bodyOverride: { amount: 100 },
+        useBodyOverride: true,
+      }),
+    ).toEqual(preview)
+    expect(previewPayloads).toEqual([
+      {
+        environment_id: environment.id,
+        runtime_variables: {},
+        runtime_headers: {},
+      },
+      {
+        environment_id: environment.id,
+        runtime_variables: {},
+        runtime_headers: {},
+        version: 1,
+        query_parameters_override: [],
+        headers_override: { 'X-Node': 'custom' },
+        body_override: { amount: 100 },
+        use_body_override: true,
+      },
+    ])
 
     const createObjectUrl = vi.fn(() => 'blob:export')
     const revokeObjectUrl = vi.fn()
@@ -205,8 +238,12 @@ describe('API console service', () => {
     const importRun = {
       id: 'import-1',
       project_id: project.id,
+      source_kind: 'file' as const,
+      source_key: 'file:openapi.json',
       source_type: 'openapi3' as const,
       source_name: 'openapi.json',
+      source_url: null,
+      document_url: null,
       source_sha256: 'source-digest',
       added: 1,
       changed: 0,
@@ -224,6 +261,39 @@ describe('API console service', () => {
         expect((form.get('document') as Blob).size).toBeGreaterThan(0)
         expect(form.get('source_type')).toBe('auto')
         return HttpResponse.json(importRun, { status: 201 })
+      }),
+      http.post(`/api/v1/projects/${project.id}/imports/url/discover`, async ({ request }) => {
+        expect(await request.json()).toEqual({
+          url: 'https://api.example.com/swagger-ui/index.html',
+        })
+        return HttpResponse.json({
+          source_url: 'https://api.example.com/swagger-ui/index.html',
+          source_kind: 'swagger_ui',
+          documents: [
+            {
+              id: 'a'.repeat(64),
+              name: '用户服务',
+              url: 'https://api.example.com/v3/api-docs/users',
+            },
+          ],
+        })
+      }),
+      http.post(`/api/v1/projects/${project.id}/imports/url/preview`, async ({ request }) => {
+        expect(await request.json()).toEqual({
+          url: 'https://api.example.com/openapi.json',
+          source_type: 'openapi3',
+          document_id: 'a'.repeat(64),
+        })
+        return HttpResponse.json(
+          {
+            ...importRun,
+            source_kind: 'url',
+            source_key: 'url:digest',
+            source_url: 'https://api.example.com/openapi.json',
+            document_url: 'https://api.example.com/openapi.json',
+          },
+          { status: 201 },
+        )
       }),
       http.post(
         `/api/v1/projects/${project.id}/imports/${importRun.id}/merge`,
@@ -253,6 +323,17 @@ describe('API console service', () => {
         new File(['{}'], 'openapi.json', { type: 'application/json' }),
       ),
     ).toEqual(importRun)
+    expect(
+      await discoverApiDocumentUrl(project.id, 'https://api.example.com/swagger-ui/index.html'),
+    ).toMatchObject({ source_kind: 'swagger_ui', documents: [{ name: '用户服务' }] })
+    expect(
+      await previewApiDocumentUrl(
+        project.id,
+        'https://api.example.com/openapi.json',
+        'openapi3',
+        'a'.repeat(64),
+      ),
+    ).toMatchObject({ source_kind: 'url', source_key: 'url:digest' })
     expect((await mergeApiImport(project.id, importRun.id, ['api-key'])).status).toBe('applied')
     expect((await listArtifacts(project.id)).items).toEqual([artifact])
     expect(

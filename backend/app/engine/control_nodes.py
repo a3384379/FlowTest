@@ -3,6 +3,8 @@ from typing import cast
 
 import jmespath
 from jmespath.exceptions import JMESPathError
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from pydantic import JsonValue
 
 from app.domain.assertions import compare_values
@@ -37,7 +39,7 @@ async def execute_control_node(node: WorkflowNode, context: ExecutionContext) ->
             return {"seconds": config.seconds}
         if isinstance(config, DatasetNodeConfig):
             return {"row": dict(context.dataset_variables)}
-    except JMESPathError as error:
+    except (JMESPathError, SchemaError) as error:
         raise NodeExecutionError(
             code="INVALID_JMESPATH",
             message=f"节点 {node.name} 的 JMESPath 表达式无效",
@@ -71,8 +73,13 @@ def _extract(config: ExtractNodeConfig, context: ExecutionContext) -> JsonValue:
 
 def _assert(config: AssertNodeConfig, context: ExecutionContext) -> JsonValue:
     actual = _search(context, config.source_node_id, config.expression)
+    passed = (
+        _schema_matches(actual, config.expected)
+        if config.assertion_type == "json_schema"
+        else (compare_values(actual, config.expected, config.operator))
+    )
     output: dict[str, JsonValue] = {
-        "passed": compare_values(actual, config.expected, config.operator),
+        "passed": passed,
         "actual": actual,
         "expected": config.expected,
         "operator": config.operator.value,
@@ -86,6 +93,12 @@ def _assert(config: AssertNodeConfig, context: ExecutionContext) -> JsonValue:
             output=output,
         )
     return output
+
+
+def _schema_matches(actual: JsonValue, expected: JsonValue) -> bool:
+    if not isinstance(expected, dict):
+        raise SchemaError("JSON Schema assertion expected must be an object")
+    return not any(Draft202012Validator(expected).iter_errors(actual))
 
 
 def _condition(config: ConditionNodeConfig, context: ExecutionContext) -> JsonValue:

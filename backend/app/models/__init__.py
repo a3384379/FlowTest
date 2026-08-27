@@ -17,6 +17,11 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.artifacts import Artifact
 from app.models.base import Base
 from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
+from app.models.change_regression import (
+    ChangeRegressionRun,
+    ChangeRegressionStage,
+    SemanticGapWaiver,
+)
 from app.models.contracts import (
     ContractRun,
     DeploymentCompatibilityCheck,
@@ -26,15 +31,17 @@ from app.models.contracts import (
     ServiceCatalogEntry,
 )
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
+from app.models.durable_execution import ExecutionCheckpoint, ExecutionCommand
 from app.models.environment_lab import (
     EnvironmentInstance,
     EnvironmentTemplate,
     EnvironmentTemplateVersion,
 )
 from app.models.executions import APICallExecution, AssertionResult
-from app.models.governance import IdempotencyRecord
+from app.models.governance import IdempotencyRecord, OrganizationGovernance, OrganizationKeyVersion
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
+from app.models.organizations import Organization, OrganizationMember, ServiceAccount
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
@@ -47,6 +54,7 @@ from app.models.runner_fabric import (
     RunnerRegistrationToken,
     RunnerTask,
 )
+from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import (
     TestCase,
@@ -55,6 +63,7 @@ from app.models.test_assets import (
     TestSuiteVersion,
     TestSuiteVersionItem,
 )
+from app.models.test_design import ChangeSetApproval, TestDesign
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
 __all__ = [
@@ -70,6 +79,9 @@ __all__ = [
     "AuditLog",
     "Base",
     "Capability",
+    "ChangeRegressionRun",
+    "ChangeRegressionStage",
+    "ChangeSetApproval",
     "ContractRun",
     "CoverageSnapshot",
     "Credential",
@@ -79,6 +91,8 @@ __all__ = [
     "EnvironmentTemplate",
     "EnvironmentTemplateVersion",
     "EventSource",
+    "ExecutionCheckpoint",
+    "ExecutionCommand",
     "FailureCluster",
     "FlakyRecord",
     "Folder",
@@ -93,6 +107,10 @@ __all__ = [
     "NotificationDelivery",
     "NotificationWebhook",
     "OIDCLoginTransaction",
+    "Organization",
+    "OrganizationGovernance",
+    "OrganizationKeyVersion",
+    "OrganizationMember",
     "PactContractVersion",
     "PactProviderVerification",
     "PerformanceGateEvaluation",
@@ -116,12 +134,17 @@ __all__ = [
     "RunnerTask",
     "SchemaArtifact",
     "Secret",
+    "SemanticGapWaiver",
+    "Service",
+    "ServiceAccount",
     "ServiceCatalogEntry",
+    "ServiceEndpoint",
     "ServiceToken",
     "Team",
     "TeamMember",
     "TestCase",
     "TestCaseVersion",
+    "TestDesign",
     "TestPlan",
     "TestPlanItem",
     "TestPlanRun",

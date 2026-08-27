@@ -7,7 +7,9 @@ import {
   type ExecutionEvent,
   type WorkflowDebugResult,
   type WorkflowDefinition,
+  type WorkflowExecution,
   type WorkflowExecutionDetail,
+  type WorkflowNodeExecution,
   type WorkflowVersionDiff,
 } from '../../lib/api'
 import { useAuthStore } from '../auth/auth-store'
@@ -36,6 +38,7 @@ import {
 } from './workflow-service'
 
 export type CreateWorkflowInput = { name: string; description: string; apiId: string }
+export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
 
 export function useWorkflows() {
   const { message } = App.useApp()
@@ -49,9 +52,12 @@ export function useWorkflows() {
     definition: WorkflowDefinition
   } | null>(null)
   const [lastResult, setLastResult] = useState<WorkflowExecutionDetail | null>(null)
+  const [activeExecution, setActiveExecution] = useState<WorkflowExecution | null>(null)
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
-  const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({})
+  const [liveNodes, setLiveNodes] = useState<Record<string, WorkflowNodeExecution>>({})
   const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
+  const [workspaceMode, setWorkspaceMode] = useState<WorkflowWorkspaceMode>('draft')
+  const [historyExecutionId, setHistoryExecutionId] = useState<string | null>(null)
   const [breakpointSelection, setBreakpointSelection] = useState<string | null>(null)
   const [debugResult, setDebugResult] = useState<WorkflowDebugResult | null>(null)
   const [versionDiff, setVersionDiff] = useState<WorkflowVersionDiff | null>(null)
@@ -105,12 +111,21 @@ export function useWorkflows() {
   const breakpointNodes = draftDefinition.nodes.filter((node) => node.type !== 'start')
   const breakpointNodeId = selectedOrFirst(breakpointSelection, breakpointNodes)
   const executions = useQuery({
-    queryKey: ['workflow-executions', projectId],
-    queryFn: () => listWorkflowExecutions(requiredId(projectId)),
-    enabled: Boolean(projectId),
+    queryKey: ['workflow-executions', projectId, workflowId],
+    queryFn: () => listWorkflowExecutions(requiredId(projectId), requiredId(workflowId)),
+    enabled: Boolean(projectId && workflowId),
+  })
+  const historyExecution = useQuery({
+    queryKey: ['workflow-execution', projectId, historyExecutionId],
+    queryFn: () => getWorkflowExecution(requiredId(projectId), requiredId(historyExecutionId)),
+    enabled: Boolean(projectId && historyExecutionId && workspaceMode === 'history'),
   })
   const createMutation = useMutation({
-    mutationFn: (input: CreateWorkflowInput) => createWorkflow(requiredId(projectId), input),
+    mutationFn: (input: CreateWorkflowInput) =>
+      createWorkflow(requiredId(projectId), {
+        ...input,
+        apiVersion: apis.data?.items.find((api) => api.id === input.apiId)?.current_version,
+      }),
   })
   const saveMutation = useMutation({
     mutationFn: (definition: WorkflowDefinition) =>
@@ -162,9 +177,12 @@ export function useWorkflows() {
     setWorkflowSelection(null)
     setDraftEdit(null)
     setLastResult(null)
+    setActiveExecution(null)
     setActiveExecutionId(null)
-    setNodeStatuses({})
+    setLiveNodes({})
     setExecutionDefinition(null)
+    setWorkspaceMode('draft')
+    setHistoryExecutionId(null)
     setBreakpointSelection(null)
     setDebugResult(null)
     setVersionDiff(null)
@@ -201,12 +219,13 @@ export function useWorkflows() {
       const execution = await executeMutation.mutateAsync()
       const runningDefinition = snapshotDefinition(execution.snapshot) ?? draftDefinition
       setLastResult(null)
+      setActiveExecution(execution)
       setExecutionDefinition(runningDefinition)
-      setNodeStatuses(
-        Object.fromEntries(runningDefinition.nodes.map((node) => [node.id, 'pending'])),
-      )
+      setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
       completedExecutionId.current = null
       setActiveExecutionId(execution.id)
+      setWorkspaceMode('run')
+      setHistoryExecutionId(null)
       void watchExecution(execution.id)
       void message.info('工作流已开始运行')
     })
@@ -239,8 +258,10 @@ export function useWorkflows() {
       event.node_status
     ) {
       const nodeId = event.node_id
-      const status = event.node_status
-      setNodeStatuses((current) => ({ ...current, [nodeId]: status }))
+      setLiveNodes((current) => ({
+        ...current,
+        [nodeId]: mergeExecutionEvent(current[nodeId], event as NodeExecutionEvent),
+      }))
     }
     if (event.type === 'execution.completed') void completeExecution(event.execution_id)
   }
@@ -259,10 +280,11 @@ export function useWorkflows() {
     completingExecutionId.current = executionId
     try {
       const result = await getWorkflowExecution(requiredId(projectId), executionId)
-      if (result.execution.status === 'running') return false
+      if (['queued', 'running'].includes(result.execution.status)) return false
       completedExecutionId.current = executionId
       setLastResult(result)
-      setNodeStatuses(Object.fromEntries(result.nodes.map((node) => [node.node_id, node.status])))
+      setActiveExecution(result.execution)
+      setLiveNodes(Object.fromEntries(result.nodes.map((node) => [node.node_id, node])))
       setActiveExecutionId(null)
       await queryClient.invalidateQueries({ queryKey: ['workflow-executions', projectId] })
       void message.success(
@@ -280,6 +302,42 @@ export function useWorkflows() {
     await queryClient.invalidateQueries({ queryKey: ['workflows', projectId] })
   }
 
+  function selectWorkflow(value: string) {
+    setWorkflowSelection(value)
+    setDraftEdit(null)
+    setLastResult(null)
+    setActiveExecution(null)
+    setActiveExecutionId(null)
+    setLiveNodes({})
+    setExecutionDefinition(null)
+    setWorkspaceMode('draft')
+    setHistoryExecutionId(null)
+  }
+
+  function showDraft() {
+    setWorkspaceMode('draft')
+    setHistoryExecutionId(null)
+  }
+
+  function showLatestRun() {
+    if (activeExecution || lastResult) setWorkspaceMode('run')
+  }
+
+  function showHistory(executionId: string) {
+    setHistoryExecutionId(executionId)
+    setWorkspaceMode('history')
+  }
+
+  const workspaceView = buildWorkspaceView({
+    mode: workspaceMode,
+    draftDefinition,
+    executionDefinition,
+    activeExecution,
+    lastResult,
+    historyDetail: historyExecution.data ?? null,
+    liveNodes,
+  })
+
   return {
     projects,
     projectId,
@@ -295,21 +353,30 @@ export function useWorkflows() {
     grpcDescriptors,
     eventSources,
     workflowId,
-    setWorkflowSelection,
+    setWorkflowSelection: selectWorkflow,
     selectedWorkflow,
     executions,
     draftDefinition,
-    designerDefinition: executionDefinition ?? draftDefinition,
+    designerDefinition: workspaceView.definition,
     setDraftDefinition: (definition: WorkflowDefinition) => {
       if (workflowId) {
         setDraftEdit({ workflowId, definition })
         setExecutionDefinition(null)
-        setNodeStatuses({})
       }
     },
-    nodeStatuses,
+    nodeStatuses: workspaceView.statuses,
     activeExecutionId,
     lastResult,
+    runtimeExecution: workspaceView.execution,
+    runtimeNodes: workspaceView.nodes,
+    runtimeChildren: workspaceView.children,
+    runtimeContext: workspaceView.context,
+    workspaceMode,
+    showDraft,
+    showLatestRun,
+    showHistory,
+    historyExecutionId,
+    historyLoading: historyExecution.isLoading,
     breakpointNodes,
     breakpointNodeId,
     setBreakpointSelection,
@@ -331,6 +398,159 @@ export function useWorkflows() {
     comparing: diffMutation.isPending,
     replaying: replayMutation.isPending,
   }
+}
+
+function initialNodeExecutions(
+  executionId: string,
+  definition: WorkflowDefinition,
+): Record<string, WorkflowNodeExecution> {
+  return Object.fromEntries(
+    definition.nodes.map((node) => [
+      node.id,
+      {
+        id: `${executionId}:${node.id}`,
+        node_id: node.id,
+        node_type: node.type,
+        name: node.name,
+        status: 'pending',
+        attempts: 0,
+        output: null,
+        result: null,
+        error_code: null,
+        error_message: null,
+        started_at: null,
+      },
+    ]),
+  )
+}
+
+type NodeExecutionEvent = ExecutionEvent & {
+  node_id: string
+  node_status: WorkflowNodeExecution['status']
+}
+
+type WorkspaceViewInput = {
+  mode: WorkflowWorkspaceMode
+  draftDefinition: WorkflowDefinition
+  executionDefinition: WorkflowDefinition | null
+  activeExecution: WorkflowExecution | null
+  lastResult: WorkflowExecutionDetail | null
+  historyDetail: WorkflowExecutionDetail | null
+  liveNodes: Record<string, WorkflowNodeExecution>
+}
+
+function buildWorkspaceView(input: WorkspaceViewInput) {
+  if (input.mode === 'history') return historicalWorkspaceView(input)
+  if (input.mode === 'run') return runningWorkspaceView(input)
+  return {
+    definition: input.draftDefinition,
+    execution: null,
+    nodes: [],
+    children: [],
+    statuses: {},
+    context: {},
+  }
+}
+
+function historicalWorkspaceView(input: WorkspaceViewInput) {
+  const detail = input.historyDetail
+  if (!detail) {
+    return {
+      definition: input.draftDefinition,
+      execution: null,
+      nodes: [],
+      children: [],
+      statuses: {},
+      context: {},
+    }
+  }
+  const nodes = detail.nodes
+  return {
+    definition: snapshotDefinition(detail.execution.snapshot) ?? input.draftDefinition,
+    execution: detail.execution,
+    nodes,
+    children: detail.children,
+    statuses: nodeStatusMap(nodes),
+    context: detail.execution.context,
+  }
+}
+
+function runningWorkspaceView(input: WorkspaceViewInput) {
+  const nodes = orderedLiveNodes(input.executionDefinition, input.liveNodes)
+  return {
+    definition: input.executionDefinition ?? input.draftDefinition,
+    execution: input.activeExecution,
+    nodes,
+    children: input.lastResult?.children ?? [],
+    statuses: nodeStatusMap(nodes),
+    context: input.lastResult?.execution.context ?? {},
+  }
+}
+
+function nodeStatusMap(nodes: WorkflowNodeExecution[]): Record<string, string> {
+  return Object.fromEntries(nodes.map((node) => [node.node_id, node.status]))
+}
+
+function mergeExecutionEvent(
+  current: WorkflowNodeExecution | undefined,
+  event: NodeExecutionEvent,
+): WorkflowNodeExecution {
+  const base = current ?? emptyEventNode(event)
+  const resultFields = event.result ? { output: event.result.output, result: event.result } : {}
+  return {
+    ...base,
+    ...resultFields,
+    status: event.node_status,
+    attempts: event.attempts,
+    error_code: event.error_code,
+    error_message: event.error_message,
+    started_at: eventStartedAt(base, event),
+    completed_at: eventCompletedAt(base, event),
+  }
+}
+
+function emptyEventNode(event: NodeExecutionEvent): WorkflowNodeExecution {
+  return {
+    id: `${event.execution_id}:${event.node_id}`,
+    node_id: event.node_id,
+    node_type: event.node_type ?? 'unknown',
+    name: event.node_name ?? '未命名节点',
+    status: 'pending',
+    attempts: 0,
+    output: null,
+    result: null,
+    error_code: null,
+    error_message: null,
+    started_at: null,
+  }
+}
+
+function eventStartedAt(
+  current: WorkflowNodeExecution,
+  event: NodeExecutionEvent,
+): string | null | undefined {
+  if (current.started_at) return current.started_at
+  return event.node_status === 'running' ? event.emitted_at : null
+}
+
+function eventCompletedAt(
+  current: WorkflowNodeExecution,
+  event: NodeExecutionEvent,
+): string | undefined {
+  if (isTerminalNodeStatus(event.node_status)) return event.emitted_at
+  return current.completed_at
+}
+
+function orderedLiveNodes(
+  definition: WorkflowDefinition | null,
+  nodes: Record<string, WorkflowNodeExecution>,
+): WorkflowNodeExecution[] {
+  if (!definition) return Object.values(nodes)
+  return definition.nodes.flatMap((node) => (nodes[node.id] ? [nodes[node.id]] : []))
+}
+
+function isTerminalNodeStatus(status: WorkflowNodeExecution['status']): boolean {
+  return !['pending', 'running'].includes(status)
 }
 
 type Identified = { id: string }

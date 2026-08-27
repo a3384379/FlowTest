@@ -20,6 +20,7 @@ dependencies = [
   "fastapi>=0.141,<1",
   "fastavro>=1.12,<2",
   "httpx>=0.28,<1",
+  "mcp>=2,<3",
   "graphql-core>=3.2.7,<4",
   "grpcio>=1.78,<2",
   "grpcio-reflection>=1.78,<2",
@@ -31,6 +32,7 @@ dependencies = [
   "pydantic-settings>=2.15,<3",
   "python-multipart>=0.0.22,<1",
   "PyYAML>=6.0.3,<7",
+  "aiosqlite>=0.22,<1",
   "redis>=6.4,<6.5",
   "sqlalchemy[asyncio]>=2.0.51,<3",
   "sqlglot>=27.29,<28",
@@ -50,7 +52,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "aiosqlite>=0.22,<1",
   "boto3-stubs[s3]>=1.43,<2",
   "import-linter>=2.7,<3",
   "mypy>=2.3,<3",
@@ -64,6 +65,9 @@ dev = [
   "types-jsonschema>=4.26,<5",
   "types-PyYAML>=6.0.12,<7",
 ]
+
+[project.scripts]
+flowtest-mcp = "app.mcp.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -116,6 +120,7 @@ ignore_missing_imports = true
 [tool.coverage.run]
 concurrency = ["greenlet", "thread"]
 source = ["app"]
+omit = ["app/migrations_support/*"]
 
 [tool.coverage.report]
 fail_under = 90

@@ -54,6 +54,7 @@ async def create_project(
         actor=current_user,
         name=payload.name,
         description=payload.description,
+        organization_id=payload.organization_id,
     )
     return _project_response(access)
 
@@ -87,6 +88,7 @@ async def get_project_security_policy(
         actor=current_user, project_id=project_id
     )
     return ProjectSecurityPolicy(
+        enabled=policy.enabled,
         allowed_hosts=list(policy.allowed_hosts),
         allowed_private_cidrs=list(policy.allowed_private_cidrs),
     )
@@ -102,10 +104,12 @@ async def update_project_security_policy(
     policy = await ProjectService(session).update_security_policy(
         actor=current_user,
         project_id=project_id,
+        enabled=payload.enabled,
         allowed_hosts=payload.allowed_hosts,
         allowed_private_cidrs=payload.allowed_private_cidrs,
     )
     return ProjectSecurityPolicy(
+        enabled=policy.enabled,
         allowed_hosts=list(policy.allowed_hosts),
         allowed_private_cidrs=list(policy.allowed_private_cidrs),
     )

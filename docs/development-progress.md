@@ -1,23 +1,378 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-15（Asia/Shanghai）
-状态：仓库已公开；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
+最后更新：2026-08-23（Asia/Shanghai）
+状态：仓库已公开；V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
+版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
+真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
-PR #37 远程源码验收。
+PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 进行中：V5 S47 正确性修复与功能闭环
+
+1. S47 在独立 `codex/v5.0` 工作树对 S37～S46 实现先做事实审计，确认并修复
+   FlowSpec 跨实例丢失 Service/Operation/Target 语义、批次子项 Checkpoint 粒度错误、
+   Resume/Retry 语义重叠、Dispatch 失败孤儿状态、变更边界泛化和结构化失败归因缺失。
+2. 新增 typed Evidence Contract 和确定性 Test Engineering Engine，从契约证据生成 Test Intent、
+   Scenario、Oracle、Coverage/Gap 和审核要求；新增 Generate → Proposal → Review → Apply 闭环，
+   Apply 复用现有 Workflow/TestCase 执行资产，不创建只能展示的平行模型。
+3. FlowSpec 保持 `flowtest-flow-spec-v1` Schema，新增 `flowtest-flow-spec-fingerprint-v2`；旧文档
+   缺省按 v1 指纹解析，v2 指纹排除实例 UUID，并通过显式 Service/Operation Mapping
+   落地多服务工作流。
+4. MCP 只读面增加生成、覆盖、源码/DataProfile/Test Evidence、FlowSpec Diff/Validate 和
+   Change Impact 工具；受控写入默认 `dry_run=true`，必须提供幂等键，仍只能产生 Draft。
+5. 前端新增“测试工程”和 FlowSpec 审核映射界面，补齐 Service/Endpoint Variant
+   类型化编辑、连通性、Secret Ref、Impact Preview，失败归因页面升级到 v2 结构化证据。
+6. 新增可回滚迁移 `20260823_0041`，扩展 `test_designs` 的 Scenario/Evidence/Warning/
+   Confidence/Review Requirement，并将过去被误标为已完成的 Key Rotation 迁移状态
+   恢复为 `planned`。真实重加密 Apply/Rollback 仍未实现，是 GA blocker，UI/API 不再声称已完成。
+7. 本地 Backend 全量 `440 passed / 3 skipped`（Coverage `90.06%`），Frontend
+   `56 files / 211 tests`（Branch `80.10%`），PostgreSQL `0041 → 0040 → 0041`
+   往返无 drift；隔离 Compose 通过多 Service FlowSpec、MCP、生成式物化和真实执行
+   Smoke，Playwright 通过 Test Engineering Generate → Draft → Review → Apply 主路径。
+   未执行的远程 CI、Windows x64 72 小时试点、14 日 RC 观察与人工签署不记为通过。完整事实见
+   [S47 V5 功能闭环记录](release/s47-v5-functional-completion.md)。
+
+## 进行中：V5 S47.1 语义正确性与证据闭环
+
+1. OpenAPI 3/Swagger 2 导入把带 location 的 parameter、request body、response status/schema、auth、
+   source/revision/completeness 持久化到 APIVersion Canonical Contract；手工/旧 API 使用安全 partial
+   backfill，不保存 Header/Query 值，也不伪造 response status。
+2. Test Engineering 从持久化契约和最多 10 个、聚合 2 MiB 的 Evidence Bundle 生成 Path/Query/Header/
+   Cookie/Body/Auth 场景；DataProfile/Source/Existing Test Finding 真实改变 Scenario、Oracle、Coverage
+   和 Knowledge Graph。冲突场景强制 review 且默认不可物化。
+3. Workflow request override 与 Runtime 已支持位置化 mutation 和节点级 auth disabled；Response Schema、
+   JSON Path 和可支持 expression 物化为 Assert，不支持的 Oracle 返回 blocker。Mock Target 记录并验证
+   实际收到的 Path、Query、Header、Body 和认证缺失。
+4. FlowSpec 新导出使用 fingerprint v3，保存 pinned/current、source version 和 contract fingerprint；
+   pinned 找不到 exact compatible target 时阻断，绝不回退 current。
+5. Change Regression 将 Asset Mapping Coverage 与 Test Semantic Coverage 拆分。真实服务集成测试覆盖
+   Mapping=100%、旧边界已覆盖时仍发现 999/1000，并使用 Current Canonical Contract 的真实 201/422
+   Oracle；审核后复用 TestEngineering 物化 Workflow/TestCase bundle。
+6. Evidence value sanitizer 覆盖 JWT、Bearer/Basic、PEM、Cloud Key、高熵值、Email、Phone、Card 和
+   URL 凭据；Failure Triage 将收到的 5xx 归为 upstream，并优先使用 service key/endpoint variant。
+7. 新迁移 `20260823_0042` 添加 API Contract 快照并 backfill；未进入 main 的 0041 downgrade 已校正，
+   不再把 planned key migration 伪造为 migrated。SQLite baseline/增量 backfill 和 Transfer revision
+   同步到 0042。
+8. 详细事实、兼容策略、门禁和剩余风险见
+   [S47.1 语义正确性与证据闭环](release/s47-1-semantic-correctness.md)。远程 CI、Windows x64 试点、
+   连续 RC、安全审批和真实 Key Rotation 未执行/未完成，不记为通过。
 
 ## 当前恢复点
 
-- 收口基线：`main@7e27bd2d012ae9b963cf11e9321a17550749bd86`，PR #36 已完成 S31 服务目录、
-  项目深链和远程全量门槛并合并。
-- 当前 S31 质量指挥中心小阶段由 `codex/s31-quality-command-center` 承载，从上述干净基线创建；范围只包含
-  全局/项目质量总览、只读证据聚合、Feature Flag 行为、稳定深链及对应测试，不进入 V4 S32。
+- V5 当前工作树：独立 `codex/v5.0`，基于 `codex/standalone-runtime@0643732`；S37 已提交
+  `6fc3df2`，S38 已提交 `d146520`，S39 已提交 `7fa68ef`，S40 已提交 `185ce87`，S41 已提交 `5a8b2e8`，S42 已提交
+  `a2f97a7`，S43 已提交 `969c5c2`，S44 已提交 `1d5fd75`，S45 已提交 `6f493d4`，S46 已完成本地等价验收，
+  本阶段提交后暂停。当前脏 `main` 工作区未参与。
+- 收口基线：`main@08db725`，PR #37 已完成 S31 质量指挥中心并合并。
+- 当前 V4 小型化小阶段由 `codex/s32-runtime-profile-foundation` 承载，从上述干净基线创建；
+  用户随后明确要求连续推进 V4 及 S34，因此范围已扩展到 S32～S36 的备份恢复、离线/私有仓库分发、
+  事务式无外网升级、容量稳定性、Full↔Compact 兼容、隐私安全诊断和可恢复回滚验收。
+- Standalone 代码在独立 `codex/standalone-runtime` 分支继续推进，避免把仍在评审的 Compact Docker
+  PR #38 与无 Docker 运行时混在同一提交中。
 - 已发布标签：`v1.1.0`、`v1.5.0`、`v1.8.0`、`v2.0.0-rc.1`、`v3.0.0-alpha.1`、
   `v3.0.0-beta.1`、`v3.0.0-beta.2`、`v3.0.0-beta.3`；不得提前创建 `v2.0.0` 或后续 V3 里程碑。
 - 用户已明确要求跳过原计划中的等待顺序并开启 V3 开发；该授权不等于完成或豁免 V2 正式发布门槛。
 - `FlowTest_V3_UI_CN_HD/` 的 HTML 设计源和 21 张 2560×1440 PNG 基准在 S22 纳入 Git，原始内容保持不变。
+
+## 已完成：V5 S37 V4.9 基线收口（本地等价验收）
+
+1. V5 独立工作树从干净的 `codex/standalone-runtime@0643732` 创建 `codex/v5.0`；当前脏 `main`
+   工作区未参与，未执行 reset/stash 覆盖或删除操作。本阶段提交主题为
+   `chore(s37): converge v4.9 baseline`。
+2. 后端质量门槛全部通过：Ruff format/check、mypy、pytest `380 passed / 3 skipped`，总覆盖率
+   `90.22%`。前端 format、lint、coverage、build 全部通过；Vitest `48 files / 195 passed`，
+   Statements `86.66%`、Branches `80.41%`、Functions `86.01%`、Lines `88.81%`。
+3. 独立 Compact Compose 项目完成六服务健康检查、S32 登录/项目/API/Workflow/不可变发布/执行/
+   Snapshot smoke；Chromium 完成首次密码初始化和 `s14-management-workbench` 主路径，覆盖
+   OpenAPI/请求体编辑、Params/Headers 批量编辑、Secret 脱敏及项目/团队操作。相关 URL/Swagger、
+   Transfer、BodyEditor、Workflow Editor 回归也由后端/前端测试套件覆盖。
+4. Alembic 在隔离数据库完成 `20260822_0033 → 20260822_0032 → 20260822_0033`，每步含 upgrade、
+   downgrade 和 `alembic check`；V2→V3 原地升级、回滚、再升级脚本完成真实数据与 Artifact 验证。
+   本阶段同时修正了验证脚本、Compact 文档和 Standalone ADR 中滞后的 `20260822_0032` 当前 head。
+5. 本地 Standalone 等价验收以临时 SQLite 数据目录启动真实 API：`/api/v1/live`、`/api/v1/ready`、
+   `/api/v1/runtime-profile` 和前端静态页均返回成功，Runtime Profile 为 `standalone`，SQLite
+   `alembic_version` 为 `20260822_0033`。这不替代 Windows x64 公司云桌面 72 小时试点；本阶段不声称
+   已取得该实机证据。
+6. S37 已完成基线冻结，下一阶段 S38（Service/ServiceEndpoint/RequestTargetResolver）须经用户确认后
+   才开始。
+
+## 已完成：V5 S38 请求目标与 Endpoint Variant（等待用户确认）
+
+1. S38 继续使用独立工作树和 `codex/v5.0` 分支，基于 `codex/standalone-runtime@0643732`；当前脏的
+   `main` 工作区未参与，未执行 reset、stash 覆盖或删除操作。
+2. 新增独立的请求目标领域模型 `Service`/`ServiceEndpoint`，不复用 Contract Hub 服务目录；以
+   `service_key` 作为跨实例稳定标识，以 `(environment_id, service_id, variant)` 保证 Endpoint 唯一，
+   并在 `20260822_0034` 迁移中为旧项目回填默认 Service/Endpoint。
+3. API、Workflow 节点、API Debug/Preview 和 Execution 共用 typed `RequestTargetResolver`。目标优先级为
+   `Node Override > API Service > Environment Default Service > Legacy base_url`；变量/请求头按
+   `Node > API > ServiceEndpoint > Environment > Project` 合并。执行与 Workflow Snapshot 保存 Service、
+   Variant、Revision、最终 URL、脱敏请求目标、Secret Ref、TLS/Proxy/Outbound Policy。
+4. 新增请求目标管理 API 和前端“请求目标”页面，支持 Service、环境 Endpoint Variant、环境默认 Service、
+   API 默认 Service 管理；Workflow API 节点支持 Service Override/Endpoint Variant，执行结果展示脱敏
+   Target Snapshot。OpenAPI 3/Swagger 2 导入会提取 Server 并在 Merge 阶段经过项目/环境校验后映射 Endpoint。
+5. Standalone SQLite 增量 Schema、Transfer Manifest、Compact/Full Alembic 基线同步到 `20260822_0034`；
+   保留 `Environment.base_url` Legacy Fallback，并维持 `/api/v1` 既有请求结构兼容。
+6. S38 阶段退出前必须完成后端 Ruff/mypy/pytest、前端 format/lint/coverage/build、迁移往返、Standalone/
+   Compact/Full 兼容、目标解析/导入/脱敏/权限回归及必要的 Compose 验证；完成本地提交后暂停，不自动进入 S39。
+
+## 已完成：V5 S39 Organization、TenantContext 与 Service Account（等待用户确认）
+
+1. 新增 `Organization`、`OrganizationMember`、`ServiceAccount` 领域与持久化模型；用户请求通过
+   `X-Organization-Id` 解析 typed `TenantContext`，系统管理员可切换组织，普通用户必须具备组织成员关系。
+2. `20260822_0035` 创建组织/成员/服务账号表，并为旧 Project、Runner Pool、Audit Log 增加组织索引和外键；
+   迁移会创建默认组织、回填旧资产和审计记录、为既有用户生成兼容成员关系。Standalone 增量 Schema、
+   Transfer 基线和 Compact/部署文档同步到 `20260822_0035`。
+3. Project 创建、列表和详情先经过组织上下文；Service/ServiceEndpoint、Execution、Artifact、Evidence、
+   Workflow、Test Plan 等项目资产继续沿用 Project 授权边界；Dashboard/Search、Runner Pool/Task/Lease/Event
+   查询增加组织过滤，旧 NULL 组织字段仅作为迁移兼容回退。
+4. 新增组织、成员和 Service Account 管理 API。Service Account 只返回一次明文令牌，数据库仅保存哈希，支持
+   scope 校验、过期、轮换、撤销和 `TenantContext` 认证结果；AuditService 自动写入组织索引并继续脱敏详情。
+5. 新增跨组织项目/Service Account API 回归、Runner 查询隔离回归；真实 PostgreSQL 完成
+   `20260822_0034 → 20260822_0035`、旧用户/项目/Runner/审计数据回填、降级、再升级和 `alembic check`。
+   本阶段只完成本地等价验证，未声称 Windows 公司云桌面实测或远程 CI 证据。
+6. S39 已完成本地 Git commit 并暂停；S40 在用户确认后继续推进。
+
+## 已完成：V5 S40 FlowSpec v1（等待用户确认）
+
+1. 新增独立 FlowSpec v1 Domain 合约和 Pipeline：Parse → Normalize → Validate → Compatibility，支持
+   稳定规范化、跨实例语义 Fingerprint、按节点/边稳定 ID 的递归 Diff、置信度/未解析证据以及实例资源引用告警。
+2. 导出支持 Workflow Draft 和已发布版本；导入不直接改库，而是复用 AI ChangeSet/ChangeItem 物理表创建
+   `source_type=flow_spec` 的 Draft，保存源快照、校验/兼容结果、目标 Revision 和指纹，必须经过 Review
+   Accept 后 Apply，并在应用前检查目标快照防止陈旧覆盖。
+3. 新增 `/api/v1/projects/{project_id}/flow-specs` 下的 Export、Validate、Diff、Import、ChangeSet
+   List/Detail、Review、Apply API；新增前端类型化 FlowSpec service，未暴露 Secret 明文，仅支持
+   `secret://` Secret Ref。既有 AI ChangeSet 查询继续只返回 `source_type=ai`，保持原 API 行为。
+4. `20260822_0036` 将 Impact/Risk/AI Job 与 Suggestion 关系改为可空，新增来源、操作者、应用时间字段和约束；
+   PostgreSQL 已完成 `0035 → 0036` upgrade、downgrade、再 upgrade 与 `alembic check`。Standalone 基线、
+   Transfer Manifest 和 Compact/部署文档同步到 `0036`；旧 SQLite ChangeSet 表增加了可恢复的表重建路径，
+   保留已有 AI 数据后再承载 FlowSpec Draft。
+5. 本地验证：后端 Ruff format/check、mypy、pytest `389 passed / 3 skipped`，覆盖率 `90.04%`；前端
+   format、lint、coverage、build 全部通过，Vitest `50 files / 198 passed`，Statements `86.8%`、
+   Branches `80.28%`、Functions `86.19%`、Lines `88.97%`；Standalone/Transfer 回归 `19 passed`。
+   验证使用本地等价环境，未声称 Windows 公司云桌面实机或远程 CI 证据。
+6. S40 完成后提交本地 Git commit 并暂停；下一阶段 S41 为 MCP Read，须经用户确认后开始。
+
+## 已完成：V5 S41 MCP Read（等待用户确认）
+
+1. 新增只读 MCP Application Service 与 `/api/v1/mcp/read` REST Gateway；服务账号必须具备
+   `mcp:read` Scope，并在认证时建立 `TenantContext`。MCP 认证不会更新 `last_used_at`，避免只读调用
+   产生业务状态变化；跨组织项目统一返回不可枚举的 404。
+2. 只读结果统一使用 `data/evidence_refs/confidence/redactions/trace_id/warnings` Envelope。项目、Service/
+   Endpoint Variant、API Contract、Workflow Draft 和 Run Evidence 均采用 allow-list 投影；请求头、变量、
+   Cookie、Secret Ref 明文、认证配置、请求/响应 Body、Execution Snapshot、上下文和错误详情不返回，
+   Endpoint URL 仅保留安全 Origin，审计详情也不记录原始参数或令牌。
+3. 使用官方 Python MCP SDK，并锁定 `mcp` 2.x 当前解析版本 `2.0.0`；新增 `flowtest-mcp` CLI，支持
+   stdio 和 Streamable HTTP 两种传输。工具、Resource Template 和 Prompt 稳定排序，Prompts 明确只读、
+   不写入/不执行且需要人工确认；MCP Gateway 仅通过 HTTP Application API 访问，不直连 ORM、PostgreSQL、
+   Redis 或 MinIO。
+4. 新增 MCP Domain 合约、typed HTTP Client、SDK contract test、服务账号/租户隔离/脱敏/审计回归；
+   后端 Ruff format/check、mypy、pytest 全部通过，`394 passed / 3 skipped`，覆盖率 `90.01%`。前端未新增
+   S41 页面或业务代码，但 format、lint、coverage、build 基线全部通过，Vitest `50 files / 198 passed`，
+   Statements `86.8%`、Branches `80.28%`、Functions `86.19%`、Lines `88.97%`。
+5. 本阶段无数据库模型或迁移变更；临时 PostgreSQL 已完成从空库升级到 `20260822_0036`、`alembic check`、
+   降级到 `20260822_0035`、再升级和再次 `check`，临时数据库已清理。未把正在运行的旧 Compact 镜像当作
+   S41 证据，未声称 Windows 云桌面实机或远程 CI 验证。
+6. S41 已完成本地等价验证并提交；S42 已完成本地等价验证，提交后暂停；下一阶段 S43
+   （Durable Execution Command、Checkpoint、Idempotency、Resume、Retry 与 Fencing）须经用户确认后开始。
+
+## 已完成：V5 S42 TestIntent/TestCase/Test Design 与 MCP Controlled Write（等待用户确认）
+
+1. 新增纯 Domain Test Design 合约：TestIntent、Knowledge Graph、State Model、Oracle、Coverage 和
+   稳定 Fingerprint。图节点/边、状态/迁移和 Oracle 标识均在进入 Application Service 前完成 typed 校验；
+   Test Design 是设计聚合，不替换既有可执行 TestCase 数据模型。
+2. 新增 `TestDesign` 与 `ChangeSetApproval` 持久化模型及可回滚迁移 `20260822_0037`；统一 ChangeSet
+   继续复用 `ai_change_sets/ai_change_items` 物理表，仅扩展 `test_design` 变更项类型。MCP 提案使用
+   `source_type=mcp`、`source_ref`、`actor_type=service_account`、`actor_id`，既有 AI ChangeSet 查询
+   仍保持只显示 `source_type=ai` 的兼容行为。
+3. 新增 `/api/v1/mcp/write/change-sets` Application API 和官方 MCP SDK 的
+   `flowtest.propose_test_design` 工具。MCP 只可提交 Draft；低置信度 Oracle 强制进入 Review，高/危风险
+   写入必须先建立人工批准记录，批准后仍须逐项审核，不能自动发布、执行、修改权限或创建 Credential。
+   人工 Review 通过既有 TestCase Application Service 创建 TestCase，并在接受 Design 后落库 approved 设计。
+4. 受控写入对 Secret、凭据、Authorization、Token、Card/Email 等敏感值只返回安全路径错误，允许的运行时
+   参数使用 `secret://` 引用；响应、审计和 ChangeSet 元数据均不记录令牌或 PII。MCP 继续通过 Application
+   Service 访问，不直连 ORM/数据库；新增 `mcp:write` Service Account Scope 与独立 TenantContext 校验。
+5. Standalone SQLite 增量 Schema 会创建新表，并对旧 `ai_change_items` 进行可恢复表重建以加入 `test_design`
+   约束；Transfer 表清单由 72 增至 74，Manifest 版本保持兼容。PostgreSQL 已完成 `0036 → 0037` upgrade、
+   `alembic check`、downgrade 到 `0036`、再 upgrade 和再次 check。
+6. 本地验证：后端 Ruff format/check、mypy、pytest `399 passed / 3 skipped`，覆盖率 `90.01%`；新增
+   Domain、MCP API/SDK、人工审批、敏感信息、Standalone/Transfer 回归。前端保持既有 `50 files / 198 passed`
+   与 format、lint、coverage、build 基线；本阶段未新增 UI 业务页面。验证为本地等价环境，未声称 Windows
+   公司云桌面实机或远程 CI 证据。
+7. S42 已完成本地 Git commit 并暂停；用户确认后进入 S43 Durable Execution 实施。
+
+## 已完成：V5 S43 Durable Execution（等待用户确认）
+
+1. 新增纯 Domain Durable Execution 合约，固定 `s43-durable-v1` Schema Version，定义
+   `ExecutionCommand`（Start/Resume/Retry/Cancel）、幂等键、命令状态、Checkpoint 状态和
+   可恢复节点判断；Domain/Engine 不依赖 FastAPI、Celery、SQLAlchemy Model 或具体基础设施客户端。
+2. 新增 `ExecutionCommand`、`ExecutionCheckpoint` 持久化模型及可回滚迁移 `20260822_0038`。命令保存
+   请求摘要、幂等键、响应/错误和 Fence 信息；Checkpoint 保存节点、Attempt、输入哈希、脱敏上下文、输出
+   Digest、提取变量和 Lease/Fence 证据，敏感值不会进入命令或 Checkpoint 明文。既有 `RunnerTask`
+   Lease/Fencing 状态机继续作为执行事实源。
+3. Workflow Start/Resume/Retry、Standalone Recovery 和 Runner Control Plane 共用 Durable Execution
+   Application Service。相同幂等键返回同一 Execution；已完成节点恢复时跳过，失败节点从连续 Attempt
+   继续；远程 Runner 重启后恢复已持久化 Checkpoint，旧 Lease/Fence 不能覆盖新状态，终态命令只完成一次。
+4. 新增 Runner Checkpoint 上报 API、命令/Checkpoint 查询 API，并在 Lease 校验、Payload 大小、脱敏、重复
+   Checkpoint 和旧 Fence 场景增加回归。Coordinator 使用独立短事务写入终态 Checkpoint，避免取消轮询刷新
+   与回调写入互相污染 SQLAlchemy Session 状态；Standalone 启动时会恢复 queued/running 的加密执行计划。
+5. 执行控制台修正 queued 状态轮询、完成后 Replay/Debug 操作可见性和执行面事件展示；Runner 事件查询保留
+   `/api/v1` 既有 `limit <= 100` 契约。Standalone、Compact、Full 继续共享业务状态语义，Transfer/Standalone
+   Schema 与迁移 head 同步到 `20260822_0038`，Transfer 表清单为 76。
+6. 后端验证：`uv run ruff format --check .`、`ruff check .`、`mypy app` 全部通过；pytest `406 passed /
+   3 skipped`，总覆盖率 `90.01%`。前端 format、lint、TypeScript、生产 build 全部通过；Vitest `50 files /
+   198 passed`，Statements `86.8%`、Branches `80.29%`、Functions `86.19%`、Lines `88.97%`。
+7. 真实 PostgreSQL 已完成 `20260822_0037 → 20260822_0038` upgrade、`alembic check`、downgrade 到
+   `0037`、再 upgrade 和再次 `check`；本轮验证栈最终 `alembic check` 无漂移。S11 基线和 S29 Runner
+   故障转移/恢复冒烟通过，包含 Attempt=2、Fence=2、Runner B 接管及 Drain；干净 Compose 数据卷上的
+   Playwright 全量 `20/20` 通过，API 上限修正后追加 S29 页面 `1/1` 通过。
+8. 验证运行于本地 macOS/ARM，因现有 Compact 环境占用默认端口使用隔离的高端口 Compose 项目；未将该结果
+   虚构为 Windows 公司云桌面实机、72 小时试点或远程 CI 证据。当前脏 `main` 工作区未参与，未修改附件原始
+   计划文件；S43 已完成本地提交后暂停，S44 等待用户确认。
+
+## 已完成：V5 S45 Change-Aware Regression（等待用户确认）
+
+1. 新增 `ChangeRegressionRun` 与 append-only `ChangeRegressionStage`，把 Change → Impact → Regression Selection →
+   Missing Test → Review → Execution → Evidence → Release Gate → Failure Triage 串成一条可追溯链路；复用既有
+   Impact、Test Plan、Test Design、AI ChangeSet、Execution 和 Release Gate Application Service，不绕过应用层直接操作 ORM。
+2. 新增人工审核与执行控制：缺失测试以置信度 `0.65` 生成 Test Design Draft，必须逐项 Review；存在待审核项或未批准时不能执行，
+   运行结果、证据引用、失败分诊和发布门禁判定均回写阶段记录。CI 入口使用独立 `analyze:change-regression` Service Account Scope，
+   复用 Idempotency 记录，重复请求返回同一条回归运行。
+3. 新增项目级变更回归 API 和前端“变更回归”页面，支持 Git Diff/OpenAPI Diff/Schema Diff 来源、测试计划与 Release Policy 绑定、
+   缺失测试 Draft 审核、批准、执行、证据查看和 Release Gate 评估；S45 页面继续遵守 Secret/PII 脱敏和标准错误 Envelope 约束。
+4. `20260823_0040` 创建回归运行/阶段表并扩展 ChangeSet 来源约束；Standalone SQLite 增量 Schema、Transfer Manifest 基线和
+   Compact/Full 迁移 head 同步到 `20260823_0040`，Transfer 表清单由 78 增至 80，原有 `standalone-compact-transfer-v1` 版本保持不变。
+   首次真实 `alembic check` 捕获并修正了迁移中多余的 `status` server default，随后往返检查无漂移。
+5. 后端质量门槛全部通过：Ruff format/check、mypy、pytest `411 passed / 3 skipped`，总覆盖率 `90.09%`；前端 format、lint、
+   TypeScript、production build 和 coverage 全部通过，Vitest `52 files / 205 passed`，Statements `86.28%`、Branches `80.02%`、
+   Functions `85.10%`、Lines `88.36%`。Standalone/Transfer 定向回归 `19 passed`。
+6. 临时 PostgreSQL 完成空库 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`；隔离高端口 Compose 完成源码构建、
+   服务健康检查和 Playwright 冒烟：管理员首次登录改密、创建项目、项目导航和 S45“变更回归”页面渲染均通过。验证使用本地 macOS/ARM
+   和独立临时数据卷，验证结束后已清理；未声称 Windows 公司云桌面实机或远程 CI 证据。
+7. S45 已完成本地 Git commit 并暂停；随后按用户继续指令进入 S46 稳定性与 GA 收口。
+
+## 已完成：V5 S46 稳定性、安全与 GA 收口（等待用户确认）
+
+1. S46 只做发布收口：新增 GA Gate、Full/Compact/Standalone 兼容矩阵、故障注入与恢复 Runbook，并补充
+   S37–S45 的升级/回滚边界；原始 V5 计划附件未修改。当前迁移 head 为 `20260823_0040`，Transfer Manifest
+   仍为 `standalone-compact-transfer-v1`，`/api/v1` 兼容基线和三个 Runtime Profile 行为保持冻结。
+2. 标准错误边界完成安全硬化：HTTP 404/405 等错误统一返回带 trace ID 的 Error Envelope；Pydantic 校验错误、
+   Application Error 详情和验证输入按敏感字段脱敏，password/token/authorization/cookie/api key 等原始值不再
+   回显。Mock 多方法路由拆分为显式 Operation，消除 OpenAPI 重复 operationId。
+3. 后端门禁全部通过：Ruff format/check、mypy、pytest `417 passed / 3 skipped`，总覆盖率 `90.10%`；前端
+   format、lint、coverage、build 全部通过，Vitest `52 files / 205 passed`，Branches `80.02%`。Standalone
+   SQLite 与 Transfer 定向回归 `19 passed`。
+4. 隔离 PostgreSQL 完成空库 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`，最终
+   revision 为 `20260823_0040`。Backend/Frontend S46 镜像均构建通过；pip-audit、pnpm audit 通过，Grype
+   扫描未发现未登记的可修复 High/Critical，CPython `3.13.15` 精确例外已在本阶段复核并更新下次复核日期。
+5. 独立高端口 Compact 栈完成六服务健康检查、S32 登录/项目/Artifact/Workflow/Snapshot smoke；20 秒 Soak
+   采样 9 次、失败 0、ready p95 `0.047471s`；100 请求/10 并发 API p95 `0.022282s`，4 条工作流/2 并发
+   全部通过，队列无积压。Full↔Compact 双向兼容演练通过；停止 Worker 后重新启动、健康检查和工作流验收再次通过。
+6. Playwright 在同一独立 Compact 栈完成管理员登录、Dashboard 和 S45“变更回归”页面渲染冒烟；MCP 租户隔离、
+   脱敏、只读/受控写入和红队静态面由 S46 Gate 测试覆盖。验证环境为本地 macOS/ARM 和临时数据卷，不声称
+   Windows x64 公司云桌面 72 小时试点、生产备份恢复、人工安全审批或远程 CI 证据。
+7. S46 已完成本地 Git 提交后暂停；下一步仅在用户确认后进行发布评审或 GA 外部环境验证，不再自动增加大功能。
+
+## 已完成：V4 S44 Enterprise Collaboration（等待用户确认）
+
+1. 新增纯 Domain 配额策略与治理决策模型，支持 `observe`、`warn`、`soft_limit`、`hard_limit` 四种模式，
+   覆盖 Project、User、Runner 并发、Execution 并发、AI 日请求和 Artifact 存储六个维度；硬限制通过统一
+   错误 envelope 返回 429，精确达到上限仍允许当前操作。治理初始化使用 PostgreSQL/SQLite 幂等插入，
+   避免组织管理页并行加载产生重复键 500。
+2. 新增 `OrganizationGovernance`、`OrganizationKeyVersion` 及可回滚迁移 `20260822_0039`。审计保留、Quota、
+   Runner Pool 类型/Runtime/注册审批策略均按组织保存；密钥生命周期支持 Prepare → Apply → Rollback，数据库
+   只保存外部引用、SHA-256 指纹和迁移状态，不保存原始密钥材料。
+3. Project、成员、Execution、AI 请求、Artifact、Runner Pool/Claim 和 Retention Cleanup 已接入组织配额；
+   审计查询支持动作、资源和时间范围过滤，审计清理遵循组织保留天数。Service Account 增加治理、审计、密钥
+   轮换和 Runner 管理 Scope，继续只在签发/轮换响应返回一次性明文令牌。
+4. 新增组织治理 API 与前端“组织治理”页面，覆盖组织角色、最小权限 Service Account、Quota/Runner Governance、
+   Audit Query、Key Rotation 和 Support Bundle Redaction。支持包明确 `internal-redacted` 分类并排除密码、密钥、
+   Token、密文和私钥字段。
+5. Standalone Schema、Compact/Full Alembic head 和 Transfer 同步到 `20260822_0039`；Transfer 表清单由 76
+   增至 78，Manifest 版本保持冻结为 `standalone-compact-transfer-v1`，新导出包以向后兼容字段声明可迁移数据、
+   仅引用/哈希数据和排除数据分类。旧 `Environment.base_url`、`/api/v1` 和三档 Runtime 业务语义保持兼容。
+6. 后端质量门槛：Ruff format/check、mypy 全部通过；pytest `410 passed / 3 skipped`，总覆盖率 `90.12%`。
+   前端 format、lint、TypeScript、production build 和 coverage 全部通过；Vitest `51 files / 202 passed`，
+   Statements `86.1%`、Branches `80.00%`、Functions `84.96%`、Lines `88.18%`。Standalone/Transfer 定向回归
+   `19 passed`，Transfer Manifest 回归 `8 passed`。
+7. 真实 PostgreSQL 临时验证栈完成空库升级至 `20260822_0039`、`alembic check`、降级到 `20260822_0038`、
+   再升级和再次 `alembic check`；最终 head 为 `20260822_0039`。独立 Compose 高端口验证栈完成 PostgreSQL、Redis、
+   MinIO、Backend、Frontend 健康检查和镜像构建；Playwright CLI 完成管理员登录、组织治理入口及组织与角色、
+   Service Account、Quota/Runner、Audit/Security 四个页签渲染，Backend 日志无 500、Traceback 或重复键异常。
+8. 空 SQLite 从最早 Alembic 链全量升级仍会在既有 `20260809_0002` 的 PostgreSQL 专用 `DEFAULT '{}'::json` 处
+   失败；这是 S44 之前的迁移兼容问题，本阶段不改写旧迁移。Standalone SQLite 使用 metadata/bootstrap 与 `0039`
+   基线的本地等价路径及定向回归通过；未将本地 macOS/ARM 结果声称为 Windows x64 公司云桌面或远程 CI 证据。
+9. S44 已完成本地等价验收并提交；下一阶段 S45 已在用户继续指令后完成，当前等待用户确认是否进入 S46。
+
+## 进行中：V4 Standalone 无 Docker 云桌面部署
+
+1. Standalone 新增独立 `standalone` 运行档位；Full/Compact 的 PostgreSQL、Redis、MinIO 和
+   Celery 拓扑保持不变，不把 SQLite 数据迁移回 Docker 档位。
+2. Standalone 使用 SQLite WAL、本地附件目录、进程内事件总线、固定窗口限流和后台调度器；
+   API、Web、工作流和测试计划在一个 Python 进程内运行，启动时自动创建当前模型基线并记录
+   `20260822_0033` Alembic revision。
+3. Performance Lab、Environment Lab、Runner Fabric 在该档位固定关闭；事件历史、限流桶和未完成
+   进程任务在重启后不恢复，业务状态、附件和加密 Snapshot 持久化到 `data\`。
+4. 新增 Windows PowerShell 安装前检查、启动、停止、Readiness/档位验收、备份和离线包构建脚本；离线包可携带
+   Python 3.13 运行时与 wheels，公司云桌面无需 Docker、WSL2、Node.js、uv 或数据库服务。
+5. 已完成 Standalone 核心单元测试、SQLite/本地存储真实 smoke 和完整应用 lifespan smoke；
+   已新增不依赖 Docker 的 Windows 长时稳定性探针 `deploy/standalone/soak.ps1`，只记录健康状态、
+   延迟和进程元数据，并在 Windows Bundle CI 中执行短窗口验证；已新增
+   `standalone-compact-transfer-v1` 逐表/逐 Artifact 迁移工具及 Windows/Compact 包装脚本；试点与迁移
+   责任人、证据字段和签署模板见 `docs/operations/standalone-pilot.md`，当前仍需 Windows x64 云桌面
+   实机 72 小时真实观察与 Standalone→Compact 真实迁移演练。
+
+## 已完成：V4 S32～S36 小型化与公司可部署性
+
+1. `full` 保持现有隔离 Worker 拓扑；`compact` 显式使用合并 Worker，并公开可机器验收的
+   `/api/v1/runtime-profile` 运行契约。
+2. Compact 与 Full 共享 PostgreSQL/Alembic、Redis 和 MinIO 语义；不引入 SQLite、本地 Artifact
+   或进程内队列产品分支。
+3. Compact 基线收缩为 Web、API、合并 Worker/Beat、PostgreSQL、Redis 和 MinIO 六个容器；
+   默认容器内存上限合计约 2.6 GB，只向 Loopback 发布 Web 与 MinIO API。
+4. 配置层会拒绝 Compact 误开 Performance Lab 或 Environment Lab，避免将任务发送到缺少
+   k6/DinD 的运行时。
+5. ARM64 真实 Compose 已完成源码构建、六服务健康检查、Readiness 和 S32 业务 smoke；
+   smoke 覆盖登录、项目/API/Workflow 创建、不可变发布、合并 Worker 执行与 Snapshot。
+   空闲实测约 918 MiB，未发现 Backend/Worker ERROR、CRITICAL 或 Traceback。
+6. Docker-only 备份已对非空 PostgreSQL 和 1 个 MinIO Artifact 生成 custom dump 与 SHA-256 清单；
+   备份后项目数从 2 增加到 3，覆盖恢复后回到 2 且新项目不存在，对象集哈希相同。
+   恢复后再次执行上传、Workflow 发布和合并 Worker 验收通过。
+7. S33 已将基础 Compose 与源码构建 Overlay 分离；Backend/Worker 复用单一镜像，
+   私有仓库脚本为 5 个镜像输出 `repository@sha256` 不可变引用。
+8. ARM64 真实离线包为 353 MiB；在删除离线 Tag 后从 `images.tar` 重新导入，逐文件摘要、
+   5 个镜像 ID/架构、`--pull never --no-build` 六服务启动及 S32 业务 smoke 全部通过。
+9. 无外网升级演练先对 5 个真实 Artifact 生成一致性备份，再切换新包的 5 个镜像；
+   升级后 Readiness、Artifact 上传/下载、Workflow 发布与执行均通过。
+10. S34 实测 1000 次 Live API 在 25 并发下零失败，吞吐约 462 req/s、P95 约 154 ms；
+    24 次真实持久化 Workflow 在 6 并发下零失败，P95 约 453 ms，全部 Celery 队列归零。
+11. 短周期稳定性探针零失败、零容器重启、零队列积压；Full↔Compact 直接共享卷切换已
+    双向验证两组 Project、Artifact、Workflow Version 和 Execution Snapshot。72 小时真实试点不以短测代替。
+12. 本机回环 Registry 已真实推送 Backend、Frontend、PostgreSQL、Redis 和 MinIO 五个 ARM64 镜像，
+    输出 5 条仓库返回的 `repository@sha256` 引用；发布 Tag 带架构后缀。
+13. 当前完整门槛：后端 348 passed/3 skipped、总覆盖率 90.54%；前端 43 文件 167 passed，
+    Statements 87.71%、Branches 80.76%、Functions 86.42%、Lines 89.69%；格式、Ruff、mypy、Lint、
+    TypeScript、生产构建、Compose 解析和真实 Chromium 登录/质量总览均通过。
+14. S35 真实诊断目录含 13 个白名单文件、9 个成功探针和逐文件 SHA-256；精确扫描确认管理员口令、
+    数据加密密钥、应用密钥和 MinIO 口令均未命中，且不收集 `.env`、原始日志、对象名称/内容或业务载荷。
+15. ARM64 回滚演练对 11 个对象生成一致性备份；一次性 Project/Artifact 在首次恢复后消失，恢复后
+    再次写入成功，第二次恢复后探针再次消失且 6 服务健康。S35 离线开发包的 23 个内部文件摘要
+    全部通过并包含 5 个新运维工具；PR #38 的 amd64 远程 CI 已复验，自动化不能代替维护窗口审批。
+16. S36 使用不同离线 Tag 完成真实双版本演练并以最终脚本对 12 个对象复跑：新版本 6 服务全部健康后
+    注入失败，自动恢复旧数据、Artifact 和旧镜像，命令保持非零，证据为 `rolled_back`；失败路径未向新目录
+    复制 `.env`。随后正常升级为 `passed`，新目录以 `0600` 激活旧配置，运行镜像全部切换到 S36，
+    S32 登录、Artifact、Workflow 发布/执行及 Snapshot 业务 smoke 通过。
+17. 双版本演练发现离线主机安装 Git 但解压目录不是仓库时，旧备份脚本会因 `git rev-parse` 失败；
+    现由新升级器调用新备份工具并显式记录旧包 `SOURCE_REVISION`，普通离线备份也会回退读取包内元数据。
+    两份升级 JSON 均未命中管理员口令、数据加密密钥、应用密钥或 MinIO 口令；PR #38 的 amd64
+    远程 CI 已复验失败自动回滚、正常升级和业务 smoke。
+18. GitHub 首页和公司电脑快速部署手册已补齐联网源码、Windows/WSL2、私有仓库与完全离线三条入口，
+    并明确首次登录、内网 TLS、备份、事务式升级及 Secret/业务数据不得提交 Git 的边界。
+19. PR #38 提交 `24ce92d` 的 Backend Test/Integration、Compact/Full Compose、Security 和 V2→V3 Upgrade
+    六项远程检查全部通过。Compact CI 在所有验收结束后保留 7 天的 `amd64` 离线候选包与外部
+    SHA-256，目标公司电脑无需 Git、Python 或 Node.js；候选包不等于正式 Release 或试点签署。
 
 ## 已完成：S30 Failure Intelligence 与 AI Draft Change Set
 
@@ -509,11 +864,113 @@ PR #37 远程源码验收。
 
 ## 下一步
 
-1. 完成 PR #37 最终评审和 squash 合并；其受影响路径的 Frontend、Security、Compose CI 已通过，
-   Backend 与 V2→V3 Upgrade 按路径过滤不触发，远程 Playwright 无 flaky。
-2. 该小阶段合并后，继续 S31 剩余页面产品化、容量、安全、备份恢复和试点文档；未完成这些门槛前
-   不宣告 S31 或 V3 GA。
-3. V3 开发期间并行推进 `v2.0.0-rc.1` 的真实试点部署与连续 14 个自然日观察；代码变更不得冒充观察天数。
-4. S31 代码冻结后执行新的 V3 RC 候选连续 14 个自然日观察；任何代码修复生成新候选并重新计时。
-5. 只有 V2 RC 签署、恢复演练、扫描和容量证据全部通过后创建
-   `v2.0.0` 正式标签。
+1. 从 PR #38 成功的 Compact CI 下载固定 Commit 的 `amd64` 离线候选包和 SHA-256，通过公司受信
+   渠道交付，在目标 Windows/WSL2 或 Linux Docker 主机完成首次安装、备份恢复和回滚演练；Standalone
+   试点按 `docs/operations/standalone-pilot.md` 记录。
+2. 在同一候选 Commit 上完成至少 72 小时公司真实试点，由业务负责人、运维和安全审批人共同签署；
+   任何代码修复都生成新候选并重新开始观察。
+3. 试点通过后完成 PR #38 Compact 与 PR #39 Standalone 最终评审和合并；未完成真实试点与人工签署前
+   不创建 V4 正式标签。
+4. 继续 S31 剩余页面产品化、容量、安全、备份恢复和 V3 试点；未完成这些门槛前不宣告 V3 GA。
+5. 并行推进 `v2.0.0-rc.1` 的真实试点与连续 14 个自然日观察；只有签署、恢复演练、扫描和容量证据
+   全部通过后创建 `v2.0.0` 正式标签。
+
+## S47.2 V5 最终正确性与安全闭环（2026-08-23）
+
+### 已完成实现
+
+- Canonical Contract 采用统一 allowlist sanitizer，覆盖 OpenAPI/Swagger 导入、APIVersion 持久化、既有数据
+  迁移、REST/MCP 读取、Test Engineering 和 fingerprint；危险示例和值级 Secret/PII 不再进入稳定契约。
+- Project、Environment、ServiceEndpoint、API、Runtime 五层请求合并后执行 Header/Query/Cookie suppression；
+  `auth_mode=disabled` 优先于旧 alias，并按 Bearer/Basic/OAuth/API Key carrier 删除认证值。
+- Semantic Coverage 使用 Service/Operation/Location/Field/Value/Category 身份，区分 Project Known 与 Current
+  TestPlan；pinned 版本缺失不回退 current，未发布 WorkflowVersion 不算覆盖。
+- Change Regression 支持 Body、Path、Query、Header、Cookie 位置化变化并从当前 Canonical Contract 生成
+  Oracle；Evidence 冲突对称、provenance 完整，观察统计不会冒充规范性约束。
+- Swagger/OpenAPI 3.0 与 3.1 exclusive boundary 以及 Source AST 的 `<`、`<=`、`>`、`>=` 已保持精确语义。
+- 迁移 head 升级为 `20260823_0043`，Standalone baseline/incremental schema 和 Transfer revision 同步。
+
+### 能力与发布边界
+
+V5 FlowSpec 正式基线仅为 fingerprint v3；开发期 v1/v2 不承担正式兼容承诺。Pairwise 仍是有界代表组合，
+State Model 未实现并明确不可用，Knowledge Graph 只表达可追溯 Evidence 关系。真实 Key Rotation、Windows
+实机、长时 Standalone/Compact、连续 RC 观察和人工安全审批仍未完成，所以 `GA_READY` 保持 `NO`。
+
+本地与远程验证结果以
+[S47.2 最终正确性与安全闭环](release/s47-2-final-correctness-security.md)为准；远程 GitHub Actions
+未真实完成前不得用本地结果替代。
+
+## S47.3 V5 最终语义完整性闭环（2026-08-23）
+
+- Coverage Token 绑定 Oracle Set Fingerprint，Status/Response Schema 改变不再被值覆盖隐藏。
+- Current Plan Gap 成为 Approve/Execute/Release 硬门禁；Add-to-Plan 和人工逐 Gap Waiver 重算 Coverage。
+- Waiver 可过期、可审计、进入 Release Evidence，Service Token 无权创建。
+- ChangeSet 冻结 Operation/API/Version/Service/Route/Fingerprint；多 Service 同路由不会选第一个。
+- AST 区分规范控制流与普通分支，不可满足约束阻断生成/物化。
+- Canonical Schema 增加严格 Keyword Value/Range/Budget 校验；敏感 Enum 只保留 Count。
+- `20260823_0044` 使用冻结 Migration Support 清理历史数据并持久化 Waiver，Standalone/Transfer 同步。
+- MultipleOf 相邻值使用 Decimal 精确对齐。
+
+详细证据见 [S47.3 最终语义完整性闭环](release/s47-3-final-semantic-integrity.md)。真实 Key Rotation、
+Windows 实机、长时运行、RC 观察和安全审批未完成，`GA_READY` 仍为 `NO`。
+
+## S47.4 V5 最终评审修复（2026-08-25）
+
+- Operation Coverage 统一比较 API Definition/Version/Fingerprint/Service/Route/Portable Ref，
+  v1 不再覆盖 v2，Contract 指纹变化不再算已覆盖，跨实例 Portable 等价仍可匹配。
+- Python AST 证据记录条件深度和分支上下文；If/Try/Loop/Match 中的局部约束仅作
+  `supporting_condition`，不进入全局 Boundary/Oracle。
+- 多 Service 歧义经人工选择后，使用所选 API 固定版本和 Canonical Contract 重新生成
+  Proposal，显式绑定 Change Item，已审核/已物化项不允许静默改写。
+- 过期 Waiver 可续签为新 Revision，保留历史和 Supersede 链；同一 Gap 仅最高有效
+  Revision 进入 Release Evidence，Service Token 仍无权豁免。
+- Published Workflow Assert 增加图可达性分析：线性和 post-join 必达可形成覆盖；条件分支仅
+  Partial，断开节点不计覆盖，循环不确定时要求 Review。
+- `20260823_0045` 增加 Waiver Revision/Supersede 持久化；真实 PostgreSQL 完成
+  `0044→0045→0044→0045` 和 `alembic check`。
+- 隔离 Compose 中三轮 `S14→S47→S14` 全部通过。根因是管理面板成功后全局 Query
+  invalidation 使共享 loading 状态阻止后续 Secret 提交；已改为项目级定向失效并为 E2E
+  创建独立项目。
+
+详细证据见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。本地门禁不替代最终
+HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据未完成，`GA_READY: NO`。
+# S47.5 Release Evidence Integrity Closure（2026-08-26）
+
+- Semantic Coverage 已与 Missing Draft 开关解耦；关闭草案生成仍计算并阻断 Plan Gap。
+- Plan Gate 使用 TestPlanItem 固定资产/Workflow 版本，TestCase 使用已发布 Version Definition。
+- Release Gate 使用本次 TestPlanRunItem 快照且只接受 Passed Item；Quarantined/Cancelled 不计覆盖。
+- Current OpenAPI Fingerprint 为权威身份，精确失败不再回退旧 Route Contract。
+- Generated Workflow/TestCase 经人工发布后可在同一 Run 显式加入计划并重新计算，不自动执行。
+- Migration Head 保持 0045；完整证据见 `docs/release/s47-5-release-evidence-integrity.md`。
+- 本地 Backend `571 passed / 3 skipped`、Frontend `215 passed`、隔离 PostgreSQL Migration
+  往返和隔离 S47 Compose Smoke 均通过；最终状态仍以精确 HEAD 远程 CI 为准。
+
+# S47.6 Runtime Release Evidence Closure（2026-08-27）
+
+- Release Gate 先锁定并验证 TestPlanRun 终态；Queued/Running 返回 409，不修改 Change Regression
+  状态、Evidence、Stage 或 Release Decision。
+- Release Coverage 从 Passed RunItem 继续追踪 WorkflowExecution、实际 Passed API Node、最终 HTTP
+  Request Observation 和实际 Passed Assert；Skipped/Cancelled/未进入分支、运行时值不匹配及未执行
+  Dataset Row 不计覆盖。
+- Failed/Cancelled TestPlanRun 成为不受宽松 Release Policy 绕过的明确硬阻断，并保存安全的执行结果
+  代码；Failed Run 继续生成 Failure Triage。
+- Current Plan Coverage 按固定 SuiteVersion 展开 TestCaseVersion；VERSION_MISMATCH 与
+  CONTRACT_MISMATCH 支持人工 Replace Plan Item Version、审计和重新计算。
+- 页面展示 Runtime Node Evidence 基础、实际匹配 Fact/API Node/Execution 数量和 Replace Version 动作。
+- Migration Head 保持 `20260823_0045`；本地与远程完整门禁记录见
+  [S47.6 Runtime Release Evidence Closure](release/s47-6-runtime-release-evidence.md)。
+
+# S47.7 Autonomous Functional Acceptance & Merge（2026-08-27）
+
+- 同步 `origin/main` 后完成 Requirement/Correctness/Security/User Flow 四轮独立自动审计。
+- Runtime Coverage 对已分配 Service 改为与 Observation 精确匹配；legacy `unassigned`
+  仍保留兼容语义。
+- 已完成 Release Gate 的重复评估返回同一不可变 Decision/Evidence/Stage，不被后续
+  Plan 修改或 Waiver 过期重新解释。
+- Change Regression Missing Test 仍聚焦变更字段生成，但物化请求现在保留完整
+  Current Contract 的其他必填字段；独立 Compose 中 5 个固定版本工作流实际通过。
+- Credentialed CORS 拒绝通配符、非 HTTP(S)、UserInfo、Query、Fragment 和非根 Path。
+- 独立 `S14→S47.7→S14` 通过，Release Evidence 基于 Runtime Node Observation 且无 Waiver。
+- 开发代码合并不再等待人工 Reviewer；仍必须通过本地门禁、精确 HEAD Remote CI
+  和分支保护。完整记录见
+  [V5 自主功能验收](release/v5-autonomous-functional-acceptance.md)。

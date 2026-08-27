@@ -5,15 +5,23 @@ import os
 import platform
 from contextlib import suppress
 from pathlib import Path
-from uuid import uuid4
+from typing import cast
+from uuid import UUID, uuid4
 
 import httpx
+from pydantic import JsonValue
 
+from app.core.logging import redact
 from app.domain.network import OutboundNetworkPolicy
+from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.runner.client import RunnerControlPlaneClient
 from app.runner.workflow import RemoteWorkflowExecutor
-from app.schemas.runner_fabric import RunnerAgentConfiguration, RunnerLeaseResponse
+from app.schemas.runner_fabric import (
+    RunnerAgentConfiguration,
+    RunnerCheckpointRequest,
+    RunnerLeaseResponse,
+)
 from app.services.workflow_plan_codec import decode_execution_plan
 
 logger = logging.getLogger(__name__)
@@ -90,24 +98,40 @@ class RunnerAgent:
                     raise ValueError("Runner plan digest mismatch")
                 plan = decode_execution_plan(lease.task.plan)
 
-                async def progress(_execution_id: object, update: NodeStatusUpdate) -> None:
+                async def progress(execution_id: UUID, update: NodeStatusUpdate) -> None:
                     acknowledgment = await self._control_plane.progress(
                         lease.lease_id,
                         lease.task.fencing_token,
                         _progress_percent(update),
                         f"节点 {update.name}: {update.status.value}",
                     )
+                    if (
+                        update.result is not None
+                        and update.status.is_terminal
+                        and hasattr(self._control_plane, "checkpoint")
+                    ):
+                        checkpoint = _checkpoint_payload(
+                            lease,
+                            update,
+                            execution_id=execution_id,
+                        )
+                        acknowledgment = await self._control_plane.checkpoint(
+                            lease.lease_id, checkpoint
+                        )
                     if acknowledgment.cancel_requested:
                         cancellation.cancel()
 
                 result = await self._executor.execute(
                     plan,
                     network_policy=OutboundNetworkPolicy(
-                        tuple(lease.task.allowed_hosts),
-                        tuple(lease.task.allowed_private_cidrs),
+                        allowed_hosts=tuple(lease.task.allowed_hosts),
+                        allowed_private_cidrs=tuple(lease.task.allowed_private_cidrs),
+                        enabled=lease.task.outbound_policy_enabled,
                     ),
                     cancellation=cancellation,
                     on_progress=progress,
+                    resume_checkpoints=lease.task.resume_checkpoints,
+                    reset_retry_budget=lease.task.reset_retry_budget,
                 )
                 await self._control_plane.complete(lease.lease_id, lease.task.fencing_token, result)
             except httpx.HTTPStatusError as error:
@@ -215,6 +239,41 @@ def _progress_percent(update: NodeStatusUpdate) -> float:
     if update.status.is_terminal:
         return 50.0
     return 10.0
+
+
+def _checkpoint_payload(
+    lease: RunnerLeaseResponse,
+    update: NodeStatusUpdate,
+    *,
+    execution_id: UUID | None = None,
+) -> RunnerCheckpointRequest:
+    result = update.result
+    if result is None:
+        raise ValueError("terminal Runner status requires a NodeResult")
+    redacted_result = NodeResult.model_validate(redact(result.model_dump(mode="json")))
+    snapshot = update.context_snapshot or {}
+    extracted = snapshot.get("extracted_variables", {})
+    if not isinstance(extracted, dict):
+        extracted = {}
+    input_hash = update.input_hash or _sha256(f"{update.node_id}:{snapshot!r}")
+    return RunnerCheckpointRequest(
+        execution_id=execution_id or lease.task.execution_id,
+        node_id=update.node_id,
+        node_type=update.node_type,
+        name=update.name,
+        status=update.status,
+        attempts=max(1, update.attempts),
+        output=redacted_result.output,
+        result=redacted_result,
+        error_code=update.error_code,
+        error_message=update.error_message,
+        started_at=None,
+        finished_at=update.occurred_at,
+        input_hash=input_hash,
+        extracted_variables=cast(dict[str, JsonValue], redact(extracted)),
+        snapshot_revision=1,
+        fencing_token=lease.task.fencing_token,
+    )
 
 
 def _retryable_control_plane_error(error: httpx.HTTPError) -> bool:

@@ -9,6 +9,7 @@ from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
     NodeExecutionError,
+    NodeRunRecord,
     NodeStatusUpdate,
     WorkflowScheduler,
 )
@@ -180,6 +181,107 @@ async def test_scheduler_retries_only_configured_transient_failures() -> None:
     api_record = result.records[1]
     assert result.status == "passed"
     assert api_record.attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_scheduler_resumes_completed_nodes_and_continues_attempt_numbers() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+    first = await WorkflowScheduler(ControlledExecutor({"api": {"permanent_failure": True}})).run(
+        definition
+    )
+    first_by_id = {record.node_id: record for record in first.records}
+    assert first.status == "failed"
+    assert first_by_id["api"].input_hash is not None
+
+    resumed_executor = ControlledExecutor()
+    resumed = await WorkflowScheduler(resumed_executor).run(
+        definition,
+        resume_records=(first_by_id["start"],),
+        resume_attempts={
+            "start": first_by_id["start"].attempts,
+            "api": first_by_id["api"].attempts,
+        },
+    )
+
+    assert resumed.status == "passed"
+    assert resumed_executor.attempts == {"api": 1, "end": 1}
+    assert resumed.records[1].attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_scheduler_retry_resets_failed_node_budget_without_reusing_attempt_number() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api", max_retries=1)],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+    first = await WorkflowScheduler(ControlledExecutor({"api": {"failures": 2}})).run(definition)
+    first_by_id = {record.node_id: record for record in first.records}
+    assert first_by_id["api"].status is NodeStatus.FAILED
+    assert first_by_id["api"].attempts == 2
+
+    resumed = await WorkflowScheduler(ControlledExecutor({"api": {"failures": 1}})).run(
+        definition,
+        resume_records=(first_by_id["start"],),
+        resume_attempts={"start": 1, "api": 2},
+    )
+    assert resumed.status == "failed"
+    assert resumed.records[1].attempts == 3
+
+    retried_executor = ControlledExecutor({"api": {"failures": 1}})
+    retried = await WorkflowScheduler(retried_executor).run(
+        definition,
+        resume_records=(first_by_id["start"],),
+        resume_attempts={"start": 1, "api": 2},
+        reset_retry_budget=True,
+    )
+    assert retried.status == "passed"
+    assert retried_executor.attempts == {"api": 2, "end": 1}
+    assert retried.records[1].attempts == 4
+
+
+@pytest.mark.asyncio
+async def test_scheduler_restores_checkpoint_output_and_emits_snapshot() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("api")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+    )
+    initial = await WorkflowScheduler(ControlledExecutor()).run(definition)
+    records: dict[str, NodeRunRecord] = {record.node_id: record for record in initial.records}
+    context = ExecutionContext()
+    context.restore_checkpoint(
+        node_id="start",
+        output={"restored": True},
+        extracted_variables={"from_checkpoint": "yes"},
+    )
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    resumed = await WorkflowScheduler(ControlledExecutor()).run(
+        definition,
+        context=context,
+        resume_records=(records["start"], records["api"]),
+        on_node_status=capture,
+    )
+
+    assert resumed.context["node_outputs"]["start"] == records["start"].output
+    assert resumed.context["extracted_variables"]["from_checkpoint"] == "yes"
+    restored_api = next(item for item in updates if item.node_id == "api")
+    assert restored_api.input_hash == records["api"].input_hash
+    assert restored_api.context_snapshot is not None
 
 
 @pytest.mark.asyncio

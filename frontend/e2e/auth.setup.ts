@@ -11,7 +11,7 @@ import {
 
 test('管理员登录并完成首次密码初始化', async ({ page }) => {
   await page.goto('/')
-  await page.getByLabel('邮箱').fill(administratorEmail)
+  await page.getByLabel('账号').fill(administratorEmail)
   let loginResponse = await submitLogin(page, bootstrapPassword)
   let authenticatedPassword = bootstrapPassword
   if (!loginResponse.ok() && activePassword !== bootstrapPassword) {
@@ -52,11 +52,11 @@ test('管理员登录并完成首次密码初始化', async ({ page }) => {
     // new credential and finish setup with a valid browser session.
     await page.context().clearCookies()
     await page.reload()
-    await page.getByLabel('邮箱').fill(administratorEmail)
+    await page.getByLabel('账号').fill(administratorEmail)
     expect((await submitLogin(page, activePassword)).ok()).toBeTruthy()
   }
 
-  await expect(page.getByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '退出' })).toBeVisible()
   await mkdir('.playwright/.auth', { recursive: true })
   await page.context().storageState({ path: authenticationStatePath })
 })

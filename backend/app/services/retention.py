@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.dml import Delete
 
 from app.core.storage import object_storage
-from app.models.access import Project, RefreshSession
+from app.models.access import AuditLog, Project, RefreshSession
 from app.models.artifacts import Artifact
 from app.models.data_sources import MockRequestLog, MockService
 from app.models.executions import APICallExecution
-from app.models.governance import IdempotencyRecord
+from app.models.governance import IdempotencyRecord, OrganizationGovernance
 from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery
 from app.models.tasking import TestPlanRun
@@ -39,6 +39,7 @@ class RetentionCleanupSummary:
     idempotency_records_deleted: int = 0
     import_previews_deleted: int = 0
     refresh_sessions_deleted: int = 0
+    audit_logs_deleted: int = 0
 
 
 class RetentionCleanupService:
@@ -69,6 +70,14 @@ class RetentionCleanupService:
         totals.refresh_sessions_deleted += await self._delete(
             delete(RefreshSession).where(RefreshSession.expires_at < cleanup_at)
         )
+        governance = list((await self._session.scalars(select(OrganizationGovernance))).all())
+        for policy in governance:
+            totals.audit_logs_deleted += await self._delete(
+                delete(AuditLog).where(
+                    AuditLog.organization_id == policy.organization_id,
+                    AuditLog.created_at < cleanup_at - timedelta(days=policy.audit_retention_days),
+                )
+            )
         await self._session.commit()
         return totals.freeze()
 
@@ -156,6 +165,7 @@ class _MutableCleanupSummary:
     idempotency_records_deleted: int = 0
     import_previews_deleted: int = 0
     refresh_sessions_deleted: int = 0
+    audit_logs_deleted: int = 0
 
     def freeze(self) -> RetentionCleanupSummary:
         return RetentionCleanupSummary(**asdict(self))

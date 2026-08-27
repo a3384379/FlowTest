@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -26,6 +27,7 @@ class ContractOperation:
     method: str
     path: str
     operation_id: str
+    service_target: str | None
     request_signature: dict[str, JsonValue]
     response_signature: dict[str, JsonValue]
 
@@ -91,6 +93,7 @@ def contract_operations(document: Mapping[str, JsonValue]) -> tuple[ContractOper
                     method=method.upper(),
                     path=path,
                     operation_id=operation_id[:200],
+                    service_target=_service_target(operation, path_item, document),
                     request_signature=_request_signature(operation, parameters),
                     response_signature=_response_signature(operation),
                 )
@@ -248,6 +251,7 @@ def _request_signature(
 ) -> dict[str, JsonValue]:
     required: list[str] = []
     types: dict[str, JsonValue] = {}
+    constraints: dict[str, JsonValue] = {}
     for raw_parameter in parameters:
         parameter = _mapping(raw_parameter)
         name = _text(parameter.get("name"))
@@ -259,25 +263,39 @@ def _request_signature(
             required.append(qualified)
         schema = _mapping(parameter.get("schema")) or parameter
         types[qualified] = _text(schema.get("type")) or "any"
+        constraints[qualified] = _schema_constraints(schema)
     request_body = _mapping(operation.get("requestBody"))
     if request_body.get("required") is True:
         required.append("body")
     body_schema = _first_content_schema(request_body)
-    _flatten_schema(body_schema, "body", types)
-    return {"required": cast(JsonValue, sorted(required)), "types": types}
+    _flatten_schema(body_schema, "body", types, constraints)
+    return {
+        "required": cast(JsonValue, sorted(required)),
+        "types": types,
+        "constraints": constraints,
+    }
 
 
 def _response_signature(operation: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     responses = _mapping(operation.get("responses"))
+    all_codes = sorted(
+        code for code in responses if code == "default" or re.fullmatch(r"[1-5][0-9]{2}", code)
+    )
     success_codes = sorted(
         code for code in responses if code == "default" or (len(code) == 3 and code.startswith("2"))
     )
     types: dict[str, JsonValue] = {}
+    constraints: dict[str, JsonValue] = {}
     for code in success_codes:
         response = _mapping(responses.get(code))
         schema = _first_content_schema(response) or _mapping(response.get("schema"))
-        _flatten_schema(schema, code, types)
-    return {"success_codes": cast(JsonValue, success_codes), "types": types}
+        _flatten_schema(schema, code, types, constraints)
+    return {
+        "all_codes": cast(JsonValue, all_codes),
+        "success_codes": cast(JsonValue, success_codes),
+        "types": types,
+        "constraints": constraints,
+    }
 
 
 def _first_content_schema(container: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -289,16 +307,60 @@ def _first_content_schema(container: Mapping[str, JsonValue]) -> dict[str, JsonV
 
 
 def _flatten_schema(
-    schema: Mapping[str, JsonValue], prefix: str, target: dict[str, JsonValue], depth: int = 0
+    schema: Mapping[str, JsonValue],
+    prefix: str,
+    target: dict[str, JsonValue],
+    constraints: dict[str, JsonValue],
+    depth: int = 0,
 ) -> None:
     if not schema or depth > 16:
         return
     schema_type = _text(schema.get("type")) or ("object" if schema.get("properties") else "any")
     target[prefix] = schema_type
+    constraints[prefix] = _schema_constraints(schema)
     if schema_type == "array":
-        _flatten_schema(_mapping(schema.get("items")), f"{prefix}[]", target, depth + 1)
+        _flatten_schema(
+            _mapping(schema.get("items")), f"{prefix}[]", target, constraints, depth + 1
+        )
     for name, raw_property in _mapping(schema.get("properties")).items():
-        _flatten_schema(_mapping(raw_property), f"{prefix}.{name}", target, depth + 1)
+        _flatten_schema(_mapping(raw_property), f"{prefix}.{name}", target, constraints, depth + 1)
+
+
+def _schema_constraints(schema: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    keys = (
+        "enum",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "format",
+        "minItems",
+        "maxItems",
+        "uniqueItems",
+        "additionalProperties",
+        "nullable",
+    )
+    return {key: schema[key] for key in keys if key in schema}
+
+
+def _service_target(
+    operation: Mapping[str, JsonValue],
+    path_item: Mapping[str, JsonValue],
+    document: Mapping[str, JsonValue],
+) -> str | None:
+    for container in (operation, path_item, document):
+        servers = container.get("servers")
+        if not isinstance(servers, list) or not servers:
+            continue
+        first = _mapping(servers[0])
+        url = _text(first.get("url"))
+        if url:
+            return url[:2048]
+    return None
 
 
 def _field_count(signature: Mapping[str, JsonValue]) -> int:

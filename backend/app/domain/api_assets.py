@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope, resolve_variables
@@ -74,6 +74,7 @@ class APIVersionSpec:
     auth_config: dict[str, str]
     extraction_rules: tuple[ExtractionRuleSpec, ...] = ()
     assertions: tuple[APIAssertionSpec, ...] = ()
+    variables: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,12 +128,16 @@ def build_variables(
     workflow_values: dict[str, str],
     dataset_values: dict[str, str],
     runtime_values: dict[str, str],
+    service_endpoint_values: dict[str, str] | None = None,
+    api_values: dict[str, str] | None = None,
 ) -> dict[str, ResolvedValue]:
     return resolve_variables(
         {
             VariableScope.GLOBAL: global_values,
             VariableScope.PROJECT: project_values,
             VariableScope.ENVIRONMENT: environment_values,
+            VariableScope.SERVICE_ENDPOINT: service_endpoint_values or {},
+            VariableScope.API: api_values or {},
             VariableScope.WORKFLOW: workflow_values,
             VariableScope.DATASET: dataset_values,
             VariableScope.RUNTIME: runtime_values,

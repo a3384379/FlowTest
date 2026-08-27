@@ -3,12 +3,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
-from app.api.dependencies import CurrentUser, SessionDependency
+from app.api.dependencies import CurrentUser, ImportDocumentFetcherDependency, SessionDependency
 from app.core.config import settings
 from app.core.errors import AppError
 from app.importers.contracts import ImportSourceType
 from app.schemas.common import Page
-from app.schemas.imports import ImportMergeRequest, ImportRunResponse
+from app.schemas.imports import (
+    ImportMergeRequest,
+    ImportRunResponse,
+    ImportUrlDiscoveryRequest,
+    ImportUrlDiscoveryResponse,
+    ImportUrlDocumentResponse,
+    ImportUrlPreviewRequest,
+)
 from app.services.imports import ImportService
 
 router = APIRouter(prefix="/projects/{project_id}/imports")
@@ -58,6 +65,49 @@ async def preview_api_document(
     return ImportRunResponse.model_validate(run)
 
 
+@router.post("/url/discover", response_model=ImportUrlDiscoveryResponse)
+async def discover_api_document_url(
+    project_id: UUID,
+    payload: ImportUrlDiscoveryRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    document_fetcher: ImportDocumentFetcherDependency,
+) -> ImportUrlDiscoveryResponse:
+    discovery = await ImportService(session, document_fetcher=document_fetcher).discover_url(
+        actor=current_user,
+        project_id=project_id,
+        url=str(payload.url),
+        maximum_bytes=settings.artifact_limit_bytes,
+    )
+    return ImportUrlDiscoveryResponse(
+        source_url=discovery.source_url,
+        source_kind=discovery.source_kind,
+        documents=[
+            ImportUrlDocumentResponse(id=item.id, name=item.name, url=item.display_url)
+            for item in discovery.documents
+        ],
+    )
+
+
+@router.post("/url/preview", response_model=ImportRunResponse, status_code=status.HTTP_201_CREATED)
+async def preview_api_document_url(
+    project_id: UUID,
+    payload: ImportUrlPreviewRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    document_fetcher: ImportDocumentFetcherDependency,
+) -> ImportRunResponse:
+    run = await ImportService(session, document_fetcher=document_fetcher).preview_url(
+        actor=current_user,
+        project_id=project_id,
+        url=str(payload.url),
+        source_type=payload.source_type,
+        maximum_bytes=settings.artifact_limit_bytes,
+        document_id=payload.document_id,
+    )
+    return ImportRunResponse.model_validate(run)
+
+
 @router.post("/{run_id}/merge", response_model=ImportRunResponse)
 async def merge_api_import(
     project_id: UUID,
@@ -71,6 +121,9 @@ async def merge_api_import(
         project_id=project_id,
         run_id=run_id,
         selected_keys=payload.selected_keys,
+        service_id=payload.service_id,
+        environment_id=payload.environment_id,
+        endpoint_variant=payload.endpoint_variant,
     )
     return ImportRunResponse.model_validate(run)
 

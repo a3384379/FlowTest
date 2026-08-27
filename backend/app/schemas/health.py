@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.domain.runtime_profiles import RuntimeFeature, RuntimeProfile, WorkerTopology
+
 
 class HealthResponse(BaseModel):
     status: Literal["ok"]
@@ -12,6 +14,12 @@ class HealthResponse(BaseModel):
 class ReadinessResponse(BaseModel):
     status: Literal["ok", "degraded"]
     checks: dict[str, Literal["ok", "error"]]
+
+
+class RuntimeProfileResponse(BaseModel):
+    profile: RuntimeProfile
+    worker_topology: WorkerTopology
+    unavailable_features: tuple[RuntimeFeature, ...]
 
 
 class FeatureFlagsResponse(BaseModel):

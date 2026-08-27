@@ -116,6 +116,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert published.status_code == 200, published.text
     version_one = published.json()
     assert version_one["version"] == 1
+    assert version_one["definition"]["nodes"][1]["config"]["api_version"] == 1
 
     updated_draft = _workflow_definition(api_id, max_retries=0)
     updated_draft["nodes"][1]["name"] = "已修改的草稿"
@@ -150,7 +151,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
         },
     )
     assert api_v2.status_code == 201
-    target = respx.get("http://workflow.example.com/users/v2").mock(
+    target = respx.get("http://workflow.example.com/users/v1").mock(
         side_effect=[Response(503, json={"error": "temporary"}), Response(200, json={"id": 7})]
     )
     executed = await workflow_client.post(
@@ -165,13 +166,49 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert detail["execution"]["status"] == "passed"
     assert detail["nodes"][1]["attempts"] == 2
     assert detail["nodes"][1]["output"]["body"] == {"id": 7}
+    observations = detail["nodes"][1]["result"]["observations"]
+    assert [item["attempt"] for item in observations] == [1, 2]
+    assert [item["response"]["status_code"] for item in observations] == [503, 200]
+    assert observations[1]["request"]["url"].endswith("/users/v1")
+    assert set(observations[1]["request"]["headers"]["X-Snapshot-Key"]) == {"*"}
+    assert observations[1]["duration_ms"] >= 0
     assert len(target.calls) == 2
+    commands = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{detail['execution']['id']}/commands",
+        headers=headers,
+    )
+    assert commands.status_code == 200, commands.text
+    assert len(commands.json()) == 1
+    assert commands.json()[0]["command_type"] == "start"
+    assert commands.json()[0]["status"] == "completed"
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{detail['execution']['id']}/checkpoints",
+        headers=headers,
+    )
+    assert checkpoints.status_code == 200, checkpoints.text
+    assert {item["node_id"] for item in checkpoints.json()} == {"start", "api", "end"}
+    assert all(len(item["input_hash"]) == 64 for item in checkpoints.json())
     snapshot = detail["execution"]["snapshot"]
     assert snapshot["workflow"]["version"] == 1
-    assert snapshot["apis"]["api"]["version"] == 2
-    assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v2")
+    assert snapshot["apis"]["api"]["version"] == 1
+    assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v1")
     assert snapshot["apis"]["api"]["spec"]["auth_config"]["value"] == "***"
     assert "snapshot-api-key" not in json.dumps(detail)
+
+    execution_list = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions",
+        headers=headers,
+        params={"workflow_id": workflow["id"]},
+    )
+    assert execution_list.status_code == 200
+    assert [item["id"] for item in execution_list.json()["items"]] == [detail["execution"]["id"]]
+    unrelated_list = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions",
+        headers=headers,
+        params={"workflow_id": "00000000-0000-4000-8000-000000000999"},
+    )
+    assert unrelated_list.status_code == 200
+    assert unrelated_list.json()["items"] == []
 
     environment_changed = await workflow_client.patch(
         f"/api/v1/projects/{project_id}/environments/{environment_id}",
@@ -192,7 +229,386 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert history.status_code == 200
     historical_snapshot = history.json()["execution"]["snapshot"]
     assert historical_snapshot["environment"]["base_url"] == "http://workflow.example.com"
-    assert historical_snapshot["apis"]["api"]["version"] == 2
+    assert historical_snapshot["apis"]["api"]["version"] == 1
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_failed_workflow_resume_reuses_checkpoints_and_command_idempotency(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = _workflow_definition(api_id)
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "可恢复流程", "definition": definition},
+    )
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[Response(500, json={"error": "temporary"}), Response(200, json={"id": 8})]
+    )
+
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers={**headers, "Idempotency-Key": "s43-start"},
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["id"]
+    failed = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert failed["execution"]["status"] == "failed"
+
+    resumed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers={**headers, "Idempotency-Key": "s43-resume"},
+    )
+    assert resumed.status_code == 202, resumed.text
+    assert resumed.json()["command"]["command_type"] == "resume"
+    completed = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, execution_id
+    )
+    assert completed["execution"]["status"] == "passed"
+    assert len(target.calls) == 2
+
+    duplicate = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers={**headers, "Idempotency-Key": "s43-resume"},
+    )
+    assert duplicate.status_code == 202
+    assert duplicate.json()["command"]["id"] == resumed.json()["command"]["id"]
+    commands = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/commands",
+        headers=headers,
+    )
+    assert [item["command_type"] for item in commands.json()] == ["resume", "start"]
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+        headers=headers,
+    )
+    api_checkpoints = [item for item in checkpoints.json() if item["node_id"] == "api"]
+    assert [item["attempt"] for item in api_checkpoints] == [1, 2]
+    assert [item["status"] for item in api_checkpoints] == ["failed", "passed"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_api_node_pins_version_and_applies_request_overrides(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    version_two = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis/{api_id}/versions",
+        headers=headers,
+        json={"method": "GET", "path": "/users/v2", "body_kind": "none"},
+    )
+    assert version_two.status_code == 201
+    definition = _workflow_definition(api_id)
+    definition["nodes"][1]["config"].update(
+        {
+            "api_version": 1,
+            "request_overrides": {
+                "query_parameters": [{"name": "source", "value": "workflow", "enabled": True}],
+                "headers": {"X-Node": "custom"},
+            },
+        }
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "固定接口版本", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1?source=workflow").mock(
+        return_value=Response(200, json={"version": 1})
+    )
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client,
+        headers,
+        project_id,
+        executed.json()["id"],
+    )
+    assert detail["execution"]["status"] == "passed"
+    assert detail["execution"]["snapshot"]["apis"]["api"]["version"] == 1
+    assert target.calls[0].request.headers["X-Node"] == "custom"
+    assert target.calls[0].request.headers["X-Snapshot-Key"] == "snapshot-api-key"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_location_overrides_and_auth_disabled_reach_real_target(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project = await workflow_client.post(
+        "/api/v1/projects", headers=headers, json={"name": "Location E2E project"}
+    )
+    project_id = project.json()["id"]
+    project_configuration = await workflow_client.put(
+        f"/api/v1/projects/{project_id}/configuration",
+        headers=headers,
+        json={
+            "headers": {
+                "Authorization": "Bearer project-token",
+                "X-Tenant-Id": "project",
+                "Cookie": "session=project; keep=project",
+            }
+        },
+    )
+    assert project_configuration.status_code == 200, project_configuration.text
+    environment = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={
+            "name": "Location target",
+            "base_url": "http://workflow.example.com",
+            "headers": {
+                "Authorization": "Bearer environment-token",
+                "X-Tenant-Id": "environment",
+                "Cookie": "session=environment; keep=environment",
+            },
+        },
+    )
+    endpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/service-endpoints", headers=headers
+    )
+    assert endpoints.status_code == 200, endpoints.text
+    default_endpoint = next(
+        item
+        for item in endpoints.json()
+        if item["service_id"] == environment.json()["default_service_id"]
+    )
+    endpoint_update = await workflow_client.patch(
+        f"/api/v1/projects/{project_id}/service-endpoints/{default_endpoint['id']}",
+        headers=headers,
+        json={
+            "headers": {
+                "Authorization": "Bearer endpoint-token",
+                "X-Tenant-Id": "endpoint",
+                "Cookie": "session=endpoint; keep=endpoint",
+            }
+        },
+    )
+    assert endpoint_update.status_code == 200, endpoint_update.text
+    api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "Create tenant order",
+            "request": {
+                "method": "POST",
+                "path": "/tenants/{{tenantId}}/orders",
+                "query_parameters": [
+                    {"name": "dryRun", "value": "false", "enabled": True},
+                    {"name": "api_key", "value": "api-key", "enabled": True},
+                ],
+                "headers": {
+                    "Authorization": "Bearer api-token",
+                    "X-Tenant-Id": "api",
+                    "Cookie": "session=api; keep=api",
+                },
+                "body_kind": "json",
+                "body": {"quantity": 1},
+                "auth": {
+                    "kind": "bearer",
+                    "values": {"token": "api-bearer-token"},
+                },
+            },
+        },
+    )
+    assert api.status_code == 201, api.text
+    definition = _workflow_definition(api.json()["definition"]["id"])
+    definition["variables"] = {"tenantId": "tenant-47"}
+    definition["nodes"][1]["config"].update(
+        {
+            "expected_statuses": [401],
+            "request_overrides": {
+                "query_parameters": [{"name": "dryRun", "value": "true", "enabled": True}],
+                "headers": {"X-Tenant-Id": "node-suppressed-value"},
+                "replace_headers": True,
+                "body": {"kind": "json", "value": {"quantity": 1000}},
+                "auth_mode": "disabled",
+                "suppressed_headers": ["x-tenant-id"],
+                "suppressed_query_parameters": ["api_key"],
+                "suppressed_cookies": ["session"],
+            },
+        }
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "Location negative E2E", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.post("http://workflow.example.com/tenants/tenant-47/orders?dryRun=true").mock(
+        return_value=Response(401, json={"error": "missing authentication"})
+    )
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={
+            "environment_id": environment.json()["id"],
+            "runtime_headers": {
+                "Authorization": "Bearer runtime-token",
+                "X-Tenant-Id": "runtime",
+                "Cookie": "session=runtime; keep=runtime",
+            },
+        },
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, executed.json()["id"]
+    )
+    assert detail["execution"]["status"] == "passed"
+    request = target.calls[0].request
+    assert request.url.path == "/tenants/tenant-47/orders"
+    assert request.url.params["dryRun"] == "true"
+    assert "X-Tenant-Id" not in request.headers
+    assert "Authorization" not in request.headers
+    assert "api_key" not in request.url.params
+    assert request.headers["Cookie"] == "keep=runtime"
+    assert json.loads(request.content) == {"quantity": 1000}
+    suppression = detail["execution"]["snapshot"]["apis"]["api"]["target"]["request_suppression"]
+    assert suppression == {
+        "auth_mode": "disabled",
+        "suppressed_header_names": ["Authorization", "x-tenant-id"],
+        "suppressed_query_parameter_names": ["api_key"],
+        "suppressed_cookie_names": ["session"],
+    }
+    snapshot_text = json.dumps(detail["execution"]["snapshot"])
+    for suppressed_value in (
+        "node-suppressed-value",
+        "api-key",
+        "api-token",
+        "runtime-token",
+        "runtime-sentinel",
+    ):
+        assert suppressed_value not in snapshot_text
+
+
+@respx.mock
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_location", ["query", "cookie"])
+async def test_api_key_query_and_cookie_auth_are_suppressed_after_all_layers(
+    workflow_client: AsyncClient,
+    auth_location: str,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project = await workflow_client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": f"API key {auth_location} suppression"},
+    )
+    project_id = project.json()["id"]
+    environment = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={"name": "Suppression target", "base_url": "http://workflow.example.com"},
+    )
+    carrier = "api_key" if auth_location == "query" else "auth_session"
+    api_headers = {"Cookie": f"{carrier}=api; keep=api"} if auth_location == "cookie" else {}
+    query_parameters = (
+        [{"name": carrier, "value": "api", "enabled": True}] if auth_location == "query" else []
+    )
+    api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": f"API key {auth_location}",
+            "request": {
+                "method": "GET",
+                "path": f"/auth-{auth_location}",
+                "query_parameters": query_parameters,
+                "headers": api_headers,
+                "body_kind": "none",
+                "auth": {
+                    "kind": "api_key",
+                    "values": {
+                        "in": auth_location,
+                        "name": carrier,
+                        "value": "auth-value",
+                    },
+                },
+            },
+        },
+    )
+    assert api.status_code == 201, api.text
+    definition = _workflow_definition(api.json()["definition"]["id"])
+    overrides: dict[str, Any] = {"auth_mode": "disabled"}
+    if auth_location == "query":
+        overrides["query_parameters"] = [{"name": carrier, "value": "node", "enabled": True}]
+    definition["nodes"][1]["config"].update(
+        {"expected_statuses": [200], "request_overrides": overrides}
+    )
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": f"Suppress {auth_location} auth", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get(f"http://workflow.example.com/auth-{auth_location}").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+    runtime_headers = {"Authorization": "Bearer stale-runtime-auth"}
+    if auth_location == "cookie":
+        runtime_headers["Cookie"] = f"{carrier}=runtime; keep=runtime"
+    executed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/executions",
+        headers=headers,
+        json={
+            "environment_id": environment.json()["id"],
+            "runtime_headers": runtime_headers,
+        },
+    )
+    assert executed.status_code == 202, executed.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, executed.json()["id"]
+    )
+    assert detail["execution"]["status"] == "passed"
+    request = target.calls[0].request
+    assert "Authorization" not in request.headers
+    if auth_location == "query":
+        assert carrier not in request.url.params
+    else:
+        assert request.headers["Cookie"] == "keep=runtime"
+    suppression = detail["execution"]["snapshot"]["apis"]["api"]["target"]["request_suppression"]
+    assert suppression["auth_mode"] == "disabled"
+    expected_key = (
+        "suppressed_query_parameter_names"
+        if auth_location == "query"
+        else "suppressed_cookie_names"
+    )
+    assert suppression[expected_key] == [carrier]
+    assert "auth-value" not in json.dumps(detail)
+    assert "stale-runtime-auth" not in json.dumps(detail)
 
 
 @respx.mock
@@ -316,7 +732,7 @@ async def test_publish_rejects_invalid_or_cross_project_api_configuration(
     workflow_client: AsyncClient,
 ) -> None:
     headers = await _login_headers(workflow_client)
-    project_id, _environment_id, _api_id = await _create_assets(workflow_client, headers)
+    project_id, _environment_id, api_id = await _create_assets(workflow_client, headers)
     missing_api = "00000000-0000-0000-0000-000000000099"
     created = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows",
@@ -343,6 +759,46 @@ async def test_publish_rejects_invalid_or_cross_project_api_configuration(
     )
     assert rejected.status_code == 422
     assert rejected.json()["error"]["code"] == "INVALID_NODE_CONFIG"
+
+    missing_version_definition = _workflow_definition(api_id)
+    missing_version_definition["nodes"][1]["config"]["api_version"] = 99
+    missing_version = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "版本不存在", "definition": missing_version_definition},
+    )
+    rejected_version = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{missing_version.json()['id']}/versions",
+        headers=headers,
+    )
+    assert rejected_version.status_code == 422
+    assert rejected_version.json()["error"]["code"] == "WORKFLOW_API_VERSION_NOT_FOUND"
+
+    missing_file_definition = _workflow_definition(api_id)
+    missing_file_definition["nodes"][1]["config"]["request_overrides"] = {
+        "body": {
+            "kind": "multipart",
+            "value": {
+                "files": [
+                    {
+                        "field": "document",
+                        "artifact_id": "00000000-0000-4000-8000-000000000098",
+                    }
+                ]
+            },
+        }
+    }
+    missing_file = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "文件不存在", "definition": missing_file_definition},
+    )
+    rejected_file = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{missing_file.json()['id']}/versions",
+        headers=headers,
+    )
+    assert rejected_file.status_code == 422
+    assert rejected_file.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 
 
 @respx.mock

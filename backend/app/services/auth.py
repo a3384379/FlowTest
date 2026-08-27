@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import PasswordService, TokenService, password_service, token_service
+from app.domain.runtime_profiles import RuntimeProfile
 from app.models.access import RefreshSession, User
 from app.repositories.access import RefreshSessionRepository, UserRepository
 from app.services.audit import AuditService
+from app.services.organizations import OrganizationContextService
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,13 +37,13 @@ class AuthService:
         self._tokens = tokens
 
     async def login(self, *, email: str, password: str) -> TokenPair:
-        user = await self._users.get_by_email(_normalize_email(email))
+        user = await self._users.get_by_email(_normalize_login_identifier(email))
         if (
             user is None
             or not user.is_active
             or not self._passwords.verify(user.password_hash, password)
         ):
-            raise AppError(code="INVALID_CREDENTIALS", message="邮箱或密码错误", status_code=401)
+            raise AppError(code="INVALID_CREDENTIALS", message="账号或密码错误", status_code=401)
         if self._passwords.needs_rehash(user.password_hash):
             user.password_hash = self._passwords.hash(password)
         pair = await self._issue_pair(user)
@@ -176,10 +178,11 @@ class UserService:
             password_hash=password_service.hash(password),
             is_active=True,
             is_system_admin=is_system_admin,
-            requires_password_change=True,
+            requires_password_change=settings.runtime_profile is not RuntimeProfile.STANDALONE,
         )
         self._users.add(user)
         await self._session.flush()
+        await OrganizationContextService(self._session).ensure_default_for_user(user)
         self._audit.record(
             actor_user_id=actor.id,
             project_id=None,
@@ -225,7 +228,9 @@ class UserService:
 async def bootstrap_administrator(session: AsyncSession) -> None:
     users = UserRepository(session)
     email = _normalize_email(settings.bootstrap_admin_email)
-    if await users.get_by_email(email) is not None:
+    existing = await users.get_by_email(email)
+    if existing is not None:
+        await OrganizationContextService(session).ensure_default_for_user(existing)
         return
     administrator = User(
         email=email,
@@ -233,11 +238,19 @@ async def bootstrap_administrator(session: AsyncSession) -> None:
         password_hash=password_service.hash(settings.bootstrap_admin_password),
         is_active=True,
         is_system_admin=True,
-        requires_password_change=True,
+        requires_password_change=settings.runtime_profile is not RuntimeProfile.STANDALONE,
     )
     users.add(administrator)
     await session.commit()
+    await OrganizationContextService(session).ensure_default_for_user(administrator)
 
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _normalize_login_identifier(identifier: str) -> str:
+    normalized = _normalize_email(identifier)
+    if normalized == "admin":
+        return _normalize_email(settings.bootstrap_admin_email)
+    return normalized

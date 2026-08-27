@@ -87,6 +87,8 @@ class ExecutionService:
         use_body_override: bool,
         timeout_seconds: int,
         assertions: tuple[AssertionSpec, ...],
+        service_override: str | None = None,
+        endpoint_variant: str | None = None,
     ) -> tuple[APICallExecution, list[AssertionResult]]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         _definition, version = await self._assets.get_detail(
@@ -103,6 +105,8 @@ class ExecutionService:
             runtime_headers=runtime_headers,
             body_override=body_override,
             use_body_override=use_body_override,
+            service_override=service_override,
+            endpoint_variant=endpoint_variant,
             redact=False,
         )
         redacted_request = await self._assets.preview(
@@ -114,6 +118,8 @@ class ExecutionService:
             runtime_headers=runtime_headers,
             body_override=body_override,
             use_body_override=use_body_override,
+            service_override=service_override,
+            endpoint_variant=endpoint_variant,
             redact=True,
         )
         policy = await self._projects.get_security_policy(actor=actor, project_id=project_id)
@@ -138,6 +144,7 @@ class ExecutionService:
                 redact({header.name: header.value for header in redacted_request.headers}),
             ),
             request_body=cast(JsonValue, redact(redacted_request.body)),
+            target_snapshot=redacted_request.target_snapshot,
             response_status=None,
             response_headers={},
             response_body=None,
@@ -438,6 +445,7 @@ async def _send_request(
     if body_kind is BodyKind.MULTIPART:
         if multipart is None:
             raise ValueError("Multipart request requires prepared files")
+        payload = MultipartBody.model_validate(request.body)
         multipart_headers = {
             name: value for name, value in headers.items() if name.lower() != "content-type"
         }
@@ -449,7 +457,7 @@ async def _send_request(
             request.method.value,
             request.url,
             headers=multipart_headers,
-            data=multipart.fields,
+            data=payload.fields,
             files=files,
             timeout=timeout,
         )

@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import password_service
 from app.domain import impact as impact_domain
+from app.domain.change_regression import missing_test_design
 from app.domain.impact import (
     AssetMapping,
     ChangeSeverity,
@@ -28,6 +29,8 @@ from app.domain.impact import (
     validate_selector,
 )
 from app.domain.protocols import ProtoSourceFile, compile_proto_sources, validate_graphql_sdl
+from app.domain.test_design import TestDesignDocument as DesignDocument
+from app.domain.test_engineering import OperationContract
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -219,6 +222,110 @@ def test_schema_diff_add_delete_and_invalid_inputs(monkeypatch: pytest.MonkeyPat
     )
     with pytest.raises(ImpactInputError, match="资产映射"):
         build_impact_evidence(git_change, (mapping,))
+
+
+def test_contract_boundary_change_generates_concrete_missing_tests() -> None:
+    changes = diff_openapi(_boundary_openapi(100), _boundary_openapi(999))
+    assert len(changes) == 1
+    change = changes[0]
+    assert change.semantic_type == "maximum_changed"
+    assert change.field_path == "request.body.quantity.maximum"
+    assert change.before == 100
+    assert change.after == 999
+
+    evidence = build_impact_evidence(changes, ())
+    gap = evidence.gaps[0]
+    document = missing_test_design(
+        gap=gap,
+        source_ref="github://acme/orders/commit/boundary-999",
+        position=1,
+    )
+    design = DesignDocument.model_validate(document)
+    scenarios = design.scenarios
+    values_by_tag = {
+        tag: scenario.mutations[0].value
+        for scenario in scenarios
+        if scenario.mutations
+        for tag in scenario.tags
+        if tag
+        in {
+            "new_legal_boundary",
+            "new_illegal_boundary",
+            "historical_boundary",
+            "historical_adjacent",
+        }
+    }
+    assert values_by_tag == {
+        "new_legal_boundary": 999,
+        "new_illegal_boundary": 1000,
+        "historical_boundary": 100,
+        "historical_adjacent": 101,
+    }
+    historical = [
+        scenario
+        for scenario in scenarios
+        if {"historical_boundary", "historical_adjacent"} & set(scenario.tags)
+    ]
+    assert {scenario.expected_category for scenario in historical} == {"success"}
+    assert "execution.status" not in json.dumps(document)
+    assert all(
+        entry.covered for entry in design.coverage.entries if entry.dimension == "change_impact"
+    )
+
+
+def test_change_scenarios_keep_unrelated_required_request_fields() -> None:
+    contract = OperationContract.model_validate(
+        {
+            "operation": "orders.create",
+            "method": "POST",
+            "path": "/orders",
+            "request_body": {
+                "required": True,
+                "schema": {
+                    "type": "object",
+                    "required": ["quantity", "type", "profile"],
+                    "properties": {
+                        "quantity": {"type": "integer", "minimum": 1, "maximum": 999},
+                        "type": {"type": "string", "enum": ["STANDARD", "EXPRESS"]},
+                        "profile": {
+                            "type": "object",
+                            "required": ["display_name"],
+                            "properties": {"display_name": {"type": "string", "minLength": 1}},
+                        },
+                    },
+                },
+            },
+            "responses": {
+                "201": {"description": "created"},
+                "422": {"description": "invalid request"},
+            },
+        }
+    )
+
+    design = DesignDocument.model_validate(
+        missing_test_design(
+            gap={
+                "change_key": "orders-quantity-maximum",
+                "source_key": "POST /orders",
+                "label": "quantity maximum changed",
+                "semantic_type": "maximum_changed",
+                "field_path": "request.body.quantity.maximum",
+                "before": 100,
+                "after": 999,
+            },
+            source_ref="openapi://orders/current",
+            position=1,
+            current_contract=contract,
+        )
+    )
+
+    assert design.scenarios
+    for scenario in design.scenarios:
+        assert scenario.request.body == {
+            "profile": {"display_name": "x"},
+            "quantity": scenario.mutations[0].value,
+            "type": "STANDARD",
+        }
 
 
 @pytest.mark.asyncio
@@ -524,6 +631,40 @@ def _second_openapi_path() -> dict[str, JsonValue]:
                 "responses": {"200": {"description": "ready"}},
             }
         }
+    }
+
+
+def _boundary_openapi(maximum: int) -> dict[str, JsonValue]:
+    return {
+        "openapi": "3.0.3",
+        "info": {"title": "Orders", "version": "1"},
+        "paths": {
+            "/orders": {
+                "post": {
+                    "operationId": "createOrder",
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "quantity": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": maximum,
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {"description": "ok"},
+                        "400": {"description": "invalid"},
+                    },
+                }
+            }
+        },
     }
 
 

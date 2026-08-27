@@ -75,6 +75,7 @@ COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/do
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
 RUN set -eux; \
+    apk upgrade --no-cache libcrypto3 libssl3 openssl; \
     rm -f \
         /usr/local/libexec/docker/cli-plugins/docker-buildx \
         /usr/local/libexec/docker/cli-plugins/docker-compose; \

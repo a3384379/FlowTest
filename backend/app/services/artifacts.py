@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.storage import ObjectStorage, object_storage
-from app.models.access import User
+from app.domain.governance import QuotaDimension
+from app.models.access import Project, User
 from app.models.artifacts import Artifact
 from app.repositories.artifacts import ArtifactRepository
 from app.services.audit import AuditService
+from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 
 
@@ -142,6 +144,14 @@ class ArtifactService:
                 status_code=413,
             )
         safe_filename = _safe_filename(filename)
+        project = await self._session.get(Project, project_id)
+        if project is None:
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=project.organization_id,
+            dimension=QuotaDimension.ARTIFACT_STORAGE,
+            increment=len(content),
+        )
         artifact_id = uuid4()
         object_key = f"projects/{project_id}/artifacts/{artifact_id}"
         normalized_content_type = content_type.strip() or "application/octet-stream"
