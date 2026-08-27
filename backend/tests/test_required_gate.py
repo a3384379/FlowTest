@@ -57,6 +57,13 @@ def test_required_gate_blocks_pr_ci_governance_changes(path: str) -> None:
         required_gate.enforce_trusted_governance([path], "pull_request_target")
 
 
+def test_required_gate_blocks_new_workflow_that_could_spoof_required_context() -> None:
+    with pytest.raises(required_gate.RequiredGateError, match="Bootstrap"):
+        required_gate.enforce_trusted_governance(
+            [".github/workflows/spoof-required-gate.yml"], "pull_request_target"
+        )
+
+
 def test_required_gate_allows_normal_pr_and_trusted_push_paths() -> None:
     required_gate.enforce_trusted_governance(
         ["backend/app/services/projects.py"], "pull_request_target"
@@ -92,16 +99,19 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
 
     assert "pull_request_target" in workflow["on"]
     assert "pull_request" not in workflow["on"]
-    assert workflow["permissions"]["checks"] == "write"
+    assert workflow["permissions"]["statuses"] == "write"
+    assert "checks" not in workflow["permissions"]
     controller = workflow["jobs"]["controller"]
     assert controller["name"] == "Required Gate Controller"
     checkout = next(step for step in controller["steps"] if "uses" in step)
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha || github.sha }}"
     assert checkout["with"]["persist-credentials"] == "false"
-    create_check = next(
+    create_status = next(
         step
         for step in controller["steps"]
-        if step.get("name") == "Create trusted Required Gate check"
+        if step.get("name") == "Create trusted Required Gate status"
     )
-    assert "-f name='Required Gate'" in create_check["run"]
-    assert '-f head_sha="${HEAD_SHA}"' in create_check["run"]
+    assert '"repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}"' in create_status["run"]
+    assert "-f context='Required Gate'" in create_status["run"]
+    assert "-f state='pending'" in create_status["run"]
+    assert controller["steps"].index(create_status) < controller["steps"].index(checkout)

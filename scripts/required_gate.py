@@ -166,6 +166,7 @@ CI_GOVERNANCE_PATHS = frozenset(
         "scripts/required_gate.py",
     }
 )
+CI_GOVERNANCE_PREFIXES = (".github/workflows/",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +238,11 @@ def build_gate_plan(paths: Iterable[str]) -> GatePlan:
 def enforce_trusted_governance(paths: Iterable[str], event_name: str) -> None:
     if event_name != "pull_request_target":
         return
-    modified = sorted(_normalized_paths(paths) & CI_GOVERNANCE_PATHS)
+    modified = sorted(
+        path
+        for path in _normalized_paths(paths)
+        if path in CI_GOVERNANCE_PATHS or path.startswith(CI_GOVERNANCE_PREFIXES)
+    )
     if modified:
         raise RequiredGateError(
             "CI 治理文件只能通过受控 Bootstrap 流程更新: " + ", ".join(modified)

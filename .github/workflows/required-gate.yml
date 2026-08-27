@@ -9,9 +9,9 @@ on:
 
 permissions:
   actions: read
-  checks: write
   contents: read
   pull-requests: read
+  statuses: write
 
 jobs:
   controller:
@@ -19,6 +19,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
+      - name: Create trusted Required Gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state='pending' \
+            -f context='Required Gate' \
+            -f description='等待路径选择的子门禁' \
+            -f target_url="${details_url}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
@@ -42,21 +54,11 @@ jobs:
             git diff --no-ext-diff --no-textconv --name-only \
               "${BASE_SHA}" "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
           fi
+          if [[ "$(wc -l <"${changed_paths}")" -ge 3000 ]]; then
+            echo '变更文件数达到 GitHub API 上限，Required Gate 拒绝继续' >&2
+            exit 1
+          fi
           echo "FLOWTEST_GATE_PATHS_FILE=${changed_paths}" >>"${GITHUB_ENV}"
-      - name: Create trusted Required Gate check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          check_id="$(gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/check-runs" \
-            -f name='Required Gate' \
-            -f head_sha="${HEAD_SHA}" \
-            -f status='in_progress' \
-            -f details_url="${details_url}" \
-            --jq '.id')"
-          echo "FLOWTEST_REQUIRED_CHECK_ID=${check_id}" >>"${GITHUB_ENV}"
       - id: gate
         name: Wait for path-selected child gates
         continue-on-error: true
@@ -68,21 +70,26 @@ jobs:
           --sha "${FLOWTEST_GATE_SHA}"
           --paths-file "${FLOWTEST_GATE_PATHS_FILE}"
           --event-name "${GITHUB_EVENT_NAME}"
-      - name: Complete trusted Required Gate check
+      - name: Complete trusted Required Gate status
         if: always()
         env:
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          conclusion='failure'
+          state='failure'
+          description='路径选择的子门禁失败'
           if [[ "${GATE_OUTCOME}" == 'success' ]]; then
-            conclusion='success'
+            state='success'
+            description='路径选择的子门禁全部成功'
           fi
-          gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/check-runs/${FLOWTEST_REQUIRED_CHECK_ID}" \
-            -f status='completed' \
-            -f conclusion="${conclusion}" \
-            -f completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          if [[ "${conclusion}" != 'success' ]]; then
+          details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="${state}" \
+            -f context='Required Gate' \
+            -f description="${description}" \
+            -f target_url="${details_url}"
+          if [[ "${state}" != 'success' ]]; then
             exit 1
           fi
