@@ -99,6 +99,7 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
 
     assert "pull_request_target" in workflow["on"]
     assert "pull_request" not in workflow["on"]
+    assert "edited" in workflow["on"]["pull_request_target"]["types"]
     assert workflow["permissions"]["statuses"] == "write"
     assert "checks" not in workflow["permissions"]
     controller = workflow["jobs"]["controller"]
@@ -115,3 +116,10 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
     assert "-f context='Required Gate'" in create_status["run"]
     assert "-f state='pending'" in create_status["run"]
     assert controller["steps"].index(create_status) < controller["steps"].index(checkout)
+    resolve_paths = next(
+        step
+        for step in controller["steps"]
+        if step.get("name") == "Resolve changed paths from trusted metadata"
+    )
+    assert ".previous_filename" in resolve_paths["run"]
+    assert "-ge 3000" in resolve_paths["run"]

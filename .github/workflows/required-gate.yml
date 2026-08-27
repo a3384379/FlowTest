@@ -2,7 +2,7 @@ name: Required Gate Controller
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   push:
     branches: [main]
   workflow_dispatch:
@@ -47,7 +47,8 @@ jobs:
           if [[ -n "${PR_NUMBER}" ]]; then
             gh api --paginate \
               "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
-              --jq '.[].filename' >"${changed_paths}"
+              --jq '.[] | (.filename, .previous_filename) | select(. != null)' \
+              | sort -u >"${changed_paths}"
           elif [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
             git show --pretty=format: --name-only "${HEAD_SHA}" | sed '/^$/d' >"${changed_paths}"
           else
