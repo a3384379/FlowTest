@@ -103,7 +103,7 @@ S48 的仓库内 PR 模板进一步固定 Scope/Non-goals、兼容迁移、数�
 | Security / Tenant / Secret / SSRF | Pass，无 P1/P2 | 新 Domain 无 FastAPI/Celery/SQLAlchemy 依赖；Fixture 无凭据/PEM/连接串；Scope 与 Production Preview 硬边界已冻结 |
 | End-to-End User Flow | Pass（S48 适用范围） | Login→Create→Query Golden 可解析、验证、转换；隔离 Compose 的登录 Setup + S22 能力/安全/深链 Playwright `2 passed` |
 
-本地 Required Checks：Backend format/Ruff/Mypy/Pytest 全绿，`637 passed / 4 skipped`，Coverage `90.21%`；
+本地 Required Checks：Backend format/Ruff/Mypy/Pytest 全绿，`638 passed / 4 skipped`，Coverage `90.21%`；
 Frontend format/lint/coverage/build 全绿，`56 files / 215 tests`，Branch Coverage `80.11%`。这些结果不替代
 PR 精确 Head Remote CI。
 
@@ -114,4 +114,57 @@ PR 精确 Head Remote CI。
 
 2026-08-28 开 PR 前重新获取 GitHub 事实：`origin/main` 仍为冻结 SHA，Open PR 为 0；Ruleset 仍为 Active、
 无 Bypass，Main SHA 对应的 Required Gate Controller、Security 和 Standalone Windows Bundle Push Run 均为
-Success。S48 PR Run ID、Conclusion、Review Thread 和合并后 Main Push Checks 在远程执行后追加。
+Success。以下第 10 节追加 PR 最终 Head、Review Thread、合并和 Main Push 的远程终态。
+
+## 10. Remote CI、Review 与合并证据
+
+### PR #46 最终 Head
+
+| 项目 | 精确值 |
+| --- | --- |
+| PR | `#46` |
+| Base SHA | `6370c6c8b44db51ce7717bc73eaf41f259c9df1b` |
+| Final Head SHA | `13d80a856802d758bbe1e6b1da0c55330a4c8121` |
+| Merge State | `CLEAN / MERGEABLE` |
+| Merge 方式 | 普通 Squash Merge，未使用 Admin/Bypass |
+
+| Workflow | Run ID | Head SHA | Conclusion |
+| --- | --- | --- | --- |
+| Backend CI | `33115205385` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| Frontend CI | `33115205482` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| Security CI | `33115205483` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| Compose Smoke Test | `33115205449` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| Standalone Windows Bundle | `33115205386` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| V2 to V3 Upgrade CI | `33115205450` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+| Required Gate Controller / `Required Gate` | `33115203520` | `13d80a856802d758bbe1e6b1da0c55330a4c8121` | `success` |
+
+首个 Head `132f97b1b8fdd5be7fb2d342d0cdecd49d9405b7` 的远程结果在 P2 修复后已被取代，不作为合并
+证据。GitHub 自动 Review 对该旧 Head 提出 2 个 P2：
+
+- 顶层 `bindings` 使用通配字典，拼写错误的未知键会进入语义指纹；
+- 先规范化再校验会使错误路径索引指向排序后而非用户提交的数组。
+
+最终 Head 新增严格 `FlowSpecBindingV2`、在原始提交顺序上校验并补充回归。两个 Thread 均已回复修复
+证据，合并前状态为 `resolved=true`、`isOutdated=true`；未解决 Review Thread 为 0，无剩余 P1/P2。
+
+### 合并后 Main Push
+
+| 项目 | 精确值 |
+| --- | --- |
+| Merge SHA | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` |
+| Merged At | `2026-08-27T21:20:15Z` |
+| Ruleset | `main-required-gate` / ID `21653796` / Active / 无 Bypass |
+| Required Context | `Required Gate` = `success` |
+
+| Workflow | Run ID | Head SHA | Conclusion |
+| --- | --- | --- | --- |
+| Backend CI | `33117671975` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| Frontend CI | `33117672081` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| Security CI | `33117672027` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| Compose Smoke Test | `33117671974` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| Standalone Windows Bundle | `33117671958` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| V2 to V3 Upgrade CI | `33117671962` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+| Required Gate Controller / `Required Gate` | `33117672031` | `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` | `success` |
+
+上述为 GitHub Actions 远程事实，与第 9 节本地结果分开记录。S48 仍只是 V6 契约与治理基线，不因 CI
+成功而升级为 Alpha/Beta/RC/GA；真实 Key Rotation、公司试点和人工签署仍未完成。
