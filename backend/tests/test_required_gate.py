@@ -100,8 +100,7 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
     assert "pull_request_target" in workflow["on"]
     assert "pull_request" not in workflow["on"]
     assert "edited" in workflow["on"]["pull_request_target"]["types"]
-    assert workflow["concurrency"]["cancel-in-progress"] == "true"
-    assert "github.event.pull_request.number" in workflow["concurrency"]["group"]
+    assert "concurrency" not in workflow
     assert workflow["permissions"]["statuses"] == "write"
     assert "checks" not in workflow["permissions"]
     controller = workflow["jobs"]["controller"]

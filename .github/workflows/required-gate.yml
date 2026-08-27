@@ -13,10 +13,6 @@ permissions:
   pull-requests: read
   statuses: write
 
-concurrency:
-  group: required-gate-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
-
 jobs:
   controller:
     name: Required Gate Controller
