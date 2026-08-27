@@ -9,9 +9,11 @@ import pytest
 from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.core.database import check_database, session_factory
+from app.core.database import check_database
 from app.core.errors import AppError
 from app.core.redis import check_redis
 from app.core.security import password_service
@@ -134,11 +136,13 @@ async def test_data_nodes_execute_real_postgres_and_redis_reads() -> None:
 async def test_postgres_serializes_concurrent_organization_member_quota(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    quota_engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    quota_sessions = async_sessionmaker(quota_engine, expire_on_commit=False)
     suffix = uuid4().hex
     actor_id: UUID
     organization_id: UUID
     target_ids: list[UUID]
-    async with session_factory() as session:
+    async with quota_sessions() as session:
         actor = User(
             email=f"quota-admin-{suffix}@example.com",
             display_name="Integration quota administrator",
@@ -213,7 +217,7 @@ async def test_postgres_serializes_concurrent_organization_member_quota(
     monkeypatch.setattr(OrganizationQuotaService, "_usage", synchronized_usage)
 
     async def add_member(user_id: UUID) -> OrganizationMember:
-        async with session_factory() as session:
+        async with quota_sessions() as session:
             actor = await session.get(User, actor_id)
             assert actor is not None
             return await OrganizationService(session).upsert_member(
@@ -233,7 +237,7 @@ async def test_postgres_serializes_concurrent_organization_member_quota(
         assert len(successes) == 1
         assert len(failures) == 1
         assert failures[0].code == "ORGANIZATION_QUOTA_EXCEEDED"
-        async with session_factory() as session:
+        async with quota_sessions() as session:
             member_count = await session.scalar(
                 select(func.count())
                 .select_from(OrganizationMember)
@@ -241,7 +245,7 @@ async def test_postgres_serializes_concurrent_organization_member_quota(
             )
         assert member_count == 1
     finally:
-        async with session_factory() as session:
+        async with quota_sessions() as session:
             await session.execute(
                 delete(AuditLog).where(AuditLog.organization_id == organization_id)
             )
@@ -258,6 +262,7 @@ async def test_postgres_serializes_concurrent_organization_member_quota(
             await session.execute(delete(Organization).where(Organization.id == organization_id))
             await session.execute(delete(User).where(User.id.in_([actor_id, *target_ids])))
             await session.commit()
+        await quota_engine.dispose()
 
 
 class IntegrationOutboundGuard:
