@@ -19,6 +19,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 GITHUB_API_URL = "https://api.github.com"
+GITHUB_ACTIONS_APP_ID = 15368
 SUCCESS = "success"
 TERMINAL_FAILURES = frozenset(
     {"action_required", "cancelled", "failure", "stale", "startup_failure", "timed_out"}
@@ -175,12 +176,17 @@ class GatePlan:
     no_op: tuple[GateSpec, ...]
 
 
+class CheckApp(TypedDict, total=False):
+    id: int
+
+
 class CheckRun(TypedDict, total=False):
     id: int
     name: str
     status: str
     conclusion: str | None
     details_url: str
+    app: CheckApp | None
 
 
 class WorkflowRun(TypedDict, total=False):
@@ -315,6 +321,8 @@ def _matching_check_run(
     for check_run in check_runs:
         if check_run.get("name") != check_name:
             continue
+        if not _is_github_actions_check(check_run):
+            continue
         run_id = _workflow_run_id(check_run.get("details_url", ""))
         if run_id is None:
             continue
@@ -325,6 +333,11 @@ def _matching_check_run(
         if _workflow_matches(workflow, workflow_path, sha):
             return check_run
     return None
+
+
+def _is_github_actions_check(check_run: CheckRun) -> bool:
+    app = check_run.get("app")
+    return app is not None and app.get("id") == GITHUB_ACTIONS_APP_ID
 
 
 def _workflow_run_id(details_url: str) -> int | None:
