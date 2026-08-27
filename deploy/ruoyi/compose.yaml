@@ -1,0 +1,65 @@
+name: flowtest-ruoyi
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ry
+      MYSQL_USER: ${RUOYI_MYSQL_USER:-ruoyi}
+      MYSQL_PASSWORD: ${RUOYI_MYSQL_PASSWORD:-ruoyi-local-password}
+      MYSQL_ROOT_PASSWORD: ${RUOYI_MYSQL_ROOT_PASSWORD:-ruoyi-local-root}
+      MYSQL_INITDB_ARGS: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "13306:3306"
+    volumes:
+      - ruoyi_mysql_data:/var/lib/mysql
+      - ../../../RuoYi/sql/ry_20260319.sql:/opt/ruoyi/seed/ry.sql:ro
+      - ./mysql-init/01-ruoyi.sh:/docker-entrypoint-initdb.d/01-ruoyi.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  ruoyi:
+    build:
+      context: ../../../RuoYi
+      dockerfile: Dockerfile.flowtest
+    image: flowtest-ruoyi:4.8.3
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_DRUID_MASTER_URL: jdbc:mysql://mysql:3306/ry?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_DRUID_MASTER_USERNAME: ${RUOYI_MYSQL_USER:-ruoyi}
+      SPRING_DATASOURCE_DRUID_MASTER_PASSWORD: ${RUOYI_MYSQL_PASSWORD:-ruoyi-local-password}
+      RUOYI_PROFILE: /opt/ruoyi/uploadPath
+      JAVA_OPTS: ${RUOYI_JAVA_OPTS:--Duser.timezone=Asia/Shanghai -Xms256m -Xmx768m}
+    ports:
+      - "8088:8080"
+    volumes:
+      - ruoyi_upload:/opt/ruoyi/uploadPath
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      default:
+      flowtest:
+        aliases:
+          - ruoyi
+    restart: unless-stopped
+
+volumes:
+  ruoyi_mysql_data:
+  ruoyi_upload:
+
+networks:
+  default:
+    name: flowtest-ruoyi_default
+  flowtest:
+    external: true
+    name: flowtest-compact_default
