@@ -279,6 +279,11 @@ class ExternalJavaClaimBase(BaseModel):
     confidence: float = Field(ge=0, le=1)
     deterministic: bool
 
+    @model_validator(mode="after")
+    def validate_source_path(self) -> ExternalJavaClaimBase:
+        require_no_sensitive_scalar_values([self.source_path])
+        return self
+
 
 class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
     kind: Literal["controller_route"] = "controller_route"

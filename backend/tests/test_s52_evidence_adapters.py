@@ -86,6 +86,25 @@ def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> 
     ExternalEvidenceEnvelope.model_validate(database_envelope.model_dump(mode="json"))
 
 
+def test_java_contracts_reject_sensitive_source_paths_at_both_boundaries() -> None:
+    sensitive_value = "4111111111111111"
+    dedicated_payload = _java_submission()
+    dedicated_payload["claims"][0]["source_path"] = f"src/{sensitive_value}.java:4"
+
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        JavaEvidenceSubmission.model_validate(dedicated_payload)
+
+    generic_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic_payload["findings"][0]["structured_data"]["claim"]["source_path"] = (
+        f"src/{sensitive_value}.java:4"
+    )
+
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_payload)
+
+
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     raw_example = _database_submission()
     raw_example["tables"][0]["columns"][0]["masked_example"] = "order-0001"
@@ -1168,6 +1187,51 @@ public class OrderController {
     assert {claim.exception_type for claim in evidence.claims if claim.kind == "exception"} == {
         "IllegalStateException",
         "OrderMissingException",
+    }
+
+
+def test_java_spring_poc_ignores_braces_in_strings_and_comments() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://brace-literals", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+public class OrderController {
+    @GetMapping("/first")
+    public Order first() {
+        String marker = "}"; // }
+        return firstService.load();
+    }
+
+    @GetMapping("/second")
+    public Order second() {
+        String marker = "{"; // {
+        /* ignored } and { */
+        return secondService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    calls = {
+        (claim.operation_ref, claim.callee_ref)
+        for claim in evidence.claims
+        if claim.kind == "service_call"
+    }
+    assert calls == {
+        ("operation://GET/api/first", "java://firstService.load"),
+        ("operation://GET/api/second", "java://secondService.load"),
     }
 
 

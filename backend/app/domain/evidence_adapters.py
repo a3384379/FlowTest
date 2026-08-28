@@ -88,6 +88,14 @@ _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\"]+)\"")
 _KAFKA_LISTENER = re.compile(r'@KafkaListener\s*\([^)]*(?:topics\s*=\s*)?"([^"]+)"')
+_JAVA_NON_CODE = re.compile(
+    r"//[^\r\n]*(?:\r?\n|$)"
+    r"|/\*.*?(?:\*/|$)"
+    r'|"""(?:(?!""").)*(?:"""|$)'
+    r'|"(?:\\.|[^"\\])*"'
+    r"|'(?:\\.|[^'\\])*'",
+    re.DOTALL,
+)
 
 
 class EvidenceAdapterProvider(BaseModel):
@@ -104,6 +112,11 @@ class JavaClaimBase(BaseModel):
     source_path: str = Field(min_length=1, max_length=1024)
     confidence: float = Field(ge=0, le=1)
     deterministic: bool
+
+    @model_validator(mode="after")
+    def validate_source_path(self) -> JavaClaimBase:
+        require_no_sensitive_scalar_values([self.source_path])
+        return self
 
 
 class JavaControllerRouteClaim(JavaClaimBase):
@@ -1854,13 +1867,19 @@ def _join_route_path(base: str, path: str) -> str:
 
 def _matching_brace(content: str, opening: int) -> int:
     depth = 0
-    for index in range(opening, len(content)):
+    index = opening
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
+            continue
         if content[index] == "{":
             depth += 1
         elif content[index] == "}":
             depth -= 1
             if depth == 0:
                 return index
+        index += 1
     return len(content)
 
 

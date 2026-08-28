@@ -748,6 +748,57 @@ async def test_generic_evidence_rejects_derived_conflict_byte_overflow(
 
 
 @pytest.mark.asyncio
+async def test_java_adapter_rejects_sensitive_source_paths_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "Java 路径安全上下文",
+            "objective": "验证专用与通用入口拒绝路径中的敏感值",
+            "required_evidence": ["repository"],
+        },
+    )
+    context_id = begun.json()["id"]
+    sensitive_value = "4111111111111111"
+    dedicated_payload = _java_evidence(project_id)
+    dedicated_payload["claims"][0]["source_path"] = f"src/{sensitive_value}.java:4"
+
+    dedicated_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": dedicated_payload},
+    )
+
+    assert dedicated_rejected.status_code == 422
+    assert dedicated_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert dedicated_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in dedicated_rejected.text
+
+    generic_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_payload["findings"][0]["structured_data"]["claim"]["source_path"] = (
+        f"src/{sensitive_value}.java:4"
+    )
+    generic_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_payload},
+    )
+
+    assert generic_rejected.status_code == 422
+    assert generic_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_rejected.text
+
+
+@pytest.mark.asyncio
 async def test_database_adapter_rejects_sensitive_or_write_input_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:
