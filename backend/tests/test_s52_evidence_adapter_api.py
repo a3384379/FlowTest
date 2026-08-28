@@ -962,6 +962,32 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert dedicated_route_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in dedicated_route_rejected.text
 
+    dedicated_constraint_payload = _java_evidence(project_id)
+    dedicated_constraint_payload["claims"].append(
+        {
+            "id": "validation-sensitive",
+            "kind": "bean_validation",
+            "source_path": "src/CreateOrderRequest.java:5",
+            "confidence": 0.98,
+            "deterministic": True,
+            "operation_ref": "operation://POST/api/orders",
+            "dto_type": "CreateOrderRequest",
+            "field_name": "quantity",
+            "annotation": "Max",
+            "constraint": f'message = "{sensitive_value}"',
+        }
+    )
+    dedicated_constraint_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": dedicated_constraint_payload},
+    )
+
+    assert dedicated_constraint_rejected.status_code == 422
+    assert dedicated_constraint_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert dedicated_constraint_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in dedicated_constraint_rejected.text
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
     ).model_dump(mode="json")
@@ -998,6 +1024,41 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert generic_route_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert generic_route_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in generic_route_rejected.text
+
+    generic_constraint_source = _java_evidence(project_id)
+    generic_constraint_source["claims"].append(
+        {
+            "id": "validation-safe",
+            "kind": "bean_validation",
+            "source_path": "src/CreateOrderRequest.java:5",
+            "confidence": 0.98,
+            "deterministic": True,
+            "operation_ref": "operation://POST/api/orders",
+            "dto_type": "CreateOrderRequest",
+            "field_name": "quantity",
+            "annotation": "Max",
+            "constraint": "maximum=10",
+        }
+    )
+    generic_constraint_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(generic_constraint_source)
+    ).model_dump(mode="json")
+    generic_constraint = next(
+        finding
+        for finding in generic_constraint_payload["findings"]
+        if finding["structured_data"]["claim_kind"] == "bean_validation"
+    )
+    generic_constraint["structured_data"]["claim"]["constraint"] = f'message = "{sensitive_value}"'
+    generic_constraint_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_constraint_payload},
+    )
+
+    assert generic_constraint_rejected.status_code == 422
+    assert generic_constraint_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_constraint_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_constraint_rejected.text
 
 
 @pytest.mark.asyncio

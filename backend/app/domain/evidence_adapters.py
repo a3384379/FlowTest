@@ -82,6 +82,10 @@ _VALIDATION_ANNOTATION = re.compile(
     r"@(?P<name>NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
     r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b(?P<args>\([^)]*\))?"
 )
+_VALIDATION_ANNOTATION_MARKER = re.compile(
+    r"@(?:NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
+    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b"
+)
 _SERVICE_CALL = re.compile(
     r"\b(?P<target>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"\.(?P<method>[A-Za-z_$][A-Za-z0-9_$]*)\s*\("
@@ -153,6 +157,11 @@ class JavaBeanValidationClaim(JavaClaimBase):
     field_name: str = Field(pattern=_IDENTIFIER)
     annotation: str = Field(pattern=_IDENTIFIER)
     constraint: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_constraint(self) -> JavaBeanValidationClaim:
+        require_no_sensitive_scalar_values([self.constraint])
+        return self
 
 
 class JavaCallClaim(JavaClaimBase):
@@ -1763,11 +1772,9 @@ def _split_top_level_java_components(content: str) -> list[str]:
 def _record_component_field(
     component: str,
 ) -> tuple[str, str, list[tuple[str, str]]] | None:
-    annotations = [
-        (annotation.group("name"), (annotation.group("args") or "")[:300])
-        for annotation in _VALIDATION_ANNOTATION.finditer(component)
-    ]
-    masked = _mask_java_annotation_arguments(component)
+    masked_component = _mask_java_non_code(component)
+    annotations = _java_validation_annotations(component, masked_component)
+    masked = _mask_java_annotation_arguments(masked_component)
     declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked)
     normalized = " ".join(declaration.split())
     match = re.fullmatch(
@@ -1781,30 +1788,49 @@ def _record_component_field(
 
 def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
     fields: list[tuple[str, str, list[tuple[str, str]]]] = []
-    for match in _FIELD_DECLARATION.finditer(body):
-        prefix = body[max(0, match.start() - 500) : match.start()]
-        annotations = [
-            (annotation.group("name"), (annotation.group("args") or "")[:300])
-            for annotation in _VALIDATION_ANNOTATION.finditer(prefix.split(";")[-1])
-        ]
+    masked_body = _mask_java_non_code(body)
+    for match in _FIELD_DECLARATION.finditer(masked_body):
+        prefix_start = max(0, match.start() - 500)
+        masked_prefix = masked_body[prefix_start : match.start()]
+        annotation_start = masked_prefix.rfind(";") + 1
+        annotations = _java_validation_annotations(
+            body[prefix_start + annotation_start : match.start()],
+            masked_prefix[annotation_start:],
+        )
         fields.append((match.group("name"), match.group("type"), annotations))
     getter_pattern = re.compile(
         r"(?P<annotations>(?:\s*@(?:NotNull|NotBlank|NotEmpty|Size|Min|Max|Email|Pattern)[^\n]*\n)+)"
         r"\s*public\s+[A-Za-z0-9_$<>,.?\[\]]+\s+get(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\("
     )
     known = {field[0] for field in fields}
-    for match in getter_pattern.finditer(body):
+    for match in getter_pattern.finditer(masked_body):
         name = match.group("name")
         field_name = name[0].lower() + name[1:]
-        annotations = [
-            (annotation.group("name"), (annotation.group("args") or "")[:300])
-            for annotation in _VALIDATION_ANNOTATION.finditer(match.group("annotations"))
-        ]
+        annotation_start, annotation_end = match.span("annotations")
+        annotations = _java_validation_annotations(
+            body[annotation_start:annotation_end],
+            masked_body[annotation_start:annotation_end],
+        )
         if field_name in known:
             index = next(index for index, field in enumerate(fields) if field[0] == field_name)
             old = fields[index]
             fields[index] = (old[0], old[1], sorted(set([*old[2], *annotations])))
     return fields
+
+
+def _java_validation_annotations(
+    content: str,
+    masked_content: str,
+) -> list[tuple[str, str]]:
+    return [
+        (annotation.group("name"), (annotation.group("args") or "")[:300])
+        for annotation in _active_java_annotation_matches(
+            content,
+            masked_content,
+            _VALIDATION_ANNOTATION_MARKER,
+            _VALIDATION_ANNOTATION,
+        )
+    ]
 
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
@@ -1826,7 +1852,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         _REQUEST_MAPPING,
         end=declaration.start(),
     )
-    base_path = _mapping_path(base_matches[-1].group("args") or "") if base_matches else ""
+    base_paths = _mapping_paths(base_matches[-1].group("args") or "") if base_matches else [""]
     controller = declaration.group("name")
     return [
         route
@@ -1837,17 +1863,14 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
             _MAPPING_ANNOTATION,
             start=declaration.end(),
         )
-        if (
-            route := _route_after_mapping(
-                file,
-                match.start(),
-                match.end(),
-                match,
-                base_path,
-                controller,
-            )
+        for route in _routes_after_mapping(
+            file,
+            match.start(),
+            match.end(),
+            match,
+            base_paths,
+            controller,
         )
-        is not None
     ]
 
 
@@ -1876,16 +1899,16 @@ def _active_java_annotation_matches(
     return matches
 
 
-def _route_after_mapping(
+def _routes_after_mapping(
     file: JavaSourceFileSnapshot,
     mapping_start: int,
     mapping_end: int,
     mapping: re.Match[str],
-    base_path: str,
+    base_paths: list[str],
     controller: str,
-) -> _JavaRoute | None:
+) -> list[_JavaRoute]:
     following = file.content[mapping_end : mapping_end + 2000]
-    masked_following = _mask_java_annotation_arguments(following)
+    masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
     signature = re.search(
         r"(?:\s*@[A-Za-z0-9_$.]+)*\s*public\s+"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
@@ -1893,29 +1916,33 @@ def _route_after_mapping(
         masked_following,
     )
     if signature is None:
-        return None
-    path = _mapping_path(mapping.group("args") or "")
-    full_path = _join_route_path(base_path, path)
+        return []
+    paths = _mapping_paths(mapping.group("args") or "")
     method = cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], mapping.group("method").upper())
     body_start = mapping_end + signature.end() - 1
     body_end = _matching_brace(file.content, body_start)
     handler = signature.group("handler")
-    return _JavaRoute(
-        method=method,
-        path=full_path,
-        operation_ref=f"operation://{method}{full_path}",
-        controller_ref=f"java://{controller}",
-        handler=handler,
-        return_type=following[signature.start("return") : signature.end("return")],
-        parameters=following[signature.start("params") : signature.end("params")],
-        declared_exceptions=_declared_java_exceptions(
-            following[signature.start("throws") : signature.end("throws")]
-            if signature.group("throws") is not None
-            else None
-        ),
-        body=file.content[body_start + 1 : body_end],
-        source_line=file.content.count("\n", 0, mapping_start) + 1,
-    )
+    return [
+        _JavaRoute(
+            method=method,
+            path=full_path,
+            operation_ref=f"operation://{method}{full_path}",
+            controller_ref=f"java://{controller}",
+            handler=handler,
+            return_type=following[signature.start("return") : signature.end("return")],
+            parameters=following[signature.start("params") : signature.end("params")],
+            declared_exceptions=_declared_java_exceptions(
+                following[signature.start("throws") : signature.end("throws")]
+                if signature.group("throws") is not None
+                else None
+            ),
+            body=file.content[body_start + 1 : body_end],
+            source_line=file.content.count("\n", 0, mapping_start) + 1,
+        )
+        for base_path in base_paths
+        for path in paths
+        if (full_path := _join_route_path(base_path, path))
+    ]
 
 
 def _declared_java_exceptions(clause: str | None) -> list[str]:
@@ -1928,11 +1955,26 @@ def _declared_java_exceptions(clause: str | None) -> list[str]:
     ]
 
 
-def _mapping_path(arguments: str) -> str:
-    match = re.search(r'\b(?:value|path)\s*=\s*(?:\{\s*)?"([^"]*)"', arguments)
-    if match is None:
-        match = re.match(r'^\s*(?:\{\s*)?"([^"]*)"', arguments)
-    return match.group(1) if match else ""
+def _mapping_paths(arguments: str) -> list[str]:
+    named = re.search(
+        r'\b(?:value|path)\s*=\s*(?P<value>\{[^}]*\}|"(?:\\.|[^"\\])*")',
+        arguments,
+        re.DOTALL,
+    )
+    expression = (
+        named.group("value") if named is not None else _positional_mapping_expression(arguments)
+    )
+    paths = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
+    return list(dict.fromkeys(paths)) or [""]
+
+
+def _positional_mapping_expression(arguments: str) -> str:
+    stripped = arguments.lstrip()
+    if stripped.startswith("{"):
+        closing = stripped.find("}")
+        return stripped[: closing + 1] if closing >= 0 else ""
+    match = re.match(r'"(?:\\.|[^"\\])*"', stripped)
+    return match.group(0) if match is not None else ""
 
 
 def _mask_java_annotation_arguments(content: str) -> str:

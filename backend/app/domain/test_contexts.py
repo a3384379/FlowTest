@@ -318,6 +318,11 @@ class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
     annotation: str = Field(pattern=_ADAPTER_IDENTIFIER)
     constraint: str = Field(min_length=1, max_length=500)
 
+    @model_validator(mode="after")
+    def validate_constraint(self) -> ExternalJavaBeanValidationClaim:
+        require_no_sensitive_scalar_values([self.constraint])
+        return self
+
 
 class ExternalJavaCallClaim(ExternalJavaClaimBase):
     kind: Literal["service_call", "feign_call"]

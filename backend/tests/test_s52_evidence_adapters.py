@@ -99,6 +99,14 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     with pytest.raises(ValidationError, match="sensitive scalar"):
         JavaEvidenceSubmission.model_validate(dedicated_route)
 
+    dedicated_constraint = _java_submission()
+    constraint_claim = next(
+        claim for claim in dedicated_constraint["claims"] if claim["kind"] == "bean_validation"
+    )
+    constraint_claim["constraint"] = f'message = "{sensitive_value}"'
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        JavaEvidenceSubmission.model_validate(dedicated_constraint)
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
     ).model_dump(mode="json")
@@ -120,6 +128,18 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     route_finding["structured_data"]["claim"]["path"] = f"/users/{sensitive_value}"
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_route)
+
+    generic_constraint = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    constraint_finding = next(
+        finding
+        for finding in generic_constraint["findings"]
+        if finding["structured_data"]["claim_kind"] == "bean_validation"
+    )
+    constraint_finding["structured_data"]["claim"]["constraint"] = f'message = "{sensitive_value}"'
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_constraint)
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1402,6 +1422,7 @@ public class OrderController {
     }
 
     @GetMapping("/live")
+    // public Order removed() {
     public Order live() {
         return liveService.load();
     }
@@ -1415,6 +1436,101 @@ public class OrderController {
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+
+
+def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://active-dto-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @PostMapping("/orders")
+    public Order create(@RequestBody CreateOrderRequest request) {
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+public class CreateOrderRequest {
+    // @NotBlank(message = "ghost")
+    // private String legacyToken;
+
+    @NotBlank(message = "required")
+    private String name;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    constraint_fields = {
+        claim.field_name for claim in evidence.claims if claim.kind == "bean_validation"
+    }
+    assert request_fields == {"name"}
+    assert constraint_fields == {"name"}
+
+
+def test_java_spring_poc_expands_all_mapping_paths() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://multi-path-routes", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping(path = {"/api", "/compat"})
+public class OrderController {
+    @GetMapping({"/current", "/legacy"})
+    public Order load() {
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = {
+        (claim.handler, claim.path) for claim in evidence.claims if claim.kind == "controller_route"
+    }
+    assert routes == {
+        ("load", "/api/current"),
+        ("load", "/api/legacy"),
+        ("load", "/compat/current"),
+        ("load", "/compat/legacy"),
+    }
+    call_operations = {
+        claim.operation_ref for claim in evidence.claims if claim.kind == "service_call"
+    }
+    assert call_operations == {
+        "operation://GET/api/current",
+        "operation://GET/api/legacy",
+        "operation://GET/compat/current",
+        "operation://GET/compat/legacy",
+    }
 
 
 def test_java_spring_poc_ignores_route_claims_in_non_code_text() -> None:
