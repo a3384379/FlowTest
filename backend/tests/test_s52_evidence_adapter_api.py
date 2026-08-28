@@ -320,6 +320,97 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_generic_evidence_rejects_adapter_provider_mismatch(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "Provider 绑定上下文",
+            "objective": "验证强类型 Adapter 不能伪造 Evidence Completeness",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    envelope = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    envelope["provider"]["type"] = "database"
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": envelope},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_generic_evidence_rejects_sensitive_adapter_scalar(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "通用标量安全上下文",
+            "objective": "验证通用入口拒绝未脱敏枚举标量",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    java_payload = _java_evidence(project_id)
+    java_payload["claims"].append(
+        {
+            "id": "state-order",
+            "kind": "enum_state",
+            "source_path": "src/OrderStatus.java:3",
+            "confidence": 0.98,
+            "deterministic": True,
+            "operation_ref": "operation://POST/api/orders",
+            "enum_ref": "java://OrderStatus",
+            "field_name": "status",
+            "values": ["created", "cancelled"],
+        }
+    )
+    envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)).model_dump(
+        mode="json"
+    )
+    state = next(
+        finding
+        for finding in envelope["findings"]
+        if finding["structured_data"]["claim_kind"] == "enum_state"
+    )
+    sensitive_value = "4111111111111111"
+    state["structured_data"]["claim"]["values"] = [sensitive_value]
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": envelope},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in rejected.text
+
+
+@pytest.mark.asyncio
 async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhausted(
     s52_context: dict[str, Any],
 ) -> None:

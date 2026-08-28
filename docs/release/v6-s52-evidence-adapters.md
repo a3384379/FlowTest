@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                               |
 | Scope              | `mcp:evidence:write`                                    |
 | 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；五轮 Review 修复已本地全绿，待推送新 Head |
+| Release 状态       | Draft PR #58；六轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -45,6 +45,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   约束 Operation/Entity、Field/Column 与 State 候选；Revision 重建不会恢复为 Finding 中的较高原始值。
 - Entity Claim 的确定性显式参与 Operation/Entity 候选；Operation→Table 关联的 Confidence/Deterministic 与
   Evidence Ref 继续约束依赖它的 Field/Column 和 DB State 候选，路径启发式不会被下游抬高。
+- Route 没有显式 Operation/Entity 关联时只回退到未绑定 Operation 的 Entity；已声明其他 Operation Ref 的
+  Entity 不会被跨 Operation 当作确定性映射。
 - Entity 显式 Table Ref 同时支持 `table://schema/table` 与既有 Fixture 使用的 `table://schema.table`；两者都按
   Schema/Table 与 DB Evidence 精确匹配，不会误降级为 Class Name 启发式或跨 Schema 误关联。
 - Java `table_column` 显式声明优先约束 Field/Column 候选，支持不同命名的 Field 与 Column；声明自身的
@@ -70,6 +72,9 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Mapping Conflict Marker 必须同时为 `kind=conflict` 与 `semantic_role=conflict`才能抑制重复合成；伪装成
   Normative 的外部 Marker 在合同边界被拒绝。新冲突数超过 Envelope 剩余 Finding 容量时返回标准
   `ENTITY_MAPPING_BUDGET_EXCEEDED` 422，不截断或静默遗漏。
+- 强类型 Java/Database/Evidence Bundle Adapter 不能在同一 Envelope 混装，且必须与 Repository/Database/按
+  Source Type 派生的 Provider Type 相符；Entity Mapping Marker 只能附着于 Java 或 Database Evidence，不能借
+  Provider 标签伪造 Context Completeness。
 
 ### Java/Spring POC
 
@@ -94,6 +99,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - DB Evidence 仅用于设计候选；不建立数据库连接，不接收原始数据行，不改变既有 Runtime DB Read Oracle。
 - DB 数值分布与 Enum 合同只接受有限浮点数，`NaN`/`Infinity` 在专用 Submission 与通用 External
   Evidence Envelope 两层边界都被拒绝，避免非标准 JSON 进入 PostgreSQL JSON 字段。
+- Java Enum State、DB Enum Values 与 Observed Distribution Enum Candidates 在专用与通用 Envelope 两层边界
+  复用同一标量敏感值检查；Phone/Card/Credential 等未脱敏值返回标准 422，错误正文不回显原值。
 - Ingest 在锁定当前 Context Revision 后基于 Existing + New Evidence 计算歧义，避免在并发写入前静默遗漏冲突。
   Revision、Evidence Item 与 Fingerprint 继续使用 S49 的不可变约束。
 - API Router 只做请求/响应适配；转换和候选规则在纯 Domain，授权、事务与 Revision 写入在 Application Service。
@@ -141,7 +148,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；688 passed、4 skipped、总覆盖率 90.56%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；692 passed、4 skipped、总覆盖率 90.55%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -186,12 +193,16 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   三项均在 `5eea6ee53b` 修复并新增 Contract/Domain/API 直接回归，对应 Thread 已回复并关闭。
 - 第五轮 Codex Review 在 `5eea6ee53b` 提出 2 个 P2：Java `table_column` 显式声明未参与 Field/Column
   候选及可靠性组合；同一 Operation 的多个 Enum State Field 共用 Source 且 DB State 相关未按 Field 隔离。
-  两项均已修复，并新增不同命名显式列映射与双独立状态字段的直接 Domain 回归；本地全量后端与安全门禁全绿，
-  待推送新精确 Head 后回复并关闭两个 Thread。
+  两项均在 `24f91b0ecb` 修复，并新增不同命名显式列映射与双独立状态字段的直接 Domain 回归，对应 Thread
+  已回复并关闭。
+- 第六轮 Codex Review 在 `24f91b0ecb` 提出 1 个 P1 与 2 个 P2：通用 Envelope 的 Java/DB Enum 标量可绕过
+  Phone/Card 检查；Route fallback 可选中已绑定其他 Operation 的 Entity；强类型 Adapter 未绑定 Provider Type，
+  可伪造 Completeness。三项均已在合同/Domain 边界修复，新增 Contract/Domain/API 直接回归；本地全量后端与
+  安全门禁全绿，待推送新精确 Head 后回复 Review 与关闭两个 Thread。
 
 ### 待完成
 
-- 第五轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 第六轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

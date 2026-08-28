@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from enum import StrEnum
 from hashlib import sha256
 from typing import Annotated, Final, Literal
@@ -358,6 +359,11 @@ class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
     field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     values: list[str] = Field(min_length=1, max_length=100)
 
+    @model_validator(mode="after")
+    def validate_state_values(self) -> ExternalJavaEnumStateClaim:
+        require_no_sensitive_scalar_values(self.values)
+        return self
+
 
 class ExternalJavaExceptionClaim(ExternalJavaClaimBase):
     kind: Literal["exception"] = "exception"
@@ -431,6 +437,11 @@ class ExternalDatabaseObservedDistribution(BaseModel):
         default_factory=list, max_length=100
     )
 
+    @model_validator(mode="after")
+    def validate_enum_candidates(self) -> ExternalDatabaseObservedDistribution:
+        require_no_sensitive_scalar_values(self.enum_candidates)
+        return self
+
 
 class ExternalDatabaseTableClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -463,6 +474,7 @@ class ExternalDatabaseColumnClaim(BaseModel):
             raise ValueError("database examples must be masked")
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
+        require_no_sensitive_scalar_values(self.enum_values)
         return self
 
 
@@ -627,6 +639,7 @@ class ExternalEvidenceEnvelope(BaseModel):
                 raise ValueError("finding source_revision must match the envelope source")
             if finding.subject_ref != self.subject_ref:
                 raise ValueError("finding subject_ref must match the envelope subject")
+        _require_compatible_adapter_provider(self)
         payload = self.model_dump(mode="json")
         if len(_canonical_json(payload)) > MAX_EXTERNAL_EVIDENCE_BYTES:
             raise ValueError("external evidence byte budget exceeded")
@@ -634,6 +647,60 @@ class ExternalEvidenceEnvelope(BaseModel):
         if unsafe is not None:
             raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         return self
+
+
+def _require_compatible_adapter_provider(envelope: ExternalEvidenceEnvelope) -> None:
+    adapters = _envelope_adapters(envelope.findings)
+    primary_adapters = adapters - {"entity_mapping"}
+    if len(primary_adapters) > 1:
+        raise ValueError("external evidence adapters must not be mixed")
+    if "entity_mapping" in adapters and not primary_adapters.intersection({"java", "database"}):
+        raise ValueError("entity mapping markers require Java or database evidence")
+    if (
+        primary_adapters == {"java"}
+        and envelope.provider.type is not EvidenceProviderType.REPOSITORY
+    ):
+        raise ValueError("Java external evidence requires a repository provider")
+    if (
+        primary_adapters == {"database"}
+        and envelope.provider.type is not EvidenceProviderType.DATABASE
+    ):
+        raise ValueError("database external evidence requires a database provider")
+    if primary_adapters == {"evidence_bundle"}:
+        expected = _evidence_bundle_provider(envelope.findings)
+        if envelope.provider.type is not expected:
+            raise ValueError("Evidence Bundle provider does not match its source types")
+
+
+def _envelope_adapters(findings: list[ExternalEvidenceFinding]) -> set[str]:
+    adapter_types = (
+        JavaExternalEvidenceStructuredData,
+        DatabaseExternalEvidenceStructuredData,
+        EvidenceBundleExternalEvidenceStructuredData,
+        EntityMappingExternalEvidenceStructuredData,
+    )
+    return {
+        finding.structured_data.adapter
+        for finding in findings
+        if isinstance(finding.structured_data, adapter_types)
+    }
+
+
+def _evidence_bundle_provider(
+    findings: list[ExternalEvidenceFinding],
+) -> EvidenceProviderType:
+    source_types = {
+        finding.structured_data.claim.source_type
+        for finding in findings
+        if isinstance(finding.structured_data, EvidenceBundleExternalEvidenceStructuredData)
+    }
+    if source_types == {"data_profile"}:
+        return EvidenceProviderType.DATA_PROFILE
+    if source_types == {"contract"}:
+        return EvidenceProviderType.CONTRACT
+    if source_types == {"existing_test"}:
+        return EvidenceProviderType.EXISTING_TEST
+    return EvidenceProviderType.REPOSITORY
 
 
 def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:
@@ -710,6 +777,14 @@ def completeness_snapshot(
         missing=missing,
         complete=not missing,
     )
+
+
+def require_no_sensitive_scalar_values(
+    values: Sequence[str | int | float | bool],
+) -> None:
+    for value in values:
+        if first_sensitive_value({"value": str(value)}) is not None:
+            raise ValueError("external evidence contains sensitive scalar value")
 
 
 def first_sensitive_value(value: object, *, path: str = "$") -> str | None:

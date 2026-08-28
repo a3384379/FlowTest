@@ -28,6 +28,7 @@ from app.domain.test_contexts import (
     ExternalDatabaseColumnClaim,
     ExternalEvidenceEnvelope,
     JavaExternalEvidenceStructuredData,
+    finding_semantic_fingerprint,
 )
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
@@ -139,6 +140,46 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     with pytest.raises(ValidationError, match="finite number"):
         ExternalEvidenceEnvelope.model_validate(external_envelope)
 
+    external_java = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    external_state = next(
+        finding
+        for finding in external_java["findings"]
+        if finding["structured_data"]["claim_kind"] == "enum_state"
+    )
+    external_state["structured_data"]["claim"]["values"] = ["4111111111111111"]
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_java)
+
+    external_enum = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    enum_column = next(
+        finding
+        for finding in external_enum["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    enum_column["structured_data"]["claim"]["enum_values"] = ["4111111111111111"]
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_enum)
+
+    external_distribution = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    distribution_column = next(
+        finding
+        for finding in external_distribution["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    distribution_column["structured_data"]["claim"]["observed_distribution"]["enum_candidates"] = [
+        "+8613800138000"
+    ]
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_distribution)
+
 
 def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> None:
     envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
@@ -174,6 +215,38 @@ def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> 
     marker["semantic_role"] = "normative"
     with pytest.raises(ValidationError, match="mapping markers must be conflict findings"):
         ExternalEvidenceEnvelope.model_validate(conflict_envelope)
+
+
+def test_external_structured_contract_binds_adapters_to_provider_types() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    mislabeled_java = java_envelope.model_dump(mode="json")
+    mislabeled_java["provider"]["type"] = "database"
+    with pytest.raises(ValidationError, match="requires a repository provider"):
+        ExternalEvidenceEnvelope.model_validate(mislabeled_java)
+
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    mislabeled_database = database_envelope.model_dump(mode="json")
+    mislabeled_database["provider"]["type"] = "repository"
+    with pytest.raises(ValidationError, match="requires a database provider"):
+        ExternalEvidenceEnvelope.model_validate(mislabeled_database)
+
+    database_finding = database_envelope.findings[0].model_copy(
+        update={
+            "source_ref": java_envelope.source.ref,
+            "source_revision": java_envelope.source.revision,
+            "subject_ref": java_envelope.subject_ref,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    database_finding = database_finding.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(database_finding)}
+    )
+    mixed = java_envelope.model_dump(mode="json")
+    mixed["findings"].append(database_finding.model_dump(mode="json"))
+    with pytest.raises(ValidationError, match="must not be mixed"):
+        ExternalEvidenceEnvelope.model_validate(mixed)
 
 
 def test_entity_mapping_candidates_are_traceable_and_ambiguity_is_never_selected() -> None:
@@ -366,6 +439,34 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
     assert not any(
         candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
         and candidate.target_ref == "entity://private/orders"
+        for candidate in mapping.candidates
+    )
+
+
+def test_operation_entity_fallback_excludes_entities_scoped_elsewhere() -> None:
+    java_payload = _java_submission()
+    route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
+    route["operation_ref"] = "operation://POST/api/purchases"
+    route["path"] = "/api/purchases"
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    assert not any(
+        candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.operation_ref == "operation://POST/api/purchases"
         for candidate in mapping.candidates
     )
 

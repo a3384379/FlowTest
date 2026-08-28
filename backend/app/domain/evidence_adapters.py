@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
@@ -40,6 +39,7 @@ from app.domain.test_contexts import (
     JavaExternalEvidenceStructuredData,
     finding_semantic_fingerprint,
     first_sensitive_value,
+    require_no_sensitive_scalar_values,
 )
 
 JAVA_EVIDENCE_SCHEMA_VERSION: Final[Literal["flowtest-java-evidence-v1"]] = (
@@ -180,7 +180,7 @@ class JavaEnumStateClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_state_values(self) -> JavaEnumStateClaim:
-        _require_no_sensitive_scalar_values(self.values)
+        require_no_sensitive_scalar_values(self.values)
         return self
 
 
@@ -248,7 +248,7 @@ class DatabaseObservedDistribution(BaseModel):
 
     @model_validator(mode="after")
     def validate_enum_candidates(self) -> DatabaseObservedDistribution:
-        _require_no_sensitive_scalar_values(self.enum_candidates)
+        require_no_sensitive_scalar_values(self.enum_candidates)
         return self
 
 
@@ -272,7 +272,7 @@ class DatabaseColumnEvidence(BaseModel):
             raise ValueError("database examples must be masked")
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
-        _require_no_sensitive_scalar_values(self.enum_values)
+        require_no_sensitive_scalar_values(self.enum_values)
         return self
 
 
@@ -768,14 +768,6 @@ def _require_no_sensitive_data(value: BaseModel) -> None:
         raise ValueError(f"evidence adapter contains sensitive data at {unsafe}")
 
 
-def _require_no_sensitive_scalar_values(
-    values: Sequence[str | int | float | bool],
-) -> None:
-    for value in values:
-        if first_sensitive_value({"value": str(value)}) is not None:
-            raise ValueError("evidence adapter contains sensitive scalar value")
-
-
 def _existing_mapping_conflict_keys(
     evidence: list[MappingEvidenceInput],
 ) -> set[tuple[str, str]]:
@@ -1028,7 +1020,9 @@ def _matching_entities(
     explicit = [
         (entity, ref) for entity, ref in entities if route.operation_ref in entity.operation_refs
     ]
-    return explicit or entities
+    if explicit:
+        return explicit
+    return [(entity, ref) for entity, ref in entities if not entity.operation_refs]
 
 
 def _entity_match(
