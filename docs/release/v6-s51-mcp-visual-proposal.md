@@ -7,7 +7,7 @@
 | 阶段基线 Main SHA | `8f20500fd151e89573bb8f01f24cb6512143dbe1` |
 | 实现分支 | `codex/s51-mcp-visual-proposal` |
 | 实现 PR / Merge SHA | #55 / `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a` |
-| Post-Merge Review Fix PR / Merge SHA | #56 / `86d2221e63f93e418b87649f56b3fdfe48d365c9` |
+| 合并后审查修复 PR / Merge SHA | #56 / `86d2221e63f93e418b87649f56b3fdfe48d365c9` |
 | MCP Server Version | `s51-flow-proposal-v1` |
 | Scope | `mcp:flow:propose` |
 | 数据库变更 | 无；Migration Head 保持 `20260828_0046` |
@@ -46,7 +46,7 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 - Raw JSON、Cross-instance Mapping 与高级校验继续由既有 `FlowSpecReviewDialog` 负责。MCP Proposal 的 Spec 与
   Mapping 可载入该对话框安全编辑；编辑结果创建新的待审核 FlowSpec ChangeSet，不原地改变冻结 Proposal。
 
-### Post-Merge Review Fix
+### 合并后审查修复
 
 - PR #55 合并后到达的自动 Review 反馈已全部在 PR #56 闭环：连线 Added/Modified/Removed/
   Rewired 分类补全，Apply 后按钮与查询缓存状态立即一致，用户可见文案全部中文化。
@@ -145,7 +145,7 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
   任意 URL、不执行 Flow、不读取 Secret；敏感输入仍沿用 Context/FlowSpec 既有校验。
 - E2E / Scope：真实 Alpha 链只到 Workflow Draft。审查中发现并修复 Raw JSON Action 未把当前 Proposal/Mapping
   载入既有 Dialog 的问题；现在安全编辑创建新 ChangeSet，冻结 Proposal 不被原地修改。
-- Post-Merge Review：PR #55 合并后才到达的 4 个有效线程全部回复、修复并解决。PR #56 又串行闭环
+- 合并后审查：PR #55 合并后才到达的 4 个有效线程全部回复、修复并解决。PR #56 又串行闭环
   Rewired Edge 语义变更、断言空态本地化、Proposal-keyed Override、Offset 分页与无界预加载共 5 轮
   精确头审查；最终头 `0e32e21a76d80b330508d031d18629efa24374c7` 的 Codex Review 明确返回未发现重大问题，
   5 / 5 个 PR #56 Review Thread 均已解决。
@@ -159,7 +159,7 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 - PR #55 通过普通 Squash Merge 生成 `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`。该精确 Main SHA 的
   Backend `33153138632`、Frontend `33153138637`、Compose `33153138644`、Security `33153138584`、Windows
   `33153138682`、Upgrade `33153138664` 与 Required Gate `33153138741` 均 Success。
-- 合并后迟到 Review 触发 Post-Merge Review Fix PR #56。该 PR Base 为 `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`，
+- 合并后迟到审查触发合并后审查修复 PR #56。该 PR Base 为 `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`，
   最终 Head 为 `0e32e21a76d80b330508d031d18629efa24374c7`。Backend `33163852048`、Frontend `33163852064`、
   Compose `33163852109`、Security `33163852132`、Windows `33163852069`、Upgrade `33163852068` 与 Required Gate
   `33163850670` 均 Success；合并前状态为 Ready / MERGEABLE / CLEAN，无未解决线程。

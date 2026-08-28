@@ -3,7 +3,7 @@
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S50 实现及 Evidence Closure。S51 实现 PR #55 已普通 Squash Merge 至
-`f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`；其合并后迟到 Review 已由 Post-Merge Fix PR #56 串行闭环，
+`f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`；其合并后迟到审查已由合并后修复 PR #56 串行闭环，
 #56 已普通 Squash Merge 至 `main@86d2221e63f93e418b87649f56b3fdfe48d365c9`，该精确 Main SHA 的
 Backend、Frontend、Compose、Security、Windows、Upgrade 与唯一 Required Gate 全部 Success。当前执行 S51
 Evidence Closure；Closure 合并且其 Main Push Required Gate 成功前不进入 S52。当前 Migration Head 为
@@ -17,7 +17,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## Evidence Closure 中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
+## 证据闭环中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
 
 ### Implemented
 
@@ -33,7 +33,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   仍进入既有 `FlowSpecReviewDialog`。安全编辑创建新的待审核 ChangeSet，不原地修改 MCP Proposal。
 - 隔离 Compose 的真实 Alpha 路径已覆盖 Context → Typed Evidence → Plan → Compile → MCP Dry Run → MCP Draft
   → UI 可视化检查 → Accept → Apply → WorkflowDesigner Draft，且 Graph 与 Proposal 一致、发布与执行均为 0。
-- Post-Merge Fix 补齐 Edge 语义分类、Apply 后状态一致性、中文化、Proposal-keyed Override，并以
+- 合并后修复补齐 Edge 语义分类、Apply 后状态一致性、中文化、Proposal-keyed Override，并以
   MCP-only `(created_at, id)` Keyset Pagination 与用户显式“加载更多提案”取代可变 Offset 及无界预加载。
 
 ### 当前门槛
