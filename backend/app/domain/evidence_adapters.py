@@ -165,7 +165,7 @@ class JavaDtoFieldClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_field_type(self) -> JavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.field_type])
+        require_no_sensitive_scalar_values([self.field_name, self.field_type])
         return self
 
 
@@ -2112,11 +2112,20 @@ def _mapping_paths(arguments: str) -> list[str]:
         content,
         re.DOTALL,
     )
+    if named is None and re.search(r"\b(?:value|path)\s*=", content) is not None:
+        return []
     expression = (
         named.group("value") if named is not None else _positional_mapping_expression(content)
     )
     paths = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
-    return list(dict.fromkeys(paths)) or [""]
+    if paths:
+        return list(dict.fromkeys(paths))
+    if named is not None or expression:
+        return []
+    stripped = content.strip()
+    if not stripped or re.match(r"[A-Za-z_$][A-Za-z0-9_$]*\s*=", stripped) is not None:
+        return [""]
+    return []
 
 
 def _positional_mapping_expression(arguments: str) -> str:
@@ -2365,11 +2374,17 @@ def _structural_java_claims(
 ) -> tuple[list[JavaEvidenceClaim], bool]:
     claims: list[JavaEvidenceClaim] = []
     truncated = False
-    declarations = list(_TYPE_DECLARATION.finditer(_mask_java_non_code(file.content)))
+    masked_content = _mask_java_non_code(file.content)
+    declarations = list(_TYPE_DECLARATION.finditer(masked_content))
+    top_level_starts = {
+        declaration.start()
+        for declaration in _TYPE_DECLARATION.finditer(_mask_nested_java_blocks(masked_content))
+    }
     for declaration in declarations:
         name = declaration.group("name")
+        kind = declaration.group("kind")
         source_path = f"{file.path}:{file.content.count(chr(10), 0, declaration.start()) + 1}"
-        if declaration.group("kind") == "interface" and name.endswith(("Mapper", "Repository")):
+        if kind == "interface" and name.endswith(("Mapper", "Repository")):
             claims.append(
                 JavaPersistenceClaim(
                     id=_claim_id("repository", source_path, name),
@@ -2379,7 +2394,11 @@ def _structural_java_claims(
                     deterministic=True,
                 )
             )
-        if _is_entity_type(file.path, name):
+        if (
+            declaration.start() in top_level_starts
+            and kind in {"class", "record"}
+            and _is_entity_type(file.path, name)
+        ):
             table_name = _snake_case(name)
             operation_refs = [
                 route.operation_ref
@@ -2411,7 +2430,7 @@ def _structural_java_claims(
                 )
                 for field_name, _field_type, _annotations in type_fields.get(name, [])
             )
-        if declaration.group("kind") == "enum":
+        if kind == "enum":
             values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
             truncated = truncated or values_truncated
             if values:

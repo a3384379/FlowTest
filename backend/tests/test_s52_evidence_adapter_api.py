@@ -1401,6 +1401,11 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
     dedicated_database["redactions"] = [redaction]
     dedicated_foreign_key = _database_evidence(project_id)
     dedicated_foreign_key["tables"][0]["columns"][0]["foreign_key"] = sensitive_value
+    dedicated_field_name = _java_evidence(project_id)
+    dedicated_dto = next(
+        claim for claim in dedicated_field_name["claims"] if claim["kind"] == "dto_field"
+    )
+    dedicated_dto["field_name"] = f"user{sensitive_value}"
 
     generic_java = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
@@ -1415,13 +1420,24 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
         if finding["structured_data"]["claim_kind"] == "column"
     )
     generic_column["structured_data"]["claim"]["foreign_key"] = sensitive_value
+    generic_field_name = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_dto = next(
+        finding
+        for finding in generic_field_name["findings"]
+        if finding["structured_data"]["claim_kind"] == "dto_field"
+    )
+    generic_dto["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
 
     requests = (
         ("java-evidence", {"evidence": dedicated_java}),
         ("database-evidence", {"evidence": dedicated_database}),
         ("database-evidence", {"evidence": dedicated_foreign_key}),
+        ("java-evidence", {"evidence": dedicated_field_name}),
         ("evidence", {"envelope": generic_java}),
         ("evidence", {"envelope": generic_database}),
+        ("evidence", {"envelope": generic_field_name}),
     )
     for endpoint, payload in requests:
         rejected = await client.post(

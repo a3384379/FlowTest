@@ -99,6 +99,12 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     with pytest.raises(ValidationError, match="sensitive scalar"):
         JavaEvidenceSubmission.model_validate(dedicated_route)
 
+    dedicated_field = _java_submission()
+    dto_field = next(claim for claim in dedicated_field["claims"] if claim["kind"] == "dto_field")
+    dto_field["field_name"] = f"user{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        JavaEvidenceSubmission.model_validate(dedicated_field)
+
     dedicated_constraint = _java_submission()
     constraint_claim = next(
         claim for claim in dedicated_constraint["claims"] if claim["kind"] == "bean_validation"
@@ -156,6 +162,18 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     route_finding["structured_data"]["claim"]["path"] = f"/users/{sensitive_value}"
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_route)
+
+    generic_field = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    dto_finding = next(
+        finding
+        for finding in generic_field["findings"]
+        if finding["structured_data"]["claim_kind"] == "dto_field"
+    )
+    dto_finding["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_field)
 
     generic_constraint = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
@@ -1837,6 +1855,56 @@ class RequestMappingController {
     }
 
 
+def test_java_spring_poc_skips_unresolved_mapping_path_constants() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://mapping-constants", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/MethodConstantController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+class MethodConstantController {
+    @GetMapping(PATH)
+    public Order unresolved() {
+        return unresolvedService.load();
+    }
+
+    @GetMapping("/live")
+    public Order live() {
+        return liveService.load();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/BaseConstantController.java",
+                        "content": """
+@RestController
+@RequestMapping(BASE_PATH)
+class BaseConstantController {
+    @GetMapping("/orders")
+    public Order unresolvedBase() {
+        return baseService.load();
+    }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+    assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
+
+
 def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -2103,6 +2171,39 @@ def test_java_spring_poc_keeps_same_named_structural_claims_from_distinct_source
         ("ACTIVE", "INACTIVE"),
         ("OPEN", "CLOSED"),
     }
+
+
+def test_java_spring_poc_infers_entities_only_from_top_level_classes_or_records() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://nested-entity-types", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/Order.java",
+                        "content": """
+public class Order {
+    private String id;
+
+    enum Status { ACTIVE, INACTIVE; }
+    interface HelperRepository {}
+    static class Detail {}
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entities = [claim for claim in evidence.claims if claim.kind == "entity"]
+    states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
+    assert [claim.class_name for claim in entities] == ["Order"]
+    assert [(claim.enum_ref.split("/")[2], claim.values) for claim in states] == [
+        ("Status", ["ACTIVE", "INACTIVE"])
+    ]
 
 
 def test_java_spring_poc_reports_claim_quota_truncation() -> None:

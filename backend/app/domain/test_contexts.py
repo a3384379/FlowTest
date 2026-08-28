@@ -314,7 +314,7 @@ class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_field_type(self) -> ExternalJavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.field_type])
+        require_no_sensitive_scalar_values([self.field_name, self.field_type])
         return self
 
 
