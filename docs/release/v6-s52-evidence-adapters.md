@@ -2,14 +2,14 @@
 
 ## 1. 阶段身份
 
-| 项目               | 当前值                                            |
-| ------------------ | ------------------------------------------------- |
-| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`        |
-| 实现分支           | `codex/v6-s52-evidence-adapters`                  |
-| MCP Server Version | `s52-evidence-adapter-v1`                         |
-| Scope              | `mcp:evidence:write`                              |
-| 数据库变更         | 无；Migration Head 保持 `20260828_0046`           |
-| Release 状态       | 本地实现与完整验证通过；尚未创建 PR、Tag 或 Release |
+| 项目               | 当前值                                                 |
+| ------------------ | ------------------------------------------------------ |
+| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`             |
+| 实现分支           | `codex/v6-s52-evidence-adapters`                       |
+| MCP Server Version | `s52-evidence-adapter-v1`                              |
+| Scope              | `mcp:evidence:write`                                   |
+| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                |
+| Release 状态       | Draft PR #58；首轮精确 Head CI 全绿，Review 修复待推送 |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -26,8 +26,10 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   拒绝，运行期 DB 校验仍继续使用既有只读 SQL Node。
 - 两类专用 Contract 都转换为既有 `flowtest-external-evidence-v1`，写入 S49 的不可变 Context Revision 与
   `ContextEvidenceItem`。未新增表、Revision 状态机或旁路持久化。
-- External Finding 增加有界 `structured_data`；空结构沿用旧 Fingerprint 输入，保持 S49 既有 Envelope 的
-  语义指纹兼容。既有 Python AST Provider 的 `EvidenceBundle` 也可通过兼容适配器进入同一 Context 主路径。
+- External Finding 的 `structured_data` 使用按 Adapter 与 Claim Kind 判别的封闭类型联合，未知字段、未知 Java/DB
+  Claim 或 Claim Kind 与 Payload 不一致都会在 API 边界拒绝；空结构沿用旧 Fingerprint 输入，保持 S49 既有
+  Envelope 的语义指纹兼容。既有 Python AST Provider 的 `EvidenceBundle` 通过只保留强类型元数据与原始结构指纹的
+  兼容适配器进入同一 Context 主路径，不把其任意字典重新暴露为外部契约。
 
 ### Entity Mapping
 
@@ -37,9 +39,13 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   或降级为可见的资源名启发式候选。
 - 所有自动结果状态固定为 `proposed`。同一 Source 出现多个 Target 时生成 `EntityMappingConflict`，不静默选中；
   专用 Evidence Ingest 会同时把新歧义写为 Conflict Finding，使 Context 状态进入 `conflicted`。
-- Java Enum 与 DB 状态列给出相同 State Set 时合并其 Evidence Ref；不同表或不同 Target 仍保留为歧义。
+- Java Enum 与 DB 状态列给出相同 State Set 时合并其 Evidence Ref，并按最小 Confidence 与全部 Deterministic
+  的保守规则组合；DB Finding 的低置信度或非确定性不会被抬高。不同表或不同 Target 仍保留为歧义。
+- DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
+  跨 Operation 假冲突，同一 Operation 内的多 Target 歧义仍保持可见。
 - Candidate ID 只取决于 Mapping Kind/Source/Target/Operation/Field/State 语义；新增佐证只合并 Evidence Ref，
-  不改变同一候选身份。相关 Evidence、Candidate 与 Conflict 超出有界预算时返回标准
+  不改变同一候选身份。Candidate Budget 在按 ID 增量去重后计算，重复 Revision 的笛卡尔积不会误报超限；相关
+  Evidence、唯一 Candidate 与 Conflict 超出有界预算时返回标准
   `ENTITY_MAPPING_BUDGET_EXCEEDED` 422，不截断或静默漏掉候选。
 
 ### API 与 MCP
@@ -75,14 +81,14 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 ## 4. S52 Exit Criteria
 
-| 条件                         | 当前状态 | 证据                                                    |
-| ---------------------------- | -------- | ------------------------------------------------------- |
-| Java Evidence 可进入 Context | 本地 Pass | API/Service 回归与隔离 Compose Playwright               |
-| DB Evidence 可进入 Context   | 本地 Pass | API/Service 回归与隔离 Compose Playwright               |
-| Entity Candidate 可追溯      | 本地 Pass | Candidate Evidence Ref 与稳定 Inspect 回归              |
+| 条件                         | 当前状态  | 证据                                                     |
+| ---------------------------- | --------- | -------------------------------------------------------- |
+| Java Evidence 可进入 Context | 本地 Pass | API/Service 回归与隔离 Compose Playwright                |
+| DB Evidence 可进入 Context   | 本地 Pass | API/Service 回归与隔离 Compose Playwright                |
+| Entity Candidate 可追溯      | 本地 Pass | Candidate Evidence Ref 与稳定 Inspect 回归               |
 | Conflict 可见且不静默选择    | 本地 Pass | Mapping Conflict + Context `conflicted` 端到端回归       |
 | 无 Secret / PII              | 本地 Pass | 契约拒绝、标准错误 Envelope、安全扫描与 Compose 日志审计 |
-| RuoYi POC                    | 本地 Pass | 固定 Revision/三个固定文件的静态 POC 回归               |
+| RuoYi POC                    | 本地 Pass | 固定 Revision/三个固定文件的静态 POC 回归                |
 
 ## 5. Intentionally Out of Scope / Blocked
 
@@ -116,7 +122,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`     | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`              | Pass                                                          |
 | Backend Types           | `uv run mypy app`                  | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                    | Pass；675 passed、4 skipped、总覆盖率 90.49%                  |
+| Backend Tests           | `uv run pytest`                    | Pass；679 passed、4 skipped、总覆盖率 90.54%                  |
 | Backend Security Lint   | `uv run ruff check --select S app` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`                | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                        | Pass；ESLint 与 TypeScript                                    |
@@ -130,7 +136,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - 使用 `flowtest-s52-local` Compose Project、`compose.yaml` 与 `deploy/s47/compose.yaml` 启动隔离完整栈；
   UI/API/Mock Target 仅绑定 `127.0.0.1:33052/38052/38053`，15 个服务全部 Healthy。
 - `FLOWTEST_E2E_BASE_URL=http://localhost:33052 pnpm exec playwright test --project=chromium
-  e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实路径覆盖创建 Context、Java Evidence、
+e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实路径覆盖创建 Context、Java Evidence、
   DB Evidence、Mapping Inspect、写 SQL 拒绝、第二张表造成歧义，以及 Context `conflicted` 与所有候选保持
   `proposed`。
 - 日志审计：Traceback、Unhandled Exception、测试危险输入 `DROP TABLE orders`、Email 地址均为 0；
@@ -139,11 +145,25 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - 验收后只删除 `flowtest-s52-local` 的容器、网络与数据卷；用户既有 `flowtest-compact`、`flowtest-ruoyi`、
   `flowtest-v5-compact` 仍分别保持 6 / 2 / 6 个运行服务。
 
+### 首轮远端验证与 Review
+
+- Draft PR：[#58](https://github.com/a3384379/FlowTest/pull/58)，Base
+  `b6c281a832ec63e94433e0f322b30b6e342098c1`，首轮 Head
+  `73dc0850e80dea443d000cd2a5ead0dadac469c7`。
+- 首轮精确 Head CI 全绿：Backend `33175484561`、Frontend `33175484456`、Compose `33175484631`、
+  Required Gate `33175484500`、Security `33175484502`、Windows `33175484558`、Upgrade `33175484451`。
+- Codex Review 在 `73dc0850e8` 提出 1 个 P1 与 3 个 P2：外部结构化数据任意字典、DB 状态置信度/确定性丢失、
+  DTO Field 跨 Operation 假冲突、Candidate Budget 在去重前误报。四项均已修复并增加直接回归；修复 Head 尚待
+  提交、推送、精确 Head CI 与再次 Review。
+
 ### 待完成
 
-- Draft PR、精确 Head CI、Codex Review、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 
-- 尚未创建实现 PR；不存在远程 CI、Review 或 Merge 结论。
+- 当前已取得首轮实现 Head 的全绿 CI 与 Codex Review；它们只证明
+  `73dc0850e80dea443d000cd2a5ead0dadac469c7`，不替代 Review 修复后 Head 的证据。
+- 最终实现 Head、对应 Required Check Run、最终 Codex Review、普通 Merge SHA 与 Main Push Gate 将在后续精确
+  取证完成后补录。
 - 禁止 Admin Merge、Force Push、Ruleset Bypass、跳过 Required Check 或直接推送 Main。

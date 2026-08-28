@@ -6,10 +6,10 @@ import json
 import re
 from enum import StrEnum
 from hashlib import sha256
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTEXT_REVISION_SCHEMA_VERSION: Final[Literal["flowtest-context-revision-v1"]] = (
     "flowtest-context-revision-v1"
@@ -50,6 +50,12 @@ _CONNECTION_STRING = re.compile(
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
+_ADAPTER_REF = r"^\S+$"
+_ADAPTER_IDENTIFIER = r"^[A-Za-z_$][A-Za-z0-9_$.-]{0,159}$"
+_WRITE_SQL = re.compile(
+    r"\b(?:alter|call|create|delete|drop|execute|grant|insert|merge|replace|revoke|truncate|update)\b",
+    re.IGNORECASE,
+)
 
 
 class TestContextStatus(StrEnum):
@@ -258,6 +264,295 @@ class ExternalEvidenceSource(BaseModel):
     revision: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
 
 
+class EmptyExternalEvidenceStructuredData(BaseModel):
+    """Preserve the pre-adapter empty-object fingerprint without accepting wildcard data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExternalJavaClaimBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160, pattern=_ADAPTER_IDENTIFIER)
+    source_path: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0, le=1)
+    deterministic: bool
+
+
+class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
+    kind: Literal["controller_route"] = "controller_route"
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    controller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    handler: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+    path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
+
+
+class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
+    kind: Literal["dto_field"] = "dto_field"
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    direction: Literal["request", "response"]
+    dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_type: str = Field(min_length=1, max_length=160)
+
+
+class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
+    kind: Literal["bean_validation"] = "bean_validation"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    annotation: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    constraint: str = Field(min_length=1, max_length=500)
+
+
+class ExternalJavaCallClaim(ExternalJavaClaimBase):
+    kind: Literal["service_call", "feign_call"]
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    caller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    callee_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+
+
+class ExternalJavaPersistenceClaim(ExternalJavaClaimBase):
+    kind: Literal["mapper_repository"] = "mapper_repository"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    repository_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    method_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    entity_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+
+
+class ExternalJavaEntityClaim(ExternalJavaClaimBase):
+    kind: Literal["entity"] = "entity"
+    entity_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    class_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    table_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    operation_refs: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_operation_refs(self) -> ExternalJavaEntityClaim:
+        if len(self.operation_refs) != len(set(self.operation_refs)):
+            raise ValueError("entity operation refs must be unique")
+        if any(re.fullmatch(_ADAPTER_REF, value) is None for value in self.operation_refs):
+            raise ValueError("entity operation refs must be bounded references")
+        return self
+
+
+class ExternalJavaTableColumnClaim(ExternalJavaClaimBase):
+    kind: Literal["table_column"] = "table_column"
+    entity_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    table_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    column_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+
+class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
+    kind: Literal["enum_state"] = "enum_state"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    enum_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
+    values: list[str] = Field(min_length=1, max_length=100)
+
+
+class ExternalJavaExceptionClaim(ExternalJavaClaimBase):
+    kind: Literal["exception"] = "exception"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    exception_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    outcome: str = Field(min_length=1, max_length=160, pattern=_ADAPTER_IDENTIFIER)
+
+
+class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
+    kind: Literal["kafka_event"] = "kafka_event"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    direction: Literal["produce", "consume"]
+    topic_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    event_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+
+type ExternalJavaClaim = Annotated[
+    ExternalJavaControllerRouteClaim
+    | ExternalJavaDtoFieldClaim
+    | ExternalJavaBeanValidationClaim
+    | ExternalJavaCallClaim
+    | ExternalJavaPersistenceClaim
+    | ExternalJavaEntityClaim
+    | ExternalJavaTableColumnClaim
+    | ExternalJavaEnumStateClaim
+    | ExternalJavaExceptionClaim
+    | ExternalJavaKafkaEventClaim,
+    Field(discriminator="kind"),
+]
+
+
+class JavaExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["java"] = "java"
+    claim_kind: Literal[
+        "controller_route",
+        "dto_field",
+        "bean_validation",
+        "service_call",
+        "feign_call",
+        "mapper_repository",
+        "entity",
+        "table_column",
+        "enum_state",
+        "exception",
+        "kafka_event",
+    ]
+    claim: ExternalJavaClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> JavaExternalEvidenceStructuredData:
+        if self.claim_kind != self.claim.kind:
+            raise ValueError("Java external claim kind must match its payload")
+        return self
+
+
+class ExternalDatabaseObservedDistribution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_count: int | None = Field(default=None, ge=0)
+    distinct_count: int | None = Field(default=None, ge=0)
+    null_ratio: float | None = Field(default=None, ge=0, le=1)
+    minimum: float | None = None
+    maximum: float | None = None
+    enum_candidates: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+
+
+class ExternalDatabaseTableClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+
+class ExternalDatabaseColumnClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    table_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    data_type: str = Field(min_length=1, max_length=160)
+    nullable: bool
+    primary_key: bool = False
+    foreign_key: str | None = Field(
+        default=None, min_length=1, max_length=320, pattern=_ADAPTER_REF
+    )
+    unique: bool = False
+    enum_values: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+    check_expression: str | None = Field(default=None, min_length=1, max_length=1000)
+    observed_distribution: ExternalDatabaseObservedDistribution | None = None
+    masked_example: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
+        if self.masked_example is not None and "***" not in self.masked_example:
+            raise ValueError("database examples must be masked")
+        if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
+            raise ValueError("database evidence must not contain write SQL")
+        return self
+
+
+class DatabaseExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["database"] = "database"
+    claim_kind: Literal["table", "column"]
+    claim: ExternalDatabaseTableClaim | ExternalDatabaseColumnClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> DatabaseExternalEvidenceStructuredData:
+        expected = "column" if isinstance(self.claim, ExternalDatabaseColumnClaim) else "table"
+        if self.claim_kind != expected:
+            raise ValueError("database external claim kind must match its payload")
+        return self
+
+
+class ExternalEvidenceBundleClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    source_type: Literal[
+        "contract",
+        "source",
+        "data_profile",
+        "service_topology",
+        "workflow",
+        "runtime",
+        "change",
+        "existing_test",
+        "user_confirmed_rule",
+    ]
+    source_ref: str = Field(min_length=1, max_length=512)
+    subject_ref: str = Field(min_length=1, max_length=512)
+    kind: str = Field(min_length=1, max_length=80)
+    path: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0, le=1)
+    deterministic: bool
+    revision: str = Field(min_length=1, max_length=160)
+    sensitive: bool = False
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    structured_data_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class EvidenceBundleExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["evidence_bundle"] = "evidence_bundle"
+    claim_kind: str = Field(min_length=1, max_length=80)
+    claim: ExternalEvidenceBundleClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> EvidenceBundleExternalEvidenceStructuredData:
+        if self.claim_kind != self.claim.kind:
+            raise ValueError("Evidence Bundle claim kind must match its payload")
+        return self
+
+
+class ExternalEntityMappingConflictClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mapping_kind: Literal[
+        "operation_entity",
+        "request_field_column",
+        "response_field_column",
+        "operation_state",
+    ]
+    source_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    candidate_count: int = Field(ge=2, le=1000)
+
+
+class EntityMappingExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["entity_mapping"] = "entity_mapping"
+    claim_kind: Literal["conflict"] = "conflict"
+    claim: ExternalEntityMappingConflictClaim
+
+
+type ExternalEvidenceAdapterStructuredData = Annotated[
+    JavaExternalEvidenceStructuredData
+    | DatabaseExternalEvidenceStructuredData
+    | EvidenceBundleExternalEvidenceStructuredData
+    | EntityMappingExternalEvidenceStructuredData,
+    Field(discriminator="adapter"),
+]
+type ExternalEvidenceStructuredData = (
+    EmptyExternalEvidenceStructuredData | ExternalEvidenceAdapterStructuredData
+)
+
+
 class ExternalEvidenceFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -271,7 +566,9 @@ class ExternalEvidenceFinding(BaseModel):
     source_content: EvidenceContentSource = EvidenceContentSource.STRUCTURED_ANALYSIS
     content_role: Literal["untrusted_data"] = "untrusted_data"
     statement: str = Field(min_length=1, max_length=2000)
-    structured_data: dict[str, JsonValue] = Field(default_factory=dict, max_length=100)
+    structured_data: ExternalEvidenceStructuredData = Field(
+        default_factory=EmptyExternalEvidenceStructuredData
+    )
     confidence: float = Field(ge=0, le=1)
     deterministic: bool
     semantic_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")

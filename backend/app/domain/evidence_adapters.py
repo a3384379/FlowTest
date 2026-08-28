@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -15,18 +17,27 @@ from typing import Annotated, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from app.domain.evidence import EvidenceBundle, EvidenceSourceType
+from app.domain.evidence import EvidenceBundle, EvidenceFinding, EvidenceSourceType
 from app.domain.test_contexts import (
+    DatabaseExternalEvidenceStructuredData,
+    EntityMappingExternalEvidenceStructuredData,
+    EvidenceBundleExternalEvidenceStructuredData,
     EvidenceContentSource,
     EvidenceFindingKind,
     EvidenceProviderType,
     EvidenceSemanticRole,
+    ExternalDatabaseColumnClaim,
+    ExternalDatabaseTableClaim,
+    ExternalEntityMappingConflictClaim,
+    ExternalEvidenceBundleClaim,
     ExternalEvidenceEnvelope,
     ExternalEvidenceFinding,
     ExternalEvidenceProvider,
     ExternalEvidenceRedaction,
     ExternalEvidenceSource,
+    ExternalEvidenceStructuredData,
     ExternalEvidenceWarning,
+    JavaExternalEvidenceStructuredData,
     finding_semantic_fingerprint,
     first_sensitive_value,
 )
@@ -465,11 +476,6 @@ def adapt_java_evidence(submission: JavaEvidenceSubmission) -> ExternalEvidenceE
 def adapt_database_evidence(submission: DatabaseEvidenceSubmission) -> ExternalEvidenceEnvelope:
     findings: list[ExternalEvidenceFinding] = []
     for table in submission.tables:
-        table_data: dict[str, JsonValue] = {
-            "adapter": "database",
-            "claim_kind": "table",
-            "claim": cast(dict[str, JsonValue], table.model_dump(mode="json", exclude={"columns"})),
-        }
         findings.append(
             _external_finding(
                 identifier=f"database-table-{table.schema_name}-{table.name}",
@@ -479,7 +485,13 @@ def adapt_database_evidence(submission: DatabaseEvidenceSubmission) -> ExternalE
                 subject_ref=submission.subject_ref,
                 source_path=f"$.tables.{table.schema_name}.{table.name}",
                 statement="数据库表结构证据。",
-                structured_data=table_data,
+                structured_data=DatabaseExternalEvidenceStructuredData(
+                    claim_kind="table",
+                    claim=ExternalDatabaseTableClaim(
+                        schema_name=table.schema_name,
+                        name=table.name,
+                    ),
+                ),
                 confidence=submission.confidence,
                 deterministic=submission.deterministic,
             )
@@ -521,11 +533,7 @@ def adapt_evidence_bundle(
             subject_ref=subject_ref,
             source_path=finding.path,
             statement="兼容 Evidence Bundle 的结构化证据。",
-            structured_data={
-                "adapter": "evidence_bundle",
-                "claim_kind": finding.kind,
-                "claim": cast(dict[str, JsonValue], finding.model_dump(mode="json")),
-            },
+            structured_data=_evidence_bundle_structured_data(finding),
             confidence=finding.confidence,
             deterministic=finding.deterministic,
         )
@@ -549,6 +557,24 @@ def adapt_evidence_bundle(
         warnings=warnings,
         confidence=min(finding.confidence for finding in bundle.findings),
         deterministic=all(finding.deterministic for finding in bundle.findings),
+    )
+
+
+def _evidence_bundle_structured_data(
+    finding: EvidenceFinding,
+) -> EvidenceBundleExternalEvidenceStructuredData:
+    structured_payload = json.dumps(
+        finding.structured_data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return EvidenceBundleExternalEvidenceStructuredData(
+        claim_kind=finding.kind,
+        claim=ExternalEvidenceBundleClaim(
+            **finding.model_dump(mode="json", exclude={"structured_data"}),
+            structured_data_fingerprint=sha256(structured_payload).hexdigest(),
+        ),
     )
 
 
@@ -596,15 +622,13 @@ def with_mapping_conflict_findings(
             subject_ref=envelope.subject_ref,
             source_path="$.entity_mapping",
             statement="实体映射存在多个候选，需要人工确认。",
-            structured_data={
-                "adapter": "entity_mapping",
-                "claim_kind": "conflict",
-                "claim": {
-                    "mapping_kind": conflict.kind.value,
-                    "source_ref": conflict.source_ref,
-                    "candidate_count": len(conflict.candidate_ids),
-                },
-            },
+            structured_data=EntityMappingExternalEvidenceStructuredData(
+                claim=ExternalEntityMappingConflictClaim(
+                    mapping_kind=conflict.kind.value,
+                    source_ref=conflict.source_ref,
+                    candidate_count=len(conflict.candidate_ids),
+                )
+            ),
             confidence=0,
             deterministic=True,
         )
@@ -631,11 +655,13 @@ def _java_external_finding(
         subject_ref=submission.subject_ref,
         source_path=claim.source_path,
         statement=f"Java/Spring 结构化证据：{claim.kind}。",
-        structured_data={
-            "adapter": "java",
-            "claim_kind": claim.kind,
-            "claim": cast(dict[str, JsonValue], claim.model_dump(mode="json")),
-        },
+        structured_data=JavaExternalEvidenceStructuredData.model_validate(
+            {
+                "adapter": "java",
+                "claim_kind": claim.kind,
+                "claim": claim.model_dump(mode="json"),
+            }
+        ),
         confidence=claim.confidence,
         deterministic=claim.deterministic,
     )
@@ -651,9 +677,6 @@ def _database_column_findings(
             if column.observed_distribution is not None
             else EvidenceSemanticRole.NORMATIVE
         )
-        claim = cast(dict[str, JsonValue], column.model_dump(mode="json"))
-        claim["schema_name"] = table.schema_name
-        claim["table_name"] = table.name
         findings.append(
             _external_finding(
                 identifier=f"database-column-{table.schema_name}-{table.name}-{column.name}",
@@ -663,11 +686,16 @@ def _database_column_findings(
                 subject_ref=submission.subject_ref,
                 source_path=f"$.tables.{table.schema_name}.{table.name}.columns.{column.name}",
                 statement="数据库列约束与脱敏分布证据。",
-                structured_data={
-                    "adapter": "database",
-                    "claim_kind": "column",
-                    "claim": claim,
-                },
+                structured_data=DatabaseExternalEvidenceStructuredData(
+                    claim_kind="column",
+                    claim=ExternalDatabaseColumnClaim.model_validate(
+                        {
+                            **column.model_dump(mode="json"),
+                            "schema_name": table.schema_name,
+                            "table_name": table.name,
+                        }
+                    ),
+                ),
                 confidence=submission.confidence,
                 deterministic=submission.deterministic,
             )
@@ -684,7 +712,7 @@ def _external_finding(
     subject_ref: str,
     source_path: str,
     statement: str,
-    structured_data: dict[str, JsonValue],
+    structured_data: ExternalEvidenceStructuredData,
     confidence: float,
     deterministic: bool,
 ) -> ExternalEvidenceFinding:
@@ -735,17 +763,9 @@ def _existing_mapping_conflict_keys(
     keys: set[tuple[str, str]] = set()
     for item in evidence:
         data = item.finding.structured_data
-        claim = data.get("claim")
-        if (
-            data.get("adapter") != "entity_mapping"
-            or data.get("claim_kind") != "conflict"
-            or not isinstance(claim, dict)
-        ):
+        if not isinstance(data, EntityMappingExternalEvidenceStructuredData):
             continue
-        kind = claim.get("mapping_kind")
-        source_ref = claim.get("source_ref")
-        if isinstance(kind, str) and isinstance(source_ref, str):
-            keys.add((kind, source_ref))
+        keys.add((data.claim.mapping_kind, data.claim.source_ref))
     return keys
 
 
@@ -797,8 +817,18 @@ class _ParsedEvidence:
         self.routes: list[tuple[JavaControllerRouteClaim, str]] = []
         self.fields: list[tuple[JavaDtoFieldClaim, str]] = []
         self.entities: list[tuple[JavaEntityClaim, str]] = []
-        self.columns: list[tuple[DatabaseColumnEvidence, str, str, str]] = []
+        self.columns: list[_ParsedDatabaseColumn] = []
         self.states: list[tuple[JavaEnumStateClaim, str]] = []
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedDatabaseColumn:
+    claim: DatabaseColumnEvidence
+    schema: str
+    table: str
+    evidence_ref: str
+    confidence: float
+    deterministic: bool
 
 
 def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
@@ -820,25 +850,39 @@ def _parse_mapping_evidence(evidence: list[MappingEvidenceInput]) -> _ParsedEvid
     parsed = _ParsedEvidence()
     for item in evidence:
         data = item.finding.structured_data
-        adapter = data.get("adapter")
-        claim_kind = data.get("claim_kind")
-        claim = data.get("claim")
-        if not isinstance(claim, dict):
-            continue
-        _append_java_mapping_claim(parsed, adapter, claim_kind, claim, item.evidence_ref)
-        _append_database_mapping_claim(parsed, adapter, claim_kind, claim, item.evidence_ref)
+        if isinstance(data, JavaExternalEvidenceStructuredData):
+            _append_java_mapping_claim(
+                parsed,
+                data.claim_kind,
+                cast(dict[str, JsonValue], data.claim.model_dump(mode="json")),
+                item.evidence_ref,
+            )
+        elif (
+            isinstance(data, DatabaseExternalEvidenceStructuredData)
+            and data.claim_kind == "column"
+            and isinstance(data.claim, ExternalDatabaseColumnClaim)
+        ):
+            parsed.columns.append(
+                _ParsedDatabaseColumn(
+                    claim=DatabaseColumnEvidence.model_validate(
+                        data.claim.model_dump(mode="json", exclude={"schema_name", "table_name"})
+                    ),
+                    schema=data.claim.schema_name,
+                    table=data.claim.table_name,
+                    evidence_ref=item.evidence_ref,
+                    confidence=item.finding.confidence,
+                    deterministic=item.finding.deterministic,
+                )
+            )
     return parsed
 
 
 def _append_java_mapping_claim(
     parsed: _ParsedEvidence,
-    adapter: JsonValue | None,
-    claim_kind: JsonValue | None,
+    claim_kind: str,
     claim: dict[str, JsonValue],
     evidence_ref: str,
 ) -> None:
-    if adapter != "java":
-        return
     if claim_kind == "controller_route":
         parsed.routes.append((JavaControllerRouteClaim.model_validate(claim), evidence_ref))
     elif claim_kind == "dto_field":
@@ -849,29 +893,8 @@ def _append_java_mapping_claim(
         parsed.states.append((JavaEnumStateClaim.model_validate(claim), evidence_ref))
 
 
-def _append_database_mapping_claim(
-    parsed: _ParsedEvidence,
-    adapter: JsonValue | None,
-    claim_kind: JsonValue | None,
-    claim: dict[str, JsonValue],
-    evidence_ref: str,
-) -> None:
-    if adapter != "database" or claim_kind != "column":
-        return
-    schema = claim.get("schema_name")
-    table = claim.get("table_name")
-    if not isinstance(schema, str) or not isinstance(table, str):
-        return
-    column_payload = {
-        key: value for key, value in claim.items() if key not in {"schema_name", "table_name"}
-    }
-    parsed.columns.append(
-        (DatabaseColumnEvidence.model_validate(column_payload), schema, table, evidence_ref)
-    )
-
-
 def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
-    candidates: list[EntityMappingCandidate] = []
+    candidates: dict[str, EntityMappingCandidate] = {}
     tables = _table_evidence(parsed.columns)
     for route, route_evidence in parsed.routes:
         matching_entities = _matching_entities(route, parsed.entities)
@@ -892,7 +915,7 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
                     evidence_refs=[route_evidence, *table_evidence, *entity_evidence],
                 ),
             )
-    return candidates
+    return list(candidates.values())
 
 
 def _matching_entities(
@@ -923,21 +946,22 @@ def _entity_match_score(
 
 
 def _table_evidence(
-    columns: list[tuple[DatabaseColumnEvidence, str, str, str]],
+    columns: list[_ParsedDatabaseColumn],
 ) -> dict[str, list[str]]:
     values: dict[str, list[str]] = defaultdict(list)
-    for _column, schema, table, evidence_ref in columns:
-        values[f"table://{schema}/{table}"].append(evidence_ref)
+    for column in columns:
+        values[f"table://{column.schema}/{column.table}"].append(column.evidence_ref)
     return {key: sorted(set(refs))[:20] for key, refs in values.items()}
 
 
 def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
     operation_tables = _operation_tables(_operation_entity_candidates(parsed))
-    candidates: list[EntityMappingCandidate] = []
+    candidates: dict[str, EntityMappingCandidate] = {}
     for field, field_evidence in parsed.fields:
         table_targets = operation_tables.get(field.operation_ref, set())
-        for column, schema, table, column_evidence in parsed.columns:
-            entity_ref = f"entity://{schema}/{table}"
+        for parsed_column in parsed.columns:
+            column = parsed_column.claim
+            entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
             if table_targets and entity_ref not in table_targets:
                 continue
             if _normalized_name(field.field_name) != _normalized_name(column.name):
@@ -947,31 +971,37 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
                 if field.direction == "request"
                 else EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN
             )
-            field_ref = f"field://{field.dto_type}/{field.field_name}"
+            operation_identity = sha256(field.operation_ref.encode()).hexdigest()
+            field_ref = (
+                f"field://{field.dto_type}/{field.field_name}?operation={operation_identity}"
+            )
             _append_mapping_candidate(
                 candidates,
                 _candidate(
                     kind=kind,
                     source_ref=field_ref,
-                    target_ref=f"column://{schema}/{table}/{column.name}",
+                    target_ref=(
+                        f"column://{parsed_column.schema}/{parsed_column.table}/{column.name}"
+                    ),
                     operation_ref=field.operation_ref,
                     field_ref=field_ref,
                     confidence=field.confidence,
                     deterministic=field.deterministic,
-                    evidence_refs=[field_evidence, column_evidence],
+                    evidence_refs=[field_evidence, parsed_column.evidence_ref],
                 ),
             )
-    return candidates
+    return list(candidates.values())
 
 
 def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
     java_candidates = _java_state_candidates(parsed.states)
-    candidates: list[EntityMappingCandidate] = []
+    candidates: dict[str, EntityMappingCandidate] = {}
     corroborated_java_ids: set[str] = set()
     operation_tables = _operation_tables(_operation_entity_candidates(parsed))
     for operation_ref, entities in operation_tables.items():
-        for column, schema, table, evidence_ref in parsed.columns:
-            if f"entity://{schema}/{table}" not in entities:
+        for parsed_column in parsed.columns:
+            column = parsed_column.claim
+            if f"entity://{parsed_column.schema}/{parsed_column.table}" not in entities:
                 continue
             values = _database_state_values(column)
             if not values or _normalized_name(column.name) not in {"status", "state"}:
@@ -987,13 +1017,23 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
                 _candidate(
                     kind=EntityMappingCandidateKind.OPERATION_STATE,
                     source_ref=operation_ref,
-                    target_ref=f"state-set://{schema}/{table}/{column.name}",
+                    target_ref=(
+                        f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"
+                    ),
                     operation_ref=operation_ref,
                     state_values=values,
-                    confidence=0.9,
-                    deterministic=True,
+                    confidence=min(
+                        [
+                            parsed_column.confidence,
+                            *(candidate.confidence for candidate in corroborating),
+                        ]
+                    ),
+                    deterministic=(
+                        parsed_column.deterministic
+                        and all(candidate.deterministic for candidate in corroborating)
+                    ),
                     evidence_refs=[
-                        evidence_ref,
+                        parsed_column.evidence_ref,
                         *(ref for candidate in corroborating for ref in candidate.evidence_refs),
                     ],
                 ),
@@ -1001,7 +1041,7 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
     for candidate in java_candidates:
         if candidate.id not in corroborated_java_ids:
             _append_mapping_candidate(candidates, candidate)
-    return candidates
+    return list(candidates.values())
 
 
 def _java_state_candidates(
@@ -1069,11 +1109,28 @@ def _candidate(
 
 
 def _append_mapping_candidate(
-    candidates: list[EntityMappingCandidate], candidate: EntityMappingCandidate
+    candidates: dict[str, EntityMappingCandidate], candidate: EntityMappingCandidate
 ) -> None:
+    existing = candidates.get(candidate.id)
+    if existing is not None:
+        candidates[candidate.id] = _merge_mapping_candidates(existing, candidate)
+        return
     if len(candidates) >= MAX_MAPPING_CANDIDATES:
         raise EntityMappingBudgetExceeded("entity mapping candidate budget exceeded")
-    candidates.append(candidate)
+    candidates[candidate.id] = candidate
+
+
+def _merge_mapping_candidates(
+    first: EntityMappingCandidate,
+    second: EntityMappingCandidate,
+) -> EntityMappingCandidate:
+    return first.model_copy(
+        update={
+            "evidence_refs": sorted({*first.evidence_refs, *second.evidence_refs})[:20],
+            "confidence": max(first.confidence, second.confidence),
+            "deterministic": first.deterministic and second.deterministic,
+        }
+    )
 
 
 def _deduplicate_candidates(
@@ -1082,16 +1139,12 @@ def _deduplicate_candidates(
     grouped: dict[str, list[EntityMappingCandidate]] = defaultdict(list)
     for candidate in candidates:
         grouped[candidate.id].append(candidate)
-    unique = [
-        group[0].model_copy(
-            update={
-                "evidence_refs": sorted({ref for item in group for ref in item.evidence_refs})[:20],
-                "confidence": max(item.confidence for item in group),
-                "deterministic": all(item.deterministic for item in group),
-            }
-        )
-        for group in grouped.values()
-    ]
+    unique = []
+    for group in grouped.values():
+        merged = group[0]
+        for candidate in group[1:]:
+            merged = _merge_mapping_candidates(merged, candidate)
+        unique.append(merged)
     return sorted(
         unique,
         key=lambda item: (item.kind.value, item.source_ref, item.target_ref, item.id),

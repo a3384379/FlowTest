@@ -21,7 +21,13 @@ from app.domain.evidence_adapters import (
     adapt_java_evidence,
     derive_entity_mapping,
 )
-from app.domain.test_contexts import ExternalEvidenceEnvelope
+from app.domain.test_contexts import (
+    DatabaseExternalEvidenceStructuredData,
+    EvidenceBundleExternalEvidenceStructuredData,
+    ExternalDatabaseColumnClaim,
+    ExternalEvidenceEnvelope,
+    JavaExternalEvidenceStructuredData,
+)
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
 RUOYI_ROOT = FIXTURE_ROOT.parents[4] / "RuoYi"
@@ -38,7 +44,11 @@ def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> 
 
     assert java_envelope.provider.type.value == "repository"
     assert java_envelope.source.revision == "a1b2c3d4"
-    assert {finding.structured_data["claim_kind"] for finding in java_envelope.findings} == {
+    assert {
+        finding.structured_data.claim_kind
+        for finding in java_envelope.findings
+        if isinstance(finding.structured_data, JavaExternalEvidenceStructuredData)
+    } == {
         "controller_route",
         "dto_field",
         "bean_validation",
@@ -54,19 +64,20 @@ def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> 
     assert database_envelope.provider.type.value == "database"
     assert database_envelope.source.revision == "schema-v1"
     column_claims = [
-        finding.structured_data["claim"]
+        finding.structured_data.claim
         for finding in database_envelope.findings
-        if finding.structured_data["claim_kind"] == "column"
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
     ]
     assert any(
-        claim["primary_key"] is True and claim["unique"] is True and claim["nullable"] is False
+        claim.primary_key is True and claim.unique is True and claim.nullable is False
         for claim in column_claims
     )
-    assert any(claim["foreign_key"] == "public.customers.id" for claim in column_claims)
+    assert any(claim.foreign_key == "public.customers.id" for claim in column_claims)
     assert any(
-        claim["observed_distribution"] is not None
-        and claim["observed_distribution"]["enum_candidates"] == ["created", "cancelled"]
-        and claim["masked_example"] == "***ated"
+        claim.observed_distribution is not None
+        and claim.observed_distribution.enum_candidates == ["created", "cancelled"]
+        and claim.masked_example == "***ated"
         for claim in column_claims
     )
     ExternalEvidenceEnvelope.model_validate(java_envelope.model_dump(mode="json"))
@@ -102,6 +113,19 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     unknown_sql["sql"] = "SELECT * FROM orders"
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         DatabaseEvidenceSubmission.model_validate(unknown_sql)
+
+
+def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> None:
+    envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    unknown_field = envelope.model_dump(mode="json")
+    unknown_field["findings"][0]["structured_data"]["claim"]["unknown_shape"] = True
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ExternalEvidenceEnvelope.model_validate(unknown_field)
+
+    mismatched_kind = envelope.model_dump(mode="json")
+    mismatched_kind["findings"][0]["structured_data"]["claim_kind"] = "dto_field"
+    with pytest.raises(ValidationError, match="kind must match"):
+        ExternalEvidenceEnvelope.model_validate(mismatched_kind)
 
 
 def test_entity_mapping_candidates_are_traceable_and_ambiguity_is_never_selected() -> None:
@@ -180,12 +204,110 @@ def test_entity_mapping_ids_stay_stable_and_merge_corroborating_evidence() -> No
     assert all(len(candidate.evidence_refs) >= 4 for candidate in corroborated.candidates)
 
 
+def test_database_state_mapping_preserves_low_confidence_and_nondeterminism() -> None:
+    database_payload = _database_submission()
+    database_payload["confidence"] = 0.25
+    database_payload["deterministic"] = False
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission())),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    state = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+        and candidate.target_ref.startswith("state-set://public/orders/status")
+    )
+    assert state.confidence == 0.25
+    assert state.deterministic is False
+
+
+def test_reused_dto_field_is_scoped_to_each_operation() -> None:
+    java_payload = _two_operation_java_submission()
+    database_payload = _two_table_database_submission()
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    field_candidates = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN
+    ]
+    assert len(field_candidates) == 2
+    assert len({candidate.source_ref for candidate in field_candidates}) == 2
+    assert not any(
+        conflict.kind is EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN
+        for conflict in mapping.conflicts
+    )
+
+
+def test_candidate_budget_counts_unique_candidates_after_deduplication() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    field = next(
+        finding
+        for finding in java_envelope.findings
+        if isinstance(finding.structured_data, JavaExternalEvidenceStructuredData)
+        and finding.structured_data.claim_kind == "dto_field"
+        and finding.structured_data.claim.field_name == "productId"
+    )
+    column = next(
+        finding
+        for finding in database_envelope.findings
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
+        and finding.structured_data.claim.name == "product_id"
+    )
+
+    mapping = derive_entity_mapping(
+        [
+            *[
+                MappingEvidenceInput(evidence_ref=f"evidence://field/{index}", finding=field)
+                for index in range(32)
+            ],
+            *[
+                MappingEvidenceInput(evidence_ref=f"evidence://column/{index}", finding=column)
+                for index in range(32)
+            ],
+        ]
+    )
+
+    assert len(mapping.candidates) == 1
+    assert len(mapping.candidates[0].evidence_refs) == 20
+
+
 def test_entity_mapping_rejects_unrepresentable_evidence_volume() -> None:
     java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
     route = next(
         finding
         for finding in java_envelope.findings
-        if finding.structured_data["claim_kind"] == "controller_route"
+        if isinstance(finding.structured_data, JavaExternalEvidenceStructuredData)
+        and finding.structured_data.claim_kind == "controller_route"
     )
 
     with pytest.raises(EntityMappingBudgetExceeded, match="evidence budget"):
@@ -228,8 +350,10 @@ def test_python_provider_bundle_remains_compatible_with_context_adapter() -> Non
     )
 
     assert envelope.provider.type.value == "repository"
-    assert envelope.findings[0].structured_data["adapter"] == "evidence_bundle"
-    assert envelope.findings[0].structured_data["claim"]["kind"] == "route"
+    structured_data = envelope.findings[0].structured_data
+    assert isinstance(structured_data, EvidenceBundleExternalEvidenceStructuredData)
+    assert structured_data.claim.kind == "route"
+    assert len(structured_data.claim.structured_data_fingerprint) == 64
 
 
 def test_java_spring_poc_analyzes_fixed_fixture_without_execution() -> None:
@@ -504,6 +628,92 @@ def _database_submission() -> dict[str, Any]:
             }
         ],
         "confidence": 0.99,
+        "deterministic": True,
+        "redactions": [],
+        "warnings": [],
+    }
+
+
+def _two_operation_java_submission() -> dict[str, Any]:
+    common = {"confidence": 0.9, "deterministic": True}
+    claims: list[dict[str, Any]] = []
+    for suffix, path, table in (
+        ("current", "/api/orders", "orders"),
+        ("archive", "/api/order-archives", "order_archives"),
+    ):
+        operation_ref = f"operation://GET{path}"
+        claims.extend(
+            [
+                {
+                    **common,
+                    "id": f"route-{suffix}",
+                    "kind": "controller_route",
+                    "source_path": f"src/{suffix}/OrderController.java:10",
+                    "operation_ref": operation_ref,
+                    "controller_ref": f"java://{suffix}/OrderController",
+                    "handler": f"get{suffix.title()}",
+                    "method": "GET",
+                    "path": path,
+                },
+                {
+                    **common,
+                    "id": f"field-{suffix}",
+                    "kind": "dto_field",
+                    "source_path": "src/SharedOrderDto.java:3",
+                    "operation_ref": operation_ref,
+                    "direction": "response",
+                    "dto_type": "SharedOrderDto",
+                    "field_name": "id",
+                    "field_type": "String",
+                },
+                {
+                    **common,
+                    "id": f"entity-{suffix}",
+                    "kind": "entity",
+                    "source_path": f"src/{suffix}/OrderEntity.java:3",
+                    "entity_ref": f"entity://{suffix}/Order",
+                    "class_name": table,
+                    "table_ref": f"table://public/{table}",
+                    "operation_refs": [operation_ref],
+                },
+            ]
+        )
+    return {
+        "schema_version": "flowtest-java-evidence-v1",
+        "provider": {"name": "external-code-mcp", "version": "2.1.0"},
+        "source": {"ref": "repository://orders-service", "revision": "two-operations"},
+        "subject_ref": SUBJECT_REF,
+        "claims": claims,
+        "confidence": 0.9,
+        "deterministic": True,
+        "redactions": [],
+        "warnings": [],
+    }
+
+
+def _two_table_database_submission() -> dict[str, Any]:
+    return {
+        "schema_version": "flowtest-database-evidence-v1",
+        "provider": {"name": "external-database-mcp", "version": "3.0.0"},
+        "source": {"ref": "database-profile://orders", "revision": "two-tables"},
+        "subject_ref": SUBJECT_REF,
+        "tables": [
+            {
+                "schema_name": "public",
+                "name": table,
+                "columns": [
+                    {
+                        "name": "id",
+                        "data_type": "uuid",
+                        "nullable": False,
+                        "primary_key": True,
+                        "masked_example": "***0001",
+                    }
+                ],
+            }
+            for table in ("orders", "order_archives")
+        ],
+        "confidence": 0.9,
         "deterministic": True,
         "redactions": [],
         "warnings": [],
