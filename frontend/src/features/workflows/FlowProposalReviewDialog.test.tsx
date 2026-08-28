@@ -178,6 +178,52 @@ describe('FlowProposalReviewDialog', () => {
     expect(await screen.findByText('MCP 用户查询提案 · 草稿 · 00000000')).toBeInTheDocument()
     expect(requestedPages).toEqual([1, 2])
   })
+
+  it('classifies a rewired edge with semantic changes as both rewired and modified', async () => {
+    const proposal = visualProposal('pending')
+    proposal.proposed_definition = {
+      ...workflowDefinition,
+      edges: workflowDefinition.edges.map((edge) =>
+        edge.id === 'start-api' ? { ...edge, target: 'end', condition: 'true' as const } : edge,
+      ),
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
+        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(proposal),
+      ),
+    )
+
+    renderDialog(() => undefined)
+
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('修改连线')
+    expect(within(dialog).getAllByText('start-api')).toHaveLength(2)
+    expect(within(dialog).getByText('重连连线')).toBeInTheDocument()
+  })
+
+  it('localizes the empty assertion diff state', async () => {
+    const proposal = visualProposal('pending')
+    proposal.proposal.diff = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
+        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(proposal),
+      ),
+    )
+
+    renderDialog(() => undefined)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('没有断言变化')).toBeInTheDocument()
+    expect(within(dialog).queryByText('没有 Assert 变化')).not.toBeInTheDocument()
+  })
 })
 
 function renderDialog(

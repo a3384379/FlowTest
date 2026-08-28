@@ -410,7 +410,7 @@ function AssertDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {
           ]}
         />
       ) : (
-        <Typography.Text type="secondary">没有 Assert 变化</Typography.Text>
+        <Typography.Text type="secondary">没有断言变化</Typography.Text>
       )}
     </Card>
   )
@@ -508,9 +508,8 @@ function graphChanges(
       const before = beforeEdges.get(edge.id)
       return (
         before !== undefined &&
-        before.source === edge.source &&
-        before.target === edge.target &&
-        JSON.stringify(before) !== JSON.stringify(edge)
+        (before.condition !== edge.condition ||
+          JSON.stringify(before.mappings) !== JSON.stringify(edge.mappings))
       )
     })
     .map((edge) => edge.id)
