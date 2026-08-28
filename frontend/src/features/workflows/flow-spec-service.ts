@@ -95,9 +95,23 @@ export async function applyFlowSpec(
 }
 
 export async function listFlowSpecChangeSets(projectId: string): Promise<FlowSpecChangeSetPage> {
+  const firstPage = await getFlowSpecChangeSetPage(projectId, 1)
+  const items = [...firstPage.items]
+  const pageCount = Math.ceil(firstPage.total / firstPage.page_size)
+  for (let page = 2; page <= pageCount; page += 1) {
+    const nextPage = await getFlowSpecChangeSetPage(projectId, page)
+    items.push(...nextPage.items)
+  }
+  return { ...firstPage, items }
+}
+
+async function getFlowSpecChangeSetPage(
+  projectId: string,
+  page: number,
+): Promise<FlowSpecChangeSetPage> {
   const response = await apiClient.get<FlowSpecChangeSetPage>(
     `/projects/${projectId}/flow-specs/change-sets`,
-    { params: { page: 1, page_size: 100 } },
+    { params: { page, page_size: 100 } },
   )
   return response.data
 }
