@@ -2,14 +2,14 @@
 
 ## 1. 阶段身份
 
-| 项目               | 当前值                                                  |
-| ------------------ | ------------------------------------------------------- |
-| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`              |
-| 实现分支           | `codex/v6-s52-evidence-adapters`                        |
-| MCP Server Version | `s52-evidence-adapter-v1`                               |
-| Scope              | `mcp:evidence:write`                                    |
-| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；八轮 Review 修复已本地全绿，待推送新 Head |
+| 项目               | 当前值                                                                 |
+| ------------------ | ---------------------------------------------------------------------- |
+| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`                             |
+| 实现分支           | `codex/v6-s52-evidence-adapters`                                       |
+| MCP Server Version | `s52-evidence-adapter-v1`                                              |
+| Scope              | `mcp:evidence:write`                                                   |
+| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                                |
+| Release 状态       | Draft PR #58；第九轮 Review 无新增问题，E2E Fixture 修复本地全绿待推送 |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -174,6 +174,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实路径覆盖创建 Context、Java Evidence、
   DB Evidence、Mapping Inspect、写 SQL 拒绝、第二张表造成歧义，以及 Context `conflicted` 与所有候选保持
   `proposed`。
+- Review 8 语义修复后的 E2E Fixture 使用独立全新 `flowtest-s52-local` Project 与数据卷复验：Setup `1 passed`，
+  S52 定向 Playwright `1 passed`；临时容器、网络与专用卷已删除，既有 Compose 卷未删除。
 - 日志审计：Traceback、Unhandled Exception、测试危险输入 `DROP TABLE orders`、Email 地址均为 0；
   Authorization/Password/Secret 关键词只来自 Redpanda 配置项名称，5xx 数字只来自 Redpanda/Redis 基础设施
   日志，不是 HTTP 失败或敏感值泄漏。
@@ -214,12 +216,15 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   422/Trace ID/不回显敏感值、超长 ID 唯一性及 Boolean State 佐证均有直接回归，对应三个 Thread 已回复并关闭。
 - 第八轮 Codex Review 在 `9cbcd89f6d` 提出 3 个 P2：显式 Operation Entity 存在时仍启用 Route/Table 启发式；
   无 Operation→Entity 候选时可吸收其他 Operation 的 `table_column`；DB Table Finding 未进入 Mapping Derivation。
-  三项均已本地修复，新增显式 Entity 禁止假后缀表、跨 Operation Column/DB Table 隔离、Table-only Domain 与
-  通用 API 可追溯映射回归；待推送新精确 Head 后回复并关闭三个 Thread。
+  三项均在 `d02f44e1ff` 修复，新增显式 Entity 禁止假后缀表、跨 Operation Column/DB Table 隔离、Table-only
+  Domain 与通用 API 可追溯映射回归；三个 Thread 已回复并关闭，第九轮 Codex Review 无新增问题。
+- `d02f44e1ff` 的 Full Compose 发现 E2E 歧义 Fixture 仍依赖已移除的 Route 后缀假冲突；Fixture 已改为为同一
+  Operation 显式声明 `ArchivedOrder→public.archived_orders`，使歧义验证与新的权威 Entity 语义一致；独立全新
+  Compose 栈的 Setup 与 S52 定向 Playwright 均通过，待新精确 Head 全门禁。
 
 ### 待完成
 
-- 第八轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- E2E Fixture 修复 Head 的精确 CI、Codex Review、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 
