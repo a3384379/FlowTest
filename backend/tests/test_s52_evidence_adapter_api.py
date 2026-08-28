@@ -15,8 +15,10 @@ from app.domain.evidence_adapters import (
     DatabaseEvidenceSubmission,
     EntityMappingBudgetExceeded,
     JavaEvidenceSubmission,
+    MappingEvidenceInput,
     adapt_database_evidence,
     adapt_java_evidence,
+    with_mapping_conflict_findings,
 )
 from app.domain.test_contexts import (
     DatabaseExternalEvidenceStructuredData,
@@ -324,6 +326,135 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
     )
     assert inspected.status_code == 200, inspected.text
     assert inspected.json()["conflicts"]
+
+
+@pytest.mark.asyncio
+async def test_differing_java_state_values_conflict_context(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "Java 状态分歧上下文",
+            "objective": "验证相同状态目标的不同值集合仍会阻断就绪状态",
+            "required_evidence": ["repository"],
+        },
+    )
+    context_id = begun.json()["id"]
+    payload = _java_evidence(project_id)
+    common = {"confidence": 0.98, "deterministic": True}
+    payload["claims"].extend(
+        [
+            {
+                **common,
+                "id": "state-order-original",
+                "kind": "enum_state",
+                "source_path": "src/OrderStatus.java:3",
+                "operation_ref": "operation://POST/api/orders",
+                "enum_ref": "java://OrderStatus",
+                "field_name": "status",
+                "values": ["created", "cancelled"],
+            },
+            {
+                **common,
+                "id": "state-order-revised",
+                "kind": "enum_state",
+                "source_path": "src/OrderStatus.java:4",
+                "operation_ref": "operation://POST/api/orders",
+                "enum_ref": "java://OrderStatus",
+                "field_name": "status",
+                "values": ["created", "refunded"],
+            },
+        ]
+    )
+
+    ingested = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": payload},
+    )
+
+    assert ingested.status_code == 201, ingested.text
+    assert ingested.json()["context"]["status"] == "conflicted"
+    assert any(
+        conflict["kind"] == "operation_state"
+        for conflict in ingested.json()["entity_mapping"]["conflicts"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_generic_evidence_rejects_derived_conflict_id_collision(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "派生冲突 ID 碰撞上下文",
+            "objective": "验证冲突标记 ID 碰撞返回标准客户端错误",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    java_payload = _java_evidence(project_id)
+    _add_archived_order_entity(java_payload)
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": java_envelope.model_dump(mode="json")},
+    )
+    assert java.status_code == 201, java.text
+
+    database_payload = _database_evidence(project_id)
+    second_table = {
+        **database_payload["tables"][0],
+        "name": "archived_orders",
+        "columns": [dict(column) for column in database_payload["tables"][0]["columns"]],
+    }
+    database_payload["tables"].append(second_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    java_inputs = [
+        MappingEvidenceInput(
+            evidence_ref=f"evidence://java/{index}",
+            finding=finding,
+            confidence=min(finding.confidence, java_envelope.confidence),
+            deterministic=finding.deterministic and java_envelope.deterministic,
+        )
+        for index, finding in enumerate(java_envelope.findings)
+    ]
+    expanded = with_mapping_conflict_findings(database_envelope, java_inputs)
+    marker = next(finding for finding in expanded.findings if finding.kind.value == "conflict")
+    colliding = database_envelope.findings[0].model_copy(
+        update={"id": marker.id, "semantic_fingerprint": "0" * 64}
+    )
+    colliding = colliding.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(colliding)}
+    )
+    collision_envelope = database_envelope.model_copy(
+        update={"findings": [colliding, *database_envelope.findings[1:]]}
+    )
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": collision_envelope.model_dump(mode="json")},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
+    assert rejected.json()["error"]["trace_id"]
 
 
 @pytest.mark.asyncio

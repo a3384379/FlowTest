@@ -68,7 +68,9 @@ _WRITE_SQL = re.compile(
 _MAPPING_ANNOTATION = re.compile(
     r"@(?P<method>Get|Post|Put|Patch|Delete)Mapping(?:\s*\((?P<args>[^)]*)\))?"
 )
+_MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete)Mapping\b")
 _REQUEST_MAPPING = re.compile(r"@RequestMapping(?:\s*\((?P<args>[^)]*)\))?")
+_REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -650,9 +652,18 @@ def with_mapping_conflict_findings(
         raise EntityMappingBudgetExceeded(
             "entity mapping conflict findings exceed envelope capacity"
         )
+    addition_ids = [
+        _claim_id("mapping-conflict", conflict.kind.value, conflict.source_ref)
+        for conflict in conflicts
+    ]
+    existing_ids = {finding.id for finding in envelope.findings}
+    if len(addition_ids) != len(set(addition_ids)) or existing_ids.intersection(addition_ids):
+        raise EntityMappingBudgetExceeded(
+            "derived mapping conflict finding id collides with existing evidence"
+        )
     additions = [
         _external_finding(
-            identifier=_claim_id("mapping-conflict", conflict.kind.value, conflict.source_ref),
+            identifier=identifier,
             kind=EvidenceFindingKind.CONFLICT,
             semantic_role=EvidenceSemanticRole.CONFLICT,
             source=envelope.source,
@@ -669,7 +680,7 @@ def with_mapping_conflict_findings(
             confidence=0,
             deterministic=True,
         )
-        for conflict in conflicts
+        for conflict, identifier in zip(conflicts, addition_ids, strict=True)
     ]
     payload = envelope.model_dump(mode="json")
     payload["findings"] = [
@@ -1594,8 +1605,17 @@ def _mapping_conflicts(
         for (kind, source_ref), group in sorted(
             groups.items(), key=lambda item: (item[0][0].value, item[0][1])
         )
-        if len({candidate.target_ref for candidate in group}) > 1
+        if _candidate_group_is_conflicted(kind, group)
     ]
+
+
+def _candidate_group_is_conflicted(
+    kind: EntityMappingCandidateKind,
+    candidates: list[EntityMappingCandidate],
+) -> bool:
+    if kind is EntityMappingCandidateKind.OPERATION_STATE:
+        return len(candidates) > 1
+    return len({candidate.target_ref for candidate in candidates}) > 1
 
 
 def _envelope_mapping_inputs(envelope: ExternalEvidenceEnvelope) -> list[MappingEvidenceInput]:
@@ -1665,7 +1685,8 @@ def _java_type_fields(
         list[list[tuple[str, str, list[tuple[str, str]]]]],
     ] = defaultdict(list)
     for file in files:
-        for declaration in _TYPE_DECLARATION.finditer(file.content):
+        masked_content = _mask_java_non_code(file.content)
+        for declaration in _TYPE_DECLARATION.finditer(masked_content):
             name = declaration.group("name")
             body = _type_body(file.content, declaration.end())
             fields = (
@@ -1689,14 +1710,57 @@ def _record_fields(
     content: str, declaration: re.Match[str]
 ) -> list[tuple[str, str, list[tuple[str, str]]]]:
     opening = content.find("(", declaration.end())
-    closing = content.find(")", opening + 1)
-    if opening < 0 or closing < 0:
+    if opening < 0:
         return []
+    closing = _matching_parenthesis(content, opening)
+    components = _split_top_level_java_components(content[opening + 1 : closing])
     return [
-        (parts[-1], parts[-2], [])
-        for component in content[opening + 1 : closing].split(",")
-        if len(parts := component.strip().split()) >= 2
+        field
+        for component in components
+        if (field := _record_component_field(component)) is not None
     ]
+
+
+def _split_top_level_java_components(content: str) -> list[str]:
+    components: list[str] = []
+    depth = 0
+    start = 0
+    index = 0
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
+            continue
+        character = content[index]
+        if character in "([{<":
+            depth += 1
+        elif character in ")]}>" and depth > 0:
+            depth -= 1
+        elif character == "," and depth == 0:
+            components.append(content[start:index])
+            start = index + 1
+        index += 1
+    components.append(content[start:])
+    return components
+
+
+def _record_component_field(
+    component: str,
+) -> tuple[str, str, list[tuple[str, str]]] | None:
+    annotations = [
+        (annotation.group("name"), (annotation.group("args") or "")[:300])
+        for annotation in _VALIDATION_ANNOTATION.finditer(component)
+    ]
+    masked = _mask_java_annotation_arguments(component)
+    declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked)
+    normalized = " ".join(declaration.split())
+    match = re.fullmatch(
+        r"(?P<type>.+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+        normalized,
+    )
+    if match is None:
+        return None
+    return match.group("name"), match.group("type"), annotations
 
 
 def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
@@ -1728,28 +1792,40 @@ def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
 
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
+    masked_content = _mask_java_non_code(file.content)
     declaration = next(
         (
             item
-            for item in _TYPE_DECLARATION.finditer(file.content)
+            for item in _TYPE_DECLARATION.finditer(masked_content)
             if item.group("kind") == "class"
         ),
         None,
     )
     if declaration is None:
         return []
-    before_class = file.content[: declaration.start()]
-    base_matches = list(_REQUEST_MAPPING.finditer(before_class))
+    base_matches = _active_java_annotation_matches(
+        file.content,
+        masked_content,
+        _REQUEST_MAPPING_MARKER,
+        _REQUEST_MAPPING,
+        end=declaration.start(),
+    )
     base_path = _mapping_path(base_matches[-1].group("args") or "") if base_matches else ""
     controller = declaration.group("name")
     return [
         route
-        for match in _MAPPING_ANNOTATION.finditer(file.content[declaration.end() :])
+        for match in _active_java_annotation_matches(
+            file.content,
+            masked_content,
+            _MAPPING_ANNOTATION_MARKER,
+            _MAPPING_ANNOTATION,
+            start=declaration.end(),
+        )
         if (
             route := _route_after_mapping(
                 file,
-                declaration.end() + match.start(),
-                declaration.end() + match.end(),
+                match.start(),
+                match.end(),
                 match,
                 base_path,
                 controller,
@@ -1757,6 +1833,31 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         )
         is not None
     ]
+
+
+def _mask_java_non_code(content: str) -> str:
+    masked = list(content)
+    for match in _JAVA_NON_CODE.finditer(content):
+        masked[match.start() : match.end()] = " " * (match.end() - match.start())
+    return "".join(masked)
+
+
+def _active_java_annotation_matches(
+    content: str,
+    masked_content: str,
+    marker: re.Pattern[str],
+    annotation: re.Pattern[str],
+    *,
+    start: int = 0,
+    end: int | None = None,
+) -> list[re.Match[str]]:
+    matches: list[re.Match[str]] = []
+    end_position = len(masked_content) if end is None else end
+    for marker_match in marker.finditer(masked_content, start, end_position):
+        parsed = annotation.match(content, marker_match.start())
+        if parsed is not None:
+            matches.append(parsed)
+    return matches
 
 
 def _route_after_mapping(
@@ -1835,28 +1936,19 @@ def _mask_java_annotation_arguments(content: str) -> str:
 
 def _matching_parenthesis(content: str, opening: int) -> int:
     depth = 0
-    quote = ""
-    escaped = False
-    for index in range(opening, len(content)):
-        character = content[index]
-        if escaped:
-            escaped = False
+    index = opening
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
             continue
-        if quote and character == "\\":
-            escaped = True
-            continue
-        if quote:
-            if character == quote:
-                quote = ""
-            continue
-        if character in {'"', "'"}:
-            quote = character
-        elif character == "(":
+        if content[index] == "(":
             depth += 1
-        elif character == ")":
+        elif content[index] == ")":
             depth -= 1
             if depth == 0:
                 return index
+        index += 1
     return len(content) - 1
 
 
@@ -2056,7 +2148,7 @@ def _structural_java_claims(
     type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
-    declarations = list(_TYPE_DECLARATION.finditer(file.content))
+    declarations = list(_TYPE_DECLARATION.finditer(_mask_java_non_code(file.content)))
     for declaration in declarations:
         name = declaration.group("name")
         source_path = f"{file.path}:{file.content.count(chr(10), 0, declaration.start()) + 1}"

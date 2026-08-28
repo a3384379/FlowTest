@@ -292,6 +292,36 @@ def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> 
         ExternalEvidenceEnvelope.model_validate(conflict_envelope)
 
 
+def test_derived_mapping_conflict_rejects_existing_finding_id_collision() -> None:
+    java_payload = _java_submission()
+    _add_archived_order_entity(java_payload)
+    java_inputs = _mapping_inputs(
+        adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+        "java",
+    )
+    database_payload = _database_submission()
+    second_table = json.loads(json.dumps(database_payload["tables"][0]))
+    second_table["name"] = "archived_orders"
+    database_payload["tables"].append(second_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    expanded = with_mapping_conflict_findings(database_envelope, java_inputs)
+    marker = next(finding for finding in expanded.findings if finding.kind.value == "conflict")
+    colliding = database_envelope.findings[0].model_copy(
+        update={"id": marker.id, "semantic_fingerprint": "0" * 64}
+    )
+    colliding = colliding.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(colliding)}
+    )
+    collision_envelope = database_envelope.model_copy(
+        update={"findings": [colliding, *database_envelope.findings[1:]]}
+    )
+
+    with pytest.raises(EntityMappingBudgetExceeded, match="finding id collides"):
+        with_mapping_conflict_findings(collision_envelope, java_inputs)
+
+
 def test_external_structured_contract_binds_adapters_to_provider_types() -> None:
     java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
     mislabeled_java = java_envelope.model_dump(mode="json")
@@ -484,6 +514,36 @@ def test_database_boolean_state_values_corroborate_json_style_java_values() -> N
         conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
         for conflict in mapping.conflicts
     )
+
+
+def test_differing_state_values_conflict_even_when_target_ref_matches() -> None:
+    java_payload = _java_submission()
+    first_state = next(claim for claim in java_payload["claims"] if claim["kind"] == "enum_state")
+    second_state = json.loads(json.dumps(first_state))
+    second_state["id"] = "state-order-revised"
+    second_state["values"] = ["created", "refunded"]
+    java_payload["claims"].append(second_state)
+
+    mapping = derive_entity_mapping(
+        _mapping_inputs(
+            adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+            "java",
+        )
+    )
+
+    state_candidates = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert len(state_candidates) == 2
+    assert len({candidate.target_ref for candidate in state_candidates}) == 1
+    state_conflict = next(
+        conflict
+        for conflict in mapping.conflicts
+        if conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+    )
+    assert set(state_conflict.candidate_ids) == {candidate.id for candidate in state_candidates}
 
 
 def test_operation_entity_mapping_preserves_entity_nondeterminism() -> None:
@@ -1233,6 +1293,91 @@ public class OrderController {
         ("operation://GET/api/first", "java://firstService.load"),
         ("operation://GET/api/second", "java://secondService.load"),
     }
+
+
+def test_java_spring_poc_parses_balanced_annotated_record_components() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://annotated-record", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/UserController.java",
+                        "content": """
+@RestController
+public class UserController {
+    @GetMapping("/users")
+    public UserDto getUser() {
+        return userService.getUser();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/UserDto.java",
+                        "content": """
+public record UserDto(
+    @NotBlank(message = "required") String name,
+    Map<String, Integer> counts,
+    int age
+) {}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        (claim.field_name, claim.field_type)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    assert response_fields == {
+        ("name", "String"),
+        ("counts", "Map<String, Integer>"),
+        ("age", "int"),
+    }
+
+
+def test_java_spring_poc_ignores_route_annotations_in_non_code_text() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://active-routes", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+// @RequestMapping("/shadow")
+public class OrderController {
+    private static final String SAMPLE = "@GetMapping(\"/string\")";
+
+    // @GetMapping("/old")
+    public Order helper() {
+        return helperService.load();
+    }
+
+    @GetMapping("/live")
+    public Order live() {
+        return liveService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:
