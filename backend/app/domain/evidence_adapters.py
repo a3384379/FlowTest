@@ -67,7 +67,7 @@ _WRITE_SQL = re.compile(
 _MAPPING_ANNOTATION = re.compile(
     r"@(?P<method>Get|Post|Put|Patch|Delete)Mapping(?:\s*\((?P<args>[^)]*)\))?"
 )
-_REQUEST_MAPPING = re.compile(r'@RequestMapping\s*\(\s*(?:value\s*=\s*)?"([^"]*)"')
+_REQUEST_MAPPING = re.compile(r"@RequestMapping(?:\s*\((?P<args>[^)]*)\))?")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -274,6 +274,8 @@ class DatabaseColumnEvidence(BaseModel):
             require_no_sensitive_scalar_values([self.masked_example])
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
+        if self.check_expression is not None:
+            require_no_sensitive_scalar_values([self.check_expression])
         require_no_sensitive_scalar_values(self.enum_values)
         return self
 
@@ -1087,21 +1089,21 @@ def _entity_match(
     scope: _OperationEntityScope,
 ) -> _EntityMatch:
     table_token = _normalized_name(table_name)
-    for entity, evidence_ref in scope.entities:
-        if entity.table_ref is not None:
-            if _table_ref_matches_database_table(entity.table_ref, schema_name, table_name):
-                return _EntityMatch(
-                    score=min(entity.confidence, 1.0),
-                    evidence_refs=(evidence_ref,),
-                    deterministic=entity.deterministic,
-                )
-            continue
-        if _normalized_name(entity.class_name) == table_token:
-            return _EntityMatch(
-                score=min(entity.confidence, 0.9),
-                evidence_refs=(evidence_ref,),
-                deterministic=False,
-            )
+    exact_matches = [
+        (entity, evidence_ref)
+        for entity, evidence_ref in scope.entities
+        if entity.table_ref is not None
+        and _table_ref_matches_database_table(entity.table_ref, schema_name, table_name)
+    ]
+    if exact_matches:
+        return _combined_entity_match(exact_matches, maximum_score=1.0, deterministic=True)
+    inferred_matches = [
+        (entity, evidence_ref)
+        for entity, evidence_ref in scope.entities
+        if entity.table_ref is None and _normalized_name(entity.class_name) == table_token
+    ]
+    if inferred_matches:
+        return _combined_entity_match(inferred_matches, maximum_score=0.9, deterministic=False)
     if not scope.allow_route_fallback or any(
         _table_ref_matches_database_table(table_ref, schema_name, table_name)
         for table_ref in scope.blocked_table_refs
@@ -1111,6 +1113,19 @@ def _entity_match(
     if route_token and (table_token == route_token or table_token.endswith(route_token)):
         return _EntityMatch(score=0.75, evidence_refs=(), deterministic=False)
     return _EntityMatch(score=0, evidence_refs=(), deterministic=False)
+
+
+def _combined_entity_match(
+    matches: list[tuple[JavaEntityClaim, str]],
+    *,
+    maximum_score: float,
+    deterministic: bool,
+) -> _EntityMatch:
+    return _EntityMatch(
+        score=min(maximum_score, *(entity.confidence for entity, _ref in matches)),
+        evidence_refs=tuple(sorted({ref for _entity, ref in matches}))[:18],
+        deterministic=deterministic and all(entity.deterministic for entity, _ref in matches),
+    )
 
 
 def _table_evidence(
@@ -1157,12 +1172,17 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
     candidates: dict[str, EntityMappingCandidate] = {}
     for field, field_evidence in parsed.fields:
         table_targets = operation_tables.get(field.operation_ref, {})
+        has_explicit_entity_scope = any(
+            field.operation_ref in entity.operation_refs for entity, _ref in parsed.entities
+        )
         blocked_table_refs = _foreign_table_refs(parsed, field.operation_ref)
         field_claims = _table_column_claims_for_field(parsed, field)
         for parsed_column in parsed.columns:
             column = parsed_column.claim
             entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
             if table_targets and entity_ref not in table_targets:
+                continue
+            if not table_targets and has_explicit_entity_scope:
                 continue
             if not table_targets and any(
                 _table_ref_matches_database_table(
@@ -1604,7 +1624,10 @@ class _JavaRoute(BaseModel):
 def _java_type_fields(
     files: list[JavaSourceFileSnapshot],
 ) -> dict[str, list[tuple[str, str, list[tuple[str, str]]]]]:
-    result: dict[str, list[tuple[str, str, list[tuple[str, str]]]]] = {}
+    definitions: dict[
+        str,
+        list[list[tuple[str, str, list[tuple[str, str]]]]],
+    ] = defaultdict(list)
     for file in files:
         for declaration in _TYPE_DECLARATION.finditer(file.content):
             name = declaration.group("name")
@@ -1614,8 +1637,8 @@ def _java_type_fields(
                 if declaration.group("kind") == "record"
                 else _class_fields(body)
             )
-            result[name] = fields
-    return result
+            definitions[name].append(fields)
+    return {name: items[0] for name, items in definitions.items() if len(items) == 1}
 
 
 def _type_body(content: str, start: int) -> str:
@@ -1681,7 +1704,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         return []
     before_class = file.content[: declaration.start()]
     base_matches = list(_REQUEST_MAPPING.finditer(before_class))
-    base_path = base_matches[-1].group(1) if base_matches else ""
+    base_path = _mapping_path(base_matches[-1].group("args") or "") if base_matches else ""
     controller = declaration.group("name")
     return [
         route
@@ -1709,11 +1732,12 @@ def _route_after_mapping(
     controller: str,
 ) -> _JavaRoute | None:
     following = file.content[mapping_end : mapping_end + 2000]
+    masked_following = _mask_java_annotation_arguments(following)
     signature = re.search(
-        r"(?:\s*@[A-Za-z0-9_$.]+(?:\([^)]*\))?)*\s*public\s+"
+        r"(?:\s*@[A-Za-z0-9_$.]+)*\s*public\s+"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
         r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^{]+))?\{",
-        following,
+        masked_following,
     )
     if signature is None:
         return None
@@ -1729,9 +1753,13 @@ def _route_after_mapping(
         operation_ref=f"operation://{method}{full_path}",
         controller_ref=f"java://{controller}",
         handler=handler,
-        return_type=signature.group("return"),
-        parameters=signature.group("params"),
-        declared_exceptions=_declared_java_exceptions(signature.group("throws")),
+        return_type=following[signature.start("return") : signature.end("return")],
+        parameters=following[signature.start("params") : signature.end("params")],
+        declared_exceptions=_declared_java_exceptions(
+            following[signature.start("throws") : signature.end("throws")]
+            if signature.group("throws") is not None
+            else None
+        ),
         body=file.content[body_start + 1 : body_end],
         source_line=file.content.count("\n", 0, mapping_start) + 1,
     )
@@ -1748,8 +1776,52 @@ def _declared_java_exceptions(clause: str | None) -> list[str]:
 
 
 def _mapping_path(arguments: str) -> str:
-    match = re.search(r'"([^"]*)"', arguments)
+    match = re.search(r'\b(?:value|path)\s*=\s*(?:\{\s*)?"([^"]*)"', arguments)
+    if match is None:
+        match = re.match(r'^\s*(?:\{\s*)?"([^"]*)"', arguments)
     return match.group(1) if match else ""
+
+
+def _mask_java_annotation_arguments(content: str) -> str:
+    masked = list(content)
+    cursor = 0
+    annotation = re.compile(r"@[A-Za-z_$][A-Za-z0-9_$.]*\s*")
+    while match := annotation.search(content, cursor):
+        opening = match.end()
+        if opening >= len(content) or content[opening] != "(":
+            cursor = match.end()
+            continue
+        closing = _matching_parenthesis(content, opening)
+        masked[opening : closing + 1] = " " * (closing - opening + 1)
+        cursor = closing + 1
+    return "".join(masked)
+
+
+def _matching_parenthesis(content: str, opening: int) -> int:
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(opening, len(content)):
+        character = content[index]
+        if escaped:
+            escaped = False
+            continue
+        if quote and character == "\\":
+            escaped = True
+            continue
+        if quote:
+            if character == quote:
+                quote = ""
+            continue
+        if character in {'"', "'"}:
+            quote = character
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return len(content) - 1
 
 
 def _join_route_path(base: str, path: str) -> str:
@@ -1865,9 +1937,8 @@ def _parameter_types(parameters: str) -> list[str]:
 
 
 def _simple_type(value: str) -> str:
-    simple = value.rsplit(".", 1)[-1]
-    match = re.search(r"<([^,>]+)", simple)
-    return match.group(1).strip().rsplit(".", 1)[-1] if match else simple.rstrip("[]")
+    identifiers = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*", value)
+    return identifiers[-1].rsplit(".", 1)[-1] if identifiers else value.rstrip("[]")
 
 
 def _route_call_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:

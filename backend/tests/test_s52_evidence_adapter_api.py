@@ -497,6 +497,45 @@ async def test_generic_evidence_rejects_sensitive_adapter_scalar(
     assert rejected_masked_example.json()["error"]["trace_id"]
     assert sensitive_value not in rejected_masked_example.text
 
+    sensitive_phone = "13800138000"
+    sensitive_check_payload = _database_evidence(project_id)
+    sensitive_check_payload["tables"][0]["columns"][2]["check_expression"] = (
+        f"phone IN ('{sensitive_phone}')"
+    )
+    rejected_sensitive_check = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": sensitive_check_payload},
+    )
+
+    assert rejected_sensitive_check.status_code == 422
+    assert rejected_sensitive_check.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_sensitive_check.json()["error"]["trace_id"]
+    assert sensitive_phone not in rejected_sensitive_check.text
+
+    generic_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_status = next(
+        finding
+        for finding in generic_envelope["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    generic_status["structured_data"]["claim"]["check_expression"] = (
+        f"phone IN ('{sensitive_phone}')"
+    )
+    rejected_generic_check = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_envelope},
+    )
+
+    assert rejected_generic_check.status_code == 422
+    assert rejected_generic_check.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_generic_check.json()["error"]["trace_id"]
+    assert sensitive_phone not in rejected_generic_check.text
+
 
 @pytest.mark.asyncio
 async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhausted(

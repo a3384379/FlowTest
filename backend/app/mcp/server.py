@@ -492,9 +492,7 @@ def _register_ingest_database_evidence_tool(
 ) -> None:
     @server.tool(
         name="flowtest.ingest_database_evidence",
-        description=(
-            "Ingest strict, design-only database schema and redacted distribution evidence."
-        ),
+        description="写入严格、仅用于设计的数据库结构与脱敏分布证据。",
         structured_output=True,
     )
     async def ingest_database_evidence(
@@ -514,9 +512,7 @@ def _register_ingest_database_evidence_tool(
 def _register_ingest_java_evidence_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.ingest_java_evidence",
-        description=(
-            "Ingest strict external Java/Spring structural evidence without code execution."
-        ),
+        description="写入严格的外部 Java/Spring 结构证据，不执行目标代码。",
         structured_output=True,
     )
     async def ingest_java_evidence(
@@ -536,7 +532,7 @@ def _register_ingest_java_evidence_tool(server: MCPServer, client: MCPReadGatewa
 def _register_inspect_entity_mapping_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_entity_mapping",
-        description="Inspect traceable entity candidates and unresolved ambiguity for a context.",
+        description="查看测试上下文中可追溯的实体候选与尚未解决的歧义。",
         structured_output=True,
     )
     async def inspect_entity_mapping(

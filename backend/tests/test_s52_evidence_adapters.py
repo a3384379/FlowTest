@@ -116,6 +116,11 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     with pytest.raises(ValidationError, match="write SQL"):
         DatabaseEvidenceSubmission.model_validate(write_sql)
 
+    sensitive_check = _database_submission()
+    sensitive_check["tables"][0]["columns"][1]["check_expression"] = "phone IN ('13800138000')"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        DatabaseEvidenceSubmission.model_validate(sensitive_check)
+
     unknown_sql = _database_submission()
     unknown_sql["sql"] = "SELECT * FROM orders"
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -144,6 +149,21 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     external_column["structured_data"]["claim"]["enum_values"] = [float("nan")]
     with pytest.raises(ValidationError, match="finite number"):
         ExternalEvidenceEnvelope.model_validate(external_envelope)
+
+    external_sensitive_check = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    external_check_column = next(
+        finding
+        for finding in external_sensitive_check["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    external_check_column["structured_data"]["claim"]["check_expression"] = (
+        "phone IN ('13800138000')"
+    )
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_sensitive_check)
 
     external_java = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
@@ -480,6 +500,55 @@ def test_operation_entity_mapping_preserves_entity_nondeterminism() -> None:
     assert operation_entity.deterministic is False
 
 
+def test_operation_entity_mapping_aggregates_all_exact_entity_evidence() -> None:
+    java_payload = _java_submission()
+    second_entity = json.loads(
+        json.dumps(next(claim for claim in java_payload["claims"] if claim["kind"] == "entity"))
+    )
+    second_entity.update(
+        {
+            "id": "entity-order-secondary",
+            "entity_ref": "entity://OrderSecondary",
+            "class_name": "OrderSecondary",
+            "confidence": 0.4,
+            "deterministic": False,
+        }
+    )
+    java_payload["claims"].append(second_entity)
+    java_inputs = _mapping_inputs(
+        adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+        "java",
+    )
+    entity_evidence_refs = {
+        item.evidence_ref
+        for item in java_inputs
+        if isinstance(item.finding.structured_data, JavaExternalEvidenceStructuredData)
+        and item.finding.structured_data.claim_kind == "entity"
+    }
+
+    mapping = derive_entity_mapping(
+        [
+            *java_inputs,
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    operation_entity = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.target_ref == "entity://public/orders"
+    )
+    assert entity_evidence_refs <= set(operation_entity.evidence_refs)
+    assert operation_entity.confidence == 0.4
+    assert operation_entity.deterministic is False
+
+
 def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> None:
     java_payload = _java_submission()
     operation_ref = "operation://POST/api/purchases"
@@ -654,6 +723,38 @@ def test_field_mapping_excludes_table_column_claims_scoped_to_other_operations()
             EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
         }
         and candidate.operation_ref == operation_ref
+        for candidate in mapping.candidates
+    )
+
+
+def test_field_mapping_does_not_escape_unmatched_explicit_entity_scope() -> None:
+    java_payload = _java_submission()
+    entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")
+    entity["class_name"] = "PrivateOrder"
+    entity["table_ref"] = "table://private/orders"
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    assert not any(
+        candidate.kind
+        in {
+            EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+            EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+        }
+        and candidate.operation_ref == "operation://POST/api/orders"
         for candidate in mapping.candidates
     )
 
@@ -995,6 +1096,117 @@ public class OrderController {
         "IllegalStateException",
         "OrderMissingException",
     }
+
+
+def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://spring-signatures", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+public class OrderController {
+    @GetMapping(produces = "application/json", path = "/orders/{id}")
+    public ResponseEntity<List<OrderDto>> getOrder(
+        @PathVariable("id") String id,
+        @RequestParam(required = false) String projection
+    ) {
+        return orderService.getOrder(id, projection);
+    }
+
+    @GetMapping(produces = "application/json")
+    public OrderDto listOrders() {
+        return orderService.listOrders();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": """
+package example;
+public class OrderDto {
+    private String orderId;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = {
+        (claim.handler, claim.path) for claim in evidence.claims if claim.kind == "controller_route"
+    }
+    assert routes == {
+        ("getOrder", "/api/orders/{id}"),
+        ("listOrders", "/api"),
+    }
+    assert any(
+        claim.kind == "dto_field"
+        and claim.direction == "response"
+        and claim.dto_type == "OrderDto"
+        and claim.field_name == "orderId"
+        for claim in evidence.claims
+    )
+
+
+def test_java_spring_poc_rejects_ambiguous_simple_dto_names() -> None:
+    files = [
+        {
+            "path": "src/main/java/example/SharedController.java",
+            "content": """
+@RestController
+public class SharedController {
+    @GetMapping("/shared")
+    public SharedDto getShared() {
+        return service.getShared();
+    }
+}
+""",
+        },
+        {
+            "path": "src/main/java/alpha/SharedDto.java",
+            "content": "package alpha; public class SharedDto { private String alphaValue; }",
+        },
+        {
+            "path": "src/main/java/beta/SharedDto.java",
+            "content": "package beta; public class SharedDto { private String betaValue; }",
+        },
+    ]
+
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://ambiguous-dtos", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": files,
+            }
+        )
+    )
+    reversed_evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://ambiguous-dtos", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": list(reversed(files)),
+            }
+        )
+    )
+
+    for result in (evidence, reversed_evidence):
+        assert any(claim.kind == "controller_route" for claim in result.claims)
+        assert not any(
+            claim.kind == "dto_field" and claim.dto_type == "SharedDto" for claim in result.claims
+        )
 
 
 def test_ruoyi_full_golden_target_poc_without_execution() -> None:

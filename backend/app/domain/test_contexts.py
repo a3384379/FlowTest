@@ -476,6 +476,8 @@ class ExternalDatabaseColumnClaim(BaseModel):
             require_no_sensitive_scalar_values([self.masked_example])
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
+        if self.check_expression is not None:
+            require_no_sensitive_scalar_values([self.check_expression])
         require_no_sensitive_scalar_values(self.enum_values)
         return self
 

@@ -721,6 +721,16 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.validate_flowspec",
             "flowtest.validate_integration_plan",
         ]
+        tools_by_name = {tool.name: tool for tool in tools}
+        assert tools_by_name["flowtest.ingest_database_evidence"].description == (
+            "写入严格、仅用于设计的数据库结构与脱敏分布证据。"
+        )
+        assert tools_by_name["flowtest.ingest_java_evidence"].description == (
+            "写入严格的外部 Java/Spring 结构证据\uff0c不执行目标代码。"
+        )
+        assert tools_by_name["flowtest.inspect_entity_mapping"].description == (
+            "查看测试上下文中可追溯的实体候选与尚未解决的歧义。"
+        )
         templates = await server.list_resource_templates()
         assert [template.uri_template for template in templates] == sorted(
             template.uri_template for template in templates
