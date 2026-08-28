@@ -9,7 +9,11 @@ from app.core.errors import AppError
 from app.domain.flow_spec import FlowSpecIssue
 from app.models.access import User
 from app.schemas.flow_spec import FlowSpecImportRequest
-from app.schemas.test_contexts import FlowSpecProposalRequest, FlowSpecProposalResponse
+from app.schemas.test_contexts import (
+    FlowSpecProposalInspectionResponse,
+    FlowSpecProposalRequest,
+    FlowSpecProposalResponse,
+)
 from app.services.flow_spec import FlowSpecImportProvenance, FlowSpecService
 from app.services.idempotency import IdempotencyService, require_idempotency_key
 from app.services.test_contexts import ProposableContext, TestContextService
@@ -52,6 +56,36 @@ class MCPFlowProposalService:
         )
         return FlowSpecProposalResponse.model_validate(response)
 
+    async def inspect(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        change_set_id: UUID,
+    ) -> FlowSpecProposalInspectionResponse:
+        self._require_scope()
+        proposal = await self._flow_specs.get_visual_proposal(
+            actor=actor,
+            project_id=project_id,
+            change_set_id=change_set_id,
+        )
+        snapshot = proposal.view.change_set.source_snapshot
+        return FlowSpecProposalInspectionResponse(
+            change_set_id=proposal.view.change_set.id,
+            project_id=proposal.view.change_set.project_id,
+            status=proposal.view.change_set.status,
+            review_status=proposal.view.item.review_status,
+            applied=proposal.view.change_set.applied_at is not None,
+            target_workflow_id=proposal.view.item.target_resource_id,
+            target_revision=_target_revision(snapshot),
+            context_revision_id=_uuid(snapshot.get("context_revision_id")),
+            context_fingerprint=_string(snapshot.get("context_fingerprint")),
+            integration_plan=proposal.integration_plan,
+            compilation=proposal.compilation,
+            existing_definition=proposal.existing_definition,
+            proposed_definition=proposal.proposed_definition,
+        )
+
     async def _preview(
         self,
         *,
@@ -65,6 +99,12 @@ class MCPFlowProposalService:
             actor=actor,
             project_id=payload.project_id,
             payload=_import_request(payload, source_ref),
+            provenance=_provenance(
+                payload=payload,
+                context=context,
+                source_ref=source_ref,
+                service_account_id=service_account_id,
+            ),
         )
         return FlowSpecProposalResponse(
             dry_run=True,
@@ -93,9 +133,9 @@ class MCPFlowProposalService:
             actor=actor,
             project_id=payload.project_id,
             payload=_import_request(payload, source_ref),
-            provenance=FlowSpecImportProvenance(
-                context_revision_id=context.revision.id,
-                context_fingerprint=context.revision.fingerprint,
+            provenance=_provenance(
+                payload=payload,
+                context=context,
                 source_ref=source_ref,
                 service_account_id=service_account_id,
             ),
@@ -125,18 +165,22 @@ class MCPFlowProposalService:
         )
 
     def _require_scope(self) -> UUID:
-        tenant = get_tenant_context()
-        if (
-            tenant is None
-            or tenant.service_account_id is None
-            or MCP_FLOW_PROPOSE_SCOPE not in tenant.scopes
-        ):
-            raise AppError(
-                code="MCP_SCOPE_REQUIRED",
-                message="MCP 需要 FlowSpec 提案权限范围",
-                status_code=403,
-            )
-        return tenant.service_account_id
+        return require_mcp_flow_propose_scope()
+
+
+def require_mcp_flow_propose_scope() -> UUID:
+    tenant = get_tenant_context()
+    if (
+        tenant is None
+        or tenant.service_account_id is None
+        or MCP_FLOW_PROPOSE_SCOPE not in tenant.scopes
+    ):
+        raise AppError(
+            code="MCP_SCOPE_REQUIRED",
+            message="MCP 需要 FlowSpec 提案权限范围",
+            status_code=403,
+        )
+    return tenant.service_account_id
 
 
 def _source_ref(payload: FlowSpecProposalRequest) -> str:
@@ -156,6 +200,24 @@ def _import_request(payload: FlowSpecProposalRequest, source_ref: str) -> FlowSp
     )
 
 
+def _provenance(
+    *,
+    payload: FlowSpecProposalRequest,
+    context: ProposableContext,
+    source_ref: str,
+    service_account_id: UUID,
+) -> FlowSpecImportProvenance:
+    return FlowSpecImportProvenance(
+        context_revision_id=context.revision.id,
+        context_fingerprint=context.revision.fingerprint,
+        source_ref=source_ref,
+        service_account_id=service_account_id,
+        expected_target_revision=payload.expected_revision,
+        integration_plan=payload.integration_plan,
+        compilation=payload.compilation,
+    )
+
+
 def _warnings(values: list[FlowSpecIssue]) -> list[str]:
     return sorted({value.code for value in values})
 
@@ -163,3 +225,16 @@ def _warnings(values: list[FlowSpecIssue]) -> list[str]:
 def _target_revision(snapshot: dict[str, object]) -> int | None:
     value = snapshot.get("target_revision")
     return value if isinstance(value, int) else None
+
+
+def _uuid(value: object) -> UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _string(value: object) -> str | None:
+    return value if isinstance(value, str) else None

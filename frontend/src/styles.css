@@ -799,6 +799,40 @@ body {
   opacity: 0.68;
 }
 
+.flow-node.is-added {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.flow-node.is-modified {
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+.flow-node.is-removed {
+  border-color: #dc2626;
+  background: #fef2f2;
+  opacity: 0.72;
+}
+
+.workflow-proposal-toolbar {
+  justify-content: flex-start;
+}
+
+.flow-proposal-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.flow-proposal-evidence-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  margin-top: 12px;
+  overflow: auto;
+}
+
 .workflow-result-card {
   margin-top: 16px;
 }

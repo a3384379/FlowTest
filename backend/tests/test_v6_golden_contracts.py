@@ -36,7 +36,7 @@ from app.domain.integration_plans import (
     validate_integration_plan,
 )
 from app.domain.mcp_read import MCP_READ_SCHEMA_VERSION, MCP_SERVER_NAME
-from app.domain.test_contexts import MCP_CONTEXT_EVIDENCE_SERVER_VERSION
+from app.domain.test_contexts import MCP_FLOW_PROPOSAL_SERVER_VERSION
 from app.domain.test_design import TestDesignDocument as GoldenTestDesignDocument
 from app.domain.test_design import fingerprint_design
 from app.domain.test_engineering import OperationContract, fingerprint_contract
@@ -302,7 +302,7 @@ async def test_mcp_tool_contract_is_frozen() -> None:
         tools = await create_mcp_server(client=gateway).list_tools()
 
     assert contract["server_name"] == MCP_SERVER_NAME
-    assert contract["server_version"] == MCP_CONTEXT_EVIDENCE_SERVER_VERSION
+    assert contract["server_version"] == MCP_FLOW_PROPOSAL_SERVER_VERSION
     assert contract["read_schema_version"] == MCP_READ_SCHEMA_VERSION
     assert [tool.name for tool in tools] == contract["tools"]
 

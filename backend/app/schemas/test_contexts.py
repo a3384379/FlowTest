@@ -4,9 +4,19 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.flow_spec import FlowSpec
+from app.domain.integration_plans import (
+    IntegrationPlan,
+    IntegrationPlanCompilation,
+    PlanActor,
+    PlanCleanupRequirement,
+    PlanDiagnostic,
+    PlanPrecondition,
+    PlanTargetEnvironment,
+    PlanValidationResult,
+)
 from app.domain.test_contexts import (
     ContextKnowledgeSnapshot,
     ContextRevisionSnapshot,
@@ -16,6 +26,7 @@ from app.domain.test_contexts import (
     RevisionReference,
     TestContextStatus,
 )
+from app.engine.contracts import WorkflowDefinition
 
 
 class BeginTestContextRequest(BaseModel):
@@ -116,6 +127,60 @@ class ContextRequirementsResponse(BaseModel):
     expires_at: datetime
 
 
+class IntegrationPlanOperationSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition_id: UUID
+    scenario_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class ExistingAuthWorkflowSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: UUID
+    workflow_version: int = Field(ge=1)
+    token_path: str = Field(min_length=1, max_length=500)
+    step_id: str = Field(default="existing-auth", pattern=r"^[A-Za-z_][A-Za-z0-9_.:-]{0,119}$")
+
+
+class IntegrationPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    context_id: UUID
+    context_revision_id: UUID
+    actors: list[PlanActor] = Field(min_length=1, max_length=50)
+    preconditions: list[PlanPrecondition] = Field(default_factory=list, max_length=100)
+    target_environment: PlanTargetEnvironment
+    operations: list[IntegrationPlanOperationSelectionRequest] = Field(
+        min_length=1, max_length=1000
+    )
+    existing_auth: ExistingAuthWorkflowSelectionRequest | None = None
+    cleanup_requirements: list[PlanCleanupRequirement] = Field(default_factory=list, max_length=200)
+
+
+class IntegrationPlanValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan: IntegrationPlan
+
+
+class IntegrationPlanCompileRequest(IntegrationPlanValidateRequest):
+    pass
+
+
+class CompilerDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flowtest-compiler-diagnostics-v1"] = "flowtest-compiler-diagnostics-v1"
+    plan_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    importable: bool
+    diagnostics: list[PlanDiagnostic] = Field(default_factory=list, max_length=500)
+    blocker_codes: list[str] = Field(default_factory=list, max_length=500)
+    review_codes: list[str] = Field(default_factory=list, max_length=500)
+    next_actions: list[str] = Field(default_factory=list, max_length=500)
+
+
 class FlowSpecProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -132,7 +197,24 @@ class FlowSpecProposalRequest(BaseModel):
     service_mappings: dict[str, UUID] = Field(default_factory=dict, max_length=500)
     operation_mappings: dict[str, UUID] = Field(default_factory=dict, max_length=1000)
     operation_version_mappings: dict[str, int] = Field(default_factory=dict, max_length=1000)
+    expected_revision: int | None = Field(default=None, ge=1)
+    integration_plan: IntegrationPlan | None = None
+    compilation: IntegrationPlanCompilation | None = None
     dry_run: bool = True
+
+    @model_validator(mode="after")
+    def validate_proposal_contract(self) -> "FlowSpecProposalRequest":
+        if self.workflow_id is not None and self.expected_revision is None:
+            raise ValueError("更新现有 Workflow 必须提供 Expected Revision")
+        if self.workflow_id is None and self.expected_revision is not None:
+            raise ValueError("新建 Workflow Proposal 不接受 Expected Revision")
+        if (self.integration_plan is None) != (self.compilation is None):
+            raise ValueError("Integration Plan 与 Compilation 必须同时提供")
+        return self
+
+
+class IntegrationPlanValidationResponse(PlanValidationResult):
+    pass
 
 
 class FlowSpecProposalResponse(BaseModel):
@@ -152,3 +234,24 @@ class FlowSpecProposalResponse(BaseModel):
     target_workflow_id: UUID | None
     target_revision: int | None
     warnings: list[str] = Field(default_factory=list, max_length=100)
+
+
+class FlowSpecProposalInspectionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flowtest-flow-proposal-inspection-v1"] = (
+        "flowtest-flow-proposal-inspection-v1"
+    )
+    change_set_id: UUID
+    project_id: UUID
+    status: str
+    review_status: Literal["pending", "accepted", "rejected"]
+    applied: bool
+    target_workflow_id: UUID | None
+    target_revision: int | None
+    context_revision_id: UUID | None
+    context_fingerprint: str | None
+    integration_plan: IntegrationPlan | None
+    compilation: IntegrationPlanCompilation | None
+    existing_definition: WorkflowDefinition | None
+    proposed_definition: WorkflowDefinition

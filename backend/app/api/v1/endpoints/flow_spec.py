@@ -16,6 +16,7 @@ from app.schemas.flow_spec import (
     FlowSpecReviewRequest,
     FlowSpecValidateRequest,
     FlowSpecValidationResponse,
+    FlowSpecVisualProposalResponse,
 )
 from app.services.flow_spec import FlowSpecChangeSetView, FlowSpecService
 
@@ -144,6 +145,33 @@ async def get_flow_spec_change_set(
         change_set_id=change_set_id,
     )
     return _detail(view)
+
+
+@router.get(
+    "/change-sets/{change_set_id}/visual-proposal",
+    response_model=FlowSpecVisualProposalResponse,
+)
+async def get_visual_flow_proposal(
+    project_id: UUID,
+    change_set_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> FlowSpecVisualProposalResponse:
+    proposal = await FlowSpecService(session).get_visual_proposal(
+        actor=current_user,
+        project_id=project_id,
+        change_set_id=change_set_id,
+    )
+    return FlowSpecVisualProposalResponse(
+        proposal=_detail(proposal.view),
+        existing_definition=proposal.existing_definition,
+        proposed_definition=proposal.proposed_definition,
+        integration_plan=proposal.integration_plan,
+        compilation=proposal.compilation,
+        service_mappings=dict(proposal.service_mappings),
+        operation_mappings=dict(proposal.operation_mappings),
+        operation_version_mappings=dict(proposal.operation_version_mappings),
+    )
 
 
 @router.post(

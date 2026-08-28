@@ -30,23 +30,37 @@ import {
 type FlowSpecReviewDialogProps = {
   open: boolean
   projectId: string
-  workflowId: string
+  workflowId?: string
   apis: ApiDefinition[]
+  initial?: FlowSpecReviewSeed
   onClose: () => void
+}
+
+export type FlowSpecReviewSeed = {
+  proposalId: string
+  targetWorkflowId: string | null
+  spec: FlowSpec
+  serviceMappings: Record<string, string>
+  operationMappings: Record<string, string>
+  operationVersionMappings: Record<string, number>
 }
 
 export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [rawSpec, setRawSpec] = useState('')
+  const [rawSpec, setRawSpec] = useState(() => initialSpec(props.initial))
   const [validation, setValidation] = useState<Awaited<ReturnType<typeof validateFlowSpec>> | null>(
     null,
   )
   const [proposal, setProposal] = useState<Awaited<ReturnType<typeof importFlowSpec>> | null>(null)
-  const [serviceMappings, setServiceMappings] = useState<Record<string, string>>({})
-  const [operationMappings, setOperationMappings] = useState<Record<string, string>>({})
+  const [serviceMappings, setServiceMappings] = useState<Record<string, string>>(
+    () => props.initial?.serviceMappings ?? {},
+  )
+  const [operationMappings, setOperationMappings] = useState<Record<string, string>>(
+    () => props.initial?.operationMappings ?? {},
+  )
   const [operationVersionMappings, setOperationVersionMappings] = useState<Record<string, number>>(
-    {},
+    () => props.initial?.operationVersionMappings ?? {},
   )
   const [busy, setBusy] = useState(false)
   const services = useQuery({
@@ -57,8 +71,10 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
   const spec = safeFlowSpec(rawSpec)
 
   async function exportCurrent(): Promise<void> {
+    const workflowId = props.workflowId
+    if (!workflowId) return
     await act(async () => {
-      const exported = await exportFlowSpec(props.projectId, props.workflowId)
+      const exported = await exportFlowSpec(props.projectId, workflowId)
       setRawSpec(JSON.stringify(exported.spec, null, 2))
       setValidation({
         fingerprint: exported.fingerprint,
@@ -152,9 +168,14 @@ export default function FlowSpecReviewDialog(props: FlowSpecReviewDialogProps) {
           showIcon
           type="info"
           title="跨项目导入按 canonical contract fingerprint 校验版本：pinned 恢复显式 api_version，current 保持跟随目标 API 当前版本。"
+          description={
+            props.initial
+              ? '已载入 MCP Proposal 快照；安全编辑会创建新的待审核 ChangeSet，不会原地修改 MCP Proposal。'
+              : undefined
+          }
         />
         <Space wrap>
-          <Button loading={busy} onClick={() => void exportCurrent()}>
+          <Button disabled={!props.workflowId} loading={busy} onClick={() => void exportCurrent()}>
             导出当前草稿
           </Button>
           <Button disabled={!spec} loading={busy} onClick={() => void validate()}>
@@ -385,6 +406,10 @@ function safeFlowSpec(raw: string): FlowSpec | null {
   } catch {
     return null
   }
+}
+
+function initialSpec(seed: FlowSpecReviewSeed | undefined): string {
+  return seed ? JSON.stringify(seed.spec, null, 2) : ''
 }
 
 function requiredSpec(spec: FlowSpec | null): FlowSpec {

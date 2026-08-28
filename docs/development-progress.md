@@ -2,11 +2,11 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48 契约冻结与证据闭环；S49 Context Revision、External Evidence 与 Proposal Adapter 已完成
-实现及 Evidence Closure；S50 Multi-Operation Plan 与 Executable FlowSpec Compiler MVP 已由 PR #53 普通
-Squash Merge，Merge SHA `main@507aff999606ab6b3190810cf25717a55265eb88` 的全部适用 Workflow 与唯一
-Required Gate 已 Success。当前严格串行执行 S50 Evidence Closure；其合并及 Main Push 全绿前不进入 S51。当前
-Migration Head 为 `20260828_0046`，仍不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
+已完成 S48～S50 实现及 Evidence Closure；S50 Closure PR #54 已普通 Squash Merge 至
+`main@8f20500fd151e89573bb8f01f24cb6512143dbe1`，其 Main Push Required Gate 已 Success。当前从该精确
+Main 严格串行执行 S51 MCP Flow Draft 与 Visual Proposal Alpha 的本地实现和验收；实现 PR 尚未创建，
+不宣称远程闭环完成，也不进入 S52。当前 Migration Head 为 `20260828_0046`，仍未发布 Alpha/Beta/RC/GA。
+历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
@@ -15,7 +15,35 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## 已完成实现验收、Evidence Closure 中：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
+## 实现与本地验收中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
+
+### Implemented
+
+- MCP SDK 与 Gateway 新增 Plan、Validate、Compile、Explain、Propose、Inspect 六个精确 Tool，统一使用
+  `mcp:flow:propose`；Proposal 默认 Dry Run，持久化要求 Idempotency Key，更新现有 Workflow 强制 Expected
+  Revision，并校验 Context/Plan/Compilation/FlowSpec Provenance。
+- Proposal 继续写入既有 `AIChangeSet`/`AIChangeItem` FlowSpec Draft；不新建 Proposal 表、Review 状态机或
+  Apply 服务，不自动 Review、Apply、Publish 或 Execute。
+- 既有 `WorkflowDesigner` 增加只读 `mode=proposal`，使用同一个 Canvas 切换冻结的 Existing/Proposed Graph，
+  展示 Added/Modified/Removed Node、Rewired Edge、Mapping/Assert Diff、Evidence、Confidence、Unresolved 与
+  Review Actions。
+- 人工可 Accept/Reject，Accepted Proposal 才能 Apply 到 Workflow Draft；Raw JSON 与 Cross-instance Mapping
+  仍进入既有 `FlowSpecReviewDialog`。安全编辑创建新的待审核 ChangeSet，不原地修改 MCP Proposal。
+- 隔离 Compose 的真实 Alpha 路径已覆盖 Context → Typed Evidence → Plan → Compile → MCP Dry Run → MCP Draft
+  → UI 可视化检查 → Accept → Apply → WorkflowDesigner Draft，且 Graph 与 Proposal 一致、发布与执行均为 0。
+
+### 当前门槛
+
+- Backend Format/Lint、335-source Mypy、安全 Lint 与全量 Pytest 已通过：`662 passed / 4 skipped`，Coverage
+  `90.41%`。Frontend Format、Lint/Types、Coverage 与 Build 已通过：`57 files / 218 tests`，Statements/
+  Branches/Functions/Lines 为 `86.12/80.02/85.29/88.38%`；Python/Node 依赖审计无已知漏洞。
+- 最终隔离 Compose 15 服务全部 Healthy；真实 Playwright Alpha 链路 `2 passed`，日志 Traceback 为 0，验收后
+  仅清除 `flowtest-s51-local` 资源，既有 Compose Project 运行数量不变。Requirement、Correctness/Data、
+  Security/Tenant/Secret/SSRF 与 E2E/Scope 四类本地 Review 已完成。
+- S51 实现 PR、精确 Head CI、普通 Squash Merge、Main Push 全绿及 Evidence Closure 均未执行完成；上述闭环前
+  不进入 S52。完整边界与证据记录见 [S51 Release Evidence](release/v6-s51-mcp-visual-proposal.md)。
+
+## 已完成：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
 
 ### Implemented
 
@@ -43,7 +71,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   Security、Windows、Upgrade/Rollback 与 Ready 后 Required Gate 全部 Success；Review/Comment/Thread 均为 0。
 - PR #53 已普通 Squash Merge 至 `507aff999606ab6b3190810cf25717a55265eb88`；该 Merge SHA 的 Backend、
   Frontend、Compose、Security、Windows、Upgrade/Rollback 与唯一 Required Gate 全部 Success。
-- S50 Evidence Closure 合并且其 Main Push Required Gate 成功前，不允许创建 S51 实现分支。
+- S50 Evidence Closure PR #54 已普通 Squash Merge 至
+  `8f20500fd151e89573bb8f01f24cb6512143dbe1`，其 Main Push Required Gate 已 Success；S51 从该精确
+  Main 创建。
 - 完整边界与证据记录见 [S50 Release Evidence](release/v6-s50-integration-plan-compiler.md)。
 
 ## 已完成实现验收：V6 S49 Context Revision、External Evidence 与 Proposal Adapter

@@ -71,11 +71,16 @@ type DesignerProps = {
   eventSources?: EventSource[]
   statuses: Record<string, string>
   editable: boolean
+  mode?: 'edit' | 'proposal'
+  proposalNodeStatuses?: Record<string, ProposalGraphStatus>
+  proposalEdgeStatuses?: Record<string, ProposalGraphStatus>
   runtimeMode?: 'run' | 'history'
   runtimeNodes?: WorkflowNodeExecution[]
   runtimeContext?: Record<string, unknown>
   onChange: (definition: WorkflowDefinition) => void
 }
+
+export type ProposalGraphStatus = 'added' | 'modified' | 'removed' | 'rewired'
 
 type NodeData = Record<string, unknown> & {
   label: string
@@ -126,17 +131,22 @@ function WorkflowDesignerReady({
   eventSources,
   statuses,
   editable,
+  mode = 'edit',
+  proposalNodeStatuses = {},
+  proposalEdgeStatuses = {},
   runtimeMode,
   runtimeNodes,
   runtimeContext,
   onChange,
 }: ReadyDesignerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [apiSelection, setApiSelection] = useState<string | undefined>(apis.at(0)?.id)
+  const [apiSelection, setApiSelection] = useState<string | undefined>(firstResourceId(apis))
   const [graphqlSelection, setGraphqlSelection] = useState<string | undefined>(
-    graphqlSchemas.at(0)?.id,
+    firstResourceId(graphqlSchemas),
   )
-  const [grpcSelection, setGrpcSelection] = useState<string | undefined>(grpcDescriptors.at(0)?.id)
+  const [grpcSelection, setGrpcSelection] = useState<string | undefined>(
+    firstResourceId(grpcDescriptors),
+  )
   const kafkaSources = eventSources.filter((source) => source.kind === 'kafka')
   const websocketSources = eventSources.filter((source) => source.kind === 'websocket')
   const [kafkaSelection, setKafkaSelection] = useState<string | undefined>(
@@ -147,7 +157,7 @@ function WorkflowDesignerReady({
   )
   const publishedWorkflows = workflows.filter((workflow) => workflow.current_version)
   const [subflowSelection, setSubflowSelection] = useState<string | undefined>(
-    publishedWorkflows.at(0)?.id,
+    firstResourceId(publishedWorkflows),
   )
   const [clipboard, setClipboard] = useState<WorkflowNode | null>(null)
   const [history, setHistory] = useState<{
@@ -161,12 +171,20 @@ function WorkflowDesignerReady({
   const nodes = useMemo(
     () =>
       definition.nodes.map((node) =>
-        toCanvasNode(node, statuses[node.id], runtimeByNode.get(node.id)),
+        toCanvasNode(
+          node,
+          displayNodeStatus(node.id, statuses, proposalNodeStatuses),
+          runtimeByNode.get(node.id),
+        ),
       ),
-    [definition.nodes, runtimeByNode, statuses],
+    [definition.nodes, proposalNodeStatuses, runtimeByNode, statuses],
   )
-  const edges = useMemo(() => definition.edges.map(toCanvasEdge), [definition.edges])
+  const edges = useMemo(
+    () => definition.edges.map((edge) => toCanvasEdge(edge, proposalEdgeStatuses[edge.id])),
+    [definition.edges, proposalEdgeStatuses],
+  )
   const selected = selectedNode(definition, selectedId)
+  const canvasEditable = isCanvasEditable(editable, mode)
   const selectedApiId = selectedResourceId(apiSelection, apis)
   const selectedApi = apis.find((api) => api.id === selectedApiId)
   const selectedGraphql = selectedSchema(graphqlSelection, graphqlSchemas)
@@ -250,48 +268,50 @@ function WorkflowDesignerReady({
   if (!definition.nodes.length) return <Empty description="请选择工作流" />
   return (
     <div className="workflow-designer">
-      <DesignerToolbar
-        runtimeMode={runtimeMode}
-        apiSelection={selectedApiId}
-        apis={apis}
-        graphqlSchemas={graphqlSchemas}
-        grpcDescriptors={grpcDescriptors}
-        kafkaSources={kafkaSources}
-        websocketSources={websocketSources}
-        graphqlSelection={selectedGraphql?.id}
-        grpcSelection={selectedGrpc?.id}
-        kafkaSelection={kafkaSelection}
-        websocketSelection={websocketSelection}
-        subflowSelection={selectedSubflow?.id}
-        subflows={publishedWorkflows}
-        editable={editable}
-        hasArtifacts={artifacts.length > 0}
-        hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
-        hasSqlCredential={credentials.some((item) => ['postgresql', 'mysql'].includes(item.kind))}
-        hasRedisCredential={credentials.some((item) => item.kind === 'redis')}
-        onApiSelection={setApiSelection}
-        onGraphqlSelection={setGraphqlSelection}
-        onGrpcSelection={setGrpcSelection}
-        onKafkaSelection={setKafkaSelection}
-        onWebsocketSelection={setWebsocketSelection}
-        onSubflowSelection={setSubflowSelection}
-        onAddApi={addSelectedApi}
-        onAddGraphql={() => addSelectedProtocol('graphql')}
-        onAddGrpc={() => addSelectedProtocol('grpc')}
-        onAddKafkaProduce={() => addSelectedEvent('kafka.produce')}
-        onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
-        onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
-        onAddNode={addPaletteNode}
-        canCopy={Boolean(selected)}
-        canPaste={Boolean(clipboard)}
-        canUndo={history.past.length > 0}
-        canRedo={history.future.length > 0}
-        onCopy={copySelectedNode}
-        onPaste={pasteCopiedNode}
-        onUndo={undo}
-        onRedo={redo}
-        onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
-      />
+      <DesignerModeToolbar mode={mode}>
+        <DesignerToolbar
+          runtimeMode={runtimeMode}
+          apiSelection={selectedApiId}
+          apis={apis}
+          graphqlSchemas={graphqlSchemas}
+          grpcDescriptors={grpcDescriptors}
+          kafkaSources={kafkaSources}
+          websocketSources={websocketSources}
+          graphqlSelection={optionalResourceId(selectedGraphql)}
+          grpcSelection={optionalResourceId(selectedGrpc)}
+          kafkaSelection={kafkaSelection}
+          websocketSelection={websocketSelection}
+          subflowSelection={optionalResourceId(selectedSubflow)}
+          subflows={publishedWorkflows}
+          editable={editable}
+          hasArtifacts={artifacts.length > 0}
+          hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
+          hasSqlCredential={credentials.some((item) => ['postgresql', 'mysql'].includes(item.kind))}
+          hasRedisCredential={credentials.some((item) => item.kind === 'redis')}
+          onApiSelection={setApiSelection}
+          onGraphqlSelection={setGraphqlSelection}
+          onGrpcSelection={setGrpcSelection}
+          onKafkaSelection={setKafkaSelection}
+          onWebsocketSelection={setWebsocketSelection}
+          onSubflowSelection={setSubflowSelection}
+          onAddApi={addSelectedApi}
+          onAddGraphql={() => addSelectedProtocol('graphql')}
+          onAddGrpc={() => addSelectedProtocol('grpc')}
+          onAddKafkaProduce={() => addSelectedEvent('kafka.produce')}
+          onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
+          onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
+          onAddNode={addPaletteNode}
+          canCopy={Boolean(selected)}
+          canPaste={Boolean(clipboard)}
+          canUndo={history.past.length > 0}
+          canRedo={history.future.length > 0}
+          onCopy={copySelectedNode}
+          onPaste={pasteCopiedNode}
+          onUndo={undo}
+          onRedo={redo}
+          onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
+        />
+      </DesignerModeToolbar>
       <div className="workflow-designer-body">
         <div className="workflow-canvas" aria-label="工作流画布">
           <ReactFlow
@@ -299,19 +319,19 @@ function WorkflowDesignerReady({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            nodesDraggable={editable}
-            nodesConnectable={editable}
-            edgesReconnectable={editable}
+            nodesDraggable={canvasEditable}
+            nodesConnectable={canvasEditable}
+            edgesReconnectable={canvasEditable}
             onNodeClick={(_event, node) => setSelectedId(node.id)}
             onPaneClick={() => setSelectedId(null)}
             onNodesChange={(changes) => {
-              if (editable) applyChange(applyCanvasNodeChanges(definition, nodes, changes))
+              if (canvasEditable) applyChange(applyCanvasNodeChanges(definition, nodes, changes))
             }}
             onEdgesChange={(changes) => {
-              if (editable) applyChange(applyCanvasEdgeChanges(definition, edges, changes))
+              if (canvasEditable) applyChange(applyCanvasEdgeChanges(definition, edges, changes))
             }}
             onConnect={(connection) => {
-              if (editable) applyChange(connectNodes(definition, edges, connection))
+              if (canvasEditable) applyChange(connectNodes(definition, edges, connection))
             }}
           >
             <Background gap={20} size={1} />
@@ -335,13 +355,45 @@ function WorkflowDesignerReady({
           graphqlSchemas={graphqlSchemas}
           grpcDescriptors={grpcDescriptors}
           eventSources={eventSources}
-          editable={editable}
+          editable={canvasEditable}
           onChange={applyChange}
           onClearSelection={() => setSelectedId(null)}
         />
       </div>
     </div>
   )
+}
+
+function DesignerModeToolbar({
+  mode,
+  children,
+}: {
+  mode: 'edit' | 'proposal'
+  children: ReactNode
+}) {
+  if (mode === 'edit') return children
+  return (
+    <div className="workflow-toolbar workflow-proposal-toolbar">
+      <Space wrap>
+        <Tag color="purple">Proposal Mode</Tag>
+        <Typography.Text type="secondary">
+          该画布只用于提案检查；应用后返回 Workflow Draft 进行安全编辑。
+        </Typography.Text>
+      </Space>
+    </div>
+  )
+}
+
+function displayNodeStatus(
+  nodeId: string,
+  statuses: Record<string, string>,
+  proposalStatuses: Record<string, ProposalGraphStatus>,
+): string | undefined {
+  return proposalStatuses[nodeId] ?? statuses[nodeId]
+}
+
+function isCanvasEditable(editable: boolean, mode: 'edit' | 'proposal'): boolean {
+  return editable && mode === 'edit'
 }
 
 function DesignerInspector({
@@ -434,6 +486,10 @@ function addSelectedEventNode(
 
 function firstResourceId(items: Array<{ id: string }>): string | undefined {
   return items.at(0)?.id
+}
+
+function optionalResourceId(item: { id: string } | undefined): string | undefined {
+  return item?.id
 }
 
 function selectedNode(definition: WorkflowDefinition, selectedId: string | null) {
@@ -838,14 +894,31 @@ function formatNodeDuration(value: number): string {
   return value < 1000 ? `${Math.round(value)}ms` : `${Math.round(value / 10) / 100}s`
 }
 
-function toCanvasEdge(edge: WorkflowDefinition['edges'][number]): Edge {
+function toCanvasEdge(
+  edge: WorkflowDefinition['edges'][number],
+  status?: ProposalGraphStatus,
+): Edge {
+  const color = proposalEdgeColor(status)
   return {
     id: edge.id,
     source: edge.source,
     target: edge.target,
     markerEnd: { type: MarkerType.ArrowClosed },
     label: edge.condition ? (edge.condition === 'true' ? '是' : '否') : undefined,
+    animated: status === 'rewired',
+    style: color ? { stroke: color, strokeWidth: 3 } : undefined,
   }
+}
+
+function proposalEdgeColor(status: ProposalGraphStatus | undefined): string | undefined {
+  if (!status) return undefined
+  const colors: Record<ProposalGraphStatus, string> = {
+    added: '#16a34a',
+    modified: '#d97706',
+    removed: '#dc2626',
+    rewired: '#7c3aed',
+  }
+  return colors[status]
 }
 
 function applyCanvasNodeChanges(
@@ -944,6 +1017,10 @@ function statusLabel(status: string): string {
       failed: '失败',
       skipped: '已跳过',
       cancelled: '已取消',
+      added: '新增',
+      modified: '修改',
+      removed: '移除',
+      rewired: '重连',
     }[status] ?? status
   )
 }

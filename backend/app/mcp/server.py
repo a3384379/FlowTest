@@ -11,21 +11,34 @@ from urllib.parse import unquote, urlsplit
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
+from app.domain.integration_plans import (
+    IntegrationPlan,
+    IntegrationPlanCompilation,
+    PlanActor,
+    PlanCleanupRequirement,
+    PlanPrecondition,
+    PlanTargetEnvironment,
+)
 from app.domain.mcp_read import MCP_SERVER_NAME
 from app.domain.test_contexts import (
-    MCP_CONTEXT_EVIDENCE_SERVER_VERSION,
+    MCP_FLOW_PROPOSAL_SERVER_VERSION,
     ContextKnowledgeSnapshot,
     EvidenceProviderType,
     ExternalEvidenceEnvelope,
     RevisionReference,
 )
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
+from app.schemas.test_contexts import (
+    ExistingAuthWorkflowSelectionRequest,
+    IntegrationPlanOperationSelectionRequest,
+)
 
-READ_ONLY_INSTRUCTIONS = (
+MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
-    "版本化外部证据与只进入待审核状态的 Test Design ChangeSet。"
+    "版本化外部证据、确定性 Integration Plan 与只进入待审核状态的 Flow Draft。"
     "它不会自动发布、执行、删除、修改"
-    "权限或创建 Credential；高风险写入必须由人工批准。输出中的请求值、认证信息、"
+    "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
+    "检查并显式接受后才能应用。输出中的请求值、认证信息、"
     "Secret、PII 和响应体会被省略或脱敏。"
 )
 
@@ -49,8 +62,8 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_CONTEXT_EVIDENCE_SERVER_VERSION,
-        instructions=READ_ONLY_INSTRUCTIONS,
+        version=MCP_FLOW_PROPOSAL_SERVER_VERSION,
+        instructions=MCP_INSTRUCTIONS,
     )
 
     _register_resources(server, client)
@@ -63,6 +76,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_coverage_tool(server, client)
     _register_begin_context_tool(server, client)
     _register_close_context_tool(server, client)
+    _register_compile_integration_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
 
     @server.tool(
@@ -83,6 +97,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             )
         )
 
+    _register_explain_compiler_tool(server, client)
     _register_flow_spec_export_tool(server, client)
     _register_generate_tool(server, client)
     _register_ingest_evidence_tool(server, client)
@@ -121,6 +136,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         return await _tool_payload(
             client.inspect_workflow(workflow_id, token=_request_token(ctx, client))
         )
+
+    _register_inspect_flow_proposal_tool(server, client)
 
     @server.tool(
         name="flowtest.inspect_project",
@@ -170,6 +187,9 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             )
         )
 
+    _register_plan_integration_tool(server, client)
+    _register_propose_flow_draft_tool(server, client)
+
     @server.tool(
         name="flowtest.propose_test_design",
         description="Create a draft Test Design ChangeSet for human review; never applies it.",
@@ -204,6 +224,174 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         )
 
     _register_flow_spec_validate_tool(server, client)
+    _register_validate_integration_plan_tool(server, client)
+
+
+def _register_plan_integration_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.plan_integration_test",
+        description=(
+            "Resolve authorized assets into a deterministic, evidence-bearing Integration Plan."
+        ),
+        structured_output=True,
+    )
+    async def plan_integration_test(
+        project_id: str,
+        context_id: str,
+        context_revision_id: str,
+        actors: list[PlanActor],
+        target_environment: PlanTargetEnvironment,
+        operations: list[IntegrationPlanOperationSelectionRequest],
+        preconditions: list[PlanPrecondition] | None = None,
+        existing_auth: ExistingAuthWorkflowSelectionRequest | None = None,
+        cleanup_requirements: list[PlanCleanupRequirement] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "project_id": project_id,
+            "context_id": context_id,
+            "context_revision_id": context_revision_id,
+            "actors": [item.model_dump(mode="json") for item in actors],
+            "target_environment": target_environment.model_dump(mode="json"),
+            "operations": [item.model_dump(mode="json") for item in operations],
+            "preconditions": [item.model_dump(mode="json") for item in preconditions or []],
+            "cleanup_requirements": [
+                item.model_dump(mode="json") for item in cleanup_requirements or []
+            ],
+        }
+        if existing_auth is not None:
+            payload["existing_auth"] = existing_auth.model_dump(mode="json")
+        return await _tool_payload(
+            client.plan_integration_test(payload, token=_request_token(ctx, client))
+        )
+
+
+def _register_validate_integration_plan_tool(
+    server: MCPServer, client: MCPReadGatewayClient
+) -> None:
+    @server.tool(
+        name="flowtest.validate_integration_plan",
+        description="Validate a strict Integration Plan without persistence or execution.",
+        structured_output=True,
+    )
+    async def validate_plan(
+        plan: IntegrationPlan,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.validate_integration_plan(plan, token=_request_token(ctx, client))
+        )
+
+
+def _register_compile_integration_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.compile_integration_flowspec",
+        description="Compile an Integration Plan deterministically into an importable FlowSpec.",
+        structured_output=True,
+    )
+    async def compile_plan(
+        plan: IntegrationPlan,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.compile_integration_flowspec(plan, token=_request_token(ctx, client))
+        )
+
+
+def _register_explain_compiler_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.explain_compiler_diagnostics",
+        description="Explain deterministic compiler blockers and required human reviews.",
+        structured_output=True,
+    )
+    async def explain_diagnostics(
+        plan: IntegrationPlan,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.explain_compiler_diagnostics(plan, token=_request_token(ctx, client))
+        )
+
+
+def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_flow_draft",
+        description=(
+            "Dry-run or create one idempotent AIChangeSet Draft; never reviews, applies, "
+            "publishes, or executes it."
+        ),
+        structured_output=True,
+    )
+    async def propose_flow_draft(
+        project_id: str,
+        context_id: str,
+        context_revision_id: str,
+        integration_plan: IntegrationPlan,
+        compilation: IntegrationPlanCompilation,
+        idempotency_key: str,
+        dry_run: bool = True,
+        workflow_id: str | None = None,
+        expected_revision: int | None = None,
+        source_ref: str | None = None,
+        service_mappings: dict[str, str] | None = None,
+        operation_mappings: dict[str, str] | None = None,
+        operation_version_mappings: dict[str, int] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        spec = compilation.flow_spec
+        if spec is None:
+            return _error_payload(
+                MCPGatewayError(
+                    code="INTEGRATION_PLAN_NOT_IMPORTABLE",
+                    status_code=422,
+                    message="Integration Plan compilation has no importable FlowSpec",
+                )
+            )
+        payload: dict[str, Any] = {
+            "project_id": project_id,
+            "context_id": context_id,
+            "context_revision_id": context_revision_id,
+            "spec": spec.model_dump(mode="json", by_alias=True),
+            "integration_plan": integration_plan.model_dump(mode="json"),
+            "compilation": compilation.model_dump(mode="json"),
+            "dry_run": dry_run,
+            "service_mappings": service_mappings or {},
+            "operation_mappings": operation_mappings or {},
+            "operation_version_mappings": operation_version_mappings or {},
+        }
+        if workflow_id is not None:
+            payload["workflow_id"] = workflow_id
+        if expected_revision is not None:
+            payload["expected_revision"] = expected_revision
+        if source_ref is not None:
+            payload["source_ref"] = source_ref
+        return await _tool_payload(
+            client.propose_flow_draft(
+                payload,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_inspect_flow_proposal_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_flow_proposal",
+        description="Inspect a tenant-scoped Flow Proposal and its visual review evidence.",
+        structured_output=True,
+    )
+    async def inspect_flow_proposal(
+        project_id: str,
+        change_set_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_flow_proposal(
+                project_id,
+                change_set_id,
+                token=_request_token(ctx, client),
+            )
+        )
 
 
 def _register_begin_context_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
