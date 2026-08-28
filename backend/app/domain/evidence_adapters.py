@@ -86,7 +86,8 @@ _TYPE_DECLARATION = re.compile(
 )
 _FIELD_DECLARATION = re.compile(
     r"\bprivate\s+(?:static\s+|final\s+|transient\s+)*"
-    r"(?P<type>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*;"
+    r"(?P<type>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"(?:\s*=\s*[^;]{0,1000})?\s*;"
 )
 _VALIDATION_ANNOTATION = re.compile(
     r"@(?P<name>NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
@@ -562,7 +563,7 @@ def adapt_database_evidence(submission: DatabaseEvidenceSubmission) -> ExternalE
     for table in submission.tables:
         findings.append(
             _external_finding(
-                identifier=f"database-table-{table.schema_name}-{table.name}",
+                identifier=_database_finding_id("table", table.schema_name, table.name),
                 kind=EvidenceFindingKind.KNOWLEDGE,
                 semantic_role=EvidenceSemanticRole.NORMATIVE,
                 source=submission.source,
@@ -795,7 +796,12 @@ def _database_column_findings(
         )
         findings.append(
             _external_finding(
-                identifier=f"database-column-{table.schema_name}-{table.name}-{column.name}",
+                identifier=_database_finding_id(
+                    "column",
+                    table.schema_name,
+                    table.name,
+                    column.name,
+                ),
                 kind=EvidenceFindingKind.CONSTRAINT,
                 semantic_role=role,
                 source=submission.source,
@@ -2537,6 +2543,16 @@ def _claim_id(*parts: str) -> str:
         sha256(key.encode()).hexdigest()[:24].translate(str.maketrans("0123456789", "ghijklmnop"))
     )
     return f"claim-{digest}"
+
+
+def _database_finding_id(kind: Literal["table", "column"], *identity: str) -> str:
+    encoded = json.dumps([kind, *identity], ensure_ascii=False, separators=(",", ":"))
+    digest = (
+        sha256(encoded.encode())
+        .hexdigest()[:24]
+        .translate(str.maketrans("0123456789", "ghijklmnop"))
+    )
+    return f"database-{kind}-{digest}"
 
 
 def _bounded_finding_id(identifier: str) -> str:

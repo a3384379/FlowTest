@@ -241,6 +241,37 @@ def test_adapter_contracts_reject_sensitive_source_and_subject_refs() -> None:
         ExternalEvidenceEnvelope.model_validate(generic)
 
 
+def test_adapter_contracts_reject_sensitive_revision_and_version_metadata() -> None:
+    sensitive_value = "13800138000"
+    for submission_factory, submission_type in (
+        (_java_submission, JavaEvidenceSubmission),
+        (_database_submission, DatabaseEvidenceSubmission),
+    ):
+        sensitive_revision = submission_factory()
+        sensitive_revision["source"]["revision"] = sensitive_value
+        with pytest.raises(ValidationError, match="sensitive data"):
+            submission_type.model_validate(sensitive_revision)
+
+        sensitive_version = submission_factory()
+        sensitive_version["provider"]["version"] = sensitive_value
+        with pytest.raises(ValidationError, match="sensitive data"):
+            submission_type.model_validate(sensitive_version)
+
+    generic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic["source"]["revision"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive data"):
+        ExternalEvidenceEnvelope.model_validate(generic)
+
+    generic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic["provider"]["version"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive data"):
+        ExternalEvidenceEnvelope.model_validate(generic)
+
+
 def test_adapter_contracts_reject_sensitive_declared_types() -> None:
     sensitive_value = "4111111111111111"
     dedicated_java = _java_submission()
@@ -299,6 +330,29 @@ def test_database_submission_rejects_oversized_derived_envelope() -> None:
 
     with pytest.raises(ValidationError, match="database evidence envelope byte budget exceeded"):
         DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_finding_ids_use_unambiguous_tuple_identity() -> None:
+    payload = _database_submission()
+    payload["tables"] = [
+        {
+            "schema_name": "a-b",
+            "name": "c",
+            "columns": [{"name": "d", "data_type": "text", "nullable": True}],
+        },
+        {
+            "schema_name": "a",
+            "name": "b-c",
+            "columns": [{"name": "d", "data_type": "text", "nullable": True}],
+        },
+    ]
+
+    envelope = adapt_database_evidence(DatabaseEvidenceSubmission.model_validate(payload))
+
+    finding_ids = [finding.id for finding in envelope.findings]
+    assert len(finding_ids) == len(set(finding_ids)) == 4
+    assert sum(identifier.startswith("database-table-") for identifier in finding_ids) == 2
+    assert sum(identifier.startswith("database-column-") for identifier in finding_ids) == 2
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1771,12 +1825,20 @@ public class CreateOrderRequest {
 
     @NotBlank(message = "required")
     @Pattern(regexp = "^(foo|bar)$")
-    private String name;
+    private String name = "NEW";
 
     static class NestedRequest {
         @NotBlank(message = "nested")
         private String nestedOnly;
     }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderEntity.java",
+                        "content": """
+public class OrderEntity {
+    private String status = "NEW";
 }
 """,
                     },
@@ -1794,8 +1856,10 @@ public class CreateOrderRequest {
         claim.field_name for claim in evidence.claims if claim.kind == "bean_validation"
     }
     constraints = {claim.constraint for claim in evidence.claims if claim.kind == "bean_validation"}
+    entity_fields = {claim.field_name for claim in evidence.claims if claim.kind == "table_column"}
     assert request_fields == {"name"}
     assert constraint_fields == {"name"}
+    assert entity_fields == {"status"}
     assert '(regexp = "^(foo|bar)$")' in constraints
 
 

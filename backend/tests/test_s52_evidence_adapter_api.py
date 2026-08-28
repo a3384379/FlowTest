@@ -936,12 +936,12 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     context_id = begun.json()["id"]
     sensitive_value = "4111111111111111"
 
-    for ref_location in ("source", "subject"):
+    for path, sensitive_ref in (
+        (("source", "ref"), f"repository://{sensitive_value}"),
+        (("subject_ref",), f"flowtest://subjects/{sensitive_value}"),
+    ):
         dedicated_ref_payload = _java_evidence(project_id)
-        if ref_location == "source":
-            dedicated_ref_payload["source"]["ref"] = f"repository://{sensitive_value}"
-        else:
-            dedicated_ref_payload["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+        _set_payload_value(dedicated_ref_payload, path, sensitive_ref)
         dedicated_ref_rejected = await client.post(
             f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
             headers=headers,
@@ -952,6 +952,20 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert dedicated_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_ref_rejected.text
+
+    for path in (("source", "revision"), ("provider", "version")):
+        dedicated_metadata_payload = _java_evidence(project_id)
+        _set_payload_value(dedicated_metadata_payload, path, sensitive_value)
+        dedicated_metadata_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+            headers=headers,
+            json={"evidence": dedicated_metadata_payload},
+        )
+
+        assert dedicated_metadata_rejected.status_code == 422
+        assert dedicated_metadata_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert dedicated_metadata_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in dedicated_metadata_rejected.text
 
     dedicated_type_payload = _java_evidence(project_id)
     dedicated_type_claim = next(
@@ -1102,14 +1116,14 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_persistence_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_persistence_rejected.text
 
-    for ref_location in ("source", "subject"):
+    for path, sensitive_ref in (
+        (("source", "ref"), f"repository://{sensitive_value}"),
+        (("subject_ref",), f"flowtest://subjects/{sensitive_value}"),
+    ):
         generic_ref_payload = adapt_java_evidence(
             JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
         ).model_dump(mode="json")
-        if ref_location == "source":
-            generic_ref_payload["source"]["ref"] = f"repository://{sensitive_value}"
-        else:
-            generic_ref_payload["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+        _set_payload_value(generic_ref_payload, path, sensitive_ref)
         generic_ref_rejected = await client.post(
             f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
             headers=headers,
@@ -1120,6 +1134,22 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert generic_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert generic_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in generic_ref_rejected.text
+
+    for path in (("source", "revision"), ("provider", "version")):
+        generic_metadata_payload = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+        ).model_dump(mode="json")
+        _set_payload_value(generic_metadata_payload, path, sensitive_value)
+        generic_metadata_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            headers=headers,
+            json={"envelope": generic_metadata_payload},
+        )
+
+        assert generic_metadata_rejected.status_code == 422
+        assert generic_metadata_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert generic_metadata_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in generic_metadata_rejected.text
 
     generic_type_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
@@ -1140,6 +1170,27 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert generic_type_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert generic_type_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in generic_type_rejected.text
+
+    collision_payload = _database_evidence(project_id)
+    collision_payload["tables"] = [
+        {
+            "schema_name": "a-b",
+            "name": "c",
+            "columns": [{"name": "d", "data_type": "text", "nullable": True}],
+        },
+        {
+            "schema_name": "a",
+            "name": "b-c",
+            "columns": [{"name": "d", "data_type": "text", "nullable": True}],
+        },
+    ]
+    accepted_collision_pair = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": collision_payload},
+    )
+
+    assert accepted_collision_pair.status_code == 201, accepted_collision_pair.text
 
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
@@ -1530,6 +1581,13 @@ async def test_database_state_union_budget_uses_standard_trace_envelope(
 
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "X-MCP-Client-Version": "s52-test"}
+
+
+def _set_payload_value(payload: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
 
 
 def _java_evidence(project_id: str) -> dict[str, Any]:
