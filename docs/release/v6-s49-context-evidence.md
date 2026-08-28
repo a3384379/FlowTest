@@ -5,13 +5,15 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 阶段基线 Main SHA | `a260272f9eb20c0a8de6c5d5e6c41d57db4b4edb` |
-| 开发分支 | `codex/s49-context-evidence` |
+| S49 实现 Main SHA | `14d4694762cd381e347b248da5e97ecb7452ab21` |
+| 实现分支 | `codex/s49-context-contracts-v2`、`codex/s49-context-evidence` |
+| 证据收口分支 | `codex/s49-evidence-closure` |
 | Alembic / Standalone Revision | `20260828_0046` |
 | Release 状态 | 未发布；不是 Alpha、Beta、RC 或 GA |
-| Remote CI | 等待本阶段 PR 精确 Head |
+| Remote CI | PR 精确 Head 与两次实现 Merge SHA 的 Main Push 全部 Success |
 
-该基线是 S48 Evidence Closure 合并且 Main Push 全绿后的最新 `main`。本记录先保存可复现的本地证据；
-PR、Review、合并与 Main Push 的远程事实只能在对应 Workflow 达到终态后追加。
+阶段从 S48 Evidence Closure 的全绿 Main 开始。CI Bootstrap、契约/持久化与应用层实现均经独立 PR、
+普通 Squash Merge 和合并后 Main Push 验证；下文只记录已达到终态的远程事实。
 
 ## 2. Implemented
 
@@ -71,8 +73,8 @@ PR、Review、合并与 Main Push 的远程事实只能在对应 Workflow 达到
 | Security / Tenant / Secret / SSRF | Pass | 严格 Envelope、跨租户拒绝、旧 Scope 拒绝、敏感输入/响应/日志回归 |
 | End-to-End User Flow | Pass（S49 范围） | Compose 上 begin → ingest → requirements → dry-run/persist → close Playwright |
 
-Domain 模块没有导入 FastAPI、Celery、SQLAlchemy Model 或具体基础设施客户端。远程自动 Review 与当前代码的
-P0/P1/P2 复核将在 PR 创建后追加，不以线程是否关闭代替代码审查。
+Domain 模块没有导入 FastAPI、Celery、SQLAlchemy Model 或具体基础设施客户端。PR #50 与 #51 均完成
+当前代码四维复核，未解决 Review Thread 为 0；线程状态不代替本地与远程代码/行为证据。
 
 ## 5. Local Validation
 
@@ -104,7 +106,7 @@ P0/P1/P2 复核将在 PR 创建后追加，不以线程是否关闭代替代码�
 
 ### Partially Implemented
 
-- 无。S49 定义范围内的实现与本地验证完整；远程 CI 属于待取得的 External Validation，不记为实现缺口。
+- 无。S49 定义范围内的实现、本地验证、PR 精确 Head CI、Review、合并与实现 Main Push 均完整。
 
 ### Intentionally Out of Scope
 
@@ -118,11 +120,49 @@ P0/P1/P2 复核将在 PR 创建后追加，不以线程是否关闭代替代码�
 
 ### External Validation
 
-- PR 精确 Head 的 Backend、Frontend、Security、Compose、Standalone Windows、Upgrade/Rollback 与 Required
-  Gate 尚未运行。
-- GitHub Review Threads、普通 Squash Merge 与合并后 Main Push Workflow 尚未发生。
-- Windows x64 公司云桌面 72 小时试点、连续 RC 观察、安全审批与真实 Key Rotation 未完成。
+- PR #50/#51 精确 Head 的适用 Backend、Frontend、Security、Compose、Standalone Windows、
+  Upgrade/Rollback 与 Required Gate 已全部 Success；两次实现 Merge SHA 的适用 Main Push 亦全部 Success。
+- Windows x64 公司云桌面 72 小时试点、连续 RC 观察、安全审批与真实 Key Rotation 仍未完成；这些是后续
+  Release/GA 外部门槛，不伪记为 S49 交付证据。
 
 ## 8. Remote CI、Review 与合并证据
 
-等待本阶段 PR 产生精确 Head 后追加。未运行或进行中的 Workflow 不记为成功，也不引用旧 Head 结果。
+### 8.1 受控 CI Bootstrap
+
+- PR #49（Head `0ce74d214894674a9fec9a483e8a6e329627743c`）只把 Migration CI 改为相对 Head 往返，
+  并让 Windows 断言比较 `BASELINE_REVISION` 与 `STANDALONE_SCHEMA_REVISION`，不携带产品实现。
+- 普通 PR 的 trusted Required Gate 对 Workflow 变更按设计失败；受控 Bootstrap 仅临时要求该 Head 的
+  Backend `33128079447`、Security `33128079381`、Standalone Windows `33128079502` 三个底层检查，
+  全部 Success 后普通 Squash Merge 至 `main@da8f42aab05b8eb8246d4787c3adc314e335c9b5`。
+- 整个过程 `bypass_actors=[]`，未用 Admin Merge、Bypass 或 Direct Push；合并后立即恢复唯一 Required Gate。
+  该 Main Push 的 Backend `33128974934`、Security `33128974969`、Windows `33128974963` 与 Required Gate
+  `33128974931` 全部 Success。
+
+### 8.2 契约、持久化与 Migration PR #50
+
+| 事实 | 精确证据 |
+| --- | --- |
+| PR Head | `4bebb1cdcd99765234fe50896a2725b8457f27ff` |
+| PR Workflow | Backend `33129844681`；Compose `33129844698`；Security `33129844690`；Windows `33129844712`；Upgrade/Rollback `33129844700`；最终 Required Gate `33131697019`，全部 Success |
+| Review | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE |
+| Merge | PR #50 普通 Squash Merge：`e3a70894aadd3ee15cd18c980186015b40e96d06` |
+| Main Push | Backend `33131727118`；Compose `33131727068`；Security `33131727095`；Windows `33131727145`；Upgrade/Rollback `33131727064`；Required Gate `33131727083`，全部 Success |
+
+### 8.3 Context/Evidence 与 Draft Proposal PR #51
+
+| 事实 | 精确证据 |
+| --- | --- |
+| PR Head | `fc17f784ed2bea50460aff5644e9942121a0e5f3` |
+| PR Workflow | Backend `33134071069`；Frontend `33134071062`；Compose `33134071031`；Security `33134071103`；Windows `33134071078`；Upgrade/Rollback `33134071083`；Ready 后 Required Gate `33135732564`，全部 Success |
+| Review | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE |
+| Merge | PR #51 普通 Squash Merge：`14d4694762cd381e347b248da5e97ecb7452ab21` |
+| Main Push | Backend `33135774067`；Frontend `33135774088`；Compose `33135774200`；Security `33135774194`；Windows `33135774493`；Upgrade/Rollback `33135774185`；Required Gate `33135774070`，全部 Success |
+
+### 8.4 阶段结论
+
+- 所有实现 PR 均从前一 Merge SHA 已全绿的最新 Main 创建，普通 Squash Merge，无 Admin、Bypass、Force Push
+  或 Direct Main Push。
+- 收口时 `main-required-gate` Ruleset 为 Active，仅要求 Integration `15368` 写入的 `Required Gate`，
+  `bypass_actors=[]`，并强制解决 Review Thread。
+- S49 Exit Criteria 全部满足；本 Evidence Closure PR 合并且其 Main Push Required Gate 成功后，才允许从
+  最新 Main 创建 S50 分支。

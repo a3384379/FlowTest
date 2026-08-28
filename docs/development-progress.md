@@ -2,8 +2,10 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48 契约冻结与证据闭环，当前 S49 Context Revision、External Evidence 与 Proposal Adapter
-已通过本地完整门禁，正在等待独立 PR 的精确 Head Remote CI、Review、合并与 Main Push 验证；当前
+已完成 S48 契约冻结与证据闭环；S49 Context Revision、External Evidence 与 Proposal Adapter 已由
+PR #49/#50/#51 受控串行合入 `main@14d4694762cd381e347b248da5e97ecb7452ab21`，实现 PR 精确 Head 与
+Merge SHA Main Push 的全部适用 Workflow、Review Thread 和唯一 Required Gate 已闭环，当前仅执行
+Evidence Closure 文档收口；当前
 Migration Head 为 `20260828_0046`，仍不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
@@ -13,7 +15,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## 进行中：V6 S49 Context Revision、External Evidence 与 Proposal Adapter
+## 已完成实现验收：V6 S49 Context Revision、External Evidence 与 Proposal Adapter
 
 ### Implemented
 
@@ -42,12 +44,16 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   拒绝且响应与日志零泄漏、Requirements、Dry Run、Draft 持久化、幂等重放与 Close；测试后已清理容器、
   网络和数据卷。
 
-### Intentionally Out of Scope / External Validation
+### Intentionally Out of Scope / Remote Validation
 
 - `flowtest.propose_flow_draft` MCP Tool、Integration Plan/Compiler、Visual Proposal、Evidence Adapter、
   Cleanup 与 Preview 分别属于 S50～S55，本阶段不提前注册；没有新建平行 Proposal/Review 状态机。
-- PR 精确 Head Remote CI、Review Thread、普通 Squash Merge 与合并后 Main Push 仍待执行；本地结果不作为
-  远程证据。完整事实见 [S49 Release Evidence](release/v6-s49-context-evidence.md)。
+- PR #50/#51 精确 Head 与实现 Merge SHA Main Push 的适用 Backend、Frontend、Security、Compose
+  full/compact、Standalone Windows、Upgrade/Rollback 和 Required Gate 全部 Success；未解决 Review Thread
+  为 0，均普通 Squash Merge，无 Admin、Bypass 或 Direct Main。精确 Run ID 见
+  [S49 Release Evidence](release/v6-s49-context-evidence.md)。
+- 下一门槛：本 Evidence Closure 文档 PR 合并且其 Main Push Required Gate 成功后，才可从最新 Main 创建
+  S50 分支。
 
 ## 已完成：V6 S48 Contract Freeze 与 Governance Baseline
 
