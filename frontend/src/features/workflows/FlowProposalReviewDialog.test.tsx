@@ -54,8 +54,8 @@ describe('FlowProposalReviewDialog', () => {
     let reviewStatus: 'pending' | 'accepted' = 'pending'
     let applyCalls = 0
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary(reviewStatus)], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary(reviewStatus)], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -116,8 +116,8 @@ describe('FlowProposalReviewDialog', () => {
 
   it('shows the captured existing graph and keeps raw mapping on the established path', async () => {
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -141,43 +141,65 @@ describe('FlowProposalReviewDialog', () => {
     expect(rawProposal?.proposal.spec.name).toBe('MCP 用户查询提案')
   })
 
-  it('loads MCP proposals beyond the first change-set page', async () => {
-    const requestedPages: number[] = []
+  it('follows stable MCP proposal cursors beyond the first page', async () => {
+    const requestedCursors: Array<string | null> = []
+    const cursorId = '00000000-0000-4000-8000-000000005100'
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, ({ request }) => {
-        const page = Number(new URL(request.url).searchParams.get('page'))
-        requestedPages.push(page)
-        if (page === 1) {
-          return HttpResponse.json({
-            items: [
-              {
-                ...summary('pending'),
-                id: '00000000-0000-4000-8000-000000005100',
-                source_ref: 'import://manual',
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`,
+        ({ request }) => {
+          const cursor = new URL(request.url).searchParams.get('cursor_id')
+          requestedCursors.push(cursor)
+          if (cursor === null) {
+            return HttpResponse.json({
+              items: [
+                {
+                  ...summary('pending'),
+                  id: cursorId,
+                  title: '首页 MCP 提案',
+                },
+              ],
+              next_cursor: {
+                created_at: '2026-08-28T00:00:00Z',
+                id: cursorId,
               },
-            ],
-            total: 101,
-            page: 1,
+              page_size: 100,
+            })
+          }
+          return HttpResponse.json({
+            items: [summary('pending')],
+            next_cursor: null,
             page_size: 100,
           })
-        }
-        return HttpResponse.json({
-          items: [summary('pending')],
-          total: 101,
-          page: 2,
-          page_size: 100,
-        })
-      }),
+        },
+      ),
       http.get(
-        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
-        () => HttpResponse.json(visualProposal('pending')),
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/:proposalId/visual-proposal`,
+        ({ params }) => {
+          const proposal = visualProposal('pending')
+          if (params.proposalId === cursorId) {
+            proposal.proposal = {
+              ...proposal.proposal,
+              id: cursorId,
+              title: '首页 MCP 提案',
+            }
+          }
+          return HttpResponse.json(proposal)
+        },
       ),
     )
 
     renderDialog(() => undefined)
+    const browser = userEvent.setup()
+    const dialog = await screen.findByRole('dialog')
+    await browser.click(within(dialog).getByRole('combobox', { name: '流程提案' }))
 
-    expect(await screen.findByText('MCP 用户查询提案 · 草稿 · 00000000')).toBeInTheDocument()
-    expect(requestedPages).toEqual([1, 2])
+    expect(
+      await screen.findByText('MCP 用户查询提案 · 草稿 · 00000000', {
+        selector: '.ant-select-item-option-content',
+      }),
+    ).toBeInTheDocument()
+    expect(requestedCursors).toEqual([null, cursorId])
   })
 
   it('classifies a rewired edge with semantic changes as both rewired and modified', async () => {
@@ -189,8 +211,8 @@ describe('FlowProposalReviewDialog', () => {
       ),
     }
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -210,8 +232,8 @@ describe('FlowProposalReviewDialog', () => {
     const proposal = visualProposal('pending')
     proposal.proposal.diff = []
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -245,11 +267,10 @@ describe('FlowProposalReviewDialog', () => {
       ),
     }
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
         HttpResponse.json({
           items: [first.proposal, second.proposal],
-          total: 2,
-          page: 1,
+          next_cursor: null,
           page_size: 100,
         }),
       ),

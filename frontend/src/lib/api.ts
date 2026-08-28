@@ -745,6 +745,17 @@ export type FlowSpecChangeSetPage = {
   page_size: number
 }
 
+export type FlowSpecChangeSetCursor = {
+  created_at: string
+  id: string
+}
+
+export type FlowSpecMcpProposalPage = {
+  items: FlowSpecChangeSet[]
+  next_cursor: FlowSpecChangeSetCursor | null
+  page_size: number
+}
+
 export type Workflow = {
   id: string
   project_id: string

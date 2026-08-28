@@ -2,11 +2,14 @@ import {
   apiClient,
   type FlowSpec,
   type FlowSpecApplyResult,
+  type FlowSpecChangeSet,
   type FlowSpecChangeSetDetail,
+  type FlowSpecChangeSetCursor,
   type FlowSpecChangeSetPage,
   type FlowSpecCompatibilityResult,
   type FlowSpecDiff,
   type FlowSpecExport,
+  type FlowSpecMcpProposalPage,
   type FlowSpecValidationResult,
   type FlowSpecVisualProposal,
 } from '../../lib/api'
@@ -95,23 +98,29 @@ export async function applyFlowSpec(
 }
 
 export async function listFlowSpecChangeSets(projectId: string): Promise<FlowSpecChangeSetPage> {
-  const firstPage = await getFlowSpecChangeSetPage(projectId, 1)
-  const items = [...firstPage.items]
-  const pageCount = Math.ceil(firstPage.total / firstPage.page_size)
-  for (let page = 2; page <= pageCount; page += 1) {
-    const nextPage = await getFlowSpecChangeSetPage(projectId, page)
+  const items: FlowSpecChangeSet[] = []
+  let cursor: FlowSpecChangeSetCursor | null = null
+  do {
+    const nextPage = await getMcpFlowProposalPage(projectId, cursor)
     items.push(...nextPage.items)
-  }
-  return { ...firstPage, items }
+    cursor = nextPage.next_cursor
+  } while (cursor !== null)
+  return { items, total: items.length, page: 1, page_size: 100 }
 }
 
-async function getFlowSpecChangeSetPage(
+async function getMcpFlowProposalPage(
   projectId: string,
-  page: number,
-): Promise<FlowSpecChangeSetPage> {
-  const response = await apiClient.get<FlowSpecChangeSetPage>(
-    `/projects/${projectId}/flow-specs/change-sets`,
-    { params: { page, page_size: 100 } },
+  cursor: FlowSpecChangeSetCursor | null,
+): Promise<FlowSpecMcpProposalPage> {
+  const response = await apiClient.get<FlowSpecMcpProposalPage>(
+    `/projects/${projectId}/flow-specs/change-sets/mcp-proposals`,
+    {
+      params: {
+        page_size: 100,
+        cursor_created_at: cursor?.created_at,
+        cursor_id: cursor?.id,
+      },
+    },
   )
   return response.data
 }

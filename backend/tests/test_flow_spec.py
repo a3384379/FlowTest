@@ -381,6 +381,75 @@ async def test_flowspec_export_review_apply_and_roundtrip(flow_spec_client: Asyn
 
 
 @pytest.mark.asyncio
+async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
+    flow_spec_client: AsyncClient,
+) -> None:
+    token_response = await flow_spec_client.post(
+        "/api/v1/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
+    headers = {"Authorization": f"Bearer {token_response.json()['access_token']}"}
+    project = await flow_spec_client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": "MCP cursor project"},
+    )
+    project_id = project.json()["id"]
+
+    async def create_proposal(index: int, *, mcp: bool = True) -> str:
+        response = await flow_spec_client.post(
+            f"/api/v1/projects/{project_id}/flow-specs/imports",
+            headers=headers,
+            json={
+                "spec": {
+                    "name": f"MCP proposal {index}",
+                    "nodes": [
+                        {"id": "start", "kind": "start", "name": "Start"},
+                        {"id": "end", "kind": "end", "name": "End"},
+                    ],
+                    "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+                },
+                "source_ref": (
+                    f"mcp://tests/stable-cursor/{index}"
+                    if mcp
+                    else f"import://tests/manual/{index}"
+                ),
+            },
+        )
+        assert response.status_code == 201, response.text
+        return str(response.json()["id"])
+
+    await create_proposal(0, mcp=False)
+    original_ids = {await create_proposal(index) for index in range(1, 4)}
+    first = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/change-sets/mcp-proposals",
+        headers=headers,
+        params={"page_size": 2},
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert len(first_body["items"]) == 2
+    assert all(item["source_ref"].startswith("mcp://") for item in first_body["items"])
+    assert first_body["next_cursor"] is not None
+
+    await create_proposal(4)
+    second = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/change-sets/mcp-proposals",
+        headers=headers,
+        params={
+            "page_size": 2,
+            "cursor_created_at": first_body["next_cursor"]["created_at"],
+            "cursor_id": first_body["next_cursor"]["id"],
+        },
+    )
+    assert second.status_code == 200, second.text
+    first_ids = {item["id"] for item in first_body["items"]}
+    second_ids = {item["id"] for item in second.json()["items"]}
+    assert first_ids.isdisjoint(second_ids)
+    assert original_ids <= first_ids | second_ids
+
+
+@pytest.mark.asyncio
 async def test_flowspec_cross_project_mapping_preserves_target_variant(
     flow_spec_client: AsyncClient,
 ) -> None:

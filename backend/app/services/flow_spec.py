@@ -8,7 +8,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from pydantic import JsonValue, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -78,6 +78,18 @@ class FlowSpecChangeSetView:
     item: AIChangeItem
     pipeline: FlowSpecPipeline
     diff: tuple[FlowSpecDiffItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowSpecChangeSetCursor:
+    created_at: datetime
+    id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class FlowSpecMcpProposalPage:
+    views: tuple[FlowSpecChangeSetView, ...]
+    next_cursor: FlowSpecChangeSetCursor | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +286,7 @@ class FlowSpecService:
             actor_type="service_account" if provenance is not None else "user",
             actor_id=actor.id,
             created_by_id=actor.id,
+            created_at=datetime.now(UTC),
         )
         self._session.add(change_set)
         await self._session.flush()
@@ -388,6 +401,51 @@ class FlowSpecService:
             if item is not None:
                 views.append(self._view(change_set, item))
         return views, int(total or 0)
+
+    async def list_mcp_proposals(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page_size: int,
+        cursor: FlowSpecChangeSetCursor | None,
+    ) -> FlowSpecMcpProposalPage:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        condition = (
+            (AIChangeSet.project_id == project_id)
+            & (AIChangeSet.source_type == "flow_spec")
+            & AIChangeSet.source_ref.startswith("mcp://")
+        )
+        if cursor is not None:
+            condition &= or_(
+                AIChangeSet.created_at < cursor.created_at,
+                and_(
+                    AIChangeSet.created_at == cursor.created_at,
+                    AIChangeSet.id < cursor.id,
+                ),
+            )
+        change_sets = list(
+            (
+                await self._session.scalars(
+                    select(AIChangeSet)
+                    .where(condition)
+                    .order_by(AIChangeSet.created_at.desc(), AIChangeSet.id.desc())
+                    .limit(page_size + 1)
+                )
+            ).all()
+        )
+        selected = change_sets[:page_size]
+        views = []
+        for change_set in selected:
+            item = await self._item(change_set.id)
+            if item is not None:
+                views.append(self._view(change_set, item))
+        next_cursor = (
+            FlowSpecChangeSetCursor(created_at=selected[-1].created_at, id=selected[-1].id)
+            if len(change_sets) > page_size and selected
+            else None
+        )
+        return FlowSpecMcpProposalPage(views=tuple(views), next_cursor=next_cursor)
 
     async def get_change_set(
         self, *, actor: User, project_id: UUID, change_set_id: UUID
