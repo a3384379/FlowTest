@@ -67,9 +67,10 @@ _WRITE_SQL = re.compile(
     re.IGNORECASE,
 )
 _MAPPING_ANNOTATION = re.compile(
-    r"@(?P<method>Get|Post|Put|Patch|Delete)Mapping(?:\s*\((?P<args>[^)]*)\))?"
+    r"@(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)"
+    r"(?:\s*\((?P<args>[^)]*)\))?"
 )
-_MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete)Mapping\b")
+_MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete|Request)Mapping\b")
 _REQUEST_MAPPING = re.compile(r"@RequestMapping(?:\s*\((?P<args>[^)]*)\))?")
 _REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
 _CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
@@ -96,7 +97,7 @@ _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\"]+)\"")
 _KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
-_KAFKA_LISTENER = re.compile(r'@KafkaListener\s*\([^)]*(?:topics\s*=\s*)?"([^"]+)"')
+_KAFKA_LISTENER = re.compile(r"@KafkaListener\b")
 _KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
 _JAVA_NON_CODE = re.compile(
     r"//[^\r\n]*(?:\r?\n|$)"
@@ -2000,7 +2001,7 @@ def _routes_after_mapping(
     if signature is None:
         return []
     paths = _mapping_paths(mapping.group("args") or "")
-    method = cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], mapping.group("method").upper())
+    methods = _mapping_http_methods(mapping)
     body_start = mapping_end + signature.end() - 1
     body_end = _matching_brace(file.content, body_start)
     handler = signature.group("handler")
@@ -2021,9 +2022,31 @@ def _routes_after_mapping(
             body=file.content[body_start + 1 : body_end],
             source_line=file.content.count("\n", 0, mapping_start) + 1,
         )
+        for method in methods
         for base_path in base_paths
         for path in paths
         if (full_path := _join_route_path(base_path, path))
+    ]
+
+
+def _mapping_http_methods(
+    mapping: re.Match[str],
+) -> list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]]:
+    composed_method = mapping.group("method")
+    if composed_method is not None:
+        return [
+            cast(
+                Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
+                composed_method.upper(),
+            )
+        ]
+    methods = re.findall(
+        r"\bRequestMethod\.(GET|POST|PUT|PATCH|DELETE)\b",
+        mapping.group("args") or "",
+    )
+    return [
+        cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
+        for method in dict.fromkeys(methods)
     ]
 
 
@@ -2405,16 +2428,31 @@ def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:
     )
     return [
         JavaKafkaEventClaim(
-            id=_claim_id("kafka", file.path, "consume", match.group(1)),
+            id=_claim_id("kafka", file.path, "consume", topic),
             source_path=f"{file.path}:{file.content.count(chr(10), 0, match.start()) + 1}",
             direction="consume",
-            topic_ref=f"kafka://{match.group(1)}",
+            topic_ref=f"kafka://{topic}",
             event_type="UnknownEvent",
             confidence=0.7,
             deterministic=False,
         )
         for match in matches
+        for topic in _kafka_listener_topics(_java_annotation_arguments(file.content, match.end()))
     ]
+
+
+def _kafka_listener_topics(arguments: str) -> list[str]:
+    content = arguments[1:-1] if arguments.startswith("(") else arguments
+    named = re.search(
+        r'\btopics\s*=\s*(?P<value>\{[^}]*\}|"(?:\\.|[^"\\])*")',
+        content,
+        re.DOTALL,
+    )
+    expression = (
+        named.group("value") if named is not None else _positional_mapping_expression(content)
+    )
+    topics = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
+    return list(dict.fromkeys(topics))
 
 
 def _deduplicate_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceClaim]:

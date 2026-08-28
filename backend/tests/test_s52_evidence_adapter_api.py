@@ -935,6 +935,24 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     )
     context_id = begun.json()["id"]
     sensitive_value = "4111111111111111"
+
+    for ref_location in ("source", "subject"):
+        dedicated_ref_payload = _java_evidence(project_id)
+        if ref_location == "source":
+            dedicated_ref_payload["source"]["ref"] = f"repository://{sensitive_value}"
+        else:
+            dedicated_ref_payload["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+        dedicated_ref_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+            headers=headers,
+            json={"evidence": dedicated_ref_payload},
+        )
+
+        assert dedicated_ref_rejected.status_code == 422
+        assert dedicated_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert dedicated_ref_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in dedicated_ref_rejected.text
+
     dedicated_payload = _java_evidence(project_id)
     dedicated_payload["claims"][0]["source_path"] = f"src/{sensitive_value}.java:4"
 
@@ -1067,6 +1085,25 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_persistence_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert dedicated_persistence_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_persistence_rejected.text
+
+    for ref_location in ("source", "subject"):
+        generic_ref_payload = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+        ).model_dump(mode="json")
+        if ref_location == "source":
+            generic_ref_payload["source"]["ref"] = f"repository://{sensitive_value}"
+        else:
+            generic_ref_payload["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+        generic_ref_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            headers=headers,
+            json={"envelope": generic_ref_payload},
+        )
+
+        assert generic_ref_rejected.status_code == 422
+        assert generic_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert generic_ref_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in generic_ref_rejected.text
 
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))

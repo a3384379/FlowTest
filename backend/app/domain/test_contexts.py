@@ -650,6 +650,10 @@ class ExternalEvidenceEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def validate_envelope(self) -> ExternalEvidenceEnvelope:
+        payload = self.model_dump(mode="json")
+        unsafe = first_sensitive_value(payload)
+        if unsafe is not None:
+            raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         identifiers = [finding.id for finding in self.findings]
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("evidence finding ids must be unique")
@@ -661,12 +665,8 @@ class ExternalEvidenceEnvelope(BaseModel):
             if finding.subject_ref != self.subject_ref:
                 raise ValueError("finding subject_ref must match the envelope subject")
         _require_compatible_adapter_provider(self)
-        payload = self.model_dump(mode="json")
         if len(_canonical_json(payload)) > MAX_EXTERNAL_EVIDENCE_BYTES:
             raise ValueError("external evidence byte budget exceeded")
-        unsafe = first_sensitive_value(payload)
-        if unsafe is not None:
-            raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         return self
 
 
@@ -873,6 +873,8 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
             ".objective",
             ".name",
             ".id",
+            ".ref",
+            "_ref",
         )
     ) and any(pattern.search(value) for pattern in (_PHONE, _CARD)):
         return True

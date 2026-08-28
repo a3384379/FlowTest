@@ -210,6 +210,37 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
             ExternalEvidenceEnvelope.model_validate(generic_persistence)
 
 
+def test_adapter_contracts_reject_sensitive_source_and_subject_refs() -> None:
+    sensitive_value = "13800138000"
+    for submission_factory, submission_type in (
+        (_java_submission, JavaEvidenceSubmission),
+        (_database_submission, DatabaseEvidenceSubmission),
+    ):
+        sensitive_source = submission_factory()
+        sensitive_source["source"]["ref"] = f"repository://{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive data"):
+            submission_type.model_validate(sensitive_source)
+
+        sensitive_subject = submission_factory()
+        sensitive_subject["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive data"):
+            submission_type.model_validate(sensitive_subject)
+
+    generic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic["source"]["ref"] = f"repository://{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive data"):
+        ExternalEvidenceEnvelope.model_validate(generic)
+
+    generic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic["subject_ref"] = f"flowtest://subjects/{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive data"):
+        ExternalEvidenceEnvelope.model_validate(generic)
+
+
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     raw_example = _database_submission()
     raw_example["tables"][0]["columns"][0]["masked_example"] = "order-0001"
@@ -1609,6 +1640,42 @@ class ModifierController {
     assert [claim.callee_ref for claim in calls] == ["java://syncService.load"]
 
 
+def test_java_spring_poc_parses_method_level_request_mapping_methods() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://request-mapping", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/RequestMappingController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+class RequestMappingController {
+    @RequestMapping(
+        path = "/orders",
+        method = {RequestMethod.GET, RequestMethod.POST}
+    )
+    public Order handle() {
+        return orderService.handle();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert {(claim.method, claim.path, claim.handler) for claim in routes} == {
+        ("GET", "/api/orders", "handle"),
+        ("POST", "/api/orders", "handle"),
+    }
+
+
 def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -1864,8 +1931,11 @@ public class OrderListener {
     private static final String SAMPLE = "@KafkaListener(\"string-ghost\")";
 
     // @KafkaListener("comment-ghost")
-    @KafkaListener(topics = "orders.real")
+    @KafkaListener(topics = {"orders.real", "orders.retry"}, groupId = "billing")
     public void consume() {}
+
+    @KafkaListener("orders.legacy")
+    public void consumeLegacy() {}
 }
 """,
                     }
@@ -1879,7 +1949,11 @@ public class OrderListener {
         for claim in evidence.claims
         if claim.kind == "kafka_event" and claim.direction == "consume"
     }
-    assert consumed_topics == {"kafka://orders.real"}
+    assert consumed_topics == {
+        "kafka://orders.real",
+        "kafka://orders.retry",
+        "kafka://orders.legacy",
+    }
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:
