@@ -1013,6 +1013,32 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert dedicated_topic_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in dedicated_topic_rejected.text
 
+    for call_ref in ("caller_ref", "callee_ref"):
+        dedicated_call_payload = _java_evidence(project_id)
+        dedicated_call_payload["claims"].append(
+            {
+                "id": f"call-sensitive-{call_ref}",
+                "kind": "service_call",
+                "source_path": "src/OrderController.java:22",
+                "confidence": 0.98,
+                "deterministic": True,
+                "operation_ref": "operation://POST/api/orders",
+                "caller_ref": "java://OrderController.create",
+                "callee_ref": "java://OrderService.create",
+            }
+        )
+        dedicated_call_payload["claims"][-1][call_ref] = f"java://service/{sensitive_value}"
+        dedicated_call_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+            headers=headers,
+            json={"evidence": dedicated_call_payload},
+        )
+
+        assert dedicated_call_rejected.status_code == 422
+        assert dedicated_call_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert dedicated_call_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in dedicated_call_rejected.text
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
     ).model_dump(mode="json")
@@ -1118,6 +1144,40 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert generic_topic_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert generic_topic_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in generic_topic_rejected.text
+
+    for call_ref in ("caller_ref", "callee_ref"):
+        generic_call_source = _java_evidence(project_id)
+        generic_call_source["claims"].append(
+            {
+                "id": f"call-safe-{call_ref}",
+                "kind": "service_call",
+                "source_path": "src/OrderController.java:22",
+                "confidence": 0.98,
+                "deterministic": True,
+                "operation_ref": "operation://POST/api/orders",
+                "caller_ref": "java://OrderController.create",
+                "callee_ref": "java://OrderService.create",
+            }
+        )
+        generic_call_payload = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(generic_call_source)
+        ).model_dump(mode="json")
+        generic_call = next(
+            finding
+            for finding in generic_call_payload["findings"]
+            if finding["structured_data"]["claim_kind"] == "service_call"
+        )
+        generic_call["structured_data"]["claim"][call_ref] = f"java://service/{sensitive_value}"
+        generic_call_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            headers=headers,
+            json={"envelope": generic_call_payload},
+        )
+
+        assert generic_call_rejected.status_code == 422
+        assert generic_call_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert generic_call_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in generic_call_rejected.text
 
 
 @pytest.mark.asyncio

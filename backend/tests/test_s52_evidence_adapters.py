@@ -115,6 +115,15 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     with pytest.raises(ValidationError, match="sensitive scalar"):
         JavaEvidenceSubmission.model_validate(dedicated_topic)
 
+    for call_ref in ("caller_ref", "callee_ref"):
+        dedicated_call = _java_submission()
+        service_call = next(
+            claim for claim in dedicated_call["claims"] if claim["kind"] == "service_call"
+        )
+        service_call[call_ref] = f"java://service/{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            JavaEvidenceSubmission.model_validate(dedicated_call)
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
     ).model_dump(mode="json")
@@ -160,6 +169,19 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     topic_finding["structured_data"]["claim"]["topic_ref"] = f"kafka://{sensitive_value}"
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_topic)
+
+    for call_ref in ("caller_ref", "callee_ref"):
+        generic_call = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_submission())
+        ).model_dump(mode="json")
+        call_finding = next(
+            finding
+            for finding in generic_call["findings"]
+            if finding["structured_data"]["claim_kind"] == "service_call"
+        )
+        call_finding["structured_data"]["claim"][call_ref] = f"java://service/{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic_call)
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1475,6 +1497,50 @@ class SecondaryController {
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+
+
+def test_java_spring_poc_selects_annotated_or_file_named_controller() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://controller-selection", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AnnotatedController.java",
+                        "content": """
+class HelperBeforeAnnotated {}
+
+@RestController
+@RequestMapping("/annotated")
+class ActualController {
+    @GetMapping("/live")
+    public Order live() { return service.load(); }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/FallbackController.java",
+                        "content": """
+class HelperBeforeNamed {}
+
+class FallbackController {
+    @GetMapping("/fallback")
+    public Order fallback() { return service.load(); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert {(claim.controller_ref, claim.handler, claim.path) for claim in routes} == {
+        ("java://ActualController", "live", "/annotated/live"),
+        ("java://FallbackController", "fallback", "/fallback"),
+    }
 
 
 def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:

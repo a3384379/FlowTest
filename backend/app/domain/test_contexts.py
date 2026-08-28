@@ -330,6 +330,11 @@ class ExternalJavaCallClaim(ExternalJavaClaimBase):
     caller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     callee_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
 
+    @model_validator(mode="after")
+    def validate_call_refs(self) -> ExternalJavaCallClaim:
+        require_no_sensitive_scalar_values([self.caller_ref, self.callee_ref])
+        return self
+
 
 class ExternalJavaPersistenceClaim(ExternalJavaClaimBase):
     kind: Literal["mapper_repository"] = "mapper_repository"

@@ -71,6 +71,7 @@ _MAPPING_ANNOTATION = re.compile(
 _MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete)Mapping\b")
 _REQUEST_MAPPING = re.compile(r"@RequestMapping(?:\s*\((?P<args>[^)]*)\))?")
 _REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
+_CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -169,6 +170,11 @@ class JavaCallClaim(JavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     caller_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     callee_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
+
+    @model_validator(mode="after")
+    def validate_call_refs(self) -> JavaCallClaim:
+        require_no_sensitive_scalar_values([self.caller_ref, self.callee_ref])
+        return self
 
 
 class JavaPersistenceClaim(JavaClaimBase):
@@ -1859,16 +1865,10 @@ def _java_annotation_arguments(content: str, annotation_end: int) -> str:
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
     masked_content = _mask_java_non_code(file.content)
-    declaration = next(
-        (
-            item
-            for item in _TYPE_DECLARATION.finditer(masked_content)
-            if item.group("kind") == "class"
-        ),
-        None,
-    )
-    if declaration is None:
+    selected = _java_controller_declaration(file, masked_content)
+    if selected is None:
         return []
+    declaration, declaration_prefix_start = selected
     class_opening = masked_content.find("{", declaration.end())
     if class_opening < 0:
         return []
@@ -1883,6 +1883,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         masked_content,
         _REQUEST_MAPPING_MARKER,
         _REQUEST_MAPPING,
+        start=declaration_prefix_start,
         end=declaration.start(),
     )
     base_paths = _mapping_paths(base_matches[-1].group("args") or "") if base_matches else [""]
@@ -1906,6 +1907,44 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
             controller,
         )
     ]
+
+
+def _java_controller_declaration(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+) -> tuple[re.Match[str], int] | None:
+    top_level_mask = _mask_nested_java_blocks(masked_content)
+    declarations = list(_TYPE_DECLARATION.finditer(top_level_mask))
+    candidates: list[tuple[re.Match[str], int]] = []
+    declaration_prefix_start = 0
+    for declaration in declarations:
+        if declaration.group("kind") == "class":
+            candidates.append((declaration, declaration_prefix_start))
+        opening = masked_content.find("{", declaration.end())
+        if opening >= 0:
+            declaration_prefix_start = _matching_brace(file.content, opening) + 1
+    if not candidates:
+        return None
+    file_stem = PurePosixPath(file.path).stem
+    annotated = [
+        candidate
+        for candidate in candidates
+        if _CONTROLLER_ANNOTATION.search(
+            masked_content,
+            candidate[1],
+            candidate[0].start(),
+        )
+        is not None
+    ]
+    return next(
+        (candidate for candidate in annotated if candidate[0].group("name") == file_stem),
+        annotated[0]
+        if annotated
+        else next(
+            (candidate for candidate in candidates if candidate[0].group("name") == file_stem),
+            candidates[0],
+        ),
+    )
 
 
 def _mask_java_non_code(content: str) -> str:
