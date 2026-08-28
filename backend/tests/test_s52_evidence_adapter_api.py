@@ -143,6 +143,65 @@ async def test_java_and_database_evidence_enter_context_and_expose_mapping(
 
 
 @pytest.mark.asyncio
+async def test_persisted_envelope_reliability_bounds_java_mapping_candidates(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "低可靠性 Java 证据上下文",
+            "objective": "验证持久化后的 Envelope 可靠性约束映射候选",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    java_payload = _java_evidence(project_id)
+    java_payload["confidence"] = 0.2
+    java_payload["deterministic"] = False
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": java_payload},
+    )
+    assert java.status_code == 201, java.text
+
+    database = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": _database_evidence(project_id)},
+    )
+    assert database.status_code == 201, database.text
+
+    inspected = await client.get(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json() == database.json()["entity_mapping"]
+
+    java_backed_kinds = {
+        "operation_entity",
+        "request_field_column",
+        "response_field_column",
+    }
+    candidates = [
+        candidate
+        for candidate in inspected.json()["candidates"]
+        if candidate["kind"] in java_backed_kinds
+    ]
+    assert candidates
+    assert all(candidate["confidence"] <= 0.2 for candidate in candidates)
+    assert all(candidate["deterministic"] is False for candidate in candidates)
+
+
+@pytest.mark.asyncio
 async def test_ambiguous_entity_candidates_conflict_context_without_silent_selection(
     s52_context: dict[str, Any],
 ) -> None:

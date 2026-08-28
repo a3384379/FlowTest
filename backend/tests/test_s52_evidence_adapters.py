@@ -114,6 +114,30 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         DatabaseEvidenceSubmission.model_validate(unknown_sql)
 
+    non_finite_distribution = _database_submission()
+    non_finite_distribution["tables"][0]["columns"][1]["observed_distribution"]["minimum"] = float(
+        "nan"
+    )
+    with pytest.raises(ValidationError, match="finite number"):
+        DatabaseEvidenceSubmission.model_validate(non_finite_distribution)
+
+    non_finite_enum = _database_submission()
+    non_finite_enum["tables"][0]["columns"][1]["enum_values"] = [float("inf")]
+    with pytest.raises(ValidationError, match="finite number"):
+        DatabaseEvidenceSubmission.model_validate(non_finite_enum)
+
+    external_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    external_column = next(
+        finding
+        for finding in external_envelope["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    external_column["structured_data"]["claim"]["enum_values"] = [float("nan")]
+    with pytest.raises(ValidationError, match="finite number"):
+        ExternalEvidenceEnvelope.model_validate(external_envelope)
+
 
 def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> None:
     envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
@@ -231,6 +255,19 @@ def test_database_state_mapping_preserves_low_confidence_and_nondeterminism() ->
     )
     assert state.confidence == 0.25
     assert state.deterministic is False
+    database_backed = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind
+        in {
+            EntityMappingCandidateKind.OPERATION_ENTITY,
+            EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+            EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+        }
+    ]
+    assert database_backed
+    assert all(candidate.confidence <= 0.25 for candidate in database_backed)
+    assert all(candidate.deterministic is False for candidate in database_backed)
 
 
 def test_reused_dto_field_is_scoped_to_each_operation() -> None:
@@ -435,6 +472,8 @@ def _mapping_inputs(envelope: ExternalEvidenceEnvelope, prefix: str) -> list[Map
         MappingEvidenceInput(
             evidence_ref=f"evidence://{prefix}/{index}",
             finding=finding,
+            confidence=min(finding.confidence, envelope.confidence),
+            deterministic=finding.deterministic and envelope.deterministic,
         )
         for index, finding in enumerate(envelope.findings)
     ]

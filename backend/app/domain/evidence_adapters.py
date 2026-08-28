@@ -15,7 +15,7 @@ from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Annotated, Final, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
 
 from app.domain.evidence import EvidenceBundle, EvidenceFinding, EvidenceSourceType
 from app.domain.test_contexts import (
@@ -240,9 +240,11 @@ class DatabaseObservedDistribution(BaseModel):
     row_count: int | None = Field(default=None, ge=0)
     distinct_count: int | None = Field(default=None, ge=0)
     null_ratio: float | None = Field(default=None, ge=0, le=1)
-    minimum: float | None = None
-    maximum: float | None = None
-    enum_candidates: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+    minimum: FiniteFloat | None = None
+    maximum: FiniteFloat | None = None
+    enum_candidates: list[str | int | FiniteFloat | bool] = Field(
+        default_factory=list, max_length=100
+    )
 
     @model_validator(mode="after")
     def validate_enum_candidates(self) -> DatabaseObservedDistribution:
@@ -259,7 +261,7 @@ class DatabaseColumnEvidence(BaseModel):
     primary_key: bool = False
     foreign_key: str | None = Field(default=None, min_length=1, max_length=320, pattern=_REF)
     unique: bool = False
-    enum_values: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+    enum_values: list[str | int | FiniteFloat | bool] = Field(default_factory=list, max_length=100)
     check_expression: str | None = Field(default=None, min_length=1, max_length=1000)
     observed_distribution: DatabaseObservedDistribution | None = None
     masked_example: str | None = Field(default=None, max_length=200)
@@ -389,6 +391,19 @@ class MappingEvidenceInput(BaseModel):
 
     evidence_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     finding: ExternalEvidenceFinding
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    deterministic: bool | None = None
+
+    @property
+    def effective_confidence(self) -> float:
+        provided = self.finding.confidence if self.confidence is None else self.confidence
+        return min(self.finding.confidence, provided)
+
+    @property
+    def effective_deterministic(self) -> bool:
+        if self.deterministic is None:
+            return self.finding.deterministic
+        return self.finding.deterministic and self.deterministic
 
 
 class EntityMappingBudgetExceeded(ValueError):
@@ -831,6 +846,13 @@ class _ParsedDatabaseColumn:
     deterministic: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedDatabaseTable:
+    evidence_refs: tuple[str, ...]
+    confidence: float
+    deterministic: bool
+
+
 def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
     count = sum(
         len(items)
@@ -856,6 +878,8 @@ def _parse_mapping_evidence(evidence: list[MappingEvidenceInput]) -> _ParsedEvid
                 data.claim_kind,
                 cast(dict[str, JsonValue], data.claim.model_dump(mode="json")),
                 item.evidence_ref,
+                item.effective_confidence,
+                item.effective_deterministic,
             )
         elif (
             isinstance(data, DatabaseExternalEvidenceStructuredData)
@@ -870,8 +894,8 @@ def _parse_mapping_evidence(evidence: list[MappingEvidenceInput]) -> _ParsedEvid
                     schema=data.claim.schema_name,
                     table=data.claim.table_name,
                     evidence_ref=item.evidence_ref,
-                    confidence=item.finding.confidence,
-                    deterministic=item.finding.deterministic,
+                    confidence=item.effective_confidence,
+                    deterministic=item.effective_deterministic,
                 )
             )
     return parsed
@@ -882,15 +906,58 @@ def _append_java_mapping_claim(
     claim_kind: str,
     claim: dict[str, JsonValue],
     evidence_ref: str,
+    confidence: float,
+    deterministic: bool,
 ) -> None:
     if claim_kind == "controller_route":
-        parsed.routes.append((JavaControllerRouteClaim.model_validate(claim), evidence_ref))
+        parsed.routes.append(
+            (
+                _effective_java_claim(
+                    JavaControllerRouteClaim.model_validate(claim), confidence, deterministic
+                ),
+                evidence_ref,
+            )
+        )
     elif claim_kind == "dto_field":
-        parsed.fields.append((JavaDtoFieldClaim.model_validate(claim), evidence_ref))
+        parsed.fields.append(
+            (
+                _effective_java_claim(
+                    JavaDtoFieldClaim.model_validate(claim), confidence, deterministic
+                ),
+                evidence_ref,
+            )
+        )
     elif claim_kind == "entity":
-        parsed.entities.append((JavaEntityClaim.model_validate(claim), evidence_ref))
+        parsed.entities.append(
+            (
+                _effective_java_claim(
+                    JavaEntityClaim.model_validate(claim), confidence, deterministic
+                ),
+                evidence_ref,
+            )
+        )
     elif claim_kind == "enum_state":
-        parsed.states.append((JavaEnumStateClaim.model_validate(claim), evidence_ref))
+        parsed.states.append(
+            (
+                _effective_java_claim(
+                    JavaEnumStateClaim.model_validate(claim), confidence, deterministic
+                ),
+                evidence_ref,
+            )
+        )
+
+
+def _effective_java_claim[T: JavaClaimBase](
+    claim: T,
+    confidence: float,
+    deterministic: bool,
+) -> T:
+    return claim.model_copy(
+        update={
+            "confidence": min(claim.confidence, confidence),
+            "deterministic": claim.deterministic and deterministic,
+        }
+    )
 
 
 def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
@@ -898,7 +965,7 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
     tables = _table_evidence(parsed.columns)
     for route, route_evidence in parsed.routes:
         matching_entities = _matching_entities(route, parsed.entities)
-        for table_ref, table_evidence in tables.items():
+        for table_ref, table in tables.items():
             table_name = table_ref.rsplit("/", 1)[-1]
             score, entity_evidence = _entity_match_score(route, table_name, matching_entities)
             if score == 0:
@@ -910,9 +977,9 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
                     source_ref=route.operation_ref,
                     target_ref=f"entity://{table_ref.removeprefix('table://')}",
                     operation_ref=route.operation_ref,
-                    confidence=min(route.confidence, score),
-                    deterministic=route.deterministic and score == 1,
-                    evidence_refs=[route_evidence, *table_evidence, *entity_evidence],
+                    confidence=min(route.confidence, score, table.confidence),
+                    deterministic=(route.deterministic and score == 1 and table.deterministic),
+                    evidence_refs=[route_evidence, *table.evidence_refs, *entity_evidence],
                 ),
             )
     return list(candidates.values())
@@ -947,11 +1014,18 @@ def _entity_match_score(
 
 def _table_evidence(
     columns: list[_ParsedDatabaseColumn],
-) -> dict[str, list[str]]:
-    values: dict[str, list[str]] = defaultdict(list)
+) -> dict[str, _ParsedDatabaseTable]:
+    values: dict[str, list[_ParsedDatabaseColumn]] = defaultdict(list)
     for column in columns:
-        values[f"table://{column.schema}/{column.table}"].append(column.evidence_ref)
-    return {key: sorted(set(refs))[:20] for key, refs in values.items()}
+        values[f"table://{column.schema}/{column.table}"].append(column)
+    return {
+        key: _ParsedDatabaseTable(
+            evidence_refs=tuple(sorted({column.evidence_ref for column in table_columns})[:20]),
+            confidence=min(column.confidence for column in table_columns),
+            deterministic=all(column.deterministic for column in table_columns),
+        )
+        for key, table_columns in values.items()
+    }
 
 
 def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
@@ -985,8 +1059,8 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
                     ),
                     operation_ref=field.operation_ref,
                     field_ref=field_ref,
-                    confidence=field.confidence,
-                    deterministic=field.deterministic,
+                    confidence=min(field.confidence, parsed_column.confidence),
+                    deterministic=field.deterministic and parsed_column.deterministic,
                     evidence_refs=[field_evidence, parsed_column.evidence_ref],
                 ),
             )
@@ -1178,6 +1252,8 @@ def _envelope_mapping_inputs(envelope: ExternalEvidenceEnvelope) -> list[Mapping
         MappingEvidenceInput(
             evidence_ref=f"evidence://semantic/{finding.semantic_fingerprint}",
             finding=finding,
+            confidence=min(finding.confidence, envelope.confidence),
+            deterministic=finding.deterministic and envelope.deterministic,
         )
         for finding in envelope.findings
     ]

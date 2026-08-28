@@ -9,7 +9,7 @@ from hashlib import sha256
 from typing import Annotated, Final, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 CONTEXT_REVISION_SCHEMA_VERSION: Final[Literal["flowtest-context-revision-v1"]] = (
     "flowtest-context-revision-v1"
@@ -425,9 +425,11 @@ class ExternalDatabaseObservedDistribution(BaseModel):
     row_count: int | None = Field(default=None, ge=0)
     distinct_count: int | None = Field(default=None, ge=0)
     null_ratio: float | None = Field(default=None, ge=0, le=1)
-    minimum: float | None = None
-    maximum: float | None = None
-    enum_candidates: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+    minimum: FiniteFloat | None = None
+    maximum: FiniteFloat | None = None
+    enum_candidates: list[str | int | FiniteFloat | bool] = Field(
+        default_factory=list, max_length=100
+    )
 
 
 class ExternalDatabaseTableClaim(BaseModel):
@@ -450,7 +452,7 @@ class ExternalDatabaseColumnClaim(BaseModel):
         default=None, min_length=1, max_length=320, pattern=_ADAPTER_REF
     )
     unique: bool = False
-    enum_values: list[str | int | float | bool] = Field(default_factory=list, max_length=100)
+    enum_values: list[str | int | FiniteFloat | bool] = Field(default_factory=list, max_length=100)
     check_expression: str | None = Field(default=None, min_length=1, max_length=1000)
     observed_distribution: ExternalDatabaseObservedDistribution | None = None
     masked_example: str | None = Field(default=None, max_length=200)

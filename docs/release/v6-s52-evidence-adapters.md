@@ -2,14 +2,14 @@
 
 ## 1. 阶段身份
 
-| 项目               | 当前值                                                 |
-| ------------------ | ------------------------------------------------------ |
-| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`             |
-| 实现分支           | `codex/v6-s52-evidence-adapters`                       |
-| MCP Server Version | `s52-evidence-adapter-v1`                              |
-| Scope              | `mcp:evidence:write`                                   |
-| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                |
-| Release 状态       | Draft PR #58；首轮精确 Head CI 全绿，Review 修复待推送 |
+| 项目               | 当前值                                                  |
+| ------------------ | ------------------------------------------------------- |
+| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`              |
+| 实现分支           | `codex/v6-s52-evidence-adapters`                        |
+| MCP Server Version | `s52-evidence-adapter-v1`                               |
+| Scope              | `mcp:evidence:write`                                    |
+| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
+| Release 状态       | Draft PR #58；二轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -41,6 +41,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   专用 Evidence Ingest 会同时把新歧义写为 Conflict Finding，使 Context 状态进入 `conflicted`。
 - Java Enum 与 DB 状态列给出相同 State Set 时合并其 Evidence Ref，并按最小 Confidence 与全部 Deterministic
   的保守规则组合；DB Finding 的低置信度或非确定性不会被抬高。不同表或不同 Target 仍保留为歧义。
+- Envelope 与持久化 `ContextEvidenceItem` 的有效 Confidence/Deterministic 会传播回 Java/DB Claim，并同时
+  约束 Operation/Entity、Field/Column 与 State 候选；Revision 重建不会恢复为 Finding 中的较高原始值。
 - DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
   跨 Operation 假冲突，同一 Operation 内的多 Target 歧义仍保持可见。
 - Candidate ID 只取决于 Mapping Kind/Source/Target/Operation/Field/State 语义；新增佐证只合并 Evidence Ref，
@@ -75,6 +77,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Source、Subject 与 Finding 始终作为 `untrusted_data`；适配器不解释 Prompt Instruction，不执行 Java、SQL、
   Shell 或任意网络访问。
 - DB Evidence 仅用于设计候选；不建立数据库连接，不接收原始数据行，不改变既有 Runtime DB Read Oracle。
+- DB 数值分布与 Enum 合同只接受有限浮点数，`NaN`/`Infinity` 在专用 Submission 与通用 External
+  Evidence Envelope 两层边界都被拒绝，避免非标准 JSON 进入 PostgreSQL JSON 字段。
 - Ingest 在锁定当前 Context Revision 后基于 Existing + New Evidence 计算歧义，避免在并发写入前静默遗漏冲突。
   Revision、Evidence Item 与 Fingerprint 继续使用 S49 的不可变约束。
 - API Router 只做请求/响应适配；转换和候选规则在纯 Domain，授权、事务与 Revision 写入在 Application Service。
@@ -122,7 +126,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`     | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`              | Pass                                                          |
 | Backend Types           | `uv run mypy app`                  | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                    | Pass；679 passed、4 skipped、总覆盖率 90.54%                  |
+| Backend Tests           | `uv run pytest`                    | Pass；680 passed、4 skipped、总覆盖率 90.55%                  |
 | Backend Security Lint   | `uv run ruff check --select S app` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`                | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                        | Pass；ESLint 与 TypeScript                                    |
@@ -153,12 +157,16 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 首轮精确 Head CI 全绿：Backend `33175484561`、Frontend `33175484456`、Compose `33175484631`、
   Required Gate `33175484500`、Security `33175484502`、Windows `33175484558`、Upgrade `33175484451`。
 - Codex Review 在 `73dc0850e8` 提出 1 个 P1 与 3 个 P2：外部结构化数据任意字典、DB 状态置信度/确定性丢失、
-  DTO Field 跨 Operation 假冲突、Candidate Budget 在去重前误报。四项均已修复并增加直接回归；修复 Head 尚待
-  提交、推送、精确 Head CI 与再次 Review。
+  DTO Field 跨 Operation 假冲突、Candidate Budget 在去重前误报。四项均在 `06a3e2c33c` 修复，对应 Review Thread
+  已回复并关闭。
+- 第二轮 Codex Review 在 `06a3e2c33c` 提出 1 个 P1 与 2 个 P2：DB Distribution 的非有限浮点数可导致
+  PostgreSQL JSON 写入 500；持久化后的有效 Evidence 可靠性在 Mapping 重建时丢失；DB 可靠性未约束
+  Operation/Entity 与 Field/Column 候选。三项均已修复，增加专用 Contract、Domain 与 API 回归；本地全量后端与
+  安全门禁全绿，待推送新精确 Head 后回复并关闭三个 Thread。
 
 ### 待完成
 
-- Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 第二轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

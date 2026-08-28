@@ -585,6 +585,8 @@ def _mapping_evidence_inputs(
         MappingEvidenceInput(
             evidence_ref=f"evidence://context/{item.fingerprint}",
             finding=ExternalEvidenceFinding.model_validate(item.finding_payload),
+            confidence=item.confidence,
+            deterministic=item.deterministic,
         )
         for item in items
     ]
