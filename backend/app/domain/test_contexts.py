@@ -293,6 +293,11 @@ class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
     path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
 
+    @model_validator(mode="after")
+    def validate_route_path(self) -> ExternalJavaControllerRouteClaim:
+        require_no_sensitive_scalar_values([self.path])
+        return self
+
 
 class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
     kind: Literal["dto_field"] = "dto_field"

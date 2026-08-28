@@ -879,7 +879,7 @@ async def test_generic_evidence_rejects_derived_conflict_byte_overflow(
 
 
 @pytest.mark.asyncio
-async def test_java_adapter_rejects_sensitive_source_paths_with_trace_id(
+async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:
     client = s52_context["client"]
@@ -911,6 +911,19 @@ async def test_java_adapter_rejects_sensitive_source_paths_with_trace_id(
     assert dedicated_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in dedicated_rejected.text
 
+    dedicated_route_payload = _java_evidence(project_id)
+    dedicated_route_payload["claims"][0]["path"] = f"/users/{sensitive_value}"
+    dedicated_route_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": dedicated_route_payload},
+    )
+
+    assert dedicated_route_rejected.status_code == 422
+    assert dedicated_route_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert dedicated_route_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in dedicated_route_rejected.text
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
     ).model_dump(mode="json")
@@ -927,6 +940,26 @@ async def test_java_adapter_rejects_sensitive_source_paths_with_trace_id(
     assert generic_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert generic_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in generic_rejected.text
+
+    generic_route_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    route_finding = next(
+        finding
+        for finding in generic_route_payload["findings"]
+        if finding["structured_data"]["claim_kind"] == "controller_route"
+    )
+    route_finding["structured_data"]["claim"]["path"] = f"/users/{sensitive_value}"
+    generic_route_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_route_payload},
+    )
+
+    assert generic_route_rejected.status_code == 422
+    assert generic_route_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_route_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_route_rejected.text
 
 
 @pytest.mark.asyncio

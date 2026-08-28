@@ -86,13 +86,18 @@ def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> 
     ExternalEvidenceEnvelope.model_validate(database_envelope.model_dump(mode="json"))
 
 
-def test_java_contracts_reject_sensitive_source_paths_at_both_boundaries() -> None:
+def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     sensitive_value = "4111111111111111"
     dedicated_payload = _java_submission()
     dedicated_payload["claims"][0]["source_path"] = f"src/{sensitive_value}.java:4"
 
     with pytest.raises(ValidationError, match="sensitive scalar"):
         JavaEvidenceSubmission.model_validate(dedicated_payload)
+
+    dedicated_route = _java_submission()
+    dedicated_route["claims"][0]["path"] = f"/users/{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        JavaEvidenceSubmission.model_validate(dedicated_route)
 
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
@@ -103,6 +108,18 @@ def test_java_contracts_reject_sensitive_source_paths_at_both_boundaries() -> No
 
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_payload)
+
+    generic_route = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    route_finding = next(
+        finding
+        for finding in generic_route["findings"]
+        if finding["structured_data"]["claim_kind"] == "controller_route"
+    )
+    route_finding["structured_data"]["claim"]["path"] = f"/users/{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_route)
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1378,6 +1395,72 @@ public class OrderController {
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+
+
+def test_java_spring_poc_reports_claim_quota_truncation() -> None:
+    routes = "\n".join(
+        f"""
+    @GetMapping("/items/{index}")
+    public Order item{index}() {{
+        return orderService.load();
+    }}
+"""
+        for index in range(13)
+    )
+    snapshot = JavaSourceSnapshot.model_validate(
+        {
+            "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+            "source": {"ref": "repository://route-overflow", "revision": "fixture-v1"},
+            "subject_ref": SUBJECT_REF,
+            "files": [
+                {
+                    "path": "src/main/java/example/OrderController.java",
+                    "content": f"public class OrderController {{\n{routes}\n}}",
+                }
+            ],
+        }
+    )
+
+    evidence = JavaSpringPocProvider().analyze(snapshot)
+
+    assert len([claim for claim in evidence.claims if claim.kind == "controller_route"]) == 12
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_BUDGET" and "不完整" in warning.message
+        for warning in evidence.warnings
+    )
+
+
+def test_java_spring_poc_ignores_kafka_listeners_in_non_code_text() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://active-listeners", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderListener.java",
+                        "content": """
+public class OrderListener {
+    private static final String SAMPLE = "@KafkaListener(\"string-ghost\")";
+
+    // @KafkaListener("comment-ghost")
+    @KafkaListener(topics = "orders.real")
+    public void consume() {}
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    consumed_topics = {
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "consume"
+    }
+    assert consumed_topics == {"kafka://orders.real"}
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:

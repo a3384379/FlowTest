@@ -90,6 +90,7 @@ _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\"]+)\"")
 _KAFKA_LISTENER = re.compile(r'@KafkaListener\s*\([^)]*(?:topics\s*=\s*)?"([^"]+)"')
+_KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
 _JAVA_NON_CODE = re.compile(
     r"//[^\r\n]*(?:\r?\n|$)"
     r"|/\*.*?(?:\*/|$)"
@@ -128,6 +129,11 @@ class JavaControllerRouteClaim(JavaClaimBase):
     handler: str = Field(pattern=_IDENTIFIER)
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
     path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
+
+    @model_validator(mode="after")
+    def validate_route_path(self) -> JavaControllerRouteClaim:
+        require_no_sensitive_scalar_values([self.path])
+        return self
 
 
 class JavaDtoFieldClaim(JavaClaimBase):
@@ -473,7 +479,20 @@ class JavaSpringPocProvider:
             file_routes = _java_routes(file)
             claims.extend(_route_claims(file, file_routes, type_fields))
             claims.extend(_structural_java_claims(file, file_routes, type_fields))
-        bounded_claims = _bounded_java_claims(claims)
+        bounded_claims, truncated = _bounded_java_claims(claims)
+        warnings = [
+            ExternalEvidenceWarning(
+                code="JAVA_POC_STATIC_ONLY",
+                message="Java/Spring POC 仅执行静态文本分析，未编译或执行目标代码。",
+            )
+        ]
+        if truncated:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_BUDGET",
+                    message="Java/Spring POC 证据超过有界配额，分析结果已截断且不完整。",
+                )
+            )
         return JavaEvidenceSubmission(
             provider=snapshot.provider,
             source=snapshot.source,
@@ -481,12 +500,7 @@ class JavaSpringPocProvider:
             claims=bounded_claims,
             confidence=min((claim.confidence for claim in bounded_claims), default=0.5),
             deterministic=all(claim.deterministic for claim in bounded_claims),
-            warnings=[
-                ExternalEvidenceWarning(
-                    code="JAVA_POC_STATIC_ONLY",
-                    message="Java/Spring POC 仅执行静态文本分析，未编译或执行目标代码。",
-                )
-            ],
+            warnings=warnings,
         )
 
 
@@ -2222,17 +2236,23 @@ def _enum_values(body: str) -> list[str]:
 
 
 def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:
+    matches = _active_java_annotation_matches(
+        file.content,
+        _mask_java_non_code(file.content),
+        _KAFKA_LISTENER_MARKER,
+        _KAFKA_LISTENER,
+    )
     return [
         JavaKafkaEventClaim(
-            id=_claim_id("kafka", file.path, "consume", topic),
-            source_path=f"{file.path}:1",
+            id=_claim_id("kafka", file.path, "consume", match.group(1)),
+            source_path=f"{file.path}:{file.content.count(chr(10), 0, match.start()) + 1}",
             direction="consume",
-            topic_ref=f"kafka://{topic}",
+            topic_ref=f"kafka://{match.group(1)}",
             event_type="UnknownEvent",
             confidence=0.7,
             deterministic=False,
         )
-        for topic in _KAFKA_LISTENER.findall(file.content)
+        for match in matches
     ]
 
 
@@ -2241,7 +2261,9 @@ def _deduplicate_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEviden
     return [unique[key] for key in sorted(unique)]
 
 
-def _bounded_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceClaim]:
+def _bounded_java_claims(
+    claims: list[JavaEvidenceClaim],
+) -> tuple[list[JavaEvidenceClaim], bool]:
     limits = {
         "controller_route": 12,
         "dto_field": 18,
@@ -2256,7 +2278,8 @@ def _bounded_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceCl
         "kafka_event": 3,
     }
     grouped: dict[str, list[JavaEvidenceClaim]] = defaultdict(list)
-    for claim in _deduplicate_java_claims(claims):
+    unique = _deduplicate_java_claims(claims)
+    for claim in unique:
         grouped[claim.kind].append(claim)
     bounded = [
         claim
@@ -2265,7 +2288,8 @@ def _bounded_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceCl
             : limits[kind]
         ]
     ]
-    return bounded[:MAX_ADAPTER_CLAIMS]
+    truncated = len(bounded) < len(unique) or len(bounded) > MAX_ADAPTER_CLAIMS
+    return bounded[:MAX_ADAPTER_CLAIMS], truncated
 
 
 def _claim_id(*parts: str) -> str:
