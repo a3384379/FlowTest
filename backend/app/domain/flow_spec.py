@@ -933,7 +933,9 @@ def _collect_secret_issues(value: JsonValue, path: str, issues: list[FlowSpecIss
         for key, child in value.items():
             child_path = f"{path}.{key}"
             if key == "secret_ref":
-                if not isinstance(child, str) or not child.startswith("secret://"):
+                if child is not None and (
+                    not isinstance(child, str) or not child.startswith("secret://")
+                ):
                     issues.append(
                         FlowSpecIssue(
                             code="INVALID_SECRET_REF",

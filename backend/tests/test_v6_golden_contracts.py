@@ -29,6 +29,12 @@ from app.domain.flow_spec_v2 import (
     flow_spec_v2_fingerprint,
     validate_flow_spec_v2,
 )
+from app.domain.integration_plans import (
+    IntegrationPlan,
+    compile_integration_plan,
+    integration_plan_fingerprint,
+    validate_integration_plan,
+)
 from app.domain.mcp_read import MCP_READ_SCHEMA_VERSION, MCP_SERVER_NAME
 from app.domain.test_contexts import MCP_CONTEXT_EVIDENCE_SERVER_VERSION
 from app.domain.test_design import TestDesignDocument as GoldenTestDesignDocument
@@ -87,6 +93,26 @@ def test_flowspec_fingerprints_v1_v2_v3_are_frozen() -> None:
         candidate = spec.model_copy(update={"fingerprint_version": version})
         assert flow_spec_fingerprint(candidate) == fingerprints[key]
     assert validate_flow_spec(spec).valid is True
+
+
+def test_integration_plan_and_compiled_flowspec_fingerprints_are_frozen() -> None:
+    plan = IntegrationPlan.model_validate(_load("login-create-query.integration-plan-v1.json"))
+    expected_flow_spec = FlowSpec.model_validate(
+        _load("login-create-query.compiled.flowspec-v1.json")
+    )
+    fingerprints = _load_mapping("fingerprints.json")
+    compilation = compile_integration_plan(plan)
+
+    assert validate_integration_plan(plan).valid is True
+    assert integration_plan_fingerprint(plan) == fingerprints["integration_plan_v1"]
+    assert plan.plan_fingerprint == fingerprints["integration_plan_v1"]
+    assert compilation.importable is True
+    assert compilation.flow_spec == expected_flow_spec
+    assert (
+        compilation.flow_spec_fingerprint == fingerprints["integration_plan_compiled_flow_spec_v1"]
+    )
+    assert compilation.node_evidence
+    assert compilation.edge_evidence
 
 
 def test_flowspec_v1_to_v2_is_deterministic_and_lossless_for_v1_semantics() -> None:

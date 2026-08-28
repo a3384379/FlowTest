@@ -28,6 +28,13 @@ from app.domain.flow_spec import (
     workflow_definition_to_flow_spec,
 )
 from app.domain.flow_spec import FlowSpecService as PortableService
+from app.domain.integration_plans import (
+    IntegrationPlan,
+    IntegrationPlanCompilation,
+    compile_integration_plan,
+    integration_plan_fingerprint,
+    normalize_integration_plan,
+)
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -79,6 +86,8 @@ class FlowSpecImportProvenance:
     context_fingerprint: str
     source_ref: str
     service_account_id: UUID
+    integration_plan: IntegrationPlan | None = None
+    compilation: IntegrationPlanCompilation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +224,7 @@ class FlowSpecService:
             project_id=project_id,
             payload=payload,
         )
+        _validate_integration_plan_provenance(prepared.pipeline, provenance)
         snapshot = _source_snapshot(
             pipeline=prepared.pipeline,
             target_workflow_id=prepared.target.id if prepared.target is not None else None,
@@ -973,7 +983,68 @@ def _source_snapshot(
                 "service_account_id": str(provenance.service_account_id),
             }
         )
+        if provenance.integration_plan is not None and provenance.compilation is not None:
+            plan = normalize_integration_plan(provenance.integration_plan)
+            compilation = provenance.compilation
+            snapshot.update(
+                {
+                    "integration_plan": plan.model_dump(mode="json"),
+                    "integration_plan_fingerprint": plan.plan_fingerprint,
+                    "integration_plan_compiler": {
+                        "version": compilation.compiler_version,
+                        "flow_spec_fingerprint": compilation.flow_spec_fingerprint,
+                        "diagnostics": [
+                            item.model_dump(mode="json") for item in compilation.diagnostics
+                        ],
+                        "passes": [item.model_dump(mode="json") for item in compilation.passes],
+                        "node_evidence": [
+                            item.model_dump(mode="json") for item in compilation.node_evidence
+                        ],
+                        "edge_evidence": [
+                            item.model_dump(mode="json") for item in compilation.edge_evidence
+                        ],
+                    },
+                }
+            )
     return snapshot
+
+
+def _validate_integration_plan_provenance(
+    pipeline: FlowSpecPipeline,
+    provenance: FlowSpecImportProvenance | None,
+) -> None:
+    if provenance is None:
+        return
+    plan = provenance.integration_plan
+    compilation = provenance.compilation
+    if (plan is None) != (compilation is None):
+        raise _integration_plan_provenance_error(
+            "Integration Plan 与编译结果必须同时提供",
+        )
+    if plan is None or compilation is None:
+        return
+    normalized = normalize_integration_plan(plan)
+    expected = compile_integration_plan(normalized)
+    consistent = (
+        normalized.context_revision_id == provenance.context_revision_id
+        and normalized.context_fingerprint == provenance.context_fingerprint
+        and normalized.plan_fingerprint == integration_plan_fingerprint(normalized)
+        and expected.importable
+        and expected.flow_spec_fingerprint == pipeline.fingerprint
+        and compilation == expected
+    )
+    if not consistent:
+        raise _integration_plan_provenance_error(
+            "Integration Plan 编译证据与 Context 或 FlowSpec 不一致",
+        )
+
+
+def _integration_plan_provenance_error(message: str) -> AppError:
+    return AppError(
+        code="INTEGRATION_PLAN_PROVENANCE_INVALID",
+        message=message,
+        status_code=422,
+    )
 
 
 def _mapping_ids(

@@ -5,5 +5,7 @@
   "flow_spec_schema_v2": "1d8e9dc8aa2a5e2d7bfb2a827e589a989f4ee27a3d7043de748101f4aa75c744",
   "http_contract": "803bc537943f2fffcdc2c1791808c56e1ab6ccaa318c2e3bbf210ba8600b99f1",
   "test_design": "276debeb9c29d4c0a7054c0ace3564625e54ac6ec108926ce70f4b6714576fdd",
-  "operation_semantic_prefix": "00000000-0000-0000-0000-000000000021|v=1|contract=2222222222222222222222222222222222222222222222222222222222222222|service=orders|method=POST|path=/api/orders|operation=orders.create"
+  "operation_semantic_prefix": "00000000-0000-0000-0000-000000000021|v=1|contract=2222222222222222222222222222222222222222222222222222222222222222|service=orders|method=POST|path=/api/orders|operation=orders.create",
+  "integration_plan_v1": "7bd623c2832118dd070d707b91b5be87c714bdea6035bbfa66bd3c2155ccd85a",
+  "integration_plan_compiled_flow_spec_v1": "e1d437108b19296a0d73fd23159f9f80e872f2ff86e5a946e9d97c94fb177e12"
 }

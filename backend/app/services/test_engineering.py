@@ -57,14 +57,21 @@ class TestEngineeringService:
         )
         return design, fingerprint_design(design)
 
-    async def contract_for_api(self, *, project_id: UUID, definition_id: UUID) -> OperationContract:
+    async def contract_for_api(
+        self,
+        *,
+        project_id: UUID,
+        definition_id: UUID,
+        version_number: int | None = None,
+    ) -> OperationContract:
         definition = await self._assets.get_definition(definition_id)
         if definition is None or definition.project_id != project_id:
             raise AppError(
                 code="API_DEFINITION_NOT_FOUND", message="API 定义不存在", status_code=404
             )
         version = await self._assets.get_version(
-            definition_id=definition.id, version=definition.current_version
+            definition_id=definition.id,
+            version=(definition.current_version if version_number is None else version_number),
         )
         if version is None:
             raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
