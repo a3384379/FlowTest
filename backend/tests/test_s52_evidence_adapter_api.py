@@ -17,7 +17,10 @@ from app.domain.evidence_adapters import (
     adapt_database_evidence,
     adapt_java_evidence,
 )
-from app.domain.test_contexts import finding_semantic_fingerprint
+from app.domain.test_contexts import (
+    DatabaseExternalEvidenceStructuredData,
+    finding_semantic_fingerprint,
+)
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
@@ -226,10 +229,12 @@ async def test_ambiguous_entity_candidates_conflict_context_without_silent_selec
         },
     )
     context_id = begun.json()["id"]
+    java_payload = _java_evidence(project_id)
+    _add_archived_order_entity(java_payload)
     java = await client.post(
         f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
         headers=headers,
-        json={"evidence": _java_evidence(project_id)},
+        json={"evidence": java_payload},
     )
     assert java.status_code == 201, java.text
 
@@ -283,9 +288,9 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
     assert begun.status_code == 201, begun.text
     context_id = begun.json()["id"]
 
-    java_envelope = adapt_java_evidence(
-        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
-    )
+    java_payload = _java_evidence(project_id)
+    _add_archived_order_entity(java_payload)
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
     java = await client.post(
         f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
         headers=headers,
@@ -317,6 +322,68 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
     )
     assert inspected.status_code == 200, inspected.text
     assert inspected.json()["conflicts"]
+
+
+@pytest.mark.asyncio
+async def test_generic_table_only_database_evidence_drives_entity_mapping(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "通用表级证据上下文",
+            "objective": "验证无列 Finding 时仍可推导可追溯实体映射",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    java_envelope = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    )
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": java_envelope.model_dump(mode="json")},
+    )
+    assert java.status_code == 201, java.text
+
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    )
+    table_finding = next(
+        finding
+        for finding in database_envelope.findings
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and finding.structured_data.claim_kind == "table"
+    )
+    table_only = database_envelope.model_copy(update={"findings": [table_finding]})
+    database = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": table_only.model_dump(mode="json")},
+    )
+    assert database.status_code == 201, database.text
+    assert database.json()["status"] == "ready"
+
+    inspected = await client.get(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    operation_entity = next(
+        candidate
+        for candidate in inspected.json()["candidates"]
+        if candidate["kind"] == "operation_entity"
+    )
+    assert operation_entity["target_ref"] == "entity://public/orders"
+    assert operation_entity["evidence_refs"]
 
 
 @pytest.mark.asyncio
@@ -451,9 +518,9 @@ async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhaus
     assert begun.status_code == 201, begun.text
     context_id = begun.json()["id"]
 
-    java_envelope = adapt_java_evidence(
-        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
-    )
+    java_payload = _java_evidence(project_id)
+    _add_archived_order_entity(java_payload)
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
     java = await client.post(
         f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
         headers=headers,
@@ -645,6 +712,22 @@ def _java_evidence(project_id: str) -> dict[str, Any]:
         "confidence": 0.98,
         "deterministic": True,
     }
+
+
+def _add_archived_order_entity(payload: dict[str, Any]) -> None:
+    payload["claims"].append(
+        {
+            "id": "entity-archived-order",
+            "kind": "entity",
+            "source_path": "src/ArchivedOrder.java:4",
+            "confidence": 0.98,
+            "deterministic": True,
+            "entity_ref": "entity://ArchivedOrder",
+            "class_name": "ArchivedOrder",
+            "table_ref": "table://public.archived_orders",
+            "operation_refs": ["operation://POST/api/orders"],
+        }
+    )
 
 
 def _database_evidence(project_id: str) -> dict[str, Any]:

@@ -835,6 +835,7 @@ class _ParsedEvidence:
         self.fields: list[tuple[JavaDtoFieldClaim, str]] = []
         self.entities: list[tuple[JavaEntityClaim, str]] = []
         self.table_columns: list[tuple[JavaTableColumnClaim, str]] = []
+        self.tables: list[_ParsedDatabaseTableClaim] = []
         self.columns: list[_ParsedDatabaseColumn] = []
         self.states: list[tuple[JavaEnumStateClaim, str]] = []
 
@@ -842,6 +843,15 @@ class _ParsedEvidence:
 @dataclass(frozen=True, slots=True)
 class _ParsedDatabaseColumn:
     claim: DatabaseColumnEvidence
+    schema: str
+    table: str
+    evidence_ref: str
+    confidence: float
+    deterministic: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedDatabaseTableClaim:
     schema: str
     table: str
     evidence_ref: str
@@ -863,6 +873,13 @@ class _EntityMatch:
     deterministic: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _OperationEntityScope:
+    entities: tuple[tuple[JavaEntityClaim, str], ...]
+    allow_route_fallback: bool
+    blocked_table_refs: tuple[str, ...]
+
+
 def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
     count = sum(
         len(items)
@@ -871,6 +888,7 @@ def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
             parsed.fields,
             parsed.entities,
             parsed.table_columns,
+            parsed.tables,
             parsed.columns,
             parsed.states,
         )
@@ -892,24 +910,47 @@ def _parse_mapping_evidence(evidence: list[MappingEvidenceInput]) -> _ParsedEvid
                 item.effective_confidence,
                 item.effective_deterministic,
             )
-        elif (
-            isinstance(data, DatabaseExternalEvidenceStructuredData)
-            and data.claim_kind == "column"
-            and isinstance(data.claim, ExternalDatabaseColumnClaim)
-        ):
-            parsed.columns.append(
-                _ParsedDatabaseColumn(
-                    claim=DatabaseColumnEvidence.model_validate(
-                        data.claim.model_dump(mode="json", exclude={"schema_name", "table_name"})
-                    ),
-                    schema=data.claim.schema_name,
-                    table=data.claim.table_name,
-                    evidence_ref=item.evidence_ref,
-                    confidence=item.effective_confidence,
-                    deterministic=item.effective_deterministic,
-                )
+        elif isinstance(data, DatabaseExternalEvidenceStructuredData):
+            _append_database_mapping_claim(
+                parsed,
+                data,
+                item.evidence_ref,
+                item.effective_confidence,
+                item.effective_deterministic,
             )
     return parsed
+
+
+def _append_database_mapping_claim(
+    parsed: _ParsedEvidence,
+    data: DatabaseExternalEvidenceStructuredData,
+    evidence_ref: str,
+    confidence: float,
+    deterministic: bool,
+) -> None:
+    if data.claim_kind == "table" and isinstance(data.claim, ExternalDatabaseTableClaim):
+        parsed.tables.append(
+            _ParsedDatabaseTableClaim(
+                schema=data.claim.schema_name,
+                table=data.claim.name,
+                evidence_ref=evidence_ref,
+                confidence=confidence,
+                deterministic=deterministic,
+            )
+        )
+    elif data.claim_kind == "column" and isinstance(data.claim, ExternalDatabaseColumnClaim):
+        parsed.columns.append(
+            _ParsedDatabaseColumn(
+                claim=DatabaseColumnEvidence.model_validate(
+                    data.claim.model_dump(mode="json", exclude={"schema_name", "table_name"})
+                ),
+                schema=data.claim.schema_name,
+                table=data.claim.table_name,
+                evidence_ref=evidence_ref,
+                confidence=confidence,
+                deterministic=deterministic,
+            )
+        )
 
 
 def _append_java_mapping_claim(
@@ -982,12 +1023,12 @@ def _effective_java_claim[T: JavaClaimBase](
 
 def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
     candidates: dict[str, EntityMappingCandidate] = {}
-    tables = _table_evidence(parsed.columns)
+    tables = _table_evidence(parsed)
     for route, route_evidence in parsed.routes:
-        matching_entities = _matching_entities(route, parsed.entities)
+        entity_scope = _operation_entity_scope(route, parsed)
         for table_ref, table in tables.items():
             schema_name, table_name = table_ref.removeprefix("table://").rsplit("/", 1)
-            entity_match = _entity_match(route, schema_name, table_name, matching_entities)
+            entity_match = _entity_match(route, schema_name, table_name, entity_scope)
             if entity_match.score == 0:
                 continue
             direct_evidence = [route_evidence, *entity_match.evidence_refs]
@@ -1015,40 +1056,57 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
     return list(candidates.values())
 
 
-def _matching_entities(
+def _operation_entity_scope(
     route: JavaControllerRouteClaim,
-    entities: list[tuple[JavaEntityClaim, str]],
-) -> list[tuple[JavaEntityClaim, str]]:
+    parsed: _ParsedEvidence,
+) -> _OperationEntityScope:
     explicit = [
-        (entity, ref) for entity, ref in entities if route.operation_ref in entity.operation_refs
+        (entity, ref)
+        for entity, ref in parsed.entities
+        if route.operation_ref in entity.operation_refs
     ]
     if explicit:
-        return explicit
-    return [(entity, ref) for entity, ref in entities if not entity.operation_refs]
+        return _OperationEntityScope(
+            entities=tuple(explicit),
+            allow_route_fallback=False,
+            blocked_table_refs=(),
+        )
+    return _OperationEntityScope(
+        entities=tuple(
+            (entity, ref) for entity, ref in parsed.entities if not entity.operation_refs
+        ),
+        allow_route_fallback=True,
+        blocked_table_refs=tuple(sorted(_foreign_table_refs(parsed, route.operation_ref))),
+    )
 
 
 def _entity_match(
     route: JavaControllerRouteClaim,
     schema_name: str,
     table_name: str,
-    entities: list[tuple[JavaEntityClaim, str]],
+    scope: _OperationEntityScope,
 ) -> _EntityMatch:
     table_token = _normalized_name(table_name)
-    for entity, evidence_ref in entities:
-        if entity.table_ref is not None and _table_ref_matches_database_table(
-            entity.table_ref, schema_name, table_name
-        ):
-            return _EntityMatch(
-                score=min(entity.confidence, 1.0),
-                evidence_refs=(evidence_ref,),
-                deterministic=entity.deterministic,
-            )
+    for entity, evidence_ref in scope.entities:
+        if entity.table_ref is not None:
+            if _table_ref_matches_database_table(entity.table_ref, schema_name, table_name):
+                return _EntityMatch(
+                    score=min(entity.confidence, 1.0),
+                    evidence_refs=(evidence_ref,),
+                    deterministic=entity.deterministic,
+                )
+            continue
         if _normalized_name(entity.class_name) == table_token:
             return _EntityMatch(
                 score=min(entity.confidence, 0.9),
                 evidence_refs=(evidence_ref,),
                 deterministic=False,
             )
+    if not scope.allow_route_fallback or any(
+        _table_ref_matches_database_table(table_ref, schema_name, table_name)
+        for table_ref in scope.blocked_table_refs
+    ):
+        return _EntityMatch(score=0, evidence_refs=(), deterministic=False)
     route_token = _route_resource_token(route.path)
     if route_token and (table_token == route_token or table_token.endswith(route_token)):
         return _EntityMatch(score=0.75, evidence_refs=(), deterministic=False)
@@ -1056,19 +1114,42 @@ def _entity_match(
 
 
 def _table_evidence(
-    columns: list[_ParsedDatabaseColumn],
+    parsed: _ParsedEvidence,
 ) -> dict[str, _ParsedDatabaseTable]:
-    values: dict[str, list[_ParsedDatabaseColumn]] = defaultdict(list)
-    for column in columns:
-        values[f"table://{column.schema}/{column.table}"].append(column)
-    return {
-        key: _ParsedDatabaseTable(
-            evidence_refs=tuple(sorted({column.evidence_ref for column in table_columns})[:20]),
-            confidence=min(column.confidence for column in table_columns),
-            deterministic=all(column.deterministic for column in table_columns),
+    table_claims: dict[str, list[_ParsedDatabaseTableClaim]] = defaultdict(list)
+    columns: dict[str, list[_ParsedDatabaseColumn]] = defaultdict(list)
+    for table in parsed.tables:
+        table_claims[f"table://{table.schema}/{table.table}"].append(table)
+    for column in parsed.columns:
+        columns[f"table://{column.schema}/{column.table}"].append(column)
+    result: dict[str, _ParsedDatabaseTable] = {}
+    for key in table_claims.keys() | columns.keys():
+        direct = table_claims[key]
+        supplemental = columns[key]
+        evidence_refs = tuple(
+            dict.fromkeys(
+                [
+                    *(
+                        item.evidence_ref
+                        for item in sorted(direct, key=lambda item: item.evidence_ref)
+                    ),
+                    *(
+                        item.evidence_ref
+                        for item in sorted(supplemental, key=lambda item: item.evidence_ref)
+                    ),
+                ]
+            )
+        )[:20]
+        sources: list[_ParsedDatabaseTableClaim | _ParsedDatabaseColumn] = [
+            *direct,
+            *supplemental,
+        ]
+        result[key] = _ParsedDatabaseTable(
+            evidence_refs=evidence_refs,
+            confidence=min(item.confidence for item in sources),
+            deterministic=all(item.deterministic for item in sources),
         )
-        for key, table_columns in values.items()
-    }
+    return result
 
 
 def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
@@ -1076,11 +1157,21 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
     candidates: dict[str, EntityMappingCandidate] = {}
     for field, field_evidence in parsed.fields:
         table_targets = operation_tables.get(field.operation_ref, {})
+        blocked_table_refs = _foreign_table_refs(parsed, field.operation_ref)
         field_claims = _table_column_claims_for_field(parsed, field)
         for parsed_column in parsed.columns:
             column = parsed_column.claim
             entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
             if table_targets and entity_ref not in table_targets:
+                continue
+            if not table_targets and any(
+                _table_ref_matches_database_table(
+                    table_ref,
+                    parsed_column.schema,
+                    parsed_column.table,
+                )
+                for table_ref in blocked_table_refs
+            ):
                 continue
             matching_claims = [
                 item
@@ -1162,12 +1253,44 @@ def _table_column_claims_for_field(
         for entity, _evidence_ref in parsed.entities
         if field.operation_ref in entity.operation_refs
     }
+    foreign_entities = {
+        entity.entity_ref
+        for entity, _evidence_ref in parsed.entities
+        if entity.operation_refs and field.operation_ref not in entity.operation_refs
+    }
     return [
         item
         for item in parsed.table_columns
         if item[0].field_name.casefold() == field.field_name.casefold()
-        and (not operation_entities or item[0].entity_ref in operation_entities)
+        and (
+            item[0].entity_ref in operation_entities
+            if operation_entities
+            else item[0].entity_ref not in foreign_entities
+        )
     ]
+
+
+def _foreign_table_refs(
+    parsed: _ParsedEvidence,
+    operation_ref: str,
+) -> set[str]:
+    foreign_entities = {
+        entity.entity_ref
+        for entity, _evidence_ref in parsed.entities
+        if entity.operation_refs and operation_ref not in entity.operation_refs
+    }
+    return {
+        *(
+            entity.table_ref
+            for entity, _evidence_ref in parsed.entities
+            if entity.entity_ref in foreign_entities and entity.table_ref is not None
+        ),
+        *(
+            claim.table_ref
+            for claim, _evidence_ref in parsed.table_columns
+            if claim.entity_ref in foreign_entities
+        ),
+    }
 
 
 def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:

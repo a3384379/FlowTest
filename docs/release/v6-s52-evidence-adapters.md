@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                               |
 | Scope              | `mcp:evidence:write`                                    |
 | 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；七轮 Review 修复已本地全绿，待推送新 Head |
+| Release 状态       | Draft PR #58；八轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -49,10 +49,15 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   Evidence Ref 继续约束依赖它的 Field/Column 和 DB State 候选，路径启发式不会被下游抬高。
 - Route 没有显式 Operation/Entity 关联时只回退到未绑定 Operation 的 Entity；已声明其他 Operation Ref 的
   Entity 不会被跨 Operation 当作确定性映射。
+- Operation 存在显式 Entity 时禁用 Route/Table 名称启发式，显式 `table_ref` 也优先于 Class Name 回退；其他
+  Operation 已声明的 Entity/Table Ref 会阻断 Route 与 Field/Column 回退，不能生成跨 Operation 候选或假冲突。
 - Entity 显式 Table Ref 同时支持 `table://schema/table` 与既有 Fixture 使用的 `table://schema.table`；两者都按
   Schema/Table 与 DB Evidence 精确匹配，不会误降级为 Class Name 启发式或跨 Schema 误关联。
 - Java `table_column` 显式声明优先约束 Field/Column 候选，支持不同命名的 Field 与 Column；声明自身的
-  Evidence Ref、Confidence 与 Deterministic 会参与候选，且同名字段按 Operation 关联的 Entity 隔离。
+  Evidence Ref、Confidence 与 Deterministic 会参与候选，且同名字段按 Operation 关联的 Entity 隔离；无显式
+  Operation→Entity 候选时，也不会吸收已绑定其他 Operation Entity 的 Column Claim 或对应 DB Table。
+- DB `claim_kind=table` Finding 作为独立强类型映射输入；即使 Envelope 没有 Column Finding，显式 Java Entity
+  仍可生成带 Table Finding Evidence Ref 的 Operation→Entity 候选。Column 只作为补充证据，不再代替 Table Claim。
 - Operation State Source 由 Operation 与 Field 共同确定；Java camelCase State Field 与 DB snake_case 状态列按
   规范化字段名相关联。同一 Operation 的独立 State Field 不互相制造假冲突，同字段不同 State Set 仍保持歧义。
 - DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
@@ -152,7 +157,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；694 passed、4 skipped、总覆盖率 90.55%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；698 passed、4 skipped、总覆盖率 90.56%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -205,12 +210,16 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   对应两个 Thread 已回复并关闭；Provider/Adapter Review Body 也已通过 PR Comment 回应。
 - 第七轮 Codex Review 在 `e926f07f4a` 提出 1 个 P1 与 2 个 P2：Masked Example 只检查 `***`，仍可夹带完整
   Phone/Card；Java Claim 生成 External Finding ID 时直接截断可碰撞；DB Boolean State 使用 Python 大小写文本，
-  与 Java JSON 风格值产生假冲突。三项均已本地修复，专用与通用 API 的标准 422/Trace ID/不回显敏感值、超长
-  ID 唯一性及 Boolean State 佐证均有直接回归；待推送新精确 Head 后回复并关闭三个 Thread。
+  与 Java JSON 风格值产生假冲突。三项均在 `9cbcd89f6d` 修复，专用与通用 API 的标准
+  422/Trace ID/不回显敏感值、超长 ID 唯一性及 Boolean State 佐证均有直接回归，对应三个 Thread 已回复并关闭。
+- 第八轮 Codex Review 在 `9cbcd89f6d` 提出 3 个 P2：显式 Operation Entity 存在时仍启用 Route/Table 启发式；
+  无 Operation→Entity 候选时可吸收其他 Operation 的 `table_column`；DB Table Finding 未进入 Mapping Derivation。
+  三项均已本地修复，新增显式 Entity 禁止假后缀表、跨 Operation Column/DB Table 隔离、Table-only Domain 与
+  通用 API 可追溯映射回归；待推送新精确 Head 后回复并关闭三个 Thread。
 
 ### 待完成
 
-- 第七轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push与 Evidence Closure。
+- 第八轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

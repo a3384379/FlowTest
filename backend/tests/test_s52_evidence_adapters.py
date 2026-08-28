@@ -228,7 +228,12 @@ def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> 
     second_table = json.loads(json.dumps(ambiguous_database["tables"][0]))
     second_table["name"] = "archived_orders"
     ambiguous_database["tables"].append(second_table)
-    java_inputs = _mapping_inputs(envelope, "java")
+    ambiguous_java = _java_submission()
+    _add_archived_order_entity(ambiguous_java)
+    java_inputs = _mapping_inputs(
+        adapt_java_evidence(JavaEvidenceSubmission.model_validate(ambiguous_java)),
+        "java",
+    )
     valid_conflict_envelope = with_mapping_conflict_findings(
         adapt_database_evidence(DatabaseEvidenceSubmission.model_validate(ambiguous_database)),
         java_inputs,
@@ -307,9 +312,14 @@ def test_entity_mapping_candidates_are_traceable_and_ambiguity_is_never_selected
     second_table = json.loads(json.dumps(ambiguous_database["tables"][0]))
     second_table["name"] = "archived_orders"
     ambiguous_database["tables"].append(second_table)
+    ambiguous_java = _java_submission()
+    _add_archived_order_entity(ambiguous_java)
     ambiguous = derive_entity_mapping(
         [
-            *_mapping_inputs(java_envelope, "java"),
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(ambiguous_java)),
+                "java",
+            ),
             *_mapping_inputs(
                 adapt_database_evidence(
                     DatabaseEvidenceSubmission.model_validate(ambiguous_database)
@@ -513,6 +523,78 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
     )
 
 
+def test_explicit_operation_entity_disables_route_table_fallback() -> None:
+    database_payload = _database_submission()
+    route_suffix_table = json.loads(json.dumps(database_payload["tables"][0]))
+    route_suffix_table["name"] = "customer_orders"
+    database_payload["tables"].append(route_suffix_table)
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission())),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    operation_entities = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.operation_ref == "operation://POST/api/orders"
+    ]
+    assert {candidate.target_ref for candidate in operation_entities} == {"entity://public/orders"}
+    assert not any(
+        conflict.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        for conflict in mapping.conflicts
+    )
+
+
+def test_database_table_finding_independently_drives_traceable_entity_mapping() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    table_finding = next(
+        finding
+        for finding in database_envelope.findings
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and finding.structured_data.claim_kind == "table"
+    )
+    table_only = database_envelope.model_copy(update={"findings": [table_finding]})
+    table_input = _mapping_inputs(table_only, "database-table")[0]
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(java_envelope, "java"),
+            table_input,
+        ]
+    )
+
+    operation_entity = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.target_ref == "entity://public/orders"
+    )
+    assert table_input.evidence_ref in operation_entity.evidence_refs
+    assert not any(
+        candidate.kind
+        in {
+            EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+            EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+        }
+        for candidate in mapping.candidates
+    )
+
+
 def test_operation_entity_fallback_excludes_entities_scoped_elsewhere() -> None:
     java_payload = _java_submission()
     route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
@@ -537,6 +619,41 @@ def test_operation_entity_fallback_excludes_entities_scoped_elsewhere() -> None:
     assert not any(
         candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
         and candidate.operation_ref == "operation://POST/api/purchases"
+        for candidate in mapping.candidates
+    )
+
+
+def test_field_mapping_excludes_table_column_claims_scoped_to_other_operations() -> None:
+    java_payload = _java_submission()
+    operation_ref = "operation://POST/api/purchases"
+    route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
+    route["operation_ref"] = operation_ref
+    route["path"] = "/api/purchases"
+    for field in (claim for claim in java_payload["claims"] if claim["kind"] == "dto_field"):
+        field["operation_ref"] = operation_ref
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    assert not any(
+        candidate.kind
+        in {
+            EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+            EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+        }
+        and candidate.operation_ref == operation_ref
         for candidate in mapping.candidates
     )
 
@@ -1066,6 +1183,22 @@ def _java_submission() -> dict[str, Any]:
         "redactions": [],
         "warnings": [],
     }
+
+
+def _add_archived_order_entity(payload: dict[str, Any]) -> None:
+    payload["claims"].append(
+        {
+            "id": "entity-archived-order",
+            "kind": "entity",
+            "source_path": "src/ArchivedOrder.java:4",
+            "confidence": 0.96,
+            "deterministic": True,
+            "entity_ref": "entity://ArchivedOrder",
+            "class_name": "ArchivedOrder",
+            "table_ref": "table://public.archived_orders",
+            "operation_refs": ["operation://POST/api/orders"],
+        }
+    )
 
 
 def _database_submission() -> dict[str, Any]:
