@@ -2,10 +2,10 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48 契约冻结与证据闭环；S49 Context Revision、External Evidence 与 Proposal Adapter 已由
-PR #49/#50/#51 受控串行合入 `main@14d4694762cd381e347b248da5e97ecb7452ab21`，实现 PR 精确 Head 与
-Merge SHA Main Push 的全部适用 Workflow、Review Thread 和唯一 Required Gate 已闭环，当前仅执行
-Evidence Closure 文档收口；当前
+已完成 S48 契约冻结与证据闭环；S49 Context Revision、External Evidence 与 Proposal Adapter 已完成
+实现及 Evidence Closure，最新全绿基线为 `main@8040882218bfa70df556c42482c69d2413190ec6`。当前严格串行
+执行 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler MVP；本地实现不等于远程闭环，S50 的 PR
+精确 Head、Review、Ready Gate、普通 Squash Merge、Merge SHA Main Push 与 Evidence Closure 尚待完成。当前
 Migration Head 为 `20260828_0046`，仍不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
@@ -14,6 +14,34 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 进行中：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
+
+### Implemented
+
+- 新增严格 `flowtest-integration-plan-v1` 纯领域 Contract 与稳定 Fingerprint，覆盖 Context、Objective、Actors、
+  Preconditions、Operations、Steps、Branches、Bindings、Data Recipes、Oracles、Cleanup、Coverage、Unresolved、
+  Confidence、Diagnostics 与 Evidence。
+- Planner 只对用户显式选择的 Operation 使用 Canonical Contract 做同名同型 Request/Response Binding；复用
+  Test Engineering 的确定性 Scenario/Oracle 与固定 Existing Auth Workflow Version。多候选不猜测、缺证据
+  阻断、Secret Literal 拒绝。
+- Compiler 以十个显式 Pass 生成当前 Runtime 可执行的 API/Extract/Assert/Condition/Dataset/SubFlow 与 Edge
+  Mapping；Path/Cookie/Secret/External Source、未决 Review、多个 Dataset 等不可无损语义返回 Blocker。
+- Plan/Compiler Provenance 进入既有 AIChangeSet Source Snapshot；写入前核对 Context、Plan 与 FlowSpec 指纹，
+  不新建 Plan 表，不复制 FlowSpec Mapping/Review/Apply 状态机。
+- Golden 固定 Login Token → Create → Extract ID → Query by ID → Assert ID/Status/Schema；纯领域、真实服务层
+  Draft Review/Apply 与 Compose Playwright 路径均有回归。
+
+### 当前门槛
+
+- Backend 458-file Format、Lint、334-source Mypy、659 passed/4 skipped Pytest（90.32% 覆盖率）以及 Frontend
+  Format、Lint/Types、215-test Coverage、Build 均通过；Python/Node 依赖审计与 Security Lint 无已知漏洞。
+- 隔离 Compose 完整栈 15 个服务 Healthy，真实 Playwright Draft → Review → Apply 通过；验收资源已清除且用户
+  既有三个 Compose Project 运行数量不变。Requirement、Correctness/Data、Security/Tenant/Secret/SSRF 与
+  E2E/Scope 四类本地 Review 已完成。
+- 远程 CI、Review Thread、Ready Gate、Merge SHA Main Push 尚未完成。
+- S50 Evidence Closure 合并且其 Main Push Required Gate 成功前，不允许创建 S51 实现分支。
+- 完整边界与证据记录见 [S50 Release Evidence](release/v6-s50-integration-plan-compiler.md)。
 
 ## 已完成实现验收：V6 S49 Context Revision、External Evidence 与 Proposal Adapter
 
