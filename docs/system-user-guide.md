@@ -1,9 +1,9 @@
-# FlowTest V5 系统使用手册
+# FlowTest V6.0 Core 开发版系统使用手册
 
 > 文档类型：系统使用文档  
-> 适用版本：FlowTest V5（以当前 `codex/v5.0` 分支已实现能力为准）  
+> 适用版本：FlowTest V6.0 Core 开发版（S49；未发布）<br>
 > 适用角色：测试工程师、研发人员、项目 Owner/Editor、组织管理员、平台管理员、MCP 客户端集成人员  
-> 最后更新：2026-08-23
+> 最后更新：2026-08-28
 
 ## 1. 文档说明
 
@@ -712,6 +712,8 @@ MCP Scope：
 | --- | --- | --- |
 | 使用只读 Tools/Resources | `mcp:read` | 默认只签发这一项 |
 | 提交 Test Design ChangeSet Draft | `mcp:write` | 仅给明确需要提案的客户端；通常同时保留 `mcp:read` |
+| 创建、补充、查看或关闭 Test Context | `mcp:evidence:write` | 只给受信 Evidence Provider；不会继承自 `mcp:write` |
+| 预览或创建 FlowSpec Draft Proposal | `mcp:flow:propose` | S49 仅开放受控 Application API；MCP Tool 在 S51 注册 |
 
 Service Account 绑定签发人的组织和项目可见性。即使拥有 MCP Scope，也不能跨组织读取，也不能读取签发人无权访问的项目。签发后如果项目权限发生变化，调用结果会同步受限。
 
@@ -811,7 +813,7 @@ http://127.0.0.1:8765/mcp
 
 ### 8.6 Tools
 
-当前共 16 个 Tool。
+当前共 21 个 Tool。
 
 #### 8.6.1 项目、服务、契约和运行证据
 
@@ -854,6 +856,22 @@ Status 200 与 201、不同 Response Schema 都属于不同覆盖要求；没有
 | `flowtest.inspect_data_profile` | `project_id`、`profile` | 分析已类型化、已脱敏的数据画像，不接收 Credential 或原始数据行 |
 
 #### 8.6.5 受控写入
+
+Context Tool 使用独立 `mcp:evidence:write` Scope：
+
+| Tool | 主要参数 | 作用 |
+| --- | --- | --- |
+| `flowtest.begin_test_context` | `project_id`、`name`、`objective`、Evidence Requirement 与有版本来源 | 创建首个不可变 Context Revision |
+| `flowtest.inspect_context_requirements` | `context_id` | 读取缺失 Evidence、Conflict、状态和当前 Fingerprint |
+| `flowtest.ingest_external_evidence` | `context_id`、严格 Evidence Envelope | 校验并生成新的不可变 Revision；原始 Finding 不在响应中返回 |
+| `flowtest.inspect_test_context` | `context_id` | 读取当前 Revision 与脱敏 Evidence 摘要 |
+| `flowtest.close_test_context` | `context_id` | 关闭 Context，阻止继续接收 Evidence 或创建 Proposal |
+
+Evidence Envelope 必须有 Provider/Source Revision、Subject、Finding Fingerprint、Confidence 与
+Deterministic 标记。未知字段、跨项目引用、无界内容、Prompt Instruction 字段和 Secret/Token/Cookie/
+Password/连接串/PEM/原始 PII 会被拒绝；代码注释、接口描述和数据库 Comment 始终只是不可信数据。
+
+Test Design 的受控写入使用既有 `mcp:write` Scope：
 
 | Tool | 主要参数 | 作用 |
 | --- | --- | --- |
@@ -977,7 +995,7 @@ MCP 只读 Tool 的成功结果包含：
 | `MCP_AUTHENTICATION_REQUIRED` | 未传 Service Account Token | 配置环境变量或 Bearer Header |
 | `INVALID_SERVICE_ACCOUNT_TOKEN` | Token 错误、撤销或格式不对 | 轮换/重签 Token；确认以 `ftsa_` 开头 |
 | `SERVICE_ACCOUNT_EXPIRED` | Service Account 已过期 | 由组织管理员重新签发 |
-| `MCP_SCOPE_REQUIRED` | 缺少 `mcp:read` 或 `mcp:write` | 重新签发最小权限账号；Scope 不能在旧 Token 上静默扩大 |
+| `MCP_SCOPE_REQUIRED` | 缺少调用所需的独立 MCP Scope | 按用途签发 `mcp:read`、`mcp:write`、`mcp:evidence:write` 或 `mcp:flow:propose`；旧 Scope 不静默扩大 |
 | 项目返回不存在 | 跨组织或签发人无项目权限 | 检查组织上下文和项目成员关系，不通过 ID 猜测绕过 |
 | `MCP_GATEWAY_UNAVAILABLE` | API 地址错误、网络/TLS 失败或后端未就绪 | 检查 `FLOWTEST_MCP_API_BASE_URL`、Readiness 和代理日志 |
 | `MCP_GATEWAY_INVALID_RESPONSE` | 网关收到非预期 Application API 响应 | 核对 API/MCP 版本和反向代理，不记录响应 Body 中的敏感值 |

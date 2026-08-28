@@ -62,8 +62,18 @@ describe('OrganizationGovernancePage', () => {
     await browser.type(within(panel).getByPlaceholderText('regression-bot'), 'governance-bot')
     const scope = within(panel).getByRole('combobox')
     fireEvent.mouseDown(scope)
+    await browser.type(scope, 'mcp:evidence:write')
     fireEvent.click(
-      await screen.findByText('org:read', { selector: '.ant-select-item-option-content' }),
+      await screen.findByText('mcp:evidence:write', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    fireEvent.mouseDown(scope)
+    await browser.type(scope, 'mcp:flow:propose')
+    fireEvent.click(
+      await screen.findByText('mcp:flow:propose', {
+        selector: '.ant-select-item-option-content',
+      }),
     )
     await browser.click(within(panel).getByRole('button', { name: '签发令牌' }))
 
@@ -72,7 +82,7 @@ describe('OrganizationGovernancePage', () => {
     expect(submitted).toMatchObject({
       name: 'Governance bot',
       account_key: 'governance-bot',
-      scopes: ['org:read'],
+      scopes: ['mcp:evidence:write', 'mcp:flow:propose'],
     })
   })
 

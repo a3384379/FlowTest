@@ -85,6 +85,8 @@ const serviceAccountScopes = [
   'audit:read',
   'mcp:read',
   'mcp:write',
+  'mcp:evidence:write',
+  'mcp:flow:propose',
 ]
 
 type MemberFormValues = { user_id: string; role: OrganizationRole }

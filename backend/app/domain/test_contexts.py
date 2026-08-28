@@ -25,6 +25,9 @@ EXTERNAL_EVIDENCE_SCHEMA_VERSION: Final[Literal["flowtest-external-evidence-v1"]
 )
 MCP_CONTEXT_EVIDENCE_SERVER_VERSION: Final[str] = "s49-context-evidence-v1"
 MAX_EXTERNAL_EVIDENCE_BYTES = 256 * 1024
+MAX_CONTEXT_REVISION_REFERENCES = 100
+MAX_CONTEXT_CONFLICTS = 100
+MAX_CONTEXT_EVIDENCE_ITEMS = 2000
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9._/-]{0,159}$")
 _VERSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$")
@@ -170,7 +173,7 @@ class ContextConflictSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flowtest-context-conflicts-v1"] = CONTEXT_CONFLICT_SCHEMA_VERSION
-    conflicts: list[ContextConflict] = Field(default_factory=list, max_length=100)
+    conflicts: list[ContextConflict] = Field(default_factory=list, max_length=MAX_CONTEXT_CONFLICTS)
 
 
 class ContextCompletenessSnapshot(BaseModel):
@@ -196,14 +199,22 @@ class ContextRevisionSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flowtest-context-revision-v1"] = CONTEXT_REVISION_SCHEMA_VERSION
-    repository_revisions: list[RevisionReference] = Field(default_factory=list, max_length=100)
-    contract_revisions: list[RevisionReference] = Field(default_factory=list, max_length=100)
-    data_profile_revisions: list[RevisionReference] = Field(default_factory=list, max_length=100)
+    repository_revisions: list[RevisionReference] = Field(
+        default_factory=list, max_length=MAX_CONTEXT_REVISION_REFERENCES
+    )
+    contract_revisions: list[RevisionReference] = Field(
+        default_factory=list, max_length=MAX_CONTEXT_REVISION_REFERENCES
+    )
+    data_profile_revisions: list[RevisionReference] = Field(
+        default_factory=list, max_length=MAX_CONTEXT_REVISION_REFERENCES
+    )
     existing_test_revision: RevisionReference | None = None
     knowledge_snapshot: ContextKnowledgeSnapshot = Field(default_factory=ContextKnowledgeSnapshot)
     conflict_snapshot: ContextConflictSnapshot = Field(default_factory=ContextConflictSnapshot)
     completeness: ContextCompletenessSnapshot
-    evidence_fingerprints: list[str] = Field(default_factory=list, max_length=2000)
+    evidence_fingerprints: list[str] = Field(
+        default_factory=list, max_length=MAX_CONTEXT_EVIDENCE_ITEMS
+    )
 
     @model_validator(mode="after")
     def validate_fingerprints(self) -> ContextRevisionSnapshot:
@@ -437,9 +448,18 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
         return True
     if _looks_like_high_entropy_credential(value):
         return True
-    if path.endswith((".statement", ".message", ".reason")) and any(
-        pattern.search(value) for pattern in (_PHONE, _CARD)
-    ):
+    if path.endswith(
+        (
+            ".statement",
+            ".message",
+            ".reason",
+            ".value",
+            ".label",
+            ".objective",
+            ".name",
+            ".id",
+        )
+    ) and any(pattern.search(value) for pattern in (_PHONE, _CARD)):
         return True
     parsed = urlsplit(value)
     return parsed.username is not None or parsed.password is not None

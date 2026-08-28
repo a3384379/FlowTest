@@ -87,7 +87,17 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 
 _SENSITIVE_LOCATION_PARTS = frozenset(
-    {"authorization", "cookie", "password", "secret", "token", "api_key", "apikey"}
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "cookie",
+        "envelope",
+        "evidence",
+        "password",
+        "secret",
+        "token",
+    }
 )
 
 

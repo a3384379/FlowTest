@@ -74,6 +74,31 @@ class FlowSpecChangeSetView:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowSpecImportProvenance:
+    context_revision_id: UUID
+    context_fingerprint: str
+    source_ref: str
+    service_account_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class FlowSpecImportPreview:
+    pipeline: FlowSpecPipeline
+    target_workflow_id: UUID | None
+    target_revision: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedFlowSpecImport:
+    pipeline: FlowSpecPipeline
+    mappings: ResolvedFlowSpecMappings
+    target: Workflow | None
+    target_revision: int | None
+    target_snapshot: str | None
+    before: FlowSpec | None
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedFlowSpecMappings:
     service_ids: Mapping[str, UUID]
     service_keys: Mapping[str, str]
@@ -163,46 +188,57 @@ class FlowSpecService:
             ),
         )
 
-    async def create_import(
+    async def preview_import(
         self, *, actor: User, project_id: UUID, payload: FlowSpecImportRequest
-    ) -> FlowSpecChangeSetView:
-        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        pipeline = self._pipeline(payload.spec)
-        _require_pipeline_importable(pipeline)
-        mappings = await self._resolve_mappings(
+    ) -> FlowSpecImportPreview:
+        prepared = await self._prepare_import(
+            actor=actor,
             project_id=project_id,
-            spec=pipeline.spec,
-            service_mappings=payload.service_mappings,
-            operation_mappings=payload.operation_mappings,
-            operation_version_mappings=payload.operation_version_mappings,
+            payload=payload,
         )
-        target = await self._target_workflow(project_id, payload.workflow_id)
-        target_snapshot = None
-        target_revision = None
-        before: FlowSpec | None = None
-        if target is not None:
-            target_revision = target.draft_revision
-            before = self._target_spec(project_id, target)
-            target_snapshot = flow_spec_fingerprint(before)
+        return FlowSpecImportPreview(
+            pipeline=prepared.pipeline,
+            target_workflow_id=prepared.target.id if prepared.target is not None else None,
+            target_revision=prepared.target_revision,
+        )
+
+    async def create_import(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        payload: FlowSpecImportRequest,
+        provenance: FlowSpecImportProvenance | None = None,
+    ) -> FlowSpecChangeSetView:
+        prepared = await self._prepare_import(
+            actor=actor,
+            project_id=project_id,
+            payload=payload,
+        )
         snapshot = _source_snapshot(
-            pipeline=pipeline,
-            target_workflow_id=target.id if target is not None else None,
-            target_revision=target_revision,
-            target_spec=before,
-            resource_mappings=mappings,
+            pipeline=prepared.pipeline,
+            target_workflow_id=prepared.target.id if prepared.target is not None else None,
+            target_revision=prepared.target_revision,
+            target_spec=prepared.before,
+            resource_mappings=prepared.mappings,
+            provenance=provenance,
         )
         change_set = AIChangeSet(
             project_id=project_id,
             impact_run_id=None,
             release_risk_id=None,
             ai_job_id=None,
-            title=pipeline.spec.name,
+            title=prepared.pipeline.spec.name,
             status="draft",
             source_snapshot=snapshot,
-            source_fingerprint=pipeline.fingerprint,
+            source_fingerprint=prepared.pipeline.fingerprint,
             source_type="flow_spec",
-            source_ref=payload.source_ref or f"flow-spec://{pipeline.fingerprint}",
-            actor_type="user",
+            source_ref=(
+                provenance.source_ref
+                if provenance is not None
+                else payload.source_ref or f"flow-spec://{prepared.pipeline.fingerprint}"
+            ),
+            actor_type="service_account" if provenance is not None else "user",
             actor_id=actor.id,
             created_by_id=actor.id,
         )
@@ -213,11 +249,13 @@ class FlowSpecService:
             suggestion_id=None,
             position=0,
             item_type="workflow",
-            action="update" if target is not None else "create",
-            title=pipeline.spec.name,
-            target_resource_id=target.id if target is not None else None,
-            target_snapshot_sha256=target_snapshot,
-            proposed_content={"flow_spec": cast(dict[str, Any], _spec_json(pipeline.spec))},
+            action="update" if prepared.target is not None else "create",
+            title=prepared.pipeline.spec.name,
+            target_resource_id=prepared.target.id if prepared.target is not None else None,
+            target_snapshot_sha256=prepared.target_snapshot,
+            proposed_content={
+                "flow_spec": cast(dict[str, Any], _spec_json(prepared.pipeline.spec))
+            },
             review_status="pending",
             review_note="",
         )
@@ -230,17 +268,51 @@ class FlowSpecService:
             resource_id=change_set.id,
             details={
                 "source_type": "flow_spec",
-                "source_fingerprint": pipeline.fingerprint,
-                "target_workflow_id": str(target.id) if target is not None else None,
-                "requires_review": pipeline.compatibility.requires_review,
-                "service_mapping_count": len(mappings.service_ids),
-                "operation_mapping_count": len(mappings.operation_ids),
+                "source_fingerprint": prepared.pipeline.fingerprint,
+                "target_workflow_id": (
+                    str(prepared.target.id) if prepared.target is not None else None
+                ),
+                "requires_review": prepared.pipeline.compatibility.requires_review,
+                "service_mapping_count": len(prepared.mappings.service_ids),
+                "operation_mapping_count": len(prepared.mappings.operation_ids),
+                "actor_type": change_set.actor_type,
+                "context_revision_id": (
+                    str(provenance.context_revision_id) if provenance is not None else None
+                ),
             },
         )
         await self._session.commit()
         await self._session.refresh(change_set)
         await self._session.refresh(item)
-        return self._view(change_set, item, before=before)
+        return self._view(change_set, item, before=prepared.before)
+
+    async def _prepare_import(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        payload: FlowSpecImportRequest,
+    ) -> _PreparedFlowSpecImport:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        pipeline = self._pipeline(payload.spec)
+        _require_pipeline_importable(pipeline)
+        mappings = await self._resolve_mappings(
+            project_id=project_id,
+            spec=pipeline.spec,
+            service_mappings=payload.service_mappings,
+            operation_mappings=payload.operation_mappings,
+            operation_version_mappings=payload.operation_version_mappings,
+        )
+        target = await self._target_workflow(project_id, payload.workflow_id)
+        before = self._target_spec(project_id, target) if target is not None else None
+        return _PreparedFlowSpecImport(
+            pipeline=pipeline,
+            mappings=mappings,
+            target=target,
+            target_revision=target.draft_revision if target is not None else None,
+            target_snapshot=flow_spec_fingerprint(before) if before is not None else None,
+            before=before,
+        )
 
     async def list_change_sets(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
@@ -881,8 +953,9 @@ def _source_snapshot(
     target_revision: int | None,
     target_spec: FlowSpec | None,
     resource_mappings: ResolvedFlowSpecMappings,
+    provenance: FlowSpecImportProvenance | None = None,
 ) -> dict[str, Any]:
-    return {
+    snapshot: dict[str, Any] = {
         "flow_spec": _spec_json(pipeline.spec),
         "validation": pipeline.validation.model_dump(mode="json"),
         "compatibility": pipeline.compatibility.model_dump(mode="json"),
@@ -891,6 +964,16 @@ def _source_snapshot(
         "target_spec": _spec_json(target_spec) if target_spec is not None else None,
         "resource_mappings": resource_mappings.snapshot(),
     }
+    if provenance is not None:
+        snapshot.update(
+            {
+                "proposal_schema_version": "v6-flow-proposal-source-v1",
+                "context_revision_id": str(provenance.context_revision_id),
+                "context_fingerprint": provenance.context_fingerprint,
+                "service_account_id": str(provenance.service_account_id),
+            }
+        )
+    return snapshot
 
 
 def _mapping_ids(

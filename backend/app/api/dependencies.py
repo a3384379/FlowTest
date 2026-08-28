@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from contextvars import Token
 from dataclasses import dataclass
 from typing import Annotated, cast
 from uuid import UUID
@@ -25,9 +26,11 @@ from app.models.access import User
 from app.models.organizations import ServiceAccount
 from app.repositories.access import UserRepository
 from app.services.mcp_controlled_write import MCP_WRITE_SCOPE
+from app.services.mcp_flow_proposals import MCP_FLOW_PROPOSE_SCOPE
 from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.services.organizations import OrganizationContextService
 from app.services.service_accounts import ServiceAccountService
+from app.services.test_contexts import MCP_EVIDENCE_WRITE_SCOPE
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -141,32 +144,14 @@ async def get_mcp_authenticated_principal(
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> AsyncIterator[MCPAuthenticatedPrincipal]:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise AppError(
-            code="MCP_AUTHENTICATION_REQUIRED",
-            message="MCP 需要服务账号令牌",
-            status_code=401,
-        )
-    account, tenant = await ServiceAccountService(session).authenticate(
-        credentials.credentials,
-        touch_last_used=False,
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_READ_SCOPE,
+        missing_scope_message="服务账号缺少 MCP 只读权限",
     )
-    if MCP_READ_SCOPE not in tenant.scopes:
-        raise AppError(
-            code="MCP_SCOPE_REQUIRED",
-            message="服务账号缺少 MCP 只读权限",
-            status_code=403,
-        )
-    actor = await UserRepository(session).get(tenant.actor_id)
-    if actor is None or not actor.is_active:
-        raise AppError(
-            code="MCP_AUTHENTICATION_REQUIRED",
-            message="MCP 服务账号关联用户不可用",
-            status_code=401,
-        )
-    context_token = set_tenant_context(tenant)
     try:
-        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
+        yield principal
     finally:
         reset_tenant_context(context_token)
 
@@ -175,6 +160,57 @@ async def get_mcp_write_principal(
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_WRITE_SCOPE,
+        missing_scope_message="服务账号缺少 MCP 受控写入权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
+async def get_mcp_evidence_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_EVIDENCE_WRITE_SCOPE,
+        missing_scope_message="服务账号缺少 MCP 外部证据写入权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
+async def get_mcp_flow_proposal_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_FLOW_PROPOSE_SCOPE,
+        missing_scope_message="服务账号缺少 MCP FlowSpec 提案权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
+async def _authenticate_mcp_principal(
+    *,
+    session: AsyncSession,
+    credentials: HTTPAuthorizationCredentials | None,
+    required_scope: str,
+    missing_scope_message: str,
+) -> tuple[MCPAuthenticatedPrincipal, Token[TenantContext | None]]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AppError(
             code="MCP_AUTHENTICATION_REQUIRED",
@@ -185,10 +221,10 @@ async def get_mcp_write_principal(
         credentials.credentials,
         touch_last_used=False,
     )
-    if MCP_WRITE_SCOPE not in tenant.scopes:
+    if required_scope not in tenant.scopes:
         raise AppError(
             code="MCP_SCOPE_REQUIRED",
-            message="服务账号缺少 MCP 受控写入权限",
+            message=missing_scope_message,
             status_code=403,
         )
     actor = await UserRepository(session).get(tenant.actor_id)
@@ -199,10 +235,7 @@ async def get_mcp_write_principal(
             status_code=401,
         )
     context_token = set_tenant_context(tenant)
-    try:
-        yield MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant)
-    finally:
-        reset_tenant_context(context_token)
+    return MCPAuthenticatedPrincipal(actor=actor, account=account, tenant=tenant), context_token
 
 
 MCPCurrent = Annotated[
@@ -213,6 +246,16 @@ MCPCurrent = Annotated[
 MCPWriteCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_write_principal),
+]
+
+MCPEvidenceCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_evidence_principal),
+]
+
+MCPFlowProposalCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_flow_proposal_principal),
 ]
 
 

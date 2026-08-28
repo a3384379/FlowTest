@@ -18,6 +18,22 @@ IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7e]{1,128}$")
 IDEMPOTENCY_RETENTION_HOURS = 24
 
 
+def require_idempotency_key(key: str | None) -> str:
+    if key is None:
+        raise AppError(
+            code="IDEMPOTENCY_KEY_REQUIRED",
+            message="必须提供 Idempotency-Key",
+            status_code=422,
+        )
+    if not IDEMPOTENCY_KEY_PATTERN.fullmatch(key):
+        raise AppError(
+            code="INVALID_IDEMPOTENCY_KEY",
+            message="Idempotency-Key 必须为 1-128 个可见 ASCII 字符",
+            status_code=422,
+        )
+    return key
+
+
 class IdempotencyService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -34,12 +50,7 @@ class IdempotencyService:
     ) -> dict[str, Any]:
         if key is None:
             return (await action()).model_dump(mode="json")
-        if not IDEMPOTENCY_KEY_PATTERN.fullmatch(key):
-            raise AppError(
-                code="INVALID_IDEMPOTENCY_KEY",
-                message="Idempotency-Key 必须为 1-128 个可见 ASCII 字符",
-                status_code=422,
-            )
+        require_idempotency_key(key)
         request_hash = _request_hash(request_payload)
         record, cached = await self._claim(
             key=key,
