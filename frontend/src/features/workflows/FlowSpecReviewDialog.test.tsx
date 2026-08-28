@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { apiDefinition, project, workflow } from '../../test/fixtures'
 import { server } from '../../test/server'
 import type { FlowSpec, FlowSpecChangeSetDetail, RequestService } from '../../lib/api'
-import FlowSpecReviewDialog from './FlowSpecReviewDialog'
+import FlowSpecReviewDialog, { type FlowSpecReviewSeed } from './FlowSpecReviewDialog'
 
 const targetService: RequestService = {
   id: '00000000-0000-4000-8000-000000008001',
@@ -229,6 +229,46 @@ describe('FlowSpecReviewDialog', () => {
     await browser.click(within(dialog).getByRole('button', { name: /创建 ChangeSet Draft/ }))
     await waitFor(() => expect(importCalls).toBe(1))
   })
+
+  it('loads an MCP proposal into the established raw mapping path without mutating it', async () => {
+    let importPayload: Record<string, unknown> | null = null
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([targetService])),
+      http.post(`/api/v1/projects/${project.id}/flow-specs/imports`, async ({ request }) => {
+        importPayload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(changeSet('pending'), { status: 201 })
+      }),
+    )
+    const initial: FlowSpecReviewSeed = {
+      proposalId: '00000000-0000-4000-8000-000000008051',
+      targetWorkflowId: null,
+      spec,
+      serviceMappings: { 'service.orders': targetService.id },
+      operationMappings: { 'orders.create': apiDefinition.id },
+      operationVersionMappings: { 'orders.create': 1 },
+    }
+    renderDialog({ workflowId: null, initial })
+    const browser = userEvent.setup()
+    const dialog = screen.getByRole('dialog')
+
+    expect(within(dialog).getByRole('textbox', { name: 'FlowSpec JSON' })).toHaveValue(
+      JSON.stringify(spec, null, 2),
+    )
+    expect(within(dialog).getByText(/已载入 MCP Proposal 快照/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '导出当前草稿' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: '创建 ChangeSet Draft' })).toBeEnabled()
+    await browser.click(within(dialog).getByRole('button', { name: '创建 ChangeSet Draft' }))
+
+    await waitFor(() =>
+      expect(importPayload).toMatchObject({
+        spec,
+        service_mappings: initial.serviceMappings,
+        operation_mappings: initial.operationMappings,
+        operation_version_mappings: initial.operationVersionMappings,
+      }),
+    )
+    expect(importPayload).not.toHaveProperty('workflow_id')
+  })
 })
 
 function changeSet(
@@ -267,18 +307,20 @@ function changeSet(
   }
 }
 
-function renderDialog() {
+function renderDialog(options?: { workflowId: string | null; initial?: FlowSpecReviewSeed }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  const workflowId = options?.workflowId === null ? undefined : (options?.workflowId ?? workflow.id)
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <FlowSpecReviewDialog
           open
           projectId={project.id}
-          workflowId={workflow.id}
+          workflowId={workflowId}
           apis={[apiDefinition]}
+          initial={options?.initial}
           onClose={() => undefined}
         />
       </QueryClientProvider>

@@ -24,6 +24,7 @@ EXTERNAL_EVIDENCE_SCHEMA_VERSION: Final[Literal["flowtest-external-evidence-v1"]
     "flowtest-external-evidence-v1"
 )
 MCP_CONTEXT_EVIDENCE_SERVER_VERSION: Final[str] = "s49-context-evidence-v1"
+MCP_FLOW_PROPOSAL_SERVER_VERSION: Final[str] = "s51-flow-proposal-v1"
 MAX_EXTERNAL_EVIDENCE_BYTES = 256 * 1024
 MAX_CONTEXT_REVISION_REFERENCES = 100
 MAX_CONTEXT_CONFLICTS = 100

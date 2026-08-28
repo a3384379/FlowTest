@@ -8,10 +8,18 @@ from uuid import UUID
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from app.domain.integration_plans import (
+    IntegrationPlan,
+    IntegrationPlanCompilation,
+    PlanValidationResult,
+)
 from app.domain.mcp_read import MCPReadEnvelope
 from app.schemas.test_contexts import (
+    CompilerDiagnosticsResponse,
     ContextRequirementsResponse,
+    FlowSpecProposalInspectionResponse,
     FlowSpecProposalResponse,
+    IntegrationPlanRequest,
     TestContextResponse,
 )
 from app.schemas.test_design import MCPControlledWriteEnvelope
@@ -37,11 +45,11 @@ class MCPReadGatewayClient:
         token: str | None = None,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
-        client_version: str = "flowtest-mcp-s42",
+        client_version: str = "flowtest-mcp-s51",
     ) -> None:
         self._base_url = _validate_base_url(base_url)
         self._token = token
-        self._client_version = client_version[:80] or "flowtest-mcp-s42"
+        self._client_version = client_version[:80] or "flowtest-mcp-s51"
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
@@ -333,6 +341,77 @@ class MCPReadGatewayClient:
         )
         return _validate_response(response, FlowSpecProposalResponse)
 
+    async def inspect_flow_proposal(
+        self,
+        project_id: UUID | str,
+        change_set_id: UUID | str,
+        *,
+        token: str | None = None,
+    ) -> FlowSpecProposalInspectionResponse:
+        response = await self._request_get(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}",
+            params={"project_id": str(project_id)},
+            token=token,
+        )
+        return _validate_response(response, FlowSpecProposalInspectionResponse)
+
+    async def plan_integration_test(
+        self,
+        payload: IntegrationPlanRequest | Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> IntegrationPlan:
+        body = (
+            payload.model_dump(mode="json")
+            if isinstance(payload, IntegrationPlanRequest)
+            else dict(payload)
+        )
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/plans",
+            payload=body,
+            token=token,
+        )
+        return _validate_response(response, IntegrationPlan)
+
+    async def validate_integration_plan(
+        self,
+        plan: IntegrationPlan | Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> PlanValidationResult:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/plans/validate",
+            payload={"plan": _model_payload(plan)},
+            token=token,
+        )
+        return _validate_response(response, PlanValidationResult)
+
+    async def compile_integration_flowspec(
+        self,
+        plan: IntegrationPlan | Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> IntegrationPlanCompilation:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/plans/compile",
+            payload={"plan": _model_payload(plan)},
+            token=token,
+        )
+        return _validate_response(response, IntegrationPlanCompilation)
+
+    async def explain_compiler_diagnostics(
+        self,
+        plan: IntegrationPlan | Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> CompilerDiagnosticsResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/plans/diagnostics",
+            payload={"plan": _model_payload(plan)},
+            token=token,
+        )
+        return _validate_response(response, CompilerDiagnosticsResponse)
+
     async def _get(
         self,
         path: str,
@@ -431,6 +510,12 @@ def _validate_base_url(value: str) -> str:
         return value.rstrip("/")
     except (AttributeError, ValueError) as error:
         raise ValueError("MCP API Base URL 必须是无凭据的 HTTP/HTTPS 地址") from error
+
+
+def _model_payload(value: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    return dict(value)
 
 
 def _gateway_error(response: httpx.Response) -> MCPGatewayError:

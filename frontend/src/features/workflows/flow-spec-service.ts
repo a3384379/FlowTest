@@ -3,10 +3,12 @@ import {
   type FlowSpec,
   type FlowSpecApplyResult,
   type FlowSpecChangeSetDetail,
+  type FlowSpecChangeSetPage,
   type FlowSpecCompatibilityResult,
   type FlowSpecDiff,
   type FlowSpecExport,
   type FlowSpecValidationResult,
+  type FlowSpecVisualProposal,
 } from '../../lib/api'
 
 export async function exportFlowSpec(
@@ -88,6 +90,24 @@ export async function applyFlowSpec(
 ): Promise<FlowSpecApplyResult> {
   const response = await apiClient.post<FlowSpecApplyResult>(
     `/projects/${projectId}/flow-specs/change-sets/${changeSetId}/apply`,
+  )
+  return response.data
+}
+
+export async function listFlowSpecChangeSets(projectId: string): Promise<FlowSpecChangeSetPage> {
+  const response = await apiClient.get<FlowSpecChangeSetPage>(
+    `/projects/${projectId}/flow-specs/change-sets`,
+    { params: { page: 1, page_size: 100 } },
+  )
+  return response.data
+}
+
+export async function getVisualFlowProposal(
+  projectId: string,
+  changeSetId: string,
+): Promise<FlowSpecVisualProposal> {
+  const response = await apiClient.get<FlowSpecVisualProposal>(
+    `/projects/${projectId}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
   )
   return response.data
 }

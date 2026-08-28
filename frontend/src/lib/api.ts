@@ -661,6 +661,90 @@ export type FlowSpecApplyResult = {
   applied_at: string
 }
 
+export type IntegrationPlanDiagnostic = {
+  code: string
+  severity: 'blocker' | 'review' | 'warning' | 'info'
+  message: string
+  path: string
+  compiler_pass: string | null
+  evidence_refs: string[]
+}
+
+export type IntegrationPlan = {
+  schema_version: 'flowtest-integration-plan-v1'
+  plan_fingerprint: string
+  context_revision_id: string
+  context_fingerprint: string
+  objective: string
+  operations: Array<{
+    ref: string
+    service_ref: string
+    name: string
+    method: string
+    path: string
+    evidence_refs: string[]
+  }>
+  bindings: Array<{
+    id: string
+    target: { step_id: string; location: string; key: string; value_type: string }
+    selected_candidate_id: string | null
+    confidence: number
+    requires_review: boolean
+    evidence_refs: string[]
+  }>
+  oracles: Array<{
+    id: string
+    step_id: string
+    kind: string
+    expression: string
+    requires_review: boolean
+    evidence_refs: string[]
+  }>
+  unresolved_items: Array<{
+    id: string
+    code: string
+    severity: 'blocker' | 'review'
+    message: string
+    candidate_refs: string[]
+    evidence_refs: string[]
+  }>
+  review_requirements: string[]
+  confidence: { overall: number; evidence_coverage: number; deterministic: boolean }
+  diagnostics: IntegrationPlanDiagnostic[]
+  evidence_refs: string[]
+}
+
+export type IntegrationPlanCompilation = {
+  compiler_version: string
+  plan_fingerprint: string
+  flow_spec: FlowSpec | null
+  flow_spec_fingerprint: string | null
+  importable: boolean
+  diagnostics: IntegrationPlanDiagnostic[]
+  node_evidence: Array<{ resource_id: string; evidence_refs: string[] }>
+  edge_evidence: Array<{ resource_id: string; evidence_refs: string[] }>
+  diff: Array<{ path: string; before: unknown; after: unknown }>
+}
+
+export type FlowSpecVisualProposal = {
+  schema_version: 'flowtest-visual-flow-proposal-v1'
+  proposal: FlowSpecChangeSetDetail
+  existing_definition: WorkflowDefinition | null
+  proposed_definition: WorkflowDefinition
+  integration_plan: IntegrationPlan | null
+  compilation: IntegrationPlanCompilation | null
+  service_mappings: Record<string, string>
+  operation_mappings: Record<string, string>
+  operation_version_mappings: Record<string, number>
+}
+
+export type FlowSpecChangeSetPage = {
+  items: FlowSpecChangeSet[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export type Workflow = {
   id: string
   project_id: string

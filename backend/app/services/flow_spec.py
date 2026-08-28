@@ -81,11 +81,24 @@ class FlowSpecChangeSetView:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowSpecVisualProposal:
+    view: FlowSpecChangeSetView
+    existing_definition: WorkflowDefinition | None
+    proposed_definition: WorkflowDefinition
+    integration_plan: IntegrationPlan | None
+    compilation: IntegrationPlanCompilation | None
+    service_mappings: Mapping[str, UUID]
+    operation_mappings: Mapping[str, UUID]
+    operation_version_mappings: Mapping[str, int]
+
+
+@dataclass(frozen=True, slots=True)
 class FlowSpecImportProvenance:
     context_revision_id: UUID
     context_fingerprint: str
     source_ref: str
     service_account_id: UUID
+    expected_target_revision: int | None = None
     integration_plan: IntegrationPlan | None = None
     compilation: IntegrationPlanCompilation | None = None
 
@@ -104,6 +117,7 @@ class _PreparedFlowSpecImport:
     target: Workflow | None
     target_revision: int | None
     target_snapshot: str | None
+    target_definition: WorkflowDefinition | None
     before: FlowSpec | None
 
 
@@ -198,13 +212,20 @@ class FlowSpecService:
         )
 
     async def preview_import(
-        self, *, actor: User, project_id: UUID, payload: FlowSpecImportRequest
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        payload: FlowSpecImportRequest,
+        provenance: FlowSpecImportProvenance | None = None,
     ) -> FlowSpecImportPreview:
         prepared = await self._prepare_import(
             actor=actor,
             project_id=project_id,
             payload=payload,
         )
+        _validate_expected_target_revision(prepared, provenance)
+        _validate_integration_plan_provenance(prepared.pipeline, provenance)
         return FlowSpecImportPreview(
             pipeline=prepared.pipeline,
             target_workflow_id=prepared.target.id if prepared.target is not None else None,
@@ -224,12 +245,14 @@ class FlowSpecService:
             project_id=project_id,
             payload=payload,
         )
+        _validate_expected_target_revision(prepared, provenance)
         _validate_integration_plan_provenance(prepared.pipeline, provenance)
         snapshot = _source_snapshot(
             pipeline=prepared.pipeline,
             target_workflow_id=prepared.target.id if prepared.target is not None else None,
             target_revision=prepared.target_revision,
             target_spec=prepared.before,
+            target_definition=prepared.target_definition,
             resource_mappings=prepared.mappings,
             provenance=provenance,
         )
@@ -314,13 +337,27 @@ class FlowSpecService:
             operation_version_mappings=payload.operation_version_mappings,
         )
         target = await self._target_workflow(project_id, payload.workflow_id)
-        before = self._target_spec(project_id, target) if target is not None else None
+        target_definition = (
+            _load_definition(target.draft_definition) if target is not None else None
+        )
+        before = (
+            workflow_definition_to_flow_spec(
+                target_definition,
+                project_id=project_id,
+                name=target.name,
+                description=target.description,
+                source_evidence=[f"workflow://{target.id}/draft/{target.draft_revision}"],
+            )
+            if target is not None and target_definition is not None
+            else None
+        )
         return _PreparedFlowSpecImport(
             pipeline=pipeline,
             mappings=mappings,
             target=target,
             target_revision=target.draft_revision if target is not None else None,
             target_snapshot=flow_spec_fingerprint(before) if before is not None else None,
+            target_definition=target_definition,
             before=before,
         )
 
@@ -365,6 +402,48 @@ class FlowSpecService:
                 status_code=409,
             )
         return self._view(change_set, item)
+
+    async def get_visual_proposal(
+        self, *, actor: User, project_id: UUID, change_set_id: UUID
+    ) -> FlowSpecVisualProposal:
+        view = await self.get_change_set(
+            actor=actor,
+            project_id=project_id,
+            change_set_id=change_set_id,
+        )
+        snapshot = view.change_set.source_snapshot
+        mappings = await self._mappings_from_snapshot(
+            project_id=project_id,
+            spec=view.pipeline.spec,
+            snapshot=snapshot,
+        )
+        plan = _integration_plan_from_snapshot(snapshot)
+        compilation = compile_integration_plan(plan) if plan is not None else None
+        if plan is not None and compilation is not None:
+            provenance = FlowSpecImportProvenance(
+                context_revision_id=plan.context_revision_id,
+                context_fingerprint=plan.context_fingerprint,
+                source_ref=view.change_set.source_ref or "mcp://flow-proposals/unknown",
+                service_account_id=_service_account_id(snapshot),
+                integration_plan=plan,
+                compilation=compilation,
+            )
+            _validate_integration_plan_provenance(view.pipeline, provenance)
+        return FlowSpecVisualProposal(
+            view=view,
+            existing_definition=_target_definition_from_snapshot(snapshot),
+            proposed_definition=flow_spec_to_workflow_definition(
+                view.pipeline.spec,
+                operation_mappings=mappings.operation_ids,
+                service_keys=mappings.service_keys,
+                operation_versions=mappings.operation_versions,
+            ),
+            integration_plan=plan,
+            compilation=compilation,
+            service_mappings=mappings.service_ids,
+            operation_mappings=mappings.operation_ids,
+            operation_version_mappings=mappings.operation_versions,
+        )
 
     async def review(
         self,
@@ -962,6 +1041,7 @@ def _source_snapshot(
     target_workflow_id: UUID | None,
     target_revision: int | None,
     target_spec: FlowSpec | None,
+    target_definition: WorkflowDefinition | None,
     resource_mappings: ResolvedFlowSpecMappings,
     provenance: FlowSpecImportProvenance | None = None,
 ) -> dict[str, Any]:
@@ -972,6 +1052,9 @@ def _source_snapshot(
         "target_workflow_id": str(target_workflow_id) if target_workflow_id is not None else None,
         "target_revision": target_revision,
         "target_spec": _spec_json(target_spec) if target_spec is not None else None,
+        "target_definition": (
+            target_definition.model_dump(mode="json") if target_definition is not None else None
+        ),
         "resource_mappings": resource_mappings.snapshot(),
     }
     if provenance is not None:
@@ -981,6 +1064,7 @@ def _source_snapshot(
                 "context_revision_id": str(provenance.context_revision_id),
                 "context_fingerprint": provenance.context_fingerprint,
                 "service_account_id": str(provenance.service_account_id),
+                "expected_target_revision": provenance.expected_target_revision,
             }
         )
         if provenance.integration_plan is not None and provenance.compilation is not None:
@@ -1039,12 +1123,82 @@ def _validate_integration_plan_provenance(
         )
 
 
+def _validate_expected_target_revision(
+    prepared: _PreparedFlowSpecImport,
+    provenance: FlowSpecImportProvenance | None,
+) -> None:
+    if provenance is None:
+        return
+    expected = provenance.expected_target_revision
+    actual = prepared.target_revision
+    if prepared.target is None and expected is not None:
+        raise AppError(
+            code="FLOWSPEC_EXPECTED_REVISION_INVALID",
+            message="新建 Workflow Proposal 不接受 Expected Revision",
+            status_code=422,
+        )
+    if prepared.target is not None and expected is None:
+        raise AppError(
+            code="FLOWSPEC_EXPECTED_REVISION_REQUIRED",
+            message="更新现有 Workflow 必须提供 Expected Revision",
+            status_code=422,
+        )
+    if expected is not None and expected != actual:
+        raise AppError(
+            code="FLOWSPEC_TARGET_CONFLICT",
+            message="Workflow 草稿已变化,请基于最新 Revision 重新生成 Proposal",
+            status_code=409,
+            details={"expected_revision": expected, "actual_revision": actual},
+        )
+
+
 def _integration_plan_provenance_error(message: str) -> AppError:
     return AppError(
         code="INTEGRATION_PLAN_PROVENANCE_INVALID",
         message=message,
         status_code=422,
     )
+
+
+def _integration_plan_from_snapshot(snapshot: Mapping[str, Any]) -> IntegrationPlan | None:
+    raw = snapshot.get("integration_plan")
+    if raw is None:
+        return None
+    try:
+        return IntegrationPlan.model_validate(raw)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise AppError(
+            code="FLOWSPEC_PROPOSAL_SNAPSHOT_INVALID",
+            message="Flow Proposal 的 Integration Plan 快照无效",
+            status_code=409,
+        ) from error
+
+
+def _target_definition_from_snapshot(
+    snapshot: Mapping[str, Any],
+) -> WorkflowDefinition | None:
+    raw = snapshot.get("target_definition")
+    if raw is None:
+        return None
+    try:
+        return WorkflowDefinition.model_validate(raw)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise AppError(
+            code="FLOWSPEC_PROPOSAL_SNAPSHOT_INVALID",
+            message="Flow Proposal 的 Existing Graph 快照无效",
+            status_code=409,
+        ) from error
+
+
+def _service_account_id(snapshot: Mapping[str, Any]) -> UUID:
+    try:
+        return UUID(str(snapshot["service_account_id"]))
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise AppError(
+            code="FLOWSPEC_PROPOSAL_SNAPSHOT_INVALID",
+            message="Flow Proposal 的 Service Account 快照无效",
+            status_code=409,
+        ) from error
 
 
 def _mapping_ids(

@@ -1,13 +1,15 @@
 {
   "server_name": "flowtest",
-  "server_version": "s49-context-evidence-v1",
+  "server_version": "s51-flow-proposal-v1",
   "read_schema_version": "flowtest-mcp-read-schema-v1",
   "tools": [
     "flowtest.analyze_test_coverage",
     "flowtest.begin_test_context",
     "flowtest.close_test_context",
+    "flowtest.compile_integration_flowspec",
     "flowtest.diff_flowspec",
     "flowtest.discover_services",
+    "flowtest.explain_compiler_diagnostics",
     "flowtest.export_flowspec",
     "flowtest.generate_test_design",
     "flowtest.ingest_external_evidence",
@@ -16,13 +18,17 @@
     "flowtest.inspect_contract",
     "flowtest.inspect_data_profile",
     "flowtest.inspect_flow",
+    "flowtest.inspect_flow_proposal",
     "flowtest.inspect_project",
     "flowtest.inspect_run_evidence",
     "flowtest.inspect_source_evidence",
     "flowtest.inspect_test_context",
     "flowtest.inspect_test_evidence",
     "flowtest.list_projects",
+    "flowtest.plan_integration_test",
+    "flowtest.propose_flow_draft",
     "flowtest.propose_test_design",
-    "flowtest.validate_flowspec"
+    "flowtest.validate_flowspec",
+    "flowtest.validate_integration_plan"
   ]
 }

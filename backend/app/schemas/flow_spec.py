@@ -10,6 +10,8 @@ from app.domain.flow_spec import (
     FlowSpecDiffItem,
     FlowSpecValidationResult,
 )
+from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.engine.contracts import WorkflowDefinition
 
 
 class FlowSpecValidateRequest(BaseModel):
@@ -92,6 +94,20 @@ class FlowSpecChangeSetDetailResponse(FlowSpecChangeSetResponse):
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
     diff: list[FlowSpecDiffItem]
+
+
+class FlowSpecVisualProposalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flowtest-visual-flow-proposal-v1"] = "flowtest-visual-flow-proposal-v1"
+    proposal: FlowSpecChangeSetDetailResponse
+    existing_definition: WorkflowDefinition | None
+    proposed_definition: WorkflowDefinition
+    integration_plan: IntegrationPlan | None
+    compilation: IntegrationPlanCompilation | None
+    service_mappings: dict[str, UUID]
+    operation_mappings: dict[str, UUID]
+    operation_version_mappings: dict[str, int]
 
 
 class FlowSpecReviewRequest(BaseModel):

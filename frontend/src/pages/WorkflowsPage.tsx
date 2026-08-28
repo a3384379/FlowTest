@@ -26,7 +26,10 @@ import {
 import { useState } from 'react'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
-import FlowSpecReviewDialog from '../features/workflows/FlowSpecReviewDialog'
+import FlowSpecReviewDialog, {
+  type FlowSpecReviewSeed,
+} from '../features/workflows/FlowSpecReviewDialog'
+import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
 import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
@@ -34,6 +37,8 @@ import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/
 export default function WorkflowsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [flowSpecOpen, setFlowSpecOpen] = useState(false)
+  const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
+  const [flowProposalOpen, setFlowProposalOpen] = useState(false)
   const state = useWorkflows()
 
   async function create(input: Parameters<typeof state.addWorkflow>[0]) {
@@ -46,7 +51,11 @@ export default function WorkflowsPage() {
       <WorkflowHeading
         state={state}
         onCreate={() => setCreateOpen(true)}
-        onFlowSpec={() => setFlowSpecOpen(true)}
+        onFlowSpec={() => {
+          setFlowSpecSeed(undefined)
+          setFlowSpecOpen(true)
+        }}
+        onFlowProposal={() => setFlowProposalOpen(true)}
       />
       <WorkflowWorkspace state={state} />
       <RunConsoleCard state={state} />
@@ -69,20 +78,140 @@ export default function WorkflowsPage() {
         onClose={() => setCreateOpen(false)}
         onCreate={create}
       />
-      {state.projectId && state.workflowId ? (
-        <FlowSpecReviewDialog
-          open={flowSpecOpen}
-          projectId={state.projectId}
-          workflowId={state.workflowId}
-          apis={state.apis.data?.items ?? []}
-          onClose={() => setFlowSpecOpen(false)}
-        />
-      ) : null}
+      <FlowDialogs
+        state={state}
+        flowSpecOpen={flowSpecOpen}
+        flowSpecSeed={flowSpecSeed}
+        flowProposalOpen={flowProposalOpen}
+        onFlowSpecClose={() => setFlowSpecOpen(false)}
+        onFlowProposalClose={() => setFlowProposalOpen(false)}
+        onOpenRawMapping={(seed) => {
+          setFlowProposalOpen(false)
+          setFlowSpecSeed(seed)
+          setFlowSpecOpen(true)
+        }}
+      />
     </>
   )
 }
 
 type WorkflowState = ReturnType<typeof useWorkflows>
+
+function FlowDialogs({
+  state,
+  flowSpecOpen,
+  flowSpecSeed,
+  flowProposalOpen,
+  onFlowSpecClose,
+  onFlowProposalClose,
+  onOpenRawMapping,
+}: FlowDialogsProps) {
+  return (
+    <>
+      <WorkflowFlowSpecDialog
+        state={state}
+        open={flowSpecOpen}
+        seed={flowSpecSeed}
+        onClose={onFlowSpecClose}
+      />
+      <WorkflowProposalDialog
+        state={state}
+        open={flowProposalOpen}
+        onClose={onFlowProposalClose}
+        onOpenRawMapping={onOpenRawMapping}
+      />
+    </>
+  )
+}
+
+type FlowDialogsProps = {
+  state: WorkflowState
+  flowSpecOpen: boolean
+  flowSpecSeed: FlowSpecReviewSeed | undefined
+  flowProposalOpen: boolean
+  onFlowSpecClose: () => void
+  onFlowProposalClose: () => void
+  onOpenRawMapping: (seed: FlowSpecReviewSeed) => void
+}
+
+function WorkflowFlowSpecDialog({
+  state,
+  open,
+  seed,
+  onClose,
+}: {
+  state: WorkflowState
+  open: boolean
+  seed: FlowSpecReviewSeed | undefined
+  onClose: () => void
+}) {
+  if (!state.projectId) return null
+  const workflowId = flowSpecTargetWorkflowId(seed, state.workflowId)
+  if (!workflowId && !seed) return null
+  return (
+    <FlowSpecReviewDialog
+      key={flowSpecDialogKey(seed, workflowId)}
+      open={open}
+      projectId={state.projectId}
+      workflowId={workflowId}
+      apis={pageItems(state.apis.data)}
+      initial={seed}
+      onClose={onClose}
+    />
+  )
+}
+
+function flowSpecTargetWorkflowId(
+  seed: FlowSpecReviewSeed | undefined,
+  selectedWorkflowId: string | null,
+): string | undefined {
+  if (seed) return seed.targetWorkflowId ?? undefined
+  return selectedWorkflowId ?? undefined
+}
+
+function flowSpecDialogKey(
+  seed: FlowSpecReviewSeed | undefined,
+  workflowId: string | undefined,
+): string | undefined {
+  return seed ? seed.proposalId : workflowId
+}
+
+function WorkflowProposalDialog({
+  state,
+  open,
+  onClose,
+  onOpenRawMapping,
+}: {
+  state: WorkflowState
+  open: boolean
+  onClose: () => void
+  onOpenRawMapping: (seed: FlowSpecReviewSeed) => void
+}) {
+  if (!state.projectId) return null
+  return (
+    <FlowProposalReviewDialog
+      open={open}
+      projectId={state.projectId}
+      resources={workflowDesignerResources(state, state.workflowId ?? '')}
+      onClose={onClose}
+      onApplied={(workflowId) => {
+        state.setWorkflowSelection(workflowId)
+        state.showDraft()
+        onClose()
+      }}
+      onOpenRawMapping={(proposal) => {
+        onOpenRawMapping({
+          proposalId: proposal.proposal.id,
+          targetWorkflowId: proposal.proposal.target_workflow_id,
+          spec: proposal.proposal.spec,
+          serviceMappings: proposal.service_mappings,
+          operationMappings: proposal.operation_mappings,
+          operationVersionMappings: proposal.operation_version_mappings,
+        })
+      }}
+    />
+  )
+}
 
 function RunConsoleCard({ state }: { state: WorkflowState }) {
   return (
@@ -121,10 +250,12 @@ function WorkflowHeading({
   state,
   onCreate,
   onFlowSpec,
+  onFlowProposal,
 }: {
   state: WorkflowState
   onCreate: () => void
   onFlowSpec: () => void
+  onFlowProposal: () => void
 }) {
   return (
     <div className="page-heading">
@@ -164,6 +295,9 @@ function WorkflowHeading({
         </Button>
         <Button disabled={!state.workflowId} onClick={onFlowSpec}>
           FlowSpec 导入 / Mapping
+        </Button>
+        <Button disabled={!state.projectId} onClick={onFlowProposal}>
+          MCP Flow Proposal
         </Button>
       </Space>
     </div>
