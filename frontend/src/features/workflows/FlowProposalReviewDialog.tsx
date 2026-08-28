@@ -54,13 +54,18 @@ type FlowProposalReviewDialogProps = {
   onOpenRawMapping: (proposal: FlowSpecVisualProposal) => void
 }
 
+type VisualOverride = {
+  proposalId: string
+  visual: FlowSpecVisualProposal
+}
+
 export default function FlowProposalReviewDialog(props: FlowProposalReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string>()
   const [graphView, setGraphView] = useState<'existing' | 'proposed'>('proposed')
   const [busy, setBusy] = useState(false)
-  const [visualOverride, setVisualOverride] = useState<FlowSpecVisualProposal>()
+  const [visualOverride, setVisualOverride] = useState<VisualOverride>()
   const proposals = useQuery({
     queryKey: ['flow-proposals', props.projectId],
     queryFn: () => listFlowSpecChangeSets(props.projectId),
@@ -80,7 +85,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     enabled: props.open && Boolean(proposalId),
     placeholderData: (previous) => previous,
   })
-  const displayedVisual = selectedVisual(visual.data, visualOverride)
+  const displayedVisual = selectedVisual(proposalId, visual.data, visualOverride)
 
   async function review(accept: boolean, currentVisual: FlowSpecVisualProposal): Promise<void> {
     if (!proposalId) return
@@ -96,7 +101,10 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           ['flow-proposal', props.projectId, proposalId],
           (current) => (current ? { ...current, proposal: reviewed } : current),
         )
-        setVisualOverride({ ...currentVisual, proposal: reviewed })
+        setVisualOverride({
+          proposalId,
+          visual: { ...currentVisual, proposal: reviewed },
+        })
       },
       accept ? '流程提案已接受' : '流程提案已拒绝',
     )
@@ -114,7 +122,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
         ['flow-proposal', props.projectId, proposalId],
         appliedVisual,
       )
-      setVisualOverride(appliedVisual)
+      setVisualOverride({ proposalId, visual: appliedVisual })
       await queryClient.invalidateQueries({ queryKey: ['workflows', props.projectId] })
       props.onApplied(result.workflow_id)
     }, '流程提案已应用到工作流草稿，可继续安全编辑')
@@ -570,8 +578,10 @@ function changeSetStatusLabel(value: string): string {
 }
 
 function selectedVisual(
+  proposalId: string | undefined,
   queried: FlowSpecVisualProposal | undefined,
-  override: FlowSpecVisualProposal | undefined,
+  override: VisualOverride | undefined,
 ): FlowSpecVisualProposal | undefined {
-  return override ?? queried
+  if (override && override.proposalId === proposalId) return override.visual
+  return queried?.proposal.id === proposalId ? queried : undefined
 }

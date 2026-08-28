@@ -11,6 +11,7 @@ import { server } from '../../test/server'
 import FlowProposalReviewDialog from './FlowProposalReviewDialog'
 
 const changeSetId = '00000000-0000-4000-8000-000000005101'
+const secondChangeSetId = '00000000-0000-4000-8000-000000005105'
 const proposedDefinition = {
   ...workflowDefinition,
   nodes: [
@@ -223,6 +224,73 @@ describe('FlowProposalReviewDialog', () => {
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByText('没有断言变化')).toBeInTheDocument()
     expect(within(dialog).queryByText('没有 Assert 变化')).not.toBeInTheDocument()
+  })
+
+  it('does not show an applied override under a proposal selected while apply is pending', async () => {
+    let finishApply!: () => void
+    const applyPending = new Promise<void>((resolve) => {
+      finishApply = resolve
+    })
+    const first = visualProposal('accepted')
+    const second = visualProposal('pending')
+    second.proposal = {
+      ...second.proposal,
+      id: secondChangeSetId,
+      title: '第二个 MCP 提案',
+    }
+    second.proposed_definition = {
+      ...second.proposed_definition,
+      nodes: second.proposed_definition.nodes.map((node) =>
+        node.id === 'api' ? { ...node, name: '第二提案查询' } : node,
+      ),
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
+        HttpResponse.json({
+          items: [first.proposal, second.proposal],
+          total: 2,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/:proposalId/visual-proposal`,
+        ({ params }) => HttpResponse.json(params.proposalId === secondChangeSetId ? second : first),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/apply`,
+        async () => {
+          await applyPending
+          return HttpResponse.json({
+            change_set_id: changeSetId,
+            workflow_id: workflow.id,
+            draft_revision: 2,
+            fingerprint: 'f'.repeat(64),
+            applied_at: '2026-08-28T00:00:00Z',
+          })
+        },
+      ),
+    )
+    renderDialog(() => undefined)
+    const browser = userEvent.setup()
+    const dialog = await screen.findByRole('dialog')
+
+    await within(dialog).findByText('提案模式')
+    await browser.click(within(dialog).getByRole('button', { name: '应用到工作流草稿' }))
+    await browser.click(within(dialog).getByRole('combobox', { name: '流程提案' }))
+    await browser.click(
+      await screen.findByText('第二个 MCP 提案 · 草稿 · 00000000', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(await within(dialog).findByText('第二提案查询')).toBeInTheDocument()
+
+    finishApply()
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '接受' })).toBeInTheDocument(),
+    )
+    expect(within(dialog).getByText('第二提案查询')).toBeInTheDocument()
   })
 })
 
