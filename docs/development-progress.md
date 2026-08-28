@@ -3,9 +3,9 @@
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48 契约冻结与证据闭环；S49 Context Revision、External Evidence 与 Proposal Adapter 已完成
-实现及 Evidence Closure，最新全绿基线为 `main@8040882218bfa70df556c42482c69d2413190ec6`。当前严格串行
-执行 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler MVP；本地实现不等于远程闭环，S50 的 PR
-精确 Head、Review、Ready Gate、普通 Squash Merge、Merge SHA Main Push 与 Evidence Closure 尚待完成。当前
+实现及 Evidence Closure；S50 Multi-Operation Plan 与 Executable FlowSpec Compiler MVP 已由 PR #53 普通
+Squash Merge，Merge SHA `main@507aff999606ab6b3190810cf25717a55265eb88` 的全部适用 Workflow 与唯一
+Required Gate 已 Success。当前严格串行执行 S50 Evidence Closure；其合并及 Main Push 全绿前不进入 S51。当前
 Migration Head 为 `20260828_0046`，仍不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
@@ -15,7 +15,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## 进行中：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
+## 已完成实现验收、Evidence Closure 中：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
 
 ### Implemented
 
@@ -39,7 +39,10 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 隔离 Compose 完整栈 15 个服务 Healthy，真实 Playwright Draft → Review → Apply 通过；验收资源已清除且用户
   既有三个 Compose Project 运行数量不变。Requirement、Correctness/Data、Security/Tenant/Secret/SSRF 与
   E2E/Scope 四类本地 Review 已完成。
-- 远程 CI、Review Thread、Ready Gate、Merge SHA Main Push 尚未完成。
+- PR #53 精确 Head `9193b7fe8bcdf012d275e15319bee65ca907fb4a` 的 Backend、Frontend、Compose、
+  Security、Windows、Upgrade/Rollback 与 Ready 后 Required Gate 全部 Success；Review/Comment/Thread 均为 0。
+- PR #53 已普通 Squash Merge 至 `507aff999606ab6b3190810cf25717a55265eb88`；该 Merge SHA 的 Backend、
+  Frontend、Compose、Security、Windows、Upgrade/Rollback 与唯一 Required Gate 全部 Success。
 - S50 Evidence Closure 合并且其 Main Push Required Gate 成功前，不允许创建 S51 实现分支。
 - 完整边界与证据记录见 [S50 Release Evidence](release/v6-s50-integration-plan-compiler.md)。
 
