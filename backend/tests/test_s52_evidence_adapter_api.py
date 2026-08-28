@@ -1039,6 +1039,35 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_call_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_call_rejected.text
 
+    for persistence_ref in ("operation_ref", "repository_ref", "method_ref", "entity_ref"):
+        dedicated_persistence_payload = _java_evidence(project_id)
+        dedicated_persistence_payload["claims"].append(
+            {
+                "id": f"persistence-sensitive-{persistence_ref}",
+                "kind": "mapper_repository",
+                "source_path": "src/OrderRepository.java:8",
+                "confidence": 0.98,
+                "deterministic": True,
+                "operation_ref": "operation://POST/api/orders",
+                "repository_ref": "java://OrderRepository",
+                "method_ref": "java://OrderRepository.save",
+                "entity_ref": "entity://Order",
+            }
+        )
+        dedicated_persistence_payload["claims"][-1][persistence_ref] = (
+            f"java://repository/{sensitive_value}"
+        )
+        dedicated_persistence_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+            headers=headers,
+            json={"evidence": dedicated_persistence_payload},
+        )
+
+        assert dedicated_persistence_rejected.status_code == 422
+        assert dedicated_persistence_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert dedicated_persistence_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in dedicated_persistence_rejected.text
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
     ).model_dump(mode="json")
@@ -1178,6 +1207,43 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert generic_call_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert generic_call_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in generic_call_rejected.text
+
+    for persistence_ref in ("operation_ref", "repository_ref", "method_ref", "entity_ref"):
+        generic_persistence_source = _java_evidence(project_id)
+        generic_persistence_source["claims"].append(
+            {
+                "id": f"persistence-safe-{persistence_ref}",
+                "kind": "mapper_repository",
+                "source_path": "src/OrderRepository.java:8",
+                "confidence": 0.98,
+                "deterministic": True,
+                "operation_ref": "operation://POST/api/orders",
+                "repository_ref": "java://OrderRepository",
+                "method_ref": "java://OrderRepository.save",
+                "entity_ref": "entity://Order",
+            }
+        )
+        generic_persistence_payload = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(generic_persistence_source)
+        ).model_dump(mode="json")
+        generic_persistence = next(
+            finding
+            for finding in generic_persistence_payload["findings"]
+            if finding["structured_data"]["claim_kind"] == "mapper_repository"
+        )
+        generic_persistence["structured_data"]["claim"][persistence_ref] = (
+            f"java://repository/{sensitive_value}"
+        )
+        generic_persistence_rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            headers=headers,
+            json={"envelope": generic_persistence_payload},
+        )
+
+        assert generic_persistence_rejected.status_code == 422
+        assert generic_persistence_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert generic_persistence_rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in generic_persistence_rejected.text
 
 
 @pytest.mark.asyncio

@@ -124,6 +124,17 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
         with pytest.raises(ValidationError, match="sensitive scalar"):
             JavaEvidenceSubmission.model_validate(dedicated_call)
 
+    for persistence_ref in ("operation_ref", "repository_ref", "method_ref", "entity_ref"):
+        dedicated_persistence = _java_submission()
+        persistence_claim = next(
+            claim
+            for claim in dedicated_persistence["claims"]
+            if claim["kind"] == "mapper_repository"
+        )
+        persistence_claim[persistence_ref] = f"java://repository/{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            JavaEvidenceSubmission.model_validate(dedicated_persistence)
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
     ).model_dump(mode="json")
@@ -182,6 +193,21 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
         call_finding["structured_data"]["claim"][call_ref] = f"java://service/{sensitive_value}"
         with pytest.raises(ValidationError, match="sensitive scalar"):
             ExternalEvidenceEnvelope.model_validate(generic_call)
+
+    for persistence_ref in ("operation_ref", "repository_ref", "method_ref", "entity_ref"):
+        generic_persistence = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_submission())
+        ).model_dump(mode="json")
+        persistence_finding = next(
+            finding
+            for finding in generic_persistence["findings"]
+            if finding["structured_data"]["claim_kind"] == "mapper_repository"
+        )
+        persistence_finding["structured_data"]["claim"][persistence_ref] = (
+            f"java://repository/{sensitive_value}"
+        )
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic_persistence)
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1541,6 +1567,46 @@ class FallbackController {
         ("java://ActualController", "live", "/annotated/live"),
         ("java://FallbackController", "fallback", "/fallback"),
     }
+
+
+def test_java_spring_poc_binds_mapping_to_immediately_following_modified_method() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://method-modifiers", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ModifierController.java",
+                        "content": """
+@RestController
+class ModifierController {
+    @GetMapping("/sync")
+    public synchronized Order synchronizedLoad() {
+        return syncService.load();
+    }
+
+    @GetMapping("/private")
+    private Order privateLoad() {
+        return privateService.load();
+    }
+
+    public Order unrelated() {
+        return unrelatedService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("synchronizedLoad", "/sync")]
+    assert [claim.callee_ref for claim in calls] == ["java://syncService.load"]
 
 
 def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:

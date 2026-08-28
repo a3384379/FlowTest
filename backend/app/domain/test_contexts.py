@@ -282,6 +282,7 @@ class ExternalJavaClaimBase(BaseModel):
     @model_validator(mode="after")
     def validate_source_path(self) -> ExternalJavaClaimBase:
         require_no_sensitive_scalar_values([self.source_path])
+        require_no_sensitive_reference_values(self)
         return self
 
 
@@ -329,11 +330,6 @@ class ExternalJavaCallClaim(ExternalJavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     caller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     callee_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
-
-    @model_validator(mode="after")
-    def validate_call_refs(self) -> ExternalJavaCallClaim:
-        require_no_sensitive_scalar_values([self.caller_ref, self.callee_ref])
-        return self
 
 
 class ExternalJavaPersistenceClaim(ExternalJavaClaimBase):
@@ -402,11 +398,6 @@ class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
     direction: Literal["produce", "consume"]
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     event_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
-
-    @model_validator(mode="after")
-    def validate_topic_ref(self) -> ExternalJavaKafkaEventClaim:
-        require_no_sensitive_scalar_values([self.topic_ref])
-        return self
 
 
 type ExternalJavaClaim = Annotated[
@@ -815,6 +806,17 @@ def require_no_sensitive_scalar_values(
     for value in values:
         if first_sensitive_value({"value": str(value)}) is not None:
             raise ValueError("external evidence contains sensitive scalar value")
+
+
+def require_no_sensitive_reference_values(model: BaseModel) -> None:
+    values: list[str] = []
+    for field_name in type(model).model_fields:
+        value = getattr(model, field_name)
+        if field_name.endswith("_ref") and isinstance(value, str):
+            values.append(value)
+        elif field_name.endswith("_refs") and isinstance(value, list):
+            values.extend(item for item in value if isinstance(item, str))
+    require_no_sensitive_scalar_values(values)
 
 
 def first_sensitive_value(value: object, *, path: str = "$") -> str | None:

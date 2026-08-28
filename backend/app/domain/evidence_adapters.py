@@ -40,6 +40,7 @@ from app.domain.test_contexts import (
     JavaExternalEvidenceStructuredData,
     finding_semantic_fingerprint,
     first_sensitive_value,
+    require_no_sensitive_reference_values,
     require_no_sensitive_scalar_values,
 )
 
@@ -125,6 +126,7 @@ class JavaClaimBase(BaseModel):
     @model_validator(mode="after")
     def validate_source_path(self) -> JavaClaimBase:
         require_no_sensitive_scalar_values([self.source_path])
+        require_no_sensitive_reference_values(self)
         return self
 
 
@@ -170,11 +172,6 @@ class JavaCallClaim(JavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     caller_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     callee_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
-
-    @model_validator(mode="after")
-    def validate_call_refs(self) -> JavaCallClaim:
-        require_no_sensitive_scalar_values([self.caller_ref, self.callee_ref])
-        return self
 
 
 class JavaPersistenceClaim(JavaClaimBase):
@@ -235,11 +232,6 @@ class JavaKafkaEventClaim(JavaClaimBase):
     direction: Literal["produce", "consume"]
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     event_type: str = Field(pattern=_IDENTIFIER)
-
-    @model_validator(mode="after")
-    def validate_topic_ref(self) -> JavaKafkaEventClaim:
-        require_no_sensitive_scalar_values([self.topic_ref])
-        return self
 
 
 type JavaEvidenceClaim = Annotated[
@@ -1997,8 +1989,10 @@ def _routes_after_mapping(
 ) -> list[_JavaRoute]:
     following = file.content[mapping_end : mapping_end + 2000]
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
-    signature = re.search(
+    signature = re.match(
         r"(?:\s*@[A-Za-z0-9_$.]+)*\s*public\s+"
+        r"(?:(?:abstract|default|final|native|static|strictfp|synchronized)\s+)*"
+        r"(?:<[^>{};]+>\s+)?"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
         r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^{]+))?\{",
         masked_following,
