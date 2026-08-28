@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                               |
 | Scope              | `mcp:evidence:write`                                    |
 | 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；四轮 Review 修复已本地全绿，待推送新 Head |
+| Release 状态       | Draft PR #58；五轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -46,7 +46,11 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Entity Claim 的确定性显式参与 Operation/Entity 候选；Operation→Table 关联的 Confidence/Deterministic 与
   Evidence Ref 继续约束依赖它的 Field/Column 和 DB State 候选，路径启发式不会被下游抬高。
 - Entity 显式 Table Ref 同时支持 `table://schema/table` 与既有 Fixture 使用的 `table://schema.table`；两者都按
-  最后表名与 DB Schema/Table Evidence 匹配，不会误降级为 Class Name 启发式。
+  Schema/Table 与 DB Evidence 精确匹配，不会误降级为 Class Name 启发式或跨 Schema 误关联。
+- Java `table_column` 显式声明优先约束 Field/Column 候选，支持不同命名的 Field 与 Column；声明自身的
+  Evidence Ref、Confidence 与 Deterministic 会参与候选，且同名字段按 Operation 关联的 Entity 隔离。
+- Operation State Source 由 Operation 与 Field 共同确定；Java camelCase State Field 与 DB snake_case 状态列按
+  规范化字段名相关联。同一 Operation 的独立 State Field 不互相制造假冲突，同字段不同 State Set 仍保持歧义。
 - DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
   跨 Operation 假冲突，同一 Operation 内的多 Target 歧义仍保持可见。
 - Candidate ID 只取决于 Mapping Kind/Source/Target/Operation/Field/State 语义；新增佐证只合并 Evidence Ref，
@@ -132,19 +136,19 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 ### 本地 Required Checks
 
-| 范围                    | 命令                               | 结果                                                          |
-| ----------------------- | ---------------------------------- | ------------------------------------------------------------- |
-| Backend Format          | `uv run ruff format --check .`     | Pass；464 files already formatted                             |
-| Backend Lint            | `uv run ruff check .`              | Pass                                                          |
-| Backend Types           | `uv run mypy app`                  | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                    | Pass；686 passed、4 skipped、总覆盖率 90.54%                  |
-| Backend Security Lint   | `uv run ruff check --select S app` | Pass                                                          |
-| Frontend Format         | `pnpm format:check`                | Pass                                                          |
-| Frontend Lint/Types     | `pnpm lint`                        | Pass；ESLint 与 TypeScript                                    |
-| Frontend Tests          | `pnpm test:coverage`               | Pass；57 files、222 tests；S/B/F/L = 86.23/80.12/85.44/88.48% |
-| Frontend Build          | `pnpm build`                       | Pass                                                          |
-| Python Dependency Audit | `uv run pip-audit`                 | Pass；无已知漏洞，非 PyPI 项目包按工具约定跳过                |
-| Node Dependency Audit   | `pnpm audit --audit-level high`    | Pass；无已知漏洞                                              |
+| 范围                    | 命令                             | 结果                                                          |
+| ----------------------- | -------------------------------- | ------------------------------------------------------------- |
+| Backend Format          | `uv run ruff format --check .`   | Pass；464 files already formatted                             |
+| Backend Lint            | `uv run ruff check .`            | Pass                                                          |
+| Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
+| Backend Tests           | `uv run pytest`                  | Pass；688 passed、4 skipped、总覆盖率 90.56%                  |
+| Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
+| Frontend Format         | `pnpm format:check`              | Pass                                                          |
+| Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
+| Frontend Tests          | `pnpm test:coverage`             | Pass；57 files、222 tests；S/B/F/L = 86.23/80.12/85.44/88.48% |
+| Frontend Build          | `pnpm build`                     | Pass                                                          |
+| Python Dependency Audit | `uv run pip-audit`               | Pass；无已知漏洞，非 PyPI 项目包按工具约定跳过                |
+| Node Dependency Audit   | `pnpm audit --audit-level high`  | Pass；无已知漏洞                                              |
 
 ### Compose / Playwright
 
@@ -179,12 +183,15 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Java 方法签名 `throws` 未提取。四项均在 `185d08d1cc` 修复并新增直接 Domain/API 回归，对应 Thread 已回复并关闭。
 - 第四轮 Codex Review 在 `185d08d1cc` 提出 3 个 P2：满 100 Findings 时可能无空间持久化新冲突标记；
   非 Conflict 语义的伪 Marker 可抑制真实冲突合成；`table://public.orders` 点号 Schema 限定形式未匹配。
-  三项均已修复并新增 Contract/Domain/API 直接回归；本地全量后端与安全门禁全绿，待推送新精确 Head 后
-  回复并关闭三个 Thread。
+  三项均在 `5eea6ee53b` 修复并新增 Contract/Domain/API 直接回归，对应 Thread 已回复并关闭。
+- 第五轮 Codex Review 在 `5eea6ee53b` 提出 2 个 P2：Java `table_column` 显式声明未参与 Field/Column
+  候选及可靠性组合；同一 Operation 的多个 Enum State Field 共用 Source 且 DB State 相关未按 Field 隔离。
+  两项均已修复，并新增不同命名显式列映射与双独立状态字段的直接 Domain 回归；本地全量后端与安全门禁全绿，
+  待推送新精确 Head 后回复并关闭两个 Thread。
 
 ### 待完成
 
-- 第四轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 第五轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

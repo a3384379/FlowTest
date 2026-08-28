@@ -840,6 +840,7 @@ class _ParsedEvidence:
         self.routes: list[tuple[JavaControllerRouteClaim, str]] = []
         self.fields: list[tuple[JavaDtoFieldClaim, str]] = []
         self.entities: list[tuple[JavaEntityClaim, str]] = []
+        self.table_columns: list[tuple[JavaTableColumnClaim, str]] = []
         self.columns: list[_ParsedDatabaseColumn] = []
         self.states: list[tuple[JavaEnumStateClaim, str]] = []
 
@@ -875,6 +876,7 @@ def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
             parsed.routes,
             parsed.fields,
             parsed.entities,
+            parsed.table_columns,
             parsed.columns,
             parsed.states,
         )
@@ -951,6 +953,15 @@ def _append_java_mapping_claim(
                 evidence_ref,
             )
         )
+    elif claim_kind == "table_column":
+        parsed.table_columns.append(
+            (
+                _effective_java_claim(
+                    JavaTableColumnClaim.model_validate(claim), confidence, deterministic
+                ),
+                evidence_ref,
+            )
+        )
     elif claim_kind == "enum_state":
         parsed.states.append(
             (
@@ -981,10 +992,12 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
     for route, route_evidence in parsed.routes:
         matching_entities = _matching_entities(route, parsed.entities)
         for table_ref, table in tables.items():
-            table_name = table_ref.rsplit("/", 1)[-1]
-            entity_match = _entity_match(route, table_name, matching_entities)
+            schema_name, table_name = table_ref.removeprefix("table://").rsplit("/", 1)
+            entity_match = _entity_match(route, schema_name, table_name, matching_entities)
             if entity_match.score == 0:
                 continue
+            direct_evidence = [route_evidence, *entity_match.evidence_refs]
+            table_evidence = list(table.evidence_refs)[: 20 - len(direct_evidence)]
             _append_mapping_candidate(
                 candidates,
                 _candidate(
@@ -1000,9 +1013,8 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
                         and table.deterministic
                     ),
                     evidence_refs=[
-                        route_evidence,
-                        *table.evidence_refs,
-                        *entity_match.evidence_refs,
+                        *direct_evidence,
+                        *table_evidence,
                     ],
                 ),
             )
@@ -1021,12 +1033,15 @@ def _matching_entities(
 
 def _entity_match(
     route: JavaControllerRouteClaim,
+    schema_name: str,
     table_name: str,
     entities: list[tuple[JavaEntityClaim, str]],
 ) -> _EntityMatch:
     table_token = _normalized_name(table_name)
     for entity, evidence_ref in entities:
-        if entity.table_ref is not None and _table_ref_matches(entity.table_ref, table_name):
+        if entity.table_ref is not None and _table_ref_matches_database_table(
+            entity.table_ref, schema_name, table_name
+        ):
             return _EntityMatch(
                 score=min(entity.confidence, 1.0),
                 evidence_refs=(evidence_ref,),
@@ -1065,12 +1080,27 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
     candidates: dict[str, EntityMappingCandidate] = {}
     for field, field_evidence in parsed.fields:
         table_targets = operation_tables.get(field.operation_ref, {})
+        field_claims = _table_column_claims_for_field(parsed, field)
         for parsed_column in parsed.columns:
             column = parsed_column.claim
             entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
             if table_targets and entity_ref not in table_targets:
                 continue
-            if _normalized_name(field.field_name) != _normalized_name(column.name):
+            matching_claims = [
+                item
+                for item in field_claims
+                if _table_ref_matches_database_table(
+                    item[0].table_ref,
+                    parsed_column.schema,
+                    parsed_column.table,
+                )
+                and item[0].column_name.casefold() == column.name.casefold()
+            ]
+            if field_claims and not matching_claims:
+                continue
+            if not field_claims and _normalized_name(field.field_name) != _normalized_name(
+                column.name
+            ):
                 continue
             kind = (
                 EntityMappingCandidateKind.REQUEST_FIELD_COLUMN
@@ -1085,6 +1115,15 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
             operation_confidence = operation_table.confidence if operation_table else 1.0
             operation_deterministic = operation_table.deterministic if operation_table else True
             operation_evidence = operation_table.evidence_refs if operation_table else []
+            claim_confidence = min(
+                (claim.confidence for claim, _evidence_ref in matching_claims),
+                default=1.0,
+            )
+            claim_deterministic = all(
+                claim.deterministic for claim, _evidence_ref in matching_claims
+            )
+            claim_evidence = sorted({evidence_ref for _claim, evidence_ref in matching_claims})[:5]
+            bounded_operation_evidence = list(operation_evidence)[: 18 - len(claim_evidence)]
             _append_mapping_candidate(
                 candidates,
                 _candidate(
@@ -1099,20 +1138,40 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
                         field.confidence,
                         parsed_column.confidence,
                         operation_confidence,
+                        claim_confidence,
                     ),
                     deterministic=(
                         field.deterministic
                         and parsed_column.deterministic
                         and operation_deterministic
+                        and claim_deterministic
                     ),
                     evidence_refs=[
                         field_evidence,
                         parsed_column.evidence_ref,
-                        *operation_evidence,
+                        *claim_evidence,
+                        *bounded_operation_evidence,
                     ],
                 ),
             )
     return list(candidates.values())
+
+
+def _table_column_claims_for_field(
+    parsed: _ParsedEvidence,
+    field: JavaDtoFieldClaim,
+) -> list[tuple[JavaTableColumnClaim, str]]:
+    operation_entities = {
+        entity.entity_ref
+        for entity, _evidence_ref in parsed.entities
+        if field.operation_ref in entity.operation_refs
+    }
+    return [
+        item
+        for item in parsed.table_columns
+        if item[0].field_name.casefold() == field.field_name.casefold()
+        and (not operation_entities or item[0].entity_ref in operation_entities)
+    ]
 
 
 def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandidate]:
@@ -1122,49 +1181,20 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
     operation_tables = _operation_tables(_operation_entity_candidates(parsed))
     for operation_ref, table_candidates in operation_tables.items():
         for parsed_column in parsed.columns:
-            column = parsed_column.claim
             entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
             operation_table = table_candidates.get(entity_ref)
             if operation_table is None:
                 continue
-            values = _database_state_values(column)
-            if not values or _normalized_name(column.name) not in {"status", "state"}:
-                continue
-            corroborating = [
-                candidate
-                for candidate in java_candidates
-                if candidate.operation_ref == operation_ref and candidate.state_values == values
-            ]
-            corroborated_java_ids.update(candidate.id for candidate in corroborating)
-            _append_mapping_candidate(
-                candidates,
-                _candidate(
-                    kind=EntityMappingCandidateKind.OPERATION_STATE,
-                    source_ref=operation_ref,
-                    target_ref=(
-                        f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"
-                    ),
-                    operation_ref=operation_ref,
-                    state_values=values,
-                    confidence=min(
-                        [
-                            parsed_column.confidence,
-                            operation_table.confidence,
-                            *(candidate.confidence for candidate in corroborating),
-                        ]
-                    ),
-                    deterministic=(
-                        parsed_column.deterministic
-                        and operation_table.deterministic
-                        and all(candidate.deterministic for candidate in corroborating)
-                    ),
-                    evidence_refs=[
-                        parsed_column.evidence_ref,
-                        *operation_table.evidence_refs,
-                        *(ref for candidate in corroborating for ref in candidate.evidence_refs),
-                    ],
-                ),
+            candidate, corroborated_ids = _database_state_candidate(
+                operation_ref,
+                operation_table,
+                parsed_column,
+                java_candidates,
             )
+            if candidate is None:
+                continue
+            corroborated_java_ids.update(corroborated_ids)
+            _append_mapping_candidate(candidates, candidate)
     for candidate in java_candidates:
         if candidate.id not in corroborated_java_ids:
             _append_mapping_candidate(candidates, candidate)
@@ -1177,9 +1207,14 @@ def _java_state_candidates(
     return [
         _candidate(
             kind=EntityMappingCandidateKind.OPERATION_STATE,
-            source_ref=state.operation_ref,
+            source_ref=_state_field_ref(state.operation_ref, state.field_name),
             target_ref=f"state-set://{state.enum_ref.removeprefix('java://')}",
             operation_ref=state.operation_ref,
+            field_ref=(
+                _state_field_ref(state.operation_ref, state.field_name)
+                if state.field_name is not None
+                else None
+            ),
             state_values=state.values,
             confidence=state.confidence,
             deterministic=state.deterministic,
@@ -1188,6 +1223,88 @@ def _java_state_candidates(
         for state, evidence_ref in states
         if state.operation_ref is not None
     ]
+
+
+def _database_state_candidate(
+    operation_ref: str,
+    operation_table: EntityMappingCandidate,
+    parsed_column: _ParsedDatabaseColumn,
+    java_candidates: list[EntityMappingCandidate],
+) -> tuple[EntityMappingCandidate | None, set[str]]:
+    column = parsed_column.claim
+    values = _database_state_values(column)
+    field_candidates = [
+        candidate
+        for candidate in java_candidates
+        if _state_candidate_matches_column(candidate, operation_ref, column.name)
+    ]
+    if not values or (
+        not field_candidates and _normalized_name(column.name) not in {"status", "state"}
+    ):
+        return None, set()
+    corroborating = [
+        candidate for candidate in field_candidates if candidate.state_values == values
+    ]
+    anchor = next(
+        (candidate for candidate in field_candidates if candidate.field_ref is not None),
+        field_candidates[0] if field_candidates else None,
+    )
+    source_ref = (
+        anchor.source_ref if anchor is not None else _state_field_ref(operation_ref, column.name)
+    )
+    field_ref = anchor.field_ref if anchor is not None else source_ref
+    corroborating_evidence = sorted(
+        {evidence_ref for candidate in corroborating for evidence_ref in candidate.evidence_refs}
+    )[:6]
+    operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
+    return (
+        _candidate(
+            kind=EntityMappingCandidateKind.OPERATION_STATE,
+            source_ref=source_ref,
+            target_ref=(f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"),
+            operation_ref=operation_ref,
+            field_ref=field_ref,
+            state_values=values,
+            confidence=min(
+                [
+                    parsed_column.confidence,
+                    operation_table.confidence,
+                    *(candidate.confidence for candidate in corroborating),
+                ]
+            ),
+            deterministic=(
+                parsed_column.deterministic
+                and operation_table.deterministic
+                and all(candidate.deterministic for candidate in corroborating)
+            ),
+            evidence_refs=[
+                parsed_column.evidence_ref,
+                *corroborating_evidence,
+                *operation_evidence,
+            ],
+        ),
+        {candidate.id for candidate in corroborating},
+    )
+
+
+def _state_candidate_matches_column(
+    candidate: EntityMappingCandidate,
+    operation_ref: str,
+    column_name: str,
+) -> bool:
+    if candidate.operation_ref != operation_ref:
+        return False
+    if candidate.field_ref is None:
+        return _normalized_name(column_name) in {"status", "state"}
+    return candidate.field_ref == _state_field_ref(operation_ref, column_name)
+
+
+def _state_field_ref(operation_ref: str, field_name: str | None) -> str:
+    if field_name is None:
+        return operation_ref
+    operation_identity = sha256(operation_ref.encode()).hexdigest()
+    field_identity = _normalized_name(field_name) or sha256(field_name.encode()).hexdigest()
+    return f"state-field://{operation_identity}/{field_identity}"
 
 
 def _database_state_values(column: DatabaseColumnEvidence) -> list[str]:
@@ -1327,10 +1444,23 @@ def _route_resource_token(path: str) -> str:
     return _normalized_name(segments[-1]) if segments else ""
 
 
-def _table_ref_matches(table_ref: str, table_name: str) -> bool:
+def _table_ref_matches_database_table(
+    table_ref: str,
+    schema_name: str,
+    table_name: str,
+) -> bool:
     qualified_name = table_ref.removeprefix("table://").rstrip("/")
-    referenced_table = qualified_name.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
-    return _normalized_name(referenced_table) == _normalized_name(table_name)
+    if "/" in qualified_name:
+        referenced_schema, referenced_table = qualified_name.rsplit("/", 1)
+        referenced_schema = referenced_schema.rsplit("/", 1)[-1]
+    elif "." in qualified_name:
+        referenced_schema, referenced_table = qualified_name.rsplit(".", 1)
+    else:
+        referenced_schema, referenced_table = None, qualified_name
+    table_matches = referenced_table.casefold() == table_name.casefold()
+    return table_matches and (
+        referenced_schema is None or referenced_schema.casefold() == schema_name.casefold()
+    )
 
 
 class _JavaRoute(BaseModel):

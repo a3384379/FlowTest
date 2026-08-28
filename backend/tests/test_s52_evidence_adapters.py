@@ -337,6 +337,10 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
     entity["class_name"] = "PurchaseRecord"
     entity["table_ref"] = "table://public.orders"
     entity["operation_refs"] = [operation_ref]
+    database_payload = _database_submission()
+    other_schema = json.loads(json.dumps(database_payload["tables"][0]))
+    other_schema["schema_name"] = "private"
+    database_payload["tables"].append(other_schema)
 
     mapping = derive_entity_mapping(
         [
@@ -346,7 +350,7 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
             ),
             *_mapping_inputs(
                 adapt_database_evidence(
-                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
                 ),
                 "database",
             ),
@@ -358,6 +362,123 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
         and candidate.operation_ref == operation_ref
         and candidate.target_ref == "entity://public/orders"
         for candidate in mapping.candidates
+    )
+    assert not any(
+        candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.target_ref == "entity://private/orders"
+        for candidate in mapping.candidates
+    )
+
+
+def test_explicit_table_column_claim_drives_differently_named_field_mapping() -> None:
+    java_payload = _java_submission()
+    field = next(claim for claim in java_payload["claims"] if claim["id"] == "request-product")
+    field["field_name"] = "userName"
+    table_column = next(
+        claim for claim in java_payload["claims"] if claim["id"] == "column-product"
+    )
+    table_column.update(
+        {
+            "field_name": "userName",
+            "column_name": "login_name",
+            "confidence": 0.4,
+            "deterministic": False,
+        }
+    )
+    database_payload = _database_submission()
+    database_column = next(
+        column
+        for column in database_payload["tables"][0]["columns"]
+        if column["name"] == "product_id"
+    )
+    database_column["name"] = "login_name"
+
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
+    java_inputs = _mapping_inputs(java_envelope, "java")
+    table_column_evidence = next(
+        item.evidence_ref
+        for item in java_inputs
+        if isinstance(item.finding.structured_data, JavaExternalEvidenceStructuredData)
+        and item.finding.structured_data.claim_kind == "table_column"
+    )
+    mapping = derive_entity_mapping(
+        [
+            *java_inputs,
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    candidate = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.REQUEST_FIELD_COLUMN
+        and candidate.target_ref == "column://public/orders/login_name"
+    )
+    assert table_column_evidence in candidate.evidence_refs
+    assert candidate.confidence == 0.4
+    assert candidate.deterministic is False
+
+
+def test_operation_state_mapping_scopes_independent_fields() -> None:
+    java_payload = _java_submission()
+    operation_ref = "operation://POST/api/orders"
+    java_payload["claims"].append(
+        {
+            "id": "state-payment",
+            "kind": "enum_state",
+            "source_path": "src/PaymentStatus.java:3",
+            "confidence": 0.96,
+            "deterministic": True,
+            "operation_ref": operation_ref,
+            "enum_ref": "java://PaymentStatus",
+            "field_name": "paymentStatus",
+            "values": ["pending", "paid"],
+        }
+    )
+    database_payload = _database_submission()
+    database_payload["tables"][0]["columns"].append(
+        {
+            "name": "payment_status",
+            "data_type": "varchar",
+            "nullable": False,
+            "enum_values": ["pending", "paid"],
+        }
+    )
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    states = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert {candidate.target_ref for candidate in states} == {
+        "state-set://public/orders/status",
+        "state-set://public/orders/payment_status",
+    }
+    assert len({candidate.source_ref for candidate in states}) == 2
+    assert all(candidate.field_ref is not None for candidate in states)
+    assert not any(
+        conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+        for conflict in mapping.conflicts
     )
 
 
