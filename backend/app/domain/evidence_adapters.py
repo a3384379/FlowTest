@@ -89,6 +89,7 @@ _SERVICE_CALL = re.compile(
 _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\"]+)\"")
+_KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
 _KAFKA_LISTENER = re.compile(r'@KafkaListener\s*\([^)]*(?:topics\s*=\s*)?"([^"]+)"')
 _KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
 _JAVA_NON_CODE = re.compile(
@@ -269,8 +270,9 @@ class DatabaseObservedDistribution(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_enum_candidates(self) -> DatabaseObservedDistribution:
-        require_no_sensitive_scalar_values(self.enum_candidates)
+    def validate_observed_values(self) -> DatabaseObservedDistribution:
+        extrema = [value for value in (self.minimum, self.maximum) if value is not None]
+        require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
 
 
@@ -2091,7 +2093,7 @@ def _simple_type(value: str) -> str:
 
 def _route_call_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
-    for call in _SERVICE_CALL.finditer(route.body):
+    for call in _SERVICE_CALL.finditer(_mask_java_non_code(route.body)):
         target = call.group("target")
         method = call.group("method")
         normalized_target = target.lower()
@@ -2116,12 +2118,13 @@ def _route_call_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidence
 
 
 def _route_exception_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:
+    masked_body = _mask_java_non_code(route.body)
     names = sorted(
         set(
             [
                 *route.declared_exceptions,
-                *_THROWS.findall(route.body),
-                *_THROW_NEW.findall(route.body),
+                *_THROWS.findall(masked_body),
+                *_THROW_NEW.findall(masked_body),
             ]
         )
     )
@@ -2140,18 +2143,24 @@ def _route_exception_claims(source_path: str, route: _JavaRoute) -> list[JavaEvi
 
 
 def _route_kafka_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:
+    matches = _active_java_annotation_matches(
+        route.body,
+        _mask_java_non_code(route.body),
+        _KAFKA_SEND_MARKER,
+        _KAFKA_SEND,
+    )
     produced: list[JavaEvidenceClaim] = [
         JavaKafkaEventClaim(
-            id=_claim_id("kafka", route.operation_ref, "produce", topic),
+            id=_claim_id("kafka", route.operation_ref, "produce", match.group(1)),
             source_path=source_path,
             operation_ref=route.operation_ref,
             direction="produce",
-            topic_ref=f"kafka://{topic}",
+            topic_ref=f"kafka://{match.group(1)}",
             event_type="UnknownEvent",
             confidence=0.7,
             deterministic=False,
         )
-        for topic in _KAFKA_SEND.findall(route.body)
+        for match in matches
     ]
     return produced
 
@@ -2231,8 +2240,34 @@ def _is_entity_type(path: str, name: str) -> bool:
 
 
 def _enum_values(body: str) -> list[str]:
-    header = body.split(";", 1)[0]
-    return re.findall(r"\b([A-Z][A-Z0-9_]*)\b", header)[:100]
+    header = _top_level_java_prefix(body, ";")
+    values: list[str] = []
+    for component in _split_top_level_java_components(header):
+        masked = _mask_java_annotation_arguments(_mask_java_non_code(component))
+        declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked).lstrip()
+        match = re.match(r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\b", declaration)
+        if match is not None:
+            values.append(match.group("name"))
+    return values[:100]
+
+
+def _top_level_java_prefix(content: str, delimiter: str) -> str:
+    depth = 0
+    index = 0
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
+            continue
+        character = content[index]
+        if character in "([{<":
+            depth += 1
+        elif character in ")]}>" and depth > 0:
+            depth -= 1
+        elif character == delimiter and depth == 0:
+            return content[:index]
+        index += 1
+    return content
 
 
 def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:

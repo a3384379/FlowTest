@@ -630,6 +630,44 @@ async def test_generic_evidence_rejects_sensitive_adapter_scalar(
     assert rejected_masked_example.json()["error"]["trace_id"]
     assert sensitive_value not in rejected_masked_example.text
 
+    sensitive_minimum = _database_evidence(project_id)
+    sensitive_minimum["tables"][0]["columns"][2]["observed_distribution"] = {"minimum": 13800138000}
+    rejected_minimum = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": sensitive_minimum},
+    )
+
+    assert rejected_minimum.status_code == 422
+    assert rejected_minimum.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_minimum.json()["error"]["trace_id"]
+    assert "13800138000" not in rejected_minimum.text
+
+    generic_payload = _database_evidence(project_id)
+    generic_payload["tables"][0]["columns"][2]["observed_distribution"] = {"maximum": 100}
+    generic_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(generic_payload)
+    ).model_dump(mode="json")
+    generic_column = next(
+        finding
+        for finding in generic_envelope["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    generic_column["structured_data"]["claim"]["observed_distribution"]["maximum"] = int(
+        sensitive_value
+    )
+    rejected_maximum = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_envelope},
+    )
+
+    assert rejected_maximum.status_code == 422
+    assert rejected_maximum.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_maximum.json()["error"]["trace_id"]
+    assert sensitive_value not in rejected_maximum.text
+
     sensitive_phone = "13800138000"
     sensitive_check_payload = _database_evidence(project_id)
     sensitive_check_payload["tables"][0]["columns"][2]["check_expression"] = (

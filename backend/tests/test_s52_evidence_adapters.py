@@ -145,6 +145,11 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     with pytest.raises(ValidationError, match="sensitive"):
         DatabaseEvidenceSubmission.model_validate(raw_distribution_pii)
 
+    sensitive_minimum = _database_submission()
+    sensitive_minimum["tables"][0]["columns"][1]["observed_distribution"]["minimum"] = 13800138000
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        DatabaseEvidenceSubmission.model_validate(sensitive_minimum)
+
     write_sql = _database_submission()
     write_sql["tables"][0]["columns"][1]["check_expression"] = (
         "status IN ('created'); DROP TABLE orders"
@@ -240,6 +245,21 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     ]
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(external_distribution)
+
+    external_sensitive_maximum = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    maximum_column = next(
+        finding
+        for finding in external_sensitive_maximum["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+        and finding["structured_data"]["claim"]["name"] == "status"
+    )
+    maximum_column["structured_data"]["claim"]["observed_distribution"]["maximum"] = (
+        4111111111111111
+    )
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_sensitive_maximum)
 
     external_masked_card = adapt_database_evidence(
         DatabaseEvidenceSubmission.model_validate(_database_submission())
@@ -1395,6 +1415,82 @@ public class OrderController {
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+
+
+def test_java_spring_poc_ignores_route_claims_in_non_code_text() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://active-calls", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @GetMapping("/orders")
+    public Order load() {
+        String sample = "stringService.delete()";
+        // commentService.delete();
+        /*
+         * blockRepository.delete();
+         * throw new GhostException();
+         * kafkaTemplate.send("ghost.topic");
+         */
+        return liveService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    calls = {
+        claim.callee_ref
+        for claim in evidence.claims
+        if claim.kind in {"service_call", "feign_call"}
+    }
+    assert calls == {"java://liveService.load"}
+    assert not [claim for claim in evidence.claims if claim.kind == "exception"]
+    assert not [claim for claim in evidence.claims if claim.kind == "kafka_event"]
+
+
+def test_java_spring_poc_parses_only_top_level_enum_constants() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://enum-constants", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderStatus.java",
+                        "content": """
+public enum OrderStatus {
+    // SHADOW_STATE must not become evidence.
+    @JsonProperty("ACTIVE_CODE")
+    ACTIVE("A") {
+        @Override
+        public String code() { return "A"; }
+    },
+    INACTIVE("I");
+
+    private final String code;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
+    assert len(states) == 1
+    assert states[0].values == ["ACTIVE", "INACTIVE"]
 
 
 def test_java_spring_poc_reports_claim_quota_truncation() -> None:

@@ -448,8 +448,9 @@ class ExternalDatabaseObservedDistribution(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_enum_candidates(self) -> ExternalDatabaseObservedDistribution:
-        require_no_sensitive_scalar_values(self.enum_candidates)
+    def validate_observed_values(self) -> ExternalDatabaseObservedDistribution:
+        extrema = [value for value in (self.minimum, self.maximum) if value is not None]
+        require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
 
 
