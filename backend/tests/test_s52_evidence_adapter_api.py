@@ -953,6 +953,22 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_ref_rejected.text
 
+    dedicated_type_payload = _java_evidence(project_id)
+    dedicated_type_claim = next(
+        claim for claim in dedicated_type_payload["claims"] if claim["kind"] == "dto_field"
+    )
+    dedicated_type_claim["field_type"] = sensitive_value
+    dedicated_type_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": dedicated_type_payload},
+    )
+
+    assert dedicated_type_rejected.status_code == 422
+    assert dedicated_type_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert dedicated_type_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in dedicated_type_rejected.text
+
     dedicated_payload = _java_evidence(project_id)
     dedicated_payload["claims"][0]["source_path"] = f"src/{sensitive_value}.java:4"
 
@@ -1104,6 +1120,26 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert generic_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert generic_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in generic_ref_rejected.text
+
+    generic_type_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_type_claim = next(
+        finding
+        for finding in generic_type_payload["findings"]
+        if finding["structured_data"]["claim_kind"] == "dto_field"
+    )
+    generic_type_claim["structured_data"]["claim"]["field_type"] = sensitive_value
+    generic_type_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_type_payload},
+    )
+
+    assert generic_type_rejected.status_code == 422
+    assert generic_type_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_type_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_type_rejected.text
 
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
@@ -1328,6 +1364,85 @@ async def test_database_adapter_rejects_sensitive_or_write_input_with_trace_id(
     assert rejected_masked_example.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected_masked_example.json()["error"]["trace_id"]
     assert sensitive_value not in rejected_masked_example.text
+
+    sensitive_type_payload = _database_evidence(project_id)
+    sensitive_type_payload["tables"][0]["columns"][0]["data_type"] = sensitive_value
+    rejected_type = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": sensitive_type_payload},
+    )
+
+    assert rejected_type.status_code == 422
+    assert rejected_type.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_type.json()["error"]["trace_id"]
+    assert sensitive_value not in rejected_type.text
+
+    generic_type_payload = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_type_claim = next(
+        finding
+        for finding in generic_type_payload["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    generic_type_claim["structured_data"]["claim"]["data_type"] = sensitive_value
+    generic_type_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_type_payload},
+    )
+
+    assert generic_type_rejected.status_code == 422
+    assert generic_type_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_type_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_type_rejected.text
+
+
+@pytest.mark.asyncio
+async def test_database_adapter_rejects_oversized_derived_envelope_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "数据库证据包预算上下文",
+            "objective": "验证派生证据包超限返回有界客户端错误",
+            "required_evidence": ["data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    payload = _database_evidence(project_id)
+    payload["tables"] = [
+        {
+            "schema_name": "public",
+            "name": "large_profiles",
+            "columns": [
+                {
+                    "name": f"field_{index:03d}",
+                    "data_type": "text",
+                    "nullable": True,
+                    "enum_values": ["x" * 4000],
+                }
+                for index in range(79)
+            ],
+        }
+    ]
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": payload},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
 
 
 @pytest.mark.asyncio

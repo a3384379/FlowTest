@@ -241,6 +241,66 @@ def test_adapter_contracts_reject_sensitive_source_and_subject_refs() -> None:
         ExternalEvidenceEnvelope.model_validate(generic)
 
 
+def test_adapter_contracts_reject_sensitive_declared_types() -> None:
+    sensitive_value = "4111111111111111"
+    dedicated_java = _java_submission()
+    dto_claim = next(claim for claim in dedicated_java["claims"] if claim["kind"] == "dto_field")
+    dto_claim["field_type"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive"):
+        JavaEvidenceSubmission.model_validate(dedicated_java)
+
+    dedicated_database = _database_submission()
+    dedicated_database["tables"][0]["columns"][0]["data_type"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive"):
+        DatabaseEvidenceSubmission.model_validate(dedicated_database)
+
+    generic_java = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    dto_finding = next(
+        finding
+        for finding in generic_java["findings"]
+        if finding["structured_data"]["claim_kind"] == "dto_field"
+    )
+    dto_finding["structured_data"]["claim"]["field_type"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive"):
+        ExternalEvidenceEnvelope.model_validate(generic_java)
+
+    generic_database = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    column_finding = next(
+        finding
+        for finding in generic_database["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    column_finding["structured_data"]["claim"]["data_type"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive"):
+        ExternalEvidenceEnvelope.model_validate(generic_database)
+
+
+def test_database_submission_rejects_oversized_derived_envelope() -> None:
+    payload = _database_submission()
+    payload["tables"] = [
+        {
+            "schema_name": "public",
+            "name": "large_profiles",
+            "columns": [
+                {
+                    "name": f"field_{index:03d}",
+                    "data_type": "text",
+                    "nullable": True,
+                    "enum_values": ["x" * 4000],
+                }
+                for index in range(79)
+            ],
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="database evidence envelope byte budget exceeded"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     raw_example = _database_submission()
     raw_example["tables"][0]["columns"][0]["masked_example"] = "order-0001"
@@ -1661,6 +1721,11 @@ class RequestMappingController {
     public Order handle() {
         return orderService.handle();
     }
+
+    @GetMapping(path = "/balanced", params = "q=(foo)")
+    public Order balanced() {
+        return orderService.balanced();
+    }
 }
 """,
                     }
@@ -1673,6 +1738,7 @@ class RequestMappingController {
     assert {(claim.method, claim.path, claim.handler) for claim in routes} == {
         ("GET", "/api/orders", "handle"),
         ("POST", "/api/orders", "handle"),
+        ("GET", "/api/balanced", "balanced"),
     }
 
 

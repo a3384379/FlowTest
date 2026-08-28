@@ -51,6 +51,10 @@ _CONNECTION_STRING = re.compile(
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
+_UUID_LITERAL = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 _ADAPTER_REF = r"^\S+$"
 _ADAPTER_IDENTIFIER = r"^[A-Za-z_$][A-Za-z0-9_$.-]{0,159}$"
 _WRITE_SQL = re.compile(
@@ -308,6 +312,11 @@ class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
     field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
 
+    @model_validator(mode="after")
+    def validate_field_type(self) -> ExternalJavaDtoFieldClaim:
+        require_no_sensitive_scalar_values([self.field_type])
+        return self
+
 
 class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
     kind: Literal["bean_validation"] = "bean_validation"
@@ -487,6 +496,7 @@ class ExternalDatabaseColumnClaim(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
+        require_no_sensitive_scalar_values([self.data_type])
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
@@ -863,6 +873,7 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
         return True
     if _looks_like_high_entropy_credential(value):
         return True
+    phone_card_value = _UUID_LITERAL.sub("", value)
     if path.endswith(
         (
             ".statement",
@@ -875,8 +886,9 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
             ".id",
             ".ref",
             "_ref",
+            "_type",
         )
-    ) and any(pattern.search(value) for pattern in (_PHONE, _CARD)):
+    ) and any(pattern.search(phone_card_value) for pattern in (_PHONE, _CARD)):
         return True
     parsed = urlsplit(value)
     return parsed.username is not None or parsed.password is not None

@@ -14,7 +14,15 @@ from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Annotated, Final, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    ValidationError,
+    model_validator,
+)
 
 from app.domain.evidence import EvidenceBundle, EvidenceFinding, EvidenceSourceType
 from app.domain.test_contexts import (
@@ -67,11 +75,10 @@ _WRITE_SQL = re.compile(
     re.IGNORECASE,
 )
 _MAPPING_ANNOTATION = re.compile(
-    r"@(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)"
-    r"(?:\s*\((?P<args>[^)]*)\))?"
+    r"@(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
 )
 _MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete|Request)Mapping\b")
-_REQUEST_MAPPING = re.compile(r"@RequestMapping(?:\s*\((?P<args>[^)]*)\))?")
+_REQUEST_MAPPING = re.compile(r"@RequestMapping\b")
 _REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
 _CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
 _TYPE_DECLARATION = re.compile(
@@ -152,6 +159,11 @@ class JavaDtoFieldClaim(JavaClaimBase):
     dto_type: str = Field(pattern=_IDENTIFIER)
     field_name: str = Field(pattern=_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_field_type(self) -> JavaDtoFieldClaim:
+        require_no_sensitive_scalar_values([self.field_type])
+        return self
 
 
 class JavaBeanValidationClaim(JavaClaimBase):
@@ -305,6 +317,7 @@ class DatabaseColumnEvidence(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
+        require_no_sensitive_scalar_values([self.data_type])
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
@@ -354,6 +367,7 @@ class DatabaseEvidenceSubmission(BaseModel):
         if len(identities) != len(set(identities)):
             raise ValueError("database table identities must be unique")
         _require_no_sensitive_data(self)
+        _require_database_envelope_budget(self)
         return self
 
 
@@ -581,6 +595,15 @@ def adapt_database_evidence(submission: DatabaseEvidenceSubmission) -> ExternalE
         confidence=submission.confidence,
         deterministic=submission.deterministic,
     )
+
+
+def _require_database_envelope_budget(submission: DatabaseEvidenceSubmission) -> None:
+    try:
+        adapt_database_evidence(submission)
+    except ValidationError as exc:
+        if "external evidence byte budget exceeded" not in str(exc):
+            raise
+        raise ValueError("database evidence envelope byte budget exceeded") from None
 
 
 def adapt_evidence_bundle(
@@ -1847,13 +1870,20 @@ def _java_validation_annotations(
 
 
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
+    return _java_annotation_arguments_and_end(content, annotation_end)[0]
+
+
+def _java_annotation_arguments_and_end(
+    content: str,
+    annotation_end: int,
+) -> tuple[str, int]:
     opening = annotation_end
     while opening < len(content) and content[opening].isspace():
         opening += 1
     if opening >= len(content) or content[opening] != "(":
-        return ""
+        return "", annotation_end
     closing = _matching_parenthesis(content, opening)
-    return content[opening : closing + 1]
+    return content[opening : closing + 1], closing + 1
 
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
@@ -1879,7 +1909,11 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         start=declaration_prefix_start,
         end=declaration.start(),
     )
-    base_paths = _mapping_paths(base_matches[-1].group("args") or "") if base_matches else [""]
+    base_paths = (
+        _mapping_paths(_java_annotation_arguments(file.content, base_matches[-1].end()))
+        if base_matches
+        else [""]
+    )
     controller = declaration.group("name")
     return [
         route
@@ -1894,7 +1928,6 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         for route in _routes_after_mapping(
             file,
             match.start(),
-            match.end(),
             match,
             base_paths,
             controller,
@@ -1983,11 +2016,14 @@ def _active_java_annotation_matches(
 def _routes_after_mapping(
     file: JavaSourceFileSnapshot,
     mapping_start: int,
-    mapping_end: int,
     mapping: re.Match[str],
     base_paths: list[str],
     controller: str,
 ) -> list[_JavaRoute]:
+    mapping_arguments, mapping_end = _java_annotation_arguments_and_end(
+        file.content,
+        mapping.end(),
+    )
     following = file.content[mapping_end : mapping_end + 2000]
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
     signature = re.match(
@@ -2000,8 +2036,8 @@ def _routes_after_mapping(
     )
     if signature is None:
         return []
-    paths = _mapping_paths(mapping.group("args") or "")
-    methods = _mapping_http_methods(mapping)
+    paths = _mapping_paths(mapping_arguments)
+    methods = _mapping_http_methods(mapping, mapping_arguments)
     body_start = mapping_end + signature.end() - 1
     body_end = _matching_brace(file.content, body_start)
     handler = signature.group("handler")
@@ -2031,6 +2067,7 @@ def _routes_after_mapping(
 
 def _mapping_http_methods(
     mapping: re.Match[str],
+    arguments: str,
 ) -> list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]]:
     composed_method = mapping.group("method")
     if composed_method is not None:
@@ -2042,7 +2079,7 @@ def _mapping_http_methods(
         ]
     methods = re.findall(
         r"\bRequestMethod\.(GET|POST|PUT|PATCH|DELETE)\b",
-        mapping.group("args") or "",
+        arguments,
     )
     return [
         cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
@@ -2061,13 +2098,16 @@ def _declared_java_exceptions(clause: str | None) -> list[str]:
 
 
 def _mapping_paths(arguments: str) -> list[str]:
+    content = (
+        arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    )
     named = re.search(
         r'\b(?:value|path)\s*=\s*(?P<value>\{[^}]*\}|"(?:\\.|[^"\\])*")',
-        arguments,
+        content,
         re.DOTALL,
     )
     expression = (
-        named.group("value") if named is not None else _positional_mapping_expression(arguments)
+        named.group("value") if named is not None else _positional_mapping_expression(content)
     )
     paths = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
     return list(dict.fromkeys(paths)) or [""]
