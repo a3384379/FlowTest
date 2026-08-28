@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -19,6 +20,7 @@ from app.domain.evidence_adapters import (
 )
 from app.domain.test_contexts import (
     DatabaseExternalEvidenceStructuredData,
+    ExternalEvidenceEnvelope,
     finding_semantic_fingerprint,
 )
 from app.main import app
@@ -606,6 +608,146 @@ async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhaus
 
 
 @pytest.mark.asyncio
+async def test_generic_evidence_rejects_derived_conflict_byte_overflow(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "派生冲突字节预算上下文",
+            "objective": "验证派生冲突超过 Envelope 字节预算时返回标准客户端错误",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+
+    java_payload = _java_evidence(project_id)
+    _add_archived_order_entity(java_payload)
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] in {"controller_route", "entity"}
+    ]
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={
+            "envelope": adapt_java_evidence(
+                JavaEvidenceSubmission.model_validate(java_payload)
+            ).model_dump(mode="json")
+        },
+    )
+    assert java.status_code == 201, java.text
+
+    database_payload = _database_evidence(project_id)
+    database_payload["tables"][0]["columns"] = [database_payload["tables"][0]["columns"][0]]
+    second_table = {
+        **database_payload["tables"][0],
+        "name": "archived_orders",
+        "columns": [dict(column) for column in database_payload["tables"][0]["columns"]],
+    }
+    database_payload["tables"].append(second_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    findings = list(database_envelope.findings)
+    base_finding = findings[0]
+    while len(findings) < 99:
+        index = len(findings)
+        provisional = base_finding.model_copy(
+            update={
+                "id": f"byte-padding-{index}",
+                "source_path": f"$.byte_padding.{index}",
+                "semantic_fingerprint": "0" * 64,
+            }
+        )
+        findings.append(
+            provisional.model_copy(
+                update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+            )
+        )
+    target_bytes = 256 * 1024 - 32
+    for index, finding in enumerate(findings):
+        payload = database_envelope.model_copy(update={"findings": findings}).model_dump(
+            mode="json"
+        )
+        current_bytes = len(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+        addition = min(2000 - len(finding.statement), target_bytes - current_bytes)
+        if addition <= 0:
+            break
+        provisional = finding.model_copy(
+            update={
+                "statement": finding.statement + "x" * addition,
+                "semantic_fingerprint": "0" * 64,
+            }
+        )
+        findings[index] = provisional.model_copy(
+            update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+        )
+    near_limit_payload = database_envelope.model_copy(update={"findings": findings}).model_dump(
+        mode="json"
+    )
+    while True:
+        current_bytes = len(
+            json.dumps(
+                near_limit_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+        if current_bytes >= target_bytes:
+            break
+        warning = {
+            "code": f"BYTE_PADDING_{len(near_limit_payload['warnings'])}",
+            "message": "x",
+        }
+        near_limit_payload["warnings"].append(warning)
+        minimum_bytes = len(
+            json.dumps(
+                near_limit_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+        if minimum_bytes > target_bytes:
+            near_limit_payload["warnings"].pop()
+            break
+        warning["message"] += "x" * min(999, target_bytes - minimum_bytes)
+    near_limit = ExternalEvidenceEnvelope.model_validate(near_limit_payload)
+    near_limit_bytes = len(
+        json.dumps(
+            near_limit.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    )
+    assert 0 < 256 * 1024 - near_limit_bytes < 256
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": near_limit.model_dump(mode="json")},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
+    assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_database_adapter_rejects_sensitive_or_write_input_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:
@@ -689,6 +831,50 @@ async def test_mapping_budget_error_uses_standard_trace_envelope(
     assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
     assert rejected.json()["error"]["trace_id"]
     assert "synthetic mapping budget" not in rejected.text
+
+
+@pytest.mark.asyncio
+async def test_database_state_union_budget_uses_standard_trace_envelope(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "状态集合预算上下文",
+            "objective": "验证声明值与观测值并集不会被静默截断",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": _java_evidence(project_id)},
+    )
+    assert java.status_code == 201, java.text
+
+    database_payload = _database_evidence(project_id)
+    status = next(
+        column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
+    )
+    status["enum_values"] = [f"declared-{index:03d}" for index in range(100)]
+    status["observed_distribution"] = {
+        "enum_candidates": [f"observed-{index:03d}" for index in range(100)]
+    }
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": database_payload},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
+    assert rejected.json()["error"]["trace_id"]
 
 
 def _headers(token: str) -> dict[str, str]:

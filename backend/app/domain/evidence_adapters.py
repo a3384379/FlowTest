@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model
 
 from app.domain.evidence import EvidenceBundle, EvidenceFinding, EvidenceSourceType
 from app.domain.test_contexts import (
+    MAX_EXTERNAL_EVIDENCE_BYTES,
     DatabaseExternalEvidenceStructuredData,
     EntityMappingExternalEvidenceStructuredData,
     EvidenceBundleExternalEvidenceStructuredData,
@@ -661,6 +662,16 @@ def with_mapping_conflict_findings(
     payload["findings"] = [
         item.model_dump(mode="json") for item in [*envelope.findings, *additions]
     ]
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if len(serialized) > MAX_EXTERNAL_EVIDENCE_BYTES:
+        raise EntityMappingBudgetExceeded(
+            "derived mapping conflicts exceed the evidence envelope byte budget"
+        )
     return ExternalEvidenceEnvelope.model_validate(payload)
 
 
@@ -879,6 +890,7 @@ class _EntityMatch:
 class _OperationEntityScope:
     entities: tuple[tuple[JavaEntityClaim, str], ...]
     allow_route_fallback: bool
+    correlate_entities_with_route: bool
     blocked_table_refs: tuple[str, ...]
 
 
@@ -1071,6 +1083,7 @@ def _operation_entity_scope(
         return _OperationEntityScope(
             entities=tuple(explicit),
             allow_route_fallback=False,
+            correlate_entities_with_route=False,
             blocked_table_refs=(),
         )
     return _OperationEntityScope(
@@ -1078,6 +1091,7 @@ def _operation_entity_scope(
             (entity, ref) for entity, ref in parsed.entities if not entity.operation_refs
         ),
         allow_route_fallback=True,
+        correlate_entities_with_route=True,
         blocked_table_refs=tuple(sorted(_foreign_table_refs(parsed, route.operation_ref))),
     )
 
@@ -1089,10 +1103,16 @@ def _entity_match(
     scope: _OperationEntityScope,
 ) -> _EntityMatch:
     table_token = _normalized_name(table_name)
+    route_token = _route_resource_token(route.path)
+    route_correlated = bool(route_token) and (
+        table_token == route_token or table_token.endswith(route_token)
+    )
+    entity_matches_are_allowed = not scope.correlate_entities_with_route or route_correlated
     exact_matches = [
         (entity, evidence_ref)
         for entity, evidence_ref in scope.entities
-        if entity.table_ref is not None
+        if entity_matches_are_allowed
+        and entity.table_ref is not None
         and _table_ref_matches_database_table(entity.table_ref, schema_name, table_name)
     ]
     if exact_matches:
@@ -1100,7 +1120,9 @@ def _entity_match(
     inferred_matches = [
         (entity, evidence_ref)
         for entity, evidence_ref in scope.entities
-        if entity.table_ref is None and _normalized_name(entity.class_name) == table_token
+        if entity_matches_are_allowed
+        and entity.table_ref is None
+        and _normalized_name(entity.class_name) == table_token
     ]
     if inferred_matches:
         return _combined_entity_match(inferred_matches, maximum_score=0.9, deterministic=False)
@@ -1109,8 +1131,7 @@ def _entity_match(
         for table_ref in scope.blocked_table_refs
     ):
         return _EntityMatch(score=0, evidence_refs=(), deterministic=False)
-    route_token = _route_resource_token(route.path)
-    if route_token and (table_token == route_token or table_token.endswith(route_token)):
+    if route_correlated:
         return _EntityMatch(score=0.75, evidence_refs=(), deterministic=False)
     return _EntityMatch(score=0, evidence_refs=(), deterministic=False)
 
@@ -1450,7 +1471,7 @@ def _database_state_values(column: DatabaseColumnEvidence) -> list[str]:
     values = list(column.enum_values)
     if column.observed_distribution is not None:
         values.extend(column.observed_distribution.enum_candidates)
-    return sorted({_state_scalar_text(value) for value in values})[:100]
+    return sorted({_state_scalar_text(value) for value in values})
 
 
 def _state_scalar_text(value: str | int | float | bool) -> str:
@@ -1481,7 +1502,9 @@ def _candidate(
     state_values: list[str] | None = None,
 ) -> EntityMappingCandidate:
     refs = sorted(set(evidence_refs))[:20]
-    values = sorted(set(state_values or []))[:100]
+    values = sorted(set(state_values or []))
+    if len(values) > 100:
+        raise EntityMappingBudgetExceeded("entity mapping state value budget exceeded")
     key = "|".join([kind.value, source_ref, target_ref, operation_ref, field_ref or "", *values])
     return EntityMappingCandidate(
         id=f"mapping-{sha256(key.encode()).hexdigest()[:24]}",

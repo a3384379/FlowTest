@@ -592,6 +592,52 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
     )
 
 
+def test_unscoped_exact_entities_still_require_route_correlation() -> None:
+    java_payload = _java_submission()
+    order_entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")
+    order_entity["operation_refs"] = []
+    java_payload["claims"].append(
+        {
+            "id": "entity-user",
+            "kind": "entity",
+            "source_path": "src/User.java:4",
+            "confidence": 0.96,
+            "deterministic": True,
+            "entity_ref": "entity://User",
+            "class_name": "User",
+            "table_ref": "table://public/users",
+            "operation_refs": [],
+        }
+    )
+    database_payload = _database_submission()
+    users_table = json.loads(json.dumps(database_payload["tables"][0]))
+    users_table["name"] = "users"
+    database_payload["tables"].append(users_table)
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    operation_entities = {
+        candidate.target_ref
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.operation_ref == "operation://POST/api/orders"
+    }
+    assert operation_entities == {"entity://public/orders"}
+
+
 def test_explicit_operation_entity_disables_route_table_fallback() -> None:
     database_payload = _database_submission()
     route_suffix_table = json.loads(json.dumps(database_payload["tables"][0]))
@@ -869,6 +915,33 @@ def test_operation_state_mapping_scopes_independent_fields() -> None:
         conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
         for conflict in mapping.conflicts
     )
+
+
+def test_database_state_union_over_budget_is_rejected_without_truncation() -> None:
+    database_payload = _database_submission()
+    status = next(
+        column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
+    )
+    status["enum_values"] = [f"declared-{index:03d}" for index in range(100)]
+    status["observed_distribution"]["enum_candidates"] = [
+        f"observed-{index:03d}" for index in range(100)
+    ]
+
+    with pytest.raises(EntityMappingBudgetExceeded, match="state value budget"):
+        derive_entity_mapping(
+            [
+                *_mapping_inputs(
+                    adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission())),
+                    "java",
+                ),
+                *_mapping_inputs(
+                    adapt_database_evidence(
+                        DatabaseEvidenceSubmission.model_validate(database_payload)
+                    ),
+                    "database",
+                ),
+            ]
+        )
 
 
 def test_dependent_mappings_preserve_heuristic_operation_table_reliability() -> None:
