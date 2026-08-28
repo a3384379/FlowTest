@@ -23,6 +23,8 @@ from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
 from app.api.v1.endpoints.mcp_controlled_write import router as mcp_controlled_write_router
 from app.api.v1.endpoints.mcp_read import router as mcp_read_router
+from app.api.v1.endpoints.mcp_test_contexts import evidence_router as mcp_evidence_router
+from app.api.v1.endpoints.mcp_test_contexts import flow_router as mcp_flow_router
 from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.performance import router as performance_router
 from app.api.v1.endpoints.projects import router as projects_router
@@ -65,6 +67,8 @@ api_router.include_router(impact_router, tags=["impact"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
 api_router.include_router(mcp_read_router, tags=["mcp-read"])
 api_router.include_router(mcp_controlled_write_router, tags=["mcp-controlled-write"])
+api_router.include_router(mcp_evidence_router, tags=["mcp-evidence"])
+api_router.include_router(mcp_flow_router, tags=["mcp-flow-proposals"])
 api_router.include_router(performance_router, tags=["performance"])
 api_router.include_router(artifacts_router, tags=["files"])
 api_router.include_router(api_assets_router, tags=["api-assets"])

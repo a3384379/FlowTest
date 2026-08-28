@@ -11,13 +11,20 @@ from urllib.parse import unquote, urlsplit
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
-from app.domain.mcp_controlled_write import MCP_CONTROLLED_WRITE_SERVER_VERSION
 from app.domain.mcp_read import MCP_SERVER_NAME
+from app.domain.test_contexts import (
+    MCP_CONTEXT_EVIDENCE_SERVER_VERSION,
+    ContextKnowledgeSnapshot,
+    EvidenceProviderType,
+    ExternalEvidenceEnvelope,
+    RevisionReference,
+)
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 
 READ_ONLY_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
-    "只进入待审核状态的 Test Design ChangeSet。它不会自动发布、执行、删除、修改"
+    "版本化外部证据与只进入待审核状态的 Test Design ChangeSet。"
+    "它不会自动发布、执行、删除、修改"
     "权限或创建 Credential；高风险写入必须由人工批准。输出中的请求值、认证信息、"
     "Secret、PII 和响应体会被省略或脱敏。"
 )
@@ -42,7 +49,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_CONTROLLED_WRITE_SERVER_VERSION,
+        version=MCP_CONTEXT_EVIDENCE_SERVER_VERSION,
         instructions=READ_ONLY_INSTRUCTIONS,
     )
 
@@ -54,6 +61,8 @@ def create_mcp_server(
 
 def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_coverage_tool(server, client)
+    _register_begin_context_tool(server, client)
+    _register_close_context_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
 
     @server.tool(
@@ -76,7 +85,9 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
 
     _register_flow_spec_export_tool(server, client)
     _register_generate_tool(server, client)
+    _register_ingest_evidence_tool(server, client)
     _register_change_impact_tool(server, client)
+    _register_context_requirements_tool(server, client)
 
     @server.tool(
         name="flowtest.inspect_contract",
@@ -137,7 +148,9 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             client.inspect_run_evidence(execution_id, token=_request_token(ctx, client))
         )
 
-    _register_evidence_tools(server, client)
+    _register_source_evidence_tool(server, client)
+    _register_inspect_context_tool(server, client)
+    _register_test_evidence_tool(server, client)
 
     @server.tool(
         name="flowtest.list_projects",
@@ -191,6 +204,120 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         )
 
     _register_flow_spec_validate_tool(server, client)
+
+
+def _register_begin_context_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.begin_test_context",
+        description="Begin a tenant-scoped, revisioned test context with bounded evidence needs.",
+        structured_output=True,
+    )
+    async def begin_test_context(
+        project_id: str,
+        name: str,
+        objective: str,
+        target_environment_id: str | None = None,
+        ttl_seconds: int = 3600,
+        required_evidence: list[EvidenceProviderType] | None = None,
+        repository_revisions: list[RevisionReference] | None = None,
+        contract_revisions: list[RevisionReference] | None = None,
+        data_profile_revisions: list[RevisionReference] | None = None,
+        existing_test_revision: RevisionReference | None = None,
+        knowledge_snapshot: ContextKnowledgeSnapshot | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "project_id": project_id,
+            "name": name,
+            "objective": objective,
+            "ttl_seconds": ttl_seconds,
+            "required_evidence": [
+                value.value for value in required_evidence or [EvidenceProviderType.CONTRACT]
+            ],
+            "repository_revisions": [
+                value.model_dump(mode="json") for value in repository_revisions or []
+            ],
+            "contract_revisions": [
+                value.model_dump(mode="json") for value in contract_revisions or []
+            ],
+            "data_profile_revisions": [
+                value.model_dump(mode="json") for value in data_profile_revisions or []
+            ],
+        }
+        if target_environment_id is not None:
+            payload["target_environment_id"] = target_environment_id
+        if existing_test_revision is not None:
+            payload["existing_test_revision"] = existing_test_revision.model_dump(mode="json")
+        if knowledge_snapshot is not None:
+            payload["knowledge_snapshot"] = knowledge_snapshot.model_dump(mode="json")
+        return await _tool_payload(
+            client.begin_test_context(payload, token=_request_token(ctx, client))
+        )
+
+
+def _register_close_context_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.close_test_context",
+        description="Close a test context so it can no longer receive evidence or proposals.",
+        structured_output=True,
+    )
+    async def close_test_context(
+        context_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.close_test_context(context_id, token=_request_token(ctx, client))
+        )
+
+
+def _register_ingest_evidence_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.ingest_external_evidence",
+        description=("Ingest a strict, revisioned External Evidence Envelope as untrusted data."),
+        structured_output=True,
+    )
+    async def ingest_external_evidence(
+        context_id: str,
+        envelope: ExternalEvidenceEnvelope,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.ingest_external_evidence(
+                context_id,
+                envelope.model_dump(mode="json"),
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_context_requirements_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_context_requirements",
+        description="Inspect missing evidence and conflict requirements for a test context.",
+        structured_output=True,
+    )
+    async def inspect_context_requirements(
+        context_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_context_requirements(context_id, token=_request_token(ctx, client))
+        )
+
+
+def _register_inspect_context_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_test_context",
+        description="Inspect the current immutable revision and redacted evidence summary.",
+        structured_output=True,
+    )
+    async def inspect_test_context(
+        context_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_test_context(context_id, token=_request_token(ctx, client))
+        )
 
 
 def _register_flow_spec_diff_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
@@ -345,7 +472,7 @@ def _register_data_profile_tool(server: MCPServer, client: MCPReadGatewayClient)
         )
 
 
-def _register_evidence_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+def _register_source_evidence_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_source_evidence",
         description="Analyze a bounded allow-listed Python repository snapshot through AST only.",
@@ -360,6 +487,8 @@ def _register_evidence_tools(server: MCPServer, client: MCPReadGatewayClient) ->
             client.inspect_source_evidence(project_id, snapshot, token=_request_token(ctx, client))
         )
 
+
+def _register_test_evidence_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_test_evidence",
         description="Inspect evidence-backed generated test semantics without persistence.",

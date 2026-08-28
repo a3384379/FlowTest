@@ -6,9 +6,14 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.test_contexts import (
+    ContextRequirementsResponse,
+    FlowSpecProposalResponse,
+    TestContextResponse,
+)
 from app.schemas.test_design import MCPControlledWriteEnvelope
 
 
@@ -261,6 +266,73 @@ class MCPReadGatewayClient:
             token=token,
         )
 
+    async def begin_test_context(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> TestContextResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/evidence/contexts", payload=payload, token=token
+        )
+        return _validate_response(response, TestContextResponse)
+
+    async def inspect_context_requirements(
+        self, context_id: UUID | str, *, token: str | None = None
+    ) -> ContextRequirementsResponse:
+        response = await self._request_get(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/requirements",
+            token=token,
+        )
+        return _validate_response(response, ContextRequirementsResponse)
+
+    async def ingest_external_evidence(
+        self,
+        context_id: UUID | str,
+        envelope: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> TestContextResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            payload={"envelope": dict(envelope)},
+            token=token,
+        )
+        return _validate_response(response, TestContextResponse)
+
+    async def inspect_test_context(
+        self, context_id: UUID | str, *, token: str | None = None
+    ) -> TestContextResponse:
+        response = await self._request_get(
+            f"/api/v1/mcp/evidence/contexts/{context_id}", token=token
+        )
+        return _validate_response(response, TestContextResponse)
+
+    async def close_test_context(
+        self, context_id: UUID | str, *, token: str | None = None
+    ) -> TestContextResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/evidence/contexts/{context_id}/close",
+            payload={},
+            token=token,
+        )
+        return _validate_response(response, TestContextResponse)
+
+    async def propose_flow_draft(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> FlowSpecProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/proposals",
+            payload=payload,
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, FlowSpecProposalResponse)
+
     async def _get(
         self,
         path: str,
@@ -269,30 +341,13 @@ class MCPReadGatewayClient:
         token: str | None,
         resource_uri: str | None,
     ) -> MCPReadEnvelope:
-        headers = {"X-MCP-Client-Version": self._client_version}
-        effective_token = token or self._token
-        if effective_token:
-            headers["Authorization"] = f"Bearer {effective_token}"
-        if resource_uri and resource_uri.startswith("flowtest://"):
-            headers["X-MCP-Resource-URI"] = resource_uri[:2048]
-        try:
-            response = await self._client.get(path, params=params, headers=headers)
-        except httpx.HTTPError as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_UNAVAILABLE",
-                status_code=503,
-                message="MCP 应用网关暂时不可用",
-            ) from error
-        if response.is_error:
-            raise _gateway_error(response)
-        try:
-            return MCPReadEnvelope.model_validate(response.json())
-        except (ValueError, ValidationError) as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_INVALID_RESPONSE",
-                status_code=502,
-                message="MCP 应用网关返回格式无效",
-            ) from error
+        response = await self._request_get(
+            path,
+            params=params,
+            token=token,
+            resource_uri=resource_uri,
+        )
+        return _validate_response(response, MCPReadEnvelope)
 
     async def _post(
         self,
@@ -302,14 +357,7 @@ class MCPReadGatewayClient:
         token: str | None,
     ) -> MCPControlledWriteEnvelope:
         response = await self._request_post(path=path, payload=payload, token=token)
-        try:
-            return MCPControlledWriteEnvelope.model_validate(response.json())
-        except (ValueError, ValidationError) as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_INVALID_RESPONSE",
-                status_code=502,
-                message="MCP 应用网关返回格式无效",
-            ) from error
+        return _validate_response(response, MCPControlledWriteEnvelope)
 
     async def _post_read(
         self,
@@ -319,14 +367,26 @@ class MCPReadGatewayClient:
         token: str | None,
     ) -> MCPReadEnvelope:
         response = await self._request_post(path=path, payload=payload, token=token)
+        return _validate_response(response, MCPReadEnvelope)
+
+    async def _request_get(
+        self,
+        path: str,
+        *,
+        token: str | None,
+        params: Mapping[str, Any] | None = None,
+        resource_uri: str | None = None,
+    ) -> httpx.Response:
+        headers = self._headers(token=token)
+        if resource_uri and resource_uri.startswith("flowtest://"):
+            headers["X-MCP-Resource-URI"] = resource_uri[:2048]
         try:
-            return MCPReadEnvelope.model_validate(response.json())
-        except (ValueError, ValidationError) as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_INVALID_RESPONSE",
-                status_code=502,
-                message="MCP 应用网关返回格式无效",
-            ) from error
+            response = await self._client.get(path, params=params, headers=headers)
+        except httpx.HTTPError as error:
+            raise _unavailable() from error
+        if response.is_error:
+            raise _gateway_error(response)
+        return response
 
     async def _request_post(
         self,
@@ -334,25 +394,26 @@ class MCPReadGatewayClient:
         path: str,
         payload: Mapping[str, Any],
         token: str | None,
+        additional_headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        headers = {
-            "X-MCP-Client-Version": self._client_version,
-            "Content-Type": "application/json",
-        }
-        effective_token = token or self._token
-        if effective_token:
-            headers["Authorization"] = f"Bearer {effective_token}"
+        headers = self._headers(token=token)
+        headers["Content-Type"] = "application/json"
+        if additional_headers is not None:
+            headers.update(additional_headers)
         try:
             response = await self._client.post(path, json=dict(payload), headers=headers)
         except httpx.HTTPError as error:
-            raise MCPGatewayError(
-                code="MCP_GATEWAY_UNAVAILABLE",
-                status_code=503,
-                message="MCP 应用网关暂时不可用",
-            ) from error
+            raise _unavailable() from error
         if response.is_error:
             raise _gateway_error(response)
         return response
+
+    def _headers(self, *, token: str | None) -> dict[str, str]:
+        headers = {"X-MCP-Client-Version": self._client_version}
+        effective_token = token or self._token
+        if effective_token:
+            headers["Authorization"] = f"Bearer {effective_token}"
+        return headers
 
 
 def _validate_base_url(value: str) -> str:
@@ -390,3 +451,24 @@ def _gateway_error(response: httpx.Response) -> MCPGatewayError:
     elif response.status_code == 404:
         message = "MCP 资源不存在"
     return MCPGatewayError(code=code, status_code=response.status_code, message=message)
+
+
+def _validate_response[ResponseModelT: BaseModel](
+    response: httpx.Response, model: type[ResponseModelT]
+) -> ResponseModelT:
+    try:
+        return model.model_validate(response.json())
+    except (ValueError, ValidationError) as error:
+        raise MCPGatewayError(
+            code="MCP_GATEWAY_INVALID_RESPONSE",
+            status_code=502,
+            message="MCP 应用网关返回格式无效",
+        ) from error
+
+
+def _unavailable() -> MCPGatewayError:
+    return MCPGatewayError(
+        code="MCP_GATEWAY_UNAVAILABLE",
+        status_code=503,
+        message="MCP 应用网关暂时不可用",
+    )

@@ -13,6 +13,7 @@ from app.models.artifacts import Artifact
 from app.models.data_sources import MockRequestLog, MockService
 from app.models.governance import IdempotencyRecord, OrganizationGovernance
 from app.models.organizations import Organization
+from app.models.test_contexts import TestContext as ContextModel
 from app.observability.metrics import MetricsRegistry, normalize_path, render_metrics
 from app.observability.task_metrics import TaskMetricsSnapshot
 from app.services.retention import RetentionCleanupService
@@ -124,6 +125,19 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
                     response_body={"id": "result"},
                     expires_at=now - timedelta(seconds=1),
                 ),
+                ContextModel(
+                    organization_id=organization.id,
+                    project_id=project.id,
+                    name="Expired context",
+                    objective="Verify retention",
+                    target_environment_id=None,
+                    status="expired",
+                    current_revision=1,
+                    created_by_type="user",
+                    created_by_id=user.id,
+                    expires_at=now - timedelta(seconds=1),
+                    closed_at=None,
+                ),
                 _mock_log(mock_service.id, old),
                 _mock_log(mock_service.id, now),
             ]
@@ -136,6 +150,7 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
         idempotency = list((await session.scalars(select(IdempotencyRecord))).all())
         mock_logs = list((await session.scalars(select(MockRequestLog))).all())
         audit_logs = list((await session.scalars(select(AuditLog))).all())
+        contexts = list((await session.scalars(select(ContextModel))).all())
 
     assert summary.projects_scanned == 1
     assert summary.artifacts_deleted == 1
@@ -143,11 +158,13 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
     assert summary.idempotency_records_deleted == 1
     assert summary.audit_logs_deleted == 1
     assert summary.mock_request_logs_deleted == 1
+    assert summary.test_contexts_deleted == 1
     assert storage.deleted == ["expired.bin"]
     assert remaining == {"failed.bin", "current.bin"}
     assert idempotency == []
     assert len(mock_logs) == 1
     assert [log.action for log in audit_logs] == ["current.audit"]
+    assert contexts == []
     await engine.dispose()
 
 

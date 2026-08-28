@@ -26,6 +26,8 @@ SERVICE_ACCOUNT_SCOPES = frozenset(
         "audit:read",
         "mcp:read",
         "mcp:write",
+        "mcp:evidence:write",
+        "mcp:flow:propose",
         "org:governance",
         "org:audit",
         "org:key_rotate",

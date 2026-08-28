@@ -17,6 +17,7 @@ from app.models.governance import IdempotencyRecord, OrganizationGovernance
 from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery
 from app.models.tasking import TestPlanRun
+from app.models.test_contexts import TestContext
 from app.models.workflows import WorkflowExecution
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class RetentionCleanupSummary:
     import_previews_deleted: int = 0
     refresh_sessions_deleted: int = 0
     audit_logs_deleted: int = 0
+    test_contexts_deleted: int = 0
 
 
 class RetentionCleanupService:
@@ -69,6 +71,9 @@ class RetentionCleanupService:
         )
         totals.refresh_sessions_deleted += await self._delete(
             delete(RefreshSession).where(RefreshSession.expires_at < cleanup_at)
+        )
+        totals.test_contexts_deleted += await self._delete(
+            delete(TestContext).where(TestContext.expires_at < cleanup_at)
         )
         governance = list((await self._session.scalars(select(OrganizationGovernance))).all())
         for policy in governance:
@@ -166,6 +171,7 @@ class _MutableCleanupSummary:
     import_previews_deleted: int = 0
     refresh_sessions_deleted: int = 0
     audit_logs_deleted: int = 0
+    test_contexts_deleted: int = 0
 
     def freeze(self) -> RetentionCleanupSummary:
         return RetentionCleanupSummary(**asdict(self))

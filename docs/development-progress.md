@@ -2,8 +2,9 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48 契约冻结：PR #46 以 `588c19719f2fbfc22e1fe65e97e0d0d0f89fd4fe` 合入，该 Merge SHA 的
-Main Push Required Gate 与全部适用 Workflow 已成功；尚未进入 S49，也不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
+已完成 S48 契约冻结与证据闭环，当前 S49 Context Revision、External Evidence 与 Proposal Adapter
+已通过本地完整门禁，正在等待独立 PR 的精确 Head Remote CI、Review、合并与 Main Push 验证；当前
+Migration Head 为 `20260828_0046`，仍不是 Alpha/Beta/RC/GA。历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
@@ -11,6 +12,42 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 进行中：V6 S49 Context Revision、External Evidence 与 Proposal Adapter
+
+### Implemented
+
+- 新增且仅新增 `test_contexts`、`test_context_revisions`、`context_evidence_items` 三张表；Revision 与
+  Evidence Item 均不可原地更新，Context 使用稳定、规范化 Fingerprint，支持 `collecting`、`ready`、
+  `incomplete`、`conflicted`、`expired`、`closed`。
+- External Evidence Envelope 使用严格 Pydantic 契约，拒绝未知字段、无 Revision 来源、跨租户引用、
+  Secret/Token/Cookie/Password/Connection String/PEM、原始 PII 与 Prompt Instruction；Comment、Description
+  等内容固定为不可信数据而非指令。Context 初始输入也执行同一敏感值检查，Revision 引用、冲突与 Evidence
+  Item 超限返回稳定 409，不产生内部 5xx。
+- MCP 增加 begin/requirements/ingest/inspect/close 五个 Context 工具，并使用独立
+  `mcp:evidence:write` Scope；旧 `mcp:write` 不继承新权限。既有“组织治理”Service Account 表单可显式
+  签发 Evidence 与 Flow Proposal 两个新 Scope。
+- Proposal Adapter 复用 `FlowSpecService` 的同一套 Import/Mapping/Validation 路径；默认 Dry Run、强制
+  Idempotency-Key，持久化时只创建 Draft，记录 Service Account、`mcp://` 来源、Context Revision 与
+  Fingerprint，不 Review、Apply、Publish 或 Execute。
+- Alembic 与 Standalone Revision 升级到 `20260828_0046`；PostgreSQL 已完成 `0045 → 0046 → 0045 → 0046`
+  往返和无 Drift 检查，Standalone 已验证旧 0045 数据库幂等升级及三表/索引完整性。
+
+### Local Validation
+
+- Backend format、Ruff、Mypy 与全量 Pytest 均通过：`644 passed / 4 skipped`，Coverage `90.29%`。
+- Frontend format、lint、Vitest Coverage 与 build 通过：`56 files / 215 tests`，Statements `86.15%`、
+  Branches `80.11%`、Functions `85.27%`、Lines `88.37%`。
+- 隔离 Compose 真实栈上的 S49 Playwright `1 passed`：覆盖旧 Scope 拒绝、Context/Evidence、Secret
+  拒绝且响应与日志零泄漏、Requirements、Dry Run、Draft 持久化、幂等重放与 Close；测试后已清理容器、
+  网络和数据卷。
+
+### Intentionally Out of Scope / External Validation
+
+- `flowtest.propose_flow_draft` MCP Tool、Integration Plan/Compiler、Visual Proposal、Evidence Adapter、
+  Cleanup 与 Preview 分别属于 S50～S55，本阶段不提前注册；没有新建平行 Proposal/Review 状态机。
+- PR 精确 Head Remote CI、Review Thread、普通 Squash Merge 与合并后 Main Push 仍待执行；本地结果不作为
+  远程证据。完整事实见 [S49 Release Evidence](release/v6-s49-context-evidence.md)。
 
 ## 已完成：V6 S48 Contract Freeze 与 Governance Baseline
 
