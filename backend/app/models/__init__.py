@@ -63,6 +63,7 @@ from app.models.test_assets import (
     TestSuiteVersion,
     TestSuiteVersionItem,
 )
+from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
 from app.models.test_design import ChangeSetApproval, TestDesign
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 
@@ -82,6 +83,7 @@ __all__ = [
     "ChangeRegressionRun",
     "ChangeRegressionStage",
     "ChangeSetApproval",
+    "ContextEvidenceItem",
     "ContractRun",
     "CoverageSnapshot",
     "Credential",
@@ -144,6 +146,8 @@ __all__ = [
     "TeamMember",
     "TestCase",
     "TestCaseVersion",
+    "TestContext",
+    "TestContextRevision",
     "TestDesign",
     "TestPlan",
     "TestPlanItem",

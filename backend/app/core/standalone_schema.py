@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260823_0045"
+BASELINE_REVISION = "20260828_0046"
 
 
 async def initialize_standalone_database() -> None:
@@ -61,6 +61,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
 
     await _ensure_organization_tables(connection)
     await _ensure_governance_tables(connection)
+    await _ensure_test_context_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
     await _ensure_s42_controlled_write_tables(connection)
     await _ensure_s47_test_design_columns(connection)
@@ -132,7 +133,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044')"
+            "'20260823_0044', '20260823_0045')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -143,7 +144,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044')"
+            "'20260823_0044', '20260823_0045')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -158,6 +159,15 @@ async def _ensure_s42_controlled_write_tables(connection: AsyncConnection) -> No
     for model in (TestDesign, ChangeSetApproval):
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
+
+
+async def _ensure_test_context_tables(connection: AsyncConnection) -> None:
+    from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
+
+    for model in (TestContext, TestContextRevision, ContextEvidenceItem):
+        table = cast(Table, model.__table__)
+        await connection.execute(CreateTable(table, if_not_exists=True))
+        await _ensure_table_indexes(connection, table)
 
 
 async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
