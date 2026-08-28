@@ -577,6 +577,11 @@ class ExternalEvidenceFinding(BaseModel):
 
     @model_validator(mode="after")
     def validate_semantic_fingerprint(self) -> ExternalEvidenceFinding:
+        if isinstance(self.structured_data, EntityMappingExternalEvidenceStructuredData) and (
+            self.kind is not EvidenceFindingKind.CONFLICT
+            or self.semantic_role is not EvidenceSemanticRole.CONFLICT
+        ):
+            raise ValueError("entity mapping markers must be conflict findings")
         if self.semantic_fingerprint != finding_semantic_fingerprint(self):
             raise ValueError("finding semantic fingerprint does not match its content")
         return self

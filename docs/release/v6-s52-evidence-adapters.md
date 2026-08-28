@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                               |
 | Scope              | `mcp:evidence:write`                                    |
 | 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；三轮 Review 修复已本地全绿，待推送新 Head |
+| Release 状态       | Draft PR #58；四轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -45,6 +45,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   约束 Operation/Entity、Field/Column 与 State 候选；Revision 重建不会恢复为 Finding 中的较高原始值。
 - Entity Claim 的确定性显式参与 Operation/Entity 候选；Operation→Table 关联的 Confidence/Deterministic 与
   Evidence Ref 继续约束依赖它的 Field/Column 和 DB State 候选，路径启发式不会被下游抬高。
+- Entity 显式 Table Ref 同时支持 `table://schema/table` 与既有 Fixture 使用的 `table://schema.table`；两者都按
+  最后表名与 DB Schema/Table Evidence 匹配，不会误降级为 Class Name 启发式。
 - DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
   跨 Operation 假冲突，同一 Operation 内的多 Target 歧义仍保持可见。
 - Candidate ID 只取决于 Mapping Kind/Source/Target/Operation/Field/State 语义；新增佐证只合并 Evidence Ref，
@@ -61,6 +63,9 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Ingest Response 同时返回脱敏 Context 摘要与当前 Mapping；Inspect 从当前不可变 Revision 复算相同结果。
 - 既有通用 `ingest_external_evidence` REST/MCP 入口接收强类型 Java/DB Adapter Payload 时，也执行同一映射
   冲突派生；不能借通用入口使存在歧义的 Context 保持 `ready`。
+- Mapping Conflict Marker 必须同时为 `kind=conflict` 与 `semantic_role=conflict`才能抑制重复合成；伪装成
+  Normative 的外部 Marker 在合同边界被拒绝。新冲突数超过 Envelope 剩余 Finding 容量时返回标准
+  `ENTITY_MAPPING_BUDGET_EXCEEDED` 422，不截断或静默遗漏。
 
 ### Java/Spring POC
 
@@ -132,7 +137,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`     | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`              | Pass                                                          |
 | Backend Types           | `uv run mypy app`                  | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                    | Pass；684 passed、4 skipped、总覆盖率 90.55%                  |
+| Backend Tests           | `uv run pytest`                    | Pass；686 passed、4 skipped、总覆盖率 90.54%                  |
 | Backend Security Lint   | `uv run ruff check --select S app` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`                | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                        | Pass；ESLint 与 TypeScript                                    |
@@ -171,12 +176,15 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   安全门禁全绿；修复 `e91303cbfb` 已推送，对应 Thread 已回复并关闭。
 - 第三轮 Codex Review 在 `e91303cbfb` 提出 4 个 P2：通用 Evidence 入口可绕过 Mapping Conflict 合成；
   Entity 非确定性未进入 Operation Mapping；下游 Field/State 候选丢失 Operation→Table 关联可靠性；
-  Java 方法签名 `throws` 未提取。四项均已修复并新增直接 Domain/API 回归；本地全量后端与安全门禁全绿，
-  待推送新精确 Head 后回复并关闭四个 Thread。
+  Java 方法签名 `throws` 未提取。四项均在 `185d08d1cc` 修复并新增直接 Domain/API 回归，对应 Thread 已回复并关闭。
+- 第四轮 Codex Review 在 `185d08d1cc` 提出 3 个 P2：满 100 Findings 时可能无空间持久化新冲突标记；
+  非 Conflict 语义的伪 Marker 可抑制真实冲突合成；`table://public.orders` 点号 Schema 限定形式未匹配。
+  三项均已修复并新增 Contract/Domain/API 直接回归；本地全量后端与安全门禁全绿，待推送新精确 Head 后
+  回复并关闭三个 Thread。
 
 ### 待完成
 
-- 第三轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 第四轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

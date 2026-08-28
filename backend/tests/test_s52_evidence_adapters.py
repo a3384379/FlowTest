@@ -20,6 +20,7 @@ from app.domain.evidence_adapters import (
     adapt_evidence_bundle,
     adapt_java_evidence,
     derive_entity_mapping,
+    with_mapping_conflict_findings,
 )
 from app.domain.test_contexts import (
     DatabaseExternalEvidenceStructuredData,
@@ -150,6 +151,29 @@ def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> 
     mismatched_kind["findings"][0]["structured_data"]["claim_kind"] = "dto_field"
     with pytest.raises(ValidationError, match="kind must match"):
         ExternalEvidenceEnvelope.model_validate(mismatched_kind)
+
+    ambiguous_database = _database_submission()
+    second_table = json.loads(json.dumps(ambiguous_database["tables"][0]))
+    second_table["name"] = "archived_orders"
+    ambiguous_database["tables"].append(second_table)
+    java_inputs = _mapping_inputs(envelope, "java")
+    valid_conflict_envelope = with_mapping_conflict_findings(
+        adapt_database_evidence(DatabaseEvidenceSubmission.model_validate(ambiguous_database)),
+        java_inputs,
+    )
+    assert (
+        with_mapping_conflict_findings(valid_conflict_envelope, java_inputs)
+        == valid_conflict_envelope
+    )
+    conflict_envelope = valid_conflict_envelope.model_dump(mode="json")
+    marker = next(
+        finding
+        for finding in conflict_envelope["findings"]
+        if finding["structured_data"].get("adapter") == "entity_mapping"
+    )
+    marker["semantic_role"] = "normative"
+    with pytest.raises(ValidationError, match="mapping markers must be conflict findings"):
+        ExternalEvidenceEnvelope.model_validate(conflict_envelope)
 
 
 def test_entity_mapping_candidates_are_traceable_and_ambiguity_is_never_selected() -> None:
@@ -301,6 +325,40 @@ def test_operation_entity_mapping_preserves_entity_nondeterminism() -> None:
         and candidate.target_ref == "entity://public/orders"
     )
     assert operation_entity.deterministic is False
+
+
+def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> None:
+    java_payload = _java_submission()
+    operation_ref = "operation://POST/api/purchases"
+    route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
+    route["operation_ref"] = operation_ref
+    route["path"] = "/api/purchases"
+    entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")
+    entity["class_name"] = "PurchaseRecord"
+    entity["table_ref"] = "table://public.orders"
+    entity["operation_refs"] = [operation_ref]
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    assert any(
+        candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.operation_ref == operation_ref
+        and candidate.target_ref == "entity://public/orders"
+        for candidate in mapping.candidates
+    )
 
 
 def test_dependent_mappings_preserve_heuristic_operation_table_reliability() -> None:

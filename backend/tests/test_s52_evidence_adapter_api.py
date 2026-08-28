@@ -17,6 +17,7 @@ from app.domain.evidence_adapters import (
     adapt_database_evidence,
     adapt_java_evidence,
 )
+from app.domain.test_contexts import finding_semantic_fingerprint
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
@@ -316,6 +317,74 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
     )
     assert inspected.status_code == 200, inspected.text
     assert inspected.json()["conflicts"]
+
+
+@pytest.mark.asyncio
+async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhausted(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "映射冲突标记容量上下文",
+            "objective": "验证冲突标记无空间时拒绝写入而非静默遗漏",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    java_envelope = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    )
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": java_envelope.model_dump(mode="json")},
+    )
+    assert java.status_code == 201, java.text
+
+    database_payload = _database_evidence(project_id)
+    second_table = {
+        **database_payload["tables"][0],
+        "name": "archived_orders",
+        "columns": [dict(column) for column in database_payload["tables"][0]["columns"]],
+    }
+    database_payload["tables"].append(second_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    findings = list(database_envelope.findings)
+    base_finding = findings[0]
+    while len(findings) < 100:
+        index = len(findings)
+        provisional = base_finding.model_copy(
+            update={
+                "id": f"capacity-padding-{index}",
+                "source_path": f"$.capacity_padding.{index}",
+                "semantic_fingerprint": "0" * 64,
+            }
+        )
+        findings.append(
+            provisional.model_copy(
+                update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+            )
+        )
+    full_envelope = database_envelope.model_copy(update={"findings": findings})
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": full_envelope.model_dump(mode="json")},
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
+    assert rejected.json()["error"]["trace_id"]
 
 
 @pytest.mark.asyncio

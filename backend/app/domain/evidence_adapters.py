@@ -619,7 +619,7 @@ def with_mapping_conflict_findings(
     evidence: list[MappingEvidenceInput],
 ) -> ExternalEvidenceEnvelope:
     provisional = [*evidence, *_envelope_mapping_inputs(envelope)]
-    existing_keys = _existing_mapping_conflict_keys(evidence)
+    existing_keys = _existing_mapping_conflict_keys(provisional)
     conflicts = [
         conflict
         for conflict in derive_entity_mapping(provisional).conflicts
@@ -628,6 +628,10 @@ def with_mapping_conflict_findings(
     if not conflicts:
         return envelope
     available = max(0, 100 - len(envelope.findings))
+    if len(conflicts) > available:
+        raise EntityMappingBudgetExceeded(
+            "entity mapping conflict findings exceed envelope capacity"
+        )
     additions = [
         _external_finding(
             identifier=_claim_id("mapping-conflict", conflict.kind.value, conflict.source_ref),
@@ -647,7 +651,7 @@ def with_mapping_conflict_findings(
             confidence=0,
             deterministic=True,
         )
-        for conflict in conflicts[: min(20, available)]
+        for conflict in conflicts
     ]
     payload = envelope.model_dump(mode="json")
     payload["findings"] = [
@@ -778,7 +782,11 @@ def _existing_mapping_conflict_keys(
     keys: set[tuple[str, str]] = set()
     for item in evidence:
         data = item.finding.structured_data
-        if not isinstance(data, EntityMappingExternalEvidenceStructuredData):
+        if (
+            not isinstance(data, EntityMappingExternalEvidenceStructuredData)
+            or item.finding.kind is not EvidenceFindingKind.CONFLICT
+            or item.finding.semantic_role is not EvidenceSemanticRole.CONFLICT
+        ):
             continue
         keys.add((data.claim.mapping_kind, data.claim.source_ref))
     return keys
@@ -1320,7 +1328,9 @@ def _route_resource_token(path: str) -> str:
 
 
 def _table_ref_matches(table_ref: str, table_name: str) -> bool:
-    return _normalized_name(table_ref.rsplit("/", 1)[-1]) == _normalized_name(table_name)
+    qualified_name = table_ref.removeprefix("table://").rstrip("/")
+    referenced_table = qualified_name.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+    return _normalized_name(referenced_table) == _normalized_name(table_name)
 
 
 class _JavaRoute(BaseModel):
