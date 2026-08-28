@@ -409,6 +409,27 @@ async def test_generic_evidence_rejects_sensitive_adapter_scalar(
     assert rejected.json()["error"]["trace_id"]
     assert sensitive_value not in rejected.text
 
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    ).model_dump(mode="json")
+    column = next(
+        finding
+        for finding in database_envelope["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    column["structured_data"]["claim"]["masked_example"] = f"*** {sensitive_value}"
+
+    rejected_masked_example = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": database_envelope},
+    )
+
+    assert rejected_masked_example.status_code == 422, rejected_masked_example.text
+    assert rejected_masked_example.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_masked_example.json()["error"]["trace_id"]
+    assert sensitive_value not in rejected_masked_example.text
+
 
 @pytest.mark.asyncio
 async def test_generic_evidence_rejects_conflicts_when_marker_capacity_is_exhausted(
@@ -509,6 +530,20 @@ async def test_database_adapter_rejects_sensitive_or_write_input_with_trace_id(
     assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected.json()["error"]["trace_id"]
     assert "DROP TABLE orders" not in rejected.text
+
+    sensitive_value = "4111111111111111"
+    masked_payload = _database_evidence(project_id)
+    masked_payload["tables"][0]["columns"][0]["masked_example"] = f"*** {sensitive_value}"
+    rejected_masked_example = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": masked_payload},
+    )
+
+    assert rejected_masked_example.status_code == 422
+    assert rejected_masked_example.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_masked_example.json()["error"]["trace_id"]
+    assert sensitive_value not in rejected_masked_example.text
 
 
 @pytest.mark.asyncio

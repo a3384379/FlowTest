@@ -270,6 +270,8 @@ class DatabaseColumnEvidence(BaseModel):
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
+        if self.masked_example is not None:
+            require_no_sensitive_scalar_values([self.masked_example])
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
         require_no_sensitive_scalar_values(self.enum_values)
@@ -736,7 +738,7 @@ def _external_finding(
     deterministic: bool,
 ) -> ExternalEvidenceFinding:
     provisional = ExternalEvidenceFinding.model_construct(
-        id=identifier[:160],
+        id=_bounded_finding_id(identifier),
         kind=kind,
         semantic_role=semantic_role,
         source_ref=source.ref,
@@ -1305,7 +1307,13 @@ def _database_state_values(column: DatabaseColumnEvidence) -> list[str]:
     values = list(column.enum_values)
     if column.observed_distribution is not None:
         values.extend(column.observed_distribution.enum_candidates)
-    return sorted({str(value) for value in values})[:100]
+    return sorted({_state_scalar_text(value) for value in values})[:100]
+
+
+def _state_scalar_text(value: str | int | float | bool) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def _operation_tables(
@@ -1938,6 +1946,13 @@ def _claim_id(*parts: str) -> str:
         sha256(key.encode()).hexdigest()[:24].translate(str.maketrans("0123456789", "ghijklmnop"))
     )
     return f"claim-{digest}"
+
+
+def _bounded_finding_id(identifier: str) -> str:
+    if len(identifier) <= 160:
+        return identifier
+    digest = sha256(identifier.encode()).hexdigest()[:24]
+    return f"{identifier[:135]}-{digest}"
 
 
 def _snake_case(value: str) -> str:

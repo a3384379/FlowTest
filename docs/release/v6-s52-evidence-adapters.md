@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                               |
 | Scope              | `mcp:evidence:write`                                    |
 | 数据库变更         | 无；Migration Head 保持 `20260828_0046`                 |
-| Release 状态       | Draft PR #58；六轮 Review 修复已本地全绿，待推送新 Head |
+| Release 状态       | Draft PR #58；七轮 Review 修复已本地全绿，待推送新 Head |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -41,6 +41,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   专用 Evidence Ingest 会同时把新歧义写为 Conflict Finding，使 Context 状态进入 `conflicted`。
 - Java Enum 与 DB 状态列给出相同 State Set 时合并其 Evidence Ref，并按最小 Confidence 与全部 Deterministic
   的保守规则组合；DB Finding 的低置信度或非确定性不会被抬高。不同表或不同 Target 仍保留为歧义。
+- DB Boolean 状态值按 JSON 标准统一为小写 `true`/`false`，与 Java Enum Claim 的字符串表达一致；等价证据不会因
+  Python `True`/`False` 文本化差异制造阻断提案的假冲突。
 - Envelope 与持久化 `ContextEvidenceItem` 的有效 Confidence/Deterministic 会传播回 Java/DB Claim，并同时
   约束 Operation/Entity、Field/Column 与 State 候选；Revision 重建不会恢复为 Finding 中的较高原始值。
 - Entity Claim 的确定性显式参与 Operation/Entity 候选；Operation→Table 关联的 Confidence/Deterministic 与
@@ -80,6 +82,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 - `JavaSpringPocProvider` 只接收有界、仓库相对路径的 `.java` 文本，使用静态文本分析；Contract 把
   `execute_analyzed_code` 固定为 `false`，不调用 Java Compiler、构建工具、ClassLoader 或被分析代码。
+- 转换后的 External Finding ID 在超长时保留有界可读前缀并附加 SHA-256 后缀；允许的 160 字符 Java Claim ID
+  即使只在尾部不同也不会因 `java-` 前缀与截断发生碰撞。
 - Controller 方法签名中的 `throws` 声明与方法体中的显式 `throw new` 都转换为 Exception Evidence，不因
   方法体截取边界遗漏已声明异常。
 - CI Golden 使用 `small-spring-v1` 固定 Fixture，覆盖两个 Controller Route、Request/Response DTO Field 与
@@ -93,7 +97,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 - Java/DB Submission、转换后的 External Envelope 与 Context 初始输入继续执行 Secret、Credential、Token、
   Cookie、连接串、PEM、Email、Phone、Card 与高熵值检查。Enum/Observed Distribution 的标量值额外按 PII
-  路径检查，Masked Example 必须包含 `***`。
+  路径检查；Masked Example 除必须包含 `***` 外，残余内容也必须通过同一标量 PII 检查，不能夹带完整 Phone/Card。
 - Source、Subject 与 Finding 始终作为 `untrusted_data`；适配器不解释 Prompt Instruction，不执行 Java、SQL、
   Shell 或任意网络访问。
 - DB Evidence 仅用于设计候选；不建立数据库连接，不接收原始数据行，不改变既有 Runtime DB Read Oracle。
@@ -148,7 +152,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；464 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；692 passed、4 skipped、总覆盖率 90.55%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；694 passed、4 skipped、总覆盖率 90.55%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -197,12 +201,16 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   已回复并关闭。
 - 第六轮 Codex Review 在 `24f91b0ecb` 提出 1 个 P1 与 2 个 P2：通用 Envelope 的 Java/DB Enum 标量可绕过
   Phone/Card 检查；Route fallback 可选中已绑定其他 Operation 的 Entity；强类型 Adapter 未绑定 Provider Type，
-  可伪造 Completeness。三项均已在合同/Domain 边界修复，新增 Contract/Domain/API 直接回归；本地全量后端与
-  安全门禁全绿，待推送新精确 Head 后回复 Review 与关闭两个 Thread。
+  可伪造 Completeness。三项均在 `e926f07f4a` 的合同/Domain 边界修复，新增 Contract/Domain/API 直接回归，
+  对应两个 Thread 已回复并关闭；Provider/Adapter Review Body 也已通过 PR Comment 回应。
+- 第七轮 Codex Review 在 `e926f07f4a` 提出 1 个 P1 与 2 个 P2：Masked Example 只检查 `***`，仍可夹带完整
+  Phone/Card；Java Claim 生成 External Finding ID 时直接截断可碰撞；DB Boolean State 使用 Python 大小写文本，
+  与 Java JSON 风格值产生假冲突。三项均已本地修复，专用与通用 API 的标准 422/Trace ID/不回显敏感值、超长
+  ID 唯一性及 Boolean State 佐证均有直接回归；待推送新精确 Head 后回复并关闭三个 Thread。
 
 ### 待完成
 
-- 第六轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 第七轮 Review 修复 Head 的精确 CI、Codex Review、线程关闭、Ready、普通 Merge、精确 Main Push与 Evidence Closure。
 
 ## 7. Remote Evidence
 

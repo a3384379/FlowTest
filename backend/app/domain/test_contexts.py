@@ -472,6 +472,8 @@ class ExternalDatabaseColumnClaim(BaseModel):
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
+        if self.masked_example is not None:
+            require_no_sensitive_scalar_values([self.masked_example])
         if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
             raise ValueError("database evidence must not contain write SQL")
         require_no_sensitive_scalar_values(self.enum_values)

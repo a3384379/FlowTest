@@ -97,6 +97,11 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     with pytest.raises(ValidationError, match="sensitive"):
         DatabaseEvidenceSubmission.model_validate(raw_pii)
 
+    masked_card = _database_submission()
+    masked_card["tables"][0]["columns"][0]["masked_example"] = "*** 4111111111111111"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        DatabaseEvidenceSubmission.model_validate(masked_card)
+
     raw_distribution_pii = _database_submission()
     raw_distribution_pii["tables"][0]["columns"][1]["observed_distribution"]["enum_candidates"] = [
         "+8613800138000"
@@ -179,6 +184,32 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     ]
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(external_distribution)
+
+    external_masked_card = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    masked_column = next(
+        finding
+        for finding in external_masked_card["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    masked_column["structured_data"]["claim"]["masked_example"] = "*** 4111111111111111"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(external_masked_card)
+
+
+def test_java_adapter_bounds_finding_ids_without_collisions() -> None:
+    payload = _java_submission()
+    shared_prefix = "claim" + ("a" * 154)
+    payload["claims"][0]["id"] = f"{shared_prefix}x"
+    payload["claims"][1]["id"] = f"{shared_prefix}y"
+
+    envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(payload))
+
+    finding_ids = [finding.id for finding in envelope.findings[:2]]
+    assert len(finding_ids) == len(set(finding_ids)) == 2
+    assert all(len(identifier) == 160 for identifier in finding_ids)
+    assert all(identifier.startswith("java-claima") for identifier in finding_ids)
 
 
 def test_external_structured_contract_rejects_unknown_or_mismatched_claims() -> None:
@@ -365,6 +396,45 @@ def test_database_state_mapping_preserves_low_confidence_and_nondeterminism() ->
     assert database_backed
     assert all(candidate.confidence <= 0.25 for candidate in database_backed)
     assert all(candidate.deterministic is False for candidate in database_backed)
+
+
+def test_database_boolean_state_values_corroborate_json_style_java_values() -> None:
+    java_payload = _java_submission()
+    java_state = next(claim for claim in java_payload["claims"] if claim["kind"] == "enum_state")
+    java_state["values"] = ["false", "true"]
+    database_payload = _database_submission()
+    status_column = next(
+        column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
+    )
+    status_column["enum_values"] = [False, True]
+    status_column["observed_distribution"]["enum_candidates"] = [False, True]
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    states = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert len(states) == 1
+    assert states[0].state_values == ["false", "true"]
+    assert not any(
+        conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+        for conflict in mapping.conflicts
+    )
 
 
 def test_operation_entity_mapping_preserves_entity_nondeterminism() -> None:
