@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   App,
@@ -22,6 +22,7 @@ import {
   type ApiDefinition,
   type Artifact,
   type Credential,
+  type FlowSpecChangeSetCursor,
   type FlowSpecVisualProposal,
   type IntegrationPlan,
   type Workflow,
@@ -31,7 +32,7 @@ import type { EventSource, SchemaArtifact } from '../protocols/protocol-service'
 import {
   applyFlowSpec,
   getVisualFlowProposal,
-  listFlowSpecChangeSets,
+  getMcpFlowProposalPage,
   reviewFlowSpec,
 } from './flow-spec-service'
 
@@ -66,13 +67,18 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
   const [graphView, setGraphView] = useState<'existing' | 'proposed'>('proposed')
   const [busy, setBusy] = useState(false)
   const [visualOverride, setVisualOverride] = useState<VisualOverride>()
-  const proposals = useQuery({
+  const proposals = useInfiniteQuery({
     queryKey: ['flow-proposals', props.projectId],
-    queryFn: () => listFlowSpecChangeSets(props.projectId),
+    queryFn: ({ pageParam }) => getMcpFlowProposalPage(props.projectId, pageParam),
+    initialPageParam: null as FlowSpecChangeSetCursor | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: props.open,
   })
   const candidates = useMemo(
-    () => (proposals.data?.items ?? []).filter((item) => item.source_ref?.startsWith('mcp://')),
+    () =>
+      (proposals.data?.pages.flatMap((page) => page.items) ?? []).filter((item) =>
+        item.source_ref?.startsWith('mcp://'),
+      ),
     [proposals.data],
   )
   const proposalId = candidates.some((item) => item.id === selectedId)
@@ -171,6 +177,14 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
             setVisualOverride(undefined)
           }}
         />
+        {proposals.hasNextPage ? (
+          <Button
+            loading={proposals.isFetchingNextPage}
+            onClick={() => void proposals.fetchNextPage()}
+          >
+            加载更多提案
+          </Button>
+        ) : null}
         {!candidates.length && !proposals.isLoading ? (
           <Empty description="暂无 MCP 流程提案" />
         ) : null}

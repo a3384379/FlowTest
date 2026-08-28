@@ -141,7 +141,7 @@ describe('FlowProposalReviewDialog', () => {
     expect(rawProposal?.proposal.spec.name).toBe('MCP 用户查询提案')
   })
 
-  it('follows stable MCP proposal cursors beyond the first page', async () => {
+  it('loads stable MCP proposal cursor pages only when requested', async () => {
     const requestedCursors: Array<string | null> = []
     const cursorId = '00000000-0000-4000-8000-000000005100'
     server.use(
@@ -192,6 +192,11 @@ describe('FlowProposalReviewDialog', () => {
     renderDialog(() => undefined)
     const browser = userEvent.setup()
     const dialog = await screen.findByRole('dialog')
+
+    await within(dialog).findByText('提案模式')
+    expect(requestedCursors).toEqual([null])
+    await browser.click(within(dialog).getByRole('button', { name: '加载更多提案' }))
+    await waitFor(() => expect(requestedCursors).toEqual([null, cursorId]))
     await browser.click(within(dialog).getByRole('combobox', { name: '流程提案' }))
 
     expect(
@@ -199,7 +204,6 @@ describe('FlowProposalReviewDialog', () => {
         selector: '.ant-select-item-option-content',
       }),
     ).toBeInTheDocument()
-    expect(requestedCursors).toEqual([null, cursorId])
   })
 
   it('classifies a rewired edge with semantic changes as both rewired and modified', async () => {
