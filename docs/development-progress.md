@@ -2,10 +2,12 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48～S50 实现及 Evidence Closure；S50 Closure PR #54 已普通 Squash Merge 至
-`main@8f20500fd151e89573bb8f01f24cb6512143dbe1`，其 Main Push Required Gate 已 Success。当前从该精确
-Main 严格串行执行 S51 MCP Flow Draft 与 Visual Proposal Alpha 的本地实现和验收；实现 PR 尚未创建，
-不宣称远程闭环完成，也不进入 S52。当前 Migration Head 为 `20260828_0046`，仍未发布 Alpha/Beta/RC/GA。
+已完成 S48～S50 实现及 Evidence Closure。S51 实现 PR #55 已普通 Squash Merge 至
+`f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`；其合并后迟到 Review 已由 Post-Merge Fix PR #56 串行闭环，
+#56 已普通 Squash Merge 至 `main@86d2221e63f93e418b87649f56b3fdfe48d365c9`，该精确 Main SHA 的
+Backend、Frontend、Compose、Security、Windows、Upgrade 与唯一 Required Gate 全部 Success。当前执行 S51
+Evidence Closure；Closure 合并且其 Main Push Required Gate 成功前不进入 S52。当前 Migration Head 为
+`20260828_0046`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
@@ -15,7 +17,7 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## 实现与本地验收中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
+## Evidence Closure 中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
 
 ### Implemented
 
@@ -31,17 +33,22 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   仍进入既有 `FlowSpecReviewDialog`。安全编辑创建新的待审核 ChangeSet，不原地修改 MCP Proposal。
 - 隔离 Compose 的真实 Alpha 路径已覆盖 Context → Typed Evidence → Plan → Compile → MCP Dry Run → MCP Draft
   → UI 可视化检查 → Accept → Apply → WorkflowDesigner Draft，且 Graph 与 Proposal 一致、发布与执行均为 0。
+- Post-Merge Fix 补齐 Edge 语义分类、Apply 后状态一致性、中文化、Proposal-keyed Override，并以
+  MCP-only `(created_at, id)` Keyset Pagination 与用户显式“加载更多提案”取代可变 Offset 及无界预加载。
 
 ### 当前门槛
 
-- Backend Format/Lint、335-source Mypy、安全 Lint 与全量 Pytest 已通过：`662 passed / 4 skipped`，Coverage
-  `90.41%`。Frontend Format、Lint/Types、Coverage 与 Build 已通过：`57 files / 218 tests`，Statements/
-  Branches/Functions/Lines 为 `86.12/80.02/85.29/88.38%`；Python/Node 依赖审计无已知漏洞。
+- Backend Format/Lint、335-source Mypy、安全 Lint 与全量 Pytest 已通过：`663 passed / 4 skipped`，Coverage
+  `90.41%`。Frontend Format、Lint/Types、Coverage 与 Build 已通过：`57 files / 222 tests`，Statements/
+  Branches/Functions/Lines 为 `86.23/80.12/85.44/88.48%`；Python/Node 依赖审计无已知漏洞。
 - 最终隔离 Compose 15 服务全部 Healthy；真实 Playwright Alpha 链路 `2 passed`，日志 Traceback 为 0，验收后
-  仅清除 `flowtest-s51-local` 资源，既有 Compose Project 运行数量不变。Requirement、Correctness/Data、
+  仅清除 `flowtest-s51-review-local` 资源；既有 `flowtest-compact` / `flowtest-ruoyi` /
+  `flowtest-v5-compact` 仍分别保持 6 / 2 / 6 个运行容器。Requirement、Correctness/Data、
   Security/Tenant/Secret/SSRF 与 E2E/Scope 四类本地 Review 已完成。
-- S51 实现 PR、精确 Head CI、普通 Squash Merge、Main Push 全绿及 Evidence Closure 均未执行完成；上述闭环前
-  不进入 S52。完整边界与证据记录见 [S51 Release Evidence](release/v6-s51-mcp-visual-proposal.md)。
+- PR #55 及迟到 Review 修复 PR #56 均已普通 Squash Merge；精确头 CI、精确头 Codex Review、全部 Thread
+  Resolution 与两个精确 Merge SHA Main Push 均已闭环。#55 / #56 未使用 Admin、Bypass 或直接推送 Main。
+- 当前只剩 S51 Evidence Closure PR 及其 Main Push Required Gate；完成前不进入 S52。完整边界与证据记录见
+  [S51 Release Evidence](release/v6-s51-mcp-visual-proposal.md)。
 
 ## 已完成：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler
 
