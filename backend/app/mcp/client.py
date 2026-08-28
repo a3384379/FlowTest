@@ -8,6 +8,7 @@ from uuid import UUID
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from app.domain.evidence_adapters import EntityMappingResult
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlanCompilation,
@@ -17,6 +18,7 @@ from app.domain.mcp_read import MCPReadEnvelope
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
     ContextRequirementsResponse,
+    EvidenceAdapterIngestionResponse,
     FlowSpecProposalInspectionResponse,
     FlowSpecProposalResponse,
     IntegrationPlanRequest,
@@ -307,6 +309,43 @@ class MCPReadGatewayClient:
             token=token,
         )
         return _validate_response(response, TestContextResponse)
+
+    async def ingest_database_evidence(
+        self,
+        context_id: UUID | str,
+        evidence: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> EvidenceAdapterIngestionResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+            payload={"evidence": dict(evidence)},
+            token=token,
+        )
+        return _validate_response(response, EvidenceAdapterIngestionResponse)
+
+    async def ingest_java_evidence(
+        self,
+        context_id: UUID | str,
+        evidence: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> EvidenceAdapterIngestionResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+            payload={"evidence": dict(evidence)},
+            token=token,
+        )
+        return _validate_response(response, EvidenceAdapterIngestionResponse)
+
+    async def inspect_entity_mapping(
+        self, context_id: UUID | str, *, token: str | None = None
+    ) -> EntityMappingResult:
+        response = await self._request_get(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
+            token=token,
+        )
+        return _validate_response(response, EntityMappingResult)
 
     async def inspect_test_context(
         self, context_id: UUID | str, *, token: str | None = None

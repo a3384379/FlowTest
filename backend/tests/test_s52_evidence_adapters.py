@@ -1,0 +1,510 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+from pydantic import ValidationError
+
+from app.domain.evidence import PythonSourceEvidenceProvider, SourceSnapshot
+from app.domain.evidence_adapters import (
+    DatabaseEvidenceSubmission,
+    EntityMappingBudgetExceeded,
+    EntityMappingCandidateKind,
+    JavaEvidenceSubmission,
+    JavaSourceSnapshot,
+    JavaSpringPocProvider,
+    MappingEvidenceInput,
+    adapt_database_evidence,
+    adapt_evidence_bundle,
+    adapt_java_evidence,
+    derive_entity_mapping,
+)
+from app.domain.test_contexts import ExternalEvidenceEnvelope
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
+RUOYI_ROOT = FIXTURE_ROOT.parents[4] / "RuoYi"
+PROJECT_ID = "00000000-0000-0000-0000-000000000001"
+SUBJECT_REF = f"flowtest://projects/{PROJECT_ID}/operations/orders"
+
+
+def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> None:
+    java = JavaEvidenceSubmission.model_validate(_java_submission())
+    database = DatabaseEvidenceSubmission.model_validate(_database_submission())
+
+    java_envelope = adapt_java_evidence(java)
+    database_envelope = adapt_database_evidence(database)
+
+    assert java_envelope.provider.type.value == "repository"
+    assert java_envelope.source.revision == "a1b2c3d4"
+    assert {finding.structured_data["claim_kind"] for finding in java_envelope.findings} == {
+        "controller_route",
+        "dto_field",
+        "bean_validation",
+        "service_call",
+        "feign_call",
+        "mapper_repository",
+        "entity",
+        "table_column",
+        "enum_state",
+        "exception",
+        "kafka_event",
+    }
+    assert database_envelope.provider.type.value == "database"
+    assert database_envelope.source.revision == "schema-v1"
+    column_claims = [
+        finding.structured_data["claim"]
+        for finding in database_envelope.findings
+        if finding.structured_data["claim_kind"] == "column"
+    ]
+    assert any(
+        claim["primary_key"] is True and claim["unique"] is True and claim["nullable"] is False
+        for claim in column_claims
+    )
+    assert any(claim["foreign_key"] == "public.customers.id" for claim in column_claims)
+    assert any(
+        claim["observed_distribution"] is not None
+        and claim["observed_distribution"]["enum_candidates"] == ["created", "cancelled"]
+        and claim["masked_example"] == "***ated"
+        for claim in column_claims
+    )
+    ExternalEvidenceEnvelope.model_validate(java_envelope.model_dump(mode="json"))
+    ExternalEvidenceEnvelope.model_validate(database_envelope.model_dump(mode="json"))
+
+
+def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
+    raw_example = _database_submission()
+    raw_example["tables"][0]["columns"][0]["masked_example"] = "order-0001"
+    with pytest.raises(ValidationError, match="masked"):
+        DatabaseEvidenceSubmission.model_validate(raw_example)
+
+    raw_pii = _database_submission()
+    raw_pii["tables"][0]["columns"][0]["masked_example"] = "*** person@example.com"
+    with pytest.raises(ValidationError, match="sensitive"):
+        DatabaseEvidenceSubmission.model_validate(raw_pii)
+
+    raw_distribution_pii = _database_submission()
+    raw_distribution_pii["tables"][0]["columns"][1]["observed_distribution"]["enum_candidates"] = [
+        "+8613800138000"
+    ]
+    with pytest.raises(ValidationError, match="sensitive"):
+        DatabaseEvidenceSubmission.model_validate(raw_distribution_pii)
+
+    write_sql = _database_submission()
+    write_sql["tables"][0]["columns"][1]["check_expression"] = (
+        "status IN ('created'); DROP TABLE orders"
+    )
+    with pytest.raises(ValidationError, match="write SQL"):
+        DatabaseEvidenceSubmission.model_validate(write_sql)
+
+    unknown_sql = _database_submission()
+    unknown_sql["sql"] = "SELECT * FROM orders"
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        DatabaseEvidenceSubmission.model_validate(unknown_sql)
+
+
+def test_entity_mapping_candidates_are_traceable_and_ambiguity_is_never_selected() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(java_envelope, "java"),
+            *_mapping_inputs(database_envelope, "database"),
+        ]
+    )
+
+    kinds = {candidate.kind for candidate in mapping.candidates}
+    assert kinds >= {
+        EntityMappingCandidateKind.OPERATION_ENTITY,
+        EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+        EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+        EntityMappingCandidateKind.OPERATION_STATE,
+    }
+    assert all(candidate.evidence_refs for candidate in mapping.candidates)
+    assert all(candidate.selection_status.value == "proposed" for candidate in mapping.candidates)
+    assert mapping.conflicts == []
+
+    ambiguous_database = _database_submission()
+    second_table = json.loads(json.dumps(ambiguous_database["tables"][0]))
+    second_table["name"] = "archived_orders"
+    ambiguous_database["tables"].append(second_table)
+    ambiguous = derive_entity_mapping(
+        [
+            *_mapping_inputs(java_envelope, "java"),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(ambiguous_database)
+                ),
+                "database-ambiguous",
+            ),
+        ]
+    )
+
+    assert ambiguous.conflicts
+    conflicted_ids = {
+        candidate_id for conflict in ambiguous.conflicts for candidate_id in conflict.candidate_ids
+    }
+    assert conflicted_ids
+    assert all(
+        candidate.selection_status.value == "proposed"
+        for candidate in ambiguous.candidates
+        if candidate.id in conflicted_ids
+    )
+
+
+def test_entity_mapping_ids_stay_stable_and_merge_corroborating_evidence() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    original_inputs = [
+        *_mapping_inputs(java_envelope, "java"),
+        *_mapping_inputs(database_envelope, "database"),
+    ]
+    original = derive_entity_mapping(original_inputs)
+    corroborated = derive_entity_mapping(
+        [
+            *original_inputs,
+            *_mapping_inputs(java_envelope, "java-corroborating"),
+            *_mapping_inputs(database_envelope, "database-corroborating"),
+        ]
+    )
+
+    assert {candidate.id for candidate in corroborated.candidates} == {
+        candidate.id for candidate in original.candidates
+    }
+    assert len(corroborated.candidates) == len(original.candidates)
+    assert all(len(candidate.evidence_refs) >= 4 for candidate in corroborated.candidates)
+
+
+def test_entity_mapping_rejects_unrepresentable_evidence_volume() -> None:
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission()))
+    route = next(
+        finding
+        for finding in java_envelope.findings
+        if finding.structured_data["claim_kind"] == "controller_route"
+    )
+
+    with pytest.raises(EntityMappingBudgetExceeded, match="evidence budget"):
+        derive_entity_mapping(
+            [
+                MappingEvidenceInput(
+                    evidence_ref=f"evidence://route/{index}",
+                    finding=route,
+                )
+                for index in range(501)
+            ]
+        )
+
+
+def test_python_provider_bundle_remains_compatible_with_context_adapter() -> None:
+    bundle = PythonSourceEvidenceProvider().analyze(
+        SourceSnapshot.model_validate(
+            {
+                "repository_url": "https://example.test/orders.git",
+                "commit": "a1b2c3d4",
+                "allowlist_paths": ["app"],
+                "files": [
+                    {
+                        "path": "app/routes.py",
+                        "language": "python",
+                        "content": '@router.post("/orders")\ndef create_order():\n    return {}\n',
+                    }
+                ],
+            }
+        )
+    )
+
+    envelope = adapt_evidence_bundle(
+        bundle,
+        provider_name="python-source-provider",
+        provider_version="1.0.0",
+        source_ref="repository://orders-python",
+        source_revision="a1b2c3d4",
+        subject_ref=SUBJECT_REF,
+    )
+
+    assert envelope.provider.type.value == "repository"
+    assert envelope.findings[0].structured_data["adapter"] == "evidence_bundle"
+    assert envelope.findings[0].structured_data["claim"]["kind"] == "route"
+
+
+def test_java_spring_poc_analyzes_fixed_fixture_without_execution() -> None:
+    manifest = cast(
+        dict[str, Any],
+        json.loads((FIXTURE_ROOT / "small-spring" / "manifest.json").read_text()),
+    )
+    snapshot = JavaSourceSnapshot.model_validate(
+        {
+            "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+            "source": {"ref": "repository://small-spring", "revision": "fixture-v1"},
+            "subject_ref": SUBJECT_REF,
+            "files": [
+                {
+                    "path": relative_path,
+                    "content": (FIXTURE_ROOT / "small-spring" / relative_path).read_text(),
+                }
+                for relative_path in manifest["files"]
+                if relative_path.endswith(".java")
+            ],
+        }
+    )
+
+    evidence = JavaSpringPocProvider().analyze(snapshot)
+
+    assert snapshot.execute_analyzed_code is False
+    assert {
+        (claim.method, claim.path) for claim in evidence.claims if claim.kind == "controller_route"
+    } == {("POST", "/api/orders"), ("GET", "/api/orders/{id}")}
+    assert {claim.field_name for claim in evidence.claims if claim.kind == "dto_field"} >= {
+        "productId",
+        "quantity",
+        "id",
+        "status",
+    }
+    assert any(claim.kind == "service_call" for claim in evidence.claims)
+
+
+def test_ruoyi_full_golden_target_poc_without_execution() -> None:
+    target = cast(dict[str, Any], json.loads((FIXTURE_ROOT / "ruoyi-target.json").read_text()))
+    if not RUOYI_ROOT.exists():
+        pytest.skip("本地 RuoYi Golden Target 未提供; CI 使用固定 small-spring Fixture")
+    paths = cast(list[str], target["poc_files"])
+    snapshot = JavaSourceSnapshot.model_validate(
+        {
+            "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+            "source": {
+                "ref": str(target["source_ref"]),
+                "revision": str(target["source_revision"]),
+            },
+            "subject_ref": SUBJECT_REF,
+            "files": [
+                {"path": relative_path, "content": (RUOYI_ROOT / relative_path).read_text()}
+                for relative_path in paths
+            ],
+        }
+    )
+
+    evidence = JavaSpringPocProvider().analyze(snapshot)
+    claim_kinds = {claim.kind for claim in evidence.claims}
+
+    assert target["execute_analyzed_code"] is False
+    assert snapshot.execute_analyzed_code is False
+    assert set(cast(list[str], target["expected_claim_kinds"])) <= claim_kinds
+    assert any(
+        claim.kind == "controller_route"
+        and claim.method == target["expected_route"]["method"]
+        and claim.path == target["expected_route"]["path"]
+        for claim in evidence.claims
+    )
+    assert any(
+        claim.kind == "entity" and claim.table_ref == target["expected_table_ref"]
+        for claim in evidence.claims
+    )
+
+
+def _mapping_inputs(envelope: ExternalEvidenceEnvelope, prefix: str) -> list[MappingEvidenceInput]:
+    return [
+        MappingEvidenceInput(
+            evidence_ref=f"evidence://{prefix}/{index}",
+            finding=finding,
+        )
+        for index, finding in enumerate(envelope.findings)
+    ]
+
+
+def _java_submission() -> dict[str, Any]:
+    operation_ref = "operation://POST/api/orders"
+    common = {"confidence": 0.96, "deterministic": True}
+    return {
+        "schema_version": "flowtest-java-evidence-v1",
+        "provider": {"name": "external-code-mcp", "version": "2.1.0"},
+        "source": {"ref": "repository://orders-service", "revision": "a1b2c3d4"},
+        "subject_ref": SUBJECT_REF,
+        "claims": [
+            {
+                **common,
+                "id": "route-create",
+                "kind": "controller_route",
+                "source_path": "src/OrderController.java:20",
+                "operation_ref": operation_ref,
+                "controller_ref": "java://OrderController",
+                "handler": "create",
+                "method": "POST",
+                "path": "/api/orders",
+            },
+            {
+                **common,
+                "id": "request-product",
+                "kind": "dto_field",
+                "source_path": "src/CreateOrderRequest.java:4",
+                "operation_ref": operation_ref,
+                "direction": "request",
+                "dto_type": "CreateOrderRequest",
+                "field_name": "productId",
+                "field_type": "String",
+            },
+            {
+                **common,
+                "id": "response-id",
+                "kind": "dto_field",
+                "source_path": "src/OrderDto.java:3",
+                "operation_ref": operation_ref,
+                "direction": "response",
+                "dto_type": "OrderDto",
+                "field_name": "id",
+                "field_type": "String",
+            },
+            {
+                **common,
+                "id": "validation-quantity",
+                "kind": "bean_validation",
+                "source_path": "src/CreateOrderRequest.java:5",
+                "operation_ref": operation_ref,
+                "dto_type": "CreateOrderRequest",
+                "field_name": "quantity",
+                "annotation": "Max",
+                "constraint": "maximum=10",
+            },
+            {
+                **common,
+                "id": "service-create",
+                "kind": "service_call",
+                "source_path": "src/OrderController.java:22",
+                "operation_ref": operation_ref,
+                "caller_ref": "java://OrderController.create",
+                "callee_ref": "java://OrderService.create",
+            },
+            {
+                **common,
+                "id": "feign-inventory",
+                "kind": "feign_call",
+                "source_path": "src/OrderService.java:30",
+                "operation_ref": operation_ref,
+                "caller_ref": "java://OrderService.create",
+                "callee_ref": "feign://inventory/reserve",
+            },
+            {
+                **common,
+                "id": "repository-save",
+                "kind": "mapper_repository",
+                "source_path": "src/OrderRepository.java:8",
+                "operation_ref": operation_ref,
+                "repository_ref": "java://OrderRepository",
+                "method_ref": "java://OrderRepository.save",
+                "entity_ref": "entity://Order",
+            },
+            {
+                **common,
+                "id": "entity-order",
+                "kind": "entity",
+                "source_path": "src/Order.java:4",
+                "entity_ref": "entity://Order",
+                "class_name": "Order",
+                "table_ref": "table://public.orders",
+                "operation_refs": [operation_ref],
+            },
+            {
+                **common,
+                "id": "column-product",
+                "kind": "table_column",
+                "source_path": "src/Order.java:8",
+                "entity_ref": "entity://Order",
+                "table_ref": "table://public.orders",
+                "field_name": "productId",
+                "column_name": "product_id",
+            },
+            {
+                **common,
+                "id": "state-order",
+                "kind": "enum_state",
+                "source_path": "src/OrderStatus.java:3",
+                "operation_ref": operation_ref,
+                "enum_ref": "java://OrderStatus",
+                "field_name": "status",
+                "values": ["created", "cancelled"],
+            },
+            {
+                **common,
+                "id": "exception-order",
+                "kind": "exception",
+                "source_path": "src/OrderService.java:40",
+                "operation_ref": operation_ref,
+                "exception_type": "OrderNotFoundException",
+                "outcome": "not_found",
+            },
+            {
+                **common,
+                "id": "event-order",
+                "kind": "kafka_event",
+                "source_path": "src/OrderService.java:45",
+                "operation_ref": operation_ref,
+                "direction": "produce",
+                "topic_ref": "kafka://orders.created",
+                "event_type": "OrderCreated",
+            },
+        ],
+        "confidence": 0.96,
+        "deterministic": True,
+        "redactions": [],
+        "warnings": [],
+    }
+
+
+def _database_submission() -> dict[str, Any]:
+    return {
+        "schema_version": "flowtest-database-evidence-v1",
+        "provider": {"name": "external-database-mcp", "version": "3.0.0"},
+        "source": {"ref": "database-profile://orders", "revision": "schema-v1"},
+        "subject_ref": SUBJECT_REF,
+        "tables": [
+            {
+                "schema_name": "public",
+                "name": "orders",
+                "columns": [
+                    {
+                        "name": "id",
+                        "data_type": "uuid",
+                        "nullable": False,
+                        "primary_key": True,
+                        "unique": True,
+                        "masked_example": "***0001",
+                    },
+                    {
+                        "name": "status",
+                        "data_type": "varchar",
+                        "nullable": False,
+                        "check_expression": "status IN ('created', 'cancelled')",
+                        "observed_distribution": {
+                            "row_count": 1000,
+                            "distinct_count": 2,
+                            "null_ratio": 0,
+                            "enum_candidates": ["created", "cancelled"],
+                        },
+                        "masked_example": "***ated",
+                    },
+                    {
+                        "name": "product_id",
+                        "data_type": "uuid",
+                        "nullable": False,
+                        "foreign_key": "public.products.id",
+                        "masked_example": "***1001",
+                    },
+                    {
+                        "name": "customer_id",
+                        "data_type": "uuid",
+                        "nullable": False,
+                        "foreign_key": "public.customers.id",
+                        "masked_example": "***2001",
+                    },
+                ],
+            }
+        ],
+        "confidence": 0.99,
+        "deterministic": True,
+        "redactions": [],
+        "warnings": [],
+    }

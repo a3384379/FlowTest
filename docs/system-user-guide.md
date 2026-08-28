@@ -863,7 +863,10 @@ Context Tool 使用独立 `mcp:evidence:write` Scope：
 | --- | --- | --- |
 | `flowtest.begin_test_context` | `project_id`、`name`、`objective`、Evidence Requirement 与有版本来源 | 创建首个不可变 Context Revision |
 | `flowtest.inspect_context_requirements` | `context_id` | 读取缺失 Evidence、Conflict、状态和当前 Fingerprint |
+| `flowtest.ingest_java_evidence` | `context_id`、强类型 Java Evidence | 接收外部 Code MCP 的 Java/Spring 结构证据；不连接外部 MCP、不执行代码 |
+| `flowtest.ingest_database_evidence` | `context_id`、强类型 DB Evidence | 接收设计期 Schema、约束与脱敏分布；不接受 SQL 或原始数据行 |
 | `flowtest.ingest_external_evidence` | `context_id`、严格 Evidence Envelope | 校验并生成新的不可变 Revision；原始 Finding 不在响应中返回 |
+| `flowtest.inspect_entity_mapping` | `context_id` | 读取可追溯 Operation/Field/State 候选与未解决歧义；不自动选择 |
 | `flowtest.inspect_test_context` | `context_id` | 读取当前 Revision 与脱敏 Evidence 摘要 |
 | `flowtest.close_test_context` | `context_id` | 关闭 Context，阻止继续接收 Evidence 或创建 Proposal |
 

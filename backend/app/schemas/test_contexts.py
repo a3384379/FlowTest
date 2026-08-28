@@ -6,6 +6,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.evidence_adapters import (
+    DatabaseEvidenceSubmission,
+    EntityMappingResult,
+    JavaEvidenceSubmission,
+)
 from app.domain.flow_spec import FlowSpec
 from app.domain.integration_plans import (
     IntegrationPlan,
@@ -61,6 +66,18 @@ class IngestExternalEvidenceRequest(BaseModel):
     envelope: ExternalEvidenceEnvelope
 
 
+class IngestJavaEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: JavaEvidenceSubmission
+
+
+class IngestDatabaseEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: DatabaseEvidenceSubmission
+
+
 class ContextEvidenceItemResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -110,6 +127,13 @@ class TestContextResponse(BaseModel):
     updated_at: datetime
     revision: TestContextRevisionResponse
     evidence_items: list[ContextEvidenceItemResponse]
+
+
+class EvidenceAdapterIngestionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context: TestContextResponse
+    entity_mapping: EntityMappingResult
 
 
 class ContextRequirementsResponse(BaseModel):

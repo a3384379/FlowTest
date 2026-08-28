@@ -2,11 +2,11 @@
 
 最后更新：2026-08-28（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48～S50 实现及 Evidence Closure。S51 实现 PR #55 已普通 Squash Merge 至
-`f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`；其合并后迟到审查已由合并后修复 PR #56 串行闭环，
-#56 已普通 Squash Merge 至 `main@86d2221e63f93e418b87649f56b3fdfe48d365c9`，该精确 Main SHA 的
-Backend、Frontend、Compose、Security、Windows、Upgrade 与唯一 Required Gate 全部 Success。当前执行 S51
-Evidence Closure；Closure 合并且其 Main Push Required Gate 成功前不进入 S52。当前 Migration Head 为
+已完成 S48～S51 实现及 Evidence Closure。S51 Closure PR #57 已普通 Squash Merge 至
+`main@b6c281a832ec63e94433e0f322b30b6e342098c1`，该精确 Main SHA 的 Security、Windows 与唯一 Required Gate
+全部 Success。S52 已从该精确 Main 创建独立分支，External Evidence Adapter、Entity Mapping 与 Java/Spring
+POC 的本地实现及完整门禁已通过，当前进入远程 PR 闭环；S52 Closure 合并且其 Main Push Required Gate
+成功前不进入 S53。当前 Migration Head 为
 `20260828_0046`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
@@ -17,7 +17,32 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
 
-## 证据闭环中：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
+## 开发中：V6 S52 External Evidence Adapter 与 Entity Mapping
+
+### Implemented
+
+- 新增 `flowtest-java-evidence-v1` 与 `flowtest-database-evidence-v1` 强类型契约，分别完整表达 Java/Spring
+  Route/DTO/Validation/Call/Persistence/Entity/State/Event 证据与 DB Schema/Table/Column/Constraint/
+  Distribution/Masked Example；两者均适配进入既有不可变 Context Revision。
+- 新增 Operation → Entity、Request/Response Field → Column、Operation → State Set 候选；每个候选携带
+  Evidence Ref，全部默认 `proposed`，多个 Target 生成显式 Mapping Conflict 并把 Context 标为
+  `conflicted`，不静默选择。
+- MCP 升级至 `s52-evidence-adapter-v1`，新增 Java/DB Ingest 与 Mapping Inspect 三个 Tool，继续复用
+  `mcp:evidence:write`、Tenant/Project 授权和标准错误 Envelope。FlowTest 不主动连接外部 MCP Server。
+- Java/Spring POC 只做有界静态文本分析，不编译或执行代码；固定 small-spring Fixture 与本地 RuoYi
+  `3b3941ab...` Golden Target 均已通过定向回归。Python AST Provider 通过 Evidence Bundle Adapter 保持兼容。
+
+### 当前门槛
+
+- 测试先行红灯与 S52 Domain/API 绿灯已记录；S49/S51 兼容、MCP Golden/SDK、S46 MCP Red Team、Ruff 与
+  337-source Mypy 检查通过。
+- Backend 675 passed / 4 skipped、90.49% 覆盖率；Frontend 57 files / 222 tests；格式、Lint、Build、Python/Node
+  依赖审计与安全 Lint 全部通过。
+- 隔离 Compose 15/15 Healthy，S52 Playwright Setup + 用例 2 passed；日志与敏感信息扫描、精确资源清理完成，
+  用户既有三个栈仍为 6 / 2 / 6。远程 PR 闭环尚在执行。
+- 完整边界与持续更新的证据见 [S52 Release Evidence](release/v6-s52-evidence-adapters.md)。
+
+## 已完成：V6 S51 MCP Flow Draft 与 Visual Proposal Alpha
 
 ### Implemented
 
@@ -47,7 +72,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   Security/Tenant/Secret/SSRF 与 E2E/Scope 四类本地 Review 已完成。
 - PR #55 及迟到 Review 修复 PR #56 均已普通 Squash Merge；精确头 CI、精确头 Codex Review、全部 Thread
   Resolution 与两个精确 Merge SHA Main Push 均已闭环。#55 / #56 未使用 Admin、Bypass 或直接推送 Main。
-- 当前只剩 S51 Evidence Closure PR 及其 Main Push Required Gate；完成前不进入 S52。完整边界与证据记录见
+- S51 Evidence Closure PR #57 已普通 Squash Merge 至 `b6c281a832ec63e94433e0f322b30b6e342098c1`，其
+  Main Push Required Gate 已 Success；S52 从该精确 Main 创建。完整边界与证据记录见
   [S51 Release Evidence](release/v6-s51-mcp-visual-proposal.md)。
 
 ## 已完成：V6 S50 Multi-Operation Plan 与 Executable FlowSpec Compiler

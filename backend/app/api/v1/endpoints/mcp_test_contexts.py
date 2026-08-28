@@ -10,21 +10,26 @@ from app.api.dependencies import (
     MCPFlowProposalCurrent,
     SessionDependency,
 )
+from app.domain.evidence_adapters import EntityMappingResult
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
 from app.schemas.test_contexts import (
     BeginTestContextRequest,
     CompilerDiagnosticsResponse,
     ContextRequirementsResponse,
+    EvidenceAdapterIngestionResponse,
     FlowSpecProposalInspectionResponse,
     FlowSpecProposalRequest,
     FlowSpecProposalResponse,
+    IngestDatabaseEvidenceRequest,
     IngestExternalEvidenceRequest,
+    IngestJavaEvidenceRequest,
     IntegrationPlanCompileRequest,
     IntegrationPlanRequest,
     IntegrationPlanValidateRequest,
     IntegrationPlanValidationResponse,
     TestContextResponse,
 )
+from app.services.evidence_adapters import EvidenceAdapterService
 from app.services.mcp_flow_proposals import MCPFlowProposalService
 from app.services.mcp_integration_plans import MCPIntegrationPlanService
 from app.services.test_contexts import TestContextService
@@ -75,6 +80,57 @@ async def ingest_external_evidence(
         actor=principal.actor,
         context_id=context_id,
         envelope=payload.envelope,
+    )
+
+
+@evidence_router.post(
+    "/{context_id}/java-evidence",
+    response_model=EvidenceAdapterIngestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_java_evidence(
+    context_id: UUID,
+    payload: IngestJavaEvidenceRequest,
+    session: SessionDependency,
+    principal: MCPEvidenceCurrent,
+) -> EvidenceAdapterIngestionResponse:
+    return await EvidenceAdapterService(session).ingest_java(
+        actor=principal.actor,
+        context_id=context_id,
+        evidence=payload.evidence,
+    )
+
+
+@evidence_router.post(
+    "/{context_id}/database-evidence",
+    response_model=EvidenceAdapterIngestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_database_evidence(
+    context_id: UUID,
+    payload: IngestDatabaseEvidenceRequest,
+    session: SessionDependency,
+    principal: MCPEvidenceCurrent,
+) -> EvidenceAdapterIngestionResponse:
+    return await EvidenceAdapterService(session).ingest_database(
+        actor=principal.actor,
+        context_id=context_id,
+        evidence=payload.evidence,
+    )
+
+
+@evidence_router.get(
+    "/{context_id}/entity-mapping",
+    response_model=EntityMappingResult,
+)
+async def inspect_entity_mapping(
+    context_id: UUID,
+    session: SessionDependency,
+    principal: MCPEvidenceCurrent,
+) -> EntityMappingResult:
+    return await EvidenceAdapterService(session).inspect_mapping(
+        actor=principal.actor,
+        context_id=context_id,
     )
 
 

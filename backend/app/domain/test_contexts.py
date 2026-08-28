@@ -9,7 +9,7 @@ from hashlib import sha256
 from typing import Final, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 CONTEXT_REVISION_SCHEMA_VERSION: Final[Literal["flowtest-context-revision-v1"]] = (
     "flowtest-context-revision-v1"
@@ -271,6 +271,7 @@ class ExternalEvidenceFinding(BaseModel):
     source_content: EvidenceContentSource = EvidenceContentSource.STRUCTURED_ANALYSIS
     content_role: Literal["untrusted_data"] = "untrusted_data"
     statement: str = Field(min_length=1, max_length=2000)
+    structured_data: dict[str, JsonValue] = Field(default_factory=dict, max_length=100)
     confidence: float = Field(ge=0, le=1)
     deterministic: bool
     semantic_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -333,6 +334,8 @@ class ExternalEvidenceEnvelope(BaseModel):
 
 def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:
     payload = finding.model_dump(mode="json", exclude={"semantic_fingerprint"})
+    if not payload["structured_data"]:
+        del payload["structured_data"]
     return sha256(_canonical_json(payload)).hexdigest()
 
 

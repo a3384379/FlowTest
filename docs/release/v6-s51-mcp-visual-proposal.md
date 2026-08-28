@@ -8,10 +8,11 @@
 | 实现分支 | `codex/s51-mcp-visual-proposal` |
 | 实现 PR / Merge SHA | #55 / `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a` |
 | 合并后审查修复 PR / Merge SHA | #56 / `86d2221e63f93e418b87649f56b3fdfe48d365c9` |
+| Evidence Closure PR / Merge SHA | #57 / `b6c281a832ec63e94433e0f322b30b6e342098c1` |
 | MCP Server Version | `s51-flow-proposal-v1` |
 | Scope | `mcp:flow:propose` |
 | 数据库变更 | 无；Migration Head 保持 `20260828_0046` |
-| Release 状态 | 实现与补丁已合并，Evidence Closure 进行中；未创建 Tag 或 Release |
+| Release 状态 | 实现、补丁与 Evidence Closure 已合并；未创建 Tag 或 Release |
 
 S51 从 S50 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Main 创建。本阶段首次完成外部
 LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S56，也不把阶段名称等同于已发布版本。
@@ -101,8 +102,8 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 
 ### Blocked
 
-- 当前无已知本地或远程实现阻断。PR #55、补丁 PR #56 及两者的精确 Merge SHA Main Push 已全绿。
-- S51 Evidence Closure PR 合并且其 Main Push Required Gate 成功前，不允许进入 S52。
+- 当前无已知本地或远程实现阻断。PR #55、补丁 PR #56、Closure PR #57 及其精确 Merge SHA Main Push 已全绿。
+- S51 Evidence Closure 已完成；S52 已从 `main@b6c281a832ec63e94433e0f322b30b6e342098c1` 创建。
 
 ## 6. Validation 与 Evidence
 
@@ -166,6 +167,10 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 - PR #56 通过普通 Squash Merge 生成 `86d2221e63f93e418b87649f56b3fdfe48d365c9`。该精确 Main SHA 的
   Backend `33165883973`、Frontend `33165884044`、Compose `33165883986`、Security `33165884058`、Windows
   `33165884089`、Upgrade `33165884052` 与 Required Gate `33165884082` 均 Success。
-- #55 / #56 均未使用 Admin Merge、Ruleset Bypass 或直接推送 Main；合并时 Ruleset Bypass Actor 为空，当前
-  用户不可绕过。
-- S51 Evidence Closure PR 合并且其 Main Push Required Gate 成功前，不进入 S52。
+- Evidence Closure PR #57 最终 Head `59a3947465118aa1619d074d06b081763416432b` 的 Security
+  `33169598946`、Required Gate `33169597332` 与 Codex Review 均 Success，1 / 1 Review Thread 已解决；
+  合并前状态为 Ready / MERGEABLE / CLEAN。
+- PR #57 通过普通 Squash Merge 生成 `b6c281a832ec63e94433e0f322b30b6e342098c1`。该精确 Main SHA 的
+  Security `33170923585`、Windows `33170923640` 与 Required Gate `33170923586` 均 Success。
+- #55 / #56 / #57 均未使用 Admin Merge、Ruleset Bypass、Force Push 或直接推送 Main；S52 已从上述精确
+  Main SHA 创建。

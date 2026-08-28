@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
+from app.domain.evidence_adapters import (
+    EntityMappingBudgetExceeded,
+    EntityMappingResult,
+    MappingEvidenceInput,
+    derive_entity_mapping,
+    with_mapping_conflict_findings,
+)
 from app.domain.test_contexts import (
     MAX_CONTEXT_CONFLICTS,
     MAX_CONTEXT_EVIDENCE_ITEMS,
@@ -22,6 +29,7 @@ from app.domain.test_contexts import (
     EvidenceProviderType,
     EvidenceSemanticRole,
     ExternalEvidenceEnvelope,
+    ExternalEvidenceFinding,
     RevisionReference,
     TestContextStatus,
     completeness_snapshot,
@@ -172,6 +180,47 @@ class TestContextService:
         context_id: UUID,
         envelope: ExternalEvidenceEnvelope,
     ) -> TestContextResponse:
+        response, _mapping = await self._ingest(
+            actor=actor,
+            context_id=context_id,
+            envelope=envelope,
+            include_mapping_conflicts=False,
+        )
+        return response
+
+    async def ingest_adapted(
+        self,
+        *,
+        actor: User,
+        context_id: UUID,
+        envelope: ExternalEvidenceEnvelope,
+    ) -> tuple[TestContextResponse, EntityMappingResult]:
+        response, mapping = await self._ingest(
+            actor=actor,
+            context_id=context_id,
+            envelope=envelope,
+            include_mapping_conflicts=True,
+        )
+        if mapping is None:
+            raise RuntimeError("adapted evidence ingestion must produce entity mapping")
+        return response, mapping
+
+    async def inspect_entity_mapping(self, *, actor: User, context_id: UUID) -> EntityMappingResult:
+        self._require_evidence_scope()
+        context = await self._load_context(actor=actor, context_id=context_id)
+        await self._mark_expired(actor=actor, context=context)
+        revision = await self._current_revision(context)
+        evidence = await self._evidence_items(revision.id)
+        return _derive_entity_mapping(_mapping_evidence_inputs(evidence))
+
+    async def _ingest(
+        self,
+        *,
+        actor: User,
+        context_id: UUID,
+        envelope: ExternalEvidenceEnvelope,
+        include_mapping_conflicts: bool,
+    ) -> tuple[TestContextResponse, EntityMappingResult | None]:
         self._require_evidence_scope()
         context = await self._load_context(
             actor=actor, context_id=context_id, editing=True, for_update=True
@@ -180,6 +229,14 @@ class TestContextService:
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
         existing = await self._evidence_items(current.id)
+        if include_mapping_conflicts:
+            try:
+                envelope = with_mapping_conflict_findings(
+                    envelope,
+                    _mapping_evidence_inputs(existing),
+                )
+            except EntityMappingBudgetExceeded as exc:
+                raise _mapping_budget_exceeded() from exc
         additions = _new_evidence_items(
             context=context,
             envelope=envelope,
@@ -236,7 +293,13 @@ class TestContextService:
         await self._session.commit()
         await self._session.refresh(context)
         await self._session.refresh(revision)
-        return await self._response(context, revision)
+        response = await self._response(context, revision)
+        mapping = (
+            _derive_entity_mapping(_mapping_evidence_inputs([*existing, *additions]))
+            if include_mapping_conflicts
+            else None
+        )
+        return response, mapping
 
     async def close(self, *, actor: User, context_id: UUID) -> TestContextResponse:
         self._require_evidence_scope()
@@ -512,6 +575,33 @@ def _evidence_response(item: ContextEvidenceItem) -> ContextEvidenceItemResponse
         data_classification="internal_redacted",
         created_at=item.created_at,
         expires_at=item.expires_at,
+    )
+
+
+def _mapping_evidence_inputs(
+    items: list[ContextEvidenceItem],
+) -> list[MappingEvidenceInput]:
+    return [
+        MappingEvidenceInput(
+            evidence_ref=f"evidence://context/{item.fingerprint}",
+            finding=ExternalEvidenceFinding.model_validate(item.finding_payload),
+        )
+        for item in items
+    ]
+
+
+def _derive_entity_mapping(evidence: list[MappingEvidenceInput]) -> EntityMappingResult:
+    try:
+        return derive_entity_mapping(evidence)
+    except EntityMappingBudgetExceeded as exc:
+        raise _mapping_budget_exceeded() from exc
+
+
+def _mapping_budget_exceeded() -> AppError:
+    return AppError(
+        code="ENTITY_MAPPING_BUDGET_EXCEEDED",
+        message="实体映射证据或候选数量超过安全上限",
+        status_code=422,
     )
 
 

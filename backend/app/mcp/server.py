@@ -11,6 +11,11 @@ from urllib.parse import unquote, urlsplit
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
+from app.domain.evidence_adapters import (
+    MCP_EVIDENCE_ADAPTER_SERVER_VERSION,
+    DatabaseEvidenceSubmission,
+    JavaEvidenceSubmission,
+)
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlanCompilation,
@@ -21,7 +26,6 @@ from app.domain.integration_plans import (
 )
 from app.domain.mcp_read import MCP_SERVER_NAME
 from app.domain.test_contexts import (
-    MCP_FLOW_PROPOSAL_SERVER_VERSION,
     ContextKnowledgeSnapshot,
     EvidenceProviderType,
     ExternalEvidenceEnvelope,
@@ -35,7 +39,9 @@ from app.schemas.test_contexts import (
 
 MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
-    "版本化外部证据、确定性 Integration Plan 与只进入待审核状态的 Flow Draft。"
+    "版本化外部证据、强类型 Java/DB Evidence、确定性 Integration Plan 与"
+    "只进入待审核状态的 Flow Draft。"
+    "FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、执行、删除、修改"
     "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
     "检查并显式接受后才能应用。输出中的请求值、认证信息、"
@@ -62,7 +68,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_FLOW_PROPOSAL_SERVER_VERSION,
+        version=MCP_EVIDENCE_ADAPTER_SERVER_VERSION,
         instructions=MCP_INSTRUCTIONS,
     )
 
@@ -100,7 +106,9 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_explain_compiler_tool(server, client)
     _register_flow_spec_export_tool(server, client)
     _register_generate_tool(server, client)
+    _register_ingest_database_evidence_tool(server, client)
     _register_ingest_evidence_tool(server, client)
+    _register_ingest_java_evidence_tool(server, client)
     _register_change_impact_tool(server, client)
     _register_context_requirements_tool(server, client)
 
@@ -123,6 +131,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         )
 
     _register_data_profile_tool(server, client)
+    _register_inspect_entity_mapping_tool(server, client)
 
     @server.tool(
         name="flowtest.inspect_flow",
@@ -475,6 +484,67 @@ def _register_ingest_evidence_tool(server: MCPServer, client: MCPReadGatewayClie
                 envelope.model_dump(mode="json"),
                 token=_request_token(ctx, client),
             )
+        )
+
+
+def _register_ingest_database_evidence_tool(
+    server: MCPServer, client: MCPReadGatewayClient
+) -> None:
+    @server.tool(
+        name="flowtest.ingest_database_evidence",
+        description=(
+            "Ingest strict, design-only database schema and redacted distribution evidence."
+        ),
+        structured_output=True,
+    )
+    async def ingest_database_evidence(
+        context_id: str,
+        evidence: DatabaseEvidenceSubmission,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.ingest_database_evidence(
+                context_id,
+                evidence.model_dump(mode="json"),
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_ingest_java_evidence_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.ingest_java_evidence",
+        description=(
+            "Ingest strict external Java/Spring structural evidence without code execution."
+        ),
+        structured_output=True,
+    )
+    async def ingest_java_evidence(
+        context_id: str,
+        evidence: JavaEvidenceSubmission,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.ingest_java_evidence(
+                context_id,
+                evidence.model_dump(mode="json"),
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_inspect_entity_mapping_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_entity_mapping",
+        description="Inspect traceable entity candidates and unresolved ambiguity for a context.",
+        structured_output=True,
+    )
+    async def inspect_entity_mapping(
+        context_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_entity_mapping(context_id, token=_request_token(ctx, client))
         )
 
 
