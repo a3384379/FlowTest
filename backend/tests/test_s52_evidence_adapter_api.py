@@ -1371,6 +1371,72 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
 
 
 @pytest.mark.asyncio
+async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "证据元数据安全上下文",
+            "objective": "验证脱敏路径与外键拒绝敏感值",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    sensitive_value = "13800138000"
+    redaction = {
+        "path": f"$.users.{sensitive_value}",
+        "method": "removed",
+        "reason": "fixture cleanup",
+    }
+
+    dedicated_java = _java_evidence(project_id)
+    dedicated_java["redactions"] = [redaction]
+    dedicated_database = _database_evidence(project_id)
+    dedicated_database["redactions"] = [redaction]
+    dedicated_foreign_key = _database_evidence(project_id)
+    dedicated_foreign_key["tables"][0]["columns"][0]["foreign_key"] = sensitive_value
+
+    generic_java = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_java["redactions"] = [redaction]
+    generic_database = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_column = next(
+        finding
+        for finding in generic_database["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    generic_column["structured_data"]["claim"]["foreign_key"] = sensitive_value
+
+    requests = (
+        ("java-evidence", {"evidence": dedicated_java}),
+        ("database-evidence", {"evidence": dedicated_database}),
+        ("database-evidence", {"evidence": dedicated_foreign_key}),
+        ("evidence", {"envelope": generic_java}),
+        ("evidence", {"envelope": generic_database}),
+    )
+    for endpoint, payload in requests:
+        rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/{endpoint}",
+            headers=headers,
+            json=payload,
+        )
+
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert rejected.json()["error"]["trace_id"]
+        assert sensitive_value not in rejected.text
+
+
+@pytest.mark.asyncio
 async def test_database_adapter_rejects_sensitive_or_write_input_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:

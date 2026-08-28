@@ -497,6 +497,8 @@ class ExternalDatabaseColumnClaim(BaseModel):
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
         require_no_sensitive_scalar_values([self.data_type])
+        if self.foreign_key is not None:
+            require_no_sensitive_scalar_values([self.foreign_key])
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
@@ -636,6 +638,11 @@ class ExternalEvidenceRedaction(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     method: Literal["removed", "masked", "hashed", "referenced"]
     reason: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_path(self) -> ExternalEvidenceRedaction:
+        require_no_sensitive_scalar_values([self.path])
+        return self
 
 
 class ExternalEvidenceWarning(BaseModel):

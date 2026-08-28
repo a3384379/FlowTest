@@ -89,13 +89,15 @@ _FIELD_DECLARATION = re.compile(
     r"(?P<type>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*=\s*[^;]{0,1000})?\s*;"
 )
-_VALIDATION_ANNOTATION = re.compile(
-    r"@(?P<name>NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
-    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b"
+_VALIDATION_ANNOTATION_NAMES = (
+    r"NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
+    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid"
 )
-_VALIDATION_ANNOTATION_MARKER = re.compile(
-    r"@(?:NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
-    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b"
+_VALIDATION_ANNOTATION = re.compile(rf"@(?P<name>{_VALIDATION_ANNOTATION_NAMES})\b")
+_VALIDATION_ANNOTATION_MARKER = re.compile(rf"@(?:{_VALIDATION_ANNOTATION_NAMES})\b")
+_VALIDATED_GETTER = re.compile(
+    rf"(?P<annotations>(?:\s*@(?:{_VALIDATION_ANNOTATION_NAMES})\b[^\n]*(?:\r?\n|$))+)"
+    r"\s*public\s+[A-Za-z0-9_$<>,.?\[\]]+\s+get(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\("
 )
 _SERVICE_CALL = re.compile(
     r"\b(?P<target>[A-Za-z_$][A-Za-z0-9_$]*)"
@@ -319,6 +321,8 @@ class DatabaseColumnEvidence(BaseModel):
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
         require_no_sensitive_scalar_values([self.data_type])
+        if self.foreign_key is not None:
+            require_no_sensitive_scalar_values([self.foreign_key])
         if self.masked_example is not None and "***" not in self.masked_example:
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
@@ -1837,12 +1841,8 @@ def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
             masked_prefix[annotation_start:],
         )
         fields.append((match.group("name"), match.group("type"), annotations))
-    getter_pattern = re.compile(
-        r"(?P<annotations>(?:\s*@(?:NotNull|NotBlank|NotEmpty|Size|Min|Max|Email|Pattern)[^\n]*\n)+)"
-        r"\s*public\s+[A-Za-z0-9_$<>,.?\[\]]+\s+get(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\("
-    )
     known = {field[0] for field in fields}
-    for match in getter_pattern.finditer(masked_body):
+    for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
         field_name = name[0].lower() + name[1:]
         annotation_start, annotation_end = match.span("annotations")
@@ -2372,9 +2372,9 @@ def _structural_java_claims(
         if declaration.group("kind") == "interface" and name.endswith(("Mapper", "Repository")):
             claims.append(
                 JavaPersistenceClaim(
-                    id=_claim_id("repository", name),
+                    id=_claim_id("repository", source_path, name),
                     source_path=source_path,
-                    repository_ref=f"java://{name}",
+                    repository_ref=_java_structural_ref("java", source_path, name),
                     confidence=1,
                     deterministic=True,
                 )
@@ -2388,9 +2388,9 @@ def _structural_java_claims(
             ]
             claims.append(
                 JavaEntityClaim(
-                    id=_claim_id("entity", name),
+                    id=_claim_id("entity", source_path, name),
                     source_path=source_path,
-                    entity_ref=f"entity://{name}",
+                    entity_ref=_java_structural_ref("entity", source_path, name),
                     class_name=name,
                     table_ref=f"table://{table_name}",
                     operation_refs=operation_refs,
@@ -2400,9 +2400,9 @@ def _structural_java_claims(
             )
             claims.extend(
                 JavaTableColumnClaim(
-                    id=_claim_id("column", name, field_name),
+                    id=_claim_id("column", source_path, name, field_name),
                     source_path=source_path,
-                    entity_ref=f"entity://{name}",
+                    entity_ref=_java_structural_ref("entity", source_path, name),
                     table_ref=f"table://{table_name}",
                     field_name=field_name,
                     column_name=_snake_case(field_name),
@@ -2417,9 +2417,9 @@ def _structural_java_claims(
             if values:
                 claims.append(
                     JavaEnumStateClaim(
-                        id=_claim_id("enum", name),
+                        id=_claim_id("enum", source_path, name),
                         source_path=source_path,
-                        enum_ref=f"java://{name}",
+                        enum_ref=_java_structural_ref("java", source_path, name),
                         values=values,
                         confidence=0.8,
                         deterministic=not values_truncated,
@@ -2543,6 +2543,11 @@ def _claim_id(*parts: str) -> str:
         sha256(key.encode()).hexdigest()[:24].translate(str.maketrans("0123456789", "ghijklmnop"))
     )
     return f"claim-{digest}"
+
+
+def _java_structural_ref(scheme: Literal["java", "entity"], source_path: str, name: str) -> str:
+    identity = _claim_id("java-structural-ref", source_path, name).removeprefix("claim-")[:16]
+    return f"{scheme}://{name}/{identity}"
 
 
 def _database_finding_id(kind: Literal["table", "column"], *identity: str) -> str:

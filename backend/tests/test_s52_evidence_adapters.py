@@ -272,6 +272,47 @@ def test_adapter_contracts_reject_sensitive_revision_and_version_metadata() -> N
         ExternalEvidenceEnvelope.model_validate(generic)
 
 
+def test_adapter_contracts_reject_sensitive_redaction_paths_and_foreign_keys() -> None:
+    sensitive_value = "13800138000"
+    redaction = {
+        "path": f"$.users.{sensitive_value}",
+        "method": "removed",
+        "reason": "fixture cleanup",
+    }
+    for submission_factory, submission_type in (
+        (_java_submission, JavaEvidenceSubmission),
+        (_database_submission, DatabaseEvidenceSubmission),
+    ):
+        dedicated = submission_factory()
+        dedicated["redactions"] = [redaction]
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            submission_type.model_validate(dedicated)
+
+    generic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    generic["redactions"] = [redaction]
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic)
+
+    dedicated_database = _database_submission()
+    dedicated_database["tables"][0]["columns"][0]["foreign_key"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        DatabaseEvidenceSubmission.model_validate(dedicated_database)
+
+    generic_database = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    ).model_dump(mode="json")
+    column_finding = next(
+        finding
+        for finding in generic_database["findings"]
+        if finding["structured_data"]["claim_kind"] == "column"
+    )
+    column_finding["structured_data"]["claim"]["foreign_key"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_database)
+
+
 def test_adapter_contracts_reject_sensitive_declared_types() -> None:
     sensitive_value = "4111111111111111"
     dedicated_java = _java_submission()
@@ -1863,6 +1904,54 @@ public class OrderEntity {
     assert '(regexp = "^(foo|bar)$")' in constraints
 
 
+def test_java_spring_poc_discovers_every_supported_getter_constraint() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://getter-validation", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @PostMapping("/orders")
+    public Order create(@RequestBody CreateOrderRequest request) {
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+public class CreateOrderRequest {
+    private BigDecimal amount;
+
+    @Positive
+    @DecimalMin(value = "0.01")
+    @Valid
+    public BigDecimal getAmount() {
+        return amount;
+    }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    annotations = {
+        claim.annotation
+        for claim in evidence.claims
+        if claim.kind == "bean_validation" and claim.field_name == "amount"
+    }
+    assert annotations == {"Positive", "DecimalMin", "Valid"}
+
+
 def test_java_spring_poc_expands_all_mapping_paths() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -1983,6 +2072,37 @@ public enum OrderStatus {
     states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
     assert len(states) == 1
     assert states[0].values == ["ACTIVE", "INACTIVE"]
+
+
+def test_java_spring_poc_keeps_same_named_structural_claims_from_distinct_sources() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://same-named-enums", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/alpha/Status.java",
+                        "content": "package alpha; public enum Status { ACTIVE, INACTIVE; }",
+                    },
+                    {
+                        "path": "src/main/java/beta/Status.java",
+                        "content": "package beta; public enum Status { OPEN, CLOSED; }",
+                    },
+                ],
+            }
+        )
+    )
+
+    states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
+    assert len(states) == 2
+    assert len({claim.id for claim in states}) == 2
+    assert len({claim.enum_ref for claim in states}) == 2
+    assert {tuple(claim.values) for claim in states} == {
+        ("ACTIVE", "INACTIVE"),
+        ("OPEN", "CLOSED"),
+    }
 
 
 def test_java_spring_poc_reports_claim_quota_truncation() -> None:
