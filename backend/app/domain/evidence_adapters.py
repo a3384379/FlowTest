@@ -853,6 +853,13 @@ class _ParsedDatabaseTable:
     deterministic: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _EntityMatch:
+    score: float
+    evidence_refs: tuple[str, ...]
+    deterministic: bool
+
+
 def _require_mapping_claim_budget(parsed: _ParsedEvidence) -> None:
     count = sum(
         len(items)
@@ -967,8 +974,8 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
         matching_entities = _matching_entities(route, parsed.entities)
         for table_ref, table in tables.items():
             table_name = table_ref.rsplit("/", 1)[-1]
-            score, entity_evidence = _entity_match_score(route, table_name, matching_entities)
-            if score == 0:
+            entity_match = _entity_match(route, table_name, matching_entities)
+            if entity_match.score == 0:
                 continue
             _append_mapping_candidate(
                 candidates,
@@ -977,9 +984,18 @@ def _operation_entity_candidates(parsed: _ParsedEvidence) -> list[EntityMappingC
                     source_ref=route.operation_ref,
                     target_ref=f"entity://{table_ref.removeprefix('table://')}",
                     operation_ref=route.operation_ref,
-                    confidence=min(route.confidence, score, table.confidence),
-                    deterministic=(route.deterministic and score == 1 and table.deterministic),
-                    evidence_refs=[route_evidence, *table.evidence_refs, *entity_evidence],
+                    confidence=min(route.confidence, entity_match.score, table.confidence),
+                    deterministic=(
+                        route.deterministic
+                        and entity_match.score == 1
+                        and entity_match.deterministic
+                        and table.deterministic
+                    ),
+                    evidence_refs=[
+                        route_evidence,
+                        *table.evidence_refs,
+                        *entity_match.evidence_refs,
+                    ],
                 ),
             )
     return list(candidates.values())
@@ -995,21 +1011,29 @@ def _matching_entities(
     return explicit or entities
 
 
-def _entity_match_score(
+def _entity_match(
     route: JavaControllerRouteClaim,
     table_name: str,
     entities: list[tuple[JavaEntityClaim, str]],
-) -> tuple[float, list[str]]:
+) -> _EntityMatch:
     table_token = _normalized_name(table_name)
     for entity, evidence_ref in entities:
         if entity.table_ref is not None and _table_ref_matches(entity.table_ref, table_name):
-            return min(entity.confidence, 1.0), [evidence_ref]
+            return _EntityMatch(
+                score=min(entity.confidence, 1.0),
+                evidence_refs=(evidence_ref,),
+                deterministic=entity.deterministic,
+            )
         if _normalized_name(entity.class_name) == table_token:
-            return min(entity.confidence, 0.9), [evidence_ref]
+            return _EntityMatch(
+                score=min(entity.confidence, 0.9),
+                evidence_refs=(evidence_ref,),
+                deterministic=False,
+            )
     route_token = _route_resource_token(route.path)
     if route_token and (table_token == route_token or table_token.endswith(route_token)):
-        return 0.75, []
-    return 0, []
+        return _EntityMatch(score=0.75, evidence_refs=(), deterministic=False)
+    return _EntityMatch(score=0, evidence_refs=(), deterministic=False)
 
 
 def _table_evidence(
@@ -1032,7 +1056,7 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
     operation_tables = _operation_tables(_operation_entity_candidates(parsed))
     candidates: dict[str, EntityMappingCandidate] = {}
     for field, field_evidence in parsed.fields:
-        table_targets = operation_tables.get(field.operation_ref, set())
+        table_targets = operation_tables.get(field.operation_ref, {})
         for parsed_column in parsed.columns:
             column = parsed_column.claim
             entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
@@ -1049,6 +1073,10 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
             field_ref = (
                 f"field://{field.dto_type}/{field.field_name}?operation={operation_identity}"
             )
+            operation_table = table_targets.get(entity_ref)
+            operation_confidence = operation_table.confidence if operation_table else 1.0
+            operation_deterministic = operation_table.deterministic if operation_table else True
+            operation_evidence = operation_table.evidence_refs if operation_table else []
             _append_mapping_candidate(
                 candidates,
                 _candidate(
@@ -1059,9 +1087,21 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
                     ),
                     operation_ref=field.operation_ref,
                     field_ref=field_ref,
-                    confidence=min(field.confidence, parsed_column.confidence),
-                    deterministic=field.deterministic and parsed_column.deterministic,
-                    evidence_refs=[field_evidence, parsed_column.evidence_ref],
+                    confidence=min(
+                        field.confidence,
+                        parsed_column.confidence,
+                        operation_confidence,
+                    ),
+                    deterministic=(
+                        field.deterministic
+                        and parsed_column.deterministic
+                        and operation_deterministic
+                    ),
+                    evidence_refs=[
+                        field_evidence,
+                        parsed_column.evidence_ref,
+                        *operation_evidence,
+                    ],
                 ),
             )
     return list(candidates.values())
@@ -1072,10 +1112,12 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
     candidates: dict[str, EntityMappingCandidate] = {}
     corroborated_java_ids: set[str] = set()
     operation_tables = _operation_tables(_operation_entity_candidates(parsed))
-    for operation_ref, entities in operation_tables.items():
+    for operation_ref, table_candidates in operation_tables.items():
         for parsed_column in parsed.columns:
             column = parsed_column.claim
-            if f"entity://{parsed_column.schema}/{parsed_column.table}" not in entities:
+            entity_ref = f"entity://{parsed_column.schema}/{parsed_column.table}"
+            operation_table = table_candidates.get(entity_ref)
+            if operation_table is None:
                 continue
             values = _database_state_values(column)
             if not values or _normalized_name(column.name) not in {"status", "state"}:
@@ -1099,15 +1141,18 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
                     confidence=min(
                         [
                             parsed_column.confidence,
+                            operation_table.confidence,
                             *(candidate.confidence for candidate in corroborating),
                         ]
                     ),
                     deterministic=(
                         parsed_column.deterministic
+                        and operation_table.deterministic
                         and all(candidate.deterministic for candidate in corroborating)
                     ),
                     evidence_refs=[
                         parsed_column.evidence_ref,
+                        *operation_table.evidence_refs,
                         *(ref for candidate in corroborating for ref in candidate.evidence_refs),
                     ],
                 ),
@@ -1146,10 +1191,10 @@ def _database_state_values(column: DatabaseColumnEvidence) -> list[str]:
 
 def _operation_tables(
     candidates: list[EntityMappingCandidate],
-) -> dict[str, set[str]]:
-    result: dict[str, set[str]] = defaultdict(set)
+) -> dict[str, dict[str, EntityMappingCandidate]]:
+    result: dict[str, dict[str, EntityMappingCandidate]] = defaultdict(dict)
     for candidate in candidates:
-        result[candidate.operation_ref].add(candidate.target_ref)
+        result[candidate.operation_ref][candidate.target_ref] = candidate
     return result
 
 
@@ -1286,6 +1331,7 @@ class _JavaRoute(BaseModel):
     handler: str
     return_type: str
     parameters: str
+    declared_exceptions: list[str]
     body: str
     source_line: int
 
@@ -1401,7 +1447,7 @@ def _route_after_mapping(
     signature = re.search(
         r"(?:\s*@[A-Za-z0-9_$.]+(?:\([^)]*\))?)*\s*public\s+"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
-        r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+[^{]+)?\{",
+        r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^{]+))?\{",
         following,
     )
     if signature is None:
@@ -1420,9 +1466,20 @@ def _route_after_mapping(
         handler=handler,
         return_type=signature.group("return"),
         parameters=signature.group("params"),
+        declared_exceptions=_declared_java_exceptions(signature.group("throws")),
         body=file.content[body_start + 1 : body_end],
         source_line=file.content.count("\n", 0, mapping_start) + 1,
     )
+
+
+def _declared_java_exceptions(clause: str | None) -> list[str]:
+    if clause is None:
+        return []
+    return [
+        name
+        for item in clause.split(",")
+        if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$.]*", name := item.strip())
+    ]
 
 
 def _mapping_path(arguments: str) -> str:
@@ -1575,7 +1632,15 @@ def _route_call_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidence
 
 
 def _route_exception_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:
-    names = sorted(set([*_THROWS.findall(route.body), *_THROW_NEW.findall(route.body)]))
+    names = sorted(
+        set(
+            [
+                *route.declared_exceptions,
+                *_THROWS.findall(route.body),
+                *_THROW_NEW.findall(route.body),
+            ]
+        )
+    )
     return [
         JavaExceptionClaim(
             id=_claim_id("exception", route.operation_ref, name),

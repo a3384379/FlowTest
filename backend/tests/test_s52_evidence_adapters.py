@@ -270,6 +270,75 @@ def test_database_state_mapping_preserves_low_confidence_and_nondeterminism() ->
     assert all(candidate.deterministic is False for candidate in database_backed)
 
 
+def test_operation_entity_mapping_preserves_entity_nondeterminism() -> None:
+    java_payload = _java_submission()
+    java_payload["confidence"] = 1
+    route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
+    route["confidence"] = 1
+    entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")
+    entity["confidence"] = 1
+    entity["deterministic"] = False
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    operation_entity = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.target_ref == "entity://public/orders"
+    )
+    assert operation_entity.deterministic is False
+
+
+def test_dependent_mappings_preserve_heuristic_operation_table_reliability() -> None:
+    java_payload = _java_submission()
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] != "entity"
+    ]
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    dependent = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind
+        in {
+            EntityMappingCandidateKind.REQUEST_FIELD_COLUMN,
+            EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN,
+            EntityMappingCandidateKind.OPERATION_STATE,
+        }
+        and "/public/orders/" in candidate.target_ref
+    ]
+    assert dependent
+    assert all(candidate.confidence <= 0.75 for candidate in dependent)
+    assert all(candidate.deterministic is False for candidate in dependent)
+
+
 def test_reused_dto_field_is_scoped_to_each_operation() -> None:
     java_payload = _two_operation_java_submission()
     database_payload = _two_table_database_submission()
@@ -427,6 +496,38 @@ def test_java_spring_poc_analyzes_fixed_fixture_without_execution() -> None:
         "status",
     }
     assert any(claim.kind == "service_call" for claim in evidence.claims)
+
+
+def test_java_spring_poc_captures_declared_method_exceptions() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://declared-errors", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+public class OrderController {
+    @GetMapping("/orders/{id}")
+    public Order getOrder() throws example.OrderMissingException, IllegalStateException {
+        return orderService.getOrder();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert {claim.exception_type for claim in evidence.claims if claim.kind == "exception"} == {
+        "IllegalStateException",
+        "OrderMissingException",
+    }
 
 
 def test_ruoyi_full_golden_target_poc_without_execution() -> None:

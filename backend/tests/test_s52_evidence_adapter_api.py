@@ -10,7 +10,13 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
 from app.core.security import password_service
-from app.domain.evidence_adapters import EntityMappingBudgetExceeded
+from app.domain.evidence_adapters import (
+    DatabaseEvidenceSubmission,
+    EntityMappingBudgetExceeded,
+    JavaEvidenceSubmission,
+    adapt_database_evidence,
+    adapt_java_evidence,
+)
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
@@ -254,6 +260,62 @@ async def test_ambiguous_entity_candidates_conflict_context_without_silent_selec
         for candidate in body["entity_mapping"]["candidates"]
         if candidate["id"] in conflicted_ids
     )
+
+
+@pytest.mark.asyncio
+async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "通用入口实体映射冲突上下文",
+            "objective": "验证通用 Evidence 入口不会绕过映射冲突派生",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    java_envelope = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    )
+    java = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": java_envelope.model_dump(mode="json")},
+    )
+    assert java.status_code == 201, java.text
+
+    database_payload = _database_evidence(project_id)
+    second_table = {
+        **database_payload["tables"][0],
+        "name": "archived_orders",
+        "columns": [dict(column) for column in database_payload["tables"][0]["columns"]],
+    }
+    database_payload["tables"].append(second_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    database = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": database_envelope.model_dump(mode="json")},
+    )
+    assert database.status_code == 201, database.text
+    assert database.json()["status"] == "conflicted"
+
+    inspected = await client.get(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json()["conflicts"]
 
 
 @pytest.mark.asyncio

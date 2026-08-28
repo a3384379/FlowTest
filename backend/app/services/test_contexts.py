@@ -184,7 +184,7 @@ class TestContextService:
             actor=actor,
             context_id=context_id,
             envelope=envelope,
-            include_mapping_conflicts=False,
+            return_entity_mapping=False,
         )
         return response
 
@@ -199,7 +199,7 @@ class TestContextService:
             actor=actor,
             context_id=context_id,
             envelope=envelope,
-            include_mapping_conflicts=True,
+            return_entity_mapping=True,
         )
         if mapping is None:
             raise RuntimeError("adapted evidence ingestion must produce entity mapping")
@@ -219,7 +219,7 @@ class TestContextService:
         actor: User,
         context_id: UUID,
         envelope: ExternalEvidenceEnvelope,
-        include_mapping_conflicts: bool,
+        return_entity_mapping: bool,
     ) -> tuple[TestContextResponse, EntityMappingResult | None]:
         self._require_evidence_scope()
         context = await self._load_context(
@@ -229,14 +229,13 @@ class TestContextService:
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
         existing = await self._evidence_items(current.id)
-        if include_mapping_conflicts:
-            try:
-                envelope = with_mapping_conflict_findings(
-                    envelope,
-                    _mapping_evidence_inputs(existing),
-                )
-            except EntityMappingBudgetExceeded as exc:
-                raise _mapping_budget_exceeded() from exc
+        try:
+            envelope = with_mapping_conflict_findings(
+                envelope,
+                _mapping_evidence_inputs(existing),
+            )
+        except EntityMappingBudgetExceeded as exc:
+            raise _mapping_budget_exceeded() from exc
         additions = _new_evidence_items(
             context=context,
             envelope=envelope,
@@ -296,7 +295,7 @@ class TestContextService:
         response = await self._response(context, revision)
         mapping = (
             _derive_entity_mapping(_mapping_evidence_inputs([*existing, *additions]))
-            if include_mapping_conflicts
+            if return_entity_mapping
             else None
         )
         return response, mapping
