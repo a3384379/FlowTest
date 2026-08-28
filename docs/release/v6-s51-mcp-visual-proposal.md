@@ -6,10 +6,12 @@
 | --- | --- |
 | 阶段基线 Main SHA | `8f20500fd151e89573bb8f01f24cb6512143dbe1` |
 | 实现分支 | `codex/s51-mcp-visual-proposal` |
+| 实现 PR / Merge SHA | #55 / `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a` |
+| 合并后审查修复 PR / Merge SHA | #56 / `86d2221e63f93e418b87649f56b3fdfe48d365c9` |
 | MCP Server Version | `s51-flow-proposal-v1` |
 | Scope | `mcp:flow:propose` |
 | 数据库变更 | 无；Migration Head 保持 `20260828_0046` |
-| Release 状态 | 未发布；本阶段名称为 Alpha，但未创建 Tag 或 Release |
+| Release 状态 | 实现与补丁已合并，Evidence Closure 进行中；未创建 Tag 或 Release |
 
 S51 从 S50 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Main 创建。本阶段首次完成外部
 LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S56，也不把阶段名称等同于已发布版本。
@@ -43,6 +45,17 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
   `FlowSpecService.apply()`，只产生/更新普通 Workflow Draft，随后打开现有 WorkflowDesigner 草稿模式。
 - Raw JSON、Cross-instance Mapping 与高级校验继续由既有 `FlowSpecReviewDialog` 负责。MCP Proposal 的 Spec 与
   Mapping 可载入该对话框安全编辑；编辑结果创建新的待审核 FlowSpec ChangeSet，不原地改变冻结 Proposal。
+
+### 合并后审查修复
+
+- PR #55 合并后到达的自动 Review 反馈已全部在 PR #56 闭环：连线 Added/Modified/Removed/
+  Rewired 分类补全，Apply 后按钮与查询缓存状态立即一致，用户可见文案全部中文化。
+- 本地 Visual Override 与 Proposal ID 绑定；Apply 请求进行中切换提案，不会把旧提案的已应用
+  图和操作状态显示到新选择下。
+- 历史提案使用专用 MCP-only Keyset Pagination Endpoint，按 `(created_at, id)` 稳定游标遍历；
+  新提案在分页间插入时，既有提案不重复也不丢失。
+- UI 用 Infinite Query 首屏最多只请求 100 条；仅当用户点击“加载更多提案”时才请求下一游标页，
+  避免对话框打开时无界串行拉取全部历史。
 
 ### 唯一状态与数据模型
 
@@ -88,8 +101,8 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 
 ### Blocked
 
-- 当前无已知本地实现阻断。远程 PR、Main Push 与 Evidence Closure 尚未执行完成，因此 S51 尚未阶段闭环，
-  不允许进入 S52。
+- 当前无已知本地或远程实现阻断。PR #55、补丁 PR #56 及两者的精确 Merge SHA Main Push 已全绿。
+- S51 Evidence Closure PR 合并且其 Main Push Required Gate 成功前，不允许进入 S52。
 
 ## 6. Validation 与 Evidence
 
@@ -100,18 +113,18 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
 | Backend Format | `uv run ruff format --check .` | Pass；460 files already formatted |
 | Backend Lint | `uv run ruff check .` | Pass |
 | Backend Types | `uv run mypy app` | Pass；335 source files |
-| Backend Tests | `uv run pytest` | Pass；662 passed、4 skipped、总覆盖率 90.41% |
+| Backend Tests | `uv run pytest` | Pass；663 passed、4 skipped、总覆盖率 90.41% |
 | Backend Security Lint | `uv run ruff check --select S app` | Pass |
 | Frontend Format | `pnpm format:check` | Pass |
 | Frontend Lint/Types | `pnpm lint` | Pass；ESLint 与 TypeScript |
-| Frontend Tests | `pnpm test:coverage` | Pass；57 files、218 tests；S/B/F/L = 86.12/80.02/85.29/88.38% |
+| Frontend Tests | `pnpm test:coverage` | Pass；57 files、222 tests；S/B/F/L = 86.23/80.12/85.44/88.48% |
 | Frontend Build | `pnpm build` | Pass |
 | Python Dependency Audit | `uv run pip-audit` | Pass；无已知漏洞，非 PyPI 项目包按工具约定跳过 |
 | Node Dependency Audit | `pnpm audit --audit-level high` | Pass；无已知漏洞 |
 
 ### Compose / Playwright
 
-- 使用临时 `flowtest-s51-local` Compose Project 与独立前端端口启动完整栈，15 个服务全部 Healthy。
+- 最终使用临时 `flowtest-s51-review-local` Compose Project 与独立前端端口启动完整栈，15 个服务全部 Healthy。
 - `FLOWTEST_E2E_BASE_URL=http://localhost:3306 pnpm exec playwright test --project=chromium
   e2e/s51-mcp-visual-proposal.spec.ts`：Setup 与 S51 用例共 2 passed。
 - 真实路径覆盖 Context、Typed External Evidence、Plan、Validate、Compile、Diagnostics、默认 Dry Run、
@@ -119,7 +132,8 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
   完全一致，发布版本和 Execution 均为 0。
 - 应用日志 Traceback 为 0。敏感关键词分类审计确认 Redpanda 命中均为内置认证机制说明；Backend/Frontend
   的三个命中仅为 Alembic Migration 名称与 `/auth/change-password` 路径，不含请求体、Credential 或 Secret。
-- 验收后只删除 `flowtest-s51-local` 容器、网络、卷与临时 Override；用户既有 Compose Project 保持不变。
+- 验收后只删除 `flowtest-s51-review-local` 容器、网络、卷与临时 Override；用户既有
+  `flowtest-compact` / `flowtest-ruoyi` / `flowtest-v5-compact` 仍分别保持 6 / 2 / 6 个运行容器。
 
 ### 本地 Review
 
@@ -131,9 +145,27 @@ LLM/MCP 到可视化 Workflow Draft 的用户闭环，但不提前实现 S52～S
   任意 URL、不执行 Flow、不读取 Secret；敏感输入仍沿用 Context/FlowSpec 既有校验。
 - E2E / Scope：真实 Alpha 链只到 Workflow Draft。审查中发现并修复 Raw JSON Action 未把当前 Proposal/Mapping
   载入既有 Dialog 的问题；现在安全编辑创建新 ChangeSet，冻结 Proposal 不被原地修改。
+- 合并后审查：PR #55 合并后才到达的 4 个有效线程全部回复、修复并解决。PR #56 又串行闭环
+  Rewired Edge 语义变更、断言空态本地化、Proposal-keyed Override、Offset 分页与无界预加载共 5 轮
+  精确头审查；最终头 `0e32e21a76d80b330508d031d18629efa24374c7` 的 Codex Review 明确返回未发现重大问题，
+  5 / 5 个 PR #56 Review Thread 均已解决。
 
 ### Remote Evidence
 
-- 尚未创建 Draft PR。实现 PR 的 Base/Head、Workflow Run、Review/Comment/Thread、Ready、普通 Squash Merge
-  与 Main Push 证据将在全部本地门禁通过后记录。
+- 实现 PR #55：Base `8f20500fd151e89573bb8f01f24cb6512143dbe1`，最终 Head
+  `bd4f3276d31fe9882fb7153cbf69275191854d88`。Backend `33150877370`、Frontend `33150877441`、Compose
+  `33150877327`、Security `33150877302`、Windows `33150877338`、Upgrade `33150877445`、Draft Controller
+  `33150877403` 与 Ready Controller `33153095136` 均 Success。
+- PR #55 通过普通 Squash Merge 生成 `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`。该精确 Main SHA 的
+  Backend `33153138632`、Frontend `33153138637`、Compose `33153138644`、Security `33153138584`、Windows
+  `33153138682`、Upgrade `33153138664` 与 Required Gate `33153138741` 均 Success。
+- 合并后迟到审查触发合并后审查修复 PR #56。该 PR Base 为 `f1e2852f7100ae0827a331a7c2ab8f9f87e7781a`，
+  最终 Head 为 `0e32e21a76d80b330508d031d18629efa24374c7`。Backend `33163852048`、Frontend `33163852064`、
+  Compose `33163852109`、Security `33163852132`、Windows `33163852069`、Upgrade `33163852068` 与 Required Gate
+  `33163850670` 均 Success；合并前状态为 Ready / MERGEABLE / CLEAN，无未解决线程。
+- PR #56 通过普通 Squash Merge 生成 `86d2221e63f93e418b87649f56b3fdfe48d365c9`。该精确 Main SHA 的
+  Backend `33165883973`、Frontend `33165884044`、Compose `33165883986`、Security `33165884058`、Windows
+  `33165884089`、Upgrade `33165884052` 与 Required Gate `33165884082` 均 Success。
+- #55 / #56 均未使用 Admin Merge、Ruleset Bypass 或直接推送 Main；合并时 Ruleset Bypass Actor 为空，当前
+  用户不可绕过。
 - S51 Evidence Closure PR 合并且其 Main Push Required Gate 成功前，不进入 S52。
