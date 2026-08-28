@@ -294,10 +294,10 @@ function WorkflowHeading({
           新建工作流
         </Button>
         <Button disabled={!state.workflowId} onClick={onFlowSpec}>
-          FlowSpec 导入 / Mapping
+          FlowSpec 导入 / 映射
         </Button>
         <Button disabled={!state.projectId} onClick={onFlowProposal}>
-          MCP Flow Proposal
+          MCP 流程提案
         </Button>
       </Space>
     </div>

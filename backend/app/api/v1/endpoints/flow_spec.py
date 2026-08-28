@@ -1,11 +1,14 @@
+from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.core.errors import AppError
 from app.schemas.flow_spec import (
     FlowSpecApplyResponse,
+    FlowSpecChangeSetCursorResponse,
     FlowSpecChangeSetDetailResponse,
     FlowSpecChangeSetListResponse,
     FlowSpecChangeSetResponse,
@@ -13,12 +16,13 @@ from app.schemas.flow_spec import (
     FlowSpecDiffResponse,
     FlowSpecExportResponse,
     FlowSpecImportRequest,
+    FlowSpecMcpProposalListResponse,
     FlowSpecReviewRequest,
     FlowSpecValidateRequest,
     FlowSpecValidationResponse,
     FlowSpecVisualProposalResponse,
 )
-from app.services.flow_spec import FlowSpecChangeSetView, FlowSpecService
+from app.services.flow_spec import FlowSpecChangeSetCursor, FlowSpecChangeSetView, FlowSpecService
 
 router = APIRouter(prefix="/projects/{project_id}/flow-specs")
 
@@ -125,6 +129,46 @@ async def list_flow_spec_change_sets(
         items=[_summary(view) for view in views],
         total=total,
         page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/change-sets/mcp-proposals", response_model=FlowSpecMcpProposalListResponse)
+async def list_mcp_flow_proposals(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page_size: int = Query(default=100, ge=1, le=100),
+    cursor_created_at: datetime | None = None,
+    cursor_id: UUID | None = None,
+) -> FlowSpecMcpProposalListResponse:
+    if (cursor_created_at is None) != (cursor_id is None):
+        raise AppError(
+            code="FLOWSPEC_CURSOR_INVALID",
+            message="FlowSpec 分页游标不完整",
+            status_code=422,
+        )
+    cursor = (
+        FlowSpecChangeSetCursor(created_at=cursor_created_at, id=cursor_id)
+        if cursor_created_at is not None and cursor_id is not None
+        else None
+    )
+    result = await FlowSpecService(session).list_mcp_proposals(
+        actor=current_user,
+        project_id=project_id,
+        page_size=page_size,
+        cursor=cursor,
+    )
+    return FlowSpecMcpProposalListResponse(
+        items=[_summary(view) for view in result.views],
+        next_cursor=(
+            FlowSpecChangeSetCursorResponse(
+                created_at=result.next_cursor.created_at,
+                id=result.next_cursor.id,
+            )
+            if result.next_cursor is not None
+            else None
+        ),
         page_size=page_size,
     )
 

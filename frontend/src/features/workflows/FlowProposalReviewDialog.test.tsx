@@ -11,6 +11,7 @@ import { server } from '../../test/server'
 import FlowProposalReviewDialog from './FlowProposalReviewDialog'
 
 const changeSetId = '00000000-0000-4000-8000-000000005101'
+const secondChangeSetId = '00000000-0000-4000-8000-000000005105'
 const proposedDefinition = {
   ...workflowDefinition,
   nodes: [
@@ -30,7 +31,7 @@ const proposedDefinition = {
     { ...workflowDefinition.nodes.at(-1)!, position: { x: 300, y: 0 } },
   ],
   edges: [
-    workflowDefinition.edges[0],
+    { ...workflowDefinition.edges[0]!, condition: 'true' as const },
     {
       id: 'api-assert',
       source: 'api',
@@ -53,8 +54,8 @@ describe('FlowProposalReviewDialog', () => {
     let reviewStatus: 'pending' | 'accepted' = 'pending'
     let applyCalls = 0
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary(reviewStatus)], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary(reviewStatus)], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -88,30 +89,35 @@ describe('FlowProposalReviewDialog', () => {
     const browser = userEvent.setup()
     const dialog = await screen.findByRole('dialog')
 
-    expect(await within(dialog).findByText('Proposal Mode')).toBeInTheDocument()
-    expect(within(dialog).getByText('Added Node')).toBeInTheDocument()
+    expect(await within(dialog).findByText('提案模式')).toBeInTheDocument()
+    expect(within(dialog).getByText('新增节点')).toBeInTheDocument()
     expect(within(dialog).getByText('assert-status')).toBeInTheDocument()
-    expect(within(dialog).getByText('Mapping Diff / Human Inspection')).toBeInTheDocument()
-    expect(within(dialog).getByText('Assert Diff')).toBeInTheDocument()
-    expect(within(dialog).getByText('Evidence / Confidence')).toBeInTheDocument()
-    expect(within(dialog).getByText('Unresolved 0')).toBeInTheDocument()
+    expect(within(dialog).getByText('修改连线')).toBeInTheDocument()
+    expect(within(dialog).getByText('start-api')).toBeInTheDocument()
+    expect(within(dialog).getByText('映射差异 / 人工检查')).toBeInTheDocument()
+    expect(within(dialog).getByText('断言差异')).toBeInTheDocument()
+    expect(within(dialog).getByText('证据 / 置信度')).toBeInTheDocument()
+    expect(within(dialog).getByText('未决项 0')).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '发布版本' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '运行' })).not.toBeInTheDocument()
 
-    expect(within(dialog).getByRole('button', { name: 'Apply to Workflow Draft' })).toBeDisabled()
-    await browser.click(within(dialog).getByRole('button', { name: 'Accept' }))
+    expect(within(dialog).getByRole('button', { name: '应用到工作流草稿' })).toBeDisabled()
+    await browser.click(within(dialog).getByRole('button', { name: '接受' }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Apply to Workflow Draft' })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: '应用到工作流草稿' })).not.toBeDisabled(),
     )
-    await browser.click(screen.getByRole('button', { name: 'Apply to Workflow Draft' }))
+    await browser.click(screen.getByRole('button', { name: '应用到工作流草稿' }))
     await waitFor(() => expect(applyCalls).toBe(1))
+    expect(screen.getByRole('button', { name: '应用到工作流草稿' })).toBeDisabled()
+    await browser.click(screen.getByRole('button', { name: '应用到工作流草稿' }))
+    expect(applyCalls).toBe(1)
     expect(appliedWorkflowId).toBe(workflow.id)
   })
 
   it('shows the captured existing graph and keeps raw mapping on the established path', async () => {
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets`, () =>
-        HttpResponse.json({ items: [summary('pending')], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -127,14 +133,189 @@ describe('FlowProposalReviewDialog', () => {
     )
     const browser = userEvent.setup()
     const dialog = await screen.findByRole('dialog')
-    await within(dialog).findByText('Proposal Mode')
-    await browser.click(within(dialog).getByText('Existing Graph'))
+    await within(dialog).findByText('提案模式')
+    await browser.click(within(dialog).getByText('现有流程图'))
     expect(await within(dialog).findByText('查询用户')).toBeInTheDocument()
-    await browser.click(
-      within(dialog).getByRole('button', { name: 'Raw JSON / Cross-instance Mapping' }),
-    )
+    await browser.click(within(dialog).getByRole('button', { name: '原始 JSON / 跨实例映射' }))
     expect(rawProposal?.proposal.target_workflow_id).toBe(workflow.id)
     expect(rawProposal?.proposal.spec.name).toBe('MCP 用户查询提案')
+  })
+
+  it('loads stable MCP proposal cursor pages only when requested', async () => {
+    const requestedCursors: Array<string | null> = []
+    const cursorId = '00000000-0000-4000-8000-000000005100'
+    server.use(
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`,
+        ({ request }) => {
+          const cursor = new URL(request.url).searchParams.get('cursor_id')
+          requestedCursors.push(cursor)
+          if (cursor === null) {
+            return HttpResponse.json({
+              items: [
+                {
+                  ...summary('pending'),
+                  id: cursorId,
+                  title: '首页 MCP 提案',
+                },
+              ],
+              next_cursor: {
+                created_at: '2026-08-28T00:00:00Z',
+                id: cursorId,
+              },
+              page_size: 100,
+            })
+          }
+          return HttpResponse.json({
+            items: [summary('pending')],
+            next_cursor: null,
+            page_size: 100,
+          })
+        },
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/:proposalId/visual-proposal`,
+        ({ params }) => {
+          const proposal = visualProposal('pending')
+          if (params.proposalId === cursorId) {
+            proposal.proposal = {
+              ...proposal.proposal,
+              id: cursorId,
+              title: '首页 MCP 提案',
+            }
+          }
+          return HttpResponse.json(proposal)
+        },
+      ),
+    )
+
+    renderDialog(() => undefined)
+    const browser = userEvent.setup()
+    const dialog = await screen.findByRole('dialog')
+
+    await within(dialog).findByText('提案模式')
+    expect(requestedCursors).toEqual([null])
+    await browser.click(within(dialog).getByRole('button', { name: '加载更多提案' }))
+    await waitFor(() => expect(requestedCursors).toEqual([null, cursorId]))
+    await browser.click(within(dialog).getByRole('combobox', { name: '流程提案' }))
+
+    expect(
+      await screen.findByText('MCP 用户查询提案 · 草稿 · 00000000', {
+        selector: '.ant-select-item-option-content',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('classifies a rewired edge with semantic changes as both rewired and modified', async () => {
+    const proposal = visualProposal('pending')
+    proposal.proposed_definition = {
+      ...workflowDefinition,
+      edges: workflowDefinition.edges.map((edge) =>
+        edge.id === 'start-api' ? { ...edge, target: 'end', condition: 'true' as const } : edge,
+      ),
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(proposal),
+      ),
+    )
+
+    renderDialog(() => undefined)
+
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('修改连线')
+    expect(within(dialog).getAllByText('start-api')).toHaveLength(2)
+    expect(within(dialog).getByText('重连连线')).toBeInTheDocument()
+  })
+
+  it('localizes the empty assertion diff state', async () => {
+    const proposal = visualProposal('pending')
+    proposal.proposal.diff = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(proposal),
+      ),
+    )
+
+    renderDialog(() => undefined)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('没有断言变化')).toBeInTheDocument()
+    expect(within(dialog).queryByText('没有 Assert 变化')).not.toBeInTheDocument()
+  })
+
+  it('does not show an applied override under a proposal selected while apply is pending', async () => {
+    let finishApply!: () => void
+    const applyPending = new Promise<void>((resolve) => {
+      finishApply = resolve
+    })
+    const first = visualProposal('accepted')
+    const second = visualProposal('pending')
+    second.proposal = {
+      ...second.proposal,
+      id: secondChangeSetId,
+      title: '第二个 MCP 提案',
+    }
+    second.proposed_definition = {
+      ...second.proposed_definition,
+      nodes: second.proposed_definition.nodes.map((node) =>
+        node.id === 'api' ? { ...node, name: '第二提案查询' } : node,
+      ),
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({
+          items: [first.proposal, second.proposal],
+          next_cursor: null,
+          page_size: 100,
+        }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/:proposalId/visual-proposal`,
+        ({ params }) => HttpResponse.json(params.proposalId === secondChangeSetId ? second : first),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/apply`,
+        async () => {
+          await applyPending
+          return HttpResponse.json({
+            change_set_id: changeSetId,
+            workflow_id: workflow.id,
+            draft_revision: 2,
+            fingerprint: 'f'.repeat(64),
+            applied_at: '2026-08-28T00:00:00Z',
+          })
+        },
+      ),
+    )
+    renderDialog(() => undefined)
+    const browser = userEvent.setup()
+    const dialog = await screen.findByRole('dialog')
+
+    await within(dialog).findByText('提案模式')
+    await browser.click(within(dialog).getByRole('button', { name: '应用到工作流草稿' }))
+    await browser.click(within(dialog).getByRole('combobox', { name: '流程提案' }))
+    await browser.click(
+      await screen.findByText('第二个 MCP 提案 · 草稿 · 00000000', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(await within(dialog).findByText('第二提案查询')).toBeInTheDocument()
+
+    finishApply()
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '接受' })).toBeInTheDocument(),
+    )
+    expect(within(dialog).getByText('第二提案查询')).toBeInTheDocument()
   })
 })
 

@@ -136,5 +136,20 @@ class FlowSpecChangeSetListResponse(BaseModel):
     page_size: int
 
 
+class FlowSpecChangeSetCursorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: datetime
+    id: UUID
+
+
+class FlowSpecMcpProposalListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FlowSpecChangeSetResponse]
+    next_cursor: FlowSpecChangeSetCursorResponse | None
+    page_size: int
+
+
 def flow_spec_payload(value: FlowSpec) -> dict[str, JsonValue]:
     return value.model_dump(mode="json", by_alias=True)

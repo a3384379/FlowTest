@@ -190,16 +190,16 @@ test('S51 MCP Draft 可视化审阅后只应用到 Workflow Draft', async ({ pag
 async function reviewAndApplyInUI(page: Page, projectId: string): Promise<void> {
   await page.goto(`/projects/${projectId}/workflows`)
   await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
-  await page.getByRole('button', { name: 'MCP Flow Proposal' }).click()
-  const dialog = page.getByRole('dialog', { name: 'External LLM / MCP 可视化 Flow Proposal' })
-  await expect(dialog.getByText('Proposal Mode')).toBeVisible()
-  await expect(dialog.getByText('Evidence / Confidence')).toBeVisible()
-  await expect(dialog.getByText('Mapping Diff / Human Inspection')).toBeVisible()
+  await page.getByRole('button', { name: 'MCP 流程提案' }).click()
+  const dialog = page.getByRole('dialog', { name: '外部 LLM / MCP 可视化流程提案' })
+  await expect(dialog.getByText('提案模式')).toBeVisible()
+  await expect(dialog.getByText('证据 / 置信度')).toBeVisible()
+  await expect(dialog.getByText('映射差异 / 人工检查')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '发布版本' })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '运行' })).toHaveCount(0)
-  const apply = dialog.getByRole('button', { name: 'Apply to Workflow Draft' })
+  const apply = dialog.getByRole('button', { name: '应用到工作流草稿' })
   await expect(apply).toBeDisabled()
-  await dialog.getByRole('button', { name: 'Accept' }).click()
+  await dialog.getByRole('button', { name: '接受' }).click()
   await expect(apply).toBeEnabled()
   await apply.click()
   await expect(dialog).toBeHidden()
@@ -235,7 +235,7 @@ async function createProject(
     headers,
     data: {
       name: `S51 E2E ${suffix}`,
-      description: 'S51 MCP visual Flow Proposal Compose 验证',
+      description: 'S51 MCP 可视化流程提案 Compose 验证',
       organization_id: organizationId,
     },
   })

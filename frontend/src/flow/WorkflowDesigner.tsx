@@ -375,9 +375,9 @@ function DesignerModeToolbar({
   return (
     <div className="workflow-toolbar workflow-proposal-toolbar">
       <Space wrap>
-        <Tag color="purple">Proposal Mode</Tag>
+        <Tag color="purple">提案模式</Tag>
         <Typography.Text type="secondary">
-          该画布只用于提案检查；应用后返回 Workflow Draft 进行安全编辑。
+          该画布只用于提案检查；应用后返回工作流草稿进行安全编辑。
         </Typography.Text>
       </Space>
     </div>

@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   App,
@@ -22,6 +22,7 @@ import {
   type ApiDefinition,
   type Artifact,
   type Credential,
+  type FlowSpecChangeSetCursor,
   type FlowSpecVisualProposal,
   type IntegrationPlan,
   type Workflow,
@@ -31,7 +32,7 @@ import type { EventSource, SchemaArtifact } from '../protocols/protocol-service'
 import {
   applyFlowSpec,
   getVisualFlowProposal,
-  listFlowSpecChangeSets,
+  getMcpFlowProposalPage,
   reviewFlowSpec,
 } from './flow-spec-service'
 
@@ -54,20 +55,30 @@ type FlowProposalReviewDialogProps = {
   onOpenRawMapping: (proposal: FlowSpecVisualProposal) => void
 }
 
+type VisualOverride = {
+  proposalId: string
+  visual: FlowSpecVisualProposal
+}
+
 export default function FlowProposalReviewDialog(props: FlowProposalReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string>()
   const [graphView, setGraphView] = useState<'existing' | 'proposed'>('proposed')
   const [busy, setBusy] = useState(false)
-  const [visualOverride, setVisualOverride] = useState<FlowSpecVisualProposal>()
-  const proposals = useQuery({
+  const [visualOverride, setVisualOverride] = useState<VisualOverride>()
+  const proposals = useInfiniteQuery({
     queryKey: ['flow-proposals', props.projectId],
-    queryFn: () => listFlowSpecChangeSets(props.projectId),
+    queryFn: ({ pageParam }) => getMcpFlowProposalPage(props.projectId, pageParam),
+    initialPageParam: null as FlowSpecChangeSetCursor | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: props.open,
   })
   const candidates = useMemo(
-    () => (proposals.data?.items ?? []).filter((item) => item.source_ref?.startsWith('mcp://')),
+    () =>
+      (proposals.data?.pages.flatMap((page) => page.items) ?? []).filter((item) =>
+        item.source_ref?.startsWith('mcp://'),
+      ),
     [proposals.data],
   )
   const proposalId = candidates.some((item) => item.id === selectedId)
@@ -80,7 +91,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     enabled: props.open && Boolean(proposalId),
     placeholderData: (previous) => previous,
   })
-  const displayedVisual = selectedVisual(visual.data, visualOverride)
+  const displayedVisual = selectedVisual(proposalId, visual.data, visualOverride)
 
   async function review(accept: boolean, currentVisual: FlowSpecVisualProposal): Promise<void> {
     if (!proposalId) return
@@ -90,25 +101,37 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           props.projectId,
           proposalId,
           accept,
-          accept ? '可视化 Flow Proposal 人工接受' : '可视化 Flow Proposal 人工拒绝',
+          accept ? '可视化流程提案人工接受' : '可视化流程提案人工拒绝',
         )
         queryClient.setQueryData<FlowSpecVisualProposal>(
           ['flow-proposal', props.projectId, proposalId],
           (current) => (current ? { ...current, proposal: reviewed } : current),
         )
-        setVisualOverride({ ...currentVisual, proposal: reviewed })
+        setVisualOverride({
+          proposalId,
+          visual: { ...currentVisual, proposal: reviewed },
+        })
       },
-      accept ? 'Flow Proposal 已接受' : 'Flow Proposal 已拒绝',
+      accept ? '流程提案已接受' : '流程提案已拒绝',
     )
   }
 
-  async function apply(): Promise<void> {
+  async function apply(currentVisual: FlowSpecVisualProposal): Promise<void> {
     if (!proposalId) return
     await act(async () => {
       const result = await applyFlowSpec(props.projectId, proposalId)
+      const appliedVisual = {
+        ...currentVisual,
+        proposal: { ...currentVisual.proposal, applied_at: result.applied_at },
+      }
+      queryClient.setQueryData<FlowSpecVisualProposal>(
+        ['flow-proposal', props.projectId, proposalId],
+        appliedVisual,
+      )
+      setVisualOverride({ proposalId, visual: appliedVisual })
       await queryClient.invalidateQueries({ queryKey: ['workflows', props.projectId] })
       props.onApplied(result.workflow_id)
-    }, 'Flow Proposal 已应用到 Workflow Draft，可继续安全编辑')
+    }, '流程提案已应用到工作流草稿，可继续安全编辑')
   }
 
   async function act(operation: () => Promise<void>, success: string): Promise<void> {
@@ -125,7 +148,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
 
   return (
     <Modal
-      title="External LLM / MCP 可视化 Flow Proposal"
+      title="外部 LLM / MCP 可视化流程提案"
       open={props.open}
       width="min(1560px, 96vw)"
       footer={null}
@@ -136,26 +159,34 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
         <Alert
           showIcon
           type="info"
-          title="Proposal 只会进入 AIChangeSet Draft；本视图没有 Publish、Execute 或自动 Apply。"
-          description="先检查图、Mapping、Assert、Evidence、Confidence 与 Unresolved，再由人工接受；应用后进入现有 WorkflowDesigner 草稿继续安全编辑。"
+          title="流程提案只会进入 AIChangeSet 草稿；本视图没有发布、执行或自动应用操作。"
+          description="先检查流程图、映射、断言、证据、置信度与未决项，再由人工接受；应用后进入现有工作流设计器草稿继续安全编辑。"
         />
         <Select
-          aria-label="Flow Proposal"
+          aria-label="流程提案"
           style={{ width: '100%' }}
           loading={proposals.isLoading}
-          placeholder="选择 MCP Flow Proposal"
+          placeholder="选择 MCP 流程提案"
           value={proposalId}
           options={candidates.map((item) => ({
             value: item.id,
-            label: `${item.title} · ${item.status} · ${item.id.slice(0, 8)}`,
+            label: `${item.title} · ${changeSetStatusLabel(item.status)} · ${item.id.slice(0, 8)}`,
           }))}
           onChange={(value) => {
             setSelectedId(value)
             setVisualOverride(undefined)
           }}
         />
+        {proposals.hasNextPage ? (
+          <Button
+            loading={proposals.isFetchingNextPage}
+            onClick={() => void proposals.fetchNextPage()}
+          >
+            加载更多提案
+          </Button>
+        ) : null}
         {!candidates.length && !proposals.isLoading ? (
-          <Empty description="暂无 MCP Flow Proposal" />
+          <Empty description="暂无 MCP 流程提案" />
         ) : null}
         {displayedVisual ? (
           <ProposalWorkspace
@@ -165,7 +196,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
             busy={busy}
             onGraphView={setGraphView}
             onReview={(accept) => review(accept, displayedVisual)}
-            onApply={apply}
+            onApply={() => apply(displayedVisual)}
             onOpenRawMapping={props.onOpenRawMapping}
           />
         ) : null}
@@ -208,11 +239,11 @@ function ProposalWorkspace({
         onOpenRawMapping={onOpenRawMapping}
       />
       <Segmented
-        aria-label="Proposal Graph View"
+        aria-label="流程提案图视图"
         value={graphView}
         options={[
-          { label: 'Existing Graph', value: 'existing' },
-          { label: 'Proposed Graph', value: 'proposed' },
+          { label: '现有流程图', value: 'existing' },
+          { label: '提案流程图', value: 'proposed' },
         ]}
         onChange={(value) => onGraphView(value as 'existing' | 'proposed')}
       />
@@ -235,7 +266,7 @@ function ProposalWorkspace({
           onChange={() => undefined}
         />
       ) : (
-        <Empty description="该 Proposal 将新建 Workflow，没有 Existing Graph" />
+        <Empty description="该提案将新建工作流，没有现有流程图" />
       )}
       <ProposalEvidence proposal={proposal} />
     </Space>
@@ -257,34 +288,37 @@ function ReviewActions({
 }) {
   const item = proposal.proposal
   return (
-    <Card title="Review Actions" size="small">
+    <Card title="审核操作" size="small">
       <Space wrap>
         <Tag color={item.review_status === 'accepted' ? 'green' : 'gold'}>
-          Review: {item.review_status}
+          审核状态：{reviewStatusLabel(item.review_status)}
         </Tag>
-        <Tag>Status: {item.status}</Tag>
+        <Tag>变更集状态：{changeSetStatusLabel(item.status)}</Tag>
         {item.review_status === 'pending' ? (
           <>
-            <Button type="primary" loading={busy} onClick={() => void onReview(true)}>
-              Accept
+            <Button
+              aria-label="接受"
+              type="primary"
+              loading={busy}
+              onClick={() => void onReview(true)}
+            >
+              接受
             </Button>
-            <Button danger loading={busy} onClick={() => void onReview(false)}>
-              Reject
+            <Button aria-label="拒绝" danger loading={busy} onClick={() => void onReview(false)}>
+              拒绝
             </Button>
           </>
         ) : null}
         <Button
-          aria-label="Apply to Workflow Draft"
+          aria-label="应用到工作流草稿"
           type="primary"
           loading={busy}
           disabled={item.review_status !== 'accepted' || Boolean(item.applied_at)}
           onClick={() => void onApply()}
         >
-          Apply to Workflow Draft
+          应用到工作流草稿
         </Button>
-        <Button onClick={() => onOpenRawMapping(proposal)}>
-          Raw JSON / Cross-instance Mapping
-        </Button>
+        <Button onClick={() => onOpenRawMapping(proposal)}>原始 JSON / 跨实例映射</Button>
       </Space>
     </Card>
   )
@@ -294,6 +328,9 @@ type GraphChangeSummary = {
   addedNodes: string[]
   modifiedNodes: string[]
   removedNodes: string[]
+  addedEdges: string[]
+  modifiedEdges: string[]
+  removedEdges: string[]
   rewiredEdges: string[]
   existingNodes: Record<string, ProposalGraphStatus>
   proposedNodes: Record<string, ProposalGraphStatus>
@@ -303,12 +340,15 @@ type GraphChangeSummary = {
 
 function GraphChangeLegend({ changes }: { changes: GraphChangeSummary }) {
   return (
-    <Card title="Graph Diff" size="small">
+    <Card title="流程图差异" size="small">
       <Space wrap>
-        <ChangeTags title="Added Node" color="green" values={changes.addedNodes} />
-        <ChangeTags title="Modified Node" color="gold" values={changes.modifiedNodes} />
-        <ChangeTags title="Removed Node" color="red" values={changes.removedNodes} />
-        <ChangeTags title="Rewired Edge" color="purple" values={changes.rewiredEdges} />
+        <ChangeTags title="新增节点" color="green" values={changes.addedNodes} />
+        <ChangeTags title="修改节点" color="gold" values={changes.modifiedNodes} />
+        <ChangeTags title="删除节点" color="red" values={changes.removedNodes} />
+        <ChangeTags title="新增连线" color="green" values={changes.addedEdges} />
+        <ChangeTags title="修改连线" color="gold" values={changes.modifiedEdges} />
+        <ChangeTags title="删除连线" color="red" values={changes.removedEdges} />
+        <ChangeTags title="重连连线" color="purple" values={changes.rewiredEdges} />
       </Space>
     </Card>
   )
@@ -345,30 +385,30 @@ function ProposalEvidence({ proposal }: { proposal: FlowSpecVisualProposal }) {
 function MappingDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {
   const rows = [
     ...Object.entries(proposal.service_mappings).map(([ref, target]) => ({
-      kind: 'Service',
+      kind: '服务',
       ref,
       target,
       version: '-',
     })),
     ...Object.entries(proposal.operation_mappings).map(([ref, target]) => ({
-      kind: 'Operation',
+      kind: '操作',
       ref,
       target,
       version: proposal.operation_version_mappings[ref] ?? '-',
     })),
   ]
   return (
-    <Card title="Mapping Diff / Human Inspection" size="small">
+    <Card title="映射差异 / 人工检查" size="small">
       <Table
         rowKey={(item) => `${item.kind}:${item.ref}`}
         size="small"
         pagination={false}
         dataSource={rows}
         columns={[
-          { title: 'Kind', dataIndex: 'kind' },
-          { title: 'Portable Ref', dataIndex: 'ref' },
-          { title: 'Target Asset', dataIndex: 'target' },
-          { title: 'Version', dataIndex: 'version' },
+          { title: '类型', dataIndex: 'kind' },
+          { title: '可移植引用', dataIndex: 'ref' },
+          { title: '目标资产', dataIndex: 'target' },
+          { title: '版本', dataIndex: 'version' },
         ]}
       />
     </Card>
@@ -378,7 +418,7 @@ function MappingDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {
 function AssertDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {
   const rows = proposal.proposal.diff.filter((item) => item.path.toLowerCase().includes('assert'))
   return (
-    <Card title="Assert Diff" size="small">
+    <Card title="断言差异" size="small">
       {rows.length ? (
         <Table
           rowKey="path"
@@ -386,13 +426,13 @@ function AssertDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {
           pagination={false}
           dataSource={rows}
           columns={[
-            { title: 'Path', dataIndex: 'path' },
-            { title: 'Before', dataIndex: 'before', render: jsonText },
-            { title: 'After', dataIndex: 'after', render: jsonText },
+            { title: '路径', dataIndex: 'path' },
+            { title: '变更前', dataIndex: 'before', render: jsonText },
+            { title: '变更后', dataIndex: 'after', render: jsonText },
           ]}
         />
       ) : (
-        <Typography.Text type="secondary">没有 Assert 变化</Typography.Text>
+        <Typography.Text type="secondary">没有断言变化</Typography.Text>
       )}
     </Card>
   )
@@ -402,16 +442,16 @@ function EvidenceConfidenceCard({ plan }: { plan: IntegrationPlan | null }) {
   const confidence = plan?.confidence
   const evidence = plan?.evidence_refs ?? []
   return (
-    <Card title="Evidence / Confidence" size="small">
+    <Card title="证据 / 置信度" size="small">
       <Descriptions bordered size="small" column={2}>
-        <Descriptions.Item label="Overall">{percent(confidence?.overall)}</Descriptions.Item>
-        <Descriptions.Item label="Evidence Coverage">
+        <Descriptions.Item label="整体置信度">{percent(confidence?.overall)}</Descriptions.Item>
+        <Descriptions.Item label="证据覆盖率">
           {percent(confidence?.evidence_coverage)}
         </Descriptions.Item>
-        <Descriptions.Item label="Deterministic">
-          {confidence?.deterministic ? 'Yes' : 'No'}
+        <Descriptions.Item label="确定性">
+          {confidence?.deterministic ? '是' : '否'}
         </Descriptions.Item>
-        <Descriptions.Item label="Evidence Refs">{evidence.length}</Descriptions.Item>
+        <Descriptions.Item label="证据引用">{evidence.length}</Descriptions.Item>
       </Descriptions>
       <div className="flow-proposal-evidence-list">
         {evidence.slice(0, 30).map((ref) => (
@@ -428,7 +468,7 @@ function UnresolvedCard({ plan }: { plan: IntegrationPlan | null }) {
   const unresolved = plan?.unresolved_items ?? []
   const requirements = plan?.review_requirements ?? []
   return (
-    <Card title="Unresolved / Review Requirements" size="small">
+    <Card title="未决项 / 审核要求" size="small">
       {unresolved.length ? (
         unresolved.map((item) => (
           <Alert
@@ -440,7 +480,7 @@ function UnresolvedCard({ plan }: { plan: IntegrationPlan | null }) {
           />
         ))
       ) : (
-        <Tag color="green">Unresolved 0</Tag>
+        <Tag color="green">未决项 0</Tag>
       )}
       {requirements.map((item) => (
         <Tag color="gold" key={item}>
@@ -471,6 +511,12 @@ function graphChanges(
     .map((node) => node.id)
   const beforeEdges = new Map((existing?.edges ?? []).map((edge) => [edge.id, edge]))
   const afterEdges = new Map(proposed.edges.map((edge) => [edge.id, edge]))
+  const addedEdges = proposed.edges
+    .filter((edge) => !beforeEdges.has(edge.id))
+    .map((edge) => edge.id)
+  const removedEdges = (existing?.edges ?? [])
+    .filter((edge) => !afterEdges.has(edge.id))
+    .map((edge) => edge.id)
   const rewiredEdges = proposed.edges
     .filter((edge) => {
       const before = beforeEdges.get(edge.id)
@@ -479,10 +525,23 @@ function graphChanges(
       )
     })
     .map((edge) => edge.id)
+  const modifiedEdges = proposed.edges
+    .filter((edge) => {
+      const before = beforeEdges.get(edge.id)
+      return (
+        before !== undefined &&
+        (before.condition !== edge.condition ||
+          JSON.stringify(before.mappings) !== JSON.stringify(edge.mappings))
+      )
+    })
+    .map((edge) => edge.id)
   return {
     addedNodes,
     modifiedNodes,
     removedNodes,
+    addedEdges,
+    modifiedEdges,
+    removedEdges,
     rewiredEdges,
     existingNodes: statusMap([
       ...modifiedNodes.map((id) => [id, 'modified'] as const),
@@ -492,23 +551,17 @@ function graphChanges(
       ...addedNodes.map((id) => [id, 'added'] as const),
       ...modifiedNodes.map((id) => [id, 'modified'] as const),
     ]),
-    existingEdges: edgeStatusMap(existing?.edges ?? [], afterEdges, rewiredEdges, 'removed'),
-    proposedEdges: edgeStatusMap(proposed.edges, beforeEdges, rewiredEdges, 'added'),
+    existingEdges: statusMap([
+      ...removedEdges.map((id) => [id, 'removed'] as const),
+      ...modifiedEdges.map((id) => [id, 'modified'] as const),
+      ...rewiredEdges.map((id) => [id, 'rewired'] as const),
+    ]),
+    proposedEdges: statusMap([
+      ...addedEdges.map((id) => [id, 'added'] as const),
+      ...modifiedEdges.map((id) => [id, 'modified'] as const),
+      ...rewiredEdges.map((id) => [id, 'rewired'] as const),
+    ]),
   }
-}
-
-function edgeStatusMap(
-  edges: WorkflowDefinition['edges'],
-  other: Map<string, WorkflowDefinition['edges'][number]>,
-  rewired: string[],
-  missingStatus: 'added' | 'removed',
-): Record<string, ProposalGraphStatus> {
-  const statuses: Array<readonly [string, ProposalGraphStatus]> = []
-  for (const edge of edges) {
-    if (!other.has(edge.id)) statuses.push([edge.id, missingStatus])
-    else if (rewired.includes(edge.id)) statuses.push([edge.id, 'rewired'])
-  }
-  return statusMap(statuses)
 }
 
 function statusMap(
@@ -526,13 +579,23 @@ function jsonText(value: unknown): string {
 }
 
 function requiredId(value: string | undefined): string {
-  if (!value) throw new Error('Flow Proposal ID is required')
+  if (!value) throw new Error('流程提案 ID 为必填项')
   return value
 }
 
+function reviewStatusLabel(value: FlowSpecVisualProposal['proposal']['review_status']): string {
+  return { pending: '待审核', accepted: '已接受', rejected: '已拒绝' }[value]
+}
+
+function changeSetStatusLabel(value: string): string {
+  return { draft: '草稿', accepted: '已接受', rejected: '已拒绝' }[value] ?? '未知'
+}
+
 function selectedVisual(
+  proposalId: string | undefined,
   queried: FlowSpecVisualProposal | undefined,
-  override: FlowSpecVisualProposal | undefined,
+  override: VisualOverride | undefined,
 ): FlowSpecVisualProposal | undefined {
-  return override ?? queried
+  if (override && override.proposalId === proposalId) return override.visual
+  return queried?.proposal.id === proposalId ? queried : undefined
 }

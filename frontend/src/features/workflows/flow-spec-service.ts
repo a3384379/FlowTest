@@ -3,10 +3,11 @@ import {
   type FlowSpec,
   type FlowSpecApplyResult,
   type FlowSpecChangeSetDetail,
-  type FlowSpecChangeSetPage,
+  type FlowSpecChangeSetCursor,
   type FlowSpecCompatibilityResult,
   type FlowSpecDiff,
   type FlowSpecExport,
+  type FlowSpecMcpProposalPage,
   type FlowSpecValidationResult,
   type FlowSpecVisualProposal,
 } from '../../lib/api'
@@ -94,10 +95,19 @@ export async function applyFlowSpec(
   return response.data
 }
 
-export async function listFlowSpecChangeSets(projectId: string): Promise<FlowSpecChangeSetPage> {
-  const response = await apiClient.get<FlowSpecChangeSetPage>(
-    `/projects/${projectId}/flow-specs/change-sets`,
-    { params: { page: 1, page_size: 100 } },
+export async function getMcpFlowProposalPage(
+  projectId: string,
+  cursor: FlowSpecChangeSetCursor | null,
+): Promise<FlowSpecMcpProposalPage> {
+  const response = await apiClient.get<FlowSpecMcpProposalPage>(
+    `/projects/${projectId}/flow-specs/change-sets/mcp-proposals`,
+    {
+      params: {
+        page_size: 100,
+        cursor_created_at: cursor?.created_at,
+        cursor_id: cursor?.id,
+      },
+    },
   )
   return response.data
 }
