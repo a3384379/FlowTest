@@ -230,6 +230,11 @@ class JavaKafkaEventClaim(JavaClaimBase):
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     event_type: str = Field(pattern=_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_topic_ref(self) -> JavaKafkaEventClaim:
+        require_no_sensitive_scalar_values([self.topic_ref])
+        return self
+
 
 type JavaEvidenceClaim = Annotated[
     JavaControllerRouteClaim
@@ -1788,7 +1793,7 @@ def _record_component_field(
 
 def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
     fields: list[tuple[str, str, list[tuple[str, str]]]] = []
-    masked_body = _mask_java_non_code(body)
+    masked_body = _mask_nested_java_blocks(_mask_java_non_code(body))
     for match in _FIELD_DECLARATION.finditer(masked_body):
         prefix_start = max(0, match.start() - 500)
         masked_prefix = masked_body[prefix_start : match.start()]
@@ -1845,6 +1850,15 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
     )
     if declaration is None:
         return []
+    class_opening = masked_content.find("{", declaration.end())
+    if class_opening < 0:
+        return []
+    class_end = _matching_brace(file.content, class_opening)
+    route_masked_content = list(masked_content)
+    route_masked_content[class_opening + 1 : class_end] = _mask_nested_java_blocks(
+        masked_content[class_opening + 1 : class_end]
+    )
+    route_mask = "".join(route_masked_content)
     base_matches = _active_java_annotation_matches(
         file.content,
         masked_content,
@@ -1858,10 +1872,11 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         route
         for match in _active_java_annotation_matches(
             file.content,
-            masked_content,
+            route_mask,
             _MAPPING_ANNOTATION_MARKER,
             _MAPPING_ANNOTATION,
             start=declaration.end(),
+            end=class_end,
         )
         for route in _routes_after_mapping(
             file,
@@ -1878,6 +1893,21 @@ def _mask_java_non_code(content: str) -> str:
     masked = list(content)
     for match in _JAVA_NON_CODE.finditer(content):
         masked[match.start() : match.end()] = " " * (match.end() - match.start())
+    return "".join(masked)
+
+
+def _mask_nested_java_blocks(content: str) -> str:
+    masked = list(content)
+    depth = 0
+    for index, character in enumerate(content):
+        if character == "{":
+            depth += 1
+            masked[index] = " "
+        elif character == "}":
+            depth = max(0, depth - 1)
+            masked[index] = " "
+        elif depth > 0:
+            masked[index] = " "
     return "".join(masked)
 
 

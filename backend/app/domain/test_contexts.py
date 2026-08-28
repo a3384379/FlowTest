@@ -398,6 +398,11 @@ class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     event_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_topic_ref(self) -> ExternalJavaKafkaEventClaim:
+        require_no_sensitive_scalar_values([self.topic_ref])
+        return self
+
 
 type ExternalJavaClaim = Annotated[
     ExternalJavaControllerRouteClaim

@@ -988,6 +988,31 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert dedicated_constraint_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in dedicated_constraint_rejected.text
 
+    dedicated_topic_payload = _java_evidence(project_id)
+    dedicated_topic_payload["claims"].append(
+        {
+            "id": "kafka-sensitive",
+            "kind": "kafka_event",
+            "source_path": "src/OrderEvents.java:8",
+            "confidence": 0.98,
+            "deterministic": True,
+            "operation_ref": "operation://POST/api/orders",
+            "direction": "produce",
+            "topic_ref": f"kafka://{sensitive_value}",
+            "event_type": "OrderCreated",
+        }
+    )
+    dedicated_topic_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": dedicated_topic_payload},
+    )
+
+    assert dedicated_topic_rejected.status_code == 422
+    assert dedicated_topic_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert dedicated_topic_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in dedicated_topic_rejected.text
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
     ).model_dump(mode="json")
@@ -1059,6 +1084,40 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
     assert generic_constraint_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert generic_constraint_rejected.json()["error"]["trace_id"]
     assert sensitive_value not in generic_constraint_rejected.text
+
+    generic_topic_source = _java_evidence(project_id)
+    generic_topic_source["claims"].append(
+        {
+            "id": "kafka-safe",
+            "kind": "kafka_event",
+            "source_path": "src/OrderEvents.java:8",
+            "confidence": 0.98,
+            "deterministic": True,
+            "operation_ref": "operation://POST/api/orders",
+            "direction": "produce",
+            "topic_ref": "kafka://orders.created",
+            "event_type": "OrderCreated",
+        }
+    )
+    generic_topic_payload = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(generic_topic_source)
+    ).model_dump(mode="json")
+    generic_topic = next(
+        finding
+        for finding in generic_topic_payload["findings"]
+        if finding["structured_data"]["claim_kind"] == "kafka_event"
+    )
+    generic_topic["structured_data"]["claim"]["topic_ref"] = f"kafka://{sensitive_value}"
+    generic_topic_rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_topic_payload},
+    )
+
+    assert generic_topic_rejected.status_code == 422
+    assert generic_topic_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert generic_topic_rejected.json()["error"]["trace_id"]
+    assert sensitive_value not in generic_topic_rejected.text
 
 
 @pytest.mark.asyncio

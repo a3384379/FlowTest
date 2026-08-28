@@ -107,6 +107,14 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     with pytest.raises(ValidationError, match="sensitive scalar"):
         JavaEvidenceSubmission.model_validate(dedicated_constraint)
 
+    dedicated_topic = _java_submission()
+    kafka_claim = next(
+        claim for claim in dedicated_topic["claims"] if claim["kind"] == "kafka_event"
+    )
+    kafka_claim["topic_ref"] = f"kafka://{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        JavaEvidenceSubmission.model_validate(dedicated_topic)
+
     generic_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
     ).model_dump(mode="json")
@@ -140,6 +148,18 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     constraint_finding["structured_data"]["claim"]["constraint"] = f'message = "{sensitive_value}"'
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_constraint)
+
+    generic_topic = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_submission())
+    ).model_dump(mode="json")
+    topic_finding = next(
+        finding
+        for finding in generic_topic["findings"]
+        if finding["structured_data"]["claim_kind"] == "kafka_event"
+    )
+    topic_finding["structured_data"]["claim"]["topic_ref"] = f"kafka://{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(generic_topic)
 
 
 def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
@@ -1426,6 +1446,20 @@ public class OrderController {
     public Order live() {
         return liveService.load();
     }
+
+    static class NestedController {
+        @GetMapping("/nested")
+        public Order nested() {
+            return nestedService.load();
+        }
+    }
+}
+
+class SecondaryController {
+    @GetMapping("/secondary")
+    public Order secondary() {
+        return secondaryService.load();
+    }
 }
 """,
                     }
@@ -1467,6 +1501,11 @@ public class CreateOrderRequest {
 
     @NotBlank(message = "required")
     private String name;
+
+    static class NestedRequest {
+        @NotBlank(message = "nested")
+        private String nestedOnly;
+    }
 }
 """,
                     },
