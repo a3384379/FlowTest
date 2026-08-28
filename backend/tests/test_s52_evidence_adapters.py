@@ -1190,7 +1190,11 @@ def test_candidate_budget_counts_unique_candidates_after_deduplication() -> None
     mapping = derive_entity_mapping(
         [
             *[
-                MappingEvidenceInput(evidence_ref=f"evidence://field/{index}", finding=field)
+                MappingEvidenceInput(
+                    evidence_ref=f"evidence://field/{index}",
+                    finding=field,
+                    confidence=0.3 if index == 0 else 0.9,
+                )
                 for index in range(32)
             ],
             *[
@@ -1202,6 +1206,7 @@ def test_candidate_budget_counts_unique_candidates_after_deduplication() -> None
 
     assert len(mapping.candidates) == 1
     assert len(mapping.candidates[0].evidence_refs) == 20
+    assert mapping.candidates[0].confidence == pytest.approx(0.3)
 
 
 def test_entity_mapping_rejects_unrepresentable_evidence_volume() -> None:
@@ -1500,6 +1505,7 @@ public class CreateOrderRequest {
     // private String legacyToken;
 
     @NotBlank(message = "required")
+    @Pattern(regexp = "^(foo|bar)$")
     private String name;
 
     static class NestedRequest {
@@ -1522,8 +1528,10 @@ public class CreateOrderRequest {
     constraint_fields = {
         claim.field_name for claim in evidence.claims if claim.kind == "bean_validation"
     }
+    constraints = {claim.constraint for claim in evidence.claims if claim.kind == "bean_validation"}
     assert request_fields == {"name"}
     assert constraint_fields == {"name"}
+    assert '(regexp = "^(foo|bar)$")' in constraints
 
 
 def test_java_spring_poc_expands_all_mapping_paths() -> None:
@@ -1675,6 +1683,34 @@ def test_java_spring_poc_reports_claim_quota_truncation() -> None:
     evidence = JavaSpringPocProvider().analyze(snapshot)
 
     assert len([claim for claim in evidence.claims if claim.kind == "controller_route"]) == 12
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_BUDGET" and "不完整" in warning.message
+        for warning in evidence.warnings
+    )
+
+
+def test_java_spring_poc_reports_enum_value_truncation() -> None:
+    constants = ",\n".join(f"STATE_{index:03d}" for index in range(101))
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://enum-overflow", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/LargeState.java",
+                        "content": f"public enum LargeState {{\n{constants};\n}}",
+                    }
+                ],
+            }
+        )
+    )
+
+    states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
+    assert len(states) == 1
+    assert len(states[0].values) == 100
+    assert states[0].deterministic is False
     assert any(
         warning.code == "JAVA_POC_INCOMPLETE_BUDGET" and "不完整" in warning.message
         for warning in evidence.warnings

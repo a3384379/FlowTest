@@ -80,7 +80,7 @@ _FIELD_DECLARATION = re.compile(
 )
 _VALIDATION_ANNOTATION = re.compile(
     r"@(?P<name>NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
-    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b(?P<args>\([^)]*\))?"
+    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid)\b"
 )
 _VALIDATION_ANNOTATION_MARKER = re.compile(
     r"@(?:NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
@@ -491,11 +491,17 @@ class JavaSpringPocProvider:
     def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
         type_fields = _java_type_fields(snapshot.files)
         claims: list[JavaEvidenceClaim] = []
+        structural_truncated = False
         for file in sorted(snapshot.files, key=lambda item: item.path):
             file_routes = _java_routes(file)
             claims.extend(_route_claims(file, file_routes, type_fields))
-            claims.extend(_structural_java_claims(file, file_routes, type_fields))
-        bounded_claims, truncated = _bounded_java_claims(claims)
+            structural_claims, file_truncated = _structural_java_claims(
+                file, file_routes, type_fields
+            )
+            claims.extend(structural_claims)
+            structural_truncated = structural_truncated or file_truncated
+        bounded_claims, claim_truncated = _bounded_java_claims(claims)
+        truncated = structural_truncated or claim_truncated
         warnings = [
             ExternalEvidenceWarning(
                 code="JAVA_POC_STATIC_ONLY",
@@ -1593,7 +1599,7 @@ def _merge_mapping_candidates(
     return first.model_copy(
         update={
             "evidence_refs": sorted({*first.evidence_refs, *second.evidence_refs})[:20],
-            "confidence": max(first.confidence, second.confidence),
+            "confidence": min(first.confidence, second.confidence),
             "deterministic": first.deterministic and second.deterministic,
         }
     )
@@ -1828,7 +1834,10 @@ def _java_validation_annotations(
     masked_content: str,
 ) -> list[tuple[str, str]]:
     return [
-        (annotation.group("name"), (annotation.group("args") or "")[:300])
+        (
+            annotation.group("name"),
+            _java_annotation_arguments(content, annotation.end())[:300],
+        )
         for annotation in _active_java_annotation_matches(
             content,
             masked_content,
@@ -1836,6 +1845,16 @@ def _java_validation_annotations(
             _VALIDATION_ANNOTATION,
         )
     ]
+
+
+def _java_annotation_arguments(content: str, annotation_end: int) -> str:
+    opening = annotation_end
+    while opening < len(content) and content[opening].isspace():
+        opening += 1
+    if opening >= len(content) or content[opening] != "(":
+        return ""
+    closing = _matching_parenthesis(content, opening)
+    return content[opening : closing + 1]
 
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
@@ -2241,8 +2260,9 @@ def _structural_java_claims(
     file: JavaSourceFileSnapshot,
     routes: list[_JavaRoute],
     type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
-) -> list[JavaEvidenceClaim]:
+) -> tuple[list[JavaEvidenceClaim], bool]:
     claims: list[JavaEvidenceClaim] = []
+    truncated = False
     declarations = list(_TYPE_DECLARATION.finditer(_mask_java_non_code(file.content)))
     for declaration in declarations:
         name = declaration.group("name")
@@ -2290,7 +2310,8 @@ def _structural_java_claims(
                 for field_name, _field_type, _annotations in type_fields.get(name, [])
             )
         if declaration.group("kind") == "enum":
-            values = _enum_values(_type_body(file.content, declaration.end()))
+            values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
+            truncated = truncated or values_truncated
             if values:
                 claims.append(
                     JavaEnumStateClaim(
@@ -2299,11 +2320,11 @@ def _structural_java_claims(
                         enum_ref=f"java://{name}",
                         values=values,
                         confidence=0.8,
-                        deterministic=True,
+                        deterministic=not values_truncated,
                     )
                 )
     claims.extend(_listener_claims(file))
-    return claims
+    return claims, truncated
 
 
 def _is_entity_type(path: str, name: str) -> bool:
@@ -2311,7 +2332,7 @@ def _is_entity_type(path: str, name: str) -> bool:
     return "/domain/" in lowered or "/entity/" in lowered or name.endswith("Entity")
 
 
-def _enum_values(body: str) -> list[str]:
+def _enum_values(body: str) -> tuple[list[str], bool]:
     header = _top_level_java_prefix(body, ";")
     values: list[str] = []
     for component in _split_top_level_java_components(header):
@@ -2320,7 +2341,7 @@ def _enum_values(body: str) -> list[str]:
         match = re.match(r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\b", declaration)
         if match is not None:
             values.append(match.group("name"))
-    return values[:100]
+    return values[:100], len(values) > 100
 
 
 def _top_level_java_prefix(content: str, delimiter: str) -> str:
