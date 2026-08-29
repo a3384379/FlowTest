@@ -587,12 +587,19 @@ class WorkflowNodeExecutor:
                 (node for node in prepared.definition.nodes if node.id == update.node_id),
                 None,
             )
-            if nested_node is None or not node_type_consumes_request(nested_node.effective_type):
+            if nested_node is None:
+                return
+            consumes_request = node_type_consumes_request(nested_node.effective_type)
+            should_checkpoint = update.status.is_terminal or (
+                consumes_request and update.status is NodeStatus.RUNNING and update.request_reserved
+            )
+            if not should_checkpoint:
                 return
             nested_id = _nested_checkpoint_id(checkpoint_scope, update.node_id)
             mapped = replace(
                 update,
                 node_id=nested_id,
+                node_type=nested_node.effective_type,
                 phase=checkpoint_phase,
                 best_effort=checkpoint_best_effort,
             )
@@ -694,6 +701,7 @@ def _nested_resume_records(
                 replace(
                     checkpoint,
                     node_id=node.id,
+                    node_type=node.type,
                     phase=node.phase,
                     best_effort=node.best_effort,
                 )

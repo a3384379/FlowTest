@@ -10,6 +10,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import (
     FieldMapping,
     NodeStatus,
+    NodeType,
     WorkflowDefinition,
     WorkflowNode,
     parse_node_config,
@@ -501,25 +502,17 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
         and update.status is NodeStatus.RUNNING
         and update.request_reserved
     )
+    nested_updates = [
+        update for update in updates if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+    ]
     assert {
-        update.name for update in updates if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
-    } == {"request"}
-    reservation_record = NodeRunRecord(
-        node_id=reservation.node_id,
-        node_type=reservation.node_type,
-        name=reservation.name,
-        status=reservation.status,
-        attempts=reservation.attempts,
-        output=None,
-        result=NodeResult(status=NodeStatus.CANCELLED),
-        error_code=None,
-        error_message=None,
-        started_at=reservation.started_at,
-        completed_at=reservation.occurred_at,
-        input_hash=reservation.input_hash,
-        phase=reservation.phase,
-        best_effort=reservation.best_effort,
-    )
+        (update.name, update.node_type) for update in nested_updates if update.status.is_terminal
+    } == {
+        ("start", NodeType.START),
+        ("request", NodeType.API),
+        ("end", NodeType.END),
+    }
+    reservation_record = _checkpoint_record(reservation)
     resumed_context = ExecutionContext()
     resumed_context.record_output("source", {"items": ["a", "b"]})
     resumed_updates: list[NodeStatusUpdate] = []
@@ -556,6 +549,105 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
     assert [request["attempts"] for request in resumed_requests] == [1, 0]
     assert all(request["error_code"] == "REQUEST_BUDGET_EXHAUSTED" for request in resumed_requests)
     assert not any(update.request_reserved for update in resumed_updates)
+
+
+@pytest.mark.asyncio
+async def test_nested_cleanup_resume_freezes_the_completed_main_phase() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000105")
+    node = WorkflowNode.model_validate(
+        _node(
+            "nested",
+            "subflow",
+            {"workflow_id": str(workflow_id), "workflow_version": 1},
+        )
+    )
+    cleanup = _capability_node("cleanup", "flow.delay", {"seconds": 0})
+    cleanup.update(
+        {
+            "phase": "cleanup",
+            "run_when": "failure",
+            "cleanup_for": ["request"],
+        }
+    )
+    nested = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "3.0",
+            "nodes": [
+                _capability_node("start", "flow.start", {}),
+                _capability_node("request", "http.request", _api_config()),
+                _capability_node("end", "flow.end", {}),
+                cleanup,
+            ],
+            "edges": [_edge("start", "request"), _edge("request", "end")],
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="c" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={},
+    )
+    wrapper_payload = _wrapper_workflow(node).model_dump(mode="json")
+    wrapper_payload["run_policy"] = {"request_budget": 2}
+    wrapper = WorkflowDefinition.model_validate(wrapper_payload)
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        await WorkflowScheduler(executor).run(wrapper, on_node_status=capture)
+
+    main_names = {"start", "request", "end"}
+    terminal_main = {
+        update.name: update
+        for update in updates
+        if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+        and update.name in main_names
+        and update.status.is_terminal
+    }
+    assert set(terminal_main) == main_names
+    resume_records = tuple(
+        _checkpoint_record(terminal_main[name]) for name in ("start", "request", "end")
+    )
+    resumed_updates: list[NodeStatusUpdate] = []
+
+    async def capture_resumed(update: NodeStatusUpdate) -> None:
+        resumed_updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        resumed_executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        resumed = await WorkflowScheduler(resumed_executor).run(
+            wrapper,
+            on_node_status=capture_resumed,
+            resume_records=resume_records,
+            resume_attempts={record.node_id: record.attempts for record in resume_records},
+        )
+
+    assert resumed.status == "failed"
+    assert not any(
+        update.name == "request" and update.request_reserved for update in resumed_updates
+    )
+    assert any(
+        update.name == "cleanup" and update.status is NodeStatus.PASSED
+        for update in resumed_updates
+    )
 
 
 def test_nested_checkpoint_scope_encoding_has_no_delimiter_collisions() -> None:
@@ -689,6 +781,26 @@ def _capability_node(
         "configuration": configuration,
         "bindings": [],
     }
+
+
+def _checkpoint_record(update: NodeStatusUpdate) -> NodeRunRecord:
+    result = update.result or NodeResult(status=NodeStatus.CANCELLED)
+    return NodeRunRecord(
+        node_id=update.node_id,
+        node_type=update.node_type,
+        name=update.name,
+        status=update.status,
+        attempts=update.attempts,
+        output=result.output,
+        result=result,
+        error_code=update.error_code,
+        error_message=update.error_message,
+        started_at=update.started_at,
+        completed_at=update.occurred_at,
+        input_hash=update.input_hash,
+        phase=update.phase,
+        best_effort=update.best_effort,
+    )
 
 
 def _edge(source: str, target: str) -> dict[str, Any]:

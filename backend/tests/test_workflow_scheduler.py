@@ -315,6 +315,31 @@ async def test_cleanup_has_bounded_retry_request_budget_and_reverse_ordering() -
     assert child.completed_at <= parent.started_at
 
 
+def test_structural_cleanup_requires_an_explicit_request_budget() -> None:
+    structural_cleanup = {
+        "id": "cleanup-subflow",
+        "type": "subflow",
+        "name": "Cleanup subflow",
+        "position": {"x": 100, "y": 100},
+        "config": {
+            "workflow_id": "00000000-0000-0000-0000-000000000001",
+            "workflow_version": 1,
+        },
+        "phase": "cleanup",
+    }
+    edges = [{"id": "start-end", "source": "start", "target": "end"}]
+
+    with pytest.raises(ValidationError, match="explicit cleanup request budget"):
+        workflow(middle_nodes=[structural_cleanup], edges=edges)
+
+    definition = workflow(
+        middle_nodes=[structural_cleanup],
+        edges=edges,
+        run_policy={"cleanup_request_budget": 2},
+    )
+    assert definition.run_policy.cleanup_request_budget == 2
+
+
 @pytest.mark.asyncio
 async def test_cleanup_reclaim_preserves_consumed_request_budget() -> None:
     definition = workflow(

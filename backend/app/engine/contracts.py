@@ -499,6 +499,7 @@ class WorkflowDefinition(BaseModel):
         self._validate_endpoints(starts[0].id, {node.id for node in ends})
         self._validate_connected(starts[0].id, {node.id for node in ends}, main_node_ids)
         self._validate_cleanup_targets(cleanup_nodes, main_node_ids)
+        self._validate_cleanup_request_budget(cleanup_nodes)
         return self
 
     @staticmethod
@@ -509,6 +510,18 @@ class WorkflowDefinition(BaseModel):
             unknown = sorted(set(node.cleanup_for) - main_node_ids)
             if unknown:
                 raise ValueError(f"Cleanup node {node.id} references unknown main nodes: {unknown}")
+
+    def _validate_cleanup_request_budget(self, cleanup_nodes: list[WorkflowNode]) -> None:
+        structural = [
+            node.id
+            for node in cleanup_nodes
+            if node.effective_type in {NodeType.SUBFLOW, NodeType.FOR_EACH}
+        ]
+        if structural and self.run_policy.cleanup_request_budget is None:
+            raise ValueError(
+                "Cleanup subflow and for-each nodes require an explicit cleanup request budget: "
+                f"{structural}"
+            )
 
     @staticmethod
     def _validate_edge(edge: WorkflowEdge, nodes: dict[str, WorkflowNode]) -> None:
