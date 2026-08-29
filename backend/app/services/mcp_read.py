@@ -29,6 +29,7 @@ from app.domain.evidence import (
     data_profile_evidence,
 )
 from app.domain.flow_spec import FlowSpec
+from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.mcp_read import (
     MCP_READ_SCOPE,
     EvidenceRef,
@@ -387,7 +388,7 @@ class MCPReadService:
         actor: User,
         project_id: UUID,
         call: MCPReadCall,
-        spec: FlowSpec,
+        spec: FlowSpec | FlowSpecV2,
     ) -> MCPReadEnvelope:
         self._require_scope()
         pipeline = await FlowSpecService(self._session).validate(
@@ -421,8 +422,8 @@ class MCPReadService:
         actor: User,
         project_id: UUID,
         call: MCPReadCall,
-        before: FlowSpec | None,
-        after: FlowSpec,
+        before: FlowSpec | FlowSpecV2 | None,
+        after: FlowSpec | FlowSpecV2,
     ) -> MCPReadEnvelope:
         self._require_scope()
         result = await FlowSpecService(self._session).diff(
@@ -443,7 +444,7 @@ class MCPReadService:
                 EvidenceRef(
                     uri=f"flowtest://flowspec/{result.after_fingerprint}",
                     kind="flow-spec-diff",
-                    version="v1",
+                    version=after.fingerprint_version,
                 )
             ],
         )

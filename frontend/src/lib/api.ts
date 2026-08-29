@@ -488,6 +488,12 @@ export type WorkflowNode = {
   capability_version?: string
   configuration?: Record<string, unknown>
   bindings?: Array<{ input: string; expression: string }>
+  phase?: 'main' | 'cleanup'
+  run_when?: 'success' | 'failure' | 'cancel' | 'always'
+  cleanup_for?: string[]
+  best_effort?: boolean
+  cleanup_timeout_seconds?: number
+  cleanup_retry_budget?: number
 }
 
 export type WorkflowFieldMapping = {
@@ -517,6 +523,12 @@ export type WorkflowDefinition = {
     fail_fast: boolean
     concurrency: number
     default_timeout_seconds: number
+  }
+  run_policy?: {
+    request_budget: number | null
+    max_runtime_seconds: number | null
+    cleanup_request_budget: number | null
+    force_cancel_skips_cleanup: boolean
   }
 }
 
@@ -592,6 +604,29 @@ export type FlowSpec = {
   confidence: { overall: number; unresolved: string[] }
 }
 
+export type FlowSpecV2 = Omit<FlowSpec, 'schema_version' | 'fingerprint_version' | 'cleanup'> & {
+  schema_version: 'flowtest-flow-spec-v2'
+  fingerprint_version: 'flowtest-flow-spec-v2-fingerprint-v1'
+  cleanup: Array<{
+    id: string
+    phase: 'cleanup'
+    operation_ref: string
+    run_when: 'success' | 'failure' | 'cancel' | 'always'
+    cleanup_for: string[]
+    best_effort: boolean
+    cleanup_timeout_seconds: number
+    cleanup_retry_budget: number
+  }>
+  plan_metadata: {
+    context_fingerprint: string | null
+    plan_fingerprint: string | null
+    compiler_version: string | null
+  }
+  run_policy: NonNullable<WorkflowDefinition['run_policy']>
+}
+
+export type FlowSpecDocument = FlowSpec | FlowSpecV2
+
 export type FlowSpecIssue = { code: string; message: string; path: string }
 
 export type FlowSpecValidationResult = {
@@ -621,7 +656,7 @@ export type FlowSpecExport = {
   version: number | null
   draft_revision: number | null
   fingerprint: string
-  spec: FlowSpec
+  spec: FlowSpecDocument
   validation: FlowSpecValidationResult
   compatibility: FlowSpecCompatibilityResult
 }
@@ -647,7 +682,7 @@ export type FlowSpecChangeSet = {
 }
 
 export type FlowSpecChangeSetDetail = FlowSpecChangeSet & {
-  spec: FlowSpec
+  spec: FlowSpecDocument
   validation: FlowSpecValidationResult
   compatibility: FlowSpecCompatibilityResult
   diff: Array<{ path: string; before: unknown; after: unknown }>
@@ -717,7 +752,7 @@ export type IntegrationPlan = {
 export type IntegrationPlanCompilation = {
   compiler_version: string
   plan_fingerprint: string
-  flow_spec: FlowSpec | null
+  flow_spec: FlowSpecDocument | null
   flow_spec_fingerprint: string | null
   importable: boolean
   diagnostics: IntegrationPlanDiagnostic[]
@@ -814,11 +849,23 @@ export type WorkflowExecution = {
   parent_execution_id: string | null
   dataset_row_index: number | null
   status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
+  main_status?: 'passed' | 'failed' | 'cancelled' | null
+  cleanup_status?: 'passed' | 'failed' | 'cancelled' | null
+  cleanup_report?: {
+    activated_node_ids?: string[]
+    skipped_node_ids?: string[]
+    required_failures?: string[]
+    best_effort_failures?: string[]
+    warnings?: Array<{ code: string; node_id: string; message: string }>
+    force_cancel_skipped?: boolean
+  }
   snapshot: Record<string, unknown>
   context: Record<string, unknown>
   error_code: string | null
   error_message: string | null
   cancel_requested_at: string | null
+  force_cancel_requested_at?: string | null
+  force_cancel_reason?: string | null
   started_at: string
   completed_at: string | null
 }
@@ -886,6 +933,8 @@ export type WorkflowNodeExecution = {
   node_id: string
   node_type: string
   name: string
+  phase?: 'main' | 'cleanup'
+  best_effort?: boolean
   status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled'
   attempts: number
   output: unknown

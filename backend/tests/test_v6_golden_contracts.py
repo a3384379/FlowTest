@@ -28,6 +28,7 @@ from app.domain.flow_spec_v2 import (
     convert_flow_spec_v1_to_v2,
     downgrade_flow_spec_v2_to_v1,
     flow_spec_v2_fingerprint,
+    flow_spec_v2_to_workflow_definition,
     validate_flow_spec_v2,
 )
 from app.domain.integration_plans import (
@@ -207,6 +208,51 @@ def test_flowspec_v2_validation_paths_preserve_submitted_order() -> None:
     assert [
         issue.path for issue in validation.issues if issue.code == "UNKNOWN_CLEANUP_OPERATION"
     ] == ["$.cleanup[0].operation_ref"]
+
+
+def test_flowspec_v2_compiles_cleanup_into_bounded_runtime_phase() -> None:
+    raw = _load_mapping("login-create-query.flowspec-v2.json")
+    spec = FlowSpecV2.model_validate(
+        {
+            **raw,
+            "cleanup": [
+                {
+                    "id": "delete-order",
+                    "operation_ref": "orders.query",
+                    "run_when": "failure",
+                    "cleanup_for": ["create"],
+                    "best_effort": True,
+                    "cleanup_timeout_seconds": 12,
+                    "cleanup_retry_budget": 1,
+                }
+            ],
+            "run_policy": {
+                "cleanup_request_budget": 2,
+                "force_cancel_skips_cleanup": True,
+            },
+        }
+    )
+    operation_ids = {
+        operation.ref: UUID(int=index) for index, operation in enumerate(spec.operations, start=1)
+    }
+
+    definition = flow_spec_v2_to_workflow_definition(
+        spec,
+        operation_mappings=operation_ids,
+        service_keys={"auth": "auth", "orders": "orders"},
+        operation_versions={operation.ref: 1 for operation in spec.operations},
+    )
+
+    cleanup = next(node for node in definition.nodes if node.phase == "cleanup")
+    assert definition.schema_version == "2.0"
+    assert definition.run_policy.cleanup_request_budget == 2
+    assert definition.run_policy.force_cancel_skips_cleanup is True
+    assert cleanup.id == "delete-order"
+    assert cleanup.cleanup_for == ["create"]
+    assert cleanup.run_when == "failure"
+    assert cleanup.best_effort is True
+    assert cleanup.cleanup_timeout_seconds == 12
+    assert cleanup.cleanup_retry_budget == 1
 
 
 def test_v1_workflow_round_trip_preserves_semantic_fingerprint() -> None:

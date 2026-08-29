@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -60,6 +61,14 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="workflow_execution_status",
         ),
         CheckConstraint(
+            "main_status IS NULL OR main_status IN ('passed', 'failed', 'cancelled')",
+            name="workflow_execution_main_status",
+        ),
+        CheckConstraint(
+            "cleanup_status IS NULL OR cleanup_status IN ('passed', 'failed', 'cancelled')",
+            name="workflow_execution_cleanup_status",
+        ),
+        CheckConstraint(
             "(parent_execution_id IS NULL AND dataset_row_index IS NULL) OR "
             "(parent_execution_id IS NOT NULL AND dataset_row_index IS NOT NULL "
             "AND dataset_row_index >= 0)",
@@ -92,6 +101,9 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     dataset_row_index: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), index=True)
+    main_status: Mapped[str | None] = mapped_column(String(16))
+    cleanup_status: Mapped[str | None] = mapped_column(String(16))
+    cleanup_report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(100))
@@ -99,6 +111,10 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
+    force_cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    force_cancel_reason: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     run_payload_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
@@ -117,6 +133,7 @@ class WorkflowNodeExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('pending', 'running', 'passed', 'failed', 'skipped', 'cancelled')",
             name="workflow_node_execution_status",
         ),
+        CheckConstraint("phase IN ('main', 'cleanup')", name="workflow_node_execution_phase"),
     )
 
     workflow_execution_id: Mapped[UUID] = mapped_column(
@@ -125,6 +142,8 @@ class WorkflowNodeExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     node_id: Mapped[str] = mapped_column(String(128))
     node_type: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(200))
+    phase: Mapped[str] = mapped_column(String(16), default="main", server_default="main")
+    best_effort: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     status: Mapped[str] = mapped_column(String(16), index=True)
     attempts: Mapped[int] = mapped_column(Integer)
     output: Mapped[Any | None] = mapped_column(JSON)

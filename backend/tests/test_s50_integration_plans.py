@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.errors import AppError
 from app.core.security import password_service
+from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import (
     CompilerEvidenceTrace,
     IntegrationPlan,
@@ -450,11 +451,14 @@ def test_dataset_and_cleanup_contract_compile_without_top_level_downgrade() -> N
     result = compile_integration_plan(changed)
 
     assert result.importable is True
-    assert result.flow_spec is not None
+    assert isinstance(result.flow_spec, FlowSpecV2)
     dataset = next(node for node in result.flow_spec.nodes if node.kind == "dataset")
     assert dataset.config["artifact_id"] == str(dataset_id)
-    assert result.flow_spec.cleanup == []
-    assert {item.code for item in result.diagnostics} >= {"CLEANUP_RUNTIME_DEFERRED"}
+    assert result.flow_spec.cleanup[0].id == "cleanup-order"
+    assert result.flow_spec.cleanup[0].cleanup_for == ["orders-create"]
+    assert result.flow_spec.run_policy.cleanup_request_budget == 1
+    assert result.compiler_version == "flowtest-integration-plan-compiler-s54-v1"
+    assert "CLEANUP_RUNTIME_DEFERRED" not in {item.code for item in result.diagnostics}
 
 
 def test_duplicate_response_evidence_is_deduplicated_and_unknown_types_block() -> None:
@@ -1190,6 +1194,69 @@ async def test_compiled_plan_creates_reviewed_workflow_draft_and_frozen_snapshot
         "extract",
         "assert",
     }
+
+    create_step = next(step for step in plan.steps if step.operation_ref == "orders.create")
+    cleanup_plan = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "objective": "Login Create Query Cleanup",
+                "cleanup_requirements": [
+                    PlanCleanupRequirement(
+                        id="cleanup-order",
+                        operation_ref="orders.create",
+                        cleanup_for_step_ids=[create_step.id],
+                        evidence_refs=["contract://orders/cleanup"],
+                    )
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+    cleanup_compilation = compile_integration_plan(cleanup_plan)
+    assert isinstance(cleanup_compilation.flow_spec, FlowSpecV2)
+    cleanup_view = await service_layer.create_import(
+        actor=actor,
+        project_id=project.id,
+        payload=FlowSpecImportRequest(
+            spec=cleanup_compilation.flow_spec,
+            service_mappings={"orders": service.id},
+            operation_mappings=operation_ids,
+            operation_version_mappings={ref: 1 for ref in operation_ids},
+        ),
+        provenance=FlowSpecImportProvenance(
+            context_revision_id=cleanup_plan.context_revision_id,
+            context_fingerprint=cleanup_plan.context_fingerprint,
+            source_ref=f"context://{context_revision_id}/cleanup-plan",
+            service_account_id=uuid4(),
+            integration_plan=cleanup_plan,
+            compilation=cleanup_compilation,
+        ),
+    )
+    assert cleanup_view.pipeline.spec.schema_version == "flowtest-flow-spec-v2"
+    await service_layer.review(
+        actor=actor,
+        project_id=project.id,
+        change_set_id=cleanup_view.change_set.id,
+        accept=True,
+        note="S54 cleanup runtime reviewed",
+    )
+    _cleanup_applied, cleanup_workflow = await service_layer.apply(
+        actor=actor,
+        project_id=project.id,
+        change_set_id=cleanup_view.change_set.id,
+    )
+    cleanup_definition = WorkflowDefinition.model_validate(cleanup_workflow.draft_definition)
+    cleanup_node = next(node for node in cleanup_definition.nodes if node.phase == "cleanup")
+    assert cleanup_node.id == "cleanup-order"
+    assert cleanup_node.cleanup_for == [create_step.id]
+    exported = await service_layer.export(
+        actor=actor,
+        project_id=project.id,
+        workflow_id=cleanup_workflow.id,
+        version=None,
+    )
+    assert isinstance(exported.pipeline.spec, FlowSpecV2)
+    assert exported.pipeline.spec.cleanup[0].id == "cleanup-order"
 
 
 def _golden_plan() -> IntegrationPlan:

@@ -40,6 +40,18 @@ from app.domain.flow_spec import (
     normalize_flow_spec,
     validate_flow_spec,
 )
+from app.domain.flow_spec_v2 import (
+    FlowSpecCleanupV2,
+    FlowSpecPlanMetadata,
+    FlowSpecRunPolicy,
+    FlowSpecV2,
+    assess_flow_spec_v2_compatibility,
+    convert_flow_spec_v1_to_v2,
+    diff_flow_specs_v2,
+    flow_spec_v2_fingerprint,
+    normalize_flow_spec_v2,
+    validate_flow_spec_v2,
+)
 from app.domain.test_contexts import first_sensitive_value, require_no_sensitive_scalar_values
 from app.domain.test_design import OracleSpec, ScenarioCandidate
 from app.domain.test_engineering import OperationContract, fingerprint_contract
@@ -60,6 +72,7 @@ INTEGRATION_PLAN_SCHEMA_VERSION_V2 = "flowtest-integration-plan-v2"
 INTEGRATION_PLAN_FINGERPRINT_VERSION_V2 = "flowtest-integration-plan-fingerprint-v2"
 INTEGRATION_PLAN_COMPILER_VERSION = "flowtest-integration-plan-compiler-v1"
 INTEGRATION_PLAN_COMPILER_VERSION_V2 = "flowtest-integration-plan-compiler-s53-v1"
+INTEGRATION_PLAN_COMPILER_VERSION_V3 = "flowtest-integration-plan-compiler-s54-v1"
 
 _ZERO_FINGERPRINT = "0" * 64
 _IDENTIFIER = r"^[A-Za-z_][A-Za-z0-9_.:-]{0,119}$"
@@ -698,7 +711,7 @@ class IntegrationPlanCompilation(BaseModel):
 
     compiler_version: str = INTEGRATION_PLAN_COMPILER_VERSION
     plan_fingerprint: str
-    flow_spec: FlowSpec | None = None
+    flow_spec: FlowSpec | FlowSpecV2 | None = None
     flow_spec_fingerprint: str | None = None
     validation: FlowSpecValidationResult | None = None
     compatibility: FlowSpecCompatibilityResult | None = None
@@ -1170,17 +1183,29 @@ def compile_integration_plan(plan: IntegrationPlan) -> IntegrationPlanCompilatio
             settings=WorkflowSettings(fail_fast=True, concurrency=5),
         )
     )
+    document: FlowSpec | FlowSpecV2 = spec
     validation = validate_flow_spec(spec)
     compatibility = assess_flow_spec_compatibility(spec)
+    diff = list(diff_flow_specs(None, spec))
+    fingerprint: str | None = None
+    if normalized.cleanup_requirements:
+        document = _compile_cleanup_flow_spec(normalized, spec)
+        validation = validate_flow_spec_v2(document)
+        compatibility = assess_flow_spec_v2_compatibility(document)
+        diff = list(diff_flow_specs_v2(None, document))
     diagnostics.extend(_flow_spec_diagnostics(validation, compatibility))
-    diagnostics.extend(_cleanup_diagnostics(normalized))
     diagnostics = _unique_diagnostics(diagnostics)
     importable = validation.valid and compatibility.compatible
-    fingerprint = flow_spec_fingerprint(spec) if importable else None
+    if importable:
+        fingerprint = (
+            flow_spec_v2_fingerprint(document)
+            if isinstance(document, FlowSpecV2)
+            else flow_spec_fingerprint(document)
+        )
     return IntegrationPlanCompilation(
         compiler_version=_compiler_version(normalized),
         plan_fingerprint=normalized.plan_fingerprint,
-        flow_spec=spec,
+        flow_spec=document,
         flow_spec_fingerprint=fingerprint,
         validation=validation,
         compatibility=compatibility,
@@ -1189,7 +1214,35 @@ def compile_integration_plan(plan: IntegrationPlan) -> IntegrationPlanCompilatio
         passes=_pass_records(diagnostics, completed=importable),
         node_evidence=_evidence_traces(node_evidence),
         edge_evidence=_evidence_traces(edge_evidence),
-        diff=list(diff_flow_specs(None, spec)),
+        diff=diff,
+    )
+
+
+def _compile_cleanup_flow_spec(plan: IntegrationPlan, spec: FlowSpec) -> FlowSpecV2:
+    compiler_version = _compiler_version(plan)
+    converted = convert_flow_spec_v1_to_v2(spec)
+    cleanup = [
+        FlowSpecCleanupV2(
+            id=requirement.id,
+            operation_ref=requirement.operation_ref,
+            cleanup_for=requirement.cleanup_for_step_ids,
+            best_effort=requirement.best_effort,
+        )
+        for requirement in plan.cleanup_requirements
+    ]
+    request_budget = sum(item.cleanup_retry_budget + 1 for item in cleanup)
+    return normalize_flow_spec_v2(
+        converted.model_copy(
+            update={
+                "cleanup": cleanup,
+                "run_policy": FlowSpecRunPolicy(cleanup_request_budget=request_budget),
+                "plan_metadata": FlowSpecPlanMetadata(
+                    context_fingerprint=plan.context_fingerprint,
+                    plan_fingerprint=plan.plan_fingerprint,
+                    compiler_version=compiler_version,
+                ),
+            }
+        )
     )
 
 
@@ -3221,23 +3274,6 @@ def _flow_spec_diagnostics(
     return diagnostics
 
 
-def _cleanup_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
-    if not plan.cleanup_requirements:
-        return []
-    return [
-        _diagnostic(
-            "CLEANUP_RUNTIME_DEFERRED",
-            "warning",
-            "Cleanup Requirement 保留在 Plan Snapshot;运行时编译在 S54 实现",
-            "$.cleanup_requirements",
-            stage="compile_variables_data",
-            evidence_refs=sorted(
-                {ref for item in plan.cleanup_requirements for ref in item.evidence_refs}
-            ),
-        )
-    ]
-
-
 def _blocked_compilation(
     plan: IntegrationPlan,
     diagnostics: list[PlanDiagnostic],
@@ -3251,6 +3287,8 @@ def _blocked_compilation(
 
 
 def _compiler_version(plan: IntegrationPlan) -> str:
+    if plan.cleanup_requirements:
+        return INTEGRATION_PLAN_COMPILER_VERSION_V3
     return (
         INTEGRATION_PLAN_COMPILER_VERSION_V2
         if plan.schema_version == INTEGRATION_PLAN_SCHEMA_VERSION_V2

@@ -20,6 +20,7 @@ from app.domain.flow_spec import (
     FlowSpecOperation,
     FlowSpecValidationResult,
     assess_flow_spec_compatibility,
+    diff_flow_spec_payloads,
     diff_flow_specs,
     flow_spec_fingerprint,
     flow_spec_to_workflow_definition,
@@ -28,6 +29,16 @@ from app.domain.flow_spec import (
     workflow_definition_to_flow_spec,
 )
 from app.domain.flow_spec import FlowSpecService as PortableService
+from app.domain.flow_spec_v2 import (
+    FlowSpecV2,
+    assess_flow_spec_v2_compatibility,
+    diff_flow_specs_v2,
+    flow_spec_v2_fingerprint,
+    flow_spec_v2_to_workflow_definition,
+    normalize_flow_spec_v2,
+    validate_flow_spec_v2,
+    workflow_definition_to_flow_spec_v2,
+)
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlanCompilation,
@@ -52,7 +63,7 @@ from app.services.workflows import WorkflowService
 
 @dataclass(frozen=True, slots=True)
 class FlowSpecPipeline:
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     fingerprint: str
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
@@ -196,7 +207,9 @@ class FlowSpecService:
         _require_pipeline_exportable(pipeline)
         return FlowSpecExport(workflow=workflow, version=version, pipeline=pipeline)
 
-    async def validate(self, *, actor: User, project_id: UUID, spec: FlowSpec) -> FlowSpecPipeline:
+    async def validate(
+        self, *, actor: User, project_id: UUID, spec: FlowSpec | FlowSpecV2
+    ) -> FlowSpecPipeline:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         pipeline = self._pipeline(spec)
         return pipeline
@@ -206,8 +219,8 @@ class FlowSpecService:
         *,
         actor: User,
         project_id: UUID,
-        before: FlowSpec | None,
-        after: FlowSpec,
+        before: FlowSpec | FlowSpecV2 | None,
+        after: FlowSpec | FlowSpecV2,
     ) -> FlowSpecDiff:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         after_pipeline = self._pipeline(after)
@@ -217,7 +230,7 @@ class FlowSpecService:
                 before_pipeline.fingerprint if before_pipeline is not None else None
             ),
             after_fingerprint=after_pipeline.fingerprint,
-            changes=diff_flow_specs(
+            changes=_diff_documents(
                 before_pipeline.spec if before_pipeline is not None else None,
                 after_pipeline.spec,
             ),
@@ -490,7 +503,7 @@ class FlowSpecService:
         return FlowSpecVisualProposal(
             view=view,
             existing_definition=_target_definition_from_snapshot(snapshot),
-            proposed_definition=flow_spec_to_workflow_definition(
+            proposed_definition=_document_to_workflow_definition(
                 view.pipeline.spec,
                 operation_mappings=mappings.operation_ids,
                 service_keys=mappings.service_keys,
@@ -585,7 +598,7 @@ class FlowSpecService:
                 name=pipeline.spec.name,
                 description=pipeline.spec.description,
                 folder_id=None,
-                definition=flow_spec_to_workflow_definition(
+                definition=_document_to_workflow_definition(
                     pipeline.spec,
                     operation_mappings=mappings.operation_ids,
                     service_keys=mappings.service_keys,
@@ -630,7 +643,7 @@ class FlowSpecService:
                 description=pipeline.spec.description,
                 folder_id=None,
                 change_folder=False,
-                definition=flow_spec_to_workflow_definition(
+                definition=_document_to_workflow_definition(
                     pipeline.spec,
                     operation_mappings=mappings.operation_ids,
                     service_keys=mappings.service_keys,
@@ -655,8 +668,16 @@ class FlowSpecService:
         await self._session.refresh(workflow)
         return self._view(change_set, item), workflow
 
-    def _pipeline(self, spec: FlowSpec) -> FlowSpecPipeline:
+    def _pipeline(self, spec: FlowSpec | FlowSpecV2) -> FlowSpecPipeline:
         try:
+            if isinstance(spec, FlowSpecV2):
+                normalized_v2 = normalize_flow_spec_v2(spec)
+                return FlowSpecPipeline(
+                    spec=normalized_v2,
+                    fingerprint=flow_spec_v2_fingerprint(normalized_v2),
+                    validation=validate_flow_spec_v2(normalized_v2),
+                    compatibility=assess_flow_spec_v2_compatibility(normalized_v2),
+                )
             normalized = normalize_flow_spec(spec)
         except (TypeError, ValueError, ValidationError) as error:
             raise AppError(
@@ -677,7 +698,7 @@ class FlowSpecService:
         self,
         *,
         project_id: UUID,
-        spec: FlowSpec,
+        spec: FlowSpec | FlowSpecV2,
         service_mappings: Mapping[str, UUID],
         operation_mappings: Mapping[str, UUID],
         operation_version_mappings: Mapping[str, int],
@@ -889,7 +910,7 @@ class FlowSpecService:
         self,
         *,
         project_id: UUID,
-        spec: FlowSpec,
+        spec: FlowSpec | FlowSpecV2,
         snapshot: Mapping[str, Any],
     ) -> ResolvedFlowSpecMappings:
         service_mappings, operation_mappings, operation_version_mappings = _mapping_ids(snapshot)
@@ -950,7 +971,7 @@ class FlowSpecService:
             change_set=change_set,
             item=item,
             pipeline=pipeline,
-            diff=diff_flow_specs(before, pipeline.spec),
+            diff=_diff_documents(before, pipeline.spec),
         )
 
     def _target_spec(self, project_id: UUID, workflow: Workflow) -> FlowSpec:
@@ -970,7 +991,7 @@ class FlowSpecService:
         name: str,
         description: str,
         evidence: list[str],
-    ) -> FlowSpec:
+    ) -> FlowSpec | FlowSpecV2:
         operation_refs: dict[str, str] = {}
         targets: dict[str, FlowSpecNodeTarget] = {}
         services: dict[str, PortableService] = {}
@@ -1014,7 +1035,12 @@ class FlowSpecService:
                     name=service.name,
                     service_type=service.service_type,
                 )
-        return workflow_definition_to_flow_spec(
+        converter = (
+            workflow_definition_to_flow_spec_v2
+            if any(node.phase.value == "cleanup" for node in definition.nodes)
+            else workflow_definition_to_flow_spec
+        )
+        return converter(
             definition,
             project_id=project_id,
             name=name,
@@ -1338,11 +1364,11 @@ def _mapping_error(*, code: str, message: str, path: str) -> AppError:
     )
 
 
-def _spec_json(spec: FlowSpec) -> dict[str, JsonValue]:
+def _spec_json(spec: FlowSpec | FlowSpecV2) -> dict[str, JsonValue]:
     return cast(dict[str, JsonValue], spec.model_dump(mode="json", by_alias=True))
 
 
-def _spec_from_item(item: AIChangeItem) -> FlowSpec:
+def _spec_from_item(item: AIChangeItem) -> FlowSpec | FlowSpecV2:
     raw = item.proposed_content.get("flow_spec")
     if not isinstance(raw, dict):
         raise AppError(
@@ -1351,6 +1377,8 @@ def _spec_from_item(item: AIChangeItem) -> FlowSpec:
             status_code=409,
         )
     try:
+        if raw.get("schema_version") == "flowtest-flow-spec-v2":
+            return FlowSpecV2.model_validate(raw)
         return FlowSpec.model_validate(raw)
     except (TypeError, ValueError, ValidationError) as error:
         raise AppError(
@@ -1358,6 +1386,40 @@ def _spec_from_item(item: AIChangeItem) -> FlowSpec:
             message="FlowSpec 变更项内容无法解析",
             status_code=409,
         ) from error
+
+
+def _document_to_workflow_definition(
+    spec: FlowSpec | FlowSpecV2,
+    *,
+    operation_mappings: Mapping[str, UUID],
+    service_keys: Mapping[str, str],
+    operation_versions: Mapping[str, int],
+) -> WorkflowDefinition:
+    if isinstance(spec, FlowSpecV2):
+        return flow_spec_v2_to_workflow_definition(
+            spec,
+            operation_mappings=operation_mappings,
+            service_keys=service_keys,
+            operation_versions=operation_versions,
+        )
+    return flow_spec_to_workflow_definition(
+        spec,
+        operation_mappings=operation_mappings,
+        service_keys=service_keys,
+        operation_versions=operation_versions,
+    )
+
+
+def _diff_documents(
+    before: FlowSpec | FlowSpecV2 | None,
+    after: FlowSpec | FlowSpecV2,
+) -> tuple[FlowSpecDiffItem, ...]:
+    if isinstance(before, FlowSpecV2) and isinstance(after, FlowSpecV2):
+        return diff_flow_specs_v2(before, after)
+    if (before is None or isinstance(before, FlowSpec)) and isinstance(after, FlowSpec):
+        return diff_flow_specs(before, after)
+    before_payload = _spec_json(before) if before is not None else None
+    return diff_flow_spec_payloads(before_payload, _spec_json(after))
 
 
 def _snapshot_target_spec(snapshot: dict[str, Any]) -> FlowSpec | None:

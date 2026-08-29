@@ -18,7 +18,7 @@ from app.domain.durable_execution import (
     json_object,
     request_hash,
 )
-from app.engine.contracts import NodeStatus, NodeType
+from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
 from app.engine.scheduler import NodeRunRecord
 from app.models.access import User
@@ -257,6 +257,8 @@ class DurableExecutionService:
             node_id=payload.node_id,
             node_type=payload.node_type.value,
             node_name=payload.name,
+            phase=payload.phase.value,
+            best_effort=payload.best_effort,
             attempt=payload.attempts,
             input_hash=payload.input_hash,
             status=payload.status.value,
@@ -282,6 +284,7 @@ class DurableExecutionService:
                 "execution_id": str(payload.execution_id),
                 "node_id": payload.node_id,
                 "status": payload.status.value,
+                "phase": payload.phase.value,
                 "attempt": payload.attempts,
                 "output_digest": output_digest,
                 "fencing_token": payload.fencing_token,
@@ -389,6 +392,8 @@ def checkpoint_to_node_record(checkpoint: ExecutionCheckpoint) -> NodeRunRecord:
         started_at=_as_utc(checkpoint.started_at),
         completed_at=_required_utc(checkpoint.finished_at),
         input_hash=checkpoint.input_hash,
+        phase=WorkflowPhase(checkpoint.phase),
+        best_effort=checkpoint.best_effort,
     )
 
 
@@ -408,6 +413,8 @@ def checkpoint_to_runner_resume(checkpoint: ExecutionCheckpoint) -> RunnerCheckp
         completed_at=record.completed_at,
         input_hash=record.input_hash or checkpoint.input_hash,
         extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
+        phase=record.phase,
+        best_effort=record.best_effort,
     )
 
 

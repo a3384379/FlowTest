@@ -152,6 +152,9 @@ class RemoteWorkflowExecutor:
                 for record in result.records
             ),
             context=cast(dict[str, JsonValue], redact(result.context)),
+            main_status=result.main_status,
+            cleanup_status=result.cleanup_status,
+            cleanup_report=result.cleanup_report,
         )
 
 
@@ -169,4 +172,6 @@ def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:
         started_at=checkpoint.started_at,
         completed_at=checkpoint.completed_at,
         input_hash=checkpoint.input_hash,
+        phase=checkpoint.phase,
+        best_effort=checkpoint.best_effort,
     )

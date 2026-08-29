@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -76,6 +77,7 @@ class ExecutionCheckpoint(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint("attempt >= 1", name="execution_checkpoint_attempt"),
         CheckConstraint("fencing_token >= 0", name="execution_checkpoint_fence"),
+        CheckConstraint("phase IN ('main', 'cleanup')", name="execution_checkpoint_phase"),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -87,6 +89,8 @@ class ExecutionCheckpoint(UuidPrimaryKeyMixin, TimestampMixin, Base):
     node_id: Mapped[str] = mapped_column(String(128))
     node_type: Mapped[str] = mapped_column(String(32))
     node_name: Mapped[str] = mapped_column(String(200))
+    phase: Mapped[str] = mapped_column(String(16), default="main", server_default="main")
+    best_effort: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     attempt: Mapped[int] = mapped_column(Integer)
     input_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), index=True)

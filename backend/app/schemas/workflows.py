@@ -2,9 +2,9 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowRunStatus
+from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowPhase, WorkflowRunStatus
 
 RuntimeVariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
@@ -71,6 +71,21 @@ class WorkflowExecuteRequest(BaseModel):
     runtime_headers: dict[str, str] = Field(default_factory=dict)
 
 
+class WorkflowCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = False
+    reason: str | None = Field(default=None, min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_force_reason(self) -> "WorkflowCancelRequest":
+        if self.force and (self.reason is None or not self.reason.strip()):
+            raise ValueError("强制取消必须提供审计原因")
+        if not self.force and self.reason is not None:
+            raise ValueError("普通取消不接受强制取消原因")
+        return self
+
+
 class WorkflowDebugRequest(WorkflowExecuteRequest):
     breakpoint_node_id: str = Field(min_length=1, max_length=128)
 
@@ -87,11 +102,16 @@ class WorkflowExecutionResponse(BaseModel):
     parent_execution_id: UUID | None
     dataset_row_index: int | None
     status: WorkflowRunStatus
+    main_status: WorkflowRunStatus | None
+    cleanup_status: WorkflowRunStatus | None
+    cleanup_report: dict[str, JsonValue]
     snapshot: dict[str, JsonValue]
     context: dict[str, JsonValue]
     error_code: str | None
     error_message: str | None
     cancel_requested_at: datetime | None
+    force_cancel_requested_at: datetime | None
+    force_cancel_reason: str | None
     started_at: datetime
     completed_at: datetime | None
 
@@ -104,6 +124,8 @@ class WorkflowNodeExecutionResponse(BaseModel):
     node_id: str
     node_type: str
     name: str
+    phase: WorkflowPhase
+    best_effort: bool
     status: NodeStatus
     attempts: int
     output: JsonValue

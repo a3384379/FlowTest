@@ -11,6 +11,7 @@ from pydantic import JsonValue
 
 from app.engine.contracts import (
     ApiNodeConfig,
+    CleanupRunWhen,
     DelayNodeConfig,
     NodeStatus,
     NodeType,
@@ -18,6 +19,7 @@ from app.engine.contracts import (
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowPhase,
     WorkflowRunStatus,
 )
 from app.engine.results import NodeObservation, NodeResult, normalize_node_result
@@ -48,6 +50,25 @@ class NodeRunRecord:
     started_at: datetime | None
     completed_at: datetime
     input_hash: str | None = None
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupWarning:
+    code: str
+    node_id: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupReport:
+    activated_node_ids: tuple[str, ...]
+    skipped_node_ids: tuple[str, ...]
+    required_failures: tuple[str, ...]
+    best_effort_failures: tuple[str, ...]
+    warnings: tuple[CleanupWarning, ...]
+    force_cancel_skipped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +76,9 @@ class WorkflowRunResult:
     status: WorkflowRunStatus
     records: tuple[NodeRunRecord, ...]
     context: dict[str, JsonValue]
+    main_status: WorkflowRunStatus | None = None
+    cleanup_status: WorkflowRunStatus | None = None
+    cleanup_report: CleanupReport | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +94,8 @@ class NodeStatusUpdate:
     occurred_at: datetime
     input_hash: str | None = None
     context_snapshot: dict[str, JsonValue] | None = None
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
 
 
 NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
@@ -170,16 +196,34 @@ class NodeExecutor(Protocol):
 class CancellationToken:
     def __init__(self) -> None:
         self._event = asyncio.Event()
+        self._force_event = asyncio.Event()
 
-    def cancel(self) -> None:
+    def cancel(self, *, force: bool = False) -> None:
         self._event.set()
+        if force:
+            self._force_event.set()
 
     @property
     def cancelled(self) -> bool:
         return self._event.is_set()
 
-    async def wait(self) -> None:
-        await self._event.wait()
+    @property
+    def force_cancelled(self) -> bool:
+        return self._force_event.is_set()
+
+    async def wait(self, *, force_only: bool = False) -> None:
+        await (self._force_event if force_only else self._event).wait()
+
+
+@dataclass(slots=True)
+class _RequestBudget:
+    remaining: int
+
+    def claim(self) -> bool:
+        if self.remaining <= 0:
+            return False
+        self.remaining -= 1
+        return True
 
 
 class WorkflowScheduler:
@@ -200,8 +244,129 @@ class WorkflowScheduler:
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
-        nodes = {node.id: node for node in definition.nodes}
-        incoming = _incoming_edges(definition)
+        main_nodes = tuple(node for node in definition.nodes if node.phase is WorkflowPhase.MAIN)
+        main_ids = frozenset(node.id for node in main_nodes)
+        main_edges = tuple(
+            edge for edge in definition.edges if edge.source in main_ids and edge.target in main_ids
+        )
+        freeze_main = not reset_retry_budget and _phase_checkpoint_complete(
+            main_nodes, resume_records
+        )
+        main_resume_records = tuple(
+            record for record in resume_records if record.node_id in main_ids
+        )
+        main = await self._run_phase(
+            definition,
+            nodes_for_phase=main_nodes,
+            edges_for_phase=main_edges,
+            context=run_context,
+            cancellation=token,
+            on_node_status=on_node_status,
+            selected_node_ids=selected_node_ids,
+            resume_records=main_resume_records,
+            resume_attempts=resume_attempts,
+            reset_retry_budget=reset_retry_budget,
+            preserve_terminal_records=freeze_main,
+        )
+        cleanup_nodes = tuple(
+            node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP
+        )
+        if not cleanup_nodes or selected_node_ids is not None:
+            return WorkflowRunResult(
+                status=main.status,
+                records=main.records,
+                context=main.context,
+                main_status=main.status,
+            )
+        return await self._run_cleanup(
+            definition,
+            main=main,
+            cleanup_nodes=cleanup_nodes,
+            context=run_context,
+            cancellation=token,
+            on_node_status=on_node_status,
+            resume_records=resume_records,
+            resume_attempts=resume_attempts,
+            reset_retry_budget=reset_retry_budget,
+        )
+
+    async def _run_cleanup(
+        self,
+        definition: WorkflowDefinition,
+        *,
+        main: WorkflowRunResult,
+        cleanup_nodes: tuple[WorkflowNode, ...],
+        context: ExecutionContext,
+        cancellation: CancellationToken,
+        on_node_status: NodeStatusCallback | None,
+        resume_records: tuple[NodeRunRecord, ...],
+        resume_attempts: dict[str, int] | None,
+        reset_retry_budget: bool,
+    ) -> WorkflowRunResult:
+        activated = _activated_cleanup_nodes(cleanup_nodes, main)
+        activated_ids = frozenset(node.id for node in activated)
+        if cancellation.force_cancelled and definition.run_policy.force_cancel_skips_cleanup:
+            cleanup_records = tuple(
+                _record(
+                    node,
+                    NodeStatus.CANCELLED,
+                    error_code="FORCE_CANCEL_SKIPPED_CLEANUP",
+                    error_message="强制取消已显式跳过清理",
+                )
+                for node in cleanup_nodes
+            )
+            report = _cleanup_report(cleanup_records, activated_ids, force_skipped=True)
+            return _combined_result(definition, main, cleanup_records, context, report)
+        cleanup_edges = _cleanup_edges(definition, activated)
+        cleanup_ids = frozenset(node.id for node in cleanup_nodes)
+        request_budget = definition.run_policy.cleanup_request_budget or sum(
+            node.cleanup_retry_budget + 1 for node in activated
+        )
+        cleanup = await self._run_phase(
+            definition,
+            nodes_for_phase=cleanup_nodes,
+            edges_for_phase=cleanup_edges,
+            context=context,
+            cancellation=cancellation,
+            on_node_status=on_node_status,
+            selected_node_ids=activated_ids,
+            resume_records=tuple(
+                record for record in resume_records if record.node_id in cleanup_ids
+            ),
+            resume_attempts=resume_attempts,
+            reset_retry_budget=reset_retry_budget,
+            preserve_terminal_records=False,
+            cancellation_force_only=True,
+            request_budget=_RequestBudget(request_budget),
+            excluded_code="CLEANUP_NOT_ACTIVATED",
+            excluded_message="清理条件或目标未激活",
+        )
+        report = _cleanup_report(cleanup.records, activated_ids)
+        return _combined_result(definition, main, cleanup.records, context, report)
+
+    async def _run_phase(
+        self,
+        definition: WorkflowDefinition,
+        *,
+        nodes_for_phase: tuple[WorkflowNode, ...],
+        edges_for_phase: tuple[WorkflowEdge, ...],
+        context: ExecutionContext,
+        cancellation: CancellationToken,
+        on_node_status: NodeStatusCallback | None,
+        selected_node_ids: frozenset[str] | None,
+        resume_records: tuple[NodeRunRecord, ...],
+        resume_attempts: dict[str, int] | None,
+        reset_retry_budget: bool,
+        preserve_terminal_records: bool,
+        cancellation_force_only: bool = False,
+        request_budget: _RequestBudget | None = None,
+        excluded_code: str = "DEBUG_SCOPE_EXCLUDED",
+        excluded_message: str = "节点不在本次调试范围内",
+    ) -> WorkflowRunResult:
+        run_context = context
+        token = cancellation
+        nodes = {node.id: node for node in nodes_for_phase}
+        incoming = _incoming_edges(nodes_for_phase, edges_for_phase)
         statuses = dict.fromkeys(nodes, NodeStatus.PENDING)
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
@@ -209,15 +374,29 @@ class WorkflowScheduler:
         attempt_offsets = resume_attempts or {}
 
         if selected_node_ids is not None:
-            _exclude_unselected(nodes, statuses, records, selected_node_ids)
-        _restore_records(nodes, statuses, records, run_context, resume_records)
+            _exclude_unselected(
+                nodes,
+                statuses,
+                records,
+                selected_node_ids,
+                error_code=excluded_code,
+                error_message=excluded_message,
+            )
+        _restore_records(
+            nodes,
+            statuses,
+            records,
+            run_context,
+            resume_records,
+            preserve_terminal=preserve_terminal_records,
+        )
 
         await _notify_status_changes(
             nodes, statuses, records, notified, run_context, on_node_status
         )
 
         while len(records) < len(nodes):
-            if token.cancelled:
+            if _phase_cancelled(token, force_only=cancellation_force_only):
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
                 await _notify_status_changes(
@@ -237,6 +416,7 @@ class WorkflowScheduler:
                 self._run_node,
                 attempt_offsets,
                 reset_retry_budget,
+                request_budget,
             )
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
@@ -249,7 +429,7 @@ class WorkflowScheduler:
                     )
                 break
 
-            cancellation_wait = asyncio.create_task(token.wait())
+            cancellation_wait = asyncio.create_task(token.wait(force_only=cancellation_force_only))
             done, _pending = await asyncio.wait(
                 {*active, cancellation_wait}, return_when=asyncio.FIRST_COMPLETED
             )
@@ -287,9 +467,23 @@ class WorkflowScheduler:
                 )
                 break
 
-        ordered = tuple(records[node.id] for node in definition.nodes)
+        ordered = tuple(records[node.id] for node in nodes_for_phase)
         status = _workflow_status(ordered)
-        return WorkflowRunResult(status=status, records=ordered, context=run_context.snapshot())
+        return WorkflowRunResult(
+            status=status,
+            records=ordered,
+            context=run_context.snapshot(),
+            main_status=(
+                status
+                if nodes_for_phase and nodes_for_phase[0].phase is WorkflowPhase.MAIN
+                else None
+            ),
+            cleanup_status=(
+                status
+                if nodes_for_phase and nodes_for_phase[0].phase is WorkflowPhase.CLEANUP
+                else None
+            ),
+        )
 
     async def _run_node(
         self,
@@ -298,6 +492,7 @@ class WorkflowScheduler:
         default_timeout_seconds: int,
         initial_attempts: int = 0,
         reset_retry_budget: bool = False,
+        request_budget: _RequestBudget | None = None,
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
         input_hash = _input_hash(node.id, context.snapshot())
@@ -307,6 +502,17 @@ class WorkflowScheduler:
         while True:
             attempts += 1
             budget_attempts += 1
+            if request_budget is not None and not request_budget.claim():
+                return _failed_record(
+                    node,
+                    attempts,
+                    started_at,
+                    NodeExecutionError(
+                        code="CLEANUP_REQUEST_BUDGET_EXHAUSTED",
+                        message="清理请求预算已耗尽",
+                    ),
+                    input_hash=input_hash,
+                )
             failure: NodeExecutionError
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
@@ -370,12 +576,166 @@ class _ExecutionPolicy:
     retry_delay_seconds: float
 
 
+def _phase_checkpoint_complete(
+    nodes: tuple[WorkflowNode, ...], records: tuple[NodeRunRecord, ...]
+) -> bool:
+    by_id = {record.node_id: record for record in records}
+    return bool(nodes) and all(
+        node.id in by_id and by_id[node.id].status.is_terminal for node in nodes
+    )
+
+
+def _phase_cancelled(token: CancellationToken, *, force_only: bool) -> bool:
+    return token.force_cancelled if force_only else token.cancelled
+
+
+def _activated_cleanup_nodes(
+    nodes: tuple[WorkflowNode, ...], main: WorkflowRunResult
+) -> tuple[WorkflowNode, ...]:
+    records = {record.node_id: record for record in main.records}
+    outcome = {
+        WorkflowRunStatus.PASSED: CleanupRunWhen.SUCCESS,
+        WorkflowRunStatus.FAILED: CleanupRunWhen.FAILURE,
+        WorkflowRunStatus.CANCELLED: CleanupRunWhen.CANCEL,
+    }[main.status]
+    return tuple(
+        node
+        for node in nodes
+        if node.run_when in {CleanupRunWhen.ALWAYS, outcome}
+        and (
+            not node.cleanup_for
+            or any(
+                target in records and records[target].attempts > 0 for target in node.cleanup_for
+            )
+        )
+    )
+
+
+def _cleanup_edges(
+    definition: WorkflowDefinition, nodes: tuple[WorkflowNode, ...]
+) -> tuple[WorkflowEdge, ...]:
+    ranks = _main_node_ranks(definition)
+    cleanup_ranks = {
+        node.id: max((ranks[target] for target in node.cleanup_for), default=0) for node in nodes
+    }
+    ordered_pairs = sorted(
+        (source.id, target.id)
+        for source in nodes
+        for target in nodes
+        if cleanup_ranks[source.id] > cleanup_ranks[target.id]
+    )
+    return tuple(
+        WorkflowEdge(id=f"cleanup-order-{index}", source=source, target=target)
+        for index, (source, target) in enumerate(ordered_pairs, start=1)
+    )
+
+
+def _main_node_ranks(definition: WorkflowDefinition) -> dict[str, int]:
+    main_ids = {node.id for node in definition.nodes if node.phase is WorkflowPhase.MAIN}
+    ranks = dict.fromkeys(main_ids, 0)
+    edges = [
+        edge for edge in definition.edges if edge.source in main_ids and edge.target in main_ids
+    ]
+    for _ in range(len(main_ids)):
+        changed = False
+        for edge in edges:
+            candidate = ranks[edge.source] + 1
+            if candidate > ranks[edge.target]:
+                ranks[edge.target] = candidate
+                changed = True
+        if not changed:
+            break
+    return ranks
+
+
+def _cleanup_report(
+    records: tuple[NodeRunRecord, ...],
+    activated_ids: frozenset[str],
+    *,
+    force_skipped: bool = False,
+) -> CleanupReport:
+    failures = tuple(
+        record
+        for record in records
+        if record.node_id in activated_ids and _cleanup_record_failed(record)
+    )
+    best_effort = tuple(record.node_id for record in failures if record.best_effort)
+    required = tuple(record.node_id for record in failures if not record.best_effort)
+    warnings = tuple(
+        CleanupWarning(
+            code="BEST_EFFORT_CLEANUP_FAILED",
+            node_id=record.node_id,
+            message=record.error_message or "Best-effort 清理失败",
+        )
+        for record in failures
+        if record.best_effort
+    )
+    return CleanupReport(
+        activated_node_ids=tuple(sorted(activated_ids)),
+        skipped_node_ids=tuple(
+            record.node_id for record in records if record.node_id not in activated_ids
+        ),
+        required_failures=required,
+        best_effort_failures=best_effort,
+        warnings=warnings,
+        force_cancel_skipped=force_skipped,
+    )
+
+
+def _cleanup_record_failed(record: NodeRunRecord) -> bool:
+    return record.status in {NodeStatus.FAILED, NodeStatus.CANCELLED} or (
+        record.status is NodeStatus.SKIPPED and record.error_code != "CLEANUP_NOT_ACTIVATED"
+    )
+
+
+def _combined_result(
+    definition: WorkflowDefinition,
+    main: WorkflowRunResult,
+    cleanup_records: tuple[NodeRunRecord, ...],
+    context: ExecutionContext,
+    report: CleanupReport,
+) -> WorkflowRunResult:
+    records = {record.node_id: record for record in (*main.records, *cleanup_records)}
+    cleanup_status = _cleanup_run_status(cleanup_records, report)
+    status = main.status
+    if main.status is WorkflowRunStatus.PASSED and report.required_failures:
+        status = WorkflowRunStatus.FAILED
+    return WorkflowRunResult(
+        status=status,
+        records=tuple(records[node.id] for node in definition.nodes),
+        context=context.snapshot(),
+        main_status=main.status,
+        cleanup_status=cleanup_status,
+        cleanup_report=report,
+    )
+
+
+def _cleanup_run_status(
+    records: tuple[NodeRunRecord, ...], report: CleanupReport
+) -> WorkflowRunStatus:
+    if report.force_cancel_skipped:
+        return WorkflowRunStatus.CANCELLED
+    if report.required_failures or report.best_effort_failures:
+        return WorkflowRunStatus.FAILED
+    if any(record.status is NodeStatus.CANCELLED for record in records):
+        return WorkflowRunStatus.CANCELLED
+    return WorkflowRunStatus.PASSED
+
+
 def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _ExecutionPolicy:
     if node.effective_type is NodeType.API:
         config = ApiNodeConfig.model_validate(node.effective_config)
         return _ExecutionPolicy(
-            timeout_seconds=config.timeout_seconds or default_timeout_seconds,
-            max_retries=config.max_retries,
+            timeout_seconds=(
+                node.cleanup_timeout_seconds
+                if node.phase is WorkflowPhase.CLEANUP
+                else config.timeout_seconds or default_timeout_seconds
+            ),
+            max_retries=(
+                node.cleanup_retry_budget
+                if node.phase is WorkflowPhase.CLEANUP
+                else config.max_retries
+            ),
             retry_on=frozenset(config.retry_on),
             retry_delay_seconds=config.retry_delay_seconds,
         )
@@ -402,9 +762,11 @@ class _EdgeState(StrEnum):
     BLOCKED = "blocked"
 
 
-def _incoming_edges(definition: WorkflowDefinition) -> dict[str, list[WorkflowEdge]]:
-    result: dict[str, list[WorkflowEdge]] = {node.id: [] for node in definition.nodes}
-    for edge in definition.edges:
+def _incoming_edges(
+    nodes: tuple[WorkflowNode, ...], edges: tuple[WorkflowEdge, ...]
+) -> dict[str, list[WorkflowEdge]]:
+    result: dict[str, list[WorkflowEdge]] = {node.id: [] for node in nodes}
+    for edge in edges:
         result[edge.target].append(edge)
     return result
 
@@ -449,10 +811,19 @@ def _schedule_ready(
     active: dict[asyncio.Task[NodeRunRecord], str],
     context: ExecutionContext,
     runner: Callable[
-        [WorkflowNode, ExecutionContext, int, int, bool], Coroutine[Any, Any, NodeRunRecord]
+        [
+            WorkflowNode,
+            ExecutionContext,
+            int,
+            int,
+            bool,
+            _RequestBudget | None,
+        ],
+        Coroutine[Any, Any, NodeRunRecord],
     ],
     attempt_offsets: dict[str, int],
     reset_retry_budget: bool,
+    request_budget: _RequestBudget | None,
 ) -> None:
     capacity = definition.settings.concurrency - len(active)
     if capacity <= 0:
@@ -474,6 +845,7 @@ def _schedule_ready(
                 definition.settings.default_timeout_seconds,
                 attempt_offsets.get(node.id, 0),
                 reset_retry_budget,
+                request_budget,
             )
         )
         active[task] = node.id
@@ -547,6 +919,9 @@ def _exclude_unselected(
     statuses: dict[str, NodeStatus],
     records: dict[str, NodeRunRecord],
     selected_node_ids: frozenset[str],
+    *,
+    error_code: str,
+    error_message: str,
 ) -> None:
     unknown = selected_node_ids - nodes.keys()
     if unknown:
@@ -558,8 +933,8 @@ def _exclude_unselected(
         records[node_id] = _record(
             node,
             NodeStatus.SKIPPED,
-            error_code="DEBUG_SCOPE_EXCLUDED",
-            error_message="节点不在本次调试范围内",
+            error_code=error_code,
+            error_message=error_message,
         )
 
 
@@ -569,12 +944,14 @@ def _restore_records(
     records: dict[str, NodeRunRecord],
     context: ExecutionContext,
     resume_records: tuple[NodeRunRecord, ...],
+    *,
+    preserve_terminal: bool,
 ) -> None:
     for record in resume_records:
         node = nodes.get(record.node_id)
         if node is None:
             raise ValueError(f"Resume checkpoint references unknown node: {record.node_id}")
-        if record.status not in {
+        if not preserve_terminal and record.status not in {
             NodeStatus.PASSED,
             NodeStatus.SKIPPED,
         }:
@@ -651,6 +1028,8 @@ def _record(
         started_at=started_at,
         completed_at=datetime.now(UTC),
         input_hash=input_hash,
+        phase=node.phase,
+        best_effort=node.best_effort,
     )
 
 
@@ -689,6 +1068,8 @@ async def _notify_status_changes(
                 occurred_at=record.completed_at if record else datetime.now(UTC),
                 input_hash=record.input_hash if record else None,
                 context_snapshot=context.snapshot(),
+                phase=nodes[node_id].phase,
+                best_effort=nodes[node_id].best_effort,
             )
         )
         notified[node_id] = status

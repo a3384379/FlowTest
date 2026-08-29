@@ -471,10 +471,12 @@ class RunnerFabricService:
         )
         runner.last_seen_at = datetime.now(UTC)
         await self._session.commit()
+        cancel_requested, force_cancel_requested = await self._cancel_state(task.execution_id)
         return RunnerLeaseAckResponse(
             task_status=task.status,
             expires_at=lease.expires_at,
-            cancel_requested=await self._cancel_requested(task.execution_id),
+            cancel_requested=cancel_requested,
+            force_cancel_requested=force_cancel_requested,
         )
 
     async def complete(
@@ -776,10 +778,12 @@ class RunnerFabricService:
         lease.expires_at = now + timedelta(seconds=pool.lease_timeout_seconds)
         lease.last_renewed_at = now
         runner.last_seen_at = now
+        cancel_requested, force_cancel_requested = await self._cancel_state(task.execution_id)
         acknowledgment = RunnerLeaseAckResponse(
             task_status=task.status,
             expires_at=lease.expires_at,
-            cancel_requested=await self._cancel_requested(task.execution_id),
+            cancel_requested=cancel_requested,
+            force_cancel_requested=force_cancel_requested,
         )
         return runner, lease, task, acknowledgment
 
@@ -842,9 +846,14 @@ class RunnerFabricService:
         runner.last_seen_at = now
         return lease
 
-    async def _cancel_requested(self, execution_id: UUID) -> bool:
+    async def _cancel_state(self, execution_id: UUID) -> tuple[bool, bool]:
         execution = await self._repository.get_execution(execution_id)
-        return execution is not None and execution.cancel_requested_at is not None
+        if execution is None:
+            return False, False
+        return (
+            execution.cancel_requested_at is not None,
+            execution.force_cancel_requested_at is not None,
+        )
 
     async def _resume_checkpoints(
         self, plan: WorkflowExecutionPlan

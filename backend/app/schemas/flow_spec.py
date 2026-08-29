@@ -10,6 +10,7 @@ from app.domain.flow_spec import (
     FlowSpecDiffItem,
     FlowSpecValidationResult,
 )
+from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
 from app.engine.contracts import WorkflowDefinition
 
@@ -17,13 +18,13 @@ from app.engine.contracts import WorkflowDefinition
 class FlowSpecValidateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
 
 
 class FlowSpecImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     workflow_id: UUID | None = None
     source_ref: str | None = Field(default=None, max_length=512)
     service_mappings: dict[str, UUID] = Field(default_factory=dict, max_length=500)
@@ -38,7 +39,7 @@ class FlowSpecExportResponse(BaseModel):
     version: int | None
     draft_revision: int | None
     fingerprint: str
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
 
@@ -47,7 +48,7 @@ class FlowSpecValidationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     fingerprint: str
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
 
@@ -55,8 +56,8 @@ class FlowSpecValidationResponse(BaseModel):
 class FlowSpecDiffRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    before: FlowSpec | None = None
-    after: FlowSpec
+    before: FlowSpec | FlowSpecV2 | None = None
+    after: FlowSpec | FlowSpecV2
 
 
 class FlowSpecDiffResponse(BaseModel):
@@ -90,7 +91,7 @@ class FlowSpecChangeSetResponse(BaseModel):
 
 
 class FlowSpecChangeSetDetailResponse(FlowSpecChangeSetResponse):
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
     diff: list[FlowSpecDiffItem]
@@ -151,5 +152,5 @@ class FlowSpecMcpProposalListResponse(BaseModel):
     page_size: int
 
 
-def flow_spec_payload(value: FlowSpec) -> dict[str, JsonValue]:
+def flow_spec_payload(value: FlowSpec | FlowSpecV2) -> dict[str, JsonValue]:
     return value.model_dump(mode="json", by_alias=True)

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
-from app.engine.contracts import NodeStatus, NodeType
+from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
 from app.runner.results import RunnerExecutionResult
 
@@ -147,6 +147,8 @@ class RunnerCheckpointResume(BaseModel):
     completed_at: datetime
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
 
 
 class RunnerCheckpointRequest(BaseModel):
@@ -168,6 +170,8 @@ class RunnerCheckpointRequest(BaseModel):
     extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
     snapshot_revision: int = Field(default=1, ge=1, le=1000000)
     fencing_token: int = Field(ge=0)
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
 
 
 class RunnerLeaseResponse(BaseModel):
@@ -204,6 +208,7 @@ class RunnerLeaseAckResponse(BaseModel):
     task_status: str
     expires_at: datetime | None = None
     cancel_requested: bool = False
+    force_cancel_requested: bool = False
 
 
 class RunnerTaskResponse(BaseModel):

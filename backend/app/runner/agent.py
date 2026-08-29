@@ -119,7 +119,9 @@ class RunnerAgent:
                             lease.lease_id, checkpoint
                         )
                     if acknowledgment.cancel_requested:
-                        cancellation.cancel()
+                        cancellation.cancel(
+                            force=bool(getattr(acknowledgment, "force_cancel_requested", False))
+                        )
 
                 result = await self._executor.execute(
                     plan,
@@ -170,7 +172,9 @@ class RunnerAgent:
                 lease.lease_id, lease.task.fencing_token
             )
             if acknowledgment.cancel_requested:
-                cancellation.cancel()
+                cancellation.cancel(
+                    force=bool(getattr(acknowledgment, "force_cancel_requested", False))
+                )
 
     async def _reap_tasks(self) -> None:
         completed = {task for task in self._tasks if task.done()}
@@ -273,6 +277,8 @@ def _checkpoint_payload(
         extracted_variables=cast(dict[str, JsonValue], redact(extracted)),
         snapshot_revision=1,
         fencing_token=lease.task.fencing_token,
+        phase=update.phase,
+        best_effort=update.best_effort,
     )
 
 

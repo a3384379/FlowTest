@@ -4,9 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
-from app.engine.contracts import NodeStatus, NodeType, WorkflowRunStatus
+from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase, WorkflowRunStatus
 from app.engine.results import NodeResult
-from app.engine.scheduler import NodeRunRecord, WorkflowRunResult
+from app.engine.scheduler import CleanupReport, NodeRunRecord, WorkflowRunResult
 
 
 class RunnerNodeRecord(BaseModel):
@@ -24,6 +24,8 @@ class RunnerNodeRecord(BaseModel):
     started_at: datetime | None
     completed_at: datetime
     input_hash: str | None = None
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
 
     @classmethod
     def from_domain(cls, record: NodeRunRecord) -> "RunnerNodeRecord":
@@ -40,6 +42,8 @@ class RunnerNodeRecord(BaseModel):
             started_at=record.started_at,
             completed_at=record.completed_at,
             input_hash=record.input_hash,
+            phase=record.phase,
+            best_effort=record.best_effort,
         )
 
     def to_domain(self) -> NodeRunRecord:
@@ -56,6 +60,8 @@ class RunnerNodeRecord(BaseModel):
             started_at=self.started_at,
             completed_at=self.completed_at,
             input_hash=self.input_hash,
+            phase=self.phase,
+            best_effort=self.best_effort,
         )
 
 
@@ -65,6 +71,9 @@ class RunnerWorkflowResult(BaseModel):
     status: WorkflowRunStatus
     records: tuple[RunnerNodeRecord, ...] = Field(max_length=2000)
     context: dict[str, JsonValue]
+    main_status: WorkflowRunStatus | None = None
+    cleanup_status: WorkflowRunStatus | None = None
+    cleanup_report: CleanupReport | None = None
 
     @model_validator(mode="after")
     def require_terminal_status(self) -> "RunnerWorkflowResult":
@@ -78,6 +87,9 @@ class RunnerWorkflowResult(BaseModel):
             status=result.status,
             records=tuple(RunnerNodeRecord.from_domain(record) for record in result.records),
             context=result.context,
+            main_status=result.main_status,
+            cleanup_status=result.cleanup_status,
+            cleanup_report=result.cleanup_report,
         )
 
     def to_domain(self) -> WorkflowRunResult:
@@ -85,6 +97,9 @@ class RunnerWorkflowResult(BaseModel):
             status=self.status,
             records=tuple(record.to_domain() for record in self.records),
             context=self.context,
+            main_status=self.main_status,
+            cleanup_status=self.cleanup_status,
+            cleanup_report=self.cleanup_report,
         )
 
 

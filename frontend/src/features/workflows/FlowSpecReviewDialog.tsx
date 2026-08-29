@@ -18,7 +18,7 @@ import {
 import { useState } from 'react'
 
 import { listRequestServices } from '../service-targets/service-target-service'
-import { apiErrorMessage, type ApiDefinition, type FlowSpec } from '../../lib/api'
+import { apiErrorMessage, type ApiDefinition, type FlowSpecDocument } from '../../lib/api'
 import {
   applyFlowSpec,
   exportFlowSpec,
@@ -39,7 +39,7 @@ type FlowSpecReviewDialogProps = {
 export type FlowSpecReviewSeed = {
   proposalId: string
   targetWorkflowId: string | null
-  spec: FlowSpec
+  spec: FlowSpecDocument
   serviceMappings: Record<string, string>
   operationMappings: Record<string, string>
   operationVersionMappings: Record<string, number>
@@ -241,7 +241,7 @@ function MappingReview({
   onOperationMapping,
   onOperationVersionMapping,
 }: {
-  spec: FlowSpec
+  spec: FlowSpecDocument
   services: Array<{ id: string; service_key: string; name: string; enabled: boolean }>
   apis: ApiDefinition[]
   serviceMappings: Record<string, string>
@@ -398,11 +398,11 @@ function ProposalReview({
   )
 }
 
-function safeFlowSpec(raw: string): FlowSpec | null {
+function safeFlowSpec(raw: string): FlowSpecDocument | null {
   if (!raw.trim()) return null
   try {
     const parsed: unknown = JSON.parse(raw)
-    return typeof parsed === 'object' && parsed !== null ? (parsed as FlowSpec) : null
+    return typeof parsed === 'object' && parsed !== null ? (parsed as FlowSpecDocument) : null
   } catch {
     return null
   }
@@ -412,13 +412,13 @@ function initialSpec(seed: FlowSpecReviewSeed | undefined): string {
   return seed ? JSON.stringify(seed.spec, null, 2) : ''
 }
 
-function requiredSpec(spec: FlowSpec | null): FlowSpec {
+function requiredSpec(spec: FlowSpecDocument | null): FlowSpecDocument {
   if (!spec) throw new Error('FlowSpec JSON 无法解析')
   return spec
 }
 
 function mappingsComplete(
-  spec: FlowSpec,
+  spec: FlowSpecDocument,
   serviceMappings: Record<string, string>,
   operationMappings: Record<string, string>,
 ): boolean {
