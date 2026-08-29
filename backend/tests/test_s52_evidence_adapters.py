@@ -2289,6 +2289,82 @@ class RequestMappingController {
     }
 
 
+def test_java_spring_poc_distinguishes_condition_specific_mappings() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://condition-mappings", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ConditionController.java",
+                        "content": """
+@RestController
+@RequestMapping("/orders")
+class ConditionController {
+    @GetMapping(params = "view=summary")
+    OrderSummaryDto summary() {
+        return summaryService.load();
+    }
+
+    @GetMapping(
+        params = "view=detail",
+        headers = "X-FlowTest-View=detail"
+    )
+    OrderDetailDto detail() {
+        return detailService.load();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderSummaryDto.java",
+                        "content": """
+class OrderSummaryDto {
+    private String summary;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDetailDto.java",
+                        "content": """
+class OrderDetailDto {
+    private String detail;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    operation_by_handler = {claim.handler: claim.operation_ref for claim in routes}
+    calls = {
+        claim.callee_ref: claim.operation_ref
+        for claim in evidence.claims
+        if claim.kind == "service_call"
+    }
+    fields = {
+        claim.field_name: claim.operation_ref
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    assert {(claim.method, claim.path) for claim in routes} == {("GET", "/orders")}
+    assert set(operation_by_handler) == {"summary", "detail"}
+    assert len(set(operation_by_handler.values())) == 2
+    assert calls == {
+        "java://summaryService.load": operation_by_handler["summary"],
+        "java://detailService.load": operation_by_handler["detail"],
+    }
+    assert fields == {
+        "summary": operation_by_handler["summary"],
+        "detail": operation_by_handler["detail"],
+    }
+    assert all("view=" not in operation_ref for operation_ref in operation_by_handler.values())
+
+
 def test_java_spring_poc_intersects_class_and_method_mapping_methods() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -2359,9 +2435,8 @@ class AnyMethodController {
     assert {(claim.method, claim.path) for claim in routes} == {
         (method, "/api/orders") for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
     }
-    assert {claim.operation_ref for claim in calls} == {
-        f"operation://{method}/api/orders" for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
-    }
+    assert {claim.operation_ref for claim in calls} == {claim.operation_ref for claim in routes}
+    assert all("#conditions-" in claim.operation_ref for claim in routes)
 
 
 def test_java_spring_poc_parses_statically_imported_request_method_constants() -> None:

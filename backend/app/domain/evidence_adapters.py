@@ -1999,6 +1999,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
     )
     base_paths = _mapping_paths(base_arguments) if base_matches else [""]
     base_methods = _mapping_http_methods(base_matches[-1], base_arguments) if base_matches else None
+    base_conditions = _mapping_conditions(base_arguments) if base_matches else []
     controller = declaration.group("name")
     return [
         route
@@ -2016,6 +2017,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
             match,
             base_paths,
             base_methods,
+            base_conditions,
             controller,
         )
     ]
@@ -2105,6 +2107,7 @@ def _routes_after_mapping(
     mapping: re.Match[str],
     base_paths: list[str],
     base_methods: list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
+    base_conditions: list[str],
     controller: str,
 ) -> list[_JavaRoute]:
     mapping_arguments, mapping_end = _java_annotation_arguments_and_end(
@@ -2128,6 +2131,7 @@ def _routes_after_mapping(
     methods = _mapping_http_methods(mapping, mapping_arguments)
     if base_methods is not None:
         methods = [method for method in methods if method in base_methods]
+    conditions = [*base_conditions, *_mapping_conditions(mapping_arguments)]
     body_start = mapping_end + signature.end() - 1
     body_end = _matching_brace(file.content, body_start)
     handler = signature.group("handler")
@@ -2135,7 +2139,7 @@ def _routes_after_mapping(
         _JavaRoute(
             method=method,
             path=full_path,
-            operation_ref=f"operation://{method}{full_path}",
+            operation_ref=_java_operation_ref(method, full_path, conditions),
             controller_ref=f"java://{controller}",
             handler=handler,
             return_type=following[signature.start("return") : signature.end("return")],
@@ -2187,6 +2191,45 @@ def _mapping_http_methods(
         cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
         for method in dict.fromkeys(methods)
     ]
+
+
+def _mapping_conditions(arguments: str) -> list[str]:
+    content = (
+        arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    )
+    masked_content = _mask_java_non_code(content)
+    conditions: list[str] = []
+    for name in ("params", "headers", "consumes", "produces"):
+        assignment = re.search(rf"\b{name}\s*=", masked_content)
+        if assignment is None:
+            continue
+        expression = _java_annotation_expression(
+            content,
+            assignment.end(),
+            allow_identifier=True,
+        )
+        values = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
+        if values:
+            conditions.extend(f"{name}:{value}" for value in sorted(set(values)))
+        else:
+            normalized = " ".join(expression.split()) or sha256(content.encode()).hexdigest()
+            conditions.append(f"{name}:{normalized}")
+    return conditions
+
+
+def _java_operation_ref(
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
+    path: str,
+    conditions: list[str],
+) -> str:
+    operation_ref = f"operation://{method}{path}"
+    if conditions:
+        encoded = json.dumps(sorted(set(conditions)), ensure_ascii=False, separators=(",", ":"))
+        operation_ref += f"#conditions-{sha256(encoded.encode()).hexdigest()[:16]}"
+    if len(operation_ref) <= 512:
+        return operation_ref
+    digest = sha256(operation_ref.encode()).hexdigest()[:24]
+    return f"{operation_ref[:487]}-{digest}"
 
 
 def _declared_java_exceptions(clause: str | None) -> list[str]:
