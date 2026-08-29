@@ -255,19 +255,35 @@ class WorkflowScheduler:
         main_resume_records = tuple(
             record for record in resume_records if record.node_id in main_ids
         )
-        main = await self._run_phase(
-            definition,
-            nodes_for_phase=main_nodes,
-            edges_for_phase=main_edges,
-            context=run_context,
-            cancellation=token,
-            on_node_status=on_node_status,
-            selected_node_ids=selected_node_ids,
-            resume_records=main_resume_records,
-            resume_attempts=resume_attempts,
-            reset_retry_budget=reset_retry_budget,
-            preserve_terminal_records=freeze_main,
+        main_budget = _remaining_request_budget(
+            definition.run_policy.request_budget,
+            main_nodes,
+            resume_attempts,
+            reset=reset_retry_budget,
         )
+        runtime_handle = _schedule_runtime_limit(
+            token,
+            definition.run_policy.max_runtime_seconds,
+            main_resume_records,
+            reset=reset_retry_budget,
+        )
+        try:
+            main = await self._run_phase(
+                definition,
+                nodes_for_phase=main_nodes,
+                edges_for_phase=main_edges,
+                context=run_context,
+                cancellation=token,
+                on_node_status=on_node_status,
+                selected_node_ids=selected_node_ids,
+                resume_records=main_resume_records,
+                resume_attempts=resume_attempts,
+                reset_retry_budget=reset_retry_budget,
+                preserve_terminal_records=freeze_main,
+                request_budget=main_budget,
+            )
+        finally:
+            _cancel_runtime_limit(runtime_handle)
         cleanup_nodes = tuple(
             node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP
         )
@@ -319,11 +335,15 @@ class WorkflowScheduler:
             return _combined_result(definition, main, cleanup_records, context, report)
         cleanup_edges = _cleanup_edges(definition, activated)
         cleanup_ids = frozenset(node.id for node in cleanup_nodes)
-        request_budget = definition.run_policy.cleanup_request_budget or sum(
+        request_budget_limit = definition.run_policy.cleanup_request_budget or sum(
             node.cleanup_retry_budget + 1 for node in activated
         )
-        if not reset_retry_budget:
-            request_budget -= sum((resume_attempts or {}).get(node.id, 0) for node in activated)
+        request_budget = _remaining_request_budget(
+            request_budget_limit,
+            activated,
+            resume_attempts,
+            reset=reset_retry_budget,
+        )
         cleanup_cancellation = (
             cancellation
             if definition.run_policy.force_cancel_skips_cleanup
@@ -344,7 +364,7 @@ class WorkflowScheduler:
             reset_retry_budget=reset_retry_budget,
             preserve_terminal_records=False,
             cancellation_force_only=True,
-            request_budget=_RequestBudget(max(request_budget, 0)),
+            request_budget=request_budget,
             fail_fast_on_error=False,
             excluded_code="CLEANUP_NOT_ACTIVATED",
             excluded_message="清理条件或目标未激活",
@@ -511,14 +531,23 @@ class WorkflowScheduler:
         while True:
             attempts += 1
             budget_attempts += 1
-            if request_budget is not None and not request_budget.claim():
+            if (
+                request_budget is not None
+                and _node_consumes_request(node)
+                and not request_budget.claim()
+            ):
+                is_cleanup = node.phase is WorkflowPhase.CLEANUP
                 return _failed_record(
                     node,
                     attempts,
                     started_at,
                     NodeExecutionError(
-                        code="CLEANUP_REQUEST_BUDGET_EXHAUSTED",
-                        message="清理请求预算已耗尽",
+                        code=(
+                            "CLEANUP_REQUEST_BUDGET_EXHAUSTED"
+                            if is_cleanup
+                            else "REQUEST_BUDGET_EXHAUSTED"
+                        ),
+                        message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
                     ),
                     input_hash=input_hash,
                 )
@@ -592,6 +621,64 @@ def _phase_checkpoint_complete(
     return bool(nodes) and all(
         node.id in by_id and by_id[node.id].status.is_terminal for node in nodes
     )
+
+
+def _remaining_request_budget(
+    limit: int | None,
+    nodes: tuple[WorkflowNode, ...],
+    resume_attempts: dict[str, int] | None,
+    *,
+    reset: bool,
+) -> _RequestBudget | None:
+    if limit is None:
+        return None
+    used = 0
+    if not reset:
+        used = sum(
+            (resume_attempts or {}).get(node.id, 0)
+            for node in nodes
+            if _node_consumes_request(node)
+        )
+    return _RequestBudget(max(limit - used, 0))
+
+
+def _node_consumes_request(node: WorkflowNode) -> bool:
+    return node.effective_type in {
+        NodeType.API,
+        NodeType.SUBFLOW,
+        NodeType.FOR_EACH,
+        NodeType.SQL,
+        NodeType.REDIS,
+    }
+
+
+def _schedule_runtime_limit(
+    token: CancellationToken,
+    limit_seconds: int | None,
+    resume_records: tuple[NodeRunRecord, ...],
+    *,
+    reset: bool,
+) -> asyncio.TimerHandle | None:
+    if limit_seconds is None:
+        return None
+    used = 0.0 if reset else _recorded_runtime_seconds(resume_records)
+    remaining = limit_seconds - used
+    if remaining <= 0:
+        token.cancel()
+        return None
+    return asyncio.get_running_loop().call_later(remaining, token.cancel)
+
+
+def _recorded_runtime_seconds(records: tuple[NodeRunRecord, ...]) -> float:
+    started = [record.started_at for record in records if record.started_at is not None]
+    if not started:
+        return 0.0
+    return max(0.0, (max(record.completed_at for record in records) - min(started)).total_seconds())
+
+
+def _cancel_runtime_limit(handle: asyncio.TimerHandle | None) -> None:
+    if handle is not None:
+        handle.cancel()
 
 
 def _phase_cancelled(token: CancellationToken, *, force_only: bool) -> bool:
@@ -751,15 +838,27 @@ def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _Exec
     if node.effective_type is NodeType.DELAY:
         delay = DelayNodeConfig.model_validate(node.effective_config)
         return _ExecutionPolicy(
-            timeout_seconds=delay.seconds + 1,
-            max_retries=0,
-            retry_on=frozenset(),
+            timeout_seconds=(
+                node.cleanup_timeout_seconds
+                if node.phase is WorkflowPhase.CLEANUP
+                else delay.seconds + 1
+            ),
+            max_retries=(node.cleanup_retry_budget if node.phase is WorkflowPhase.CLEANUP else 0),
+            retry_on=(
+                frozenset({RetryCategory.NETWORK_ERROR})
+                if node.phase is WorkflowPhase.CLEANUP
+                else frozenset()
+            ),
             retry_delay_seconds=0,
         )
     return _ExecutionPolicy(
-        timeout_seconds=default_timeout_seconds,
-        max_retries=0,
-        retry_on=frozenset(),
+        timeout_seconds=(
+            node.cleanup_timeout_seconds
+            if node.phase is WorkflowPhase.CLEANUP
+            else default_timeout_seconds
+        ),
+        max_retries=(node.cleanup_retry_budget if node.phase is WorkflowPhase.CLEANUP else 0),
+        retry_on=(frozenset(RetryCategory) if node.phase is WorkflowPhase.CLEANUP else frozenset()),
         retry_delay_seconds=0,
     )
 

@@ -36,8 +36,9 @@ PR 精确 Head Review 与最终一次完整门禁。
 - Scheduler、Runner Fabric、Plan Codec、Workflow API、V6 Golden、S50 与 S51 聚焦回归：
   `85 passed`。
 - MCP/Workflow/S50/Golden 兼容回归：`47 passed`。
-- 首次复审提出的 Force Cancel Policy、Reclaim Budget 与 Best-effort Fail-fast 三个
-  P1 已增加回归并修复；修复后 S54/MCP 合并定向集 `95 passed`。
+- 两轮复审提出的 Force Cancel Policy、Reclaim Budget、Best-effort Fail-fast、
+  Main Request/Runtime Budget 与非 API Cleanup Timeout 共五个 P1 已增加回归并修复；
+  修复后 S54/MCP 合并定向集 `99 passed`。
 - Frontend FlowSpec Service、Review Dialog 与 Workflow Page：`6 passed`。
 - Ruff Format、Ruff Check、`mypy app` 与 Frontend TypeScript 检查通过。
 
@@ -51,7 +52,7 @@ PR 精确 Head Review 与最终一次完整门禁。
 | Snapshot/Report/Checkpoint 可持久化           | Pass     | API、Codec 与 Migration 回归   |
 | Resume/Reclaim 不重放已完成 Main              | Pass     | Runner Reclaim 回归            |
 | FlowSpec v2 与 S50 Cleanup Requirement 闭环   | Pass     | Golden 与 S50 兼容回归         |
-| 精确 Head Review P0/P1 为 0                   | Pending  | 首轮 3 个 P1 已修复，待复审    |
+| 精确 Head Review P0/P1 为 0                   | Pending  | 两轮 5 个 P1 已修复，待复审    |
 | 最终一次完整门禁                              | Pending  | P0/P1 清零后执行               |
 
 ## 6. 范围边界

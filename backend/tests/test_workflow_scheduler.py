@@ -1,5 +1,7 @@
 import asyncio
 from collections import defaultdict
+from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from pydantic import JsonValue, ValidationError
@@ -342,6 +344,113 @@ async def test_cleanup_reclaim_preserves_consumed_request_budget() -> None:
     cleanup_b = next(record for record in reclaimed.records if record.node_id == "cleanup-b")
     assert executor.attempts == {"cleanup-b": 1}
     assert cleanup_b.error_code == "CLEANUP_REQUEST_BUDGET_EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_main_request_budget_is_bounded_across_reclaim() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("request-a"), api_node("request-b", max_retries=1)],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "request-a"},
+            {"id": "a-b", "source": "request-a", "target": "request-b"},
+            {"id": "b-e", "source": "request-b", "target": "end"},
+        ],
+        run_policy={"request_budget": 2},
+    )
+    initial = await WorkflowScheduler(ControlledExecutor()).run(definition)
+    resumed_records = tuple(
+        record for record in initial.records if record.node_id in {"start", "request-a"}
+    )
+    resume_attempts = {record.node_id: record.attempts for record in resumed_records}
+    executor = ControlledExecutor({"request-b": {"failures": 1}})
+
+    reclaimed = await WorkflowScheduler(executor).run(
+        definition,
+        resume_records=resumed_records,
+        resume_attempts=resume_attempts,
+    )
+
+    request_b = next(record for record in reclaimed.records if record.node_id == "request-b")
+    assert executor.attempts == {"request-b": 1}
+    assert request_b.error_code == "REQUEST_BUDGET_EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_main_runtime_limit_cancels_work_and_still_allows_cleanup() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("slow"),
+            cleanup_node("delete", run_when="cancel"),
+        ],
+        edges=[
+            {"id": "s-slow", "source": "start", "target": "slow"},
+            {"id": "slow-e", "source": "slow", "target": "end"},
+        ],
+        run_policy={"max_runtime_seconds": 1},
+    )
+    executor = ControlledExecutor({"slow": {"delay": 2}})
+
+    result = await WorkflowScheduler(executor).run(definition)
+
+    assert result.main_status == "cancelled"
+    assert result.cleanup_status == "passed"
+    assert executor.attempts["delete"] == 1
+
+
+@pytest.mark.asyncio
+async def test_main_runtime_limit_accounts_for_reclaim_checkpoint_time() -> None:
+    definition = workflow(
+        middle_nodes=[api_node("request")],
+        edges=[
+            {"id": "s-request", "source": "start", "target": "request"},
+            {"id": "request-e", "source": "request", "target": "end"},
+        ],
+        run_policy={"max_runtime_seconds": 1},
+    )
+    initial = await WorkflowScheduler(ControlledExecutor()).run(definition)
+    start = initial.records[0]
+    expired_start = replace(
+        start,
+        started_at=start.completed_at - timedelta(seconds=2),
+    )
+    executor = ControlledExecutor()
+
+    reclaimed = await WorkflowScheduler(executor).run(
+        definition,
+        resume_records=(expired_start,),
+        resume_attempts={"start": 1},
+    )
+
+    assert reclaimed.main_status == "cancelled"
+    assert executor.executed == []
+
+
+@pytest.mark.asyncio
+async def test_non_api_cleanup_uses_declared_cleanup_timeout() -> None:
+    cleanup_delay = {
+        "id": "cleanup-delay",
+        "type": "delay",
+        "name": "Cleanup delay",
+        "position": {"x": 200, "y": 100},
+        "config": {"seconds": 5},
+        "phase": "cleanup",
+        "cleanup_for": ["create"],
+        "cleanup_timeout_seconds": 1,
+    }
+    definition = workflow(
+        middle_nodes=[api_node("create"), cleanup_delay],
+        edges=[
+            {"id": "s-create", "source": "start", "target": "create"},
+            {"id": "create-e", "source": "create", "target": "end"},
+        ],
+    )
+    executor = ControlledExecutor({"cleanup-delay": {"delay": 2}})
+
+    result = await WorkflowScheduler(executor).run(definition)
+
+    cleanup = next(record for record in result.records if record.node_id == "cleanup-delay")
+    assert cleanup.status == "failed"
+    assert cleanup.error_code == "NODE_TIMEOUT"
 
 
 @pytest.mark.asyncio
