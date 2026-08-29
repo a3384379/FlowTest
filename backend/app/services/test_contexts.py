@@ -26,6 +26,7 @@ from app.domain.test_contexts import (
     ContextConflict,
     ContextConflictSnapshot,
     ContextRevisionSnapshot,
+    EntityMappingExternalEvidenceStructuredData,
     EvidenceProviderType,
     EvidenceSemanticRole,
     ExternalEvidenceEnvelope,
@@ -229,7 +230,13 @@ class TestContextService:
         await self._require_accepting_evidence(actor=actor, context=context)
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
-        existing = await self._evidence_items(current.id)
+        stored_evidence = await self._evidence_items(current.id)
+        retired_mapping_conflicts = {
+            item.fingerprint for item in stored_evidence if _is_mapping_conflict_item(item)
+        }
+        existing = [
+            item for item in stored_evidence if item.fingerprint not in retired_mapping_conflicts
+        ]
         try:
             envelope = with_mapping_conflict_findings(
                 envelope,
@@ -247,12 +254,14 @@ class TestContextService:
             current=current_snapshot,
             envelope=envelope,
             evidence_count=len(existing) + len(additions),
+            retired_conflict_fingerprints=retired_mapping_conflicts,
         )
         snapshot = _next_snapshot(
             current=current_snapshot,
             envelope=envelope,
             evidence_fingerprints=[item.fingerprint for item in existing]
             + [item.fingerprint for item in additions],
+            retired_conflict_fingerprints=retired_mapping_conflicts,
         )
         now = datetime.now(UTC)
         actor_identity = _actor_identity(actor.id)
@@ -592,6 +601,11 @@ def _mapping_evidence_inputs(
     ]
 
 
+def _is_mapping_conflict_item(item: ContextEvidenceItem) -> bool:
+    finding = ExternalEvidenceFinding.model_validate(item.finding_payload)
+    return isinstance(finding.structured_data, EntityMappingExternalEvidenceStructuredData)
+
+
 def _derive_entity_mapping(evidence: list[MappingEvidenceInput]) -> EntityMappingResult:
     try:
         return derive_entity_mapping(evidence)
@@ -688,6 +702,7 @@ def _next_snapshot(
     current: ContextRevisionSnapshot,
     envelope: ExternalEvidenceEnvelope,
     evidence_fingerprints: list[str],
+    retired_conflict_fingerprints: set[str],
 ) -> ContextRevisionSnapshot:
     repository = list(current.repository_revisions)
     contracts = list(current.contract_revisions)
@@ -713,7 +728,10 @@ def _next_snapshot(
     if envelope.provider.type is EvidenceProviderType.DATABASE:
         present.append(EvidenceProviderType.DATA_PROFILE)
     completeness = completeness_snapshot(current.completeness.required, present)
-    conflicts = list(current.conflict_snapshot.conflicts)
+    conflicts = _without_conflict_fingerprints(
+        current.conflict_snapshot.conflicts,
+        retired_conflict_fingerprints,
+    )
     conflicts.extend(_envelope_conflicts(envelope))
     return normalize_revision_snapshot(
         ContextRevisionSnapshot(
@@ -739,6 +757,24 @@ def _envelope_conflicts(envelope: ExternalEvidenceEnvelope) -> list[ContextConfl
         for finding in envelope.findings
         if finding.semantic_role is EvidenceSemanticRole.CONFLICT
     ]
+
+
+def _without_conflict_fingerprints(
+    conflicts: list[ContextConflict],
+    retired_fingerprints: set[str],
+) -> list[ContextConflict]:
+    retained: list[ContextConflict] = []
+    for conflict in conflicts:
+        finding_fingerprints = [
+            fingerprint
+            for fingerprint in conflict.finding_fingerprints
+            if fingerprint not in retired_fingerprints
+        ]
+        if finding_fingerprints:
+            retained.append(
+                conflict.model_copy(update={"finding_fingerprints": finding_fingerprints})
+            )
+    return retained
 
 
 def _with_reference(
@@ -789,13 +825,18 @@ def _require_revision_capacity(
     current: ContextRevisionSnapshot,
     envelope: ExternalEvidenceEnvelope,
     evidence_count: int,
+    retired_conflict_fingerprints: set[str],
 ) -> None:
     if evidence_count > MAX_CONTEXT_EVIDENCE_ITEMS:
         raise _context_capacity_exceeded()
     new_conflicts = sum(
         finding.semantic_role is EvidenceSemanticRole.CONFLICT for finding in envelope.findings
     )
-    if len(current.conflict_snapshot.conflicts) + new_conflicts > MAX_CONTEXT_CONFLICTS:
+    retained_conflicts = _without_conflict_fingerprints(
+        current.conflict_snapshot.conflicts,
+        retired_conflict_fingerprints,
+    )
+    if len(retained_conflicts) + new_conflicts > MAX_CONTEXT_CONFLICTS:
         raise _context_capacity_exceeded()
     references = _revision_references_for_provider(current, envelope.provider.type)
     if references is None:

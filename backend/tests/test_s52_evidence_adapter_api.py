@@ -490,6 +490,91 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_later_evidence_retires_resolved_adapter_mapping_conflicts(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "实体映射冲突消解上下文",
+            "objective": "验证后续显式实体证据会退休已消解的映射冲突",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    route_payload = _java_evidence(project_id)
+    route_payload["claims"] = [
+        claim for claim in route_payload["claims"] if claim["kind"] == "controller_route"
+    ]
+    route_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(route_payload))
+    route = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": route_envelope.model_dump(mode="json")},
+    )
+    assert route.status_code == 201, route.text
+
+    database_payload = _database_evidence(project_id)
+    archive_table = {
+        **database_payload["tables"][0],
+        "schema_name": "archive",
+        "columns": [dict(column) for column in database_payload["tables"][0]["columns"]],
+    }
+    database_payload["tables"].append(archive_table)
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(database_payload)
+    )
+    conflicted = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": database_envelope.model_dump(mode="json")},
+    )
+    assert conflicted.status_code == 201, conflicted.text
+    conflicted_body = conflicted.json()
+    assert conflicted_body["status"] == "conflicted"
+    assert conflicted_body["revision"]["snapshot"]["conflict_snapshot"]["conflicts"]
+    conflicted_evidence_count = len(conflicted_body["evidence_items"])
+    conflict_marker_count = sum(
+        item["semantic_role"] == "conflict" for item in conflicted_body["evidence_items"]
+    )
+    assert conflict_marker_count > 0
+
+    entity_payload = _java_evidence(project_id)
+    entity_payload["source"]["revision"] = "a1b2c3d5"
+    entity_payload["claims"] = [
+        claim for claim in entity_payload["claims"] if claim["kind"] == "entity"
+    ]
+    entity_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(entity_payload))
+    resolved = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": entity_envelope.model_dump(mode="json")},
+    )
+
+    assert resolved.status_code == 201, resolved.text
+    resolved_body = resolved.json()
+    assert resolved_body["status"] == "ready"
+    assert resolved_body["revision"]["snapshot"]["conflict_snapshot"]["conflicts"] == []
+    assert len(resolved_body["evidence_items"]) == (
+        conflicted_evidence_count - conflict_marker_count + 1
+    )
+    assert all(item["semantic_role"] != "conflict" for item in resolved_body["evidence_items"])
+    inspected = await client.get(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
+        headers=headers,
+    )
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json()["conflicts"] == []
+
+
+@pytest.mark.asyncio
 async def test_generic_evidence_rejects_nested_cross_project_references(
     s52_context: dict[str, Any],
 ) -> None:

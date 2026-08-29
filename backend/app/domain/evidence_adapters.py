@@ -1201,16 +1201,18 @@ def with_mapping_conflict_findings(
     envelope: ExternalEvidenceEnvelope,
     evidence: list[MappingEvidenceInput],
 ) -> ExternalEvidenceEnvelope:
-    provisional = [*evidence, *_envelope_mapping_inputs(envelope)]
-    existing_keys = _existing_mapping_conflict_keys(provisional)
-    conflicts = [
-        conflict
-        for conflict in derive_entity_mapping(provisional).conflicts
-        if (conflict.kind.value, conflict.source_ref) not in existing_keys
+    retained_findings = [
+        finding for finding in envelope.findings if not _is_mapping_conflict_finding(finding)
     ]
+    retained_envelope = envelope.model_copy(update={"findings": retained_findings})
+    retained_evidence = [
+        item for item in evidence if not _is_mapping_conflict_finding(item.finding)
+    ]
+    provisional = [*retained_evidence, *_envelope_mapping_inputs(retained_envelope)]
+    conflicts = derive_entity_mapping(provisional).conflicts
     if not conflicts:
-        return envelope
-    available = max(0, 100 - len(envelope.findings))
+        return retained_envelope
+    available = max(0, 100 - len(retained_findings))
     if len(conflicts) > available:
         raise EntityMappingBudgetExceeded(
             "entity mapping conflict findings exceed envelope capacity"
@@ -1219,7 +1221,7 @@ def with_mapping_conflict_findings(
         _claim_id("mapping-conflict", conflict.kind.value, conflict.source_ref)
         for conflict in conflicts
     ]
-    existing_ids = {finding.id for finding in envelope.findings}
+    existing_ids = {finding.id for finding in retained_findings}
     if len(addition_ids) != len(set(addition_ids)) or existing_ids.intersection(addition_ids):
         raise EntityMappingBudgetExceeded(
             "derived mapping conflict finding id collides with existing evidence"
@@ -1245,9 +1247,9 @@ def with_mapping_conflict_findings(
         )
         for conflict, identifier in zip(conflicts, addition_ids, strict=True)
     ]
-    payload = envelope.model_dump(mode="json")
+    payload = retained_envelope.model_dump(mode="json")
     payload["findings"] = [
-        item.model_dump(mode="json") for item in [*envelope.findings, *additions]
+        item.model_dump(mode="json") for item in [*retained_findings, *additions]
     ]
     serialized = json.dumps(
         payload,
@@ -1375,20 +1377,8 @@ def _require_no_sensitive_data(value: BaseModel) -> None:
         raise ValueError(f"evidence adapter contains sensitive data at {unsafe}")
 
 
-def _existing_mapping_conflict_keys(
-    evidence: list[MappingEvidenceInput],
-) -> set[tuple[str, str]]:
-    keys: set[tuple[str, str]] = set()
-    for item in evidence:
-        data = item.finding.structured_data
-        if (
-            not isinstance(data, EntityMappingExternalEvidenceStructuredData)
-            or item.finding.kind is not EvidenceFindingKind.CONFLICT
-            or item.finding.semantic_role is not EvidenceSemanticRole.CONFLICT
-        ):
-            continue
-        keys.add((data.claim.mapping_kind, data.claim.source_ref))
-    return keys
+def _is_mapping_conflict_finding(finding: ExternalEvidenceFinding) -> bool:
+    return isinstance(finding.structured_data, EntityMappingExternalEvidenceStructuredData)
 
 
 def _java_finding_kind(kind: str) -> EvidenceFindingKind:
