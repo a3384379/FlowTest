@@ -1126,11 +1126,15 @@ def _bundle_provider_type(bundle: EvidenceBundle) -> EvidenceProviderType:
     source_type = next(iter(source_types))
     return {
         EvidenceSourceType.CONTRACT: EvidenceProviderType.CONTRACT,
+        EvidenceSourceType.SOURCE: EvidenceProviderType.REPOSITORY,
         EvidenceSourceType.DATA_PROFILE: EvidenceProviderType.DATA_PROFILE,
+        EvidenceSourceType.SERVICE_TOPOLOGY: EvidenceProviderType.SERVICE_TOPOLOGY,
         EvidenceSourceType.EXISTING_TEST: EvidenceProviderType.EXISTING_TEST,
         EvidenceSourceType.WORKFLOW: EvidenceProviderType.WORKFLOW,
         EvidenceSourceType.RUNTIME: EvidenceProviderType.RUNTIME,
-    }.get(source_type, EvidenceProviderType.REPOSITORY)
+        EvidenceSourceType.CHANGE: EvidenceProviderType.CHANGE,
+        EvidenceSourceType.USER_CONFIRMED_RULE: EvidenceProviderType.USER_CONFIRMED_RULE,
+    }[source_type]
 
 
 def _bundle_finding_kind(kind: str) -> EvidenceFindingKind:

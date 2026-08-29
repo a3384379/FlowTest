@@ -2193,8 +2193,18 @@ def test_python_provider_bundle_remains_compatible_with_context_adapter() -> Non
     assert len(structured_data.claim.structured_data_fingerprint) == 64
 
 
-@pytest.mark.parametrize("source_type", ["service_topology", "workflow", "change"])
-def test_evidence_bundle_adapter_preserves_supporting_semantics(source_type: str) -> None:
+@pytest.mark.parametrize(
+    ("source_type", "provider_type"),
+    [
+        ("service_topology", "service_topology"),
+        ("workflow", "workflow"),
+        ("change", "change"),
+    ],
+)
+def test_evidence_bundle_adapter_preserves_supporting_semantics(
+    source_type: str,
+    provider_type: str,
+) -> None:
     bundle = EvidenceBundle.model_validate(
         {
             "subject_ref": SUBJECT_REF,
@@ -2226,6 +2236,7 @@ def test_evidence_bundle_adapter_preserves_supporting_semantics(source_type: str
 
     assert bundle.findings[0].as_ref().semantic_role == "supporting"
     assert envelope.findings[0].semantic_role.value == "supporting"
+    assert envelope.provider.type.value == provider_type
 
 
 def test_evidence_bundle_rejects_sensitive_path_and_warning_metadata() -> None:

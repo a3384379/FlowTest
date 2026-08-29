@@ -83,9 +83,12 @@ class EvidenceProviderType(StrEnum):
     REPOSITORY = "repository"
     CONTRACT = "contract"
     DATA_PROFILE = "data_profile"
+    SERVICE_TOPOLOGY = "service_topology"
     EXISTING_TEST = "existing_test"
     WORKFLOW = "workflow"
     RUNTIME = "runtime"
+    CHANGE = "change"
+    USER_CONFIRMED_RULE = "user_confirmed_rule"
     DATABASE = "database"
 
 
@@ -862,11 +865,15 @@ def _evidence_bundle_provider(
     source_type = next(iter(source_types))
     return {
         "contract": EvidenceProviderType.CONTRACT,
+        "source": EvidenceProviderType.REPOSITORY,
         "data_profile": EvidenceProviderType.DATA_PROFILE,
+        "service_topology": EvidenceProviderType.SERVICE_TOPOLOGY,
         "existing_test": EvidenceProviderType.EXISTING_TEST,
         "workflow": EvidenceProviderType.WORKFLOW,
         "runtime": EvidenceProviderType.RUNTIME,
-    }.get(source_type, EvidenceProviderType.REPOSITORY)
+        "change": EvidenceProviderType.CHANGE,
+        "user_confirmed_rule": EvidenceProviderType.USER_CONFIRMED_RULE,
+    }[source_type]
 
 
 def _external_evidence_finding_payload(

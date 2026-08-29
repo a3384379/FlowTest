@@ -160,6 +160,74 @@ async def test_java_and_database_evidence_enter_context_and_expose_mapping(
 
 
 @pytest.mark.asyncio
+async def test_user_confirmed_rule_does_not_satisfy_repository_evidence(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    subject_ref = f"flowtest://projects/{project_id}/operations/orders"
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "人工确认规则不替代仓库证据",
+            "objective": "验证来源类型不会错误满足仓库完整性要求",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": subject_ref,
+            "findings": [
+                {
+                    "id": "confirmed-order-rule",
+                    "source_type": "user_confirmed_rule",
+                    "source_ref": "rule://orders/confirmed",
+                    "subject_ref": subject_ref,
+                    "kind": "constraint",
+                    "path": "$.orders.status",
+                    "structured_data": {"allowed": ["created"]},
+                    "confidence": 1,
+                    "deterministic": True,
+                    "revision": "rule-v1",
+                }
+            ],
+        }
+    )
+    envelope = adapt_evidence_bundle(
+        bundle,
+        provider_name="confirmed-rule-provider",
+        provider_version="1.0.0",
+        source_ref="rule://orders/confirmed",
+        source_revision="rule-v1",
+        subject_ref=subject_ref,
+    )
+
+    assert envelope.provider.type.value == "user_confirmed_rule"
+    ingested = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": envelope.model_dump(mode="json")},
+    )
+
+    assert ingested.status_code == 201, ingested.text
+    body = ingested.json()
+    assert body["status"] == "incomplete"
+    snapshot = body["revision"]["snapshot"]
+    assert snapshot["repository_revisions"] == []
+    assert snapshot["completeness"] == {
+        "required": ["repository"],
+        "present": ["user_confirmed_rule"],
+        "missing": ["repository"],
+        "complete": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_persisted_envelope_reliability_bounds_java_mapping_candidates(
     s52_context: dict[str, Any],
 ) -> None:
