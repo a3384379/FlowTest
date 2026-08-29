@@ -3512,6 +3512,126 @@ class CustomerAccountEntity {
     ]
 
 
+def test_java_spring_poc_recognizes_annotated_jpa_entities() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://annotated-entity", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/model/Customer.java",
+                        "content": """
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "customers")
+class Customer {
+    private String id;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entities = [claim for claim in evidence.claims if claim.kind == "entity"]
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert [(claim.class_name, claim.table_ref) for claim in entities] == [
+        ("Customer", "table://customers")
+    ]
+    assert [(claim.field_name, claim.column_name) for claim in columns] == [("id", "id")]
+
+
+def test_java_spring_poc_honors_explicit_jpa_column_names() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jpa-column-name", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/CustomerEntity.java",
+                        "content": """
+@Entity
+class CustomerEntity {
+    @Column(name = "customer_code")
+    private String code;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert [(claim.field_name, claim.column_name) for claim in columns] == [
+        ("code", "customer_code")
+    ]
+
+
+def test_java_spring_poc_excludes_transient_entity_fields() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://transient-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/CustomerEntity.java",
+                        "content": """
+@Entity
+class CustomerEntity {
+    private transient String javaCache;
+
+    @Transient
+    private String jpaCache;
+
+    private String status;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert [(claim.field_name, claim.column_name) for claim in columns] == [("status", "status")]
+
+
+def test_java_spring_poc_preserves_explicit_jpa_table_schemas() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jpa-table-schema", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/OrderEntity.java",
+                        "content": """
+@Entity
+@Table(name = "orders", schema = "sales")
+class OrderEntity {
+    private String id;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entity = next(claim for claim in evidence.claims if claim.kind == "entity")
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert entity.table_ref == "table://sales/orders"
+    assert {claim.table_ref for claim in columns} == {"table://sales/orders"}
+
+
 def test_java_spring_poc_marks_inherited_type_analysis_incomplete() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

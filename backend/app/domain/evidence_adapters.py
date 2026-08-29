@@ -81,8 +81,14 @@ _MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete|Request)
 _REQUEST_MAPPING = re.compile(r"@RequestMapping\b")
 _REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
 _CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
+_JPA_ENTITY_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
+_JPA_ENTITY_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
 _JPA_TABLE_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
 _JPA_TABLE_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
+_JPA_COLUMN_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Column\b")
+_JPA_COLUMN_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Column\b")
+_JPA_TRANSIENT_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Transient\b")
+_JPA_TRANSIENT_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Transient\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -1844,7 +1850,7 @@ class _JavaRoute(BaseModel):
     source_line: int
 
 
-JavaField = tuple[str, str, list[tuple[str, str]]]
+JavaField = tuple[str, str, list[tuple[str, str]], str | None]
 
 
 @dataclass(frozen=True)
@@ -1932,9 +1938,7 @@ def _type_body(content: str, start: int) -> str:
     return content[brace + 1 : end]
 
 
-def _record_fields(
-    content: str, declaration: re.Match[str]
-) -> list[tuple[str, str, list[tuple[str, str]]]]:
+def _record_fields(content: str, declaration: re.Match[str]) -> list[JavaField]:
     opening = content.find("(", declaration.end())
     if opening < 0:
         return []
@@ -1972,9 +1976,12 @@ def _split_top_level_java_components(content: str) -> list[str]:
 
 def _record_component_field(
     component: str,
-) -> tuple[str, str, list[tuple[str, str]]] | None:
+) -> JavaField | None:
     masked_component = _mask_java_non_code(component)
+    if _has_jpa_transient_annotation(component, masked_component):
+        return None
     annotations = _java_validation_annotations(component, masked_component)
+    column_name = _java_column_name(component, masked_component)
     masked = _mask_java_annotation_arguments(masked_component)
     declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked)
     normalized = " ".join(declaration.split())
@@ -1984,24 +1991,27 @@ def _record_component_field(
     )
     if match is None:
         return None
-    return match.group("name"), match.group("type"), annotations
+    return match.group("name"), match.group("type"), annotations, column_name
 
 
-def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
-    fields: list[tuple[str, str, list[tuple[str, str]]]] = []
+def _class_fields(body: str) -> list[JavaField]:
+    fields: list[JavaField] = []
     masked_body = _mask_nested_java_blocks(_mask_java_non_code(body))
     for match in _FIELD_DECLARATION.finditer(masked_body):
-        if "static" in match.group("modifiers").split():
+        modifiers = set(match.group("modifiers").split())
+        if modifiers.intersection({"static", "transient"}):
             continue
         prefix_start = max(0, match.start() - 500)
         masked_prefix = masked_body[prefix_start : match.start()]
         annotation_start = masked_prefix.rfind(";") + 1
-        annotations = _java_validation_annotations(
-            body[prefix_start + annotation_start : match.start()],
-            masked_prefix[annotation_start:],
-        )
+        annotation_content = body[prefix_start + annotation_start : match.start()]
+        annotation_mask = masked_prefix[annotation_start:]
+        if _has_jpa_transient_annotation(annotation_content, annotation_mask):
+            continue
+        annotations = _java_validation_annotations(annotation_content, annotation_mask)
+        column_name = _java_column_name(annotation_content, annotation_mask)
         field_type = " ".join(match.group("type").split())
-        fields.append((match.group("name"), field_type, annotations))
+        fields.append((match.group("name"), field_type, annotations, column_name))
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
@@ -2014,7 +2024,12 @@ def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
         if field_name in known:
             index = next(index for index, field in enumerate(fields) if field[0] == field_name)
             old = fields[index]
-            fields[index] = (old[0], old[1], sorted(set([*old[2], *annotations])))
+            fields[index] = (
+                old[0],
+                old[1],
+                sorted(set([*old[2], *annotations])),
+                old[3],
+            )
     return fields
 
 
@@ -2034,6 +2049,30 @@ def _java_validation_annotations(
             _VALIDATION_ANNOTATION,
         )
     ]
+
+
+def _java_column_name(content: str, masked_content: str) -> str | None:
+    matches = _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JPA_COLUMN_ANNOTATION_MARKER,
+        _JPA_COLUMN_ANNOTATION,
+    )
+    if not matches:
+        return None
+    arguments = _java_annotation_arguments(content, matches[-1].end())
+    return _java_named_literal_argument(arguments, "name")
+
+
+def _has_jpa_transient_annotation(content: str, masked_content: str) -> bool:
+    return bool(
+        _active_java_annotation_matches(
+            content,
+            masked_content,
+            _JPA_TRANSIENT_ANNOTATION_MARKER,
+            _JPA_TRANSIENT_ANNOTATION,
+        )
+    )
 
 
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
@@ -2519,7 +2558,9 @@ def _dto_field_claims(
     type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
-    for field_name, field_type, validation_annotations in type_analysis.fields.get(dto_type, []):
+    for field_name, field_type, validation_annotations, _column_name in type_analysis.fields.get(
+        dto_type, []
+    ):
         claims.append(
             JavaDtoFieldClaim(
                 id=_claim_id("dto", operation_ref, direction, dto_type, field_name),
@@ -2663,7 +2704,7 @@ def _route_kafka_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenc
 def _structural_java_claims(
     file: JavaSourceFileSnapshot,
     routes: list[_JavaRoute],
-    type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
+    type_fields: dict[str, list[JavaField]],
 ) -> tuple[list[JavaEvidenceClaim], bool]:
     claims: list[JavaEvidenceClaim] = []
     truncated = False
@@ -2688,14 +2729,24 @@ def _structural_java_claims(
         if (
             declaration.start() in top_level_starts
             and kind in {"class", "record"}
-            and _is_entity_type(file.path, name)
+            and (
+                _is_entity_type(file.path, name)
+                or _has_jpa_entity_annotation(
+                    file.content,
+                    masked_content,
+                    top_level_prefixes[declaration.start()],
+                    declaration.start(),
+                )
+            )
         ):
-            table_name = _java_entity_table_name(
+            table_ref = _java_entity_table_ref(
                 file.content,
                 masked_content,
                 top_level_prefixes[declaration.start()],
                 declaration.start(),
-            ) or _snake_case(name)
+                fallback_name=_snake_case(name),
+            )
+            table_name = table_ref.rsplit("/", 1)[-1]
             operation_refs = [
                 route.operation_ref
                 for route in routes
@@ -2707,7 +2758,7 @@ def _structural_java_claims(
                     source_path=source_path,
                     entity_ref=_java_structural_ref("entity", source_path, name),
                     class_name=name,
-                    table_ref=f"table://{table_name}",
+                    table_ref=table_ref,
                     operation_refs=operation_refs,
                     confidence=0.65,
                     deterministic=False,
@@ -2718,13 +2769,13 @@ def _structural_java_claims(
                     id=_claim_id("column", source_path, name, field_name),
                     source_path=source_path,
                     entity_ref=_java_structural_ref("entity", source_path, name),
-                    table_ref=f"table://{table_name}",
+                    table_ref=table_ref,
                     field_name=field_name,
-                    column_name=_snake_case(field_name),
+                    column_name=column_name or _snake_case(field_name),
                     confidence=0.65,
                     deterministic=False,
                 )
-                for field_name, _field_type, _annotations in type_fields.get(name, [])
+                for field_name, _field_type, _annotations, column_name in type_fields.get(name, [])
             )
         if kind == "enum":
             values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
@@ -2756,12 +2807,32 @@ def _top_level_declaration_prefixes(content: str, masked_content: str) -> dict[i
     return prefixes
 
 
-def _java_entity_table_name(
+def _has_jpa_entity_annotation(
     content: str,
     masked_content: str,
     start: int,
     end: int,
-) -> str | None:
+) -> bool:
+    return bool(
+        _active_java_annotation_matches(
+            content,
+            masked_content,
+            _JPA_ENTITY_ANNOTATION_MARKER,
+            _JPA_ENTITY_ANNOTATION,
+            start=start,
+            end=end,
+        )
+    )
+
+
+def _java_entity_table_ref(
+    content: str,
+    masked_content: str,
+    start: int,
+    end: int,
+    *,
+    fallback_name: str,
+) -> str:
     matches = _active_java_annotation_matches(
         content,
         masked_content,
@@ -2771,10 +2842,18 @@ def _java_entity_table_name(
         end=end,
     )
     if not matches:
-        return None
+        return f"table://{fallback_name}"
     arguments = _java_annotation_arguments(content, matches[-1].end())
+    table_name = _java_named_literal_argument(arguments, "name") or fallback_name
+    schema_name = _java_named_literal_argument(arguments, "schema")
+    if schema_name is not None:
+        return f"table://{schema_name}/{table_name}"
+    return f"table://{table_name}"
+
+
+def _java_named_literal_argument(arguments: str, name: str) -> str | None:
     inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
-    assignment = re.search(r"\bname\s*=", _mask_java_non_code(inner))
+    assignment = re.search(rf"\b{re.escape(name)}\s*=", _mask_java_non_code(inner))
     if assignment is None:
         return None
     values = _java_literal_values(_java_annotation_expression(inner, assignment.end()))
