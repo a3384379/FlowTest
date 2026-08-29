@@ -688,38 +688,28 @@ def test_database_distribution_rejects_inverted_extrema_at_dedicated_boundary() 
 
 
 def test_database_distribution_rejects_inverted_extrema_at_generic_boundary() -> None:
-    envelope = adapt_database_evidence(
-        DatabaseEvidenceSubmission.model_validate(_database_submission())
-    )
-    finding_index, finding = next(
-        (index, finding)
-        for index, finding in enumerate(envelope.findings)
-        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
-        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
-        and finding.structured_data.claim.name == "status"
-    )
-    structured_data = cast(DatabaseExternalEvidenceStructuredData, finding.structured_data)
-    claim = cast(ExternalDatabaseColumnClaim, structured_data.claim)
-    assert claim.observed_distribution is not None
-    inverted_distribution = claim.observed_distribution.model_copy(
-        update={"minimum": 10.0, "maximum": 1.0}
-    )
-    inverted_claim = claim.model_copy(update={"observed_distribution": inverted_distribution})
-    inverted_structured_data = structured_data.model_copy(update={"claim": inverted_claim})
-    provisional = finding.model_copy(
-        update={
-            "structured_data": inverted_structured_data,
-            "semantic_fingerprint": "0" * 64,
-        }
-    )
-    inverted_finding = provisional.model_copy(
-        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
-    )
-    findings = list(envelope.findings)
-    findings[finding_index] = inverted_finding
-    payload = envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
+    payload = _database_envelope_with_distribution_update({"minimum": 10.0, "maximum": 1.0})
 
     with pytest.raises(ValidationError, match="minimum must not exceed maximum"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
+def test_database_distribution_rejects_distinct_count_above_row_count_at_dedicated_boundary() -> (
+    None
+):
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {"row_count": 1, "distinct_count": 2}
+    )
+
+    with pytest.raises(ValidationError, match="distinct count must not exceed row count"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_distribution_rejects_distinct_count_above_row_count_at_generic_boundary() -> None:
+    payload = _database_envelope_with_distribution_update({"row_count": 1, "distinct_count": 2})
+
+    with pytest.raises(ValidationError, match="distinct count must not exceed row count"):
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
@@ -3028,6 +3018,37 @@ def _mapping_inputs(envelope: ExternalEvidenceEnvelope, prefix: str) -> list[Map
         )
         for index, finding in enumerate(envelope.findings)
     ]
+
+
+def _database_envelope_with_distribution_update(update: dict[str, Any]) -> dict[str, Any]:
+    envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    finding_index, finding = next(
+        (index, finding)
+        for index, finding in enumerate(envelope.findings)
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
+        and finding.structured_data.claim.name == "status"
+    )
+    structured_data = cast(DatabaseExternalEvidenceStructuredData, finding.structured_data)
+    claim = cast(ExternalDatabaseColumnClaim, structured_data.claim)
+    assert claim.observed_distribution is not None
+    distribution = claim.observed_distribution.model_copy(update=update)
+    changed_claim = claim.model_copy(update={"observed_distribution": distribution})
+    changed_structured_data = structured_data.model_copy(update={"claim": changed_claim})
+    provisional = finding.model_copy(
+        update={
+            "structured_data": changed_structured_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    changed_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    findings = list(envelope.findings)
+    findings[finding_index] = changed_finding
+    return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
 
 
 def _java_submission() -> dict[str, Any]:

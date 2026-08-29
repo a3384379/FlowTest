@@ -320,6 +320,12 @@ class DatabaseObservedDistribution(BaseModel):
 
     @model_validator(mode="after")
     def validate_observed_values(self) -> DatabaseObservedDistribution:
+        if (
+            self.row_count is not None
+            and self.distinct_count is not None
+            and self.distinct_count > self.row_count
+        ):
+            raise ValueError("database observed distinct count must not exceed row count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]

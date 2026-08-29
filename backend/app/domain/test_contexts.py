@@ -484,6 +484,12 @@ class ExternalDatabaseObservedDistribution(BaseModel):
 
     @model_validator(mode="after")
     def validate_observed_values(self) -> ExternalDatabaseObservedDistribution:
+        if (
+            self.row_count is not None
+            and self.distinct_count is not None
+            and self.distinct_count > self.row_count
+        ):
+            raise ValueError("database observed distinct count must not exceed row count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
@@ -778,15 +784,32 @@ def _evidence_bundle_provider(
     }.get(source_type, EvidenceProviderType.REPOSITORY)
 
 
-def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:
-    payload = finding.model_dump(mode="json", exclude={"semantic_fingerprint"})
+def _external_evidence_finding_payload(
+    finding: ExternalEvidenceFinding,
+    *,
+    exclude_semantic_fingerprint: bool = False,
+) -> dict[str, object]:
+    exclude = {"semantic_fingerprint"} if exclude_semantic_fingerprint else None
+    payload: dict[str, object] = finding.model_dump(mode="json", exclude=exclude)
     if not payload["structured_data"]:
         del payload["structured_data"]
+    return payload
+
+
+def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:
+    payload = _external_evidence_finding_payload(
+        finding,
+        exclude_semantic_fingerprint=True,
+    )
     return sha256(_canonical_json(payload)).hexdigest()
 
 
 def external_evidence_fingerprint(envelope: ExternalEvidenceEnvelope) -> str:
-    return sha256(_canonical_json(envelope.model_dump(mode="json"))).hexdigest()
+    payload = envelope.model_dump(mode="json")
+    payload["findings"] = [
+        _external_evidence_finding_payload(finding) for finding in envelope.findings
+    ]
+    return sha256(_canonical_json(payload)).hexdigest()
 
 
 def external_evidence_item_fingerprint(
@@ -797,7 +820,7 @@ def external_evidence_item_fingerprint(
         "provider": envelope.provider.model_dump(mode="json"),
         "source": envelope.source.model_dump(mode="json"),
         "subject_ref": envelope.subject_ref,
-        "finding": finding.model_dump(mode="json"),
+        "finding": _external_evidence_finding_payload(finding),
         "redactions": [item.model_dump(mode="json") for item in envelope.redactions],
         "warnings": [item.model_dump(mode="json") for item in envelope.warnings],
         "confidence": envelope.confidence,

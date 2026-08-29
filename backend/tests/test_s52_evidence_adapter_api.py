@@ -1783,6 +1783,21 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
     assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected.json()["error"]["trace_id"]
 
+    impossible_counts = _database_evidence(project_id)
+    impossible_counts["tables"][0]["columns"][2]["observed_distribution"] = {
+        "row_count": 1,
+        "distinct_count": 2,
+    }
+    rejected_counts = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": impossible_counts},
+    )
+
+    assert rejected_counts.status_code == 422, rejected_counts.text
+    assert rejected_counts.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_counts.json()["error"]["trace_id"]
+
 
 @pytest.mark.asyncio
 async def test_generic_evidence_rejects_inverted_extrema_with_trace_id(
@@ -1806,12 +1821,32 @@ async def test_generic_evidence_rejects_inverted_extrema_with_trace_id(
     rejected = await client.post(
         f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
         headers=headers,
-        json={"envelope": _inverted_database_envelope(project_id)},
+        json={
+            "envelope": _database_envelope_with_invalid_distribution(
+                project_id,
+                {"minimum": 10.0, "maximum": 1.0},
+            )
+        },
     )
 
     assert rejected.status_code == 422, rejected.text
     assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected.json()["error"]["trace_id"]
+
+    rejected_counts = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={
+            "envelope": _database_envelope_with_invalid_distribution(
+                project_id,
+                {"row_count": 1, "distinct_count": 2},
+            )
+        },
+    )
+
+    assert rejected_counts.status_code == 422, rejected_counts.text
+    assert rejected_counts.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_counts.json()["error"]["trace_id"]
 
 
 @pytest.mark.asyncio
@@ -1999,7 +2034,10 @@ def _oversized_java_evidence(project_id: str) -> dict[str, Any]:
     return payload
 
 
-def _inverted_database_envelope(project_id: str) -> dict[str, Any]:
+def _database_envelope_with_invalid_distribution(
+    project_id: str,
+    update: dict[str, Any],
+) -> dict[str, Any]:
     payload = _database_evidence(project_id)
     payload["tables"][0]["columns"][2]["observed_distribution"] = {
         "minimum": 1,
@@ -2018,20 +2056,20 @@ def _inverted_database_envelope(project_id: str) -> dict[str, Any]:
     assert isinstance(claim, ExternalDatabaseColumnClaim)
     distribution = claim.observed_distribution
     assert distribution is not None
-    inverted_distribution = distribution.model_copy(update={"minimum": 10.0, "maximum": 1.0})
-    inverted_claim = claim.model_copy(update={"observed_distribution": inverted_distribution})
-    inverted_structured_data = structured_data.model_copy(update={"claim": inverted_claim})
+    invalid_distribution = distribution.model_copy(update=update)
+    invalid_claim = claim.model_copy(update={"observed_distribution": invalid_distribution})
+    invalid_structured_data = structured_data.model_copy(update={"claim": invalid_claim})
     provisional = finding.model_copy(
         update={
-            "structured_data": inverted_structured_data,
+            "structured_data": invalid_structured_data,
             "semantic_fingerprint": "0" * 64,
         }
     )
-    inverted_finding = provisional.model_copy(
+    invalid_finding = provisional.model_copy(
         update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
     )
     findings = list(envelope.findings)
-    findings[finding_index] = inverted_finding
+    findings[finding_index] = invalid_finding
     return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
 
 
