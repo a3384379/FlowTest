@@ -29,7 +29,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Migration `20260829_0047_evidence_provider_provenance` 扩展 `test_context_evidence_items` 的 Provider Type
   约束，允许 Repository/Database 以及 S51 已声明的 Service Topology、Change Analysis 与 User Confirmed 来源；
   Standalone 基线、既有 SQLite 表重建和 Storage Transfer Revision 同步到 Head `20260829_0047`。Downgrade 会先按
-  外键级联删除含新增 Provider Type 的 Context，再恢复 `20260828_0046` 的旧约束，Upgrade/Downgrade 路径均有回归。
+  外键级联删除 Evidence Row 或 Revision Completeness Snapshot 含新增 Provider Type 的 Context，再恢复
+  `20260828_0046` 的旧约束；无 Evidence Row 的不兼容快照也不会残留，Upgrade/Downgrade 路径均有回归。
 - External Finding 的 `structured_data` 使用按 Adapter 与 Claim Kind 判别的封闭类型联合，未知字段、未知 Java/DB
   Claim 或 Claim Kind 与 Payload 不一致都会在 API 边界拒绝；空结构沿用旧 Fingerprint 输入，保持 S49 既有
   Envelope 的语义指纹兼容。既有 Python AST Provider 的 `EvidenceBundle` 通过只保留强类型元数据与原始结构指纹的
@@ -180,7 +181,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；854 passed、4 skipped、总覆盖率 90.71%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；854 passed、4 skipped、总覆盖率 90.72%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -267,6 +268,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 最新复审指出 Claim 配额截断后 Submission 仍可标为确定性，以及 Controller 父类继承路由未解析也未显式
   降级；当前实现已将配额截断和所有已知不完整类型边界统一传播为非确定性，并为未展开的
   Controller 父类路由生成 `JAVA_POC_INCOMPLETE_INHERITANCE` 告警；两项直接回归与全量后端门禁均通过。
+- 后续复审发现 `0047` Downgrade 只按 Evidence Row 删除新 Provider Context，会漏掉仅在 Revision
+  Completeness Snapshot 声明新 Required Evidence 的上下文；当前迁移会同时检查 Snapshot 与 Evidence Row，
+  回归验证不兼容 Snapshot 级联删除、旧 Provider Snapshot 保留，且全量后端门禁通过。
 
 ### 待完成
 

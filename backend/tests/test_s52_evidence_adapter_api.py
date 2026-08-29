@@ -234,6 +234,32 @@ async def test_user_confirmed_rule_does_not_satisfy_repository_evidence(
         "complete": False,
     }
 
+    snapshot_only = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "只在快照声明新来源",
+            "objective": "验证降级删除尚无证据行的不兼容快照",
+            "required_evidence": ["service_topology"],
+        },
+    )
+    assert snapshot_only.status_code == 201, snapshot_only.text
+    snapshot_only_context_id = snapshot_only.json()["id"]
+
+    legacy = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "降级保留旧来源快照",
+            "objective": "验证降级不删除与 0046 兼容的上下文",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert legacy.status_code == 201, legacy.text
+    legacy_context_id = legacy.json()["id"]
+
     migration_path = (
         Path(__file__).parents[1]
         / "migrations/versions/20260829_0047_evidence_provider_provenance.py"
@@ -270,7 +296,25 @@ async def test_user_confirmed_rule_does_not_satisfy_repository_evidence(
                 "WHERE source_type = 'user_confirmed_rule'"
             )
         )
+        snapshot_only_contexts = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_contexts WHERE id = :identifier"),
+            {"identifier": snapshot_only_context_id.replace("-", "")},
+        )
+        snapshot_only_revisions = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_context_revisions WHERE context_id = :identifier"),
+            {"identifier": snapshot_only_context_id.replace("-", "")},
+        )
+        legacy_contexts = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_contexts WHERE id = :identifier"),
+            {"identifier": legacy_context_id.replace("-", "")},
+        )
+        legacy_revisions = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_context_revisions WHERE context_id = :identifier"),
+            {"identifier": legacy_context_id.replace("-", "")},
+        )
     assert [remaining_contexts, remaining_revisions, remaining_evidence] == [0, 0, 0]
+    assert [snapshot_only_contexts, snapshot_only_revisions] == [0, 0]
+    assert [legacy_contexts, legacy_revisions] == [1, 1]
 
 
 @pytest.mark.asyncio

@@ -28,16 +28,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Revision snapshots embed provider types, so preserving only their evidence rows
-    # would leave an unreadable 0046 context. The declared CASCADE relationships remove
-    # all revisions and evidence for each affected context atomically.
+    # Revision completeness snapshots embed provider types even before evidence exists.
+    # Keeping either those snapshots or new-type evidence would leave unreadable 0046
+    # contexts. Quoted-token matching is portable across PostgreSQL JSON and SQLite JSON
+    # text; declared CASCADE relationships remove each incompatible context atomically.
     op.execute(
         "DELETE FROM test_contexts WHERE id IN ("
         "SELECT DISTINCT revisions.context_id FROM test_context_revisions AS revisions "
-        "JOIN context_evidence_items AS evidence "
-        "ON evidence.context_revision_id = revisions.id "
-        "WHERE evidence.source_type IN "
-        "('service_topology', 'change', 'user_confirmed_rule'))"
+        "WHERE CAST(revisions.completeness AS TEXT) LIKE '%\"service_topology\"%' "
+        "OR CAST(revisions.completeness AS TEXT) LIKE '%\"change\"%' "
+        "OR CAST(revisions.completeness AS TEXT) LIKE '%\"user_confirmed_rule\"%' "
+        "OR EXISTS (SELECT 1 FROM context_evidence_items AS evidence "
+        "WHERE evidence.context_revision_id = revisions.id "
+        "AND evidence.source_type IN "
+        "('service_topology', 'change', 'user_confirmed_rule')))"
     )
     with op.batch_alter_table("context_evidence_items") as batch:
         batch.drop_constraint(op.f(_CONSTRAINT_NAME), type_="check")
