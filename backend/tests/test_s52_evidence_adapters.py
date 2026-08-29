@@ -4868,6 +4868,39 @@ class CreateOrderRequest {
     assert len({claim.id for claim in patterns}) == 2
 
 
+def test_java_spring_poc_allows_large_numeric_validation_bounds() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://large-validation-bound", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/LimitController.java",
+                        "content": """
+@RestController
+class LimitController {
+    @PostMapping("/limits")
+    LimitDto update(@RequestBody LimitDto request) { return request; }
+}
+
+class LimitDto {
+    @Max(9999999999L)
+    private long timestampLimit;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    constraints = [claim.constraint for claim in evidence.claims if claim.kind == "bean_validation"]
+    assert constraints == ["(9999999999L)"]
+    ExternalEvidenceEnvelope.model_validate(adapt_java_evidence(evidence).model_dump(mode="json"))
+
+
 def test_java_spring_poc_preserves_remaining_standard_validation_constraints() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

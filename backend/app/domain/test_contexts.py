@@ -56,6 +56,8 @@ _UUID_LITERAL = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
 )
+_JAVA_QUOTED_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+_JAVA_INTEGRAL_LITERAL = re.compile(r"(?<![A-Za-z0-9_$])[+-]?\d(?:[\d_]*\d)?[lL]?(?![A-Za-z0-9_$])")
 _ADAPTER_REF = r"^\S+$"
 _ADAPTER_IDENTIFIER = r"^[A-Za-z_$][A-Za-z0-9_$.-]{0,159}$"
 _WRITE_SQL = re.compile(
@@ -348,8 +350,10 @@ class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_constraint(self) -> ExternalJavaBeanValidationClaim:
-        require_no_sensitive_scalar_values(
-            [self.dto_type, self.field_name, self.annotation, self.constraint]
+        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.annotation])
+        require_safe_java_validation_constraint(
+            annotation=self.annotation,
+            constraint=self.constraint,
         )
         return self
 
@@ -1000,6 +1004,20 @@ def require_no_sensitive_scalar_values(
     for value in values:
         if first_sensitive_value({"value": str(value)}) is not None:
             raise ValueError("external evidence contains sensitive scalar value")
+
+
+def require_safe_java_validation_constraint(*, annotation: str, constraint: str) -> None:
+    inspected = constraint
+    if annotation.rsplit(".", 1)[-1] in {"Max", "Min"}:
+        parts: list[str] = []
+        start = 0
+        for match in _JAVA_QUOTED_LITERAL.finditer(constraint):
+            parts.append(_JAVA_INTEGRAL_LITERAL.sub("0", constraint[start : match.start()]))
+            parts.append(match.group(0))
+            start = match.end()
+        parts.append(_JAVA_INTEGRAL_LITERAL.sub("0", constraint[start:]))
+        inspected = "".join(parts)
+    require_no_sensitive_scalar_values([inspected])
 
 
 def require_no_sensitive_reference_values(model: BaseModel) -> None:

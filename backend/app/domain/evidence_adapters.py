@@ -53,6 +53,7 @@ from app.domain.test_contexts import (
     first_sensitive_value,
     require_no_sensitive_reference_values,
     require_no_sensitive_scalar_values,
+    require_safe_java_validation_constraint,
 )
 
 JAVA_EVIDENCE_SCHEMA_VERSION: Final[Literal["flowtest-java-evidence-v1"]] = (
@@ -394,8 +395,10 @@ class JavaBeanValidationClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_constraint(self) -> JavaBeanValidationClaim:
-        require_no_sensitive_scalar_values(
-            [self.dto_type, self.field_name, self.annotation, self.constraint]
+        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.annotation])
+        require_safe_java_validation_constraint(
+            annotation=self.annotation,
+            constraint=self.constraint,
         )
         return self
 

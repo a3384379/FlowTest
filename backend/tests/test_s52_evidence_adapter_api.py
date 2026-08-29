@@ -546,6 +546,48 @@ async def test_later_evidence_retires_resolved_adapter_mapping_conflicts(
     )
     assert conflict_marker_count > 0
 
+    subject_ref = f"flowtest://projects/{project_id}/operations/orders"
+    unrelated_bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": subject_ref,
+            "findings": [
+                {
+                    "id": "orders-contract-rule",
+                    "source_type": "contract",
+                    "source_ref": "contract://orders/rules",
+                    "subject_ref": subject_ref,
+                    "kind": "constraint",
+                    "path": "$.orders.status",
+                    "structured_data": {"allowed": ["created"]},
+                    "confidence": 1,
+                    "deterministic": True,
+                    "revision": "contract-v1",
+                }
+            ],
+        }
+    )
+    unrelated_envelope = adapt_evidence_bundle(
+        unrelated_bundle,
+        provider_name="orders-contract-provider",
+        provider_version="1.0.0",
+        source_ref="contract://orders/rules",
+        source_revision="contract-v1",
+        subject_ref=subject_ref,
+    )
+    unrelated = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": unrelated_envelope.model_dump(mode="json")},
+    )
+    assert unrelated.status_code == 201, unrelated.text
+    unrelated_body = unrelated.json()
+    assert unrelated_body["status"] == "conflicted"
+    assert (
+        sum(item["semantic_role"] == "conflict" for item in unrelated_body["evidence_items"])
+        == conflict_marker_count
+    )
+    conflicted_evidence_count = len(unrelated_body["evidence_items"])
+
     entity_payload = _java_evidence(project_id)
     entity_payload["source"]["revision"] = "a1b2c3d5"
     entity_payload["claims"] = [

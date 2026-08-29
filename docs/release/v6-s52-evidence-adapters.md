@@ -203,7 +203,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；871 passed、4 skipped、总覆盖率 90.74%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；872 passed、4 skipped、总覆盖率 90.75%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -340,7 +340,13 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   `@JsonProperty` 常量错误回退 Java 字段名；具体 Record Controller 被遗漏。当前 Revision/Version 不再应用
   无上下文的电话/卡号检测，未解析的显式 JSON 字段名会停止对应 DTO 证据并标记分析不完整，具体
   Record Controller 纳入路由分析。直接回归覆盖 12 位数字 Build Revision、`ExternalNames.LOGIN` 与
-  `StatusController` Record。全量后端门禁通过：871 passed、4 skipped、总覆盖率 90.74%。
+  `StatusController` Record。
+- 后续精确复审提出两个 P2：已有 Mapping Conflict 会被重新附加到无关 Contract/Runtime/Bundle
+  Envelope，导致合法提交被 422 拒绝；10–15 位合法 Bean Validation 数字上限被误当作手机号或卡号。
+  当前只在新 Envelope 含 Java/Database Mapping 证据时退役并重算派生冲突，其他 Provider 保留当前冲突标记；
+  `Max`/`Min` 未引用整数边界不参与电话/卡号检测，引用的 `message` 仍完整检查。直接回归覆盖 Conflicted
+  Context 继续接收 Contract Evidence 与 `@Max(9999999999L)`。全量后端门禁通过：872 passed、4 skipped、
+  总覆盖率 90.75%。
 
 ### 待完成
 

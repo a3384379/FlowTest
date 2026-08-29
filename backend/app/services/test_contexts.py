@@ -26,11 +26,13 @@ from app.domain.test_contexts import (
     ContextConflict,
     ContextConflictSnapshot,
     ContextRevisionSnapshot,
+    DatabaseExternalEvidenceStructuredData,
     EntityMappingExternalEvidenceStructuredData,
     EvidenceProviderType,
     EvidenceSemanticRole,
     ExternalEvidenceEnvelope,
     ExternalEvidenceFinding,
+    JavaExternalEvidenceStructuredData,
     RevisionReference,
     TestContextStatus,
     completeness_snapshot,
@@ -231,19 +233,23 @@ class TestContextService:
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
         stored_evidence = await self._evidence_items(current.id)
-        retired_mapping_conflicts = {
-            item.fingerprint for item in stored_evidence if _is_mapping_conflict_item(item)
-        }
+        recompute_mapping_conflicts = _has_mapping_adapter_findings(envelope)
+        retired_mapping_conflicts = (
+            {item.fingerprint for item in stored_evidence if _is_mapping_conflict_item(item)}
+            if recompute_mapping_conflicts
+            else set()
+        )
         existing = [
             item for item in stored_evidence if item.fingerprint not in retired_mapping_conflicts
         ]
-        try:
-            envelope = with_mapping_conflict_findings(
-                envelope,
-                _mapping_evidence_inputs(existing),
-            )
-        except EntityMappingBudgetExceeded as exc:
-            raise _mapping_budget_exceeded() from exc
+        if recompute_mapping_conflicts:
+            try:
+                envelope = with_mapping_conflict_findings(
+                    envelope,
+                    _mapping_evidence_inputs(existing),
+                )
+            except EntityMappingBudgetExceeded as exc:
+                raise _mapping_budget_exceeded() from exc
         additions = _new_evidence_items(
             context=context,
             envelope=envelope,
@@ -604,6 +610,16 @@ def _mapping_evidence_inputs(
 def _is_mapping_conflict_item(item: ContextEvidenceItem) -> bool:
     finding = ExternalEvidenceFinding.model_validate(item.finding_payload)
     return isinstance(finding.structured_data, EntityMappingExternalEvidenceStructuredData)
+
+
+def _has_mapping_adapter_findings(envelope: ExternalEvidenceEnvelope) -> bool:
+    return any(
+        isinstance(
+            finding.structured_data,
+            (JavaExternalEvidenceStructuredData, DatabaseExternalEvidenceStructuredData),
+        )
+        for finding in envelope.findings
+    )
 
 
 def _derive_entity_mapping(evidence: list[MappingEvidenceInput]) -> EntityMappingResult:
