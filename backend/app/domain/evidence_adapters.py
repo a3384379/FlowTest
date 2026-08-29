@@ -129,7 +129,9 @@ _SERVICE_CALL = re.compile(
 )
 _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
-_KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\"]+)\"")
+_KAFKA_SEND = re.compile(
+    r'\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*"((?:\\.|[^"\\])*)"\s*(?=[,)])'
+)
 _KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
 _KAFKA_LISTENER = re.compile(r"@KafkaListener\b")
 _KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
@@ -2555,7 +2557,7 @@ def _mapping_conditions(arguments: str) -> list[str]:
             assignment.end(),
             allow_identifier=True,
         )
-        values = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
+        values = _java_literal_values(expression)
         if values:
             conditions.extend(f"{name}:{value}" for value in sorted(set(values)))
         else:
@@ -3160,17 +3162,16 @@ def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:
 
 
 def _kafka_listener_topics(arguments: str) -> list[str]:
-    content = arguments[1:-1] if arguments.startswith("(") else arguments
-    named = re.search(
-        r'\btopics\s*=\s*(?P<value>\{[^}]*\}|"(?:\\.|[^"\\])*")',
-        content,
-        re.DOTALL,
+    content = (
+        arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
+    named = re.search(r"\btopics\s*=", _mask_java_non_code(content))
     expression = (
-        named.group("value") if named is not None else _positional_mapping_expression(content)
+        _java_annotation_expression(content, named.end())
+        if named is not None
+        else _positional_mapping_expression(content)
     )
-    topics = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
-    return list(dict.fromkeys(topics))
+    return list(dict.fromkeys(_java_literal_values(expression)))
 
 
 def _deduplicate_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceClaim]:

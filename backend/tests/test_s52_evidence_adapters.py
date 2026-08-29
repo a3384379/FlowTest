@@ -2764,6 +2764,50 @@ class OrderDetailDto {
     assert all("view=" not in operation_ref for operation_ref in operation_by_handler.values())
 
 
+def test_java_spring_poc_preserves_unresolved_mapping_condition_identity() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://computed-conditions", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/TenantController.java",
+                        "content": """
+@RestController
+@RequestMapping("/orders")
+class TenantController {
+    @GetMapping(headers = "X-Tenant=" + TENANT_A)
+    Order tenantA() {
+        return tenantAService.load();
+    }
+
+    @GetMapping(headers = "X-Tenant=" + TENANT_B)
+    Order tenantB() {
+        return tenantBService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    operation_by_handler = {claim.handler: claim.operation_ref for claim in routes}
+    calls = {
+        claim.callee_ref: claim.operation_ref
+        for claim in evidence.claims
+        if claim.kind == "service_call"
+    }
+    assert set(operation_by_handler) == {"tenantA", "tenantB"}
+    assert operation_by_handler["tenantA"] != operation_by_handler["tenantB"]
+    assert calls["java://tenantAService.load"] == operation_by_handler["tenantA"]
+    assert calls["java://tenantBService.load"] == operation_by_handler["tenantB"]
+
+
 def test_java_spring_poc_intersects_class_and_method_mapping_methods() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -3856,6 +3900,62 @@ public class OrderListener {
         "kafka://orders.retry",
         "kafka://orders.legacy",
     }
+
+
+def test_java_spring_poc_rejects_partial_kafka_topic_expressions() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://computed-topics", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order publish() {
+        kafkaTemplate.send("orders-" + tenant, event);
+        kafkaTemplate.send("orders.literal", event);
+        return orderService.load();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderListener.java",
+                        "content": """
+class OrderListener {
+    @KafkaListener("orders-" + TENANT)
+    void computedPositional() {}
+
+    @KafkaListener(topics = "billing-" + TENANT)
+    void computedNamed() {}
+
+    @KafkaListener(topics = {"orders.valid", "orders.retry"})
+    void literals() {}
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    produced_topics = {
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "produce"
+    }
+    consumed_topics = {
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "consume"
+    }
+    assert produced_topics == {"kafka://orders.literal"}
+    assert consumed_topics == {"kafka://orders.valid", "kafka://orders.retry"}
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:
