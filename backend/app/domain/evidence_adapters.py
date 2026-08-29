@@ -109,6 +109,34 @@ _RESPONSE_MAP_CONTAINERS: Final = (
     "NavigableMap",
     "SortedMap",
 )
+_TRANSPORT_ONLY_PARAMETER_ANNOTATIONS: Final = (
+    "AuthenticationPrincipal",
+    "CookieValue",
+    "CurrentSecurityContext",
+    "MatrixVariable",
+    "PathVariable",
+    "RequestAttribute",
+    "RequestHeader",
+    "RequestParam",
+    "SessionAttribute",
+)
+_TRANSPORT_ONLY_PARAMETER_TYPES: Final = (
+    "Authentication",
+    "BindingResult",
+    "Errors",
+    "HttpServletRequest",
+    "HttpServletResponse",
+    "InputStream",
+    "Locale",
+    "Model",
+    "OutputStream",
+    "Principal",
+    "RedirectAttributes",
+    "SessionStatus",
+    "TimeZone",
+    "WebRequest",
+    "ZoneId",
+)
 _MAPPING_ANNOTATION = re.compile(
     rf"@{_SPRING_WEB_ANNOTATION_PREFIX}"
     r"(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
@@ -141,6 +169,11 @@ _FIELD_DECLARATION = re.compile(
     r"\b(?P<modifiers>(?:(?:public|protected|private|static|final|transient)\s+)*)"
     r"(?P<type>[A-Za-z0-9_$<>,.?\[\] \t]+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*=\s*[^;]{0,1000})?\s*;"
+)
+_JAVA_STRING_CONSTANT_DECLARATION = re.compile(
+    r"\b(?P<modifiers>(?:(?:public|protected|private|static|final)\s+)*)"
+    r"(?:java\.lang\.)?String\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*="
+    r"(?P<expression>[^;]+);"
 )
 _VALIDATION_CONSTRAINT_ANNOTATION_NAMES = (
     r"NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
@@ -689,11 +722,16 @@ class JavaSpringPocProvider:
 
     def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
         type_analysis = _java_type_analysis(snapshot.files)
-        interface_routes = _java_interface_route_contracts(snapshot.files)
+        string_constants = _java_string_constants(snapshot.files)
+        interface_contracts = _java_interface_route_contracts(snapshot.files, string_constants)
+        unresolved_mappings = _java_unresolved_mapping_locations(
+            snapshot.files,
+            string_constants,
+        )
         claims: list[JavaEvidenceClaim] = []
         structural_truncated = False
         for file in sorted(snapshot.files, key=lambda item: item.path):
-            file_routes = _java_routes(file, interface_routes)
+            file_routes = _java_routes(file, interface_contracts.routes, string_constants)
             claims.extend(_route_claims(file, file_routes, type_analysis))
             structural_claims, file_truncated = _structural_java_claims(
                 file,
@@ -741,6 +779,26 @@ class JavaSpringPocProvider:
                     ),
                 )
             )
+        if interface_contracts.unresolved_interfaces:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_INTERFACE_HIERARCHY",
+                    message=(
+                        "Java/Spring POC 无法安全解析部分接口继承关系，分析不完整："
+                        f"{_java_type_name_summary(interface_contracts.unresolved_interfaces)}。"
+                    ),
+                )
+            )
+        if unresolved_mappings:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_MAPPING_PATH",
+                    message=(
+                        "Java/Spring POC 无法解析部分 Mapping 路径常量或表达式，分析不完整："
+                        f"{_java_type_name_summary(unresolved_mappings)}。"
+                    ),
+                )
+            )
         if truncated:
             warnings.append(
                 ExternalEvidenceWarning(
@@ -754,7 +812,11 @@ class JavaSpringPocProvider:
             subject_ref=snapshot.subject_ref,
             claims=bounded_claims,
             confidence=min((claim.confidence for claim in bounded_claims), default=0.5),
-            deterministic=all(claim.deterministic for claim in bounded_claims),
+            deterministic=(
+                all(claim.deterministic for claim in bounded_claims)
+                and not interface_contracts.unresolved_interfaces
+                and not unresolved_mappings
+            ),
             warnings=warnings,
         )
 
@@ -2010,6 +2072,43 @@ class _JavaRoute(BaseModel):
     source_line: int
 
 
+@dataclass(frozen=True)
+class _JavaParameter:
+    declared_type: str
+    annotations: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _JavaInterfaceDefinition:
+    routes: tuple[_JavaRoute, ...]
+    parents: tuple[str, ...]
+    base_paths: tuple[str, ...]
+    base_methods: tuple[Literal["GET", "POST", "PUT", "PATCH", "DELETE"], ...] | None
+    base_conditions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _JavaInterfaceContracts:
+    routes: dict[str, tuple[_JavaRoute, ...]]
+    unresolved_interfaces: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _JavaStringConstants:
+    qualified_values: dict[str, str]
+    simple_values: dict[str, str]
+    local_values: dict[str, dict[str, str]]
+
+    def resolve(self, reference: str, enclosing_type: str) -> str | None:
+        if "." not in reference:
+            local = self.local_values.get(enclosing_type, {}).get(reference)
+            return local if local is not None else self.simple_values.get(reference)
+        direct = self.qualified_values.get(reference)
+        if direct is not None:
+            return direct
+        return self.qualified_values.get(".".join(reference.rsplit(".", 2)[-2:]))
+
+
 JavaField = tuple[str, str, list[tuple[str, str]], str | None]
 
 
@@ -2406,14 +2505,109 @@ def _java_annotation_arguments_and_end(
     return content[opening : closing + 1], closing + 1
 
 
+def _java_string_constants(files: list[JavaSourceFileSnapshot]) -> _JavaStringConstants:
+    qualified_candidates: dict[str, list[str]] = defaultdict(list)
+    simple_candidates: dict[str, list[str]] = defaultdict(list)
+    local_candidates: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for file in sorted(files, key=lambda item: item.path):
+        masked_content = _mask_java_non_code(file.content)
+        for declaration, _prefix_start in _java_top_level_declarations(file, masked_content):
+            type_name = declaration.group("name")
+            for name, value in _java_declared_string_constants(
+                file.content,
+                masked_content,
+                declaration,
+            ):
+                qualified_candidates[f"{type_name}.{name}"].append(value)
+                simple_candidates[name].append(value)
+                local_candidates[(type_name, name)].append(value)
+    qualified_values = {
+        name: values[0] for name, values in qualified_candidates.items() if len(values) == 1
+    }
+    simple_values = {
+        name: values[0] for name, values in simple_candidates.items() if len(values) == 1
+    }
+    local_values: dict[str, dict[str, str]] = defaultdict(dict)
+    for (type_name, name), values in local_candidates.items():
+        if len(values) == 1:
+            local_values[type_name][name] = values[0]
+    return _JavaStringConstants(
+        qualified_values=qualified_values,
+        simple_values=simple_values,
+        local_values=dict(local_values),
+    )
+
+
+def _java_declared_string_constants(
+    content: str,
+    masked_content: str,
+    declaration: re.Match[str],
+) -> list[tuple[str, str]]:
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return []
+    closing = _matching_brace(content, opening)
+    body_start = opening + 1
+    shallow_mask = _mask_nested_java_blocks(masked_content[body_start:closing])
+    constants: list[tuple[str, str]] = []
+    for match in _JAVA_STRING_CONSTANT_DECLARATION.finditer(shallow_mask):
+        modifiers = set(match.group("modifiers").split())
+        if declaration.group("kind") != "interface" and not {"static", "final"}.issubset(modifiers):
+            continue
+        expression = content[
+            body_start + match.start("expression") : body_start + match.end("expression")
+        ]
+        value = _java_string_expression_value(expression, None, "")
+        if value is not None:
+            constants.append((match.group("name"), value))
+    return constants
+
+
+def _java_unresolved_mapping_locations(
+    files: list[JavaSourceFileSnapshot],
+    string_constants: _JavaStringConstants,
+) -> tuple[str, ...]:
+    unresolved: set[str] = set()
+    for file in sorted(files, key=lambda item: item.path):
+        masked_content = _mask_java_non_code(file.content)
+        for declaration, prefix_start in _java_top_level_declarations(file, masked_content):
+            opening = masked_content.find("{", declaration.end())
+            if opening < 0:
+                continue
+            closing = _matching_brace(file.content, opening)
+            shallow_mask = list(masked_content)
+            shallow_mask[opening + 1 : closing] = _mask_nested_java_blocks(
+                masked_content[opening + 1 : closing]
+            )
+            for match in _active_java_annotation_matches(
+                file.content,
+                "".join(shallow_mask),
+                _MAPPING_ANNOTATION_MARKER,
+                _MAPPING_ANNOTATION,
+                start=prefix_start,
+                end=closing,
+            ):
+                arguments = _java_annotation_arguments(file.content, match.end())
+                if not _mapping_paths(arguments, string_constants, declaration.group("name")):
+                    line = file.content.count("\n", 0, match.start()) + 1
+                    unresolved.add(f"{file.path}:{line}")
+    return tuple(sorted(unresolved))
+
+
 def _java_routes(
     file: JavaSourceFileSnapshot,
     interface_routes: dict[str, tuple[_JavaRoute, ...]],
+    string_constants: _JavaStringConstants,
 ) -> list[_JavaRoute]:
     masked_content = _mask_java_non_code(file.content)
     routes: list[_JavaRoute] = []
     for selected in _java_controller_declarations(file, masked_content):
-        local_routes = _java_controller_routes(file, masked_content, selected)
+        local_routes = _java_controller_routes(
+            file,
+            masked_content,
+            selected,
+            string_constants,
+        )
         routes.extend(local_routes)
         operation_refs = {route.operation_ref for route in local_routes}
         for route in _java_bound_interface_routes(
@@ -2421,6 +2615,7 @@ def _java_routes(
             masked_content,
             selected,
             interface_routes,
+            string_constants,
         ):
             if route.operation_ref not in operation_refs:
                 routes.append(route)
@@ -2430,31 +2625,101 @@ def _java_routes(
 
 def _java_interface_route_contracts(
     files: list[JavaSourceFileSnapshot],
-) -> dict[str, tuple[_JavaRoute, ...]]:
-    definitions: dict[str, list[tuple[_JavaRoute, ...]]] = defaultdict(list)
+    string_constants: _JavaStringConstants,
+) -> _JavaInterfaceContracts:
+    definitions: dict[str, list[_JavaInterfaceDefinition]] = defaultdict(list)
     for file in sorted(files, key=lambda item: item.path):
         masked_content = _mask_java_non_code(file.content)
         for selected in _java_top_level_declarations(file, masked_content):
             declaration, _prefix_start = selected
             if declaration.group("kind") != "interface":
                 continue
-            routes = tuple(
-                _java_controller_routes(
-                    file,
-                    masked_content,
-                    selected,
-                    allow_abstract_methods=True,
+            base_paths, base_methods, base_conditions = _java_type_mapping(
+                file,
+                masked_content,
+                declaration,
+                selected[1],
+                string_constants,
+            )
+            definitions[declaration.group("name")].append(
+                _JavaInterfaceDefinition(
+                    routes=tuple(
+                        _java_controller_routes(
+                            file,
+                            masked_content,
+                            selected,
+                            string_constants,
+                            allow_abstract_methods=True,
+                        )
+                    ),
+                    parents=_java_extended_interfaces(masked_content, declaration),
+                    base_paths=tuple(base_paths),
+                    base_methods=tuple(base_methods) if base_methods is not None else None,
+                    base_conditions=tuple(base_conditions),
                 )
             )
-            if routes:
-                definitions[declaration.group("name")].append(routes)
-    return {name: candidates[0] for name, candidates in definitions.items() if len(candidates) == 1}
+    unique = {name: items[0] for name, items in definitions.items() if len(items) == 1}
+    unresolved = {name for name, items in definitions.items() if len(items) != 1}
+    resolved: dict[str, tuple[_JavaRoute, ...]] = {}
+    visiting: set[str] = set()
+
+    def resolve(name: str) -> tuple[_JavaRoute, ...]:
+        if name in resolved:
+            return resolved[name]
+        if name in visiting:
+            unresolved.add(name)
+            return ()
+        definition = unique.get(name)
+        if definition is None:
+            unresolved.add(name)
+            return ()
+        visiting.add(name)
+        routes = list(definition.routes)
+        for parent in definition.parents:
+            routes.extend(_java_rebased_interface_routes(resolve(parent), definition, name))
+        visiting.remove(name)
+        resolved[name] = tuple(routes)
+        return resolved[name]
+
+    for interface_name in sorted(unique):
+        resolve(interface_name)
+    return _JavaInterfaceContracts(resolved, tuple(sorted(unresolved)))
+
+
+def _java_rebased_interface_routes(
+    contracts: tuple[_JavaRoute, ...],
+    definition: _JavaInterfaceDefinition,
+    interface_name: str,
+) -> list[_JavaRoute]:
+    routes: list[_JavaRoute] = []
+    for contract in contracts:
+        if definition.base_methods is not None and contract.method not in definition.base_methods:
+            continue
+        conditions = [*contract.conditions, *definition.base_conditions]
+        for base_path in definition.base_paths:
+            full_path = _join_route_path(base_path, contract.path)
+            routes.append(
+                contract.model_copy(
+                    update={
+                        "path": full_path,
+                        "operation_ref": _java_operation_ref(
+                            contract.method,
+                            full_path,
+                            conditions,
+                        ),
+                        "controller_ref": f"java://{interface_name}",
+                        "conditions": tuple(conditions),
+                    }
+                )
+            )
+    return routes
 
 
 def _java_controller_routes(
     file: JavaSourceFileSnapshot,
     masked_content: str,
     selected: tuple[re.Match[str], int],
+    string_constants: _JavaStringConstants,
     *,
     allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
@@ -2473,6 +2738,7 @@ def _java_controller_routes(
         masked_content,
         declaration,
         declaration_prefix_start,
+        string_constants,
     )
     controller = declaration.group("name")
     return [
@@ -2493,6 +2759,7 @@ def _java_controller_routes(
             base_methods,
             base_conditions,
             controller,
+            string_constants,
             allow_abstract_methods=allow_abstract_methods,
         )
     ]
@@ -2503,6 +2770,7 @@ def _java_bound_interface_routes(
     masked_content: str,
     selected: tuple[re.Match[str], int],
     interface_routes: dict[str, tuple[_JavaRoute, ...]],
+    string_constants: _JavaStringConstants,
 ) -> list[_JavaRoute]:
     declaration, _prefix_start = selected
     controller = declaration.group("name")
@@ -2511,6 +2779,7 @@ def _java_bound_interface_routes(
         masked_content,
         declaration,
         selected[1],
+        string_constants,
     )
     routes: list[_JavaRoute] = []
     for interface_name in _java_implemented_interfaces(masked_content, declaration):
@@ -2558,6 +2827,7 @@ def _java_type_mapping(
     masked_content: str,
     declaration: re.Match[str],
     declaration_prefix_start: int,
+    string_constants: _JavaStringConstants,
 ) -> tuple[
     list[str],
     list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
@@ -2575,7 +2845,11 @@ def _java_type_mapping(
         return [""], None, []
     base_arguments = _java_annotation_arguments(file.content, base_matches[-1].end())
     return (
-        _mapping_paths(base_arguments),
+        _mapping_paths(
+            base_arguments,
+            string_constants,
+            declaration.group("name"),
+        ),
         _mapping_http_methods(base_matches[-1], base_arguments),
         _mapping_conditions(base_arguments),
     )
@@ -2595,6 +2869,24 @@ def _java_implemented_interfaces(
     return tuple(
         _outer_java_type(component)
         for component in _split_top_level_java_components(implemented.group(1))
+        if component.strip()
+    )
+
+
+def _java_extended_interfaces(
+    masked_content: str,
+    declaration: re.Match[str],
+) -> tuple[str, ...]:
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return ()
+    header = masked_content[declaration.end() : opening]
+    extended = re.search(r"\bextends\s+(.+?)(?=\bpermits\b|$)", header, re.DOTALL)
+    if extended is None:
+        return ()
+    return tuple(
+        _outer_java_type(component)
+        for component in _split_top_level_java_components(extended.group(1))
         if component.strip()
     )
 
@@ -2641,13 +2933,12 @@ def _java_controller_method_body(
 
 
 def _java_parameter_type_signature(parameters: str) -> tuple[str, ...] | None:
-    if not parameters.strip():
-        return ()
-    components = _split_top_level_java_components(parameters)
-    parameter_types = tuple(_parameter_types(parameters))
-    if len(parameter_types) != len(components):
+    declarations = _java_parameter_declarations(parameters)
+    if declarations is None:
         return None
-    return parameter_types
+    return tuple(
+        _normalized_java_declared_type(parameter.declared_type) for parameter in declarations
+    )
 
 
 def _java_controller_declarations(
@@ -2745,6 +3036,7 @@ def _routes_after_mapping(
     base_methods: list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
     base_conditions: list[str],
     controller: str,
+    string_constants: _JavaStringConstants,
     *,
     allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
@@ -2768,7 +3060,7 @@ def _routes_after_mapping(
         return []
     if signature.group("terminator") == ";" and not allow_abstract_methods:
         return []
-    paths = _mapping_paths(mapping_arguments)
+    paths = _mapping_paths(mapping_arguments, string_constants, controller)
     methods = _mapping_http_methods(mapping, mapping_arguments)
     if base_methods is not None:
         methods = [method for method in methods if method in base_methods]
@@ -2892,25 +3184,103 @@ def _declared_java_exceptions(clause: str | None) -> list[str]:
     ]
 
 
-def _mapping_paths(arguments: str) -> list[str]:
+def _mapping_paths(
+    arguments: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[str]:
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
     named = re.search(r"\b(?:value|path)\s*=", _mask_java_non_code(content))
+    stripped = content.strip()
+    if named is None and re.match(r"[A-Za-z_$][A-Za-z0-9_$]*\s*=", stripped) is not None:
+        return [""]
     expression = (
-        _java_annotation_expression(content, named.end())
+        _java_annotation_expression(content, named.end(), allow_identifier=True)
         if named is not None
-        else _positional_mapping_expression(content)
+        else _java_annotation_expression(content, 0, allow_identifier=True)
     )
-    paths = _java_literal_values(expression)
+    paths = _java_mapping_path_values(expression, string_constants, enclosing_type)
     if paths:
         return list(dict.fromkeys(paths))
     if named is not None or expression:
         return []
-    stripped = content.strip()
     if not stripped or re.match(r"[A-Za-z_$][A-Za-z0-9_$]*\s*=", stripped) is not None:
         return [""]
     return []
+
+
+def _java_mapping_path_values(
+    expression: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[str]:
+    stripped = expression.strip()
+    if not stripped:
+        return []
+    components = (
+        _split_top_level_java_components(stripped[1:-1])
+        if stripped.startswith("{") and stripped.endswith("}")
+        else [stripped]
+    )
+    values: list[str] = []
+    for component in components:
+        value = _java_string_expression_value(component, string_constants, enclosing_type)
+        if value is None:
+            return []
+        values.append(value)
+    return values
+
+
+def _java_string_expression_value(
+    expression: str,
+    string_constants: _JavaStringConstants | None,
+    enclosing_type: str,
+) -> str | None:
+    values: list[str] = []
+    for component in _split_top_level_java_operator(expression.strip(), "+"):
+        literal = re.fullmatch(_JAVA_STRING_LITERAL, component.strip())
+        if literal is not None:
+            decoded = _decode_java_string_literal(component.strip()[1:-1])
+            if decoded is None:
+                return None
+            values.append(decoded)
+            continue
+        reference = component.strip()
+        if (
+            string_constants is None
+            or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$.]*", reference) is None
+        ):
+            return None
+        resolved = string_constants.resolve(reference, enclosing_type)
+        if resolved is None:
+            return None
+        values.append(resolved)
+    return "".join(values) if values else None
+
+
+def _split_top_level_java_operator(content: str, operator: str) -> list[str]:
+    components: list[str] = []
+    depth = 0
+    start = 0
+    index = 0
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
+            continue
+        character = content[index]
+        if character in "([{":
+            depth += 1
+        elif character in ")]}":
+            depth = max(0, depth - 1)
+        elif character == operator and depth == 0:
+            components.append(content[start:index].strip())
+            start = index + 1
+        index += 1
+    components.append(content[start:].strip())
+    return components
 
 
 def _positional_mapping_expression(arguments: str) -> str:
@@ -3206,17 +3576,55 @@ def _dto_field_claims(
 
 
 def _parameter_types(parameters: str) -> list[str]:
-    result: list[str] = []
+    declarations = _java_parameter_declarations(parameters)
+    if declarations is None:
+        return []
+    return [
+        _request_dto_type(parameter.declared_type)
+        for parameter in declarations
+        if not _java_parameter_is_transport_only(parameter)
+    ]
+
+
+def _java_parameter_declarations(parameters: str) -> list[_JavaParameter] | None:
+    if not parameters.strip():
+        return []
+    declarations: list[_JavaParameter] = []
     for parameter in _split_top_level_java_components(parameters):
-        cleaned = re.sub(r"@[A-Za-z0-9_$.]+(?:\([^)]*\))?", "", parameter).strip()
+        annotations = frozenset(
+            match.group(1).rsplit(".", 1)[-1]
+            for match in re.finditer(r"@([A-Za-z_$][A-Za-z0-9_$.]*)", parameter)
+        )
+        masked = _mask_java_annotation_arguments(parameter)
+        cleaned = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked).strip()
         declaration = re.fullmatch(
-            r"(?:final\s+)*(?P<type>.+?)\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\[\])?",
+            r"(?:final\s+)*(?P<type>.+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"(?P<array>(?:\s*\[\])*)",
             cleaned,
             re.DOTALL,
         )
-        if declaration is not None:
-            result.append(_request_dto_type(declaration.group("type")))
-    return result
+        if declaration is None:
+            return None
+        declared_type = declaration.group("type").strip()
+        if declaration.group("array"):
+            declared_type += re.sub(r"\s+", "", declaration.group("array"))
+        declarations.append(_JavaParameter(declared_type, annotations))
+    return declarations
+
+
+def _normalized_java_declared_type(value: str) -> str:
+    simplified = re.sub(
+        r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+",
+        lambda match: match.group(0).rsplit(".", 1)[-1],
+        value,
+    )
+    return re.sub(r"\s+", "", simplified.replace("...", "[]"))
+
+
+def _java_parameter_is_transport_only(parameter: _JavaParameter) -> bool:
+    if parameter.annotations.intersection(_TRANSPORT_ONLY_PARAMETER_ANNOTATIONS):
+        return True
+    return _outer_java_type(parameter.declared_type) in _TRANSPORT_ONLY_PARAMETER_TYPES
 
 
 def _request_dto_type(value: str) -> str:

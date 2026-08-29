@@ -8,8 +8,8 @@
 | 实现分支           | `codex/v6-s52-evidence-adapters`                                       |
 | MCP Server Version | `s52-evidence-adapter-v1`                                              |
 | Scope              | `mcp:evidence:write`                                                   |
-| 数据库变更         | 无；Migration Head 保持 `20260828_0046`                                |
-| Release 状态       | Draft PR #58；第九轮 Review 无新增问题，E2E Fixture 修复本地全绿待推送 |
+| 数据库变更         | `20260829_0047`；扩展 Evidence Provider 来源约束                       |
+| Release 状态       | PR #58；最新 Codex Review 修复与精确门禁复验中                         |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -26,6 +26,10 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   拒绝，运行期 DB 校验仍继续使用既有只读 SQL Node。
 - 两类专用 Contract 都转换为既有 `flowtest-external-evidence-v1`，写入 S49 的不可变 Context Revision 与
   `ContextEvidenceItem`。未新增表、Revision 状态机或旁路持久化。
+- Migration `20260829_0047_evidence_provider_provenance` 扩展 `test_context_evidence_items` 的 Provider Type
+  约束，允许 Repository/Database 以及 S51 已声明的 Service Topology、Change Analysis 与 User Confirmed 来源；
+  Standalone 基线、既有 SQLite 表重建和 Storage Transfer Revision 同步到 Head `20260829_0047`。Downgrade 会先按
+  外键级联删除含新增 Provider Type 的 Context，再恢复 `20260828_0046` 的旧约束，Upgrade/Downgrade 路径均有回归。
 - External Finding 的 `structured_data` 使用按 Adapter 与 Claim Kind 判别的封闭类型联合，未知字段、未知 Java/DB
   Claim 或 Claim Kind 与 Payload 不一致都会在 API 边界拒绝；空结构沿用旧 Fingerprint 输入，保持 S49 既有
   Envelope 的语义指纹兼容。既有 Python AST Provider 的 `EvidenceBundle` 通过只保留强类型元数据与原始结构指纹的
@@ -154,10 +158,10 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 | 范围                    | 命令                             | 结果                                                          |
 | ----------------------- | -------------------------------- | ------------------------------------------------------------- |
-| Backend Format          | `uv run ruff format --check .`   | Pass；464 files already formatted                             |
+| Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；698 passed、4 skipped、总覆盖率 90.56%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；844 passed、4 skipped、总覆盖率 90.73%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -220,11 +224,17 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Domain 与通用 API 可追溯映射回归；三个 Thread 已回复并关闭，第九轮 Codex Review 无新增问题。
 - `d02f44e1ff` 的 Full Compose 发现 E2E 歧义 Fixture 仍依赖已移除的 Route 后缀假冲突；Fixture 已改为为同一
   Operation 显式声明 `ArchivedOrder→public.archived_orders`，使歧义验证与新的权威 Entity 语义一致；独立全新
-  Compose 栈的 Setup 与 S52 定向 Playwright 均通过，待新精确 Head 全门禁。
+  Compose 栈的 Setup 与 S52 定向 Playwright 均通过。
+- 后续复审继续补齐 Java Collection Request DTO、Fully-qualified Kafka Annotation、Singleton Distribution、
+  Controller Interface Mapping、Prefix/Overload、Java String Decode、Response Wrapper、Kafka Producer Topic、
+  Evidence Provider Provenance、Standalone `0047` Head 与真实 Downgrade 回归。
+- 最新复审指出集合容器 Overload 绑定、接口继承 Route、Mapping 常量、Framework 注入参数和迁移文档五项边界；
+  当前实现已保留完整参数类型签名、递归解析本地接口继承、解析本地常量并对未知表达式显式标记分析不完整、排除
+  Transport/Injected 参数，同时把本文件与 Migration Head 更新到 `20260829_0047`。五项均有直接回归。
 
 ### 待完成
 
-- E2E Fixture 修复 Head 的精确 CI、Codex Review、Ready、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 最新修复 Head 的精确 CI、Codex Review、普通 Merge、精确 Main Push 与 Evidence Closure。
 
 ## 7. Remote Evidence
 

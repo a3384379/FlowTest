@@ -2885,6 +2885,97 @@ class OrderController implements OrdersApi {
     assert [claim.callee_ref for claim in calls] == ["java://stringService.find"]
 
 
+def test_java_spring_poc_preserves_container_types_for_interface_overloads() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {
+                    "ref": "repository://interface-container-overload",
+                    "revision": "fixture-v1",
+                },
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @PostMapping("/orders/search")
+    Order find(List<OrderFilter> filters);
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    public Order find(Set<OrderFilter> filters) { return setService.find(filters); }
+
+    public Order find(List<OrderFilter> filters) { return listService.find(filters); }
+}
+
+class OrderFilter { private String status; }
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [claim.callee_ref for claim in calls] == ["java://listService.find"]
+
+
+def test_java_spring_poc_resolves_inherited_local_interface_routes() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {
+                    "ref": "repository://inherited-interface-route",
+                    "revision": "fixture-v1",
+                },
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/BaseApi.java",
+                        "content": """
+interface BaseApi {
+    @GetMapping("/orders/{id}")
+    OrderDto load(String id);
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+@RequestMapping("/v1")
+interface OrdersApi extends BaseApi {}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    public OrderDto load(String id) { return orderService.load(id); }
+}
+
+class OrderDto { private String status; }
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("load", "/v1/orders/{id}")]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
+
+
 def test_java_spring_poc_does_not_select_an_arbitrary_unannotated_class() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -3597,6 +3688,85 @@ class BaseConstantController {
     calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
     assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
+    assert evidence.deterministic is False
+    assert "JAVA_POC_INCOMPLETE_MAPPING_PATH" in {warning.code for warning in evidence.warnings}
+
+
+def test_java_spring_poc_resolves_local_mapping_path_constants() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://resolved-mapping-constants", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/Routes.java",
+                        "content": """
+final class Routes {
+    static final String ORDERS = "/orders";
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping(path = API_PATH)
+class OrderController {
+    private static final String API_PATH = "/api";
+
+    @GetMapping(value = Routes.ORDERS)
+    Order load() { return orderService.load(); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    route = next(claim for claim in evidence.claims if claim.kind == "controller_route")
+    assert (route.handler, route.path) == ("load", "/api/orders")
+
+
+def test_java_spring_poc_excludes_framework_injected_parameters_from_request_dtos() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://injected-parameter", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders/search")
+    Order search(
+        @AuthenticationPrincipal User user,
+        @RequestBody OrderFilter filter
+    ) {
+        return orderService.search(filter);
+    }
+}
+
+class User { private String tenantId; }
+class OrderFilter { private String status; }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        (claim.dto_type, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    assert request_fields == {("OrderFilter", "status")}
 
 
 def test_java_spring_poc_rejects_partial_mapping_path_expressions() -> None:
