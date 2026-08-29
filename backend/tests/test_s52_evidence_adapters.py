@@ -694,6 +694,25 @@ def test_database_distribution_rejects_inverted_extrema_at_generic_boundary() ->
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_distribution_rejects_unequal_singleton_extrema_at_dedicated_boundary() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {"distinct_count": 1, "minimum": 1.0, "maximum": 2.0, "enum_candidates": []}
+    )
+
+    with pytest.raises(ValidationError, match="singleton extrema must be equal"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_distribution_rejects_unequal_singleton_extrema_at_generic_boundary() -> None:
+    payload = _database_envelope_with_distribution_update(
+        {"distinct_count": 1, "minimum": 1.0, "maximum": 2.0, "enum_candidates": []}
+    )
+
+    with pytest.raises(ValidationError, match="singleton extrema must be equal"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_distribution_rejects_distinct_count_above_row_count_at_dedicated_boundary() -> (
     None
 ):

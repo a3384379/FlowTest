@@ -406,6 +406,13 @@ class DatabaseObservedDistribution(BaseModel):
             raise ValueError("database observed candidates must not exceed distinct count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
+        if (
+            self.distinct_count == 1
+            and self.minimum is not None
+            and self.maximum is not None
+            and self.minimum != self.maximum
+        ):
+            raise ValueError("database observed singleton extrema must be equal")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
