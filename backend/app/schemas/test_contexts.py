@@ -17,7 +17,10 @@ from app.domain.integration_plans import (
     IntegrationPlanCompilation,
     PlanActor,
     PlanCleanupRequirement,
+    PlanDatabaseRead,
+    PlanDataRecipe,
     PlanDiagnostic,
+    PlanOracle,
     PlanPrecondition,
     PlanTargetEnvironment,
     PlanValidationResult,
@@ -180,6 +183,9 @@ class IntegrationPlanRequest(BaseModel):
         min_length=1, max_length=1000
     )
     existing_auth: ExistingAuthWorkflowSelectionRequest | None = None
+    data_recipes: list[PlanDataRecipe] = Field(default_factory=list, max_length=500)
+    database_reads: list[PlanDatabaseRead] = Field(default_factory=list, max_length=200)
+    additional_oracles: list[PlanOracle] = Field(default_factory=list, max_length=2000)
     cleanup_requirements: list[PlanCleanupRequirement] = Field(default_factory=list, max_length=200)
 
 

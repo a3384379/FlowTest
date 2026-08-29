@@ -5,12 +5,20 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from app.core.errors import AppError
 from app.domain.network import OutboundNetworkPolicy
-from app.engine.contracts import FieldMapping, NodeStatus, WorkflowDefinition, WorkflowNode
+from app.engine.contracts import (
+    FieldMapping,
+    NodeStatus,
+    WorkflowDefinition,
+    WorkflowNode,
+    parse_node_config,
+)
 from app.engine.control_nodes import execute_control_node
 from app.engine.mappings import MappingResolutionError, resolve_field_mappings
 from app.engine.scheduler import ExecutionContext, NodeExecutionError, WorkflowScheduler
 from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
+from app.services.workflows import WorkflowService
 
 
 class ControlExecutor:
@@ -273,6 +281,46 @@ async def test_control_node_reports_invalid_expression_and_unsupported_executor(
     with pytest.raises(NodeExecutionError, match="不支持") as unsupported:
         await execute_control_node(api_node, context)
     assert unsupported.value.code == "UNSUPPORTED_NODE_TYPE"
+
+
+def test_workflow_publish_validation_rejects_downstream_dynamic_expected_source() -> None:
+    definition = WorkflowDefinition.model_validate(
+        {
+            "nodes": [
+                _node("start", "start", {}),
+                _node("source", "api", _api_config()),
+                _node(
+                    "assert",
+                    "assert",
+                    {
+                        "source_node_id": "source",
+                        "expression": "body.id",
+                        "expected_source_node_id": "later",
+                        "expected_expression": "body.id",
+                    },
+                ),
+                _node("later", "api", _api_config()),
+                _node("end", "end", {}),
+            ],
+            "edges": [
+                _edge("start", "source"),
+                _edge("source", "assert"),
+                _edge("assert", "later"),
+                _edge("later", "end"),
+            ],
+        }
+    )
+    assertion = next(node for node in definition.nodes if node.id == "assert")
+    service = WorkflowService.__new__(WorkflowService)
+
+    with pytest.raises(AppError) as error_info:
+        service._validate_control_node(
+            definition,
+            assertion,
+            parse_node_config(assertion),
+        )
+
+    assert error_info.value.code == "INVALID_NODE_SOURCE"
 
 
 @pytest.mark.asyncio

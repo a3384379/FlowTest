@@ -40,6 +40,7 @@ from app.domain.flow_spec import (
     normalize_flow_spec,
     validate_flow_spec,
 )
+from app.domain.test_contexts import first_sensitive_value, require_no_sensitive_scalar_values
 from app.domain.test_design import OracleSpec, ScenarioCandidate
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.engine.contracts import (
@@ -55,15 +56,25 @@ from app.engine.contracts import (
 
 INTEGRATION_PLAN_SCHEMA_VERSION = "flowtest-integration-plan-v1"
 INTEGRATION_PLAN_FINGERPRINT_VERSION = "flowtest-integration-plan-fingerprint-v1"
+INTEGRATION_PLAN_SCHEMA_VERSION_V2 = "flowtest-integration-plan-v2"
+INTEGRATION_PLAN_FINGERPRINT_VERSION_V2 = "flowtest-integration-plan-fingerprint-v2"
 INTEGRATION_PLAN_COMPILER_VERSION = "flowtest-integration-plan-compiler-v1"
+INTEGRATION_PLAN_COMPILER_VERSION_V2 = "flowtest-integration-plan-compiler-s53-v1"
 
 _ZERO_FINGERPRINT = "0" * 64
 _IDENTIFIER = r"^[A-Za-z_][A-Za-z0-9_.:-]{0,119}$"
 _SECRET_REF = r"^secret://[A-Za-z0-9._:/-]{1,480}$"  # noqa: S105
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_DATABASE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_ORACLE_AUTO_CONFIDENCE = 0.8
 _SENSITIVE_KEY = re.compile(
     r"(?:^|[_-])(authorization|cookie|password|passwd|secret|token|api[_-]?key)"
     r"(?:$|[_-])",
+    re.IGNORECASE,
+)
+_SENSITIVE_ORACLE_PATH = re.compile(
+    r"(?:^|[.\[\"'])(authorization|cookie|password|passwd|secret|token|api[_-]?key)"
+    r"(?:$|[.\]\"'])",
     re.IGNORECASE,
 )
 _COMPILER_PASSES = (
@@ -188,12 +199,13 @@ class PlanStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(pattern=_IDENTIFIER)
-    kind: Literal["operation", "subflow", "dataset"]
+    kind: Literal["operation", "subflow", "dataset", "db_read"]
     name: str = Field(min_length=1, max_length=200)
     operation_ref: str | None = Field(default=None, pattern=_IDENTIFIER)
     workflow_id: UUID | None = None
     workflow_version: int | None = Field(default=None, ge=1)
     data_recipe_ref: str | None = Field(default=None, pattern=_IDENTIFIER)
+    db_read_ref: str | None = Field(default=None, pattern=_IDENTIFIER)
     evidence_refs: list[EvidenceRef] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -202,6 +214,7 @@ class PlanStep(BaseModel):
             "operation": self.operation_ref is not None,
             "subflow": self.workflow_id is not None and self.workflow_version is not None,
             "dataset": self.data_recipe_ref is not None,
+            "db_read": self.db_read_ref is not None,
         }
         if not present[self.kind] or sum(present.values()) != 1:
             raise ValueError("step kind must declare exactly its matching reference")
@@ -330,21 +343,106 @@ class PlanDataRecipe(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(pattern=_IDENTIFIER)
-    kind: Literal["dataset", "runtime", "environment", "constant", "setup_api"]
+    kind: Literal[
+        "dataset",
+        "runtime",
+        "environment",
+        "constant",
+        "setup_api",
+        "synthetic",
+        "approved_dataset",
+        "previous_step",
+        "environment_variable",
+        "secret_reference",
+        "existing_safe_record",
+        "database_observation",
+    ]
     name: str = Field(min_length=1, max_length=160)
     artifact_id: UUID | None = None
     value: str | None = Field(default=None, max_length=65536)
+    source_ref: EvidenceRef | None = None
+    source_step_id: str | None = Field(default=None, pattern=_IDENTIFIER)
+    expression: str | None = Field(default=None, min_length=1, max_length=500)
+    variable_name: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$",
+    )
+    secret_ref: str | None = Field(default=None, pattern=_SECRET_REF)
+    generator: Literal["uuid", "unique_string", "positive_integer"] | None = None
+    side_effecting: bool = False
+    cleanup_requirement_ref: str | None = Field(default=None, pattern=_IDENTIFIER)
+    deterministic: bool = True
+    requires_review: bool = False
+    confidence: float = Field(default=1, ge=0, le=1)
+    applies_to: list[str] = Field(default_factory=list, max_length=100)
     evidence_refs: list[EvidenceRef] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_recipe_value(self) -> PlanDataRecipe:
-        if (self.kind == "dataset") != (self.artifact_id is not None):
-            raise ValueError("dataset recipes require only an artifact id")
-        if self.kind == "constant" and self.value is None:
-            raise ValueError("constant recipes require a value")
-        if self.kind not in {"constant"} and self.value is not None:
-            raise ValueError("only constant recipes may contain a value")
+        _validate_recipe_payload(self)
+        _validate_recipe_source(self)
+        _validate_recipe_governance(self)
         return self
+
+
+def _validate_recipe_payload(recipe: PlanDataRecipe) -> None:
+    dataset_kinds = {"dataset", "approved_dataset"}
+    value_kinds = {"constant", "existing_safe_record"}
+    if (recipe.kind in dataset_kinds) != (recipe.artifact_id is not None):
+        raise ValueError("approved dataset recipes require only an artifact id")
+    if recipe.kind in value_kinds and recipe.value is None:
+        raise ValueError("constant or safe-record recipes require a value")
+    if recipe.kind not in value_kinds and recipe.value is not None:
+        raise ValueError("only constant or safe-record recipes may contain a value")
+    if recipe.value is not None and first_sensitive_value({"value": recipe.value}) is not None:
+        raise ValueError("data recipes cannot persist PII or sensitive literals")
+    if (recipe.kind == "secret_reference") != (recipe.secret_ref is not None):
+        raise ValueError("secret recipes require only a secret reference")
+    if (recipe.kind == "synthetic") != (recipe.generator is not None):
+        raise ValueError("synthetic recipes require only a bounded generator")
+
+
+def _validate_recipe_source(recipe: PlanDataRecipe) -> None:
+    s53_kinds = {
+        "synthetic",
+        "approved_dataset",
+        "previous_step",
+        "environment_variable",
+        "secret_reference",
+        "setup_api",
+        "existing_safe_record",
+        "database_observation",
+    }
+    if recipe.kind in s53_kinds and recipe.source_ref is None:
+        raise ValueError("S53 data recipes require a source_ref")
+    if (recipe.kind in {"previous_step", "setup_api"}) != (recipe.source_step_id is not None):
+        raise ValueError("recipe source step does not match its source kind")
+    if (recipe.kind == "previous_step") != (recipe.expression is not None):
+        raise ValueError("previous-step recipes require only a source expression")
+    variable_kinds = {"synthetic", "previous_step", "environment_variable"}
+    if (recipe.kind in variable_kinds) != (recipe.variable_name is not None):
+        raise ValueError("recipe variable name does not match its source kind")
+
+
+def _validate_recipe_governance(recipe: PlanDataRecipe) -> None:
+    _require_safe_plan_references(recipe)
+    if recipe.side_effecting and recipe.kind != "setup_api":
+        raise ValueError("only setup API recipes may declare side effects")
+    if recipe.side_effecting and recipe.cleanup_requirement_ref is None:
+        raise ValueError("side-effecting setup recipes require a cleanup requirement")
+    if recipe.cleanup_requirement_ref is not None and not recipe.side_effecting:
+        raise ValueError("cleanup references require a side-effecting setup recipe")
+    if (
+        not recipe.deterministic or recipe.confidence < _ORACLE_AUTO_CONFIDENCE
+    ) and not recipe.requires_review:
+        raise ValueError("low-confidence or non-deterministic recipes require_review")
+
+
+class PlanOracleValueSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(pattern=_IDENTIFIER)
+    expression: str = Field(min_length=1, max_length=500)
 
 
 class PlanOracle(BaseModel):
@@ -352,7 +450,16 @@ class PlanOracle(BaseModel):
 
     id: str = Field(pattern=_IDENTIFIER)
     step_id: str = Field(pattern=_IDENTIFIER)
-    kind: Literal["status", "schema", "field"]
+    kind: Literal[
+        "status",
+        "header",
+        "schema",
+        "content_type",
+        "time",
+        "field",
+        "cross_api",
+        "db_read",
+    ]
     expression: str = Field(min_length=1, max_length=500)
     operator: Literal[
         "equals",
@@ -366,9 +473,105 @@ class PlanOracle(BaseModel):
         "matches",
     ] = "equals"
     expected: JsonValue = None
+    expected_source: PlanOracleValueSource | None = None
     confidence: float = Field(ge=0, le=1)
+    deterministic: bool = True
     requires_review: bool = False
+    source_ref: EvidenceRef | None = None
+    applies_to: list[str] = Field(default_factory=list, max_length=100)
     evidence_refs: list[EvidenceRef] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_strength_and_source(self) -> PlanOracle:
+        _require_safe_plan_references(self)
+        if (not self.deterministic or self.confidence < _ORACLE_AUTO_CONFIDENCE) and not (
+            self.requires_review
+        ):
+            raise ValueError("low-confidence or non-deterministic oracles require_review")
+        if self.kind in {"cross_api", "db_read"} and self.source_ref is None:
+            raise ValueError("cross-system oracles require a source_ref")
+        if self.kind in {"cross_api", "db_read"} and not self.applies_to:
+            raise ValueError("cross-system oracles require applies_to references")
+        if self.kind == "cross_api" and self.expected_source is None:
+            raise ValueError("cross-API oracles require an expected source")
+        if self.expected_source is not None and self.expected is not None:
+            raise ValueError("dynamic oracles cannot also declare a literal expected value")
+        if self.expected_source is not None and self.operator == "exists":
+            raise ValueError("exists oracles cannot declare an expected source")
+        if self.kind in {"cross_api", "db_read"}:
+            required_steps = {self.step_id}
+            if self.expected_source is not None:
+                required_steps.add(self.expected_source.step_id)
+            if not required_steps.issubset(set(self.applies_to)):
+                raise ValueError("cross-system oracle applies_to must include all source steps")
+        return self
+
+
+class PlanDatabasePredicate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column: str = Field(min_length=1, max_length=63)
+    parameter: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+    variable_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
+
+    @model_validator(mode="after")
+    def validate_column(self) -> PlanDatabasePredicate:
+        if _DATABASE_IDENTIFIER.fullmatch(self.column) is None:
+            raise ValueError("database predicate columns must be identifiers")
+        return self
+
+
+class PlanDatabaseRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=_IDENTIFIER)
+    name: str = Field(min_length=1, max_length=200)
+    credential_id: UUID
+    dialect: Literal["postgresql", "mysql"]
+    table: str = Field(min_length=1, max_length=127)
+    columns: list[str] = Field(min_length=1, max_length=50)
+    predicates: list[PlanDatabasePredicate] = Field(min_length=1, max_length=20)
+    timeout_seconds: int = Field(default=30, ge=1, le=30)
+    source_ref: EvidenceRef
+    deterministic: bool = True
+    requires_review: bool = False
+    confidence: float = Field(default=1, ge=0, le=1)
+    applies_to: list[str] = Field(default_factory=list, max_length=100)
+    evidence_refs: list[EvidenceRef] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_structure_and_strength(self) -> PlanDatabaseRead:
+        _require_safe_plan_references(self)
+        identifiers = self.table.split(".")
+        if len(identifiers) not in {1, 2} or any(
+            _DATABASE_IDENTIFIER.fullmatch(item) is None for item in identifiers
+        ):
+            raise ValueError("database tables must be one- or two-part identifiers")
+        if any(_DATABASE_IDENTIFIER.fullmatch(item) is None for item in self.columns):
+            raise ValueError("database projection columns must be identifiers")
+        if len(self.columns) != len(set(self.columns)):
+            raise ValueError("database projection columns must be unique")
+        parameters = [item.parameter for item in self.predicates]
+        if len(parameters) != len(set(parameters)):
+            raise ValueError("database predicate parameters must be unique")
+        if (not self.deterministic or self.confidence < _ORACLE_AUTO_CONFIDENCE) and not (
+            self.requires_review
+        ):
+            raise ValueError("low-confidence or non-deterministic database reads require_review")
+        return self
+
+
+def _require_safe_plan_references(model: BaseModel) -> None:
+    references: list[str] = []
+    for field_name in type(model).model_fields:
+        value = getattr(model, field_name)
+        if field_name.endswith("_ref") and isinstance(value, str):
+            references.append(value)
+        elif field_name.endswith("_refs") and isinstance(value, list):
+            references.extend(item for item in value if isinstance(item, str))
+    require_no_sensitive_scalar_values(
+        [value for value in references if re.fullmatch(_SECRET_REF, value) is None]
+    )
 
 
 class PlanCleanupRequirement(BaseModel):
@@ -389,8 +592,13 @@ class PlanCoverageTarget(BaseModel):
         "operation",
         "binding",
         "status",
+        "header",
         "schema",
+        "content_type",
+        "time",
         "field",
+        "cross_api",
+        "db_read",
         "branch",
         "cleanup",
     ]
@@ -432,10 +640,13 @@ class PlanDiagnostic(BaseModel):
 class IntegrationPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flowtest-integration-plan-v1"] = "flowtest-integration-plan-v1"
-    fingerprint_version: Literal["flowtest-integration-plan-fingerprint-v1"] = (
-        "flowtest-integration-plan-fingerprint-v1"
+    schema_version: Literal["flowtest-integration-plan-v1", "flowtest-integration-plan-v2"] = (
+        "flowtest-integration-plan-v1"
     )
+    fingerprint_version: Literal[
+        "flowtest-integration-plan-fingerprint-v1",
+        "flowtest-integration-plan-fingerprint-v2",
+    ] = "flowtest-integration-plan-fingerprint-v1"
     plan_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     context_revision_id: UUID
     context_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -448,6 +659,7 @@ class IntegrationPlan(BaseModel):
     branches: list[PlanBranch] = Field(default_factory=list, max_length=100)
     bindings: list[PlanBinding] = Field(default_factory=list, max_length=2000)
     data_recipes: list[PlanDataRecipe] = Field(default_factory=list, max_length=500)
+    database_reads: list[PlanDatabaseRead] = Field(default_factory=list, max_length=200)
     oracles: list[PlanOracle] = Field(default_factory=list, max_length=2000)
     cleanup_requirements: list[PlanCleanupRequirement] = Field(default_factory=list, max_length=200)
     coverage_targets: list[PlanCoverageTarget] = Field(default_factory=list, max_length=2000)
@@ -542,6 +754,9 @@ class IntegrationPlannerRequest(BaseModel):
     target_environment: PlanTargetEnvironment
     selected_operations: list[SelectedOperationEvidence] = Field(min_length=1, max_length=100)
     reusable_auth_subflow: ReusableAuthSubflowEvidence | None = None
+    data_recipes: list[PlanDataRecipe] = Field(default_factory=list, max_length=500)
+    database_reads: list[PlanDatabaseRead] = Field(default_factory=list, max_length=200)
+    additional_oracles: list[PlanOracle] = Field(default_factory=list, max_length=2000)
     cleanup_requirements: list[PlanCleanupRequirement] = Field(default_factory=list)
 
 
@@ -614,14 +829,40 @@ def normalize_integration_plan(plan: IntegrationPlan | Mapping[str, object]) -> 
             ),
             "data_recipes": sorted(
                 (
-                    item.model_copy(update={"evidence_refs": _sorted_refs(item.evidence_refs)})
+                    item.model_copy(
+                        update={
+                            "applies_to": sorted(set(item.applies_to)),
+                            "evidence_refs": _sorted_refs(item.evidence_refs),
+                        }
+                    )
                     for item in normalized.data_recipes
+                ),
+                key=lambda item: item.id,
+            ),
+            "database_reads": sorted(
+                (
+                    item.model_copy(
+                        update={
+                            "columns": list(dict.fromkeys(item.columns)),
+                            "predicates": sorted(
+                                item.predicates, key=lambda value: value.parameter
+                            ),
+                            "applies_to": sorted(set(item.applies_to)),
+                            "evidence_refs": _sorted_refs(item.evidence_refs),
+                        }
+                    )
+                    for item in normalized.database_reads
                 ),
                 key=lambda item: item.id,
             ),
             "oracles": sorted(
                 (
-                    item.model_copy(update={"evidence_refs": _sorted_refs(item.evidence_refs)})
+                    item.model_copy(
+                        update={
+                            "applies_to": sorted(set(item.applies_to)),
+                            "evidence_refs": _sorted_refs(item.evidence_refs),
+                        }
+                    )
                     for item in normalized.oracles
                 ),
                 key=lambda item: item.id,
@@ -719,6 +960,8 @@ def integration_plan_fingerprint(plan: IntegrationPlan) -> str:
     normalized = normalize_integration_plan(plan)
     payload = normalized.model_dump(mode="json")
     payload.pop("plan_fingerprint", None)
+    if normalized.fingerprint_version == INTEGRATION_PLAN_FINGERPRINT_VERSION:
+        _remove_s53_fingerprint_fields(payload)
     canonical = json.dumps(
         {"version": normalized.fingerprint_version, "plan": payload},
         ensure_ascii=False,
@@ -726,6 +969,31 @@ def integration_plan_fingerprint(plan: IntegrationPlan) -> str:
         separators=(",", ":"),
     )
     return sha256(canonical.encode()).hexdigest()
+
+
+def _remove_s53_fingerprint_fields(payload: dict[str, object]) -> None:
+    payload.pop("database_reads", None)
+    for step in cast(list[dict[str, object]], payload.get("steps", [])):
+        step.pop("db_read_ref", None)
+    for recipe in cast(list[dict[str, object]], payload.get("data_recipes", [])):
+        for key in (
+            "source_ref",
+            "source_step_id",
+            "expression",
+            "variable_name",
+            "secret_ref",
+            "generator",
+            "side_effecting",
+            "cleanup_requirement_ref",
+            "deterministic",
+            "requires_review",
+            "confidence",
+            "applies_to",
+        ):
+            recipe.pop(key, None)
+    for oracle in cast(list[dict[str, object]], payload.get("oracles", [])):
+        for key in ("expected_source", "deterministic", "source_ref", "applies_to"):
+            oracle.pop(key, None)
 
 
 def seal_integration_plan(plan: IntegrationPlan) -> IntegrationPlan:
@@ -747,6 +1015,7 @@ def validate_integration_plan(plan: IntegrationPlan) -> PlanValidationResult:
                 "$.plan_fingerprint",
             )
         )
+    diagnostics.extend(_version_diagnostics(normalized))
     diagnostics.extend(_identity_diagnostics(normalized))
     diagnostics.extend(_reference_diagnostics(normalized))
     diagnostics.extend(_binding_diagnostics(normalized))
@@ -773,6 +1042,23 @@ def validate_integration_plan(plan: IntegrationPlan) -> PlanValidationResult:
     )
 
 
+def _version_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    expected = {
+        INTEGRATION_PLAN_SCHEMA_VERSION: INTEGRATION_PLAN_FINGERPRINT_VERSION,
+        INTEGRATION_PLAN_SCHEMA_VERSION_V2: INTEGRATION_PLAN_FINGERPRINT_VERSION_V2,
+    }[plan.schema_version]
+    if plan.fingerprint_version == expected:
+        return []
+    return [
+        _diagnostic(
+            "PLAN_VERSION_MISMATCH",
+            "blocker",
+            "Integration Plan Schema 与 Fingerprint Version 不匹配",
+            "$.fingerprint_version",
+        )
+    ]
+
+
 def build_integration_plan(request: IntegrationPlannerRequest) -> IntegrationPlan:
     """Build a deterministic plan from user-selected canonical operation evidence."""
 
@@ -780,11 +1066,42 @@ def build_integration_plan(request: IntegrationPlannerRequest) -> IntegrationPla
     steps = _planned_steps(request)
     bindings, unresolved = _planned_bindings(request, steps)
     oracles, oracle_unresolved = _planned_oracles(request, steps)
+    oracles.extend(request.additional_oracles)
     unresolved.extend(oracle_unresolved)
     evidence_refs = _all_planner_evidence(request)
     evidence_items = max(1, len(request.selected_operations) + len(bindings) + len(oracles))
     unresolved_count = len(unresolved)
+    uses_s53 = bool(request.data_recipes or request.database_reads or request.additional_oracles)
+    review_requirements = {item.code for item in unresolved if item.severity == "review"}
+    review_requirements.update(
+        f"DATA_RECIPE_REVIEW_REQUIRED:{item.id}"
+        for item in request.data_recipes
+        if item.requires_review
+    )
+    review_requirements.update(
+        f"DATABASE_READ_REVIEW_REQUIRED:{item.id}"
+        for item in request.database_reads
+        if item.requires_review
+    )
+    review_requirements.update(
+        f"ORACLE_REVIEW_REQUIRED:{item.id}"
+        for item in request.additional_oracles
+        if item.requires_review
+    )
+    strengths = [
+        *(item.confidence for item in request.data_recipes),
+        *(item.confidence for item in request.database_reads),
+        *(item.confidence for item in oracles),
+    ]
     plan = IntegrationPlan(
+        schema_version=(
+            INTEGRATION_PLAN_SCHEMA_VERSION_V2 if uses_s53 else INTEGRATION_PLAN_SCHEMA_VERSION
+        ),
+        fingerprint_version=(
+            INTEGRATION_PLAN_FINGERPRINT_VERSION_V2
+            if uses_s53
+            else INTEGRATION_PLAN_FINGERPRINT_VERSION
+        ),
         plan_fingerprint=_ZERO_FINGERPRINT,
         context_revision_id=request.context_revision_id,
         context_fingerprint=request.context_fingerprint,
@@ -795,19 +1112,25 @@ def build_integration_plan(request: IntegrationPlannerRequest) -> IntegrationPla
         operations=operations,
         steps=steps,
         bindings=bindings,
-        data_recipes=[],
+        data_recipes=request.data_recipes,
+        database_reads=request.database_reads,
         oracles=oracles,
         cleanup_requirements=request.cleanup_requirements,
         coverage_targets=_planned_coverage(steps, bindings, oracles),
         unresolved_items=unresolved,
-        review_requirements=sorted({item.code for item in unresolved if item.severity == "review"}),
+        review_requirements=sorted(review_requirements),
         confidence=PlanConfidence(
             overall=min(
                 [candidate.confidence for binding in bindings for candidate in binding.candidates]
+                + strengths
                 or [1]
             ),
             evidence_coverage=max(0, (evidence_items - unresolved_count) / evidence_items),
-            deterministic=True,
+            deterministic=(
+                all(item.deterministic for item in request.data_recipes)
+                and all(item.deterministic for item in request.database_reads)
+                and all(item.deterministic for item in oracles)
+            ),
         ),
         diagnostics=[],
         evidence_refs=evidence_refs,
@@ -855,6 +1178,7 @@ def compile_integration_plan(plan: IntegrationPlan) -> IntegrationPlanCompilatio
     importable = validation.valid and compatibility.compatible
     fingerprint = flow_spec_fingerprint(spec) if importable else None
     return IntegrationPlanCompilation(
+        compiler_version=_compiler_version(normalized),
         plan_fingerprint=normalized.plan_fingerprint,
         flow_spec=spec,
         flow_spec_fingerprint=fingerprint,
@@ -919,7 +1243,17 @@ def _scenario_request(scenario: ScenarioCandidate | None) -> PlanRequestTemplate
 
 
 def _planned_steps(request: IntegrationPlannerRequest) -> list[PlanStep]:
-    steps: list[PlanStep] = []
+    steps = [
+        PlanStep(
+            id=item.id,
+            kind="dataset",
+            name=item.name,
+            data_recipe_ref=item.id,
+            evidence_refs=item.evidence_refs,
+        )
+        for item in request.data_recipes
+        if item.kind in {"dataset", "approved_dataset"}
+    ]
     auth = request.reusable_auth_subflow
     if auth is not None:
         steps.append(
@@ -941,6 +1275,16 @@ def _planned_steps(request: IntegrationPlannerRequest) -> list[PlanStep]:
             evidence_refs=item.evidence_refs,
         )
         for item in request.selected_operations
+    )
+    steps.extend(
+        PlanStep(
+            id=item.id,
+            kind="db_read",
+            name=item.name,
+            db_read_ref=item.id,
+            evidence_refs=item.evidence_refs,
+        )
+        for item in request.database_reads
     )
     return steps
 
@@ -1253,6 +1597,14 @@ def _all_planner_evidence(request: IntegrationPlannerRequest) -> list[str]:
     refs.extend(ref for item in request.preconditions for ref in item.evidence_refs)
     refs.extend(ref for item in request.selected_operations for ref in item.evidence_refs)
     refs.extend(ref for item in request.selected_operations for ref in item.credential_refs)
+    refs.extend(ref for item in request.data_recipes for ref in item.evidence_refs)
+    refs.extend(ref for item in request.database_reads for ref in item.evidence_refs)
+    refs.extend(ref for item in request.additional_oracles for ref in item.evidence_refs)
+    refs.extend(item.source_ref for item in request.data_recipes if item.source_ref is not None)
+    refs.extend(item.source_ref for item in request.database_reads)
+    refs.extend(
+        item.source_ref for item in request.additional_oracles if item.source_ref is not None
+    )
     if request.reusable_auth_subflow is not None:
         refs.extend(request.reusable_auth_subflow.evidence_refs)
     return sorted(set(refs))
@@ -1268,6 +1620,7 @@ def _identity_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         ("branch", (item.id for item in plan.branches)),
         ("binding", (item.id for item in plan.bindings)),
         ("data recipe", (item.id for item in plan.data_recipes)),
+        ("database read", (item.id for item in plan.database_reads)),
         ("oracle", (item.id for item in plan.oracles)),
         ("cleanup", (item.id for item in plan.cleanup_requirements)),
         ("coverage", (item.id for item in plan.coverage_targets)),
@@ -1324,6 +1677,7 @@ def _reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     return [
         *_step_reference_diagnostics(plan),
         *_binding_reference_diagnostics(plan),
+        *_s53_reference_diagnostics(plan),
         *_cleanup_reference_diagnostics(plan),
         *_coverage_reference_diagnostics(plan),
     ]
@@ -1333,6 +1687,7 @@ def _step_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     diagnostics: list[PlanDiagnostic] = []
     operations = {item.ref for item in plan.operations}
     recipes = {item.id: item for item in plan.data_recipes}
+    database_reads = {item.id for item in plan.database_reads}
     for index, step in enumerate(plan.steps):
         if step.operation_ref is not None and step.operation_ref not in operations:
             diagnostics.append(
@@ -1345,7 +1700,7 @@ def _step_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         if (
             step.data_recipe_ref is not None
             and step.data_recipe_ref in recipes
-            and recipes[step.data_recipe_ref].kind != "dataset"
+            and recipes[step.data_recipe_ref].kind not in {"dataset", "approved_dataset"}
         ):
             diagnostics.append(
                 _diagnostic(
@@ -1355,10 +1710,20 @@ def _step_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
                     f"$.steps[{index}].data_recipe_ref",
                 )
             )
+        if step.db_read_ref is not None and step.db_read_ref not in database_reads:
+            diagnostics.append(
+                _unknown_ref("UNKNOWN_DATABASE_READ_REF", step.db_read_ref, f"$.steps[{index}]")
+            )
     operation_steps = {item.operation_ref for item in plan.steps if item.operation_ref is not None}
     diagnostics.extend(
         _unknown_ref("UNPLANNED_OPERATION", ref, "$.operations")
         for ref in sorted(operations - operation_steps)
+    )
+    database_step_refs = {item.db_read_ref for item in plan.steps if item.db_read_ref is not None}
+    diagnostics.extend(
+        _unknown_ref("DATABASE_READ_STEP_REQUIRED", item.id, "$.database_reads")
+        for item in plan.database_reads
+        if item.id not in database_step_refs
     )
     dataset_step_refs = {
         item.data_recipe_ref for item in plan.steps if item.data_recipe_ref is not None
@@ -1366,7 +1731,7 @@ def _step_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     diagnostics.extend(
         _unknown_ref("DATASET_STEP_REQUIRED", recipe.id, "$.data_recipes")
         for recipe in plan.data_recipes
-        if recipe.kind == "dataset" and recipe.id not in dataset_step_refs
+        if recipe.kind in {"dataset", "approved_dataset"} and recipe.id not in dataset_step_refs
     )
     steps = {item.id for item in plan.steps}
     diagnostics.extend(
@@ -1384,6 +1749,241 @@ def _step_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         if item.target.step_id not in steps
     )
     return diagnostics
+
+
+def _s53_version_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    if plan.schema_version != INTEGRATION_PLAN_SCHEMA_VERSION:
+        return []
+    s53_recipe_kinds = {
+        "synthetic",
+        "approved_dataset",
+        "previous_step",
+        "environment_variable",
+        "secret_reference",
+        "existing_safe_record",
+        "database_observation",
+    }
+    uses_s53 = (
+        bool(plan.database_reads)
+        or any(item.kind in s53_recipe_kinds for item in plan.data_recipes)
+        or any(
+            not item.deterministic or item.requires_review or item.confidence != 1
+            for item in plan.data_recipes
+        )
+        or any(
+            item.kind in {"header", "content_type", "time", "cross_api", "db_read"}
+            or item.expected_source is not None
+            for item in plan.oracles
+        )
+    )
+    if not uses_s53:
+        return []
+    return [
+        _diagnostic(
+            "S53_PLAN_VERSION_REQUIRED",
+            "blocker",
+            "S53 Data Recipe 与 Cross-system Oracle 必须使用 Integration Plan v2",
+            "$.schema_version",
+        )
+    ]
+
+
+def _data_recipe_reference_diagnostics(
+    plan: IntegrationPlan,
+    *,
+    steps: set[str],
+    cleanups: set[str],
+    binding_captures: dict[str, tuple[str, str]],
+) -> list[PlanDiagnostic]:
+    diagnostics: list[PlanDiagnostic] = []
+    for index, recipe in enumerate(plan.data_recipes):
+        diagnostics.extend(
+            _unknown_ref(
+                "UNKNOWN_DATA_RECIPE_APPLIES_TO",
+                step_id,
+                f"$.data_recipes[{index}].applies_to",
+            )
+            for step_id in recipe.applies_to
+            if step_id not in steps
+        )
+        if recipe.source_step_id is not None and recipe.source_step_id not in steps:
+            diagnostics.append(
+                _unknown_ref(
+                    "UNKNOWN_DATA_RECIPE_SOURCE_STEP",
+                    recipe.source_step_id,
+                    f"$.data_recipes[{index}].source_step_id",
+                )
+            )
+        if (
+            recipe.cleanup_requirement_ref is not None
+            and recipe.cleanup_requirement_ref not in cleanups
+        ):
+            diagnostics.append(
+                _unknown_ref(
+                    "UNKNOWN_DATA_RECIPE_CLEANUP",
+                    recipe.cleanup_requirement_ref,
+                    f"$.data_recipes[{index}].cleanup_requirement_ref",
+                )
+            )
+        if recipe.kind == "previous_step" and recipe.variable_name not in binding_captures:
+            diagnostics.append(
+                _diagnostic(
+                    "PREVIOUS_STEP_RECIPE_CAPTURE_REQUIRED",
+                    "blocker",
+                    "Previous-step Data Recipe 必须引用已提取的 Workflow Variable",
+                    f"$.data_recipes[{index}].variable_name",
+                    evidence_refs=recipe.evidence_refs,
+                )
+            )
+        elif recipe.kind == "previous_step":
+            capture = binding_captures[cast(str, recipe.variable_name)]
+            if (recipe.source_step_id, recipe.expression) != capture:
+                diagnostics.append(
+                    _diagnostic(
+                        "PREVIOUS_STEP_RECIPE_SOURCE_MISMATCH",
+                        "blocker",
+                        "Previous-step Data Recipe 必须与已提取变量的来源步骤和表达式一致",
+                        f"$.data_recipes[{index}]",
+                        evidence_refs=recipe.evidence_refs,
+                    )
+                )
+    return diagnostics
+
+
+def _selected_binding_variable_captures(plan: IntegrationPlan) -> dict[str, tuple[str, str]]:
+    captures: dict[str, tuple[str, str]] = {}
+    for binding in plan.bindings:
+        if binding.capture_variable is None:
+            continue
+        selected = next(
+            (
+                candidate
+                for candidate in binding.candidates
+                if candidate.id == binding.selected_candidate_id
+            ),
+            None,
+        )
+        if selected is not None and selected.source_step_id is not None:
+            captures[binding.capture_variable] = (selected.source_step_id, selected.path)
+    return captures
+
+
+def _database_read_reference_diagnostics(
+    plan: IntegrationPlan,
+    *,
+    steps: set[str],
+    step_order: dict[str, int],
+    available_variables: set[str],
+    binding_sources: dict[str, str],
+) -> list[PlanDiagnostic]:
+    diagnostics: list[PlanDiagnostic] = []
+    for index, database_read in enumerate(plan.database_reads):
+        diagnostics.extend(
+            _unknown_ref(
+                "UNKNOWN_DATABASE_READ_APPLIES_TO",
+                step_id,
+                f"$.database_reads[{index}].applies_to",
+            )
+            for step_id in database_read.applies_to
+            if step_id not in steps
+        )
+        diagnostics.extend(
+            _diagnostic(
+                "DATABASE_READ_VARIABLE_MISSING",
+                "blocker",
+                f"DB Read 参数变量不存在: {predicate.variable_name}",
+                f"$.database_reads[{index}].predicates[{predicate_index}].variable_name",
+                evidence_refs=database_read.evidence_refs,
+            )
+            for predicate_index, predicate in enumerate(database_read.predicates)
+            if predicate.variable_name not in available_variables
+        )
+        database_step = next(
+            (item for item in plan.steps if item.db_read_ref == database_read.id),
+            None,
+        )
+        if database_step is None:
+            continue
+        diagnostics.extend(
+            _diagnostic(
+                "DATABASE_READ_VARIABLE_ORDER_INVALID",
+                "blocker",
+                "DB Read 参数变量必须来自更早的步骤",
+                f"$.database_reads[{index}].predicates[{predicate_index}].variable_name",
+                evidence_refs=database_read.evidence_refs,
+            )
+            for predicate_index, predicate in enumerate(database_read.predicates)
+            if (
+                (source_step := binding_sources.get(predicate.variable_name)) is not None
+                and source_step in step_order
+                and step_order[source_step] >= step_order[database_step.id]
+            )
+        )
+    return diagnostics
+
+
+def _oracle_source_reference_diagnostics(
+    plan: IntegrationPlan,
+    *,
+    steps: set[str],
+    step_order: dict[str, int],
+) -> list[PlanDiagnostic]:
+    diagnostics: list[PlanDiagnostic] = []
+    for index, oracle in enumerate(plan.oracles):
+        refs = [*oracle.applies_to]
+        if oracle.expected_source is not None:
+            refs.append(oracle.expected_source.step_id)
+        diagnostics.extend(
+            _unknown_ref("UNKNOWN_ORACLE_SOURCE_STEP", step_id, f"$.oracles[{index}]")
+            for step_id in refs
+            if step_id not in steps
+        )
+        if (
+            oracle.expected_source is not None
+            and oracle.step_id in step_order
+            and oracle.expected_source.step_id in step_order
+            and step_order[oracle.expected_source.step_id] >= step_order[oracle.step_id]
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "ORACLE_EXPECTED_SOURCE_ORDER_INVALID",
+                    "blocker",
+                    "Cross-system Oracle 的期望值必须来自更早的步骤",
+                    f"$.oracles[{index}].expected_source.step_id",
+                    evidence_refs=oracle.evidence_refs,
+                )
+            )
+    return diagnostics
+
+
+def _s53_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    steps = {item.id for item in plan.steps}
+    step_order = {item.id: index for index, item in enumerate(plan.steps)}
+    binding_captures = _selected_binding_variable_captures(plan)
+    binding_variables = set(binding_captures)
+    available_variables = set(binding_variables)
+    available_variables.update(
+        item.variable_name
+        for item in plan.data_recipes
+        if item.variable_name is not None and item.kind != "previous_step"
+    )
+    return [
+        *_s53_version_diagnostics(plan),
+        *_data_recipe_reference_diagnostics(
+            plan,
+            steps=steps,
+            cleanups={item.id for item in plan.cleanup_requirements},
+            binding_captures=binding_captures,
+        ),
+        *_database_read_reference_diagnostics(
+            plan,
+            steps=steps,
+            step_order=step_order,
+            available_variables=available_variables,
+            binding_sources={name: source for name, (source, _path) in binding_captures.items()},
+        ),
+        *_oracle_source_reference_diagnostics(plan, steps=steps, step_order=step_order),
+    ]
 
 
 def _binding_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
@@ -1446,8 +2046,13 @@ def _coverage_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnosti
         "operation": {item.ref for item in plan.operations},
         "binding": bindings,
         "status": oracles,
+        "header": oracles,
         "schema": oracles,
+        "content_type": oracles,
+        "time": oracles,
         "field": oracles,
+        "cross_api": oracles,
+        "db_read": oracles,
         "branch": branches,
         "cleanup": cleanup,
     }
@@ -1482,7 +2087,9 @@ def _binding_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         item.data_recipe_ref: item.id for item in plan.steps if item.data_recipe_ref is not None
     }
     variable_recipes = {
-        item.name for item in plan.data_recipes if item.kind in {"runtime", "environment"}
+        item.variable_name or item.name
+        for item in plan.data_recipes
+        if item.kind in {"runtime", "environment", "synthetic", "environment_variable"}
     }
     for index, binding in enumerate(plan.bindings):
         if binding.requires_review:
@@ -1700,6 +2307,15 @@ def _expression_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     )
     expressions.extend(
         (
+            oracle.expected_source.expression,
+            f"$.oracles[{index}].expected_source.expression",
+            oracle.evidence_refs,
+        )
+        for index, oracle in enumerate(plan.oracles)
+        if oracle.expected_source is not None
+    )
+    expressions.extend(
+        (
             candidate.path,
             f"$.bindings[{binding_index}].candidates[{candidate_index}].path",
             candidate.evidence_refs,
@@ -1817,6 +2433,7 @@ def _review_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         )
         for requirement in plan.review_requirements
     ]
+    diagnostics.extend(_oracle_conflict_diagnostics(plan))
     diagnostics.extend(
         _diagnostic(
             "ORACLE_REVIEW_REQUIRED",
@@ -1828,6 +2445,28 @@ def _review_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         for index, oracle in enumerate(plan.oracles)
         if oracle.requires_review
     )
+    diagnostics.extend(
+        _diagnostic(
+            "DATA_RECIPE_REVIEW_REQUIRED",
+            "review",
+            f"Data Recipe {recipe.id} 必须完成人工审核后才能编译",
+            f"$.data_recipes[{index}].requires_review",
+            evidence_refs=recipe.evidence_refs,
+        )
+        for index, recipe in enumerate(plan.data_recipes)
+        if recipe.requires_review
+    )
+    diagnostics.extend(
+        _diagnostic(
+            "DATABASE_READ_REVIEW_REQUIRED",
+            "review",
+            f"DB Read {database_read.id} 必须完成人工审核后才能编译",
+            f"$.database_reads[{index}].requires_review",
+            evidence_refs=database_read.evidence_refs,
+        )
+        for index, database_read in enumerate(plan.database_reads)
+        if database_read.requires_review
+    )
     if not plan.confidence.deterministic:
         diagnostics.append(
             _diagnostic(
@@ -1835,6 +2474,43 @@ def _review_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
                 "blocker",
                 "S50 Compiler 仅接受 deterministic Integration Plan",
                 "$.confidence.deterministic",
+            )
+        )
+    return diagnostics
+
+
+def _oracle_conflict_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    groups: dict[tuple[str, str, str, str], list[PlanOracle]] = {}
+    for oracle in plan.oracles:
+        key = (oracle.step_id, oracle.kind, oracle.expression, oracle.operator)
+        groups.setdefault(key, []).append(oracle)
+    diagnostics: list[PlanDiagnostic] = []
+    for oracles in groups.values():
+        expectations = {
+            json.dumps(
+                {
+                    "expected": oracle.expected,
+                    "expected_source": (
+                        oracle.expected_source.model_dump(mode="json")
+                        if oracle.expected_source is not None
+                        else None
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for oracle in oracles
+        }
+        if len(expectations) < 2:
+            continue
+        diagnostics.append(
+            _diagnostic(
+                "ORACLE_CONFLICT_REVIEW_REQUIRED",
+                "review",
+                "同一断言目标存在冲突的 Oracle 期望值,必须人工消歧",
+                "$.oracles",
+                evidence_refs=sorted({ref for oracle in oracles for ref in oracle.evidence_refs}),
             )
         )
     return diagnostics
@@ -1876,6 +2552,30 @@ def _secret_literal_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         and _is_sensitive_key(recipe.name)
         and not _is_secret_reference(recipe.value)
     )
+    for index, oracle in enumerate(plan.oracles):
+        expressions = [oracle.expression]
+        if oracle.expected_source is not None:
+            expressions.append(oracle.expected_source.expression)
+        if any(_SENSITIVE_ORACLE_PATH.search(expression) for expression in expressions):
+            diagnostics.append(
+                _diagnostic(
+                    "SENSITIVE_ORACLE_SOURCE_FORBIDDEN",
+                    "blocker",
+                    "Oracle 不能读取 Password、Token、Cookie 或其他敏感值",
+                    f"$.oracles[{index}]",
+                    evidence_refs=oracle.evidence_refs,
+                )
+            )
+        if first_sensitive_value({"value": oracle.expected}) is not None:
+            diagnostics.append(
+                _diagnostic(
+                    "SENSITIVE_ORACLE_EXPECTED_FORBIDDEN",
+                    "blocker",
+                    "Oracle Expected 不能持久化 PII 或敏感值",
+                    f"$.oracles[{index}].expected",
+                    evidence_refs=oracle.evidence_refs,
+                )
+            )
     return diagnostics
 
 
@@ -2030,15 +2730,15 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
         )
     diagnostics.extend(
         _diagnostic(
-            "SETUP_API_RECIPE_RUNTIME_UNSUPPORTED",
+            "DESIGN_ONLY_DATA_RECIPE",
             "blocker",
-            "Setup API 必须解析为显式 Operation Step 后才能编译",
+            "Database Observation 只提供设计期 Evidence,不能作为运行时数据",
             f"$.data_recipes[{index}]",
             stage="compile_variables_data",
             evidence_refs=recipe.evidence_refs,
         )
         for index, recipe in enumerate(plan.data_recipes)
-        if recipe.kind == "setup_api"
+        if recipe.kind == "database_observation"
     )
     diagnostics.extend(_secret_reference_runtime_diagnostics(plan))
     return diagnostics
@@ -2049,8 +2749,38 @@ def _compile_step_nodes(
 ) -> tuple[list[FlowSpecNode], dict[str, list[str]]]:
     operations = {item.ref: item for item in plan.operations}
     recipes = {item.id: item for item in plan.data_recipes}
-    nodes = [FlowSpecNode(id="start", kind="start", name="Start", position=Position(x=0, y=0))]
-    evidence = {"start": list(plan.evidence_refs)}
+    database_reads = {item.id: item for item in plan.database_reads}
+    synthetic_recipes = {
+        cast(str, item.variable_name): cast(str, item.generator)
+        for item in plan.data_recipes
+        if item.kind == "synthetic"
+    }
+    nodes = [
+        FlowSpecNode(
+            id="start",
+            kind="start",
+            name="Start",
+            position=Position(x=0, y=0),
+            config=(
+                {"synthetic_variables": cast(JsonValue, synthetic_recipes)}
+                if synthetic_recipes
+                else {}
+            ),
+        )
+    ]
+    evidence = {
+        "start": sorted(
+            {
+                *plan.evidence_refs,
+                *(
+                    ref
+                    for item in plan.data_recipes
+                    if item.kind == "synthetic"
+                    for ref in item.evidence_refs
+                ),
+            }
+        )
+    }
     for index, step in enumerate(plan.steps, start=1):
         config: dict[str, JsonValue] = {}
         operation_ref = None
@@ -2067,10 +2797,22 @@ def _compile_step_nodes(
                 "workflow_version": step.workflow_version,
             }
             kind = "subflow"
-        else:
+        elif step.kind == "dataset":
             recipe = recipes[cast(str, step.data_recipe_ref)]
             config = {"artifact_id": str(recipe.artifact_id), "format": "auto"}
             kind = "dataset"
+        else:
+            database_read = database_reads[cast(str, step.db_read_ref)]
+            config = {
+                "credential_id": str(database_read.credential_id),
+                "query": _database_read_query(database_read),
+                "parameters": {
+                    item.parameter: f"{{{{{item.variable_name}}}}}"
+                    for item in database_read.predicates
+                },
+                "timeout_seconds": database_read.timeout_seconds,
+            }
+            kind = "sql"
         nodes.append(
             FlowSpecNode(
                 id=step.id,
@@ -2093,6 +2835,20 @@ def _compile_step_nodes(
     )
     evidence["end"] = list(plan.evidence_refs)
     return nodes, evidence
+
+
+def _database_read_query(database_read: PlanDatabaseRead) -> str:
+    quote = "`" if database_read.dialect == "mysql" else '"'
+
+    def quoted(identifier: str) -> str:
+        return ".".join(f"{quote}{part}{quote}" for part in identifier.split("."))
+
+    columns = ", ".join(quoted(item) for item in database_read.columns)
+    predicates = " AND ".join(
+        f"{quoted(item.column)} = :{item.parameter}" for item in database_read.predicates
+    )
+    # All identifiers and parameter names were validated against closed grammars above.
+    return f"SELECT {columns} FROM {quoted(database_read.table)} WHERE {predicates} LIMIT 2"  # noqa: S608 - identifiers use closed grammars
 
 
 def _operation_config(operation: PlanOperation) -> dict[str, JsonValue]:
@@ -2277,21 +3033,27 @@ def _compile_oracles(
         previous = step_id
         for index, oracle in enumerate(oracles):
             assert_id = _slug_id(f"assert-{oracle.id}")
+            config: dict[str, JsonValue] = {
+                "source_node_id": step_id,
+                "expression": oracle.expression,
+                "operator": oracle.operator,
+                "expected": oracle.expected,
+                "assertion_type": "json_schema" if oracle.kind == "schema" else "comparison",
+            }
+            if oracle.expected_source is not None:
+                config.update(
+                    {
+                        "expected_source_node_id": oracle.expected_source.step_id,
+                        "expected_expression": oracle.expected_source.expression,
+                    }
+                )
             nodes.append(
                 FlowSpecNode(
                     id=assert_id,
                     kind="assert",
                     name=f"Assert {oracle.id}",
                     position=Position(x=(index + 1) * 180, y=-120),
-                    config={
-                        "source_node_id": step_id,
-                        "expression": oracle.expression,
-                        "operator": oracle.operator,
-                        "expected": oracle.expected,
-                        "assertion_type": (
-                            "json_schema" if oracle.kind == "schema" else "comparison"
-                        ),
-                    },
+                    config=config,
                 )
             )
             node_evidence[assert_id] = list(oracle.evidence_refs)
@@ -2313,14 +3075,21 @@ def _compile_oracles(
 def _compile_data_parameters(plan: IntegrationPlan) -> list[FlowSpecParameter]:
     parameters: list[FlowSpecParameter] = []
     for recipe in plan.data_recipes:
-        if recipe.kind not in {"runtime", "environment", "constant"}:
+        if recipe.kind not in {
+            "runtime",
+            "environment",
+            "constant",
+            "environment_variable",
+            "existing_safe_record",
+        }:
             continue
+        name = recipe.variable_name or recipe.name
         parameters.append(
             FlowSpecParameter(
-                name=recipe.name,
+                name=name,
                 source=(
                     FlowSpecParameterSource.CONSTANT
-                    if recipe.kind == "constant"
+                    if recipe.kind in {"constant", "existing_safe_record"}
                     else FlowSpecParameterSource.RUNTIME
                 ),
                 value=recipe.value,
@@ -2474,9 +3243,18 @@ def _blocked_compilation(
     diagnostics: list[PlanDiagnostic],
 ) -> IntegrationPlanCompilation:
     return IntegrationPlanCompilation(
+        compiler_version=_compiler_version(plan),
         plan_fingerprint=plan.plan_fingerprint,
         diagnostics=diagnostics,
         passes=_pass_records(diagnostics, completed=False),
+    )
+
+
+def _compiler_version(plan: IntegrationPlan) -> str:
+    return (
+        INTEGRATION_PLAN_COMPILER_VERSION_V2
+        if plan.schema_version == INTEGRATION_PLAN_SCHEMA_VERSION_V2
+        else INTEGRATION_PLAN_COMPILER_VERSION
     )
 
 

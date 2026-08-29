@@ -1280,6 +1280,14 @@ class WorkflowService:
                 config.source_node_id,
             )
             self._validate_jmespath(config.expression, node.id)
+            if isinstance(config, AssertNodeConfig) and config.expected_source_node_id is not None:
+                self._validate_control_source(
+                    definition,
+                    {item.id for item in definition.nodes},
+                    node.id,
+                    config.expected_source_node_id,
+                )
+                self._validate_jmespath(cast(str, config.expected_expression), node.id)
         if isinstance(config, ForEachNodeConfig):
             self._validate_control_source(
                 definition,

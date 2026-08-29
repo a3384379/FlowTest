@@ -3,10 +3,9 @@
 最后更新：2026-08-29（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S51 实现及 Evidence Closure。S52 External Evidence Adapter、Entity Mapping 与 Java/Spring POC
-已通过本地验收，并由 PR #58 普通 Squash Merge 至
-`main@ccf9a8d05fb632f1466ab7394362d22b1386ed6d`；该精确 Main SHA 的 Backend、Frontend、Compose、Security、
-Windows、Upgrade/Rollback 与唯一 Required Gate 全部 Success。当前仅剩 S52 Evidence Closure 文档归档，
-合并且其 Main Push Required Gate 成功后进入 S53。当前 Migration Head 为
+已由 PR #58 普通 Squash Merge，Evidence Closure PR #59 也已普通 Squash Merge 且 Main Push Required Gate
+成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 正在独立分支开发，当前聚焦回归
+64 passed，尚未进入精确 Head Review 与最终完整门禁。当前 Migration Head 为
 `20260829_0047`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
@@ -402,8 +401,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
    `/api/v1` 既有 `limit <= 100` 契约。Standalone、Compact、Full 继续共享业务状态语义，Transfer/Standalone
    Schema 与迁移 head 同步到 `20260822_0038`，Transfer 表清单为 76。
 6. 后端验证：`uv run ruff format --check .`、`ruff check .`、`mypy app` 全部通过；pytest `406 passed /
-   3 skipped`，总覆盖率 `90.01%`。前端 format、lint、TypeScript、生产 build 全部通过；Vitest `50 files /
-   198 passed`，Statements `86.8%`、Branches `80.29%`、Functions `86.19%`、Lines `88.97%`。
+3 skipped`，总覆盖率 `90.01%`。前端 format、lint、TypeScript、生产 build 全部通过；Vitest `50 files /
+198 passed`，Statements `86.8%`、Branches `80.29%`、Functions `86.19%`、Lines `88.97%`。
 7. 真实 PostgreSQL 已完成 `20260822_0037 → 20260822_0038` upgrade、`alembic check`、downgrade 到
    `0037`、再 upgrade 和再次 `check`；本轮验证栈最终 `alembic check` 无漂移。S11 基线和 S29 Runner
    故障转移/恢复冒烟通过，包含 Attempt=2、Fence=2、Runner B 接管及 Drain；干净 Compose 数据卷上的
@@ -1114,6 +1113,7 @@ Windows 实机、长时运行、RC 观察和安全审批未完成，`GA_READY` �
 
 详细证据见 [S47.4 最终评审修复](release/s47-4-final-review-fix.md)。本地门禁不替代最终
 HEAD 的 GitHub Actions；PR 保持 Draft，真实 Key Rotation 和外部证据未完成，`GA_READY: NO`。
+
 # S47.5 Release Evidence Integrity Closure（2026-08-26）
 
 - Semantic Coverage 已与 Missing Draft 开关解耦；关闭草案生成仍计算并阻断 Plan Gap。

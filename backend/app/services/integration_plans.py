@@ -10,11 +10,15 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.data_nodes import CredentialKind
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlannerRequest,
     PlanActor,
     PlanCleanupRequirement,
+    PlanDatabaseRead,
+    PlanDataRecipe,
+    PlanOracle,
     PlanPrecondition,
     PlanTargetEnvironment,
     ReusableAuthSubflowEvidence,
@@ -31,6 +35,8 @@ from app.engine.contracts import NodeType, WorkflowDefinition
 from app.models.access import User
 from app.models.api_assets import APIDefinition
 from app.repositories.api_assets import APIAssetRepository
+from app.repositories.artifacts import ArtifactRepository
+from app.repositories.data_sources import DataSourceRepository
 from app.repositories.service_targets import ServiceTargetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.services.projects import ProjectService
@@ -63,6 +69,9 @@ class IntegrationPlanAssetCommand:
     target_environment: PlanTargetEnvironment
     operations: tuple[OperationPlanSelection, ...]
     existing_auth: ExistingAuthWorkflowSelection | None = None
+    data_recipes: tuple[PlanDataRecipe, ...] = ()
+    database_reads: tuple[PlanDatabaseRead, ...] = ()
+    additional_oracles: tuple[PlanOracle, ...] = ()
     cleanup_requirements: tuple[PlanCleanupRequirement, ...] = ()
 
 
@@ -72,6 +81,8 @@ class IntegrationPlanAssetService:
     def __init__(self, session: AsyncSession) -> None:
         self._projects = ProjectService(session)
         self._assets = APIAssetRepository(session)
+        self._artifacts = ArtifactRepository(session)
+        self._data_sources = DataSourceRepository(session)
         self._targets = ServiceTargetRepository(session)
         self._workflows = WorkflowRepository(session)
         self._test_engineering = TestEngineeringService(session)
@@ -102,6 +113,11 @@ class IntegrationPlanAssetService:
             project_id=project_id,
             selection=command.existing_auth,
         )
+        await self._validate_data_assets(
+            project_id=project_id,
+            data_recipes=command.data_recipes,
+            database_reads=command.database_reads,
+        )
         return build_integration_plan(
             IntegrationPlannerRequest(
                 context_revision_id=command.context_revision_id,
@@ -112,9 +128,43 @@ class IntegrationPlanAssetService:
                 target_environment=command.target_environment,
                 selected_operations=selected,
                 reusable_auth_subflow=reusable_auth,
+                data_recipes=list(command.data_recipes),
+                database_reads=list(command.database_reads),
+                additional_oracles=list(command.additional_oracles),
                 cleanup_requirements=list(command.cleanup_requirements),
             )
         )
+
+    async def _validate_data_assets(
+        self,
+        *,
+        project_id: UUID,
+        data_recipes: tuple[PlanDataRecipe, ...],
+        database_reads: tuple[PlanDatabaseRead, ...],
+    ) -> None:
+        for recipe in data_recipes:
+            if recipe.artifact_id is None:
+                continue
+            artifact = await self._artifacts.get(recipe.artifact_id)
+            if artifact is None or artifact.project_id != project_id:
+                raise AppError(
+                    code="DATA_RECIPE_ARTIFACT_NOT_FOUND",
+                    message="Data Recipe 引用的数据集不存在",
+                    status_code=422,
+                )
+        for database_read in database_reads:
+            credential = await self._data_sources.get_credential(database_read.credential_id)
+            expected_kind = CredentialKind(database_read.dialect)
+            if (
+                credential is None
+                or credential.project_id != project_id
+                or credential.kind != expected_kind.value
+            ):
+                raise AppError(
+                    code="DATABASE_READ_CREDENTIAL_NOT_FOUND",
+                    message="DB Read 引用的只读数据库 Credential 不存在或类型不匹配",
+                    status_code=422,
+                )
 
     async def _selected_operation(
         self,

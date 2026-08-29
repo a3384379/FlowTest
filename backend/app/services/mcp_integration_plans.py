@@ -79,6 +79,9 @@ class MCPIntegrationPlanService:
                     if existing_auth is not None
                     else None
                 ),
+                data_recipes=tuple(payload.data_recipes),
+                database_reads=tuple(payload.database_reads),
+                additional_oracles=tuple(payload.additional_oracles),
                 cleanup_requirements=tuple(payload.cleanup_requirements),
             ),
         )

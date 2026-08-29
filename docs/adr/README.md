@@ -44,3 +44,4 @@
 40. Sandbox Preview 安全边界
 41. V6 数据分类、保留与导出
 42. V6 MCP 最小权限 Scope
+43. Integration Plan v2 Data Recipe 与跨系统 Oracle
