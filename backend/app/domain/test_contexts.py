@@ -922,6 +922,27 @@ def referenced_project_id(value: str) -> str | None:
     return segments[0] if segments else None
 
 
+def external_evidence_project_references(envelope: ExternalEvidenceEnvelope) -> list[str]:
+    values = [envelope.source.ref, envelope.subject_ref]
+    for finding in envelope.findings:
+        values.extend(_typed_string_values(finding.structured_data))
+    return [value for value in values if referenced_project_id(value) is not None]
+
+
+def _typed_string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, BaseModel):
+        return [
+            item
+            for field_name in type(value).model_fields
+            for item in _typed_string_values(getattr(value, field_name))
+        ]
+    if isinstance(value, (list, tuple)):
+        return [item for child in value for item in _typed_string_values(child)]
+    return []
+
+
 def _is_sensitive_literal(value: str, *, path: str) -> bool:
     if any(
         pattern.search(value)

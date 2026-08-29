@@ -332,6 +332,87 @@ async def test_generic_evidence_ingestion_synthesizes_adapter_mapping_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_generic_evidence_rejects_nested_cross_project_references(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    other_project_id = "00000000-0000-0000-0000-000000000002"
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "嵌套引用跨项目上下文",
+            "objective": "验证类型化证据内的项目引用边界",
+            "required_evidence": ["repository", "data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+
+    bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": f"flowtest://projects/{project_id}/operations/orders",
+            "findings": [
+                {
+                    "id": "profile-finding",
+                    "source_type": "data_profile",
+                    "source_ref": "database://orders",
+                    "subject_ref": f"flowtest://projects/{project_id}/operations/orders",
+                    "kind": "column_profile",
+                    "path": "$.orders.id",
+                    "structured_data": {"nullable": False},
+                    "confidence": 0.9,
+                    "deterministic": True,
+                    "revision": "profile-v1",
+                }
+            ],
+        }
+    )
+    bundle_envelope = adapt_evidence_bundle(
+        bundle,
+        provider_name="profile-provider",
+        provider_version="1.0.0",
+        source_ref="database://orders",
+        source_revision="profile-v1",
+        subject_ref=f"flowtest://projects/{project_id}/operations/orders",
+    )
+    java_envelope = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    )
+    cross_project_ref = f"flowtest://projects/{other_project_id}/operations/orders"
+    envelopes = [
+        _envelope_with_claim_reference(
+            bundle_envelope,
+            claim_kind="column_profile",
+            field_name=field_name,
+            value=cross_project_ref,
+        )
+        for field_name in ("source_ref", "subject_ref")
+    ]
+    envelopes.append(
+        _envelope_with_claim_reference(
+            java_envelope,
+            claim_kind="controller_route",
+            field_name="operation_ref",
+            value=cross_project_ref,
+        )
+    )
+
+    for envelope in envelopes:
+        rejected = await client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+            headers=headers,
+            json={"envelope": envelope},
+        )
+
+        assert rejected.status_code == 404, rejected.text
+        assert rejected.json()["error"]["code"] == "EXTERNAL_EVIDENCE_CROSS_TENANT"
+        assert other_project_id not in rejected.text
+
+
+@pytest.mark.asyncio
 async def test_differing_java_state_values_conflict_context(
     s52_context: dict[str, Any],
 ) -> None:
@@ -2070,6 +2151,36 @@ def _database_envelope_with_invalid_distribution(
     )
     findings = list(envelope.findings)
     findings[finding_index] = invalid_finding
+    return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
+
+
+def _envelope_with_claim_reference(
+    envelope: ExternalEvidenceEnvelope,
+    *,
+    claim_kind: str,
+    field_name: str,
+    value: str,
+) -> dict[str, Any]:
+    finding_index, finding = next(
+        (index, finding)
+        for index, finding in enumerate(envelope.findings)
+        if getattr(finding.structured_data, "claim_kind", None) == claim_kind
+    )
+    structured_data = finding.structured_data
+    claim = structured_data.claim
+    changed_claim = claim.model_copy(update={field_name: value})
+    changed_structured_data = structured_data.model_copy(update={"claim": changed_claim})
+    provisional = finding.model_copy(
+        update={
+            "structured_data": changed_structured_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    changed_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    findings = list(envelope.findings)
+    findings[finding_index] = changed_finding
     return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
 
 

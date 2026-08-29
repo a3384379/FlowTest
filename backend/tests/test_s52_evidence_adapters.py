@@ -2230,7 +2230,7 @@ def test_java_spring_poc_expands_request_mapping_without_method_to_supported_ver
 @RestController
 @RequestMapping("/api")
 class AnyMethodController {
-    @RequestMapping("/orders")
+    @RequestMapping(path = "/orders", params = "method=GET")
     public Order handle() {
         return orderService.handle();
     }

@@ -2154,7 +2154,7 @@ def _mapping_http_methods(
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
-    method_assignment = re.search(r"\bmethod\s*=", content)
+    method_assignment = re.search(r"\bmethod\s*=", _mask_java_non_code(content))
     if method_assignment is None:
         methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
     else:
@@ -2187,7 +2187,7 @@ def _mapping_paths(arguments: str) -> list[str]:
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
-    named = re.search(r"\b(?:value|path)\s*=", content)
+    named = re.search(r"\b(?:value|path)\s*=", _mask_java_non_code(content))
     expression = (
         _java_annotation_expression(content, named.end())
         if named is not None

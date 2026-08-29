@@ -36,6 +36,7 @@ from app.domain.test_contexts import (
     context_revision_fingerprint,
     external_evidence_fingerprint,
     external_evidence_item_fingerprint,
+    external_evidence_project_references,
     first_sensitive_value,
     normalize_revision_snapshot,
     referenced_project_id,
@@ -758,7 +759,7 @@ def _context_status(snapshot: ContextRevisionSnapshot, *, evidence_count: int) -
 
 
 def _require_same_project(project_id: UUID, envelope: ExternalEvidenceEnvelope) -> None:
-    _require_project_references(project_id, (envelope.source.ref, envelope.subject_ref))
+    _require_project_references(project_id, external_evidence_project_references(envelope))
 
 
 def _require_initial_references_same_project(
