@@ -3349,6 +3349,50 @@ class GenericController {
     assert [claim.topic_ref for claim in events] == ["kafka://orders.loaded"]
 
 
+def test_java_spring_poc_does_not_guess_ambiguous_generic_response_dto() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://ambiguous-response", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/PairController.java",
+                        "content": """
+@RestController
+class PairController {
+    @GetMapping("/orders")
+    Pair<OrderDto, MetadataDto> load() {
+        return orderService.load();
+    }
+}
+
+class OrderDto {
+    String orderId;
+}
+
+class MetadataDto {
+    String cursor;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    response_fields = [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    ]
+    assert response_fields == []
+    assert [claim.callee_ref for claim in evidence.claims if claim.kind == "service_call"] == [
+        "java://orderService.load"
+    ]
+
+
 def test_java_spring_poc_parses_generic_handler_parameters_at_top_level() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4514,6 +4558,43 @@ class OrderListener {
     }
     assert produced_topics == {"kafka://orders.literal"}
     assert consumed_topics == {"kafka://orders.valid", "kafka://orders.retry"}
+
+
+def test_java_spring_poc_decodes_java_string_escapes_in_kafka_producer_topics() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {
+                    "ref": "repository://escaped-producer-topic",
+                    "revision": "fixture-v1",
+                },
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order publish() {
+        kafkaTemplate.send("\\u006frders", event);
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    produced_topics = [
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "produce"
+    ]
+    assert produced_topics == ["kafka://orders"]
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:

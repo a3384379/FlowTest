@@ -87,6 +87,28 @@ _REQUEST_COLLECTION_TYPES: Final = (
     "SequencedCollection",
     "Set",
 )
+_RESPONSE_SINGLE_VALUE_CONTAINERS: Final = (
+    *_REQUEST_COLLECTION_TYPES,
+    "CompletableFuture",
+    "CompletionStage",
+    "Flux",
+    "HttpEntity",
+    "Mono",
+    "Optional",
+    "Page",
+    "Publisher",
+    "ResponseEntity",
+    "Slice",
+    "Stream",
+)
+_RESPONSE_MAP_CONTAINERS: Final = (
+    "ConcurrentMap",
+    "HashMap",
+    "LinkedHashMap",
+    "Map",
+    "NavigableMap",
+    "SortedMap",
+)
 _MAPPING_ANNOTATION = re.compile(
     rf"@{_SPRING_WEB_ANNOTATION_PREFIX}"
     r"(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
@@ -3081,16 +3103,17 @@ def _route_dto_claims(
                 type_analysis,
             )
         )
-    return_type = _simple_type(route.return_type)
-    claims.extend(
-        _dto_field_claims(
-            source_path,
-            route.operation_ref,
-            "response",
-            return_type,
-            type_analysis,
+    return_type = _response_dto_type(route.return_type)
+    if return_type is not None:
+        claims.extend(
+            _dto_field_claims(
+                source_path,
+                route.operation_ref,
+                "response",
+                return_type,
+                type_analysis,
+            )
         )
-    )
     return claims
 
 
@@ -3201,6 +3224,29 @@ def _request_dto_type(value: str) -> str:
     return _outer_java_type(current)
 
 
+def _response_dto_type(value: str) -> str | None:
+    current = value.strip()
+    for _depth in range(10):
+        outer_type = _outer_java_type(current)
+        opening = current.find("<")
+        closing = current.rfind(">")
+        if opening < 0 or closing < opening:
+            return outer_type
+        arguments = _split_top_level_java_components(current[opening + 1 : closing])
+        if outer_type in _RESPONSE_SINGLE_VALUE_CONTAINERS and len(arguments) == 1:
+            current = arguments[0].strip()
+        elif outer_type in _RESPONSE_MAP_CONTAINERS and len(arguments) == 2:
+            current = arguments[1].strip()
+        else:
+            return None
+        if current.startswith("?"):
+            bounded = re.fullmatch(r"\?\s+extends\s+(.+)", current, re.DOTALL)
+            if bounded is None:
+                return None
+            current = bounded.group(1).strip()
+    return None
+
+
 def _outer_java_type(value: str) -> str:
     declaration = value.replace("...", " ").split("<", 1)[0].rstrip("[] ")
     identifiers = re.findall(
@@ -3273,19 +3319,23 @@ def _route_kafka_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenc
         _KAFKA_SEND_MARKER,
         _KAFKA_SEND,
     )
-    produced: list[JavaEvidenceClaim] = [
-        JavaKafkaEventClaim(
-            id=_claim_id("kafka", route.operation_ref, "produce", match.group(1)),
-            source_path=source_path,
-            operation_ref=route.operation_ref,
-            direction="produce",
-            topic_ref=f"kafka://{match.group(1)}",
-            event_type="UnknownEvent",
-            confidence=0.7,
-            deterministic=False,
+    produced: list[JavaEvidenceClaim] = []
+    for match in matches:
+        topic = _decode_java_string_literal(match.group(1))
+        if topic is None:
+            continue
+        produced.append(
+            JavaKafkaEventClaim(
+                id=_claim_id("kafka", route.operation_ref, "produce", topic),
+                source_path=source_path,
+                operation_ref=route.operation_ref,
+                direction="produce",
+                topic_ref=f"kafka://{topic}",
+                event_type="UnknownEvent",
+                confidence=0.7,
+                deterministic=False,
+            )
         )
-        for match in matches
-    ]
     return produced
 
 
