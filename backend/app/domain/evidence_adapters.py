@@ -632,10 +632,11 @@ class JavaSpringPocProvider:
 
     def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
         type_analysis = _java_type_analysis(snapshot.files)
+        interface_routes = _java_interface_route_contracts(snapshot.files)
         claims: list[JavaEvidenceClaim] = []
         structural_truncated = False
         for file in sorted(snapshot.files, key=lambda item: item.path):
-            file_routes = _java_routes(file)
+            file_routes = _java_routes(file, interface_routes)
             claims.extend(_route_claims(file, file_routes, type_analysis))
             structural_claims, file_truncated = _structural_java_claims(
                 file,
@@ -2343,19 +2344,57 @@ def _java_annotation_arguments_and_end(
     return content[opening : closing + 1], closing + 1
 
 
-def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
+def _java_routes(
+    file: JavaSourceFileSnapshot,
+    interface_routes: dict[str, tuple[_JavaRoute, ...]],
+) -> list[_JavaRoute]:
     masked_content = _mask_java_non_code(file.content)
-    return [
-        route
-        for selected in _java_controller_declarations(file, masked_content)
-        for route in _java_controller_routes(file, masked_content, selected)
-    ]
+    routes: list[_JavaRoute] = []
+    for selected in _java_controller_declarations(file, masked_content):
+        local_routes = _java_controller_routes(file, masked_content, selected)
+        routes.extend(local_routes)
+        operation_refs = {route.operation_ref for route in local_routes}
+        for route in _java_bound_interface_routes(
+            file,
+            masked_content,
+            selected,
+            interface_routes,
+        ):
+            if route.operation_ref not in operation_refs:
+                routes.append(route)
+                operation_refs.add(route.operation_ref)
+    return routes
+
+
+def _java_interface_route_contracts(
+    files: list[JavaSourceFileSnapshot],
+) -> dict[str, tuple[_JavaRoute, ...]]:
+    definitions: dict[str, list[tuple[_JavaRoute, ...]]] = defaultdict(list)
+    for file in sorted(files, key=lambda item: item.path):
+        masked_content = _mask_java_non_code(file.content)
+        for selected in _java_top_level_declarations(file, masked_content):
+            declaration, _prefix_start = selected
+            if declaration.group("kind") != "interface":
+                continue
+            routes = tuple(
+                _java_controller_routes(
+                    file,
+                    masked_content,
+                    selected,
+                    allow_abstract_methods=True,
+                )
+            )
+            if routes:
+                definitions[declaration.group("name")].append(routes)
+    return {name: candidates[0] for name, candidates in definitions.items() if len(candidates) == 1}
 
 
 def _java_controller_routes(
     file: JavaSourceFileSnapshot,
     masked_content: str,
     selected: tuple[re.Match[str], int],
+    *,
+    allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
     declaration, declaration_prefix_start = selected
     class_opening = masked_content.find("{", declaration.end())
@@ -2400,24 +2439,120 @@ def _java_controller_routes(
             base_methods,
             base_conditions,
             controller,
+            allow_abstract_methods=allow_abstract_methods,
         )
     ]
+
+
+def _java_bound_interface_routes(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+    selected: tuple[re.Match[str], int],
+    interface_routes: dict[str, tuple[_JavaRoute, ...]],
+) -> list[_JavaRoute]:
+    declaration, _prefix_start = selected
+    controller = declaration.group("name")
+    routes: list[_JavaRoute] = []
+    for interface_name in _java_implemented_interfaces(masked_content, declaration):
+        for contract in interface_routes.get(interface_name, ()):
+            implementation = _java_controller_method_body(
+                file,
+                masked_content,
+                declaration,
+                contract,
+            )
+            body, source_line = (
+                implementation
+                if implementation is not None
+                else (
+                    contract.body,
+                    file.content.count("\n", 0, declaration.start()) + 1,
+                )
+            )
+            routes.append(
+                contract.model_copy(
+                    update={
+                        "controller_ref": f"java://{controller}",
+                        "body": body,
+                        "source_line": source_line,
+                    }
+                )
+            )
+    return routes
+
+
+def _java_implemented_interfaces(
+    masked_content: str,
+    declaration: re.Match[str],
+) -> tuple[str, ...]:
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return ()
+    header = masked_content[declaration.end() : opening]
+    implemented = re.search(r"\bimplements\s+(.+?)(?=\bpermits\b|$)", header, re.DOTALL)
+    if implemented is None:
+        return ()
+    return tuple(
+        _outer_java_type(component)
+        for component in _split_top_level_java_components(implemented.group(1))
+        if component.strip()
+    )
+
+
+def _java_controller_method_body(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+    declaration: re.Match[str],
+    contract: _JavaRoute,
+) -> tuple[str, int] | None:
+    class_opening = masked_content.find("{", declaration.end())
+    if class_opening < 0:
+        return None
+    class_end = _matching_brace(file.content, class_opening)
+    route_masked_content = list(masked_content)
+    route_masked_content[class_opening + 1 : class_end] = _mask_nested_java_blocks(
+        masked_content[class_opening + 1 : class_end]
+    )
+    route_mask = "".join(route_masked_content)
+    expected_arity = _java_parameter_arity(contract.parameters)
+    handler_marker = re.compile(rf"\b{re.escape(contract.handler)}\s*\(")
+    for match in handler_marker.finditer(route_mask, class_opening + 1, class_end):
+        parameter_opening = route_mask.find("(", match.start(), match.end())
+        parameter_closing = _matching_parenthesis(file.content, parameter_opening)
+        parameters = file.content[parameter_opening + 1 : parameter_closing]
+        if _java_parameter_arity(parameters) != expected_arity:
+            continue
+        method_tail = file.content[parameter_closing + 1 : class_end]
+        body_match = re.match(
+            r"\s*(?:throws\s+[A-Za-z0-9_$., \t\r\n]+)?\s*\{",
+            method_tail,
+        )
+        if body_match is None:
+            continue
+        body_opening = parameter_closing + body_match.end()
+        body_end = _matching_brace(file.content, body_opening - 1)
+        return (
+            file.content[body_opening:body_end],
+            file.content.count("\n", 0, match.start()) + 1,
+        )
+    return None
+
+
+def _java_parameter_arity(parameters: str) -> int:
+    if not parameters.strip():
+        return 0
+    return len(_split_top_level_java_components(parameters))
 
 
 def _java_controller_declarations(
     file: JavaSourceFileSnapshot,
     masked_content: str,
 ) -> list[tuple[re.Match[str], int]]:
-    top_level_mask = _mask_nested_java_blocks(masked_content)
-    declarations = list(_TYPE_DECLARATION.finditer(top_level_mask))
-    candidates: list[tuple[re.Match[str], int]] = []
-    declaration_prefix_start = 0
-    for declaration in declarations:
-        if declaration.group("kind") == "class":
-            candidates.append((declaration, declaration_prefix_start))
-        opening = masked_content.find("{", declaration.end())
-        if opening >= 0:
-            declaration_prefix_start = _matching_brace(file.content, opening) + 1
+    candidates = [
+        selected
+        for selected in _java_top_level_declarations(file, masked_content)
+        if selected[0].group("kind") == "class"
+    ]
     if not candidates:
         return []
     file_stem = PurePosixPath(file.path).stem
@@ -2438,6 +2573,22 @@ def _java_controller_declarations(
         None,
     )
     return [filename_match] if filename_match is not None else []
+
+
+def _java_top_level_declarations(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+) -> list[tuple[re.Match[str], int]]:
+    top_level_mask = _mask_nested_java_blocks(masked_content)
+    declarations = list(_TYPE_DECLARATION.finditer(top_level_mask))
+    selected: list[tuple[re.Match[str], int]] = []
+    declaration_prefix_start = 0
+    for declaration in declarations:
+        selected.append((declaration, declaration_prefix_start))
+        opening = masked_content.find("{", declaration.end())
+        if opening >= 0:
+            declaration_prefix_start = _matching_brace(file.content, opening) + 1
+    return selected
 
 
 def _mask_java_non_code(content: str) -> str:
@@ -2488,6 +2639,8 @@ def _routes_after_mapping(
     base_methods: list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
     base_conditions: list[str],
     controller: str,
+    *,
+    allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
     mapping_arguments, mapping_end = _java_annotation_arguments_and_end(
         file.content,
@@ -2501,10 +2654,13 @@ def _routes_after_mapping(
         r"(?:<[^>{};]+>\s+)?"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
         r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
-        r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^{]+))?\{",
+        r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^;{]+))?"
+        r"(?P<terminator>[;{])",
         masked_following,
     )
     if signature is None:
+        return []
+    if signature.group("terminator") == ";" and not allow_abstract_methods:
         return []
     paths = _mapping_paths(mapping_arguments)
     methods = _mapping_http_methods(mapping, mapping_arguments)
@@ -2512,7 +2668,11 @@ def _routes_after_mapping(
         methods = [method for method in methods if method in base_methods]
     conditions = [*base_conditions, *_mapping_conditions(mapping_arguments)]
     body_start = mapping_end + signature.end() - 1
-    body_end = _matching_brace(file.content, body_start)
+    body_end = (
+        _matching_brace(file.content, body_start)
+        if signature.group("terminator") == "{"
+        else body_start
+    )
     handler = signature.group("handler")
     return [
         _JavaRoute(
@@ -2528,7 +2688,11 @@ def _routes_after_mapping(
                 if signature.group("throws") is not None
                 else None
             ),
-            body=file.content[body_start + 1 : body_end],
+            body=(
+                file.content[body_start + 1 : body_end]
+                if signature.group("terminator") == "{"
+                else ""
+            ),
             source_line=file.content.count("\n", 0, mapping_start) + 1,
         )
         for method in methods

@@ -2583,6 +2583,113 @@ class FallbackController {
     }
 
 
+def test_java_spring_poc_resolves_local_controller_interface_mappings() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://controller-interface", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+@RequestMapping("/api")
+interface OrdersApi {
+    @PostMapping("/orders")
+    Order create(@RequestBody CreateOrderRequest request) throws OrderException;
+}
+
+class CreateOrderRequest {
+    @NotNull
+    String name;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    @Override
+    public Order create(CreateOrderRequest request) throws OrderException {
+        if (request == null) {
+            throw new OrderException();
+        }
+        kafkaTemplate.send("orders.created", request);
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    request_fields = [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    ]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    exceptions = [claim for claim in evidence.claims if claim.kind == "exception"]
+    events = [claim for claim in evidence.claims if claim.kind == "kafka_event"]
+    assert [
+        (claim.controller_ref, claim.handler, claim.method, claim.path) for claim in routes
+    ] == [("java://OrderController", "create", "POST", "/api/orders")]
+    assert [(claim.dto_type, claim.field_name) for claim in request_fields] == [
+        ("CreateOrderRequest", "name")
+    ]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.create"]
+    assert [claim.exception_type for claim in exceptions] == ["OrderException"]
+    assert [(claim.direction, claim.topic_ref) for claim in events] == [
+        ("produce", "kafka://orders.created")
+    ]
+
+
+def test_java_spring_poc_deduplicates_repeated_interface_mapping_on_implementation() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {
+                    "ref": "repository://repeated-interface-route",
+                    "revision": "fixture-v1",
+                },
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @GetMapping("/orders")
+    Order load();
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    @GetMapping("/orders")
+    public Order load() { return orderService.load(); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert [(claim.handler, claim.method, claim.path) for claim in routes] == [
+        ("load", "GET", "/orders")
+    ]
+
+
 def test_java_spring_poc_does_not_select_an_arbitrary_unannotated_class() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
