@@ -9,6 +9,8 @@ from pydantic import JsonValue
 
 from app.core.logging import redact
 from app.domain.network import OutboundNetworkPolicy
+from app.engine.contracts import NodeStatus
+from app.engine.results import NodeResult
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
@@ -159,6 +161,7 @@ class RemoteWorkflowExecutor:
 
 
 def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:
+    result = checkpoint.result or NodeResult(status=NodeStatus.CANCELLED)
     return NodeRunRecord(
         node_id=checkpoint.node_id,
         node_type=checkpoint.node_type,
@@ -166,7 +169,7 @@ def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:
         status=checkpoint.status,
         attempts=checkpoint.attempts,
         output=checkpoint.output,
-        result=checkpoint.result,
+        result=result,
         error_code=checkpoint.error_code,
         error_message=checkpoint.error_message,
         started_at=checkpoint.started_at,

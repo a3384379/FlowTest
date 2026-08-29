@@ -216,10 +216,10 @@ class DurableExecutionService:
         actor_user_id: UUID | None,
         payload: RunnerCheckpointRequest,
     ) -> ExecutionCheckpoint:
-        if payload.status in {NodeStatus.PENDING, NodeStatus.RUNNING}:
+        if payload.status is NodeStatus.PENDING:
             raise AppError(
                 code="EXECUTION_CHECKPOINT_NOT_TERMINAL",
-                message="Checkpoint 必须记录节点终态",
+                message="Checkpoint 必须记录 Attempt 预留或节点终态",
                 status_code=422,
             )
         execution = await self._session.scalar(
@@ -233,7 +233,11 @@ class DurableExecutionService:
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
             )
         redacted_output = cast(JsonValue, redact(payload.output))
-        redacted_result = json_object(redact(payload.result.model_dump(mode="json")))
+        redacted_result = (
+            {}
+            if payload.result is None
+            else json_object(redact(payload.result.model_dump(mode="json")))
+        )
         redacted_variables = json_object(redact(payload.extracted_variables))
         existing = await self._repository.get_checkpoint(
             execution_id=payload.execution_id,
@@ -243,13 +247,32 @@ class DurableExecutionService:
         )
         output_digest = checkpoint_output_digest(redacted_output)
         if existing is not None:
-            if existing.input_hash != payload.input_hash or existing.output_digest != output_digest:
+            if existing.input_hash != payload.input_hash:
+                raise AppError(
+                    code="EXECUTION_CHECKPOINT_CONFLICT",
+                    message="同一节点 Attempt 的 Checkpoint 内容不一致",
+                    status_code=409,
+                )
+            if existing.status == NodeStatus.RUNNING.value and payload.status.is_terminal:
+                existing.status = payload.status.value
+                existing.output_digest = output_digest
+                existing.output = redacted_output
+                existing.result = redacted_result
+                existing.extracted_variables = redacted_variables
+                existing.started_at = existing.started_at or payload.started_at
+                existing.finished_at = payload.finished_at
+                existing.snapshot_revision = payload.snapshot_revision
+                existing.fencing_token = payload.fencing_token
+                existing.lease_id = lease_id
+                existing.runner_id = runner_id
+            elif existing.status != payload.status.value or existing.output_digest != output_digest:
                 raise AppError(
                     code="EXECUTION_CHECKPOINT_CONFLICT",
                     message="同一节点 Attempt 的 Checkpoint 内容不一致",
                     status_code=409,
                 )
             await self._session.commit()
+            await self._session.refresh(existing)
             return existing
         checkpoint = ExecutionCheckpoint(
             project_id=project_id,
@@ -379,14 +402,20 @@ class DurableExecutionService:
 
 
 def checkpoint_to_node_record(checkpoint: ExecutionCheckpoint) -> NodeRunRecord:
+    status = NodeStatus(checkpoint.status)
+    result = (
+        NodeResult(status=NodeStatus.CANCELLED)
+        if status is NodeStatus.RUNNING
+        else NodeResult.model_validate(checkpoint.result)
+    )
     return NodeRunRecord(
         node_id=checkpoint.node_id,
         node_type=NodeType(checkpoint.node_type),
         name=checkpoint.node_name,
-        status=NodeStatus(checkpoint.status),
+        status=status,
         attempts=checkpoint.attempt,
         output=cast(JsonValue, checkpoint.output),
-        result=NodeResult.model_validate(checkpoint.result),
+        result=result,
         error_code=_optional_string(checkpoint.result.get("error"), "code"),
         error_message=_optional_string(checkpoint.result.get("error"), "message"),
         started_at=_as_utc(checkpoint.started_at),
@@ -406,7 +435,7 @@ def checkpoint_to_runner_resume(checkpoint: ExecutionCheckpoint) -> RunnerCheckp
         status=record.status,
         attempts=record.attempts,
         output=record.output,
-        result=record.result,
+        result=None if record.status is NodeStatus.RUNNING else record.result,
         error_code=record.error_code,
         error_message=record.error_message,
         started_at=record.started_at,

@@ -92,10 +92,12 @@ class NodeStatusUpdate:
     error_message: str | None
     result: NodeResult | None
     occurred_at: datetime
+    started_at: datetime | None = None
     input_hash: str | None = None
     context_snapshot: dict[str, JsonValue] | None = None
     phase: WorkflowPhase = WorkflowPhase.MAIN
     best_effort: bool = False
+    request_reserved: bool = False
 
 
 NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
@@ -446,6 +448,7 @@ class WorkflowScheduler:
                 attempt_offsets,
                 reset_retry_budget,
                 request_budget,
+                on_node_status,
             )
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
@@ -522,6 +525,7 @@ class WorkflowScheduler:
         initial_attempts: int = 0,
         reset_retry_budget: bool = False,
         request_budget: _RequestBudget | None = None,
+        on_node_status: NodeStatusCallback | None = None,
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
         input_hash = _input_hash(node.id, context.snapshot())
@@ -529,8 +533,6 @@ class WorkflowScheduler:
         attempts = initial_attempts
         budget_attempts = 0 if reset_retry_budget else initial_attempts
         while True:
-            attempts += 1
-            budget_attempts += 1
             if (
                 request_budget is not None
                 and _node_consumes_request(node)
@@ -551,6 +553,16 @@ class WorkflowScheduler:
                     ),
                     input_hash=input_hash,
                 )
+            attempts += 1
+            budget_attempts += 1
+            await _notify_attempt_reserved(
+                node,
+                attempts=attempts,
+                started_at=started_at,
+                input_hash=input_hash,
+                context=context,
+                callback=on_node_status,
+            )
             failure: NodeExecutionError
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
@@ -673,7 +685,11 @@ def _recorded_runtime_seconds(records: tuple[NodeRunRecord, ...]) -> float:
     started = [record.started_at for record in records if record.started_at is not None]
     if not started:
         return 0.0
-    return max(0.0, (max(record.completed_at for record in records) - min(started)).total_seconds())
+    now = datetime.now(UTC)
+    completed = [
+        now if record.status is NodeStatus.RUNNING else record.completed_at for record in records
+    ]
+    return max(0.0, (max(completed) - min(started)).total_seconds())
 
 
 def _cancel_runtime_limit(handle: asyncio.TimerHandle | None) -> None:
@@ -926,12 +942,14 @@ def _schedule_ready(
             int,
             bool,
             _RequestBudget | None,
+            NodeStatusCallback | None,
         ],
         Coroutine[Any, Any, NodeRunRecord],
     ],
     attempt_offsets: dict[str, int],
     reset_retry_budget: bool,
     request_budget: _RequestBudget | None,
+    on_node_status: NodeStatusCallback | None,
 ) -> None:
     capacity = definition.settings.concurrency - len(active)
     if capacity <= 0:
@@ -954,6 +972,7 @@ def _schedule_ready(
                 attempt_offsets.get(node.id, 0),
                 reset_retry_budget,
                 request_budget,
+                on_node_status,
             )
         )
         active[task] = node.id
@@ -1165,6 +1184,9 @@ async def _notify_status_changes(
         if notified.get(node_id) is status:
             continue
         record = records.get(node_id)
+        if status is NodeStatus.RUNNING and record is None:
+            notified[node_id] = status
+            continue
         await callback(
             NodeStatusUpdate(
                 node_id=node_id,
@@ -1176,6 +1198,7 @@ async def _notify_status_changes(
                 error_message=record.error_message if record else None,
                 result=record.result if record else None,
                 occurred_at=record.completed_at if record else datetime.now(UTC),
+                started_at=record.started_at if record else None,
                 input_hash=record.input_hash if record else None,
                 context_snapshot=context.snapshot(),
                 phase=nodes[node_id].phase,
@@ -1183,6 +1206,38 @@ async def _notify_status_changes(
             )
         )
         notified[node_id] = status
+
+
+async def _notify_attempt_reserved(
+    node: WorkflowNode,
+    *,
+    attempts: int,
+    started_at: datetime,
+    input_hash: str,
+    context: ExecutionContext,
+    callback: NodeStatusCallback | None,
+) -> None:
+    if callback is None:
+        return
+    await callback(
+        NodeStatusUpdate(
+            node_id=node.id,
+            node_type=node.type,
+            name=node.name,
+            status=NodeStatus.RUNNING,
+            attempts=attempts,
+            error_code=None,
+            error_message=None,
+            result=None,
+            occurred_at=started_at,
+            started_at=started_at,
+            input_hash=input_hash,
+            context_snapshot=context.snapshot(),
+            phase=node.phase,
+            best_effort=node.best_effort,
+            request_reserved=_node_consumes_request(node),
+        )
+    )
 
 
 def _input_hash(node_id: str, context_snapshot: dict[str, JsonValue]) -> str:

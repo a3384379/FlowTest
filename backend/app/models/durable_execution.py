@@ -72,7 +72,7 @@ class ExecutionCheckpoint(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="uq_execution_checkpoint_node_attempt",
         ),
         CheckConstraint(
-            "status IN ('passed', 'failed', 'skipped', 'cancelled')",
+            "status IN ('running', 'passed', 'failed', 'skipped', 'cancelled')",
             name="execution_checkpoint_status",
         ),
         CheckConstraint("attempt >= 1", name="execution_checkpoint_attempt"),

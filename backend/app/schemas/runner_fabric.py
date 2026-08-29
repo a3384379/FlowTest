@@ -140,7 +140,7 @@ class RunnerCheckpointResume(BaseModel):
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
     output: JsonValue = None
-    result: NodeResult
+    result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=1000)
     started_at: datetime | None
@@ -161,7 +161,7 @@ class RunnerCheckpointRequest(BaseModel):
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
     output: JsonValue = None
-    result: NodeResult
+    result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=1000)
     started_at: datetime | None
@@ -172,6 +172,14 @@ class RunnerCheckpointRequest(BaseModel):
     fencing_token: int = Field(ge=0)
     phase: WorkflowPhase = WorkflowPhase.MAIN
     best_effort: bool = False
+
+    @model_validator(mode="after")
+    def validate_reservation_shape(self) -> RunnerCheckpointRequest:
+        if self.status is NodeStatus.RUNNING and self.result is not None:
+            raise ValueError("Running checkpoint reservations cannot include a terminal result")
+        if self.status.is_terminal and self.result is None:
+            raise ValueError("Terminal checkpoints require a NodeResult")
+        return self
 
 
 class RunnerLeaseResponse(BaseModel):

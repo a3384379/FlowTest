@@ -376,6 +376,34 @@ async def test_main_request_budget_is_bounded_across_reclaim() -> None:
 
 
 @pytest.mark.asyncio
+async def test_budget_rejection_does_not_activate_cleanup_for_undispatched_node() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("request-a"),
+            api_node("request-b"),
+            cleanup_node("cleanup-b", cleanup_for=["request-b"], run_when="failure"),
+        ],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "request-a"},
+            {"id": "a-b", "source": "request-a", "target": "request-b"},
+            {"id": "b-e", "source": "request-b", "target": "end"},
+        ],
+        run_policy={"request_budget": 1},
+    )
+    executor = ControlledExecutor()
+
+    result = await WorkflowScheduler(executor).run(definition)
+
+    request_b = next(record for record in result.records if record.node_id == "request-b")
+    assert request_b.attempts == 0
+    assert request_b.error_code == "REQUEST_BUDGET_EXHAUSTED"
+    assert "request-b" not in executor.executed
+    assert "cleanup-b" not in executor.executed
+    assert result.cleanup_report is not None
+    assert "cleanup-b" not in result.cleanup_report.activated_node_ids
+
+
+@pytest.mark.asyncio
 async def test_main_runtime_limit_cancels_work_and_still_allows_cleanup() -> None:
     definition = workflow(
         middle_nodes=[
@@ -569,6 +597,15 @@ async def test_scheduler_reports_pending_running_and_terminal_node_states() -> N
         "api": [NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.PASSED],
         "end": [NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.PASSED],
     }
+    api_running = next(
+        update
+        for update in updates
+        if update.node_id == "api" and update.status is NodeStatus.RUNNING
+    )
+    assert api_running.attempts == 1
+    assert api_running.started_at is not None
+    assert api_running.input_hash is not None
+    assert api_running.request_reserved is True
 
 
 @pytest.mark.asyncio
