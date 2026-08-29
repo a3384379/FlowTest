@@ -85,7 +85,7 @@ _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
 _FIELD_DECLARATION = re.compile(
-    r"\bprivate\s+(?P<modifiers>(?:(?:static|final|transient)\s+)*)"
+    r"\b(?P<modifiers>(?:(?:public|protected|private|static|final|transient)\s+)*)"
     r"(?P<type>[A-Za-z0-9_$<>,.?\[\] \t]+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*=\s*[^;]{0,1000})?\s*;"
 )

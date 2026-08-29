@@ -2688,6 +2688,75 @@ public class OrderEntity {
     assert entity_fields == {"status"}
 
 
+def test_java_spring_poc_infers_all_instance_field_visibilities() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://field-visibilities", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @GetMapping("/orders")
+    OrderDto getOrder() {
+        return orderService.getOrder();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": """
+class OrderDto {
+    public String publicStatus;
+    protected String protectedStatus;
+    String packageStatus;
+    private String privateStatus;
+    public static String PUBLIC_SAMPLE;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderEntity.java",
+                        "content": """
+class OrderEntity {
+    public String publicColumn;
+    protected String protectedColumn;
+    String packageColumn;
+    private String privateColumn;
+    protected static String PROTECTED_SAMPLE;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    entity_fields = {claim.field_name for claim in evidence.claims if claim.kind == "table_column"}
+    assert response_fields == {
+        "publicStatus",
+        "protectedStatus",
+        "packageStatus",
+        "privateStatus",
+    }
+    assert entity_fields == {
+        "publicColumn",
+        "protectedColumn",
+        "packageColumn",
+        "privateColumn",
+    }
+
+
 def test_java_spring_poc_parses_whitespace_in_class_field_generic_types() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
