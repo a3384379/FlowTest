@@ -292,6 +292,17 @@ _JAVA_NON_CODE = re.compile(
     r"|'(?:\\.|[^'\\])*'",
     re.DOTALL,
 )
+_JAVA_METHOD_SIGNATURE = re.compile(
+    r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*"
+    r"(?P<modifiers>"
+    r"(?:(?:public|protected|abstract|default|final|native|static|strictfp|synchronized)"
+    r"\s+|@[A-Za-z0-9_$.]+\s*)*)"
+    r"(?:<[^>{};]+>\s+)?"
+    r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
+    r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^;{]+))?"
+    r"(?P<terminator>[;{])"
+)
 
 type JavaHttpMethod = Literal[
     "GET",
@@ -2368,6 +2379,15 @@ class _JavaRoute(BaseModel):
     source_line: int
 
 
+@dataclass(frozen=True, slots=True)
+class _JavaMethodImplementation:
+    return_type: str
+    parameters: str
+    declared_exceptions: tuple[str, ...]
+    body: str
+    source_line: int
+
+
 @dataclass(frozen=True)
 class _JavaParameter:
     declared_type: str
@@ -3545,20 +3565,24 @@ def _java_bound_interface_routes(
         for contract in interface_routes.get(interface_name, ()):
             if base_methods is not None and contract.method not in base_methods:
                 continue
-            implementation = _java_controller_method_body(
+            implementation = _java_controller_method_implementation(
                 file,
                 masked_content,
                 declaration,
                 contract,
             )
-            body, source_line = (
-                implementation
-                if implementation is not None
-                else (
-                    contract.body,
-                    file.content.count("\n", 0, declaration.start()) + 1,
-                )
-            )
+            implementation_update: dict[str, object] = {}
+            if implementation is None:
+                body = contract.body
+                source_line = file.content.count("\n", 0, declaration.start()) + 1
+            else:
+                body = implementation.body
+                source_line = implementation.source_line
+                implementation_update = {
+                    "return_type": implementation.return_type,
+                    "parameters": implementation.parameters,
+                    "declared_exceptions": list(implementation.declared_exceptions),
+                }
             conditions = _merge_mapping_conditions(
                 base_conditions,
                 contract.conditions,
@@ -3578,6 +3602,7 @@ def _java_bound_interface_routes(
                             "conditions": tuple(conditions),
                             "body": body,
                             "source_line": source_line,
+                            **implementation_update,
                         }
                     )
                 )
@@ -3657,12 +3682,12 @@ def _java_extended_interfaces(
     )
 
 
-def _java_controller_method_body(
+def _java_controller_method_implementation(
     file: JavaSourceFileSnapshot,
     masked_content: str,
     declaration: re.Match[str],
     contract: _JavaRoute,
-) -> tuple[str, int] | None:
+) -> _JavaMethodImplementation | None:
     class_opening = masked_content.find("{", declaration.end())
     if class_opening < 0:
         return None
@@ -3672,28 +3697,52 @@ def _java_controller_method_body(
         masked_content[class_opening + 1 : class_end]
     )
     route_mask = "".join(route_masked_content)
+    class_body = masked_content[class_opening + 1 : class_end]
     expected_types = _java_parameter_type_signature(contract.parameters)
     if expected_types is None:
         return None
     handler_marker = re.compile(rf"\b{re.escape(contract.handler)}\s*\(")
     for match in handler_marker.finditer(route_mask, class_opening + 1, class_end):
-        parameter_opening = route_mask.find("(", match.start(), match.end())
-        parameter_closing = _matching_parenthesis(file.content, parameter_opening)
-        parameters = file.content[parameter_opening + 1 : parameter_closing]
+        relative_handler_start = match.start() - class_opening - 1
+        method_start = (
+            class_opening
+            + 1
+            + _java_member_prefix_start(
+                class_body,
+                relative_handler_start,
+            )
+        )
+        following = file.content[method_start : method_start + 2000]
+        masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
+        signature = _JAVA_METHOD_SIGNATURE.match(masked_following)
+        if (
+            signature is None
+            or signature.group("handler") != contract.handler
+            or signature.group("terminator") != "{"
+        ):
+            continue
+        parameters = following[signature.start("params") : signature.end("params")]
         if _java_parameter_type_signature(parameters) != expected_types:
             continue
-        method_tail = file.content[parameter_closing + 1 : class_end]
-        body_match = re.match(
-            r"\s*(?:throws\s+[A-Za-z0-9_$., \t\r\n]+)?\s*\{",
-            method_tail,
-        )
-        if body_match is None:
-            continue
-        body_opening = parameter_closing + body_match.end()
+        body_opening = method_start + signature.end()
         body_end = _matching_brace(file.content, body_opening - 1)
-        return (
-            file.content[body_opening:body_end],
-            file.content.count("\n", 0, match.start()) + 1,
+        return _JavaMethodImplementation(
+            return_type=following[signature.start("return") : signature.end("return")],
+            parameters=parameters,
+            declared_exceptions=tuple(
+                _declared_java_exceptions(
+                    following[signature.start("throws") : signature.end("throws")]
+                    if signature.group("throws") is not None
+                    else None
+                )
+            ),
+            body=file.content[body_opening:body_end],
+            source_line=file.content.count(
+                "\n",
+                0,
+                method_start + signature.start("handler"),
+            )
+            + 1,
         )
     return None
 
@@ -3805,18 +3854,7 @@ def _routes_after_mapping(
     )
     following = file.content[mapping_end : mapping_end + 2000]
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
-    signature = re.match(
-        r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*"
-        r"(?P<modifiers>"
-        r"(?:(?:public|protected|abstract|default|final|native|static|strictfp|synchronized)"
-        r"\s+|@[A-Za-z0-9_$.]+\s*)*)"
-        r"(?:<[^>{};]+>\s+)?"
-        r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
-        r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
-        r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^;{]+))?"
-        r"(?P<terminator>[;{])",
-        masked_following,
-    )
+    signature = _JAVA_METHOD_SIGNATURE.match(masked_following)
     if signature is None:
         return []
     if allow_abstract_methods and re.search(r"\bstatic\b", signature.group("modifiers")):

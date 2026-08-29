@@ -3187,6 +3187,54 @@ class OrderDto { private String status; }
     assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
 
 
+def test_java_spring_poc_uses_covariant_implementation_signature_for_interface_route() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://covariant-interface-route", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @GetMapping("/orders/{id}")
+    BaseOrderDto load(String id);
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    @Override
+    public DetailedOrderDto load(String id) {
+        return orderService.load(id);
+    }
+}
+
+class BaseOrderDto { private String summary; }
+class DetailedOrderDto extends BaseOrderDto { private String detail; }
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        (claim.dto_type, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    assert response_fields == {("DetailedOrderDto", "detail")}
+    assert [claim.callee_ref for claim in evidence.claims if claim.kind == "service_call"] == [
+        "java://orderService.load"
+    ]
+
+
 def test_java_spring_poc_excludes_static_interface_mapping_methods() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
