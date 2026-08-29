@@ -938,6 +938,17 @@ class JavaSpringPocProvider:
                     ),
                 )
             )
+        if type_analysis.unresolved_json_property_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_JSON_PROPERTY",
+                    message=(
+                        "Java/Spring POC 无法静态解析部分 @JsonProperty 字段名，"
+                        "已停止生成对应 DTO 字段证据："
+                        f"{_java_type_name_summary(type_analysis.unresolved_json_property_types)}。"
+                    ),
+                )
+            )
         warnings.extend(
             _java_reference_warnings(
                 interface_contracts.unresolved_interfaces,
@@ -975,6 +986,7 @@ class JavaSpringPocProvider:
                 and not type_analysis.unresolved_column_types
                 and not type_analysis.unresolved_enum_serialization_types
                 and not type_analysis.unresolved_json_naming_types
+                and not type_analysis.unresolved_json_property_types
             ),
             warnings=warnings,
         )
@@ -2430,6 +2442,7 @@ JavaField = tuple[
     bool,
     JavaJsonAccess,
     str | None,
+    bool,
 ]
 
 
@@ -2451,6 +2464,7 @@ class _JavaTypeAnalysis:
     unresolved_column_types: tuple[str, ...]
     unresolved_enum_serialization_types: tuple[str, ...]
     unresolved_json_naming_types: tuple[str, ...]
+    unresolved_json_property_types: tuple[str, ...]
 
 
 def _java_type_analysis(
@@ -2467,6 +2481,7 @@ def _java_type_analysis(
     unresolved_column_types: set[str] = set()
     unresolved_enum_serialization_types: set[str] = set()
     unresolved_json_naming_types: set[str] = set()
+    unresolved_json_property_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
         top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
@@ -2487,6 +2502,8 @@ def _java_type_analysis(
                 name,
             )
             unresolved_json_naming_types.update(unresolved_naming_types)
+            if any(field[7] for field in fields):
+                unresolved_json_property_types.add(name)
             definitions[name].append(fields)
             if any(field[4] for field in fields):
                 unresolved_column_types.add(name)
@@ -2544,6 +2561,7 @@ def _java_type_analysis(
         unresolved_column_types=tuple(sorted(unresolved_column_types)),
         unresolved_enum_serialization_types=tuple(sorted(unresolved_enum_serialization_types)),
         unresolved_json_naming_types=tuple(sorted(unresolved_json_naming_types)),
+        unresolved_json_property_types=tuple(sorted(unresolved_json_property_types)),
     )
 
 
@@ -2566,7 +2584,7 @@ def _java_fields_with_json_naming(
         declaration.start(),
     )
     if naming_strategy == "snake_case":
-        return [(*field[:6], field[6] or _snake_case(field[0])) for field in fields], ()
+        return [(*field[:6], field[6] or _snake_case(field[0]), field[7]) for field in fields], ()
     return fields, (type_name,) * naming_unresolved
 
 
@@ -2733,6 +2751,12 @@ def _record_component_field(
     )
     if match is None:
         return None
+    serialized_name, serialized_name_unresolved = _jackson_property_name(
+        component,
+        masked_component,
+        string_constants,
+        enclosing_type,
+    )
     return (
         match.group("name"),
         match.group("type"),
@@ -2740,12 +2764,8 @@ def _record_component_field(
         column_name,
         column_name_unresolved,
         _jackson_property_access(component, masked_component),
-        _jackson_property_name(
-            component,
-            masked_component,
-            string_constants,
-            enclosing_type,
-        ),
+        serialized_name,
+        serialized_name_unresolved,
     )
 
 
@@ -2782,6 +2802,12 @@ def _class_fields(
             string_constants,
             enclosing_type,
         )
+        serialized_name, serialized_name_unresolved = _jackson_property_name(
+            annotation_content,
+            annotation_mask,
+            string_constants,
+            enclosing_type,
+        )
         fields.extend(
             (
                 field_name,
@@ -2790,12 +2816,8 @@ def _class_fields(
                 column_name,
                 column_name_unresolved,
                 _jackson_property_access(annotation_content, annotation_mask),
-                _jackson_property_name(
-                    annotation_content,
-                    annotation_mask,
-                    string_constants,
-                    enclosing_type,
-                ),
+                serialized_name,
+                serialized_name_unresolved,
             )
             for field_name, field_type in declarators
         )
@@ -2811,17 +2833,20 @@ def _class_fields(
         if accessor_field[0] not in known and accessor_field[0] not in ignored_getters:
             fields.append(accessor_field)
             known.add(accessor_field[0])
-    accessor_access, accessor_names = _jackson_accessor_property_metadata(
-        body,
-        masked_body,
-        string_constants,
-        enclosing_type,
+    accessor_access, accessor_names, unresolved_accessor_names = (
+        _jackson_accessor_property_metadata(
+            body,
+            masked_body,
+            string_constants,
+            enclosing_type,
+        )
     )
     fields = [
         (
             *field[:5],
             accessor_access.get(field[0], field[5]),
             accessor_names.get(field[0], field[6]),
+            field[7] or field[0] in unresolved_accessor_names,
         )
         for field in fields
     ]
@@ -2844,6 +2869,7 @@ def _class_fields(
                 old[4],
                 old[5],
                 old[6],
+                old[7],
             )
     return fields
 
@@ -2896,6 +2922,12 @@ def _java_accessor_fields(
         field_name, field_type, default_access = parsed
         declared_access = _jackson_property_access(annotation_content, annotation_mask)
         access = default_access if declared_access == "auto" else declared_access
+        serialized_name, serialized_name_unresolved = _jackson_property_name(
+            annotation_content,
+            annotation_mask,
+            string_constants,
+            enclosing_type,
+        )
         candidate: JavaField = (
             field_name,
             field_type,
@@ -2903,12 +2935,8 @@ def _java_accessor_fields(
             None,
             False,
             access,
-            _jackson_property_name(
-                annotation_content,
-                annotation_mask,
-                string_constants,
-                enclosing_type,
-            ),
+            serialized_name,
+            serialized_name_unresolved,
         )
         existing = fields.get(field_name)
         fields[field_name] = (
@@ -2949,6 +2977,7 @@ def _merge_java_accessor_fields(first: JavaField, second: JavaField) -> JavaFiel
         False,
         access,
         second[6] or first[6],
+        first[7] or second[7],
     )
 
 
@@ -3148,15 +3177,16 @@ def _jackson_property_name(
     masked_content: str,
     string_constants: _JavaStringConstants,
     enclosing_type: str,
-) -> str | None:
+) -> tuple[str | None, bool]:
     serialized_name: str | None = None
+    unresolved = False
     for match in _active_java_annotation_matches(
         content,
         masked_content,
         _JACKSON_PROPERTY_ANNOTATION_MARKER,
         _JACKSON_PROPERTY_ANNOTATION,
     ):
-        candidate = _jackson_property_name_from_match(
+        candidate, candidate_unresolved = _jackson_property_name_from_match(
             content,
             match,
             string_constants,
@@ -3164,7 +3194,11 @@ def _jackson_property_name(
         )
         if candidate is not None:
             serialized_name = candidate
-    return serialized_name
+            unresolved = False
+        elif candidate_unresolved:
+            serialized_name = None
+            unresolved = True
+    return serialized_name, unresolved
 
 
 def _jackson_property_name_from_match(
@@ -3172,22 +3206,29 @@ def _jackson_property_name_from_match(
     annotation: re.Match[str],
     string_constants: _JavaStringConstants,
     enclosing_type: str,
-) -> str | None:
+) -> tuple[str | None, bool]:
     arguments = _java_annotation_arguments(content, annotation.end())
-    named, value = _java_named_string_argument(
-        arguments,
-        "value",
-        string_constants,
-        enclosing_type,
-    )
-    if named:
-        return value
     inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
-    expression = _java_annotation_expression(inner, 0, allow_identifier=True)
+    masked_inner = _mask_java_non_code(inner)
+    assignment = re.search(r"\bvalue\s*=", masked_inner)
+    if assignment is not None:
+        expression = _java_annotation_expression(
+            inner,
+            assignment.end(),
+            allow_identifier=True,
+        )
+    elif re.search(r"\b[A-Za-z_$][A-Za-z0-9_$]*\s*=", masked_inner) is not None:
+        return None, False
+    else:
+        expression = _java_annotation_expression(inner, 0, allow_identifier=True)
+    if not expression:
+        return None, False
     value = _java_string_expression_value(expression, string_constants, enclosing_type)
+    if value == "":
+        return None, False
     if value is None or not 1 <= len(value) <= 160:
-        return None
-    return value
+        return None, True
+    return value, False
 
 
 def _java_json_naming_strategy(
@@ -3222,9 +3263,10 @@ def _jackson_accessor_property_metadata(
     masked_content: str,
     string_constants: _JavaStringConstants,
     enclosing_type: str,
-) -> tuple[dict[str, JavaJsonAccess], dict[str, str]]:
+) -> tuple[dict[str, JavaJsonAccess], dict[str, str], set[str]]:
     access_properties: dict[str, JavaJsonAccess] = {}
     named_properties: dict[str, str] = {}
+    unresolved_names: set[str] = set()
     for match in _active_java_annotation_matches(
         content,
         masked_content,
@@ -3246,7 +3288,7 @@ def _jackson_accessor_property_metadata(
             property_name = name[0].lower() + name[1:]
             if access != "auto":
                 access_properties[property_name] = access
-            serialized_name = _jackson_property_name_from_match(
+            serialized_name, serialized_name_unresolved = _jackson_property_name_from_match(
                 content,
                 match,
                 string_constants,
@@ -3254,7 +3296,11 @@ def _jackson_accessor_property_metadata(
             )
             if serialized_name is not None:
                 named_properties[property_name] = serialized_name
-    return access_properties, named_properties
+                unresolved_names.discard(property_name)
+            elif serialized_name_unresolved:
+                named_properties.pop(property_name, None)
+                unresolved_names.add(property_name)
+    return access_properties, named_properties, unresolved_names
 
 
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
@@ -3876,8 +3922,11 @@ def _java_controller_declarations(
     candidates = [
         selected
         for selected in _java_top_level_declarations(file, masked_content)
-        if selected[0].group("kind") == "class"
-        and not _java_class_is_abstract(masked_content, selected)
+        if selected[0].group("kind") in {"class", "record"}
+        and (
+            selected[0].group("kind") == "record"
+            or not _java_class_is_abstract(masked_content, selected)
+        )
     ]
     if not candidates:
         return []
@@ -4528,7 +4577,10 @@ def _dto_field_claims(
     dto_type: str,
     type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
-    if dto_type in type_analysis.unresolved_json_naming_types:
+    if dto_type in {
+        *type_analysis.unresolved_json_naming_types,
+        *type_analysis.unresolved_json_property_types,
+    }:
         return []
     claims: list[JavaEvidenceClaim] = []
     for (
@@ -4539,6 +4591,7 @@ def _dto_field_claims(
         _column_name_unresolved,
         json_access,
         serialized_name,
+        _serialized_name_unresolved,
     ) in type_analysis.fields.get(dto_type, []):
         if not _jackson_access_allows(json_access, direction):
             continue
@@ -4913,6 +4966,7 @@ def _structural_java_claims(
                         column_name_unresolved,
                         _json_access,
                         _serialized_name,
+                        _serialized_name_unresolved,
                     ) in type_fields.get(name, [])
                     if not column_name_unresolved
                 )

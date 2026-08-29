@@ -1092,10 +1092,6 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
             ".ref",
             "_ref",
             "_type",
-            ".revision",
-            "_revision",
-            ".version",
-            "_version",
         )
     ) and any(pattern.search(phone_card_value) for pattern in (_PHONE, _CARD)):
         return True

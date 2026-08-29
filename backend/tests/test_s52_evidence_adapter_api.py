@@ -1280,20 +1280,6 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert dedicated_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in dedicated_ref_rejected.text
 
-    for path in (("source", "revision"), ("provider", "version")):
-        dedicated_metadata_payload = _java_evidence(project_id)
-        _set_payload_value(dedicated_metadata_payload, path, sensitive_value)
-        dedicated_metadata_rejected = await client.post(
-            f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
-            headers=headers,
-            json={"evidence": dedicated_metadata_payload},
-        )
-
-        assert dedicated_metadata_rejected.status_code == 422
-        assert dedicated_metadata_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
-        assert dedicated_metadata_rejected.json()["error"]["trace_id"]
-        assert sensitive_value not in dedicated_metadata_rejected.text
-
     dedicated_type_payload = _java_evidence(project_id)
     dedicated_type_claim = next(
         claim for claim in dedicated_type_payload["claims"] if claim["kind"] == "dto_field"
@@ -1461,22 +1447,6 @@ async def test_java_adapter_rejects_sensitive_paths_with_trace_id(
         assert generic_ref_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
         assert generic_ref_rejected.json()["error"]["trace_id"]
         assert sensitive_value not in generic_ref_rejected.text
-
-    for path in (("source", "revision"), ("provider", "version")):
-        generic_metadata_payload = adapt_java_evidence(
-            JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
-        ).model_dump(mode="json")
-        _set_payload_value(generic_metadata_payload, path, sensitive_value)
-        generic_metadata_rejected = await client.post(
-            f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
-            headers=headers,
-            json={"envelope": generic_metadata_payload},
-        )
-
-        assert generic_metadata_rejected.status_code == 422
-        assert generic_metadata_rejected.json()["error"]["code"] == "VALIDATION_ERROR"
-        assert generic_metadata_rejected.json()["error"]["trace_id"]
-        assert sensitive_value not in generic_metadata_rejected.text
 
     generic_type_payload = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_evidence(project_id))

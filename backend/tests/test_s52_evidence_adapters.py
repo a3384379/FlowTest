@@ -348,35 +348,24 @@ def test_adapter_contracts_reject_sensitive_source_and_subject_refs() -> None:
         ExternalEvidenceEnvelope.model_validate(generic)
 
 
-def test_adapter_contracts_reject_sensitive_revision_and_version_metadata() -> None:
-    sensitive_value = "13800138000"
+def test_adapter_contracts_allow_numeric_revision_and_version_metadata() -> None:
+    numeric_value = "202608290047"
     for submission_factory, submission_type in (
         (_java_submission, JavaEvidenceSubmission),
         (_database_submission, DatabaseEvidenceSubmission),
     ):
-        sensitive_revision = submission_factory()
-        sensitive_revision["source"]["revision"] = sensitive_value
-        with pytest.raises(ValidationError, match="sensitive data"):
-            submission_type.model_validate(sensitive_revision)
+        numeric_metadata = submission_factory()
+        numeric_metadata["source"]["revision"] = numeric_value
+        numeric_metadata["provider"]["version"] = numeric_value
+        submission_type.model_validate(numeric_metadata)
 
-        sensitive_version = submission_factory()
-        sensitive_version["provider"]["version"] = sensitive_value
-        with pytest.raises(ValidationError, match="sensitive data"):
-            submission_type.model_validate(sensitive_version)
-
-    generic = adapt_java_evidence(
-        JavaEvidenceSubmission.model_validate(_java_submission())
-    ).model_dump(mode="json")
-    generic["source"]["revision"] = sensitive_value
-    with pytest.raises(ValidationError, match="sensitive data"):
-        ExternalEvidenceEnvelope.model_validate(generic)
-
-    generic = adapt_java_evidence(
-        JavaEvidenceSubmission.model_validate(_java_submission())
-    ).model_dump(mode="json")
-    generic["provider"]["version"] = sensitive_value
-    with pytest.raises(ValidationError, match="sensitive data"):
-        ExternalEvidenceEnvelope.model_validate(generic)
+    generic_source = _java_submission()
+    generic_source["source"]["revision"] = numeric_value
+    generic_source["provider"]["version"] = numeric_value
+    generic = adapt_java_evidence(JavaEvidenceSubmission.model_validate(generic_source)).model_dump(
+        mode="json"
+    )
+    ExternalEvidenceEnvelope.model_validate(generic)
 
 
 def test_adapter_contracts_reject_sensitive_redaction_paths_and_foreign_keys() -> None:
@@ -3339,6 +3328,43 @@ enum Marker { PRESENT; }
     assert not [claim for claim in evidence.claims if claim.kind == "service_call"]
 
 
+def test_java_spring_poc_analyzes_concrete_record_controllers() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://record-controller", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/StatusController.java",
+                        "content": """
+@RestController
+record StatusController() {
+    @GetMapping("/status")
+    StatusDto status() { return new StatusDto("ready"); }
+}
+
+record StatusDto(String state) {}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert any(
+        claim.kind == "controller_route" and claim.path == "/status" for claim in evidence.claims
+    )
+    assert any(
+        claim.kind == "dto_field"
+        and claim.direction == "response"
+        and claim.dto_type == "StatusDto"
+        and claim.field_name == "state"
+        for claim in evidence.claims
+    )
+
+
 def test_java_spring_poc_resolves_call_kind_from_injected_dependency_type() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4608,6 +4634,46 @@ class AccessorDto {
         and claim.field_name == "1st-name"
         and claim.annotation == "NotBlank"
         for claim in evidence.claims
+    )
+
+
+def test_java_spring_poc_stops_dto_claims_for_unresolved_json_property_name() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://unresolved-json-property", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ProfileController.java",
+                        "content": """
+@RestController
+class ProfileController {
+    @PostMapping("/profile")
+    ProfileDto update(@RequestBody ProfileDto request) { return request; }
+}
+
+class ProfileDto {
+    @JsonProperty(ExternalNames.LOGIN)
+    private String userName;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.dto_type == "ProfileDto"
+    ]
+    assert evidence.deterministic is False
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_JSON_PROPERTY" and "ProfileDto" in warning.message
+        for warning in evidence.warnings
     )
 
 

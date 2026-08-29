@@ -203,7 +203,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；869 passed、4 skipped、总覆盖率 90.72%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；871 passed、4 skipped、总覆盖率 90.74%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -335,7 +335,12 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Callee Ref 仍使用局部变量名而无法跨 Controller 稳定关联。当前公共或显式 `@JsonProperty` Accessor 会生成
   Getter Read-only / Setter Write-only DTO Field，成对 Accessor 合并为 Read-write；已识别依赖使用声明类型构造
   Callee Ref，无类型证据才回退变量名。直接回归覆盖 `display-name` 计算属性和稳定的 `OrderService.load` /
-  `InventoryClient.reserve` 身份。全量后端门禁通过：869 passed、4 skipped、总覆盖率 90.72%。
+  `InventoryClient.reserve` 身份。
+- 后续精确复审提出三个 P2：纯数字 Revision/Version 被误当作手机号或卡号；无法从有界快照解析的
+  `@JsonProperty` 常量错误回退 Java 字段名；具体 Record Controller 被遗漏。当前 Revision/Version 不再应用
+  无上下文的电话/卡号检测，未解析的显式 JSON 字段名会停止对应 DTO 证据并标记分析不完整，具体
+  Record Controller 纳入路由分析。直接回归覆盖 12 位数字 Build Revision、`ExternalNames.LOGIN` 与
+  `StatusController` Record。全量后端门禁通过：871 passed、4 skipped、总覆盖率 90.74%。
 
 ### 待完成
 
