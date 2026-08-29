@@ -2894,6 +2894,64 @@ public class OrderEntity {
     assert '(regexp = "^(foo|bar)$")' in constraints
 
 
+def test_java_spring_poc_preserves_qualified_and_repeated_validation_constraints() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://qualified-validation", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(CreateOrderRequest request) {
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+class CreateOrderRequest {
+    @jakarta.validation.constraints.NotNull
+    private String name;
+
+    @javax.validation.constraints.Pattern(regexp = "^[A-Z]+$")
+    @javax.validation.constraints.Pattern(regexp = "^[A-Z0-9]+$")
+    private String code;
+
+    private Details details;
+
+    @jakarta.validation.Valid
+    public Details getDetails() { return details; }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    constraints = [claim for claim in evidence.claims if claim.kind == "bean_validation"]
+    assert {(claim.field_name, claim.annotation) for claim in constraints} == {
+        ("code", "Pattern"),
+        ("details", "Valid"),
+        ("name", "NotNull"),
+    }
+    patterns = [claim for claim in constraints if claim.annotation == "Pattern"]
+    assert {claim.constraint for claim in patterns} == {
+        '(regexp = "^[A-Z]+$")',
+        '(regexp = "^[A-Z0-9]+$")',
+    }
+    assert len(patterns) == 2
+    assert len({claim.id for claim in patterns}) == 2
+
+
 def test_java_spring_poc_excludes_static_dto_and_entity_fields() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

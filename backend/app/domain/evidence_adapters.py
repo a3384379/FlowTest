@@ -108,14 +108,19 @@ _FIELD_DECLARATION = re.compile(
     r"(?P<type>[A-Za-z0-9_$<>,.?\[\] \t]+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*=\s*[^;]{0,1000})?\s*;"
 )
-_VALIDATION_ANNOTATION_NAMES = (
+_VALIDATION_CONSTRAINT_ANNOTATION_NAMES = (
     r"NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
-    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax|Valid"
+    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax"
 )
-_VALIDATION_ANNOTATION = re.compile(rf"@(?P<name>{_VALIDATION_ANNOTATION_NAMES})\b")
-_VALIDATION_ANNOTATION_MARKER = re.compile(rf"@(?:{_VALIDATION_ANNOTATION_NAMES})\b")
+_VALIDATION_ANNOTATION_SOURCE = (
+    rf"(?:(?:(?:jakarta|javax)\.validation\.constraints\.)?"
+    rf"(?:{_VALIDATION_CONSTRAINT_ANNOTATION_NAMES})|"
+    r"(?:(?:jakarta|javax)\.validation\.)?Valid)"
+)
+_VALIDATION_ANNOTATION = re.compile(rf"@{_VALIDATION_ANNOTATION_SOURCE}\b")
+_VALIDATION_ANNOTATION_MARKER = re.compile(rf"@{_VALIDATION_ANNOTATION_SOURCE}\b")
 _VALIDATED_GETTER = re.compile(
-    rf"(?P<annotations>(?:\s*@(?:{_VALIDATION_ANNOTATION_NAMES})\b[^\n]*(?:\r?\n|$))+)"
+    rf"(?P<annotations>(?:\s*@{_VALIDATION_ANNOTATION_SOURCE}\b[^\n]*(?:\r?\n|$))+)"
     r"\s*public\s+[A-Za-z0-9_$<>,.?\[\]]+\s+get(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\("
 )
 _SERVICE_CALL = re.compile(
@@ -2174,7 +2179,7 @@ def _java_validation_annotations(
 ) -> list[tuple[str, str]]:
     return [
         (
-            annotation.group("name"),
+            annotation.group(0).rsplit(".", 1)[-1].removeprefix("@"),
             _java_annotation_arguments(content, annotation.end())[:500],
         )
         for annotation in _active_java_annotation_matches(
@@ -2711,7 +2716,14 @@ def _dto_field_claims(
         )
         claims.extend(
             JavaBeanValidationClaim(
-                id=_claim_id("validation", operation_ref, dto_type, field_name, annotation),
+                id=_claim_id(
+                    "validation",
+                    operation_ref,
+                    dto_type,
+                    field_name,
+                    annotation,
+                    arguments,
+                ),
                 source_path=source_path,
                 operation_ref=operation_ref,
                 dto_type=dto_type,
