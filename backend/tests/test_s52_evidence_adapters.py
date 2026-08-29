@@ -1700,6 +1700,44 @@ def test_operation_entity_mapping_matches_dotted_schema_table_reference() -> Non
     )
 
 
+def test_operation_entity_mapping_uses_resource_before_action_suffix() -> None:
+    java_payload = _java_submission()
+    route = next(claim for claim in java_payload["claims"] if claim["kind"] == "controller_route")
+    route["operation_ref"] = "operation://POST/system/user/add"
+    route["path"] = "/system/user/add"
+    entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")
+    entity["class_name"] = "SysUser"
+    entity["entity_ref"] = "entity://SysUser"
+    entity["table_ref"] = "table://public/sys_user"
+    entity["operation_refs"] = []
+    java_payload["claims"] = [route, entity]
+
+    database_payload = _database_submission()
+    database_payload["tables"][0]["name"] = "sys_user"
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java-action-route",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database-action-route",
+            ),
+        ]
+    )
+
+    assert any(
+        candidate.kind is EntityMappingCandidateKind.OPERATION_ENTITY
+        and candidate.operation_ref == "operation://POST/system/user/add"
+        and candidate.target_ref == "entity://public/sys_user"
+        for candidate in mapping.candidates
+    )
+
+
 def test_unscoped_exact_entities_still_require_route_correlation() -> None:
     java_payload = _java_submission()
     order_entity = next(claim for claim in java_payload["claims"] if claim["kind"] == "entity")

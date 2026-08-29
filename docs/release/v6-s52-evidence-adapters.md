@@ -65,6 +65,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   仍可生成带 Table Finding Evidence Ref 的 Operation→Entity 候选。Column 只作为补充证据，不再代替 Table Claim。
 - Operation State Source 由 Operation 与 Field 共同确定；Java camelCase State Field 与 DB snake_case 状态列按
   规范化字段名相关联。同一 Operation 的独立 State Field 不互相制造假冲突，同字段不同 State Set 仍保持歧义。
+- Route/Table 名称启发式识别常见动作后缀；`/system/user/add` 使用 `user` 而不是 `add` 作为
+  资源 Token，可与 `SysUser`/`sys_user` 的 Java 与 Database Evidence 生成可追溯 Operation/Entity 候选。
 - DTO Field Source Ref 包含完整 Operation Ref 的 SHA-256 身份；同一 DTO Field 被不同 Operation 合法复用时不产生
   跨 Operation 假冲突，同一 Operation 内的多 Target 歧义仍保持可见。
 - Candidate ID 只取决于 Mapping Kind/Source/Target/Operation/Field/State 语义；新增佐证只合并 Evidence Ref，
@@ -185,7 +187,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；856 passed、4 skipped、总覆盖率 90.73%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；857 passed、4 skipped、总覆盖率 90.73%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -280,6 +282,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   `READ_ONLY`/`WRITE_ONLY` 方向及 Java Entity Field 身份；直接回归与全量后端门禁通过。
 - 后续复审指出 Interface `static` Mapping 方法不应被实现 Controller 继承；当前 Interface Contract
   收集阶段已排除 `static` Handler，回归验证只保留可继承的实例 Route 与 Service Call，全量后端门禁通过。
+- 最新复审指出 RuoYi 风格动作路由 `/system/user/add` 会错把 `add` 当作资源，从而漏掉
+  `SysUser`/`sys_user` Operation/Entity 候选；当前实现会在受控常见动作后缀前取资源段，直接回归覆盖
+  Java Entity + Database Table 证据联合派生，且全量后端门禁通过。
 
 ### 待完成
 

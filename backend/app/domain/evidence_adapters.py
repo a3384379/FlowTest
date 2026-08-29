@@ -101,6 +101,29 @@ _RESPONSE_SINGLE_VALUE_CONTAINERS: Final = (
     "Slice",
     "Stream",
 )
+_ROUTE_ACTION_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {
+        "add",
+        "changestatus",
+        "create",
+        "delete",
+        "download",
+        "edit",
+        "export",
+        "import",
+        "importdata",
+        "importtemplate",
+        "list",
+        "query",
+        "remove",
+        "reset",
+        "resetpwd",
+        "save",
+        "search",
+        "update",
+        "upload",
+    }
+)
 _RESPONSE_MAP_CONTAINERS: Final = (
     "ConcurrentMap",
     "HashMap",
@@ -2163,7 +2186,12 @@ def _normalized_name(value: str) -> str:
 
 def _route_resource_token(path: str) -> str:
     segments = [segment for segment in path.split("/") if segment and "{" not in segment]
-    return _normalized_name(segments[-1]) if segments else ""
+    if not segments:
+        return ""
+    resource_index = (
+        -2 if len(segments) > 1 and _normalized_name(segments[-1]) in _ROUTE_ACTION_SUFFIXES else -1
+    )
+    return _normalized_name(segments[resource_index])
 
 
 def _table_ref_matches_database_table(
