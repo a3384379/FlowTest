@@ -319,7 +319,7 @@ class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     direction: Literal["request", "response"]
     dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
-    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
     java_field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
 
@@ -342,7 +342,7 @@ class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
         default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
     )
     dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
-    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
     annotation: str = Field(pattern=_ADAPTER_IDENTIFIER)
     constraint: str = Field(min_length=1, max_length=500)
 
@@ -409,7 +409,8 @@ class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
     enum_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     direction: Literal["request", "response"] | None = None
     dto_type: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
-    field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
+    field_name: str | None = Field(default=None, min_length=1, max_length=160)
+    java_field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     values: list[str] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -422,6 +423,7 @@ class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
             [
                 *([self.dto_type] if self.dto_type is not None else []),
                 *([self.field_name] if self.field_name is not None else []),
+                *([self.java_field_name] if self.java_field_name is not None else []),
                 *self.values,
             ]
         )

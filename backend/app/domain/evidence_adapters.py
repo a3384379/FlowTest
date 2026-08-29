@@ -14,6 +14,7 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Annotated, Final, Literal, cast
+from urllib.parse import quote
 
 from pydantic import (
     BaseModel,
@@ -355,7 +356,7 @@ class JavaDtoFieldClaim(JavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     direction: Literal["request", "response"]
     dto_type: str = Field(pattern=_IDENTIFIER)
-    field_name: str = Field(pattern=_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
     java_field_name: str | None = Field(default=None, pattern=_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
 
@@ -376,7 +377,7 @@ class JavaBeanValidationClaim(JavaClaimBase):
     kind: Literal["bean_validation"] = "bean_validation"
     operation_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_REF)
     dto_type: str = Field(pattern=_IDENTIFIER)
-    field_name: str = Field(pattern=_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
     annotation: str = Field(pattern=_IDENTIFIER)
     constraint: str = Field(min_length=1, max_length=500)
 
@@ -439,7 +440,8 @@ class JavaEnumStateClaim(JavaClaimBase):
     enum_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     direction: Literal["request", "response"] | None = None
     dto_type: str | None = Field(default=None, pattern=_IDENTIFIER)
-    field_name: str | None = Field(default=None, pattern=_IDENTIFIER)
+    field_name: str | None = Field(default=None, min_length=1, max_length=160)
+    java_field_name: str | None = Field(default=None, pattern=_IDENTIFIER)
     values: list[str] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -452,6 +454,7 @@ class JavaEnumStateClaim(JavaClaimBase):
             [
                 *([self.dto_type] if self.dto_type is not None else []),
                 *([self.field_name] if self.field_name is not None else []),
+                *([self.java_field_name] if self.java_field_name is not None else []),
                 *self.values,
             ]
         )
@@ -1461,6 +1464,13 @@ class _ParsedDatabaseTable:
 
 
 @dataclass(frozen=True, slots=True)
+class _JavaStateCandidate:
+    mapping: EntityMappingCandidate
+    field_name: str | None
+    java_field_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class _EntityMatch:
     score: float
     evidence_refs: tuple[str, ...]
@@ -1818,7 +1828,8 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
             )
             operation_identity = sha256(field.operation_ref.encode()).hexdigest()
             field_ref = (
-                f"field://{field.dto_type}/{field.field_name}?operation={operation_identity}"
+                f"field://{field.dto_type}/{quote(field.field_name, safe='')}"
+                f"?operation={operation_identity}"
             )
             operation_table = table_targets.get(entity_ref)
             operation_confidence = operation_table.confidence if operation_table else 1.0
@@ -1932,46 +1943,51 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
                 operation_table,
                 parsed_column,
                 java_candidates,
+                parsed.table_columns,
             )
             if not column_candidates:
                 continue
             corroborated_java_ids.update(corroborated_ids)
             for candidate in column_candidates:
                 _append_mapping_candidate(candidates, candidate)
-    for candidate in java_candidates:
-        if candidate.id not in corroborated_java_ids:
-            _append_mapping_candidate(candidates, candidate)
+    for java_candidate in java_candidates:
+        if java_candidate.mapping.id not in corroborated_java_ids:
+            _append_mapping_candidate(candidates, java_candidate.mapping)
     return list(candidates.values())
 
 
 def _java_state_candidates(
     states: list[tuple[JavaEnumStateClaim, str]],
-) -> list[EntityMappingCandidate]:
+) -> list[_JavaStateCandidate]:
     return [
-        _candidate(
-            kind=EntityMappingCandidateKind.OPERATION_STATE,
-            source_ref=_state_field_ref(
-                state.operation_ref,
-                state.field_name,
-                direction=state.direction,
-                dto_type=state.dto_type,
-            ),
-            target_ref=f"state-set://{state.enum_ref.removeprefix('java://')}",
-            operation_ref=state.operation_ref,
-            field_ref=(
-                _state_field_ref(
+        _JavaStateCandidate(
+            mapping=_candidate(
+                kind=EntityMappingCandidateKind.OPERATION_STATE,
+                source_ref=_state_field_ref(
                     state.operation_ref,
                     state.field_name,
                     direction=state.direction,
                     dto_type=state.dto_type,
-                )
-                if state.field_name is not None
-                else None
+                ),
+                target_ref=f"state-set://{state.enum_ref.removeprefix('java://')}",
+                operation_ref=state.operation_ref,
+                field_ref=(
+                    _state_field_ref(
+                        state.operation_ref,
+                        state.field_name,
+                        direction=state.direction,
+                        dto_type=state.dto_type,
+                    )
+                    if state.field_name is not None
+                    else None
+                ),
+                state_values=state.values,
+                confidence=state.confidence,
+                deterministic=state.deterministic,
+                evidence_refs=[evidence_ref],
             ),
-            state_values=state.values,
-            confidence=state.confidence,
-            deterministic=state.deterministic,
-            evidence_refs=[evidence_ref],
+            field_name=state.field_name,
+            java_field_name=state.java_field_name,
         )
         for state, evidence_ref in states
         if state.operation_ref is not None
@@ -1982,14 +1998,20 @@ def _database_state_candidates(
     operation_ref: str,
     operation_table: EntityMappingCandidate,
     parsed_column: _ParsedDatabaseColumn,
-    java_candidates: list[EntityMappingCandidate],
+    java_candidates: list[_JavaStateCandidate],
+    table_columns: list[tuple[JavaTableColumnClaim, str]],
 ) -> tuple[list[EntityMappingCandidate], set[str]]:
     column = parsed_column.claim
     value_sets = _database_state_value_sets(column)
     field_candidates = [
         candidate
         for candidate in java_candidates
-        if _state_candidate_matches_column(candidate, operation_ref, column.name)
+        if _state_candidate_matches_column(
+            candidate,
+            operation_ref,
+            parsed_column,
+            table_columns,
+        )
     ]
     if not value_sets or (
         not field_candidates and _normalized_name(column.name) not in {"status", "state"}
@@ -1999,18 +2021,33 @@ def _database_state_candidates(
     corroborated_ids: set[str] = set()
     for values in value_sets:
         corroborating = [
-            candidate for candidate in field_candidates if candidate.state_values == values
+            candidate for candidate in field_candidates if candidate.mapping.state_values == values
         ]
-        corroborated_ids.update(candidate.id for candidate in corroborating)
-        anchors: list[EntityMappingCandidate | None] = [*corroborating] or [None]
+        corroborated_ids.update(candidate.mapping.id for candidate in corroborating)
+        anchors: list[_JavaStateCandidate | None] = [*corroborating] or [None]
         for anchor in anchors:
-            source_ref = (
-                anchor.source_ref
+            anchor_mapping = anchor.mapping if anchor is not None else None
+            table_column_links = (
+                _state_table_column_links(anchor, parsed_column, table_columns)
                 if anchor is not None
+                else []
+            )
+            source_ref = (
+                anchor_mapping.source_ref
+                if anchor_mapping is not None
                 else _state_field_ref(operation_ref, column.name)
             )
-            field_ref = anchor.field_ref if anchor is not None else source_ref
-            corroborating_evidence = sorted(anchor.evidence_refs)[:6] if anchor is not None else []
+            field_ref = anchor_mapping.field_ref if anchor_mapping is not None else source_ref
+            corroborating_evidence = (
+                sorted(
+                    {
+                        *anchor_mapping.evidence_refs,
+                        *(evidence_ref for _claim, evidence_ref in table_column_links),
+                    }
+                )[:6]
+                if anchor_mapping is not None
+                else []
+            )
             operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
             candidates.append(
                 _candidate(
@@ -2026,13 +2063,15 @@ def _database_state_candidates(
                         [
                             parsed_column.confidence,
                             operation_table.confidence,
-                            *([anchor.confidence] if anchor is not None else []),
+                            *([anchor_mapping.confidence] if anchor_mapping is not None else []),
+                            *(claim.confidence for claim, _ref in table_column_links),
                         ]
                     ),
                     deterministic=(
                         parsed_column.deterministic
                         and operation_table.deterministic
-                        and (anchor is None or anchor.deterministic)
+                        and (anchor_mapping is None or anchor_mapping.deterministic)
+                        and all(claim.deterministic for claim, _ref in table_column_links)
                     ),
                     evidence_refs=[
                         parsed_column.evidence_ref,
@@ -2045,15 +2084,43 @@ def _database_state_candidates(
 
 
 def _state_candidate_matches_column(
-    candidate: EntityMappingCandidate,
+    candidate: _JavaStateCandidate,
     operation_ref: str,
-    column_name: str,
+    parsed_column: _ParsedDatabaseColumn,
+    table_columns: list[tuple[JavaTableColumnClaim, str]],
 ) -> bool:
-    if candidate.operation_ref != operation_ref:
+    if candidate.mapping.operation_ref != operation_ref:
         return False
-    if candidate.field_ref is None:
+    column_name = parsed_column.claim.name
+    if candidate.field_name is None:
         return _normalized_name(column_name) in {"status", "state"}
-    return candidate.field_ref.rsplit("/", 1)[-1] == _state_field_identity(column_name)
+    if _normalized_name(candidate.field_name) == _normalized_name(column_name):
+        return True
+    if candidate.java_field_name is None:
+        return False
+    return bool(_state_table_column_links(candidate, parsed_column, table_columns))
+
+
+def _state_table_column_links(
+    candidate: _JavaStateCandidate,
+    parsed_column: _ParsedDatabaseColumn,
+    table_columns: list[tuple[JavaTableColumnClaim, str]],
+) -> list[tuple[JavaTableColumnClaim, str]]:
+    if candidate.java_field_name is None:
+        return []
+    return [
+        item
+        for item in table_columns
+        if (
+            (claim := item[0]).field_name.casefold() == candidate.java_field_name.casefold()
+            and claim.column_name.casefold() == parsed_column.claim.name.casefold()
+            and _table_ref_matches_database_table(
+                claim.table_ref,
+                parsed_column.schema,
+                parsed_column.table,
+            )
+        )
+    ]
 
 
 def _state_field_ref(
@@ -2967,7 +3034,7 @@ def _jackson_property_name_from_match(
     inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     expression = _java_annotation_expression(inner, 0, allow_identifier=True)
     value = _java_string_expression_value(expression, string_constants, enclosing_type)
-    if value is None or re.fullmatch(_IDENTIFIER, value) is None:
+    if value is None or not 1 <= len(value) <= 160:
         return None
     return value
 
@@ -4291,6 +4358,7 @@ def _dto_field_claims(
                     direction=direction,
                     dto_type=dto_type,
                     field_name=evidence_name,
+                    java_field_name=field_name,
                     values=list(enum_definition.values),
                     confidence=0.8,
                     deterministic=enum_definition.deterministic,

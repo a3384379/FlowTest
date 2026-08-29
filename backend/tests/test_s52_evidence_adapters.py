@@ -2030,6 +2030,76 @@ def test_explicit_table_column_claim_drives_differently_named_field_mapping() ->
     assert candidate.deterministic is False
 
 
+def test_explicit_table_column_claim_correlates_renamed_enum_state_field() -> None:
+    java_payload = _java_submission()
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] != "enum_state"
+    ]
+    operation_ref = "operation://POST/api/orders"
+    java_payload["claims"].append(
+        {
+            "id": "state-order",
+            "kind": "enum_state",
+            "source_path": "src/OrderStatus.java:3",
+            "confidence": 0.8,
+            "deterministic": True,
+            "operation_ref": operation_ref,
+            "enum_ref": "java://OrderStatus",
+            "direction": "request",
+            "dto_type": "CreateOrderRequest",
+            "field_name": "state",
+            "java_field_name": "orderStatus",
+            "values": ["cancelled", "created"],
+        }
+    )
+    table_column = next(
+        claim for claim in java_payload["claims"] if claim["id"] == "column-product"
+    )
+    table_column.update(
+        {
+            "field_name": "orderStatus",
+            "column_name": "status_code",
+            "confidence": 0.7,
+        }
+    )
+    database_payload = _database_submission()
+    status_column = next(
+        column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
+    )
+    status_column["name"] = "status_code"
+
+    java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
+    java_inputs = _mapping_inputs(java_envelope, "java-state")
+    table_column_evidence = next(
+        item.evidence_ref
+        for item in java_inputs
+        if isinstance(item.finding.structured_data, JavaExternalEvidenceStructuredData)
+        and item.finding.structured_data.claim_kind == "table_column"
+        and item.finding.structured_data.claim.field_name == "orderStatus"
+    )
+    mapping = derive_entity_mapping(
+        [
+            *java_inputs,
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database-state",
+            ),
+        ]
+    )
+
+    candidate = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+        and candidate.target_ref == "state-set://public/orders/status_code"
+    )
+    assert candidate.state_values == ["cancelled", "created"]
+    assert candidate.confidence == 0.7
+    assert table_column_evidence in candidate.evidence_refs
+
+
 def test_operation_state_mapping_scopes_independent_fields() -> None:
     java_payload = _java_submission()
     operation_ref = "operation://POST/api/orders"
@@ -4286,7 +4356,8 @@ class AccountController {
 }
 
 class ClassDto {
-    @JsonProperty("login")
+    @NotBlank
+    @JsonProperty("1st-name")
     private String userName;
 
     @JsonProperty(value = "password", access = JsonProperty.Access.WRITE_ONLY)
@@ -4316,9 +4387,9 @@ class AccessorDto {
     assert fields == {
         ("AccessorDto", "request", "accessorLogin"),
         ("AccessorDto", "response", "accessorLogin"),
-        ("ClassDto", "request", "login"),
+        ("ClassDto", "request", "1st-name"),
         ("ClassDto", "request", "password"),
-        ("ClassDto", "response", "login"),
+        ("ClassDto", "response", "1st-name"),
         ("RecordDto", "request", "recordLogin"),
         ("RecordDto", "response", "recordLogin"),
     }
@@ -4328,9 +4399,15 @@ class AccessorDto {
         if claim.kind == "dto_field"
     } >= {
         ("AccessorDto", "accessorLogin", "userName"),
-        ("ClassDto", "login", "userName"),
+        ("ClassDto", "1st-name", "userName"),
         ("RecordDto", "recordLogin", "userName"),
     }
+    assert any(
+        claim.kind == "bean_validation"
+        and claim.field_name == "1st-name"
+        and claim.annotation == "NotBlank"
+        for claim in evidence.claims
+    )
 
 
 def test_java_spring_poc_applies_snake_case_json_naming_to_dto_fields() -> None:
@@ -5636,6 +5713,7 @@ class OrderController {
                         "path": "src/main/java/example/CreateOrderRequest.java",
                         "content": """
 class CreateOrderRequest {
+    @JsonProperty("request-state")
     private RequestStatus status;
 }
 """,
@@ -5672,6 +5750,7 @@ class OrderDto {
             claim.direction,
             claim.dto_type,
             claim.field_name,
+            claim.java_field_name,
             tuple(claim.values),
         )
         for claim in scoped_states
@@ -5680,6 +5759,7 @@ class OrderDto {
             "operation://POST/orders",
             "request",
             "CreateOrderRequest",
+            "request-state",
             "status",
             ("REQUESTED", "RETRIED"),
         ),
@@ -5687,6 +5767,7 @@ class OrderDto {
             "operation://POST/orders",
             "response",
             "OrderDto",
+            "status",
             "status",
             ("CREATED", "PAID"),
         ),
