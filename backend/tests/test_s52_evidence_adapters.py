@@ -4159,6 +4159,68 @@ class OrderDto {
     assert response_fields == {"generatedId", "getterReadOnly", "visible"}
 
 
+def test_java_spring_poc_honors_explicit_jackson_property_names() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jackson-names", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AccountController.java",
+                        "content": """
+@RestController
+class AccountController {
+    @PostMapping("/class")
+    ClassDto classDto(@RequestBody ClassDto request) { return request; }
+
+    @PostMapping("/record")
+    RecordDto recordDto(@RequestBody RecordDto request) { return request; }
+
+    @PostMapping("/accessor")
+    AccessorDto accessorDto(@RequestBody AccessorDto request) { return request; }
+}
+
+class ClassDto {
+    @JsonProperty("login")
+    private String userName;
+
+    @JsonProperty(value = "password", access = JsonProperty.Access.WRITE_ONLY)
+    private String secret;
+}
+
+record RecordDto(@JsonProperty(value = "recordLogin") String userName) {}
+
+class AccessorDto {
+    private String userName;
+
+    @JsonProperty("accessorLogin")
+    public String getUserName() { return userName; }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    fields = {
+        (claim.dto_type, claim.direction, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field"
+    }
+    assert fields == {
+        ("AccessorDto", "request", "accessorLogin"),
+        ("AccessorDto", "response", "accessorLogin"),
+        ("ClassDto", "request", "login"),
+        ("ClassDto", "request", "password"),
+        ("ClassDto", "response", "login"),
+        ("RecordDto", "request", "recordLogin"),
+        ("RecordDto", "response", "recordLogin"),
+    }
+
+
 def test_java_spring_poc_preserves_qualified_and_repeated_validation_constraints() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

@@ -2248,6 +2248,7 @@ JavaField = tuple[
     str | None,
     bool,
     JavaJsonAccess,
+    str | None,
 ]
 
 
@@ -2504,6 +2505,12 @@ def _record_component_field(
         column_name,
         column_name_unresolved,
         _jackson_property_access(component, masked_component),
+        _jackson_property_name(
+            component,
+            masked_component,
+            string_constants,
+            enclosing_type,
+        ),
     )
 
 
@@ -2547,13 +2554,31 @@ def _class_fields(
                 column_name,
                 column_name_unresolved,
                 _jackson_property_access(annotation_content, annotation_mask),
+                _jackson_property_name(
+                    annotation_content,
+                    annotation_mask,
+                    string_constants,
+                    enclosing_type,
+                ),
             )
             for field_name, field_type in declarators
         )
     ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
     fields = [field for field in fields if field[0] not in ignored_getters]
-    accessor_access = _jackson_accessor_property_access(body, masked_body)
-    fields = [(*field[:5], accessor_access.get(field[0], field[5])) for field in fields]
+    accessor_access, accessor_names = _jackson_accessor_property_metadata(
+        body,
+        masked_body,
+        string_constants,
+        enclosing_type,
+    )
+    fields = [
+        (
+            *field[:5],
+            accessor_access.get(field[0], field[5]),
+            accessor_names.get(field[0], field[6]),
+        )
+        for field in fields
+    ]
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
@@ -2573,6 +2598,7 @@ def _class_fields(
                 old[3],
                 old[4],
                 old[5],
+                old[6],
             )
     return fields
 
@@ -2768,11 +2794,61 @@ def _jackson_property_access_from_match(
     return cast(JavaJsonAccess, match.group("access").lower())
 
 
-def _jackson_accessor_property_access(
+def _jackson_property_name(
     content: str,
     masked_content: str,
-) -> dict[str, JavaJsonAccess]:
-    properties: dict[str, JavaJsonAccess] = {}
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> str | None:
+    serialized_name: str | None = None
+    for match in _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_PROPERTY_ANNOTATION_MARKER,
+        _JACKSON_PROPERTY_ANNOTATION,
+    ):
+        candidate = _jackson_property_name_from_match(
+            content,
+            match,
+            string_constants,
+            enclosing_type,
+        )
+        if candidate is not None:
+            serialized_name = candidate
+    return serialized_name
+
+
+def _jackson_property_name_from_match(
+    content: str,
+    annotation: re.Match[str],
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> str | None:
+    arguments = _java_annotation_arguments(content, annotation.end())
+    named, value = _java_named_string_argument(
+        arguments,
+        "value",
+        string_constants,
+        enclosing_type,
+    )
+    if named:
+        return value
+    inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    expression = _java_annotation_expression(inner, 0, allow_identifier=True)
+    value = _java_string_expression_value(expression, string_constants, enclosing_type)
+    if value is None or re.fullmatch(_IDENTIFIER, value) is None:
+        return None
+    return value
+
+
+def _jackson_accessor_property_metadata(
+    content: str,
+    masked_content: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> tuple[dict[str, JavaJsonAccess], dict[str, str]]:
+    access_properties: dict[str, JavaJsonAccess] = {}
+    named_properties: dict[str, str] = {}
     for match in _active_java_annotation_matches(
         content,
         masked_content,
@@ -2780,8 +2856,6 @@ def _jackson_accessor_property_access(
         _JACKSON_PROPERTY_ANNOTATION,
     ):
         access = _jackson_property_access_from_match(content, match)
-        if access == "auto":
-            continue
         _arguments, annotation_end = _java_annotation_arguments_and_end(content, match.end())
         following = _mask_java_annotation_arguments(masked_content[annotation_end:])
         accessor = re.match(
@@ -2793,8 +2867,18 @@ def _jackson_accessor_property_access(
         )
         if accessor is not None:
             name = accessor.group("name")
-            properties[name[0].lower() + name[1:]] = access
-    return properties
+            property_name = name[0].lower() + name[1:]
+            if access != "auto":
+                access_properties[property_name] = access
+            serialized_name = _jackson_property_name_from_match(
+                content,
+                match,
+                string_constants,
+                enclosing_type,
+            )
+            if serialized_name is not None:
+                named_properties[property_name] = serialized_name
+    return access_properties, named_properties
 
 
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
@@ -3986,17 +4070,19 @@ def _dto_field_claims(
         _column_name,
         _column_name_unresolved,
         json_access,
+        serialized_name,
     ) in type_analysis.fields.get(dto_type, []):
         if not _jackson_access_allows(json_access, direction):
             continue
+        evidence_name = serialized_name or field_name
         claims.append(
             JavaDtoFieldClaim(
-                id=_claim_id("dto", operation_ref, direction, dto_type, field_name),
+                id=_claim_id("dto", operation_ref, direction, dto_type, evidence_name),
                 source_path=source_path,
                 operation_ref=operation_ref,
                 direction=direction,
                 dto_type=dto_type,
-                field_name=field_name,
+                field_name=evidence_name,
                 field_type=field_type,
                 confidence=0.9,
                 deterministic=True,
@@ -4008,14 +4094,14 @@ def _dto_field_claims(
                     "validation",
                     operation_ref,
                     dto_type,
-                    field_name,
+                    evidence_name,
                     annotation,
                     arguments,
                 ),
                 source_path=source_path,
                 operation_ref=operation_ref,
                 dto_type=dto_type,
-                field_name=field_name,
+                field_name=evidence_name,
                 annotation=annotation,
                 constraint=(arguments or "present")[:500],
                 confidence=0.9,
@@ -4032,7 +4118,7 @@ def _dto_field_claims(
                         operation_ref,
                         direction,
                         dto_type,
-                        field_name,
+                        evidence_name,
                         enum_definition.enum_ref,
                     ),
                     source_path=enum_definition.source_path,
@@ -4040,7 +4126,7 @@ def _dto_field_claims(
                     enum_ref=enum_definition.enum_ref,
                     direction=direction,
                     dto_type=dto_type,
-                    field_name=field_name,
+                    field_name=evidence_name,
                     values=list(enum_definition.values),
                     confidence=0.8,
                     deterministic=enum_definition.deterministic,
@@ -4344,6 +4430,7 @@ def _structural_java_claims(
                         column_name,
                         column_name_unresolved,
                         _json_access,
+                        _serialized_name,
                     ) in type_fields.get(name, [])
                     if not column_name_unresolved
                 )

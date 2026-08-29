@@ -103,6 +103,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   `@JsonIgnore(false)` 保持显式可见语义。
 - Jackson `@JsonProperty(access = WRITE_ONLY)` 属性只生成 Request Evidence，`READ_ONLY` 只生成
   Response Evidence，Field、Record Component 和 Accessor 的显式方向都会传播到 DTO Claim。
+- Jackson `@JsonProperty("...")`/`value = "..."` 的显式线上属性名同样从 Field、Record Component 和
+  Accessor 传播到 DTO、Validation 与 Enum Evidence；Entity/Table Column 仍保留 Java 字段身份。
 - Spring 方法级 `consumes`/`produces` 按框架语义覆盖类型级媒体条件，`params`/`headers` 仍合并；
   显式空 `RequestMethod` 数组按 Annotation 默认值处理为八种受支持 HTTP Method。
 - Claim 配额截断、同名类型、继承字段/控制器父类路由和 JPA Property Access 等显式不完整边界都会
@@ -181,7 +183,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；854 passed、4 skipped、总覆盖率 90.72%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；855 passed、4 skipped、总覆盖率 90.73%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -271,6 +273,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 后续复审发现 `0047` Downgrade 只按 Evidence Row 删除新 Provider Context，会漏掉仅在 Revision
   Completeness Snapshot 声明新 Required Evidence 的上下文；当前迁移会同时检查 Snapshot 与 Evidence Row，
   回归验证不兼容 Snapshot 级联删除、旧 Provider Snapshot 保留，且全量后端门禁通过。
+- 最新复审指出 `@JsonProperty("login")` 仍以 Java `userName` 产生 DTO Evidence，可导致错误的线上字段与
+  Column 候选；当前实现已将显式 Jackson 名称传播到 Field/Record/Accessor 证据，并保持
+  `READ_ONLY`/`WRITE_ONLY` 方向及 Java Entity Field 身份；直接回归与全量后端门禁通过。
 
 ### 待完成
 
