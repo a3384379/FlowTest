@@ -2365,9 +2365,7 @@ class _JavaRoute(BaseModel):
     parameters: str
     declared_exceptions: list[str]
     conditions: tuple[str, ...] = ()
-    call_target_kinds: dict[str, Literal["service_call", "feign_call"]] = Field(
-        default_factory=dict
-    )
+    call_target_types: dict[str, str] = Field(default_factory=dict)
     body: str
     source_line: int
 
@@ -2803,6 +2801,16 @@ def _class_fields(
         )
     ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
     fields = [field for field in fields if field[0] not in ignored_getters]
+    known = {field[0] for field in fields}
+    for accessor_field in _java_accessor_fields(
+        body,
+        code_body,
+        string_constants,
+        enclosing_type,
+    ):
+        if accessor_field[0] not in known and accessor_field[0] not in ignored_getters:
+            fields.append(accessor_field)
+            known.add(accessor_field[0])
     accessor_access, accessor_names = _jackson_accessor_property_metadata(
         body,
         masked_body,
@@ -2817,7 +2825,6 @@ def _class_fields(
         )
         for field in fields
     ]
-    known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
         field_name = name[0].lower() + name[1:]
@@ -2839,6 +2846,110 @@ def _class_fields(
                 old[6],
             )
     return fields
+
+
+def _java_accessor_fields(
+    body: str,
+    code_body: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[JavaField]:
+    fields: dict[str, JavaField] = {}
+    member_mask = _mask_nested_java_blocks(code_body)
+    marker_pattern = re.compile(r"\b(?:get|is|set)[A-Z][A-Za-z0-9_$]*\s*\(")
+    for marker in marker_pattern.finditer(member_mask):
+        member_start = _java_member_prefix_start(code_body, marker.start())
+        following = body[member_start : member_start + 2000]
+        masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
+        signature = _JAVA_METHOD_SIGNATURE.match(masked_following)
+        if signature is None or signature.group("terminator") != "{":
+            continue
+        handler = signature.group("handler")
+        if not re.fullmatch(r"(?:get|is|set)[A-Z][A-Za-z0-9_$]*", handler):
+            continue
+        annotation_content = following[: signature.start("return")]
+        annotation_mask = masked_following[: signature.start("return")]
+        explicit_property = bool(
+            _active_java_annotation_matches(
+                annotation_content,
+                annotation_mask,
+                _JACKSON_PROPERTY_ANNOTATION_MARKER,
+                _JACKSON_PROPERTY_ANNOTATION,
+            )
+        )
+        if "public" not in signature.group("modifiers").split() and not explicit_property:
+            continue
+        if _has_jackson_ignore_annotation(annotation_content, annotation_mask):
+            continue
+        parameters = _java_parameter_declarations(
+            following[signature.start("params") : signature.end("params")]
+        )
+        if parameters is None:
+            continue
+        parsed = _java_accessor_field_signature(
+            handler,
+            following[signature.start("return") : signature.end("return")],
+            parameters,
+        )
+        if parsed is None:
+            continue
+        field_name, field_type, default_access = parsed
+        declared_access = _jackson_property_access(annotation_content, annotation_mask)
+        access = default_access if declared_access == "auto" else declared_access
+        candidate: JavaField = (
+            field_name,
+            field_type,
+            _java_validation_annotations(annotation_content, annotation_mask),
+            None,
+            False,
+            access,
+            _jackson_property_name(
+                annotation_content,
+                annotation_mask,
+                string_constants,
+                enclosing_type,
+            ),
+        )
+        existing = fields.get(field_name)
+        fields[field_name] = (
+            candidate if existing is None else _merge_java_accessor_fields(existing, candidate)
+        )
+    return list(fields.values())
+
+
+def _java_accessor_field_signature(
+    handler: str,
+    return_type: str,
+    parameters: list[_JavaParameter],
+) -> tuple[str, str, JavaJsonAccess] | None:
+    if handler.startswith(("get", "is")) and not parameters:
+        field_type = return_type.strip()
+        if field_type == "void":
+            return None
+        if handler.startswith("is") and _outer_java_type(field_type) not in {
+            "boolean",
+            "Boolean",
+        }:
+            return None
+        suffix = handler[2:] if handler.startswith("is") else handler[3:]
+        return suffix[0].lower() + suffix[1:], field_type, "read_only"
+    if handler.startswith("set") and len(parameters) == 1:
+        suffix = handler[3:]
+        return suffix[0].lower() + suffix[1:], parameters[0].declared_type, "write_only"
+    return None
+
+
+def _merge_java_accessor_fields(first: JavaField, second: JavaField) -> JavaField:
+    access: JavaJsonAccess = first[5] if first[5] == second[5] else "read_write"
+    return (
+        first[0],
+        first[1],
+        sorted(set([*first[2], *second[2]])),
+        None,
+        False,
+        access,
+        second[6] or first[6],
+    )
 
 
 def _java_member_prefix_start(content: str, end: int) -> int:
@@ -3512,8 +3623,8 @@ def _java_controller_routes(
     if base_conditions is None:
         return []
     controller = declaration.group("name")
-    call_target_kinds = (
-        _java_call_target_kinds(file, masked_content, declaration)
+    call_target_types = (
+        _java_call_target_types(file, masked_content, declaration)
         if declaration.group("kind") == "class"
         else {}
     )
@@ -3536,7 +3647,7 @@ def _java_controller_routes(
             base_conditions,
             controller,
             string_constants,
-            call_target_kinds=call_target_kinds,
+            call_target_types=call_target_types,
             allow_abstract_methods=allow_abstract_methods,
         )
     ]
@@ -3560,7 +3671,7 @@ def _java_bound_interface_routes(
     )
     if base_conditions is None:
         return []
-    call_target_kinds = _java_call_target_kinds(file, masked_content, declaration)
+    call_target_types = _java_call_target_types(file, masked_content, declaration)
     routes: list[_JavaRoute] = []
     for interface_name in _java_implemented_interfaces(masked_content, declaration):
         for contract in interface_routes.get(interface_name, ()):
@@ -3601,7 +3712,7 @@ def _java_bound_interface_routes(
                             ),
                             "controller_ref": f"java://{controller}",
                             "conditions": tuple(conditions),
-                            "call_target_kinds": call_target_kinds,
+                            "call_target_types": call_target_types,
                             "body": body,
                             "source_line": source_line,
                             **implementation_update,
@@ -3792,22 +3903,22 @@ def _java_class_is_abstract(
     return re.search(r"\babstract\b", prefix) is not None
 
 
-def _java_call_target_kinds(
+def _java_call_target_types(
     file: JavaSourceFileSnapshot,
     masked_content: str,
     declaration: re.Match[str],
-) -> dict[str, Literal["service_call", "feign_call"]]:
+) -> dict[str, str]:
     class_opening = masked_content.find("{", declaration.end())
     if class_opening < 0:
         return {}
     class_end = _matching_brace(file.content, class_opening)
     class_body = masked_content[class_opening + 1 : class_end]
     member_mask = _mask_nested_java_blocks(class_body)
-    targets: dict[str, Literal["service_call", "feign_call"]] = {}
+    targets: dict[str, str] = {}
     for field in _FIELD_DECLARATION.finditer(member_mask):
         for name, declared_type in _java_field_declarators(field.group(0)):
-            if (kind := _java_call_kind_from_declared_type(declared_type)) is not None:
-                targets[name] = kind
+            if _java_call_kind_from_declared_type(declared_type) is not None:
+                targets[name] = _outer_java_type(declared_type)
     controller = declaration.group("name")
     constructor_marker = re.compile(rf"\b{re.escape(controller)}\s*\(")
     constructor_signature = re.compile(
@@ -3825,9 +3936,8 @@ def _java_call_target_kinds(
         if parameters is None:
             continue
         for parameter in parameters:
-            kind = _java_call_kind_from_declared_type(parameter.declared_type)
-            if kind is not None:
-                targets.setdefault(parameter.name, kind)
+            if _java_call_kind_from_declared_type(parameter.declared_type) is not None:
+                targets.setdefault(parameter.name, _outer_java_type(parameter.declared_type))
     return targets
 
 
@@ -3908,7 +4018,7 @@ def _routes_after_mapping(
     controller: str,
     string_constants: _JavaStringConstants,
     *,
-    call_target_kinds: dict[str, Literal["service_call", "feign_call"]] | None = None,
+    call_target_types: dict[str, str] | None = None,
     allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
     mapping_arguments, mapping_end = _java_annotation_arguments_and_end(
@@ -3958,7 +4068,7 @@ def _routes_after_mapping(
                 else None
             ),
             conditions=tuple(conditions),
-            call_target_kinds=call_target_kinds or {},
+            call_target_types=call_target_types or {},
             body=(
                 file.content[body_start + 1 : body_end]
                 if signature.group("terminator") == "{"
@@ -4629,21 +4739,25 @@ def _route_call_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidence
         target = call.group("target")
         method = call.group("method")
         normalized_target = target.lower()
-        kind = route.call_target_kinds.get(target)
+        declared_type = route.call_target_types.get(target)
+        kind = (
+            _java_call_kind_from_declared_type(declared_type) if declared_type is not None else None
+        )
         if kind is None and normalized_target.endswith("client"):
             kind = "feign_call"
         elif kind is None and normalized_target.endswith(("service", "repository", "mapper")):
             kind = "service_call"
         if kind is None:
             continue
+        callee_target = declared_type or target
         claims.append(
             JavaCallClaim(
-                id=_claim_id(kind, route.operation_ref, target, method),
+                id=_claim_id(kind, route.operation_ref, callee_target, method),
                 kind=kind,
                 source_path=source_path,
                 operation_ref=route.operation_ref,
                 caller_ref=f"{route.controller_ref}.{route.handler}",
-                callee_ref=f"java://{target}.{method}",
+                callee_ref=f"java://{callee_target}.{method}",
                 confidence=0.85,
                 deterministic=True,
             )

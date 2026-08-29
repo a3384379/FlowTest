@@ -3379,8 +3379,8 @@ class OrderController {
         if claim.kind in {"service_call", "feign_call"}
     }
     assert calls == {
-        ("service_call", "java://orderOperations.load"),
-        ("feign_call", "java://stockGateway.reserve"),
+        ("service_call", "java://OrderService.load"),
+        ("feign_call", "java://InventoryClient.reserve"),
     }
 
 
@@ -4609,6 +4609,47 @@ class AccessorDto {
         and claim.annotation == "NotBlank"
         for claim in evidence.claims
     )
+
+
+def test_java_spring_poc_emits_accessor_only_dto_properties() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://accessor-only-dto", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ProfileController.java",
+                        "content": """
+@RestController
+class ProfileController {
+    @PostMapping("/profile")
+    AccessorOnlyDto update(@RequestBody AccessorOnlyDto request) { return request; }
+}
+
+class AccessorOnlyDto {
+    @JsonProperty("display-name")
+    public String getDisplayName() { return "computed"; }
+
+    public void setNickname(String nickname) {}
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    fields = {
+        (claim.direction, claim.field_name, claim.java_field_name, claim.field_type)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.dto_type == "AccessorOnlyDto"
+    }
+    assert fields == {
+        ("request", "nickname", "nickname", "String"),
+        ("response", "display-name", "displayName", "String"),
+    }
 
 
 def test_java_spring_poc_applies_snake_case_json_naming_to_dto_fields() -> None:

@@ -203,7 +203,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；868 passed、4 skipped、总覆盖率 90.74%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；869 passed、4 skipped、总覆盖率 90.72%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -330,8 +330,12 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 后续精确复审提出两个 P2：依赖变量名不以 `service/client/repository/mapper` 结尾时漏掉调用证据；抽象
   `@Controller`/`@RestController` 被误判为可注册 Bean。当前 Route 同时使用注入字段与构造参数的声明类型识别
   Service/Feign Target，并排除抽象 Controller 候选；变量名后缀仍作为无类型证据时的兼容回退。直接回归覆盖
-  `OrderService orderOperations`、`InventoryClient stockGateway` 与抽象 Controller。全量后端门禁通过：
-  868 passed、4 skipped、总覆盖率 90.74%。
+  `OrderService orderOperations`、`InventoryClient stockGateway` 与抽象 Controller。
+- 最新精确复审提出两个 P2：无 Backing Field 的 Jackson Getter/Setter 属性被漏掉；按声明类型识别调用后，
+  Callee Ref 仍使用局部变量名而无法跨 Controller 稳定关联。当前公共或显式 `@JsonProperty` Accessor 会生成
+  Getter Read-only / Setter Write-only DTO Field，成对 Accessor 合并为 Read-write；已识别依赖使用声明类型构造
+  Callee Ref，无类型证据才回退变量名。直接回归覆盖 `display-name` 计算属性和稳定的 `OrderService.load` /
+  `InventoryClient.reserve` 身份。全量后端门禁通过：869 passed、4 skipped、总覆盖率 90.72%。
 
 ### 待完成
 
