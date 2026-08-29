@@ -9,7 +9,7 @@
 | MCP Server Version | `s52-evidence-adapter-v1`                                              |
 | Scope              | `mcp:evidence:write`                                                   |
 | 数据库变更         | `20260829_0047`；扩展 Evidence Provider 来源约束                       |
-| Release 状态       | PR #58；最新 Codex Review 修复与精确门禁复验中                         |
+| Release 状态       | PR #58 已普通 Squash Merge；精确 Main Push 门禁全绿                    |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -164,12 +164,12 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 | 条件                         | 当前状态  | 证据                                                     |
 | ---------------------------- | --------- | -------------------------------------------------------- |
-| Java Evidence 可进入 Context | 本地 Pass | API/Service 回归与隔离 Compose Playwright                |
-| DB Evidence 可进入 Context   | 本地 Pass | API/Service 回归与隔离 Compose Playwright                |
-| Entity Candidate 可追溯      | 本地 Pass | Candidate Evidence Ref 与稳定 Inspect 回归               |
-| Conflict 可见且不静默选择    | 本地 Pass | Mapping Conflict + Context `conflicted` 端到端回归       |
-| 无 Secret / PII              | 本地 Pass | 契约拒绝、标准错误 Envelope、安全扫描与 Compose 日志审计 |
-| RuoYi POC                    | 本地 Pass | 固定 Revision/三个固定文件的静态 POC 回归                |
+| Java Evidence 可进入 Context | Pass      | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
+| DB Evidence 可进入 Context   | Pass      | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
+| Entity Candidate 可追溯      | Pass      | Candidate Evidence Ref 与稳定 Inspect 回归               |
+| Conflict 可见且不静默选择    | Pass      | Mapping Conflict + Context `conflicted` 端到端回归       |
+| 无 Secret / PII              | Pass      | 契约拒绝、标准错误 Envelope、安全扫描与 Compose 日志审计 |
+| RuoYi POC                    | Pass      | 固定 Revision/三个固定文件的静态 POC 回归                |
 
 ## 5. Intentionally Out of Scope / Blocked
 
@@ -183,7 +183,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 ### Blocked
 
-- 当前无已知本地实现阻断。PR 精确头检查、Review、普通 Merge 与 Main Push Gate 尚未完成。
+- 当前无已知实现或远程门禁阻断。
 - S52 Evidence Closure 合并且其 Main Push Required Gate 成功前，不进入 S53。
 
 ## 6. Validation 与 Evidence
@@ -348,14 +348,34 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Context 继续接收 Contract Evidence 与 `@Max(9999999999L)`。全量后端门禁通过：872 passed、4 skipped、
   总覆盖率 90.75%。
 
+### 已完成的最终远端验收
+
+- PR #58 最终实现 Head `099ca44837c88527c3cf4e7b8490e9af7af64904` 的 Backend `33254467632`、
+  Compose `33254467641`、Frontend `33254467629`、Required Gate `33254466992`、Security
+  `33254467684`、Windows `33254467630` 与 Upgrade/Rollback `33254467636` 全部 Success。
+- 最终精确 Head Codex Review 于 2026-08-29 完成；P0/P1 为 0。Review 仅余两项 P2：私有 DTO Member 的
+  Jackson 默认可见性，以及普通 `@Controller` 的 Response Body 语义。按本阶段用户指定的 P0/P1 合并门槛，
+  两项作为非阻塞技术债记录，对应 Thread 已明确回复并关闭，不继续触发修复—全量门禁循环。
+- PR #58 已普通 Squash Merge 至 `ccf9a8d05fb632f1466ab7394362d22b1386ed6d`，未使用 Admin、Bypass、
+  Force Push 或直接推送 Main。
+- 该精确 Main Merge 的 Backend `33256061004`、Compose `33256061325`、Frontend `33256060972`、
+  Required Gate `33256061010`、Security `33256061020`、Windows `33256061013` 与 Upgrade/Rollback
+  `33256060984` 全部 Success。
+
 ### 待完成
 
-- 最新修复 Head 的精确 CI、Codex Review、普通 Merge、精确 Main Push 与 Evidence Closure。
+- 仅剩本 Evidence Closure 文档 PR 及其 Main Push Required Gate；不再重复实现代码 Review、本地全量测试或容量门禁。
 
 ## 7. Remote Evidence
 
-- 当前已取得首轮实现 Head 的全绿 CI 与 Codex Review；它们只证明
-  `73dc0850e80dea443d000cd2a5ead0dadac469c7`，不替代 Review 修复后 Head 的证据。
-- 最终实现 Head、对应 Required Check Run、最终 Codex Review、普通 Merge SHA 与 Main Push Gate 将在后续精确
-  取证完成后补录。
-- 禁止 Admin Merge、Force Push、Ruleset Bypass、跳过 Required Check 或直接推送 Main。
+- 实现 PR：[#58](https://github.com/a3384379/FlowTest/pull/58)；Base
+  `b6c281a832ec63e94433e0f322b30b6e342098c1`，最终 Head
+  `099ca44837c88527c3cf4e7b8490e9af7af64904`。
+- 最终 Head 七项检查全部 Success：Backend `33254467632`、Frontend `33254467629`、Compose
+  `33254467641`、Security `33254467684`、Windows `33254467630`、Upgrade/Rollback `33254467636`、
+  Required Gate `33254466992`。
+- 最终 Review 的阻塞级结果为 P0/P1 = 0；两项 P2 已按用户指定门槛记录为非阻塞债务并关闭 Thread。
+- 普通 Squash Merge SHA：`ccf9a8d05fb632f1466ab7394362d22b1386ed6d`。该精确 Main Push 的 Backend
+  `33256061004`、Frontend `33256060972`、Compose `33256061325`、Security `33256061020`、Windows
+  `33256061013`、Upgrade/Rollback `33256060984` 与 Required Gate `33256061010` 全部 Success。
+- 全过程未使用 Admin Merge、Force Push、Ruleset Bypass、跳过 Required Check 或直接推送 Main。
