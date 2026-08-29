@@ -77,6 +77,16 @@ _WRITE_SQL = re.compile(
     re.IGNORECASE,
 )
 _SPRING_WEB_ANNOTATION_PREFIX = r"(?:(?:org\.springframework\.web\.bind\.annotation)\.)?"
+_SPRING_KAFKA_ANNOTATION_PREFIX = r"(?:(?:org\.springframework\.kafka\.annotation)\.)?"
+_REQUEST_COLLECTION_TYPES: Final = (
+    "Collection",
+    "Deque",
+    "Iterable",
+    "List",
+    "Queue",
+    "SequencedCollection",
+    "Set",
+)
 _MAPPING_ANNOTATION = re.compile(
     rf"@{_SPRING_WEB_ANNOTATION_PREFIX}"
     r"(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
@@ -135,8 +145,8 @@ _KAFKA_SEND = re.compile(
     r'\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*"((?:\\.|[^"\\])*)"\s*(?=[,)])'
 )
 _KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
-_KAFKA_LISTENER = re.compile(r"@KafkaListener\b")
-_KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
+_KAFKA_LISTENER = re.compile(rf"@{_SPRING_KAFKA_ANNOTATION_PREFIX}KafkaListener\b")
+_KAFKA_LISTENER_MARKER = re.compile(rf"@{_SPRING_KAFKA_ANNOTATION_PREFIX}KafkaListener\b")
 _JAVA_STRING_LITERAL = r'"(?:\\.|[^"\\])*"'
 _JAVA_NON_CODE = re.compile(
     r"//[^\r\n]*(?:\r?\n|$)"
@@ -2872,8 +2882,30 @@ def _parameter_types(parameters: str) -> list[str]:
             re.DOTALL,
         )
         if declaration is not None:
-            result.append(_outer_java_type(declaration.group("type")))
+            result.append(_request_dto_type(declaration.group("type")))
     return result
+
+
+def _request_dto_type(value: str) -> str:
+    current = value.strip()
+    for _depth in range(10):
+        outer_type = _outer_java_type(current)
+        if outer_type not in _REQUEST_COLLECTION_TYPES:
+            return outer_type
+        opening = current.find("<")
+        closing = current.rfind(">")
+        if opening < 0 or closing < opening:
+            return outer_type
+        arguments = _split_top_level_java_components(current[opening + 1 : closing])
+        if len(arguments) != 1:
+            return outer_type
+        current = arguments[0].strip()
+        if current.startswith("?"):
+            bounded = re.fullmatch(r"\?\s+extends\s+(.+)", current, re.DOTALL)
+            if bounded is None:
+                return outer_type
+            current = bounded.group(1).strip()
+    return _outer_java_type(current)
 
 
 def _outer_java_type(value: str) -> str:

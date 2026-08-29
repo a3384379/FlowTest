@@ -3099,6 +3099,58 @@ class Bar {
     assert constraints == set()
 
 
+def test_java_spring_poc_unwraps_collection_request_body_dto_types() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://collection-request", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(@RequestBody List<CreateOrderRequest> requests) {
+        return orderService.create(requests);
+    }
+}
+
+class CreateOrderRequest {
+    @NotNull
+    private OrderStatus status;
+}
+
+enum OrderStatus { ACTIVE, INACTIVE }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        (claim.dto_type, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    constraints = {
+        (claim.dto_type, claim.field_name, claim.annotation)
+        for claim in evidence.claims
+        if claim.kind == "bean_validation" and claim.operation_ref is not None
+    }
+    states = {
+        (claim.dto_type, claim.field_name, tuple(claim.values))
+        for claim in evidence.claims
+        if claim.kind == "enum_state" and claim.operation_ref is not None
+    }
+    assert request_fields == {("CreateOrderRequest", "status")}
+    assert constraints == {("CreateOrderRequest", "status", "NotNull")}
+    assert states == {("CreateOrderRequest", "status", ("ACTIVE", "INACTIVE"))}
+
+
 def test_java_spring_poc_skips_unresolved_mapping_path_constants() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4074,6 +4126,36 @@ public class OrderListener {
         "kafka://orders.retry",
         "kafka://orders.legacy",
     }
+
+
+def test_java_spring_poc_recognizes_fully_qualified_kafka_listener_annotation() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://qualified-listener", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderListener.java",
+                        "content": """
+class OrderListener {
+    @org.springframework.kafka.annotation.KafkaListener("orders.qualified")
+    void consume() {}
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    consumed_topics = {
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "consume"
+    }
+    assert consumed_topics == {"kafka://orders.qualified"}
 
 
 def test_java_spring_poc_rejects_partial_kafka_topic_expressions() -> None:
