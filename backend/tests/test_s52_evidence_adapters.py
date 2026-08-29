@@ -2527,6 +2527,110 @@ public class OrderEntity {
     assert '(regexp = "^(foo|bar)$")' in constraints
 
 
+def test_java_spring_poc_excludes_static_dto_and_entity_fields() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://static-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @GetMapping("/orders")
+    public OrderDto getOrder() {
+        return orderService.getOrder();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": """
+public class OrderDto {
+    private static final long serialVersionUID = 1L;
+    private String status;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderEntity.java",
+                        "content": """
+public class OrderEntity {
+    private static final String TABLE_NAME = "orders";
+    private String status;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    entity_fields = {claim.field_name for claim in evidence.claims if claim.kind == "table_column"}
+    assert response_fields == {"status"}
+    assert entity_fields == {"status"}
+
+
+def test_java_spring_poc_parses_whitespace_in_class_field_generic_types() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://generic-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @GetMapping("/orders")
+    public OrderDto getOrder() {
+        return orderService.getOrder();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": """
+public class OrderDto {
+    private Map<String, OrderDto> orders;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderEntity.java",
+                        "content": """
+public class OrderEntity {
+    private Map<String, OrderDto> orders;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        (claim.field_name, claim.field_type)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    entity_fields = {claim.field_name for claim in evidence.claims if claim.kind == "table_column"}
+    assert response_fields == {("orders", "Map<String, OrderDto>")}
+    assert entity_fields == {"orders"}
+
+
 def test_java_spring_poc_preserves_supported_long_validation_arguments() -> None:
     long_pattern = "x" * 340
     evidence = JavaSpringPocProvider().analyze(

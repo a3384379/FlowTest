@@ -85,8 +85,8 @@ _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
 _FIELD_DECLARATION = re.compile(
-    r"\bprivate\s+(?:static\s+|final\s+|transient\s+)*"
-    r"(?P<type>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\bprivate\s+(?P<modifiers>(?:(?:static|final|transient)\s+)*)"
+    r"(?P<type>[A-Za-z0-9_$<>,.?\[\] \t]+?)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*=\s*[^;]{0,1000})?\s*;"
 )
 _VALIDATION_ANNOTATION_NAMES = (
@@ -1902,6 +1902,8 @@ def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
     fields: list[tuple[str, str, list[tuple[str, str]]]] = []
     masked_body = _mask_nested_java_blocks(_mask_java_non_code(body))
     for match in _FIELD_DECLARATION.finditer(masked_body):
+        if "static" in match.group("modifiers").split():
+            continue
         prefix_start = max(0, match.start() - 500)
         masked_prefix = masked_body[prefix_start : match.start()]
         annotation_start = masked_prefix.rfind(";") + 1
@@ -1909,7 +1911,8 @@ def _class_fields(body: str) -> list[tuple[str, str, list[tuple[str, str]]]]:
             body[prefix_start + annotation_start : match.start()],
             masked_prefix[annotation_start:],
         )
-        fields.append((match.group("name"), match.group("type"), annotations))
+        field_type = " ".join(match.group("type").split())
+        fields.append((match.group("name"), field_type, annotations))
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
