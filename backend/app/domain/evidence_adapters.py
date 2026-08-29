@@ -732,26 +732,33 @@ class JavaSpringPocProvider:
     """Statically inspect bounded Java text; never compile or execute analyzed code."""
 
     def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
-        type_analysis = _java_type_analysis(snapshot.files)
         string_constants = _java_string_constants(snapshot.files)
+        type_analysis = _java_type_analysis(snapshot.files, string_constants)
         interface_contracts = _java_interface_route_contracts(snapshot.files, string_constants)
         unresolved_mappings = _java_unresolved_mapping_locations(
             snapshot.files,
             string_constants,
         )
+        unresolved_kafka_topics = _java_unresolved_kafka_locations(
+            snapshot.files,
+            string_constants,
+        )
         claims: list[JavaEvidenceClaim] = []
         structural_truncated = False
+        unresolved_jpa_tables: set[str] = set()
         for file in sorted(snapshot.files, key=lambda item: item.path):
             file_routes = _java_routes(file, interface_contracts.routes, string_constants)
             claims.extend(_route_claims(file, file_routes, type_analysis))
-            structural_claims, file_truncated = _structural_java_claims(
+            structural_claims, file_truncated, file_unresolved_tables = _structural_java_claims(
                 file,
                 file_routes,
                 type_analysis.fields,
                 type_analysis.property_access_types,
+                string_constants,
             )
             claims.extend(structural_claims)
             structural_truncated = structural_truncated or file_truncated
+            unresolved_jpa_tables.update(file_unresolved_tables)
         bounded_claims, claim_truncated = _bounded_java_claims(claims)
         truncated = structural_truncated or claim_truncated
         warnings = [
@@ -790,26 +797,15 @@ class JavaSpringPocProvider:
                     ),
                 )
             )
-        if interface_contracts.unresolved_interfaces:
-            warnings.append(
-                ExternalEvidenceWarning(
-                    code="JAVA_POC_INCOMPLETE_INTERFACE_HIERARCHY",
-                    message=(
-                        "Java/Spring POC 无法安全解析部分接口继承关系，分析不完整："
-                        f"{_java_type_name_summary(interface_contracts.unresolved_interfaces)}。"
-                    ),
-                )
+        warnings.extend(
+            _java_reference_warnings(
+                interface_contracts.unresolved_interfaces,
+                unresolved_mappings,
+                unresolved_kafka_topics,
+                tuple(sorted(unresolved_jpa_tables)),
+                type_analysis.unresolved_column_types,
             )
-        if unresolved_mappings:
-            warnings.append(
-                ExternalEvidenceWarning(
-                    code="JAVA_POC_INCOMPLETE_MAPPING_PATH",
-                    message=(
-                        "Java/Spring POC 无法解析部分 Mapping 路径常量或表达式，分析不完整："
-                        f"{_java_type_name_summary(unresolved_mappings)}。"
-                    ),
-                )
-            )
+        )
         if truncated:
             warnings.append(
                 ExternalEvidenceWarning(
@@ -827,9 +823,58 @@ class JavaSpringPocProvider:
                 all(claim.deterministic for claim in bounded_claims)
                 and not interface_contracts.unresolved_interfaces
                 and not unresolved_mappings
+                and not unresolved_kafka_topics
+                and not unresolved_jpa_tables
+                and not type_analysis.unresolved_column_types
             ),
             warnings=warnings,
         )
+
+
+def _java_reference_warnings(
+    unresolved_interfaces: tuple[str, ...],
+    unresolved_mappings: tuple[str, ...],
+    unresolved_kafka_topics: tuple[str, ...],
+    unresolved_jpa_tables: tuple[str, ...],
+    unresolved_jpa_columns: tuple[str, ...],
+) -> list[ExternalEvidenceWarning]:
+    warnings: list[ExternalEvidenceWarning] = []
+    definitions = (
+        (
+            unresolved_interfaces,
+            "JAVA_POC_INCOMPLETE_INTERFACE_HIERARCHY",
+            "Java/Spring POC 无法安全解析部分接口继承关系，分析不完整：",
+        ),
+        (
+            unresolved_mappings,
+            "JAVA_POC_INCOMPLETE_MAPPING_PATH",
+            "Java/Spring POC 无法解析部分 Mapping 路径常量或表达式，分析不完整：",
+        ),
+        (
+            unresolved_kafka_topics,
+            "JAVA_POC_INCOMPLETE_KAFKA_TOPIC",
+            "Java/Spring POC 无法解析部分 Kafka Topic 常量、占位符或表达式，分析不完整：",
+        ),
+        (
+            unresolved_jpa_tables,
+            "JAVA_POC_INCOMPLETE_JPA_TABLE",
+            "Java/Spring POC 无法解析部分 JPA Table 名称，已停止推断对应表绑定：",
+        ),
+        (
+            unresolved_jpa_columns,
+            "JAVA_POC_INCOMPLETE_JPA_COLUMN",
+            "Java/Spring POC 无法解析部分 JPA Column 名称，已停止推断对应列绑定：",
+        ),
+    )
+    for references, code, prefix in definitions:
+        if references:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code=code,
+                    message=f"{prefix}{_java_type_name_summary(references)}。",
+                )
+            )
+    return warnings
 
 
 def adapt_java_evidence(submission: JavaEvidenceSubmission) -> ExternalEvidenceEnvelope:
@@ -2120,7 +2165,7 @@ class _JavaStringConstants:
         return self.qualified_values.get(".".join(reference.rsplit(".", 2)[-2:]))
 
 
-JavaField = tuple[str, str, list[tuple[str, str]], str | None]
+JavaField = tuple[str, str, list[tuple[str, str]], str | None, bool]
 
 
 @dataclass(frozen=True)
@@ -2138,9 +2183,13 @@ class _JavaTypeAnalysis:
     ambiguous_types: tuple[str, ...]
     inherited_types: tuple[str, ...]
     property_access_types: tuple[str, ...]
+    unresolved_column_types: tuple[str, ...]
 
 
-def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysis:
+def _java_type_analysis(
+    files: list[JavaSourceFileSnapshot],
+    string_constants: _JavaStringConstants,
+) -> _JavaTypeAnalysis:
     definitions: dict[
         str,
         list[list[JavaField]],
@@ -2148,6 +2197,7 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
     enum_definitions: dict[str, list[_JavaEnumDefinition]] = defaultdict(list)
     inherited_types: set[str] = set()
     property_access_types: set[str] = set()
+    unresolved_column_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
         top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
@@ -2155,11 +2205,13 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
             name = declaration.group("name")
             body = _type_body(file.content, declaration.end())
             fields = (
-                _record_fields(file.content, declaration)
+                _record_fields(file.content, declaration, string_constants)
                 if declaration.group("kind") == "record"
-                else _class_fields(body)
+                else _class_fields(body, string_constants, name)
             )
             definitions[name].append(fields)
+            if any(field[4] for field in fields):
+                unresolved_column_types.add(name)
             if _java_type_extends(masked_content, declaration):
                 inherited_types.add(name)
             if (
@@ -2206,6 +2258,7 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
         ambiguous_types=ambiguous_types,
         inherited_types=tuple(sorted(inherited_types)),
         property_access_types=tuple(sorted(property_access_types)),
+        unresolved_column_types=tuple(sorted(unresolved_column_types)),
     )
 
 
@@ -2288,7 +2341,11 @@ def _type_body(content: str, start: int) -> str:
     return content[brace + 1 : end]
 
 
-def _record_fields(content: str, declaration: re.Match[str]) -> list[JavaField]:
+def _record_fields(
+    content: str,
+    declaration: re.Match[str],
+    string_constants: _JavaStringConstants,
+) -> list[JavaField]:
     opening = content.find("(", declaration.end())
     if opening < 0:
         return []
@@ -2297,7 +2354,14 @@ def _record_fields(content: str, declaration: re.Match[str]) -> list[JavaField]:
     return [
         field
         for component in components
-        if (field := _record_component_field(component)) is not None
+        if (
+            field := _record_component_field(
+                component,
+                string_constants,
+                declaration.group("name"),
+            )
+        )
+        is not None
     ]
 
 
@@ -2326,12 +2390,19 @@ def _split_top_level_java_components(content: str) -> list[str]:
 
 def _record_component_field(
     component: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
 ) -> JavaField | None:
     masked_component = _mask_java_non_code(component)
     if _has_jpa_transient_annotation(component, masked_component):
         return None
     annotations = _java_validation_annotations(component, masked_component)
-    column_name = _java_column_name(component, masked_component)
+    column_name, column_name_unresolved = _java_column_name(
+        component,
+        masked_component,
+        string_constants,
+        enclosing_type,
+    )
     masked = _mask_java_annotation_arguments(masked_component)
     declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked)
     normalized = " ".join(declaration.split())
@@ -2341,10 +2412,20 @@ def _record_component_field(
     )
     if match is None:
         return None
-    return match.group("name"), match.group("type"), annotations, column_name
+    return (
+        match.group("name"),
+        match.group("type"),
+        annotations,
+        column_name,
+        column_name_unresolved,
+    )
 
 
-def _class_fields(body: str) -> list[JavaField]:
+def _class_fields(
+    body: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[JavaField]:
     fields: list[JavaField] = []
     code_body = _mask_java_non_code(body)
     masked_body = _mask_nested_java_blocks(code_body)
@@ -2364,9 +2445,20 @@ def _class_fields(body: str) -> list[JavaField]:
         if _has_jpa_transient_annotation(annotation_content, annotation_mask):
             continue
         annotations = _java_validation_annotations(annotation_content, annotation_mask)
-        column_name = _java_column_name(annotation_content, annotation_mask)
+        column_name, column_name_unresolved = _java_column_name(
+            annotation_content,
+            annotation_mask,
+            string_constants,
+            enclosing_type,
+        )
         fields.extend(
-            (field_name, field_type, annotations, column_name)
+            (
+                field_name,
+                field_type,
+                annotations,
+                column_name,
+                column_name_unresolved,
+            )
             for field_name, field_type in declarators
         )
     known = {field[0] for field in fields}
@@ -2386,6 +2478,7 @@ def _class_fields(body: str) -> list[JavaField]:
                 old[1],
                 sorted(set([*old[2], *annotations])),
                 old[3],
+                old[4],
             )
     return fields
 
@@ -2475,7 +2568,12 @@ def _java_validation_annotations(
     ]
 
 
-def _java_column_name(content: str, masked_content: str) -> str | None:
+def _java_column_name(
+    content: str,
+    masked_content: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> tuple[str | None, bool]:
     matches = _active_java_annotation_matches(
         content,
         masked_content,
@@ -2483,9 +2581,15 @@ def _java_column_name(content: str, masked_content: str) -> str | None:
         _JPA_COLUMN_ANNOTATION,
     )
     if not matches:
-        return None
+        return None, False
     arguments = _java_annotation_arguments(content, matches[-1].end())
-    return _java_named_literal_argument(arguments, "name")
+    present, value = _java_named_string_argument(
+        arguments,
+        "name",
+        string_constants,
+        enclosing_type,
+    )
+    return value, present and value is None
 
 
 def _has_jpa_transient_annotation(content: str, masked_content: str) -> bool:
@@ -2603,6 +2707,50 @@ def _java_unresolved_mapping_locations(
                     line = file.content.count("\n", 0, match.start()) + 1
                     unresolved.add(f"{file.path}:{line}")
     return tuple(sorted(unresolved))
+
+
+def _java_unresolved_kafka_locations(
+    files: list[JavaSourceFileSnapshot],
+    string_constants: _JavaStringConstants,
+) -> tuple[str, ...]:
+    unresolved: set[str] = set()
+    for file in sorted(files, key=lambda item: item.path):
+        masked_content = _mask_java_non_code(file.content)
+        listener_matches = _active_java_annotation_matches(
+            file.content,
+            masked_content,
+            _KAFKA_LISTENER_MARKER,
+            _KAFKA_LISTENER,
+        )
+        for match in listener_matches:
+            enclosing_type = _java_enclosing_top_level_type(
+                file,
+                masked_content,
+                match.start(),
+            )
+            arguments = _java_annotation_arguments(file.content, match.end())
+            if not _kafka_listener_topics(arguments, string_constants, enclosing_type):
+                line = file.content.count("\n", 0, match.start()) + 1
+                unresolved.add(f"{file.path}:{line}")
+        for marker in _KAFKA_SEND_MARKER.finditer(masked_content):
+            parsed = _KAFKA_SEND.match(file.content, marker.start())
+            topic = _decode_java_string_literal(parsed.group(1)) if parsed is not None else None
+            if topic is None or _java_has_runtime_expression(topic):
+                line = file.content.count("\n", 0, marker.start()) + 1
+                unresolved.add(f"{file.path}:{line}")
+    return tuple(sorted(unresolved))
+
+
+def _java_enclosing_top_level_type(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+    position: int,
+) -> str:
+    for declaration, _prefix_start in _java_top_level_declarations(file, masked_content):
+        opening = masked_content.find("{", declaration.end())
+        if opening >= 0 and opening < position < _matching_brace(file.content, opening):
+            return declaration.group("name")
+    return ""
 
 
 def _java_routes(
@@ -3259,7 +3407,14 @@ def _java_string_expression_value(
         if resolved is None:
             return None
         values.append(resolved)
-    return "".join(values) if values else None
+    resolved = "".join(values) if values else None
+    if resolved is None or _java_has_runtime_expression(resolved):
+        return None
+    return resolved
+
+
+def _java_has_runtime_expression(value: str) -> bool:
+    return "${" in value or "#{" in value
 
 
 def _split_top_level_java_operator(content: str, operator: str) -> list[str]:
@@ -3514,9 +3669,13 @@ def _dto_field_claims(
     type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
-    for field_name, field_type, validation_annotations, _column_name in type_analysis.fields.get(
-        dto_type, []
-    ):
+    for (
+        field_name,
+        field_type,
+        validation_annotations,
+        _column_name,
+        _column_name_unresolved,
+    ) in type_analysis.fields.get(dto_type, []):
         claims.append(
             JavaDtoFieldClaim(
                 id=_claim_id("dto", operation_ref, direction, dto_type, field_name),
@@ -3749,7 +3908,7 @@ def _route_kafka_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenc
     produced: list[JavaEvidenceClaim] = []
     for match in matches:
         topic = _decode_java_string_literal(match.group(1))
-        if topic is None:
+        if topic is None or _java_has_runtime_expression(topic):
             continue
         produced.append(
             JavaKafkaEventClaim(
@@ -3771,9 +3930,11 @@ def _structural_java_claims(
     routes: list[_JavaRoute],
     type_fields: dict[str, list[JavaField]],
     property_access_types: tuple[str, ...],
-) -> tuple[list[JavaEvidenceClaim], bool]:
+    string_constants: _JavaStringConstants,
+) -> tuple[list[JavaEvidenceClaim], bool, tuple[str, ...]]:
     claims: list[JavaEvidenceClaim] = []
     truncated = False
+    unresolved_tables: set[str] = set()
     masked_content = _mask_java_non_code(file.content)
     declarations = list(_TYPE_DECLARATION.finditer(masked_content))
     top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
@@ -3811,13 +3972,19 @@ def _structural_java_claims(
                 top_level_prefixes[declaration.start()],
                 declaration.start(),
                 fallback_name=_snake_case(name),
+                string_constants=string_constants,
+                enclosing_type=name,
             )
-            table_name = table_ref.rsplit("/", 1)[-1]
-            operation_refs = [
-                route.operation_ref
-                for route in routes
-                if _route_resource_token(route.path) == _normalized_name(table_name)
-            ]
+            if table_ref is None:
+                unresolved_tables.add(source_path)
+                operation_refs: list[str] = []
+            else:
+                table_name = table_ref.rsplit("/", 1)[-1]
+                operation_refs = [
+                    route.operation_ref
+                    for route in routes
+                    if _route_resource_token(route.path) == _normalized_name(table_name)
+                ]
             claims.append(
                 JavaEntityClaim(
                     id=_claim_id("entity", source_path, name),
@@ -3830,7 +3997,7 @@ def _structural_java_claims(
                     deterministic=False,
                 )
             )
-            if name not in property_access_types:
+            if table_ref is not None and name not in property_access_types:
                 claims.extend(
                     JavaTableColumnClaim(
                         id=_claim_id("column", source_path, name, field_name),
@@ -3842,9 +4009,14 @@ def _structural_java_claims(
                         confidence=0.65,
                         deterministic=False,
                     )
-                    for field_name, _field_type, _annotations, column_name in type_fields.get(
-                        name, []
-                    )
+                    for (
+                        field_name,
+                        _field_type,
+                        _annotations,
+                        column_name,
+                        column_name_unresolved,
+                    ) in type_fields.get(name, [])
+                    if not column_name_unresolved
                 )
         if kind == "enum":
             values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
@@ -3860,8 +4032,8 @@ def _structural_java_claims(
                         deterministic=not values_truncated,
                     )
                 )
-    claims.extend(_listener_claims(file))
-    return claims, truncated
+    claims.extend(_listener_claims(file, string_constants))
+    return claims, truncated, tuple(sorted(unresolved_tables))
 
 
 def _top_level_declaration_prefixes(content: str, masked_content: str) -> dict[int, int]:
@@ -3901,7 +4073,9 @@ def _java_entity_table_ref(
     end: int,
     *,
     fallback_name: str,
-) -> str:
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> str | None:
     matches = _active_java_annotation_matches(
         content,
         masked_content,
@@ -3913,22 +4087,47 @@ def _java_entity_table_ref(
     if not matches:
         return f"table://{fallback_name}"
     arguments = _java_annotation_arguments(content, matches[-1].end())
-    table_name = _java_named_literal_argument(arguments, "name") or fallback_name
-    schema_name = _java_named_literal_argument(arguments, "schema")
+    table_name_present, resolved_table_name = _java_named_string_argument(
+        arguments,
+        "name",
+        string_constants,
+        enclosing_type,
+    )
+    if table_name_present and resolved_table_name is None:
+        return None
+    table_name = resolved_table_name or fallback_name
+    schema_name_present, schema_name = _java_named_string_argument(
+        arguments,
+        "schema",
+        string_constants,
+        enclosing_type,
+    )
+    if schema_name_present and schema_name is None:
+        return None
     if schema_name is not None:
         return f"table://{schema_name}/{table_name}"
     return f"table://{table_name}"
 
 
-def _java_named_literal_argument(arguments: str, name: str) -> str | None:
+def _java_named_string_argument(
+    arguments: str,
+    name: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> tuple[bool, str | None]:
     inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     assignment = re.search(rf"\b{re.escape(name)}\s*=", _mask_java_non_code(inner))
     if assignment is None:
-        return None
-    values = _java_literal_values(_java_annotation_expression(inner, assignment.end()))
-    if len(values) != 1 or re.fullmatch(_IDENTIFIER, values[0]) is None:
-        return None
-    return values[0]
+        return False, None
+    expression = _java_annotation_expression(
+        inner,
+        assignment.end(),
+        allow_identifier=True,
+    )
+    value = _java_string_expression_value(expression, string_constants, enclosing_type)
+    if value is None or re.fullmatch(_IDENTIFIER, value) is None:
+        return True, None
+    return True, value
 
 
 def _is_entity_type(path: str, name: str) -> bool:
@@ -3967,10 +4166,14 @@ def _top_level_java_prefix(content: str, delimiter: str) -> str:
     return content
 
 
-def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:
+def _listener_claims(
+    file: JavaSourceFileSnapshot,
+    string_constants: _JavaStringConstants,
+) -> list[JavaEvidenceClaim]:
+    masked_content = _mask_java_non_code(file.content)
     matches = _active_java_annotation_matches(
         file.content,
-        _mask_java_non_code(file.content),
+        masked_content,
         _KAFKA_LISTENER_MARKER,
         _KAFKA_LISTENER,
     )
@@ -3985,21 +4188,31 @@ def _listener_claims(file: JavaSourceFileSnapshot) -> list[JavaEvidenceClaim]:
             deterministic=False,
         )
         for match in matches
-        for topic in _kafka_listener_topics(_java_annotation_arguments(file.content, match.end()))
+        for topic in _kafka_listener_topics(
+            _java_annotation_arguments(file.content, match.end()),
+            string_constants,
+            _java_enclosing_top_level_type(file, masked_content, match.start()),
+        )
     ]
 
 
-def _kafka_listener_topics(arguments: str) -> list[str]:
+def _kafka_listener_topics(
+    arguments: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[str]:
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
     named = re.search(r"\btopics\s*=", _mask_java_non_code(content))
     expression = (
-        _java_annotation_expression(content, named.end())
+        _java_annotation_expression(content, named.end(), allow_identifier=True)
         if named is not None
-        else _positional_mapping_expression(content)
+        else _java_annotation_expression(content, 0, allow_identifier=True)
     )
-    return list(dict.fromkeys(_java_literal_values(expression)))
+    return list(
+        dict.fromkeys(_java_mapping_path_values(expression, string_constants, enclosing_type))
+    )
 
 
 def _deduplicate_java_claims(claims: list[JavaEvidenceClaim]) -> list[JavaEvidenceClaim]:

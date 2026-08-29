@@ -93,6 +93,10 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   `execute_analyzed_code` 固定为 `false`，不调用 Java Compiler、构建工具、ClassLoader 或被分析代码。
 - Route 只从显式 `@Controller`/`@RestController` 类型或其本地接口 Contract 生成，不再按文件名猜测 Controller；
   `RequestMethod` 覆盖 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS/TRACE，避免合法 Mapping 被静默遗漏。
+- Mapping 与 Kafka Topic 中的 Spring `${...}` Placeholder/`#{...}` SpEL 不会被当作确定性运行值；无法静态解析时
+  删除对应 Route/Topic Claim，产生显式 Incomplete Warning 并把 Submission 标为非确定性。
+- JPA `@Table`/`@Column` 的本地 `static final String`、接口常量和限定常量引用复用安全常量解析；无法解析的显式
+  名称不回退猜测 Table/Column，而是停止相应绑定并产生 Incomplete Warning。
 - 转换后的 External Finding ID 在超长时保留有界可读前缀并附加 SHA-256 后缀；允许的 160 字符 Java Claim ID
   即使只在尾部不同也不会因 `java-` 前缀与截断发生碰撞。
 - Controller 方法签名中的 `throws` 声明与方法体中的显式 `throw new` 都转换为 Exception Evidence，不因
@@ -163,7 +167,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；845 passed、4 skipped、总覆盖率 90.71%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；847 passed、4 skipped、总覆盖率 90.74%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -235,6 +239,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Transport/Injected 参数，同时把本文件与 Migration Head 更新到 `20260829_0047`。五项均有直接回归。
 - 下一轮复审指出文件名回退会把普通类误报为 Controller，以及显式 HEAD Mapping 会被遗漏；当前实现改为只接收
   明确 Spring Controller Annotation，并完整支持 Spring `RequestMethod` 的八种方法，含 HEAD/OPTIONS/TRACE 回归。
+- 随后复审指出 Spring Mapping/Kafka Placeholder 可能被误报为字面运行值，以及 JPA Table 常量会错误回退类名；
+  当前实现统一拒绝未解析 Placeholder/SpEL、为 Kafka 与 Mapping 产生不完整告警，并解析 JPA Table/Column 常量；
+  未解析的显式 JPA 名称不再生成猜测绑定。对应常量、占位符和停止回退路径均有直接回归。
 
 ### 待完成
 

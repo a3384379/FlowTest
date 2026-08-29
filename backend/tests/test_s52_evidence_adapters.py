@@ -3818,6 +3818,11 @@ def test_java_spring_poc_rejects_partial_mapping_path_expressions() -> None:
                         "content": """
 @RestController
 class ExpressionController {
+    @GetMapping("${api.orders-path}")
+    Order placeholder() {
+        return placeholderService.load();
+    }
+
     @GetMapping("/api/" + VERSION)
     Order concatenated() {
         return concatenatedService.load();
@@ -3857,6 +3862,8 @@ class BaseExpressionController {
     calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/live")]
     assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
+    assert evidence.deterministic is False
+    assert "JAVA_POC_INCOMPLETE_MAPPING_PATH" in {warning.code for warning in evidence.warnings}
 
 
 def test_java_spring_poc_ignores_dto_fields_and_constraints_in_non_code_text() -> None:
@@ -4781,6 +4788,7 @@ class OrderController {
     @PostMapping("/orders")
     Order publish() {
         kafkaTemplate.send("orders-" + tenant, event);
+        kafkaTemplate.send("${orders.topic}", event);
         kafkaTemplate.send("orders.literal", event);
         return orderService.load();
     }
@@ -4791,6 +4799,9 @@ class OrderController {
                         "path": "src/main/java/example/OrderListener.java",
                         "content": """
 class OrderListener {
+    @KafkaListener("${orders.topic}")
+    void placeholder() {}
+
     @KafkaListener("orders-" + TENANT)
     void computedPositional() {}
 
@@ -4819,6 +4830,8 @@ class OrderListener {
     }
     assert produced_topics == {"kafka://orders.literal"}
     assert consumed_topics == {"kafka://orders.valid", "kafka://orders.retry"}
+    assert evidence.deterministic is False
+    assert "JAVA_POC_INCOMPLETE_KAFKA_TOPIC" in {warning.code for warning in evidence.warnings}
 
 
 def test_java_spring_poc_decodes_java_string_escapes_in_kafka_producer_topics() -> None:
@@ -5098,6 +5111,97 @@ class CustomerAccountEntity {
     assert [(claim.table_ref, claim.field_name, claim.column_name) for claim in columns] == [
         ("table://customer_accounts", "id", "id")
     ]
+
+
+def test_java_spring_poc_resolves_jpa_table_and_column_name_constants() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jpa-name-constants", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/ArchivedOrderEntity.java",
+                        "content": """
+@Entity
+@Table(name = TABLE_NAME, schema = SchemaNames.APPLICATION)
+class ArchivedOrderEntity {
+    private static final String TABLE_NAME = "orders";
+
+    @Column(name = Columns.STATUS)
+    private String state;
+}
+
+final class SchemaNames {
+    static final String APPLICATION = "application";
+}
+
+final class Columns {
+    static final String STATUS = "order_status";
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entity = next(
+        claim
+        for claim in evidence.claims
+        if claim.kind == "entity" and claim.class_name == "ArchivedOrderEntity"
+    )
+    columns = [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "table_column" and claim.entity_ref == entity.entity_ref
+    ]
+    assert entity.table_ref == "table://application/orders"
+    assert [(claim.field_name, claim.column_name) for claim in columns] == [
+        ("state", "order_status")
+    ]
+
+
+def test_java_spring_poc_marks_unresolved_jpa_names_incomplete_without_guessing() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://unresolved-jpa-names", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/model/Entities.java",
+                        "content": """
+@Entity
+@Table(name = UNKNOWN_TABLE)
+class WrongEntity {
+    private String id;
+}
+
+@Entity
+@Table(name = "orders")
+class OrderEntity {
+    @Column(name = UNKNOWN_COLUMN)
+    private String status;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entities = {claim.class_name: claim for claim in evidence.claims if claim.kind == "entity"}
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert entities["WrongEntity"].table_ref is None
+    assert not [
+        claim for claim in columns if claim.entity_ref == entities["OrderEntity"].entity_ref
+    ]
+    assert evidence.deterministic is False
+    warning_codes = {warning.code for warning in evidence.warnings}
+    assert {"JAVA_POC_INCOMPLETE_JPA_TABLE", "JAVA_POC_INCOMPLETE_JPA_COLUMN"} <= warning_codes
 
 
 def test_java_spring_poc_recognizes_annotated_jpa_entities() -> None:
