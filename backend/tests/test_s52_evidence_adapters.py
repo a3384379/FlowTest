@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
-from app.domain.evidence import PythonSourceEvidenceProvider, SourceSnapshot
+from app.domain.evidence import EvidenceBundle, PythonSourceEvidenceProvider, SourceSnapshot
 from app.domain.evidence_adapters import (
     DatabaseEvidenceSubmission,
     EntityMappingBudgetExceeded,
@@ -174,6 +174,27 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
     dto_finding["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(generic_field)
+
+    for identifier in ("field_name", "column_name"):
+        dedicated_column = _java_submission()
+        column_claim = next(
+            claim for claim in dedicated_column["claims"] if claim["kind"] == "table_column"
+        )
+        column_claim[identifier] = f"card{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            JavaEvidenceSubmission.model_validate(dedicated_column)
+
+        generic_column = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_submission())
+        ).model_dump(mode="json")
+        column_finding = next(
+            finding
+            for finding in generic_column["findings"]
+            if finding["structured_data"]["claim_kind"] == "table_column"
+        )
+        column_finding["structured_data"]["claim"][identifier] = f"card{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic_column)
 
     generic_constraint = adapt_java_evidence(
         JavaEvidenceSubmission.model_validate(_java_submission())
@@ -1516,6 +1537,87 @@ def test_python_provider_bundle_remains_compatible_with_context_adapter() -> Non
     assert len(structured_data.claim.structured_data_fingerprint) == 64
 
 
+def test_evidence_bundle_adapter_rejects_mixed_source_semantics() -> None:
+    mixed_bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": SUBJECT_REF,
+            "findings": [
+                {
+                    "id": "contract-finding",
+                    "source_type": "contract",
+                    "source_ref": "contract://orders",
+                    "subject_ref": SUBJECT_REF,
+                    "kind": "schema",
+                    "path": "$.components.schemas.Order",
+                    "structured_data": {"required": ["id"]},
+                    "confidence": 1,
+                    "deterministic": True,
+                    "revision": "contract-v1",
+                },
+                {
+                    "id": "profile-finding",
+                    "source_type": "data_profile",
+                    "source_ref": "database://orders",
+                    "subject_ref": SUBJECT_REF,
+                    "kind": "column_profile",
+                    "path": "$.orders.id",
+                    "structured_data": {"nullable": False},
+                    "confidence": 0.9,
+                    "deterministic": True,
+                    "revision": "profile-v1",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="one source type"):
+        adapt_evidence_bundle(
+            mixed_bundle,
+            provider_name="mixed-provider",
+            provider_version="1.0.0",
+            source_ref="evidence://mixed",
+            source_revision="mixed-v1",
+            subject_ref=SUBJECT_REF,
+        )
+
+    contract_bundle = mixed_bundle.model_copy(update={"findings": [mixed_bundle.findings[0]]})
+    contract_envelope = adapt_evidence_bundle(
+        contract_bundle,
+        provider_name="contract-provider",
+        provider_version="1.0.0",
+        source_ref="contract://orders",
+        source_revision="contract-v1",
+        subject_ref=SUBJECT_REF,
+    )
+    contract_finding = contract_envelope.findings[0]
+    contract_data = cast(
+        EvidenceBundleExternalEvidenceStructuredData, contract_finding.structured_data
+    )
+    profile_data = contract_data.model_copy(
+        update={
+            "claim": contract_data.claim.model_copy(
+                update={"id": "profile-finding", "source_type": "data_profile"}
+            )
+        }
+    )
+    provisional = contract_finding.model_copy(
+        update={
+            "id": "bundle-profile-finding",
+            "structured_data": profile_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    profile_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    generic_payload = contract_envelope.model_copy(
+        update={"findings": [contract_finding, profile_finding]}
+    ).model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="one source type"):
+        ExternalEvidenceEnvelope.model_validate(generic_payload)
+
+
 def test_java_spring_poc_analyzes_fixed_fixture_without_execution() -> None:
     manifest = cast(
         dict[str, Any],
@@ -1852,6 +1954,42 @@ class RequestMappingController {
         ("GET", "/api/orders", "handle"),
         ("POST", "/api/orders", "handle"),
         ("GET", "/api/balanced", "balanced"),
+    }
+
+
+def test_java_spring_poc_expands_request_mapping_without_method_to_supported_verbs() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://request-mapping-any", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AnyMethodController.java",
+                        "content": """
+@RestController
+@RequestMapping("/api")
+class AnyMethodController {
+    @RequestMapping("/orders")
+    public Order handle() {
+        return orderService.handle();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert {(claim.method, claim.path) for claim in routes} == {
+        (method, "/api/orders") for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
+    }
+    assert {claim.operation_ref for claim in calls} == {
+        f"operation://{method}/api/orders" for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
     }
 
 

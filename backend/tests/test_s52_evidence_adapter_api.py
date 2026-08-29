@@ -1430,6 +1430,43 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
     )
     generic_dto["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
 
+    sensitive_columns: list[tuple[str, dict[str, Any]]] = []
+    for identifier in ("field_name", "column_name"):
+        dedicated_column = _java_evidence(project_id)
+        dedicated_column_claim = {
+            "id": f"column-sensitive-{identifier}",
+            "kind": "table_column",
+            "source_path": "src/OrderEntity.java:8",
+            "confidence": 0.98,
+            "deterministic": True,
+            "entity_ref": "entity://Order",
+            "table_ref": "table://public/orders",
+            "field_name": "cardNumber",
+            "column_name": "card_number",
+        }
+        dedicated_column["claims"].append(dedicated_column_claim)
+        dedicated_column_claim[identifier] = f"card{sensitive_value}"
+        sensitive_columns.append(("java-evidence", {"evidence": dedicated_column}))
+
+        generic_column_source = _java_evidence(project_id)
+        generic_column_source["claims"].append(
+            {
+                **dedicated_column_claim,
+                "id": f"column-generic-{identifier}",
+                identifier: "cardNumber" if identifier == "field_name" else "card_number",
+            }
+        )
+        generic_column_name = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(generic_column_source)
+        ).model_dump(mode="json")
+        generic_column_claim = next(
+            finding
+            for finding in generic_column_name["findings"]
+            if finding["structured_data"]["claim_kind"] == "table_column"
+        )
+        generic_column_claim["structured_data"]["claim"][identifier] = f"card{sensitive_value}"
+        sensitive_columns.append(("evidence", {"envelope": generic_column_name}))
+
     requests = (
         ("java-evidence", {"evidence": dedicated_java}),
         ("database-evidence", {"evidence": dedicated_database}),
@@ -1438,6 +1475,7 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
         ("evidence", {"envelope": generic_java}),
         ("evidence", {"envelope": generic_database}),
         ("evidence", {"envelope": generic_field_name}),
+        *sensitive_columns,
     )
     for endpoint, payload in requests:
         rejected = await client.post(

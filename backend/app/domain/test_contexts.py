@@ -374,6 +374,11 @@ class ExternalJavaTableColumnClaim(ExternalJavaClaimBase):
     field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
     column_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalJavaTableColumnClaim:
+        require_no_sensitive_scalar_values([self.field_name, self.column_name])
+        return self
+
 
 class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
     kind: Literal["enum_state"] = "enum_state"
@@ -732,13 +737,16 @@ def _evidence_bundle_provider(
         for finding in findings
         if isinstance(finding.structured_data, EvidenceBundleExternalEvidenceStructuredData)
     }
-    if source_types == {"data_profile"}:
-        return EvidenceProviderType.DATA_PROFILE
-    if source_types == {"contract"}:
-        return EvidenceProviderType.CONTRACT
-    if source_types == {"existing_test"}:
-        return EvidenceProviderType.EXISTING_TEST
-    return EvidenceProviderType.REPOSITORY
+    if len(source_types) != 1:
+        raise ValueError("Evidence Bundle must contain exactly one source type")
+    source_type = next(iter(source_types))
+    return {
+        "contract": EvidenceProviderType.CONTRACT,
+        "data_profile": EvidenceProviderType.DATA_PROFILE,
+        "existing_test": EvidenceProviderType.EXISTING_TEST,
+        "workflow": EvidenceProviderType.WORKFLOW,
+        "runtime": EvidenceProviderType.RUNTIME,
+    }.get(source_type, EvidenceProviderType.REPOSITORY)
 
 
 def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:

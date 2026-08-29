@@ -221,6 +221,11 @@ class JavaTableColumnClaim(JavaClaimBase):
     field_name: str = Field(pattern=_IDENTIFIER)
     column_name: str = Field(pattern=_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> JavaTableColumnClaim:
+        require_no_sensitive_scalar_values([self.field_name, self.column_name])
+        return self
+
 
 class JavaEnumStateClaim(JavaClaimBase):
     kind: Literal["enum_state"] = "enum_state"
@@ -905,13 +910,18 @@ def _java_finding_kind(kind: str) -> EvidenceFindingKind:
 
 def _bundle_provider_type(bundle: EvidenceBundle) -> EvidenceProviderType:
     source_types = {finding.source_type for finding in bundle.findings}
-    if source_types == {EvidenceSourceType.DATA_PROFILE}:
-        return EvidenceProviderType.DATA_PROFILE
-    if source_types == {EvidenceSourceType.CONTRACT}:
-        return EvidenceProviderType.CONTRACT
-    if source_types == {EvidenceSourceType.EXISTING_TEST}:
-        return EvidenceProviderType.EXISTING_TEST
-    return EvidenceProviderType.REPOSITORY
+    if not source_types:
+        return EvidenceProviderType.REPOSITORY
+    if len(source_types) != 1:
+        raise ValueError("Evidence Bundle must contain exactly one source type")
+    source_type = next(iter(source_types))
+    return {
+        EvidenceSourceType.CONTRACT: EvidenceProviderType.CONTRACT,
+        EvidenceSourceType.DATA_PROFILE: EvidenceProviderType.DATA_PROFILE,
+        EvidenceSourceType.EXISTING_TEST: EvidenceProviderType.EXISTING_TEST,
+        EvidenceSourceType.WORKFLOW: EvidenceProviderType.WORKFLOW,
+        EvidenceSourceType.RUNTIME: EvidenceProviderType.RUNTIME,
+    }.get(source_type, EvidenceProviderType.REPOSITORY)
 
 
 def _bundle_finding_kind(kind: str) -> EvidenceFindingKind:
@@ -2087,6 +2097,8 @@ def _mapping_http_methods(
         r"\bRequestMethod\.(GET|POST|PUT|PATCH|DELETE)\b",
         arguments,
     )
+    if not methods:
+        methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
     return [
         cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
         for method in dict.fromkeys(methods)
