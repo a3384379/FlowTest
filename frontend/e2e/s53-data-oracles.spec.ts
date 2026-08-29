@@ -255,7 +255,7 @@ async function createWorkflow(
     target: 'create',
     condition: null,
     mappings: [
-      syntheticBodyMapping('service_key', '000-s53-{{value}}'),
+      syntheticBodyMapping('service_key', 'a-s53-{{value}}'),
       syntheticBodyMapping('name', 'S53 {{value}}'),
     ],
   })
