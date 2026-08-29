@@ -378,6 +378,8 @@ class DatabaseObservedDistribution(BaseModel):
             self.enum_candidates or self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("database zero-distinct distribution must not include observed values")
+        if self.distinct_count is not None and len(set(self.enum_candidates)) > self.distinct_count:
+            raise ValueError("database observed candidates must not exceed distinct count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
@@ -2851,12 +2853,25 @@ def _dto_field_claims(
 
 def _parameter_types(parameters: str) -> list[str]:
     result: list[str] = []
-    for parameter in parameters.split(","):
+    for parameter in _split_top_level_java_components(parameters):
         cleaned = re.sub(r"@[A-Za-z0-9_$.]+(?:\([^)]*\))?", "", parameter).strip()
-        parts = cleaned.split()
-        if len(parts) >= 2:
-            result.append(_simple_type(parts[-2]))
+        declaration = re.fullmatch(
+            r"(?:final\s+)*(?P<type>.+?)\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\[\])?",
+            cleaned,
+            re.DOTALL,
+        )
+        if declaration is not None:
+            result.append(_outer_java_type(declaration.group("type")))
     return result
+
+
+def _outer_java_type(value: str) -> str:
+    declaration = value.replace("...", " ").split("<", 1)[0].rstrip("[] ")
+    identifiers = re.findall(
+        r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*",
+        declaration,
+    )
+    return identifiers[-1].rsplit(".", 1)[-1] if identifiers else declaration
 
 
 def _simple_type(value: str) -> str:
@@ -3206,8 +3221,47 @@ def _bounded_java_claims(
             : limits[kind]
         ]
     ]
-    truncated = len(bounded) < len(unique) or len(bounded) > MAX_ADAPTER_CLAIMS
-    return bounded[:MAX_ADAPTER_CLAIMS], truncated
+    limited = bounded[:MAX_ADAPTER_CLAIMS]
+    route_refs = {
+        claim.operation_ref for claim in limited if isinstance(claim, JavaControllerRouteClaim)
+    }
+    retained = [
+        adjusted
+        for claim in limited
+        if (adjusted := _claim_with_retained_routes(claim, route_refs)) is not None
+    ]
+    return retained, len(retained) < len(unique)
+
+
+def _claim_with_retained_routes(
+    claim: JavaEvidenceClaim,
+    retained_routes: set[str],
+) -> JavaEvidenceClaim | None:
+    if isinstance(claim, JavaEntityClaim):
+        return claim.model_copy(
+            update={
+                "operation_refs": [
+                    reference for reference in claim.operation_refs if reference in retained_routes
+                ]
+            }
+        )
+    if (
+        isinstance(
+            claim,
+            (
+                JavaDtoFieldClaim,
+                JavaBeanValidationClaim,
+                JavaCallClaim,
+                JavaPersistenceClaim,
+                JavaEnumStateClaim,
+                JavaExceptionClaim,
+                JavaKafkaEventClaim,
+            ),
+        )
+        and claim.operation_ref is not None
+    ):
+        return claim if claim.operation_ref in retained_routes else None
+    return claim
 
 
 def _claim_id(*parts: str) -> str:

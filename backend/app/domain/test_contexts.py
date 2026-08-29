@@ -515,6 +515,8 @@ class ExternalDatabaseObservedDistribution(BaseModel):
             self.enum_candidates or self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("database zero-distinct distribution must not include observed values")
+        if self.distinct_count is not None and len(set(self.enum_candidates)) > self.distinct_count:
+            raise ValueError("database observed candidates must not exceed distinct count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]

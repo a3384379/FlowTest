@@ -713,6 +713,38 @@ def test_database_distribution_rejects_distinct_count_above_row_count_at_generic
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_distribution_bounds_unique_candidates_at_dedicated_boundary() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {"distinct_count": 1, "enum_candidates": ["active", "inactive"]}
+    )
+
+    with pytest.raises(ValidationError, match="candidates must not exceed distinct count"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_distribution_bounds_unique_candidates_at_generic_boundary() -> None:
+    payload = _database_envelope_with_distribution_update(
+        {"distinct_count": 1, "enum_candidates": ["active", "inactive"]}
+    )
+
+    with pytest.raises(ValidationError, match="candidates must not exceed distinct count"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
+def test_database_distribution_counts_duplicate_candidates_once() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {"distinct_count": 1, "enum_candidates": ["active", "active"]}
+    )
+
+    submission = DatabaseEvidenceSubmission.model_validate(payload)
+
+    distribution = submission.tables[0].columns[1].observed_distribution
+    assert distribution is not None
+    assert distribution.distinct_count == 1
+
+
 @pytest.mark.parametrize(
     "observed_values",
     [
@@ -1826,6 +1858,7 @@ def test_database_state_sets_at_budget_remain_separate_without_truncation() -> N
     status["observed_distribution"]["enum_candidates"] = [
         f"observed-{index:03d}" for index in range(100)
     ]
+    status["observed_distribution"]["distinct_count"] = 100
 
     mapping = derive_entity_mapping(
         [
@@ -2961,6 +2994,58 @@ class GenericController {
     assert [claim.topic_ref for claim in events] == ["kafka://orders.loaded"]
 
 
+def test_java_spring_poc_parses_generic_handler_parameters_at_top_level() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://generic-parameter", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(Pair<Foo, Bar> request) {
+        return orderService.create(request);
+    }
+}
+
+class Pair<T, U> {
+    private String pairValue;
+}
+
+class Foo {
+    private String fooOnly;
+}
+
+class Bar {
+    @NotNull
+    private String barOnly;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        (claim.dto_type, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    constraints = {
+        (claim.dto_type, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "bean_validation" and claim.operation_ref is not None
+    }
+    assert request_fields == {("Pair", "pairValue")}
+    assert constraints == set()
+
+
 def test_java_spring_poc_skips_unresolved_mapping_path_constants() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -3832,6 +3917,42 @@ def test_java_spring_poc_reports_claim_quota_truncation() -> None:
         warning.code == "JAVA_POC_INCOMPLETE_BUDGET" and "不完整" in warning.message
         for warning in evidence.warnings
     )
+
+
+def test_java_spring_poc_removes_claims_for_truncated_routes() -> None:
+    routes = "\n".join(
+        f"""
+    @GetMapping("/items/{index}")
+    Dto{index} item{index}() {{
+        return item{index}Service.load();
+    }}
+"""
+        for index in range(13)
+    )
+    dtos = "\n".join(f"class Dto{index} {{ private String value{index}; }}" for index in range(13))
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://dependent-overflow", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": f"{dtos}\npublic class OrderController {{\n{routes}\n}}",
+                    }
+                ],
+            }
+        )
+    )
+
+    route_refs = {
+        claim.operation_ref for claim in evidence.claims if claim.kind == "controller_route"
+    }
+    dto_claims = [claim for claim in evidence.claims if claim.kind == "dto_field"]
+    assert len(route_refs) == 12
+    assert len(dto_claims) == 12
+    assert {claim.operation_ref for claim in dto_claims} <= route_refs
 
 
 def test_java_spring_poc_reports_enum_value_truncation() -> None:

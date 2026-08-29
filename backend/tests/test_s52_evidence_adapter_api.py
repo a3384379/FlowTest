@@ -1895,6 +1895,35 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
     assert rejected_counts.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected_counts.json()["error"]["trace_id"]
 
+    excess_candidates = _database_evidence(project_id)
+    excess_candidates["tables"][0]["columns"][2]["observed_distribution"] = {
+        "distinct_count": 1,
+        "enum_candidates": ["active", "inactive"],
+    }
+    rejected_candidates = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": excess_candidates},
+    )
+
+    assert rejected_candidates.status_code == 422, rejected_candidates.text
+    assert rejected_candidates.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_candidates.json()["error"]["trace_id"]
+
+    generic_excess_candidates = _database_envelope_with_invalid_distribution(
+        project_id,
+        {"distinct_count": 1, "enum_candidates": ["active", "inactive"]},
+    )
+    rejected_generic_candidates = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_excess_candidates},
+    )
+
+    assert rejected_generic_candidates.status_code == 422, rejected_generic_candidates.text
+    assert rejected_generic_candidates.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_generic_candidates.json()["error"]["trace_id"]
+
     empty_values = _database_evidence(project_id)
     empty_values["tables"][0]["columns"][2]["observed_distribution"] = {
         "row_count": 0,
