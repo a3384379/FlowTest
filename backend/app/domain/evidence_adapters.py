@@ -840,7 +840,8 @@ class JavaSpringPocProvider:
                 ExternalEvidenceWarning(
                     code="JAVA_POC_INCOMPLETE_INHERITANCE",
                     message=(
-                        "Java/Spring POC 不展开继承字段，以下类型的字段分析不完整："
+                        "Java/Spring POC 不展开继承字段或控制器父类路由，"
+                        "以下类型的分析不完整："
                         f"{_java_type_name_summary(type_analysis.inherited_types)}。"
                     ),
                 )
@@ -880,6 +881,10 @@ class JavaSpringPocProvider:
             confidence=min((claim.confidence for claim in bounded_claims), default=0.5),
             deterministic=(
                 all(claim.deterministic for claim in bounded_claims)
+                and not truncated
+                and not type_analysis.ambiguous_types
+                and not type_analysis.inherited_types
+                and not type_analysis.property_access_types
                 and not interface_contracts.unresolved_interfaces
                 and not unresolved_mappings
                 and not unresolved_mapping_conditions

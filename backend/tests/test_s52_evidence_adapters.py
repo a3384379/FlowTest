@@ -4855,6 +4855,7 @@ def test_java_spring_poc_reports_claim_quota_truncation() -> None:
     evidence = JavaSpringPocProvider().analyze(snapshot)
 
     assert len([claim for claim in evidence.claims if claim.kind == "controller_route"]) == 12
+    assert evidence.deterministic is False
     assert any(
         warning.code == "JAVA_POC_INCOMPLETE_BUDGET" and "不完整" in warning.message
         for warning in evidence.warnings
@@ -5702,6 +5703,46 @@ class OrderController {
         and "OrderDto" in warning.message
         and "OrderEntity" in warning.message
         and "不完整" in warning.message
+        for warning in evidence.warnings
+    )
+    assert evidence.deterministic is False
+
+
+def test_java_spring_poc_marks_inherited_controller_routes_incomplete() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://inherited-routes", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController extends BaseOrderController {
+    @GetMapping("/own")
+    Order own() { return orderService.own(); }
+}
+
+class BaseOrderController {
+    @GetMapping("/inherited")
+    Order inherited() { return orderService.inherited(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("own", "/own")]
+    assert evidence.deterministic is False
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_INHERITANCE"
+        and "OrderController" in warning.message
+        and "控制器父类路由" in warning.message
         for warning in evidence.warnings
     )
 
