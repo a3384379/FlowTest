@@ -2030,6 +2030,67 @@ def test_explicit_table_column_claim_drives_differently_named_field_mapping() ->
     assert candidate.deterministic is False
 
 
+def test_field_mapping_bounds_encoded_wire_name_in_reference() -> None:
+    java_payload = _java_submission()
+    field = next(claim for claim in java_payload["claims"] if claim["id"] == "request-product")
+    field["field_name"] = "!" * 160
+    field["java_field_name"] = "productId"
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    candidate = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.REQUEST_FIELD_COLUMN
+        and candidate.target_ref == "column://public/orders/product_id"
+    )
+    assert "sha256:" in candidate.source_ref
+    assert len(candidate.source_ref) <= 512
+    assert not any(character.isspace() for character in candidate.source_ref)
+
+
+def test_enum_state_reference_escapes_wire_name_whitespace() -> None:
+    java_payload = _java_submission()
+    state = next(claim for claim in java_payload["claims"] if claim["kind"] == "enum_state")
+    state.update(
+        {
+            "direction": "request",
+            "dto_type": "CreateOrderRequest",
+            "field_name": "workflow state",
+        }
+    )
+
+    mapping = derive_entity_mapping(
+        _mapping_inputs(
+            adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+            "java-state",
+        )
+    )
+
+    candidate = next(
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    )
+    assert "%20" in candidate.source_ref
+    assert candidate.field_ref == candidate.source_ref
+    assert len(candidate.source_ref) <= 512
+    assert not any(character.isspace() for character in candidate.source_ref)
+
+
 def test_explicit_table_column_claim_correlates_renamed_enum_state_field() -> None:
     java_payload = _java_submission()
     java_payload["claims"] = [
@@ -2067,6 +2128,14 @@ def test_explicit_table_column_claim_correlates_renamed_enum_state_field() -> No
         column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
     )
     status_column["name"] = "status_code"
+    database_payload["tables"][0]["columns"].append(
+        {
+            "name": "state",
+            "data_type": "varchar",
+            "nullable": False,
+            "enum_values": ["cancelled", "created"],
+        }
+    )
 
     java_envelope = adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload))
     java_inputs = _mapping_inputs(java_envelope, "java-state")
@@ -2098,6 +2167,16 @@ def test_explicit_table_column_claim_correlates_renamed_enum_state_field() -> No
     assert candidate.state_values == ["cancelled", "created"]
     assert candidate.confidence == 0.7
     assert table_column_evidence in candidate.evidence_refs
+    assert not any(
+        other.source_ref == candidate.source_ref
+        and other.target_ref == "state-set://public/orders/state"
+        for other in mapping.candidates
+    )
+    assert not any(
+        conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+        and conflict.source_ref == candidate.source_ref
+        for conflict in mapping.conflicts
+    )
 
 
 def test_operation_state_mapping_scopes_independent_fields() -> None:

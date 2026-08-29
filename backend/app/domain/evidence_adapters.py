@@ -1827,10 +1827,8 @@ def _field_column_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCandi
                 else EntityMappingCandidateKind.RESPONSE_FIELD_COLUMN
             )
             operation_identity = sha256(field.operation_ref.encode()).hexdigest()
-            field_ref = (
-                f"field://{field.dto_type}/{quote(field.field_name, safe='')}"
-                f"?operation={operation_identity}"
-            )
+            field_identity = _bounded_reference_identity(field.field_name)
+            field_ref = f"field://{field.dto_type}/{field_identity}?operation={operation_identity}"
             operation_table = table_targets.get(entity_ref)
             operation_confidence = operation_table.confidence if operation_table else 1.0
             operation_deterministic = operation_table.deterministic if operation_table else True
@@ -2091,17 +2089,39 @@ def _state_candidate_matches_column(
 ) -> bool:
     if candidate.mapping.operation_ref != operation_ref:
         return False
+    explicit_links = _state_table_column_links_for_table(
+        candidate,
+        parsed_column,
+        table_columns,
+    )
+    if explicit_links:
+        return any(
+            claim.column_name.casefold() == parsed_column.claim.name.casefold()
+            for claim, _evidence_ref in explicit_links
+        )
     column_name = parsed_column.claim.name
     if candidate.field_name is None:
         return _normalized_name(column_name) in {"status", "state"}
-    if _normalized_name(candidate.field_name) == _normalized_name(column_name):
-        return True
-    if candidate.java_field_name is None:
-        return False
-    return bool(_state_table_column_links(candidate, parsed_column, table_columns))
+    return _normalized_name(candidate.field_name) == _normalized_name(column_name)
 
 
 def _state_table_column_links(
+    candidate: _JavaStateCandidate,
+    parsed_column: _ParsedDatabaseColumn,
+    table_columns: list[tuple[JavaTableColumnClaim, str]],
+) -> list[tuple[JavaTableColumnClaim, str]]:
+    return [
+        item
+        for item in _state_table_column_links_for_table(
+            candidate,
+            parsed_column,
+            table_columns,
+        )
+        if item[0].column_name.casefold() == parsed_column.claim.name.casefold()
+    ]
+
+
+def _state_table_column_links_for_table(
     candidate: _JavaStateCandidate,
     parsed_column: _ParsedDatabaseColumn,
     table_columns: list[tuple[JavaTableColumnClaim, str]],
@@ -2113,7 +2133,6 @@ def _state_table_column_links(
         for item in table_columns
         if (
             (claim := item[0]).field_name.casefold() == candidate.java_field_name.casefold()
-            and claim.column_name.casefold() == parsed_column.claim.name.casefold()
             and _table_ref_matches_database_table(
                 claim.table_ref,
                 parsed_column.schema,
@@ -2141,7 +2160,14 @@ def _state_field_ref(
 
 
 def _state_field_identity(field_name: str) -> str:
-    return _normalized_name(field_name) or sha256(field_name.encode()).hexdigest()
+    return _bounded_reference_identity(field_name)
+
+
+def _bounded_reference_identity(value: str) -> str:
+    encoded = quote(value, safe="")
+    if len(encoded) <= 120:
+        return encoded
+    return f"sha256:{sha256(value.encode()).hexdigest()}"
 
 
 def _database_state_value_sets(column: DatabaseColumnEvidence) -> list[list[str]]:

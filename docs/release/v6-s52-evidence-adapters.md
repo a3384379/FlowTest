@@ -109,7 +109,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   Accessor 传播到 DTO、Validation 与 Enum Evidence；DTO Claim 同时保留 `java_field_name`，因此线上字段身份用于
   Request/Response Candidate，Java 成员身份仍可与 Entity/Table Column 精确关联。
 - Jackson 线上属性名使用有界 JSON Property 字符串而非 Java Identifier 约束，`1st-name` 等合法名称可进入 DTO、
-  Validation 与 Route Enum Evidence；Field Candidate Ref 对任意线上属性名执行 URL 编码，保持引用合法与稳定。
+  Validation 与 Route Enum Evidence；Field/State Candidate Ref 对任意线上属性名执行 URL 编码，并对编码后超限的
+  身份使用确定性摘要，保持引用合法、有界与稳定。
 - Enum Constant 的 `@JsonProperty` 值按 Jackson 线上状态值生成 Evidence；遇到无法安全静态求值的
   `@JsonValue` 时停止生成对应状态候选，产生 `JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION` 并降级为非确定性，
   避免 Java 常量名制造错误 DB State 候选或冲突。
@@ -201,7 +202,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；862 passed、4 skipped、总覆盖率 90.74%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；864 passed、4 skipped、总覆盖率 90.74%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -302,8 +303,7 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 本轮复审提出 4 个 P2：Enum `@JsonProperty`/`@JsonValue` 线上值未正确建模、Bean Validation 标准约束缺项、
   类级 `@JsonNaming` 未传播，以及舍入后的 Null Ratio 被精确小数运算误拒绝。当前实现支持可静态解析的
   Enum/DTO 线上命名，对 `@JsonValue` 与未知 Naming Strategy 停止生成不可靠候选并显式降级，补齐标准约束，
-  同时在专用与通用 DB Distribution 合同中使用整数上界。S52 Domain/API 定向回归与全量后端门禁均已通过：
-  862 passed、4 skipped、总覆盖率 90.74%。
+  同时在专用与通用 DB Distribution 合同中使用整数上界。S52 Domain/API 定向回归与全量后端门禁均已通过。
 - 精确 Head 复审随后指出嵌套 DTO 声明未使用顶层类型 Prefix Map，导致其 `@JsonNaming` 被跳过；当前实现会从
   嵌套声明之前最近的 Java Member 边界定位 Annotation Prefix，直接回归验证嵌套 Request 的 `userName` 生成
   `user_name` Evidence。
@@ -315,6 +315,10 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Wire Name，Enum Claim 同时保留 `java_field_name`；State Correlation 使用显式 Table Column Link，并把该证据的
   Confidence、Deterministic 与 Evidence Ref 传播到候选。直接回归覆盖 `1st-name` 以及
   `@JsonProperty("state") orderStatus → @Column(name="status_code")`。
+- 最新精确复审提出两个 P2：任意 Wire Name 经 URL 编码后可能突破 Mapping Ref 上限；同表存在 Wire 同名列时，
+  State Correlation 会在显式 Java Field/Column Link 之前命中弱回退。当前 Field/State Ref 对超限编码使用确定性摘要，
+  且同表显式列声明优先于 Wire Name 回退。直接回归覆盖 160 个符号字符、含空格的 Enum Wire Name，以及
+  `state` 干扰列与显式 `status_code` 并存；全量后端门禁通过：864 passed、4 skipped、总覆盖率 90.74%。
 
 ### 待完成
 
