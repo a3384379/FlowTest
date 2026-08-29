@@ -100,6 +100,10 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   Route Claim 并产生 `JAVA_POC_INCOMPLETE_MAPPING_CONDITION`。
 - DTO/Record 静态分析排除启用的 Jackson `@JsonIgnore` 字段、Record Component 和 Getter 属性；
   `@JsonIgnore(false)` 保持显式可见语义。
+- Jackson `@JsonProperty(access = WRITE_ONLY)` 属性只生成 Request Evidence，`READ_ONLY` 只生成
+  Response Evidence，Field、Record Component 和 Accessor 的显式方向都会传播到 DTO Claim。
+- Spring 方法级 `consumes`/`produces` 按框架语义覆盖类型级媒体条件，`params`/`headers` 仍合并；
+  显式空 `RequestMethod` 数组按 Annotation 默认值处理为八种受支持 HTTP Method。
 - Kafka Producer 会从 `KafkaTemplate<K,V>` 字段/构造参数识别实际变量名，不依赖固定 `kafkaTemplate` 命名；
   Mapping Handler 签名允许 Java 合法的 Modifier/Return Type Annotation 交错形式，如 `public @Nullable DTO`。
 - JPA `@Table`/`@Column` 的本地 `static final String`、接口常量和限定常量引用复用安全常量解析；无法解析的显式
@@ -174,7 +178,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；850 passed、4 skipped、总覆盖率 90.72%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；853 passed、4 skipped、总覆盖率 90.71%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -255,6 +259,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Operation ID，且 Jackson `@JsonIgnore` 字段仍进入 DTO Evidence；当前实现已按运行时媒体类型值归一化，
   未解析条件显式降级为不完整分析，并排除启用的 `@JsonIgnore` Field/Record Component/Getter；
   两项均有直接回归，本地全量后端门禁已通过。
+- 后续复审指出 Jackson 属性读写方向未区分、方法级媒体条件应覆盖类型级条件，以及显式
+  `method = {}` 应保持无限制语义；当前实现已传播 `READ_ONLY`/`WRITE_ONLY`、按框架语义合并条件，
+  并将空 Method 数组展开为八种受支持方法；三项直接回归与本地全量后端门禁均已通过。
 
 ### 待完成
 

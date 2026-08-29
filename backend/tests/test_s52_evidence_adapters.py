@@ -3415,6 +3415,82 @@ class MediaController {
     assert len(condition_suffixes) == 1
 
 
+def test_java_spring_poc_method_media_conditions_override_type_conditions() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://media-override", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/MediaOverrideController.java",
+                        "content": """
+@RestController
+@RequestMapping(produces = "application/json", headers = "X-Class=1")
+class MediaOverrideController {
+    @GetMapping(path = "/override", produces = "application/xml", headers = "X-Method=1")
+    Order override() { return overrideService.load(); }
+}
+
+@RestController
+class MediaBaselineController {
+    @GetMapping(
+        path = "/baseline",
+        produces = "application/xml",
+        headers = {"X-Class=1", "X-Method=1"}
+    )
+    Order baseline() { return baselineService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    condition_suffixes = {claim.operation_ref.split("#", 1)[1] for claim in routes}
+    assert len(routes) == 2
+    assert len(condition_suffixes) == 1
+
+
+def test_java_spring_poc_treats_empty_request_method_array_as_unrestricted() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://empty-methods", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @RequestMapping(path = "/orders", method = {})
+    Order allMethods() { return orderService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert {claim.method for claim in routes} == {
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "TRACE",
+    }
+
+
 def test_java_spring_poc_intersects_class_and_method_mapping_methods() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4025,6 +4101,62 @@ class OrderDto {
         ("response", "explicitlyVisible"),
         ("response", "visible"),
     }
+
+
+def test_java_spring_poc_honors_jackson_property_access_direction() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jackson-access", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    OrderDto create(@RequestBody OrderDto request) {
+        return orderService.create(request);
+    }
+}
+
+class OrderDto {
+    private String visible;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String password;
+
+    @com.fasterxml.jackson.annotation.JsonProperty(
+        access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY
+    )
+    private String generatedId;
+
+    private String getterReadOnly;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public String getGetterReadOnly() { return getterReadOnly; }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    response_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    assert request_fields == {"password", "visible"}
+    assert response_fields == {"generatedId", "getterReadOnly", "visible"}
 
 
 def test_java_spring_poc_preserves_qualified_and_repeated_validation_constraints() -> None:

@@ -196,6 +196,12 @@ _JACKSON_IGNORE_ANNOTATION = re.compile(
 _JACKSON_IGNORE_ANNOTATION_MARKER = re.compile(
     r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonIgnore)\b"
 )
+_JACKSON_PROPERTY_ANNOTATION = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonProperty)\b"
+)
+_JACKSON_PROPERTY_ANNOTATION_MARKER = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonProperty)\b"
+)
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -260,6 +266,16 @@ type JavaHttpMethod = Literal[
     "OPTIONS",
     "TRACE",
 ]
+_SPRING_HTTP_METHODS: Final[tuple[JavaHttpMethod, ...]] = (
+    "GET",
+    "HEAD",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+    "TRACE",
+)
 
 
 class EvidenceAdapterProvider(BaseModel):
@@ -2219,7 +2235,15 @@ class _JavaStringConstants:
         return _SPRING_STRING_CONSTANT_VALUES.get(shortened)
 
 
-JavaField = tuple[str, str, list[tuple[str, str]], str | None, bool]
+JavaJsonAccess = Literal["auto", "read_only", "write_only", "read_write"]
+JavaField = tuple[
+    str,
+    str,
+    list[tuple[str, str]],
+    str | None,
+    bool,
+    JavaJsonAccess,
+]
 
 
 @dataclass(frozen=True)
@@ -2474,6 +2498,7 @@ def _record_component_field(
         annotations,
         column_name,
         column_name_unresolved,
+        _jackson_property_access(component, masked_component),
     )
 
 
@@ -2516,11 +2541,14 @@ def _class_fields(
                 annotations,
                 column_name,
                 column_name_unresolved,
+                _jackson_property_access(annotation_content, annotation_mask),
             )
             for field_name, field_type in declarators
         )
     ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
     fields = [field for field in fields if field[0] not in ignored_getters]
+    accessor_access = _jackson_accessor_property_access(body, masked_body)
+    fields = [(*field[:5], accessor_access.get(field[0], field[5])) for field in fields]
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
@@ -2539,6 +2567,7 @@ def _class_fields(
                 sorted(set([*old[2], *annotations])),
                 old[3],
                 old[4],
+                old[5],
             )
     return fields
 
@@ -2702,6 +2731,65 @@ def _jackson_ignore_enabled(content: str, annotation: re.Match[str]) -> bool:
     arguments = _java_annotation_arguments(content, annotation.end())
     inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     return re.fullmatch(r"\s*(?:value\s*=\s*)?false\s*", inner) is None
+
+
+def _jackson_property_access(
+    content: str,
+    masked_content: str,
+) -> JavaJsonAccess:
+    access: JavaJsonAccess = "auto"
+    for match in _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_PROPERTY_ANNOTATION_MARKER,
+        _JACKSON_PROPERTY_ANNOTATION,
+    ):
+        access = _jackson_property_access_from_match(content, match)
+    return access
+
+
+def _jackson_property_access_from_match(
+    content: str,
+    annotation: re.Match[str],
+) -> JavaJsonAccess:
+    arguments = _java_annotation_arguments(content, annotation.end())
+    match = re.search(
+        r"\baccess\s*=\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*"
+        r"(?P<access>AUTO|READ_ONLY|WRITE_ONLY|READ_WRITE)\b",
+        _mask_java_non_code(arguments),
+    )
+    if match is None:
+        return "auto"
+    return cast(JavaJsonAccess, match.group("access").lower())
+
+
+def _jackson_accessor_property_access(
+    content: str,
+    masked_content: str,
+) -> dict[str, JavaJsonAccess]:
+    properties: dict[str, JavaJsonAccess] = {}
+    for match in _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_PROPERTY_ANNOTATION_MARKER,
+        _JACKSON_PROPERTY_ANNOTATION,
+    ):
+        access = _jackson_property_access_from_match(content, match)
+        if access == "auto":
+            continue
+        _arguments, annotation_end = _java_annotation_arguments_and_end(content, match.end())
+        following = _mask_java_annotation_arguments(masked_content[annotation_end:])
+        accessor = re.match(
+            r"(?:\s*@[A-Za-z0-9_$.]+)*\s*"
+            r"(?:(?:public|protected|private|final)\s+|@[A-Za-z0-9_$.]+\s+)*"
+            r"[A-Za-z0-9_$<>,.?\[\]\s]+?\s+"
+            r"(?:get|is|set)(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\(",
+            following,
+        )
+        if accessor is not None:
+            name = accessor.group("name")
+            properties[name[0].lower() + name[1:]] = access
+    return properties
 
 
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
@@ -3019,7 +3107,10 @@ def _java_rebased_interface_routes(
     for contract in contracts:
         if definition.base_methods is not None and contract.method not in definition.base_methods:
             continue
-        conditions = [*contract.conditions, *definition.base_conditions]
+        conditions = _merge_mapping_conditions(
+            definition.base_conditions,
+            contract.conditions,
+        )
         for base_path in definition.base_paths:
             full_path = _join_route_path(base_path, contract.path)
             routes.append(
@@ -3128,7 +3219,10 @@ def _java_bound_interface_routes(
                     file.content.count("\n", 0, declaration.start()) + 1,
                 )
             )
-            conditions = [*contract.conditions, *base_conditions]
+            conditions = _merge_mapping_conditions(
+                base_conditions,
+                contract.conditions,
+            )
             for base_path in base_paths:
                 full_path = _join_route_path(base_path, contract.path)
                 routes.append(
@@ -3397,7 +3491,7 @@ def _routes_after_mapping(
     )
     if mapping_conditions is None:
         return []
-    conditions = [*base_conditions, *mapping_conditions]
+    conditions = _merge_mapping_conditions(base_conditions, mapping_conditions)
     body_start = mapping_end + signature.end() - 1
     body_end = (
         _matching_brace(file.content, body_start)
@@ -3451,19 +3545,23 @@ def _mapping_http_methods(
     )
     method_assignment = re.search(r"\bmethod\s*=", _mask_java_non_code(content))
     if method_assignment is None:
-        methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]
+        methods = list(_SPRING_HTTP_METHODS)
     else:
         expression = _java_annotation_expression(
             content,
             method_assignment.end(),
             allow_identifier=True,
         )
-        methods = re.findall(
-            r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?"
-            r"(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)\b",
-            expression,
+        methods = (
+            list(_SPRING_HTTP_METHODS)
+            if re.fullmatch(r"\{\s*\}", expression) is not None
+            else re.findall(
+                r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?"
+                r"(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)\b",
+                expression,
+            )
         )
-    return [cast(JavaHttpMethod, method) for method in dict.fromkeys(methods)]
+    return list(dict.fromkeys(methods))
 
 
 def _mapping_conditions(
@@ -3485,6 +3583,8 @@ def _mapping_conditions(
             assignment.end(),
             allow_identifier=True,
         )
+        if re.fullmatch(r"\{\s*\}", expression) is not None:
+            continue
         values = _java_mapping_path_values(
             expression,
             string_constants,
@@ -3494,6 +3594,23 @@ def _mapping_conditions(
             return None
         conditions.extend(f"{name}:{value}" for value in sorted(set(values)))
     return conditions
+
+
+def _merge_mapping_conditions(
+    base_conditions: list[str] | tuple[str, ...],
+    overriding_conditions: list[str] | tuple[str, ...],
+) -> list[str]:
+    overridden_media = {
+        condition.partition(":")[0]
+        for condition in overriding_conditions
+        if condition.startswith(("consumes:", "produces:"))
+    }
+    retained_base = [
+        condition
+        for condition in base_conditions
+        if condition.partition(":")[0] not in overridden_media
+    ]
+    return [*retained_base, *overriding_conditions]
 
 
 def _java_operation_ref(
@@ -3863,7 +3980,10 @@ def _dto_field_claims(
         validation_annotations,
         _column_name,
         _column_name_unresolved,
+        json_access,
     ) in type_analysis.fields.get(dto_type, []):
+        if not _jackson_access_allows(json_access, direction):
+            continue
         claims.append(
             JavaDtoFieldClaim(
                 id=_claim_id("dto", operation_ref, direction, dto_type, field_name),
@@ -3922,6 +4042,17 @@ def _dto_field_claims(
                 )
             )
     return claims
+
+
+def _jackson_access_allows(
+    access: JavaJsonAccess,
+    direction: Literal["request", "response"],
+) -> bool:
+    if access == "write_only":
+        return direction == "request"
+    if access == "read_only":
+        return direction == "response"
+    return True
 
 
 def _parameter_types(parameters: str) -> list[str]:
@@ -4207,6 +4338,7 @@ def _structural_java_claims(
                         _annotations,
                         column_name,
                         column_name_unresolved,
+                        _json_access,
                     ) in type_fields.get(name, [])
                     if not column_name_unresolved
                 )
