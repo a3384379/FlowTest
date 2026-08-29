@@ -25,6 +25,7 @@ from app.engine.contracts import (
     NodeType,
     RedisNodeConfig,
     SqlNodeConfig,
+    StartNodeConfig,
     SubFlowNodeConfig,
     WorkflowNode,
 )
@@ -280,7 +281,7 @@ def _v3_event_manifest(
 
 
 BUILTIN_CAPABILITY_MANIFESTS = (
-    _manifest("flow.start", "开始", CapabilityCategory.CONTROL, None),
+    _manifest("flow.start", "开始", CapabilityCategory.CONTROL, StartNodeConfig),
     _manifest(
         "http.request",
         "HTTP 请求",

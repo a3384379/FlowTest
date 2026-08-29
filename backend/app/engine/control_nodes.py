@@ -1,5 +1,6 @@
 import asyncio
 from typing import cast
+from uuid import uuid4
 
 import jmespath
 from jmespath.exceptions import JMESPathError
@@ -15,6 +16,7 @@ from app.engine.contracts import (
     DelayNodeConfig,
     ExtractNodeConfig,
     NodeType,
+    StartNodeConfig,
     WorkflowNode,
     parse_node_config,
 )
@@ -23,7 +25,7 @@ from app.engine.scheduler import ExecutionContext, NodeExecutionError
 
 async def execute_control_node(node: WorkflowNode, context: ExecutionContext) -> JsonValue:
     if node.type is NodeType.START:
-        return {"variables": context.resolved_variables()}
+        return _start(node, context)
     if node.type is NodeType.END:
         return None
     config = parse_node_config(node)
@@ -50,6 +52,29 @@ async def execute_control_node(node: WorkflowNode, context: ExecutionContext) ->
     )
 
 
+def _start(node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+    config = parse_node_config(node)
+    if not isinstance(config, StartNodeConfig):
+        raise NodeExecutionError(code="INVALID_START_CONFIG", message="开始节点配置无效")
+    for name, generator in sorted(config.synthetic_variables.items()):
+        context.record_variable(
+            name,
+            _synthetic_value(generator),
+            node_id=node.id,
+            path=f"synthetic.{name}",
+        )
+    return {"variables": context.resolved_variables()}
+
+
+def _synthetic_value(generator: str) -> JsonValue:
+    identifier = uuid4()
+    if generator == "uuid":
+        return str(identifier)
+    if generator == "unique_string":
+        return f"flowtest-{identifier.hex}"
+    return identifier.int % 2_147_483_647 or 1
+
+
 def _extract(config: ExtractNodeConfig, context: ExecutionContext) -> JsonValue:
     actual = _search(context, config.source_node_id, config.expression)
     if config.required and actual is None:
@@ -73,19 +98,35 @@ def _extract(config: ExtractNodeConfig, context: ExecutionContext) -> JsonValue:
 
 def _assert(config: AssertNodeConfig, context: ExecutionContext) -> JsonValue:
     actual = _search(context, config.source_node_id, config.expression)
+    expected = (
+        _search(
+            context,
+            config.expected_source_node_id,
+            cast(str, config.expected_expression),
+        )
+        if config.expected_source_node_id is not None
+        else config.expected
+    )
     passed = (
-        _schema_matches(actual, config.expected)
+        _schema_matches(actual, expected)
         if config.assertion_type == "json_schema"
-        else (compare_values(actual, config.expected, config.operator))
+        else (compare_values(actual, expected, config.operator))
     )
     output: dict[str, JsonValue] = {
         "passed": passed,
         "actual": actual,
-        "expected": config.expected,
+        "expected": expected,
         "operator": config.operator.value,
         "source_node_id": config.source_node_id,
         "expression": config.expression,
     }
+    if config.expected_source_node_id is not None:
+        output.update(
+            {
+                "expected_source_node_id": config.expected_source_node_id,
+                "expected_expression": config.expected_expression,
+            }
+        )
     if output["passed"] is not True:
         raise NodeExecutionError(
             code="WORKFLOW_ASSERTION_FAILED",

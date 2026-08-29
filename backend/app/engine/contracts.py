@@ -201,6 +201,15 @@ class WorkflowSettings(BaseModel):
     default_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
+class StartNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    synthetic_variables: dict[
+        VariableName,
+        Literal["uuid", "unique_string", "positive_integer"],
+    ] = Field(default_factory=dict, max_length=100)
+
+
 class ApiNodeRequestParameter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -330,7 +339,19 @@ class AssertNodeConfig(BaseModel):
     expression: str = Field(min_length=1, max_length=500)
     operator: ComparisonOperator = ComparisonOperator.EQUALS
     expected: JsonValue = None
+    expected_source_node_id: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_expression: str | None = Field(default=None, min_length=1, max_length=500)
     assertion_type: Literal["comparison", "json_schema"] = "comparison"
+
+    @model_validator(mode="after")
+    def validate_expected_source(self) -> "AssertNodeConfig":
+        has_node = self.expected_source_node_id is not None
+        has_expression = self.expected_expression is not None
+        if has_node != has_expression:
+            raise ValueError("dynamic assertions require both expected source fields")
+        if has_node and self.assertion_type != "comparison":
+            raise ValueError("dynamic expected values only support comparison assertions")
+        return self
 
 
 class ConditionNodeConfig(BaseModel):
@@ -511,7 +532,8 @@ def parse_api_node_config(node: WorkflowNode) -> ApiNodeConfig:
 
 
 NodeConfig = (
-    ApiNodeConfig
+    StartNodeConfig
+    | ApiNodeConfig
     | ExtractNodeConfig
     | AssertNodeConfig
     | ConditionNodeConfig
@@ -526,6 +548,7 @@ NodeConfig = (
 
 
 _NODE_CONFIG_MODELS: dict[NodeType, type[BaseModel]] = {
+    NodeType.START: StartNodeConfig,
     NodeType.API: ApiNodeConfig,
     NodeType.EXTRACT: ExtractNodeConfig,
     NodeType.ASSERT: AssertNodeConfig,

@@ -20,7 +20,11 @@ from app.domain.integration_plans import (
     PlanBindingCandidate,
     PlanBranch,
     PlanCleanupRequirement,
+    PlanDatabasePredicate,
+    PlanDatabaseRead,
     PlanDataRecipe,
+    PlanOracle,
+    PlanOracleValueSource,
     PlanPrecondition,
     PlanRequestTemplate,
     PlanRequestValue,
@@ -48,6 +52,8 @@ from app.engine.contracts import MappingTargetLocation, WorkflowDefinition
 from app.models import Base
 from app.models.access import Project, User
 from app.models.api_assets import APIDefinition, APIVersion
+from app.models.artifacts import Artifact
+from app.models.data_sources import Credential
 from app.models.organizations import Organization
 from app.models.service_targets import Service
 from app.models.workflows import Workflow, WorkflowVersion
@@ -652,6 +658,102 @@ def test_existing_operation_credential_reference_uses_inherited_auth() -> None:
     assert all(parameter.source.value != "secret_ref" for parameter in result.flow_spec.parameters)
 
 
+def test_s53_builder_emits_v2_plan_with_database_step_and_cross_api_oracle() -> None:
+    create = _selected_operation(
+        ref="orders.create",
+        contract=OperationContract(
+            operation="orders.create",
+            method="POST",
+            path="/orders",
+            service="orders",
+            responses={
+                "201": ContractResponse(
+                    description="Created",
+                    schema={
+                        "type": "object",
+                        "properties": {"id": {"type": "string"}},
+                    },
+                )
+            },
+            source_ref="contract://orders/create",
+        ),
+        status=201,
+    )
+    query = _selected_operation(
+        ref="orders.query",
+        contract=OperationContract(
+            operation="orders.query",
+            method="GET",
+            path="/orders",
+            service="orders",
+            parameters=[
+                ContractParameter(
+                    name="id",
+                    location="query",
+                    required=True,
+                    schema={"type": "string"},
+                    source_ref="contract://orders/query/id",
+                )
+            ],
+            responses={
+                "200": ContractResponse(
+                    description="OK",
+                    schema={
+                        "type": "object",
+                        "properties": {"id": {"type": "string"}},
+                    },
+                )
+            },
+            source_ref="contract://orders/query",
+        ),
+        status=200,
+    )
+    database_read = PlanDatabaseRead(
+        id="orders-db-read",
+        name="Read created order",
+        credential_id=UUID("00000000-0000-0000-0000-000000000053"),
+        dialect="postgresql",
+        table="public.orders",
+        columns=["id"],
+        predicates=[
+            PlanDatabasePredicate(
+                column="id",
+                parameter="order_id",
+                variable_name="orders-create-id",
+            )
+        ],
+        source_ref="database://orders/schema/revision/53",
+        applies_to=["orders-create", "orders-query"],
+        evidence_refs=["database://orders/schema/revision/53"],
+    )
+    cross_api = PlanOracle(
+        id="query-create-id",
+        step_id="orders-query",
+        kind="cross_api",
+        expression="body.id",
+        expected_source=PlanOracleValueSource(
+            step_id="orders-create",
+            expression="body.id",
+        ),
+        confidence=1,
+        source_ref="context://s53/oracle/create-query-id",
+        applies_to=["orders-create", "orders-query"],
+        evidence_refs=["context://s53/oracle/create-query-id"],
+    )
+    request = _planner_request([create, query]).model_copy(
+        update={"database_reads": [database_read], "additional_oracles": [cross_api]}
+    )
+
+    plan = build_integration_plan(request)
+    result = compile_integration_plan(plan)
+
+    assert plan.schema_version == "flowtest-integration-plan-v2"
+    assert plan.fingerprint_version == "flowtest-integration-plan-fingerprint-v2"
+    assert plan.steps[-1].db_read_ref == database_read.id
+    assert result.compiler_version == "flowtest-integration-plan-compiler-s53-v1"
+    assert result.importable is True
+
+
 @pytest.mark.asyncio
 async def test_asset_service_reads_canonical_contract_scenario_oracle_and_existing_workflow(
     s50_session: tuple[AsyncSession, User, Project],
@@ -846,6 +948,113 @@ async def test_asset_service_rejects_cross_project_operation(
         )
 
     assert error_info.value.code == "API_DEFINITION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_asset_service_validates_s53_dataset_and_database_ownership(
+    s50_session: tuple[AsyncSession, User, Project],
+) -> None:
+    session, actor, project = s50_session
+    foreign_project = Project(
+        organization_id=project.organization_id,
+        name="Foreign S53 data project",
+        created_by_id=actor.id,
+    )
+    session.add(foreign_project)
+    await session.flush()
+    foreign_artifact = Artifact(
+        project_id=foreign_project.id,
+        object_key=f"s53/{uuid4()}",
+        filename="approved.csv",
+        content_type="text/csv",
+        size_bytes=10,
+        sha256="5" * 64,
+        purpose="upload",
+        created_by_id=actor.id,
+    )
+    foreign_credential = Credential(
+        project_id=foreign_project.id,
+        name="foreign-readonly-postgres",
+        kind="postgresql",
+        host="database.example.test",
+        port=5432,
+        database_name="orders",
+        username="flowtest_reader",
+        secret_provider="local",
+        provider_reference=None,
+        ciphertext=b"encrypted",
+        nonce=b"0123456789ab",
+        tls_enabled=True,
+        created_by_id=actor.id,
+    )
+    wrong_dialect_credential = Credential(
+        project_id=project.id,
+        name="local-readonly-mysql",
+        kind="mysql",
+        host="database.example.test",
+        port=3306,
+        database_name="orders",
+        username="flowtest_reader",
+        secret_provider="local",
+        provider_reference=None,
+        ciphertext=b"encrypted",
+        nonce=b"0123456789ab",
+        tls_enabled=True,
+        created_by_id=actor.id,
+    )
+    session.add_all([foreign_artifact, foreign_credential, wrong_dialect_credential])
+    await session.commit()
+    recipe = PlanDataRecipe(
+        id="approved-orders",
+        kind="approved_dataset",
+        name="Approved orders",
+        artifact_id=foreign_artifact.id,
+        source_ref="artifact://approved-orders/revision/1",
+        evidence_refs=["artifact://approved-orders/revision/1"],
+    )
+    database_read = PlanDatabaseRead(
+        id="orders-db-read",
+        name="Read order",
+        credential_id=foreign_credential.id,
+        dialect="postgresql",
+        table="orders",
+        columns=["id"],
+        predicates=[
+            PlanDatabasePredicate(
+                column="id",
+                parameter="order_id",
+                variable_name="orders-create-id",
+            )
+        ],
+        source_ref="database://orders/schema/revision/53",
+        evidence_refs=["database://orders/schema/revision/53"],
+    )
+    service = IntegrationPlanAssetService(session)
+
+    with pytest.raises(AppError) as artifact_error:
+        await service._validate_data_assets(
+            project_id=project.id,
+            data_recipes=(recipe,),
+            database_reads=(),
+        )
+    with pytest.raises(AppError) as credential_error:
+        await service._validate_data_assets(
+            project_id=project.id,
+            data_recipes=(),
+            database_reads=(database_read,),
+        )
+    with pytest.raises(AppError) as dialect_error:
+        await service._validate_data_assets(
+            project_id=project.id,
+            data_recipes=(),
+            database_reads=(
+                database_read.model_copy(update={"credential_id": wrong_dialect_credential.id}),
+            ),
+        )
+
+    assert artifact_error.value.code == "DATA_RECIPE_ARTIFACT_NOT_FOUND"
+    assert credential_error.value.code == "DATABASE_READ_CREDENTIAL_NOT_FOUND"
+    assert dialect_error.value.code == "DATABASE_READ_CREDENTIAL_NOT_FOUND"
 
 
 @pytest.mark.asyncio
