@@ -529,6 +529,8 @@ class ExternalDatabaseColumnClaim(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
+        if self.primary_key and self.nullable:
+            raise ValueError("database primary key must not be nullable")
         require_no_sensitive_scalar_values(
             [self.schema_name, self.table_name, self.name, self.data_type]
         )

@@ -383,7 +383,7 @@ async def test_generic_evidence_rejects_nested_cross_project_references(
     )
     cross_project_ref = f"flowtest://projects/{other_project_id}/operations/orders"
     envelopes = [
-        _envelope_with_claim_reference(
+        _envelope_with_claim_update(
             bundle_envelope,
             claim_kind="column_profile",
             field_name=field_name,
@@ -392,7 +392,7 @@ async def test_generic_evidence_rejects_nested_cross_project_references(
         for field_name in ("source_ref", "subject_ref")
     ]
     envelopes.append(
-        _envelope_with_claim_reference(
+        _envelope_with_claim_update(
             java_envelope,
             claim_kind="controller_route",
             field_name="operation_ref",
@@ -1881,6 +1881,54 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
 
 
 @pytest.mark.asyncio
+async def test_database_adapter_rejects_nullable_primary_keys_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "数据库主键约束上下文",
+            "objective": "验证专用与通用入口拒绝可空主键",
+            "required_evidence": ["data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    dedicated_payload = _database_evidence(project_id)
+    dedicated_payload["tables"][0]["columns"][0]["nullable"] = True
+
+    dedicated = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": dedicated_payload},
+    )
+    database_envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    )
+    generic = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={
+            "envelope": _envelope_with_claim_update(
+                database_envelope,
+                claim_kind="column",
+                field_name="nullable",
+                value=True,
+            )
+        },
+    )
+
+    for rejected in (dedicated, generic):
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_generic_evidence_rejects_inverted_extrema_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:
@@ -2154,12 +2202,12 @@ def _database_envelope_with_invalid_distribution(
     return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
 
 
-def _envelope_with_claim_reference(
+def _envelope_with_claim_update(
     envelope: ExternalEvidenceEnvelope,
     *,
     claim_kind: str,
     field_name: str,
-    value: str,
+    value: Any,
 ) -> dict[str, Any]:
     finding_index, finding = next(
         (index, finding)

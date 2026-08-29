@@ -349,6 +349,8 @@ class DatabaseColumnEvidence(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
+        if self.primary_key and self.nullable:
+            raise ValueError("database primary key must not be nullable")
         require_no_sensitive_scalar_values([self.name, self.data_type])
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
@@ -1982,11 +1984,11 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
         start=declaration_prefix_start,
         end=declaration.start(),
     )
-    base_paths = (
-        _mapping_paths(_java_annotation_arguments(file.content, base_matches[-1].end()))
-        if base_matches
-        else [""]
+    base_arguments = (
+        _java_annotation_arguments(file.content, base_matches[-1].end()) if base_matches else ""
     )
+    base_paths = _mapping_paths(base_arguments) if base_matches else [""]
+    base_methods = _mapping_http_methods(base_matches[-1], base_arguments) if base_matches else None
     controller = declaration.group("name")
     return [
         route
@@ -2003,6 +2005,7 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
             match.start(),
             match,
             base_paths,
+            base_methods,
             controller,
         )
     ]
@@ -2091,6 +2094,7 @@ def _routes_after_mapping(
     mapping_start: int,
     mapping: re.Match[str],
     base_paths: list[str],
+    base_methods: list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
     controller: str,
 ) -> list[_JavaRoute]:
     mapping_arguments, mapping_end = _java_annotation_arguments_and_end(
@@ -2112,6 +2116,8 @@ def _routes_after_mapping(
         return []
     paths = _mapping_paths(mapping_arguments)
     methods = _mapping_http_methods(mapping, mapping_arguments)
+    if base_methods is not None:
+        methods = [method for method in methods if method in base_methods]
     body_start = mapping_end + signature.end() - 1
     body_end = _matching_brace(file.content, body_start)
     handler = signature.group("handler")
@@ -2143,7 +2149,7 @@ def _mapping_http_methods(
     mapping: re.Match[str],
     arguments: str,
 ) -> list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]]:
-    composed_method = mapping.group("method")
+    composed_method = mapping.groupdict().get("method")
     if composed_method is not None:
         return [
             cast(

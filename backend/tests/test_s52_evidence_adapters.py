@@ -713,6 +713,46 @@ def test_database_distribution_rejects_distinct_count_above_row_count_at_generic
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_column_rejects_nullable_primary_key_at_dedicated_boundary() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][0]["nullable"] = True
+
+    with pytest.raises(ValidationError, match="primary key must not be nullable"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_column_rejects_nullable_primary_key_at_generic_boundary() -> None:
+    envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    finding_index, finding = next(
+        (index, finding)
+        for index, finding in enumerate(envelope.findings)
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
+        and finding.structured_data.claim.primary_key
+    )
+    structured_data = cast(DatabaseExternalEvidenceStructuredData, finding.structured_data)
+    claim = cast(ExternalDatabaseColumnClaim, structured_data.claim)
+    changed_claim = claim.model_copy(update={"nullable": True})
+    changed_structured_data = structured_data.model_copy(update={"claim": changed_claim})
+    provisional = finding.model_copy(
+        update={
+            "structured_data": changed_structured_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    changed_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    findings = list(envelope.findings)
+    findings[finding_index] = changed_finding
+    payload = envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="primary key must not be nullable"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_java_adapter_bounds_finding_ids_without_collisions() -> None:
     payload = _java_submission()
     shared_prefix = "claim" + ("a" * 154)
@@ -2214,6 +2254,45 @@ class RequestMappingController {
         ("POST", "/api/orders", "handle"),
         ("GET", "/api/balanced", "balanced"),
     }
+
+
+def test_java_spring_poc_intersects_class_and_method_mapping_methods() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://class-method", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ClassMethodController.java",
+                        "content": """
+@RestController
+@RequestMapping(path = "/orders", method = RequestMethod.POST)
+class ClassMethodController {
+    @RequestMapping("/create")
+    public Order create() {
+        return orderService.create();
+    }
+
+    @GetMapping("/conflict")
+    public Order conflict() {
+        return orderService.conflict();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.method, claim.path, claim.handler) for claim in routes] == [
+        ("POST", "/orders/create", "create")
+    ]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.create"]
 
 
 def test_java_spring_poc_expands_request_mapping_without_method_to_supported_verbs() -> None:
