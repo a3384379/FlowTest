@@ -9,6 +9,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -46,6 +47,7 @@ from app.domain.test_contexts import (
     ExternalEvidenceStructuredData,
     ExternalEvidenceWarning,
     JavaExternalEvidenceStructuredData,
+    evidence_state_scalar_text,
     finding_semantic_fingerprint,
     first_sensitive_value,
     require_no_sensitive_reference_values,
@@ -374,11 +376,23 @@ class DatabaseObservedDistribution(BaseModel):
             or self.maximum is not None
         ):
             raise ValueError("database all-null distribution must not include observed values")
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and self.distinct_count is not None
+            and Decimal(self.distinct_count)
+            > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+        ):
+            raise ValueError("database distinct count must not exceed non-null row count")
         if self.distinct_count == 0 and (
             self.enum_candidates or self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("database zero-distinct distribution must not include observed values")
-        if self.distinct_count is not None and len(set(self.enum_candidates)) > self.distinct_count:
+        if (
+            self.distinct_count is not None
+            and len({evidence_state_scalar_text(value) for value in self.enum_candidates})
+            > self.distinct_count
+        ):
             raise ValueError("database observed candidates must not exceed distinct count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
@@ -1725,10 +1739,13 @@ def _state_field_identity(field_name: str) -> str:
 
 
 def _database_state_value_sets(column: DatabaseColumnEvidence) -> list[list[str]]:
-    declared = sorted({_state_scalar_text(value) for value in column.enum_values})
+    declared = sorted({evidence_state_scalar_text(value) for value in column.enum_values})
     observed = (
         sorted(
-            {_state_scalar_text(value) for value in column.observed_distribution.enum_candidates}
+            {
+                evidence_state_scalar_text(value)
+                for value in column.observed_distribution.enum_candidates
+            }
         )
         if column.observed_distribution is not None
         else []
@@ -1738,12 +1755,6 @@ def _database_state_value_sets(column: DatabaseColumnEvidence) -> list[list[str]
         if values and values not in result:
             result.append(values)
     return result
-
-
-def _state_scalar_text(value: str | int | float | bool) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
 
 
 def _operation_tables(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
+from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from typing import Annotated, Final, Literal
@@ -61,6 +62,12 @@ _WRITE_SQL = re.compile(
     r"\b(?:alter|call|create|delete|drop|execute|grant|insert|merge|replace|revoke|truncate|update)\b",
     re.IGNORECASE,
 )
+
+
+def evidence_state_scalar_text(value: str | int | float | bool) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 class TestContextStatus(StrEnum):
@@ -511,11 +518,23 @@ class ExternalDatabaseObservedDistribution(BaseModel):
             or self.maximum is not None
         ):
             raise ValueError("database all-null distribution must not include observed values")
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and self.distinct_count is not None
+            and Decimal(self.distinct_count)
+            > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+        ):
+            raise ValueError("database distinct count must not exceed non-null row count")
         if self.distinct_count == 0 and (
             self.enum_candidates or self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("database zero-distinct distribution must not include observed values")
-        if self.distinct_count is not None and len(set(self.enum_candidates)) > self.distinct_count:
+        if (
+            self.distinct_count is not None
+            and len({evidence_state_scalar_text(value) for value in self.enum_candidates})
+            > self.distinct_count
+        ):
             raise ValueError("database observed candidates must not exceed distinct count")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
