@@ -75,7 +75,7 @@ class ExecutionCheckpoint(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('running', 'passed', 'failed', 'skipped', 'cancelled')",
             name="execution_checkpoint_status",
         ),
-        CheckConstraint("attempt >= 1", name="execution_checkpoint_attempt"),
+        CheckConstraint("attempt >= 0", name="execution_checkpoint_attempt"),
         CheckConstraint("fencing_token >= 0", name="execution_checkpoint_fence"),
         CheckConstraint("phase IN ('main', 'cleanup')", name="execution_checkpoint_phase"),
     )

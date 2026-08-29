@@ -462,6 +462,24 @@ async def test_durable_command_and_checkpoint_edge_cases(
         assert finalized_reservation.id == reservation.id
         assert finalized_reservation.status == NodeStatus.PASSED.value
 
+        zero_attempt = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=RunnerCheckpointRequest.model_validate(
+                {
+                    **checkpoint_payload.model_dump(mode="python"),
+                    "node_id": "not-dispatched",
+                    "status": NodeStatus.CANCELLED,
+                    "attempts": 0,
+                    "output": None,
+                    "result": NodeResult(status=NodeStatus.CANCELLED),
+                }
+            ),
+        )
+        assert zero_attempt.attempt == 0
+
         with pytest.raises(AppError) as missing_checkpoint_execution:
             await durable.record_checkpoint(
                 project_id=project.id,

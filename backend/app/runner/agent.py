@@ -107,9 +107,7 @@ class RunnerAgent:
                         f"节点 {update.name}: {update.status.value}",
                     )
                     should_checkpoint = (
-                        update.status.is_terminal
-                        and update.result is not None
-                        and update.attempts > 0
+                        update.status.is_terminal and update.result is not None
                     ) or (
                         update.status is NodeStatus.RUNNING
                         and update.attempts > 0

@@ -407,6 +407,52 @@ async def test_budget_rejection_does_not_activate_cleanup_for_undispatched_node(
 
 
 @pytest.mark.asyncio
+async def test_network_capabilities_consume_request_budget_and_reserve_attempts() -> None:
+    def capability_node(node_id: str) -> dict[str, object]:
+        return {
+            "id": node_id,
+            "type": "capability",
+            "name": node_id,
+            "position": {"x": 100, "y": 0},
+            "capability_id": "graphql.request",
+            "capability_version": "3.0.0",
+            "configuration": {},
+            "bindings": [],
+        }
+
+    definition = workflow(
+        middle_nodes=[capability_node("query-a"), capability_node("query-b")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "query-a"},
+            {"id": "a-b", "source": "query-a", "target": "query-b"},
+            {"id": "b-e", "source": "query-b", "target": "end"},
+        ],
+        run_policy={"request_budget": 1},
+    )
+    updates: list[NodeStatusUpdate] = []
+    executor = ControlledExecutor()
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    result = await WorkflowScheduler(executor).run(
+        definition,
+        on_node_status=capture,
+    )
+
+    query_b = next(record for record in result.records if record.node_id == "query-b")
+    assert executor.executed == ["start", "query-a"]
+    assert query_b.attempts == 0
+    assert query_b.error_code == "REQUEST_BUDGET_EXHAUSTED"
+    query_a_running = next(
+        update
+        for update in updates
+        if update.node_id == "query-a" and update.status is NodeStatus.RUNNING
+    )
+    assert query_a_running.request_reserved is True
+
+
+@pytest.mark.asyncio
 async def test_main_runtime_limit_cancels_work_and_still_allows_cleanup() -> None:
     definition = workflow(
         middle_nodes=[

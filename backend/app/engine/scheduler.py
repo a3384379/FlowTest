@@ -258,8 +258,13 @@ class WorkflowScheduler:
         main_edges = tuple(
             edge for edge in definition.edges if edge.source in main_ids and edge.target in main_ids
         )
-        freeze_main = not reset_retry_budget and _phase_checkpoint_complete(
-            main_nodes, resume_records
+        cleanup_nodes = tuple(
+            node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP
+        )
+        freeze_main = (
+            bool(cleanup_nodes)
+            and not reset_retry_budget
+            and _phase_checkpoint_complete(main_nodes, resume_records)
         )
         main_resume_records = tuple(
             record for record in resume_records if record.node_id in main_ids
@@ -293,9 +298,6 @@ class WorkflowScheduler:
             )
         finally:
             _cancel_runtime_limit(runtime_handle)
-        cleanup_nodes = tuple(
-            node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP
-        )
         if not cleanup_nodes or selected_node_ids is not None:
             return WorkflowRunResult(
                 status=main.status,
@@ -702,6 +704,7 @@ def _node_consumes_request(node: WorkflowNode) -> bool:
         NodeType.FOR_EACH,
         NodeType.SQL,
         NodeType.REDIS,
+        NodeType.CAPABILITY,
     }
 
 

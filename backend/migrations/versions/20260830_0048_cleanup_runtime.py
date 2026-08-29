@@ -53,6 +53,13 @@ def upgrade() -> None:
         )
     with op.batch_alter_table("execution_checkpoints") as batch:
         batch.drop_constraint(
+            op.f("ck_execution_checkpoints_execution_checkpoint_attempt"), type_="check"
+        )
+        batch.create_check_constraint(
+            op.f("ck_execution_checkpoints_execution_checkpoint_attempt"),
+            "attempt >= 0",
+        )
+        batch.drop_constraint(
             op.f("ck_execution_checkpoints_execution_checkpoint_status"), type_="check"
         )
         batch.create_check_constraint(
@@ -72,8 +79,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM execution_checkpoints WHERE status = 'running'")
+    op.execute("DELETE FROM execution_checkpoints WHERE status = 'running' OR attempt = 0")
     with op.batch_alter_table("execution_checkpoints") as batch:
+        batch.drop_constraint(
+            op.f("ck_execution_checkpoints_execution_checkpoint_attempt"), type_="check"
+        )
+        batch.create_check_constraint(
+            op.f("ck_execution_checkpoints_execution_checkpoint_attempt"),
+            "attempt >= 1",
+        )
         batch.drop_constraint(
             op.f("ck_execution_checkpoints_execution_checkpoint_status"), type_="check"
         )

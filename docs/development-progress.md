@@ -33,10 +33,11 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 
 - S54 后端定向集 `85 passed`，兼容回归 `47 passed`，前端相关测试 `6 passed`；
   Ruff、Mypy、TypeScript 与隔离 PostgreSQL Migration 升级/回滚/再升级通过。
-- 四轮复审的 12 个 P1 已完成 Force Cancel Policy、Reclaim Budget、Best-effort
+- 五轮复审的 14 个 P1 已完成 Force Cancel Policy、Reclaim Budget、Best-effort
   Fail-fast、Main Request/Runtime Budget、非 API Cleanup Timeout、持久化 Runtime/Request
   Reservation、预算拒绝激活语义、取消终态 Reservation、Standalone 持久化与
-  Policy-only v2 导出定向修复；修复后 S54 合并定向集 `112 passed`，正等待最终复审。
+  Policy-only v2 导出、Main Phase 完整终态标记与 Capability 请求计费定向修复；
+  修复后 S54 合并定向集 `113 passed`，正等待最终复审。
 - 下一门槛：提交 PR 并复审；只修复 P0/P1。P0/P1 为 0 后只执行一次最终完整
   本地/远程门禁，然后普通合并。
 - 完整实现、验证与边界见 [S54 Release Evidence](release/v6-s54-cleanup-runtime.md)。

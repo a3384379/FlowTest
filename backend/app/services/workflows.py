@@ -620,7 +620,7 @@ class WorkflowService:
                 output=cast(JsonValue, checkpoint.output),
                 extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
             )
-        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoints)
+        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoint_history)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
                 client,

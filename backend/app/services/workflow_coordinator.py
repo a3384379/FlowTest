@@ -172,9 +172,7 @@ class WorkflowRunCoordinator:
                         error_message=update.error_message,
                     )
                 )
-                should_checkpoint = (
-                    safe_result is not None and update.status.is_terminal and update.attempts > 0
-                ) or (
+                should_checkpoint = (safe_result is not None and update.status.is_terminal) or (
                     update.status is NodeStatus.RUNNING
                     and update.attempts > 0
                     and update.request_reserved
