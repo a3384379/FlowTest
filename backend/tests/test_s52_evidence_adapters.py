@@ -829,6 +829,62 @@ def test_database_distribution_rejects_values_when_every_row_is_null_at_generic_
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_when_distinct_count_is_zero_at_dedicated_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["nullable"] = True
+    payload["tables"][0]["columns"][1]["observed_distribution"] = {
+        "distinct_count": 0,
+        **observed_values,
+    }
+
+    with pytest.raises(
+        ValidationError, match="zero-distinct distribution must not include observed values"
+    ):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_when_distinct_count_is_zero_at_generic_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "row_count": None,
+            "distinct_count": 0,
+            "null_ratio": None,
+            "enum_candidates": [],
+            "minimum": None,
+            "maximum": None,
+            **observed_values,
+        },
+        nullable=True,
+    )
+
+    with pytest.raises(
+        ValidationError, match="zero-distinct distribution must not include observed values"
+    ):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_column_rejects_observed_nulls_when_non_nullable_at_dedicated_boundary() -> None:
     payload = _database_submission()
     payload["tables"][0]["columns"][1]["observed_distribution"]["null_ratio"] = 0.01
@@ -1963,6 +2019,41 @@ def test_python_provider_bundle_remains_compatible_with_context_adapter() -> Non
     assert isinstance(structured_data, EvidenceBundleExternalEvidenceStructuredData)
     assert structured_data.claim.kind == "route"
     assert len(structured_data.claim.structured_data_fingerprint) == 64
+
+
+@pytest.mark.parametrize("source_type", ["service_topology", "workflow", "change"])
+def test_evidence_bundle_adapter_preserves_supporting_semantics(source_type: str) -> None:
+    bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": SUBJECT_REF,
+            "findings": [
+                {
+                    "id": f"{source_type}-finding",
+                    "source_type": source_type,
+                    "source_ref": f"evidence://{source_type}",
+                    "subject_ref": SUBJECT_REF,
+                    "kind": "knowledge",
+                    "path": "$.orders",
+                    "structured_data": {"component": "orders"},
+                    "confidence": 0.9,
+                    "deterministic": True,
+                    "revision": "fixture-v1",
+                }
+            ],
+        }
+    )
+
+    envelope = adapt_evidence_bundle(
+        bundle,
+        provider_name="bundle-provider",
+        provider_version="1.0.0",
+        source_ref=f"evidence://{source_type}",
+        source_revision="fixture-v1",
+        subject_ref=SUBJECT_REF,
+    )
+
+    assert bundle.findings[0].as_ref().semantic_role == "supporting"
+    assert envelope.findings[0].semantic_role.value == "supporting"
 
 
 def test_evidence_bundle_rejects_sensitive_path_and_warning_metadata() -> None:
@@ -3378,6 +3469,69 @@ public class CreateOrderRequest {
         if claim.kind == "bean_validation" and claim.field_name == "amount"
     }
     assert annotations == {"Positive", "DecimalMin", "Valid"}
+
+
+def test_java_spring_poc_does_not_inherit_annotations_from_preceding_getters() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://member-boundaries", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(CreateOrderRequest request) { return orderService.create(request); }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+class CreateOrderRequest {
+    private String name;
+
+    @NotNull
+    public String getName() { return name; }
+
+    private String status;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/entity/OrderEntity.java",
+                        "content": """
+class OrderEntity {
+    private String displayName;
+
+    @Column(name = "display_name")
+    public String getDisplayName() { return displayName; }
+
+    private String status;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    constraints = {
+        (claim.field_name, claim.annotation)
+        for claim in evidence.claims
+        if claim.kind == "bean_validation"
+    }
+    entity_columns = {
+        claim.field_name: claim.column_name
+        for claim in evidence.claims
+        if claim.kind == "table_column"
+    }
+    assert constraints == {("name", "NotNull")}
+    assert entity_columns["status"] == "status"
 
 
 def test_java_spring_poc_expands_all_mapping_paths() -> None:

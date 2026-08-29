@@ -372,6 +372,10 @@ class DatabaseObservedDistribution(BaseModel):
             or self.maximum is not None
         ):
             raise ValueError("database all-null distribution must not include observed values")
+        if self.distinct_count == 0 and (
+            self.enum_candidates or self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("database zero-distinct distribution must not include observed values")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
@@ -756,7 +760,7 @@ def adapt_evidence_bundle(
         _external_finding(
             identifier=f"bundle-{finding.id}",
             kind=_bundle_finding_kind(finding.kind),
-            semantic_role=_bundle_semantic_role(finding.source_type),
+            semantic_role=_bundle_semantic_role(finding),
             source=source,
             subject_ref=subject_ref,
             source_path=finding.path,
@@ -1059,14 +1063,8 @@ def _bundle_finding_kind(kind: str) -> EvidenceFindingKind:
     return EvidenceFindingKind.KNOWLEDGE
 
 
-def _bundle_semantic_role(source_type: EvidenceSourceType) -> EvidenceSemanticRole:
-    if source_type is EvidenceSourceType.RUNTIME:
-        return EvidenceSemanticRole.OBSERVED
-    if source_type is EvidenceSourceType.DATA_PROFILE:
-        return EvidenceSemanticRole.MIXED
-    if source_type is EvidenceSourceType.EXISTING_TEST:
-        return EvidenceSemanticRole.COVERAGE
-    return EvidenceSemanticRole.NORMATIVE
+def _bundle_semantic_role(finding: EvidenceFinding) -> EvidenceSemanticRole:
+    return EvidenceSemanticRole(finding.as_ref().semantic_role)
 
 
 class _ParsedEvidence:
@@ -2143,7 +2141,8 @@ def _record_component_field(
 
 def _class_fields(body: str) -> list[JavaField]:
     fields: list[JavaField] = []
-    masked_body = _mask_nested_java_blocks(_mask_java_non_code(body))
+    code_body = _mask_java_non_code(body)
+    masked_body = _mask_nested_java_blocks(code_body)
     for match in _FIELD_DECLARATION.finditer(masked_body):
         modifiers = set(match.group("modifiers").split())
         if modifiers.intersection({"static", "transient"}):
@@ -2151,11 +2150,12 @@ def _class_fields(body: str) -> list[JavaField]:
         declarators = _java_field_declarators(match.group(0))
         if not declarators:
             continue
-        prefix_start = max(0, match.start() - 500)
-        masked_prefix = masked_body[prefix_start : match.start()]
-        annotation_start = masked_prefix.rfind(";") + 1
-        annotation_content = body[prefix_start + annotation_start : match.start()]
-        annotation_mask = masked_prefix[annotation_start:]
+        prefix_start = max(
+            _java_member_prefix_start(code_body, match.start()),
+            match.start() - 500,
+        )
+        annotation_content = body[prefix_start : match.start()]
+        annotation_mask = masked_body[prefix_start : match.start()]
         if _has_jpa_transient_annotation(annotation_content, annotation_mask):
             continue
         annotations = _java_validation_annotations(annotation_content, annotation_mask)
@@ -2183,6 +2183,32 @@ def _class_fields(body: str) -> list[JavaField]:
                 old[3],
             )
     return fields
+
+
+def _java_member_prefix_start(content: str, end: int) -> int:
+    member_start = 0
+    brace_depth = 0
+    group_depth = {"(": 0, "[": 0}
+    closing_groups = {")": "(", "]": "["}
+    for index, character in enumerate(content[:end]):
+        if character in group_depth:
+            group_depth[character] += 1
+            continue
+        if character in closing_groups:
+            opening = closing_groups[character]
+            group_depth[opening] = max(0, group_depth[opening] - 1)
+            continue
+        if any(group_depth.values()):
+            continue
+        if character == "{":
+            brace_depth += 1
+        elif character == "}" and brace_depth > 0:
+            brace_depth -= 1
+            if brace_depth == 0:
+                member_start = index + 1
+        elif character == ";" and brace_depth == 0:
+            member_start = index + 1
+    return member_start
 
 
 def _java_field_declarators(declaration: str) -> list[tuple[str, str]]:

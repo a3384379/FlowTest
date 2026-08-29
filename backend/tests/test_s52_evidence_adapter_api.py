@@ -1971,6 +1971,44 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
     assert rejected_generic_all_null_values.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected_generic_all_null_values.json()["error"]["trace_id"]
 
+    zero_distinct_values = _database_evidence(project_id)
+    zero_distinct_values["tables"][0]["columns"][2]["nullable"] = True
+    zero_distinct_values["tables"][0]["columns"][2]["observed_distribution"] = {
+        "distinct_count": 0,
+        "enum_candidates": ["ghost"],
+    }
+    rejected_zero_distinct_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": zero_distinct_values},
+    )
+
+    assert rejected_zero_distinct_values.status_code == 422
+    assert rejected_zero_distinct_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_zero_distinct_values.json()["error"]["trace_id"]
+
+    generic_zero_distinct_values = _database_envelope_with_invalid_distribution(
+        project_id,
+        {
+            "row_count": None,
+            "distinct_count": 0,
+            "null_ratio": None,
+            "minimum": None,
+            "maximum": None,
+            "enum_candidates": ["ghost"],
+        },
+        nullable=True,
+    )
+    rejected_generic_zero_distinct_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_zero_distinct_values},
+    )
+
+    assert rejected_generic_zero_distinct_values.status_code == 422
+    assert rejected_generic_zero_distinct_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_generic_zero_distinct_values.json()["error"]["trace_id"]
+
 
 @pytest.mark.asyncio
 async def test_database_adapter_rejects_nullable_primary_keys_with_trace_id(
