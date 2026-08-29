@@ -450,6 +450,61 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
 
 
 @pytest.mark.asyncio
+async def test_flowspec_export_preserves_policy_only_v2_runtime_bounds(
+    flow_spec_client: AsyncClient,
+) -> None:
+    token_response = await flow_spec_client.post(
+        "/api/v1/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
+    headers = {"Authorization": f"Bearer {token_response.json()['access_token']}"}
+    project_response = await flow_spec_client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": "Policy-only FlowSpec project"},
+    )
+    project_id = project_response.json()["id"]
+    definition = {
+        "schema_version": "1.0",
+        "variables": {},
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Start",
+                "position": {"x": 0, "y": 0},
+                "config": {},
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "End",
+                "position": {"x": 200, "y": 0},
+                "config": {},
+            },
+        ],
+        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        "settings": {"fail_fast": True, "concurrency": 20, "default_timeout_seconds": 30},
+        "run_policy": {"request_budget": 5, "max_runtime_seconds": 60},
+    }
+    created = await flow_spec_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "Policy-only workflow", "definition": definition},
+    )
+    exported = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/workflows/{created.json()['id']}/export",
+        headers=headers,
+    )
+
+    assert exported.status_code == 200, exported.text
+    spec = exported.json()["spec"]
+    assert spec["schema_version"] == "flowtest-flow-spec-v2"
+    assert spec["run_policy"]["request_budget"] == 5
+    assert spec["run_policy"]["max_runtime_seconds"] == 60
+
+
+@pytest.mark.asyncio
 async def test_flowspec_cross_project_mapping_preserves_target_variant(
     flow_spec_client: AsyncClient,
 ) -> None:

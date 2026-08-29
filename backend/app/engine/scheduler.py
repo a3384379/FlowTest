@@ -228,6 +228,13 @@ class _RequestBudget:
         return True
 
 
+@dataclass(frozen=True, slots=True)
+class _AttemptReservation:
+    attempts: int
+    started_at: datetime | None
+    input_hash: str | None
+
+
 class WorkflowScheduler:
     def __init__(self, executor: NodeExecutor) -> None:
         self._executor = executor
@@ -403,6 +410,15 @@ class WorkflowScheduler:
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
         notified: dict[str, NodeStatus] = {}
         attempt_offsets = resume_attempts or {}
+        reservations = {
+            record.node_id: _AttemptReservation(
+                attempts=record.attempts,
+                started_at=record.started_at,
+                input_hash=record.input_hash,
+            )
+            for record in resume_records
+            if record.attempts > 0
+        }
 
         if selected_node_ids is not None:
             _exclude_unselected(
@@ -429,7 +445,7 @@ class WorkflowScheduler:
         while len(records) < len(nodes):
             if _phase_cancelled(token, force_only=cancellation_force_only):
                 await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
                 await _notify_status_changes(
                     nodes, statuses, records, notified, run_context, on_node_status
                 )
@@ -449,13 +465,14 @@ class WorkflowScheduler:
                 reset_retry_budget,
                 request_budget,
                 on_node_status,
+                reservations,
             )
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
             )
             if not active:
                 if len(records) < len(nodes):
-                    _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED)
+                    _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED, reservations)
                     await _notify_status_changes(
                         nodes, statuses, records, notified, run_context, on_node_status
                     )
@@ -467,7 +484,7 @@ class WorkflowScheduler:
             )
             if cancellation_wait in done:
                 await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
                 await _notify_status_changes(
                     nodes, statuses, records, notified, run_context, on_node_status
                 )
@@ -493,7 +510,7 @@ class WorkflowScheduler:
 
             if failed and definition.settings.fail_fast:
                 await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED)
+                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
                 await _notify_status_changes(
                     nodes, statuses, records, notified, run_context, on_node_status
                 )
@@ -526,6 +543,7 @@ class WorkflowScheduler:
         reset_retry_budget: bool = False,
         request_budget: _RequestBudget | None = None,
         on_node_status: NodeStatusCallback | None = None,
+        reservations: dict[str, _AttemptReservation] | None = None,
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
         input_hash = _input_hash(node.id, context.snapshot())
@@ -555,6 +573,13 @@ class WorkflowScheduler:
                 )
             attempts += 1
             budget_attempts += 1
+            _store_attempt_reservation(
+                reservations,
+                node_id=node.id,
+                attempts=attempts,
+                started_at=started_at,
+                input_hash=input_hash,
+            )
             await _notify_attempt_reserved(
                 node,
                 attempts=attempts,
@@ -652,6 +677,22 @@ def _remaining_request_budget(
             if _node_consumes_request(node)
         )
     return _RequestBudget(max(limit - used, 0))
+
+
+def _store_attempt_reservation(
+    reservations: dict[str, _AttemptReservation] | None,
+    *,
+    node_id: str,
+    attempts: int,
+    started_at: datetime,
+    input_hash: str,
+) -> None:
+    if reservations is not None:
+        reservations[node_id] = _AttemptReservation(
+            attempts=attempts,
+            started_at=started_at,
+            input_hash=input_hash,
+        )
 
 
 def _node_consumes_request(node: WorkflowNode) -> bool:
@@ -943,6 +984,7 @@ def _schedule_ready(
             bool,
             _RequestBudget | None,
             NodeStatusCallback | None,
+            dict[str, _AttemptReservation] | None,
         ],
         Coroutine[Any, Any, NodeRunRecord],
     ],
@@ -950,6 +992,7 @@ def _schedule_ready(
     reset_retry_budget: bool,
     request_budget: _RequestBudget | None,
     on_node_status: NodeStatusCallback | None,
+    reservations: dict[str, _AttemptReservation],
 ) -> None:
     capacity = definition.settings.concurrency - len(active)
     if capacity <= 0:
@@ -973,6 +1016,7 @@ def _schedule_ready(
                 reset_retry_budget,
                 request_budget,
                 on_node_status,
+                reservations,
             )
         )
         active[task] = node.id
@@ -1036,11 +1080,19 @@ def _record_remaining(
     statuses: dict[str, NodeStatus],
     records: dict[str, NodeRunRecord],
     status: NodeStatus,
+    reservations: dict[str, _AttemptReservation],
 ) -> None:
     for node_id, node in nodes.items():
         if node_id not in records:
+            reservation = reservations.get(node_id) if status is NodeStatus.CANCELLED else None
             statuses[node_id] = status
-            records[node_id] = _record(node, status)
+            records[node_id] = _record(
+                node,
+                status,
+                attempts=reservation.attempts if reservation is not None else 0,
+                started_at=reservation.started_at if reservation is not None else None,
+                input_hash=reservation.input_hash if reservation is not None else None,
+            )
 
 
 def _exclude_unselected(

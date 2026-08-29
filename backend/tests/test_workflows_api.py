@@ -894,6 +894,27 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     )
     assert running.status_code == 202, running.text
     execution_id = running.json()["id"]
+    running_checkpoint: dict[str, Any] | None = None
+    for _ in range(50):
+        checkpoints = await workflow_client.get(
+            f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+            headers=headers,
+        )
+        running_checkpoint = next(
+            (
+                item
+                for item in checkpoints.json()
+                if item["node_id"] == "api" and item["status"] == "running"
+            ),
+            None,
+        )
+        if running_checkpoint is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert running_checkpoint is not None
+    assert running_checkpoint["attempt"] == 1
+    assert running_checkpoint["started_at"] is not None
+    reserved_input_hash = running_checkpoint["input_hash"]
     cancelled = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/cancel",
         headers=headers,
@@ -904,6 +925,14 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     result = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
     assert result["execution"]["status"] == "cancelled"
     assert result["nodes"][1]["status"] == "cancelled"
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+        headers=headers,
+    )
+    cancelled_api = next(item for item in checkpoints.json() if item["node_id"] == "api")
+    assert cancelled_api["status"] == "cancelled"
+    assert cancelled_api["attempt"] == 1
+    assert cancelled_api["input_hash"] == reserved_input_hash
 
     forced = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",

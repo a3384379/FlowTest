@@ -46,7 +46,7 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
-from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition
+from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion
@@ -1038,6 +1038,7 @@ class FlowSpecService:
         converter = (
             workflow_definition_to_flow_spec_v2
             if any(node.phase.value == "cleanup" for node in definition.nodes)
+            or definition.run_policy != WorkflowRunPolicy()
             else workflow_definition_to_flow_spec
         )
         return converter(

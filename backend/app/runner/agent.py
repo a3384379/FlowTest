@@ -107,7 +107,9 @@ class RunnerAgent:
                         f"节点 {update.name}: {update.status.value}",
                     )
                     should_checkpoint = (
-                        update.status.is_terminal and update.result is not None
+                        update.status.is_terminal
+                        and update.result is not None
+                        and update.attempts > 0
                     ) or (
                         update.status is NodeStatus.RUNNING
                         and update.attempts > 0
@@ -274,7 +276,7 @@ def _checkpoint_payload(
         node_type=update.node_type,
         name=update.name,
         status=update.status,
-        attempts=max(1, update.attempts),
+        attempts=update.attempts,
         output=redacted_result.output if redacted_result is not None else None,
         result=redacted_result,
         error_code=update.error_code,

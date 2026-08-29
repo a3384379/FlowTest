@@ -213,7 +213,7 @@ async def test_graceful_cancel_runs_cleanup_and_force_cancel_can_skip_it() -> No
     definition = workflow(
         middle_nodes=[
             api_node("slow"),
-            cleanup_node("delete", run_when="cancel"),
+            cleanup_node("delete", cleanup_for=["slow"], run_when="cancel"),
         ],
         edges=[
             {"id": "s-slow", "source": "start", "target": "slow"},
@@ -234,6 +234,9 @@ async def test_graceful_cancel_runs_cleanup_and_force_cancel_can_skip_it() -> No
     assert graceful.status == "cancelled"
     assert graceful.cleanup_status == "passed"
     assert graceful_executor.attempts["delete"] == 1
+    graceful_slow = next(record for record in graceful.records if record.node_id == "slow")
+    assert graceful_slow.attempts == 1
+    assert graceful_slow.input_hash is not None
 
     force_token = CancellationToken()
     force_executor = ControlledExecutor({"slow": {"delay": 5}})

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import redact
 from app.domain.durable_execution import checkpoint_input_hash
+from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
@@ -171,7 +172,14 @@ class WorkflowRunCoordinator:
                         error_message=update.error_message,
                     )
                 )
-                if safe_result is not None and update.status.is_terminal:
+                should_checkpoint = (
+                    safe_result is not None and update.status.is_terminal and update.attempts > 0
+                ) or (
+                    update.status is NodeStatus.RUNNING
+                    and update.attempts > 0
+                    and update.request_reserved
+                )
+                if should_checkpoint:
                     snapshot = update.context_snapshot or {}
                     extracted = snapshot.get("extracted_variables", {})
                     if not isinstance(extracted, dict):
@@ -192,18 +200,20 @@ class WorkflowRunCoordinator:
                                 node_type=update.node_type,
                                 name=update.name,
                                 status=update.status,
-                                attempts=max(1, update.attempts),
-                                output=safe_result.output,
+                                attempts=update.attempts,
+                                output=safe_result.output if safe_result is not None else None,
                                 result=safe_result,
                                 error_code=update.error_code,
                                 error_message=update.error_message,
-                                started_at=None,
+                                started_at=update.started_at,
                                 finished_at=update.occurred_at,
                                 input_hash=update.input_hash
                                 or checkpoint_input_hash(update.node_id, snapshot),
                                 extracted_variables=cast(dict[str, JsonValue], redact(extracted)),
                                 snapshot_revision=1,
                                 fencing_token=0,
+                                phase=update.phase,
+                                best_effort=update.best_effort,
                             ),
                         )
 
