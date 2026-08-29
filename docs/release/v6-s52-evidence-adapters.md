@@ -95,6 +95,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   `RequestMethod` 覆盖 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS/TRACE，避免合法 Mapping 被静默遗漏。
 - Mapping 与 Kafka Topic 中的 Spring `${...}` Placeholder/`#{...}` SpEL 不会被当作确定性运行值；无法静态解析时
   删除对应 Route/Topic Claim，产生显式 Incomplete Warning 并把 Submission 标为非确定性。
+- Kafka Producer 会从 `KafkaTemplate<K,V>` 字段/构造参数识别实际变量名，不依赖固定 `kafkaTemplate` 命名；
+  Mapping Handler 签名允许 Java 合法的 Modifier/Return Type Annotation 交错形式，如 `public @Nullable DTO`。
 - JPA `@Table`/`@Column` 的本地 `static final String`、接口常量和限定常量引用复用安全常量解析；无法解析的显式
   名称不回退猜测 Table/Column，而是停止相应绑定并产生 Incomplete Warning。
 - 转换后的 External Finding ID 在超长时保留有界可读前缀并附加 SHA-256 后缀；允许的 160 字符 Java Claim ID
@@ -167,7 +169,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；847 passed、4 skipped、总覆盖率 90.74%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；848 passed、4 skipped、总覆盖率 90.74%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -242,6 +244,8 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 随后复审指出 Spring Mapping/Kafka Placeholder 可能被误报为字面运行值，以及 JPA Table 常量会错误回退类名；
   当前实现统一拒绝未解析 Placeholder/SpEL、为 Kafka 与 Mapping 产生不完整告警，并解析 JPA Table/Column 常量；
   未解析的显式 JPA 名称不再生成猜测绑定。对应常量、占位符和停止回退路径均有直接回归。
+- 最新复审指出领域命名的 `KafkaTemplate` 字段会漏报 Producer，以及 Method Annotation 夹在 Modifier 与 Return
+  Type 之间时会漏报 Route；当前实现从 KafkaTemplate 类型声明收集变量名，并允许合法 Annotation/Modifier 交错。
 
 ### 待完成
 

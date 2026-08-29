@@ -197,9 +197,13 @@ _SERVICE_CALL = re.compile(
 _THROWS = re.compile(r"\bthrows\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _THROW_NEW = re.compile(r"\bthrow\s+new\s+([A-Za-z_$][A-Za-z0-9_$.]*)")
 _KAFKA_SEND = re.compile(
-    r'\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*"((?:\\.|[^"\\])*)"\s*(?=[,)])'
+    r'\b(?P<target>[A-Za-z_$][A-Za-z0-9_$]*)\.send\s*\(\s*"'
+    r'(?P<topic>(?:\\.|[^"\\])*)"\s*(?=[,)])'
 )
-_KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
+_KAFKA_TEMPLATE_DECLARATION = re.compile(
+    r"\b(?:(?:org\.springframework\.kafka\.core\.)?KafkaTemplate)\s*"
+    r"(?:<[^;(){}=]+>)?\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\b"
+)
 _KAFKA_LISTENER = re.compile(rf"@{_SPRING_KAFKA_ANNOTATION_PREFIX}KafkaListener\b")
 _KAFKA_LISTENER_MARKER = re.compile(rf"@{_SPRING_KAFKA_ANNOTATION_PREFIX}KafkaListener\b")
 _JAVA_STRING_LITERAL = r'"(?:\\.|[^"\\])*"'
@@ -2716,6 +2720,7 @@ def _java_unresolved_kafka_locations(
     unresolved: set[str] = set()
     for file in sorted(files, key=lambda item: item.path):
         masked_content = _mask_java_non_code(file.content)
+        template_names = _java_kafka_template_names(masked_content)
         listener_matches = _active_java_annotation_matches(
             file.content,
             masked_content,
@@ -2732,13 +2737,36 @@ def _java_unresolved_kafka_locations(
             if not _kafka_listener_topics(arguments, string_constants, enclosing_type):
                 line = file.content.count("\n", 0, match.start()) + 1
                 unresolved.add(f"{file.path}:{line}")
-        for marker in _KAFKA_SEND_MARKER.finditer(masked_content):
+        for marker in _java_kafka_send_markers(masked_content, template_names):
             parsed = _KAFKA_SEND.match(file.content, marker.start())
-            topic = _decode_java_string_literal(parsed.group(1)) if parsed is not None else None
+            topic = (
+                _decode_java_string_literal(parsed.group("topic")) if parsed is not None else None
+            )
             if topic is None or _java_has_runtime_expression(topic):
                 line = file.content.count("\n", 0, marker.start()) + 1
                 unresolved.add(f"{file.path}:{line}")
     return tuple(sorted(unresolved))
+
+
+def _java_kafka_template_names(masked_content: str) -> frozenset[str]:
+    return frozenset(
+        {
+            "KafkaTemplate",
+            "kafkaTemplate",
+            *(
+                match.group("name")
+                for match in _KAFKA_TEMPLATE_DECLARATION.finditer(masked_content)
+            ),
+        }
+    )
+
+
+def _java_kafka_send_markers(
+    masked_content: str,
+    template_names: frozenset[str],
+) -> list[re.Match[str]]:
+    targets = "|".join(re.escape(name) for name in sorted(template_names))
+    return list(re.finditer(rf"\b(?:{targets})\.send\b", masked_content))
 
 
 def _java_enclosing_top_level_type(
@@ -3199,8 +3227,9 @@ def _routes_after_mapping(
     following = file.content[mapping_end : mapping_end + 2000]
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
     signature = re.match(
-        r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*(?:(?:public|protected)\s+)?"
-        r"(?:(?:abstract|default|final|native|static|strictfp|synchronized)\s+)*"
+        r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*"
+        r"(?:(?:public|protected|abstract|default|final|native|static|strictfp|synchronized)"
+        r"\s+|@[A-Za-z0-9_$.]+\s*)*"
         r"(?:<[^>{};]+>\s+)?"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
         r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
@@ -3608,6 +3637,7 @@ def _route_claims(
     type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
+    kafka_template_names = _java_kafka_template_names(_mask_java_non_code(file.content))
     for route in routes:
         path = f"{file.path}:{route.source_line}"
         claims.append(
@@ -3626,7 +3656,7 @@ def _route_claims(
         claims.extend(_route_dto_claims(path, route, type_analysis))
         claims.extend(_route_call_claims(path, route))
         claims.extend(_route_exception_claims(path, route))
-        claims.extend(_route_kafka_claims(path, route))
+        claims.extend(_route_kafka_claims(path, route, kafka_template_names))
     return claims
 
 
@@ -3898,16 +3928,20 @@ def _route_exception_claims(source_path: str, route: _JavaRoute) -> list[JavaEvi
     ]
 
 
-def _route_kafka_claims(source_path: str, route: _JavaRoute) -> list[JavaEvidenceClaim]:
-    matches = _active_java_annotation_matches(
-        route.body,
-        _mask_java_non_code(route.body),
-        _KAFKA_SEND_MARKER,
-        _KAFKA_SEND,
-    )
+def _route_kafka_claims(
+    source_path: str,
+    route: _JavaRoute,
+    kafka_template_names: frozenset[str],
+) -> list[JavaEvidenceClaim]:
+    masked_body = _mask_java_non_code(route.body)
+    matches = [
+        parsed
+        for marker in _java_kafka_send_markers(masked_body, kafka_template_names)
+        if (parsed := _KAFKA_SEND.match(route.body, marker.start())) is not None
+    ]
     produced: list[JavaEvidenceClaim] = []
     for match in matches:
-        topic = _decode_java_string_literal(match.group(1))
+        topic = _decode_java_string_literal(match.group("topic"))
         if topic is None or _java_has_runtime_expression(topic):
             continue
         produced.append(

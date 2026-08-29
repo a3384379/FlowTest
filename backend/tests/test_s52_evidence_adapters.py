@@ -3146,6 +3146,11 @@ class ModifierController {
         return packageService.load();
     }
 
+    @GetMapping("/nullable")
+    public @Nullable Order nullableLoad() {
+        return nullableService.load();
+    }
+
     @GetMapping("/private")
     private Order privateLoad() {
         return privateService.load();
@@ -3168,11 +3173,13 @@ class ModifierController {
         ("synchronizedLoad", "/sync"),
         ("protectedLoad", "/protected"),
         ("packageLoad", "/package"),
+        ("nullableLoad", "/nullable"),
     }
     assert {claim.callee_ref for claim in calls} == {
         "java://syncService.load",
         "java://protectedService.load",
         "java://packageService.load",
+        "java://nullableService.load",
     }
 
 
@@ -4869,6 +4876,42 @@ class OrderController {
         if claim.kind == "kafka_event" and claim.direction == "produce"
     ]
     assert produced_topics == ["kafka://orders"]
+
+
+def test_java_spring_poc_recognizes_domain_named_kafka_template_fields() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://named-kafka-template", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    private final KafkaTemplate<String, OrderEvent> orderEvents;
+
+    @PostMapping("/orders")
+    Order publish() {
+        orderEvents.send("orders.domain", event);
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    produced_topics = {
+        claim.topic_ref
+        for claim in evidence.claims
+        if claim.kind == "kafka_event" and claim.direction == "produce"
+    }
+    assert produced_topics == {"kafka://orders.domain"}
 
 
 def test_java_spring_poc_parses_mapping_attributes_annotated_parameters_and_nested_dtos() -> None:
