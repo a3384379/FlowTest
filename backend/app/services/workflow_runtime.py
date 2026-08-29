@@ -557,7 +557,7 @@ class WorkflowNodeExecutor:
         request_budget: RequestBudget | None,
         *,
         status_callback: NodeStatusCallback | None,
-        checkpoint_scope: str,
+        checkpoint_scope: tuple[str, ...],
         checkpoint_phase: WorkflowPhase,
         checkpoint_best_effort: bool,
         checkpoint_records: dict[str, NodeRunRecord],
@@ -583,7 +583,11 @@ class WorkflowNodeExecutor:
         resume_attempts = {record.node_id: record.attempts for record in resume_records}
 
         async def publish_nested(update: NodeStatusUpdate) -> None:
-            if not node_type_consumes_request(update.node_type):
+            nested_node = next(
+                (node for node in prepared.definition.nodes if node.id == update.node_id),
+                None,
+            )
+            if nested_node is None or not node_type_consumes_request(nested_node.effective_type):
                 return
             nested_id = _nested_checkpoint_id(checkpoint_scope, update.node_id)
             mapped = replace(
@@ -661,24 +665,25 @@ def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dic
 
 
 def _nested_scope(
-    parent: str,
+    parent: tuple[str, ...],
     kind: str,
     node_id: str,
     *,
     index: int | None = None,
-) -> str:
-    segment = f"{kind}:{node_id}" if index is None else f"{kind}:{node_id}:{index}"
-    return f"{parent}/{segment}" if parent else segment
+) -> tuple[str, ...]:
+    segment = (kind, node_id) if index is None else (kind, node_id, str(index))
+    return (*parent, *segment)
 
 
-def _nested_checkpoint_id(scope: str, node_id: str) -> str:
-    digest = hashlib.sha256(f"{scope}\0{node_id}".encode()).hexdigest()
+def _nested_checkpoint_id(scope: tuple[str, ...], node_id: str) -> str:
+    encoded = json.dumps((*scope, node_id), ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
     return f"{NESTED_CHECKPOINT_PREFIX}{digest}"
 
 
 def _nested_resume_records(
     definition: WorkflowDefinition,
-    scope: str,
+    scope: tuple[str, ...],
     records: dict[str, NodeRunRecord],
 ) -> tuple[NodeRunRecord, ...]:
     restored: list[NodeRunRecord] = []

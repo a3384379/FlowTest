@@ -25,7 +25,12 @@ from app.engine.scheduler import (
     NodeStatusUpdate,
     WorkflowScheduler,
 )
-from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
+from app.services.workflow_runtime import (
+    PreparedSubflow,
+    WorkflowNodeExecutor,
+    _nested_checkpoint_id,
+    _nested_scope,
+)
 from app.services.workflows import WorkflowService
 
 
@@ -435,10 +440,11 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
     )
     nested = WorkflowDefinition.model_validate(
         {
+            "schema_version": "3.0",
             "nodes": [
-                _node("start", "start", {}),
-                _node("request", "api", _api_config()),
-                _node("end", "end", {}),
+                _capability_node("start", "flow.start", {}),
+                _capability_node("request", "http.request", _api_config()),
+                _capability_node("end", "flow.end", {}),
             ],
             "edges": [_edge("start", "request"), _edge("request", "end")],
         }
@@ -495,6 +501,9 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
         and update.status is NodeStatus.RUNNING
         and update.request_reserved
     )
+    assert {
+        update.name for update in updates if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+    } == {"request"}
     reservation_record = NodeRunRecord(
         node_id=reservation.node_id,
         node_type=reservation.node_type,
@@ -547,6 +556,21 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
     assert [request["attempts"] for request in resumed_requests] == [1, 0]
     assert all(request["error_code"] == "REQUEST_BUDGET_EXHAUSTED" for request in resumed_requests)
     assert not any(update.request_reserved for update in resumed_updates)
+
+
+def test_nested_checkpoint_scope_encoding_has_no_delimiter_collisions() -> None:
+    direct = _nested_scope((), "subflow", "a/subflow:b")
+    nested = _nested_scope(
+        _nested_scope((), "subflow", "a"),
+        "subflow",
+        "b",
+    )
+
+    assert direct != nested
+    assert _nested_checkpoint_id(direct, "request") != _nested_checkpoint_id(
+        nested,
+        "request",
+    )
 
 
 @pytest.mark.asyncio
@@ -647,6 +671,23 @@ def _node(node_id: str, node_type: str, config: dict[str, Any]) -> dict[str, Any
         "name": node_id,
         "position": {"x": 0, "y": 0},
         "config": config,
+    }
+
+
+def _capability_node(
+    node_id: str,
+    capability_id: str,
+    configuration: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": node_id,
+        "type": "capability",
+        "name": node_id,
+        "position": {"x": 0, "y": 0},
+        "capability_id": capability_id,
+        "capability_version": "2.0.0",
+        "configuration": configuration,
+        "bindings": [],
     }
 
 

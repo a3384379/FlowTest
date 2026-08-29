@@ -135,7 +135,7 @@ class ExecutionContext:
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
     request_budget: RequestBudget | None = field(default=None, repr=False)
     status_callback: NodeStatusCallback | None = field(default=None, repr=False)
-    checkpoint_scope: str = field(default="", repr=False)
+    checkpoint_scope: tuple[str, ...] = field(default=(), repr=False)
     checkpoint_phase: WorkflowPhase | None = field(default=None, repr=False)
     checkpoint_best_effort: bool = field(default=False, repr=False)
     nested_checkpoint_records: dict[str, NodeRunRecord] = field(
