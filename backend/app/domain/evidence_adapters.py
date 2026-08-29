@@ -394,10 +394,7 @@ class DatabaseObservedDistribution(BaseModel):
             > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
         ):
             raise ValueError("database distinct count must not exceed non-null row count")
-        if self.distinct_count == 0 and (
-            self.enum_candidates or self.minimum is not None or self.maximum is not None
-        ):
-            raise ValueError("database zero-distinct distribution must not include observed values")
+        self._validate_zero_distinct_distribution()
         if (
             self.distinct_count is not None
             and len({evidence_state_scalar_text(value) for value in self.enum_candidates})
@@ -429,6 +426,18 @@ class DatabaseObservedDistribution(BaseModel):
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
+
+    def _validate_zero_distinct_distribution(self) -> None:
+        if self.distinct_count != 0:
+            return
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio))) > 0
+        ):
+            raise ValueError("database non-null rows require a positive distinct count")
+        if self.enum_candidates or self.minimum is not None or self.maximum is not None:
+            raise ValueError("database zero-distinct distribution must not include observed values")
 
 
 class DatabaseColumnEvidence(BaseModel):
@@ -2914,7 +2923,61 @@ def _java_literal_values(expression: str) -> list[str]:
     array_pattern = rf"\{{\s*{_JAVA_STRING_LITERAL}(?:\s*,\s*{_JAVA_STRING_LITERAL})*\s*,?\s*\}}"
     if single_literal is None and re.fullmatch(array_pattern, stripped) is None:
         return []
-    return [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', stripped)]
+    values: list[str] = []
+    for match in re.finditer(r'"((?:\\.|[^"\\])*)"', stripped):
+        decoded = _decode_java_string_literal(match.group(1))
+        if decoded is None:
+            return []
+        values.append(decoded)
+    return values
+
+
+def _decode_java_string_literal(value: str) -> str | None:
+    decoded: list[str] = []
+    index = 0
+    simple_escapes = {
+        "b": "\b",
+        "t": "\t",
+        "n": "\n",
+        "f": "\f",
+        "r": "\r",
+        '"': '"',
+        "'": "'",
+        "\\": "\\",
+        "s": " ",
+    }
+    while index < len(value):
+        if value[index] != "\\":
+            decoded.append(value[index])
+            index += 1
+            continue
+        index += 1
+        if index >= len(value):
+            return None
+        marker = value[index]
+        if marker in simple_escapes:
+            decoded.append(simple_escapes[marker])
+            index += 1
+            continue
+        if marker == "u":
+            while index < len(value) and value[index] == "u":
+                index += 1
+            code_unit = value[index : index + 4]
+            if len(code_unit) != 4 or re.fullmatch(r"[0-9A-Fa-f]{4}", code_unit) is None:
+                return None
+            decoded.append(chr(int(code_unit, 16)))
+            index += 4
+            continue
+        if marker in "01234567":
+            maximum_digits = 3 if marker in "0123" else 2
+            end = index + 1
+            while end < len(value) and end - index < maximum_digits and value[end] in "01234567":
+                end += 1
+            decoded.append(chr(int(value[index:end], 8)))
+            index = end
+            continue
+        return None
+    return "".join(decoded)
 
 
 def _mask_java_annotation_arguments(content: str) -> str:

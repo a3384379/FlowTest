@@ -752,6 +752,34 @@ def test_database_distribution_rejects_numeric_candidates_outside_extrema_at_gen
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_distribution_rejects_zero_distinct_for_non_null_rows_dedicated() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"] = {
+        "row_count": 10,
+        "null_ratio": 0,
+        "distinct_count": 0,
+    }
+
+    with pytest.raises(ValidationError, match="non-null rows require a positive distinct count"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_distribution_rejects_zero_distinct_for_non_null_rows_generic() -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "row_count": 10,
+            "null_ratio": 0,
+            "distinct_count": 0,
+            "enum_candidates": [],
+            "minimum": None,
+            "maximum": None,
+        }
+    )
+
+    with pytest.raises(ValidationError, match="non-null rows require a positive distinct count"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_distribution_rejects_distinct_count_above_row_count_at_dedicated_boundary() -> (
     None
 ):
@@ -2872,6 +2900,39 @@ class QualifiedController {
         ("GET", "/api/orders", "load")
     ]
     assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
+
+
+def test_java_spring_poc_decodes_java_string_escapes_in_mapping_paths() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://escaped-mapping", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ItemController.java",
+                        "content": """
+@RestController
+class ItemController {
+    @GetMapping("/items/{id:\\\\d+}")
+    Item load() { return itemService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    route = next(claim for claim in evidence.claims if claim.kind == "controller_route")
+    call = next(claim for claim in evidence.claims if claim.kind == "service_call")
+    expected_path = r"/items/{id:\d+}"
+    assert (route.path, route.operation_ref) == (
+        expected_path,
+        f"operation://GET{expected_path}",
+    )
+    assert call.operation_ref == route.operation_ref
 
 
 def test_java_spring_poc_analyzes_every_annotated_top_level_controller() -> None:

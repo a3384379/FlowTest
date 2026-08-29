@@ -526,10 +526,7 @@ class ExternalDatabaseObservedDistribution(BaseModel):
             > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
         ):
             raise ValueError("database distinct count must not exceed non-null row count")
-        if self.distinct_count == 0 and (
-            self.enum_candidates or self.minimum is not None or self.maximum is not None
-        ):
-            raise ValueError("database zero-distinct distribution must not include observed values")
+        self._validate_zero_distinct_distribution()
         if (
             self.distinct_count is not None
             and len({evidence_state_scalar_text(value) for value in self.enum_candidates})
@@ -561,6 +558,18 @@ class ExternalDatabaseObservedDistribution(BaseModel):
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
+
+    def _validate_zero_distinct_distribution(self) -> None:
+        if self.distinct_count != 0:
+            return
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio))) > 0
+        ):
+            raise ValueError("database non-null rows require a positive distinct count")
+        if self.enum_candidates or self.minimum is not None or self.maximum is not None:
+            raise ValueError("database zero-distinct distribution must not include observed values")
 
 
 class ExternalDatabaseTableClaim(BaseModel):
