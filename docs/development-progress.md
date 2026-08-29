@@ -4,8 +4,9 @@
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S51 实现及 Evidence Closure。S52 External Evidence Adapter、Entity Mapping 与 Java/Spring POC
 已由 PR #58 普通 Squash Merge，Evidence Closure PR #59 也已普通 Squash Merge 且 Main Push Required Gate
-成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 正在独立分支开发，当前聚焦回归
-64 passed，尚未进入精确 Head Review 与最终完整门禁。当前 Migration Head 为
+成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 已由 PR #60 普通 Squash Merge，最终
+P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；当前正在独立文档分支完成 S53
+Evidence Closure，尚未进入 S54。当前 Migration Head 为
 `20260829_0047`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
@@ -15,6 +16,31 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 已完成实现验收：V6 S53 Data Recipe 与 Cross-system Oracle
+
+### Implemented
+
+- `flowtest-integration-plan-v2` 增加 Synthetic、Approved Dataset、Previous Step、Environment Variable、
+  Secret Reference、Setup API、Existing Safe Record 与 Database Observation Recipe，并保存来源、证据、
+  Deterministic、Requires Review、Confidence 与 Applies To。
+- Compiler 复用现有 Start/API/Extract/Assert/SQL Node，生成每次执行变化的 Synthetic 数据、Cross-API
+  动态断言与参数化只读 DB Read；敏感路径、写 SQL、跨项目 Artifact/Credential、低置信度与设计期 DB
+  Observation 均 Fail Closed。
+- 真实链路覆盖 Login → Create → Query → DB Read → Cross-API/DB Assert；项目出站策略显式允许
+  `backend` 与 `postgres`，失败断言会输出节点错误码但不输出 Token/Secret。
+
+### 当前门槛
+
+- 测试先行红灯、64 项聚焦回归、Ruff/Mypy 与独立最小真实栈 S53 Playwright 均已通过；临时
+  `flowtest-s53-*` 资源已精确清理，既有 Docker 恢复栈未改动。
+- PR #60 最终 Review 的 P0/P1 为 0；重复 Synthetic 变量名、常量 DB Read 参数与旧版 setup_api
+  兼容三项 P2 按用户指定门槛延期并记录，不继续触发修复—全量门禁循环。
+- PR #60 已普通 Squash Merge，未使用 Admin/Bypass/Force Push/直接 Main；最终精确 Head 与 Merge 后
+  Main 的 Backend、Frontend、Security、Compose Full/Compact、Windows、Upgrade 与 Required Gate
+  全部 Success。完整运行 ID 见 [S53 Release Evidence](release/v6-s53-data-oracles.md)。
+- 下一门槛：S53 Evidence Closure 文档 PR 普通合并且其 Main Push Required Gate 成功后，才可从最新
+  Main 创建 S54 Cleanup Scheduler / Compensation Runtime 独立分支。
 
 ## 已完成实现验收：V6 S52 External Evidence Adapter 与 Entity Mapping
 
