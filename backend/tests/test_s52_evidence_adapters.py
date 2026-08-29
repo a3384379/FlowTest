@@ -3310,6 +3310,80 @@ enum Marker { PRESENT; }
     ]
 
 
+def test_java_spring_poc_excludes_abstract_annotated_controllers() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://abstract-controller", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AbstractOrderController.java",
+                        "content": """
+@RestController
+abstract class AbstractOrderController {
+    @GetMapping("/orders")
+    Order load() { return orderService.load(); }
+}
+
+enum Marker { PRESENT; }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert not [claim for claim in evidence.claims if claim.kind == "service_call"]
+
+
+def test_java_spring_poc_resolves_call_kind_from_injected_dependency_type() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://typed-call-target", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    private final OrderService orderOperations;
+    private final InventoryClient stockGateway;
+
+    OrderController(OrderService orderOperations, InventoryClient stockGateway) {
+        this.orderOperations = orderOperations;
+        this.stockGateway = stockGateway;
+    }
+
+    @GetMapping("/orders/{id}")
+    Order load(String id) {
+        stockGateway.reserve(id);
+        return orderOperations.load(id);
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    calls = {
+        (claim.kind, claim.callee_ref)
+        for claim in evidence.claims
+        if claim.kind in {"service_call", "feign_call"}
+    }
+    assert calls == {
+        ("service_call", "java://orderOperations.load"),
+        ("feign_call", "java://stockGateway.reserve"),
+    }
+
+
 def test_java_spring_poc_recognizes_fully_qualified_spring_mapping_annotations() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

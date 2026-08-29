@@ -203,7 +203,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；866 passed、4 skipped、总覆盖率 90.74%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；868 passed、4 skipped、总覆盖率 90.74%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -326,8 +326,12 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 最新精确复审提出一个 P2：新增证据消除 Mapping 歧义后，旧 Revision 派生的 Conflict Finding 仍被复制，
   导致 Context 永久保持 `conflicted` 并占用冲突配额。当前每次 Ingest 都会从累计非派生证据重新计算 Mapping
   Conflict，退休旧派生标记并重建 Snapshot；普通外部冲突仍保留。直接 API 回归覆盖 Route 对两个同名跨 Schema
-  Table 产生冲突，随后显式 Entity/Table 关联将其消解并恢复 `ready`。全量后端门禁通过：
-  866 passed、4 skipped、总覆盖率 90.74%。
+  Table 产生冲突，随后显式 Entity/Table 关联将其消解并恢复 `ready`。
+- 后续精确复审提出两个 P2：依赖变量名不以 `service/client/repository/mapper` 结尾时漏掉调用证据；抽象
+  `@Controller`/`@RestController` 被误判为可注册 Bean。当前 Route 同时使用注入字段与构造参数的声明类型识别
+  Service/Feign Target，并排除抽象 Controller 候选；变量名后缀仍作为无类型证据时的兼容回退。直接回归覆盖
+  `OrderService orderOperations`、`InventoryClient stockGateway` 与抽象 Controller。全量后端门禁通过：
+  868 passed、4 skipped、总覆盖率 90.74%。
 
 ### 待完成
 
