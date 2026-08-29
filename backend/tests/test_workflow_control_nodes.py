@@ -724,6 +724,81 @@ async def test_graceful_parent_cancel_allows_nested_cleanup_to_finish() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_force_escalation_interrupts_shielded_nested_cleanup() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000107")
+    node = WorkflowNode.model_validate(
+        _node(
+            "nested",
+            "subflow",
+            {"workflow_id": str(workflow_id), "workflow_version": 1},
+        )
+    )
+    slow = _capability_node("slow", "flow.delay", {"seconds": 5})
+    cleanup = _capability_node("cleanup", "flow.delay", {"seconds": 5})
+    cleanup.update(
+        {
+            "phase": "cleanup",
+            "run_when": "cancel",
+            "cleanup_for": ["slow"],
+        }
+    )
+    nested = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "3.0",
+            "nodes": [
+                _capability_node("start", "flow.start", {}),
+                slow,
+                _capability_node("end", "flow.end", {}),
+                cleanup,
+            ],
+            "edges": [_edge("start", "slow"), _edge("slow", "end")],
+            "run_policy": {"force_cancel_skips_cleanup": True},
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="e" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={},
+    )
+    wrapper = _wrapper_workflow(node)
+    cancellation = CancellationToken()
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        task = asyncio.create_task(
+            WorkflowScheduler(executor).run(
+                wrapper,
+                cancellation=cancellation,
+                on_node_status=capture,
+            )
+        )
+        await asyncio.sleep(0.02)
+        cancellation.cancel()
+        await asyncio.sleep(0.05)
+        cancellation.cancel(force=True)
+        result = await asyncio.wait_for(task, timeout=1)
+
+    assert result.status == "cancelled"
+    assert any(
+        update.name == "cleanup" and update.status is NodeStatus.CANCELLED for update in updates
+    )
+
+
 def test_nested_checkpoint_scope_encoding_has_no_delimiter_collisions() -> None:
     direct = _nested_scope((), "subflow", "a/subflow:b")
     nested = _nested_scope(

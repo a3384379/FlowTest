@@ -612,6 +612,13 @@ class WorkflowNodeExecutor:
                 await status_callback(mapped)
 
         nested_cancellation = CancellationToken()
+        force_forwarder = (
+            asyncio.create_task(
+                _forward_force_cancellation(parent_cancellation, nested_cancellation)
+            )
+            if parent_cancellation is not None
+            else None
+        )
         run_task = asyncio.create_task(
             WorkflowScheduler(executor).run(
                 prepared.definition,
@@ -646,6 +653,9 @@ class WorkflowNodeExecutor:
             await asyncio.shield(run_task)
             raise
         finally:
+            if force_forwarder is not None:
+                force_forwarder.cancel()
+                await asyncio.gather(force_forwarder, return_exceptions=True)
             await executor.close()
 
     def _prepared_subflow(self, node: WorkflowNode) -> PreparedSubflow:
@@ -746,6 +756,14 @@ def _checkpoint_record(update: NodeStatusUpdate) -> NodeRunRecord:
         phase=update.phase,
         best_effort=update.best_effort,
     )
+
+
+async def _forward_force_cancellation(
+    parent: CancellationToken,
+    nested: CancellationToken,
+) -> None:
+    await parent.wait(force_only=True)
+    nested.cancel(force=True)
 
 
 async def _collect_for_each_tasks(
