@@ -413,6 +413,19 @@ class DatabaseObservedDistribution(BaseModel):
             and self.minimum != self.maximum
         ):
             raise ValueError("database observed singleton extrema must be equal")
+        numeric_candidates = [
+            value
+            for value in self.enum_candidates
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        if (
+            self.minimum is not None
+            and any(candidate < self.minimum for candidate in numeric_candidates)
+        ) or (
+            self.maximum is not None
+            and any(candidate > self.maximum for candidate in numeric_candidates)
+        ):
+            raise ValueError("database numeric candidates must fall within observed extrema")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
@@ -1944,6 +1957,7 @@ class _JavaRoute(BaseModel):
     return_type: str
     parameters: str
     declared_exceptions: list[str]
+    conditions: tuple[str, ...] = ()
     body: str
     source_line: int
 
@@ -2406,20 +2420,12 @@ def _java_controller_routes(
         masked_content[class_opening + 1 : class_end]
     )
     route_mask = "".join(route_masked_content)
-    base_matches = _active_java_annotation_matches(
-        file.content,
+    base_paths, base_methods, base_conditions = _java_type_mapping(
+        file,
         masked_content,
-        _REQUEST_MAPPING_MARKER,
-        _REQUEST_MAPPING,
-        start=declaration_prefix_start,
-        end=declaration.start(),
+        declaration,
+        declaration_prefix_start,
     )
-    base_arguments = (
-        _java_annotation_arguments(file.content, base_matches[-1].end()) if base_matches else ""
-    )
-    base_paths = _mapping_paths(base_arguments) if base_matches else [""]
-    base_methods = _mapping_http_methods(base_matches[-1], base_arguments) if base_matches else None
-    base_conditions = _mapping_conditions(base_arguments) if base_matches else []
     controller = declaration.group("name")
     return [
         route
@@ -2452,9 +2458,17 @@ def _java_bound_interface_routes(
 ) -> list[_JavaRoute]:
     declaration, _prefix_start = selected
     controller = declaration.group("name")
+    base_paths, base_methods, base_conditions = _java_type_mapping(
+        file,
+        masked_content,
+        declaration,
+        selected[1],
+    )
     routes: list[_JavaRoute] = []
     for interface_name in _java_implemented_interfaces(masked_content, declaration):
         for contract in interface_routes.get(interface_name, ()):
+            if base_methods is not None and contract.method not in base_methods:
+                continue
             implementation = _java_controller_method_body(
                 file,
                 masked_content,
@@ -2469,16 +2483,54 @@ def _java_bound_interface_routes(
                     file.content.count("\n", 0, declaration.start()) + 1,
                 )
             )
-            routes.append(
-                contract.model_copy(
-                    update={
-                        "controller_ref": f"java://{controller}",
-                        "body": body,
-                        "source_line": source_line,
-                    }
+            conditions = [*contract.conditions, *base_conditions]
+            for base_path in base_paths:
+                full_path = _join_route_path(base_path, contract.path)
+                routes.append(
+                    contract.model_copy(
+                        update={
+                            "path": full_path,
+                            "operation_ref": _java_operation_ref(
+                                contract.method,
+                                full_path,
+                                conditions,
+                            ),
+                            "controller_ref": f"java://{controller}",
+                            "conditions": tuple(conditions),
+                            "body": body,
+                            "source_line": source_line,
+                        }
+                    )
                 )
-            )
     return routes
+
+
+def _java_type_mapping(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+    declaration: re.Match[str],
+    declaration_prefix_start: int,
+) -> tuple[
+    list[str],
+    list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
+    list[str],
+]:
+    base_matches = _active_java_annotation_matches(
+        file.content,
+        masked_content,
+        _REQUEST_MAPPING_MARKER,
+        _REQUEST_MAPPING,
+        start=declaration_prefix_start,
+        end=declaration.start(),
+    )
+    if not base_matches:
+        return [""], None, []
+    base_arguments = _java_annotation_arguments(file.content, base_matches[-1].end())
+    return (
+        _mapping_paths(base_arguments),
+        _mapping_http_methods(base_matches[-1], base_arguments),
+        _mapping_conditions(base_arguments),
+    )
 
 
 def _java_implemented_interfaces(
@@ -2514,13 +2566,15 @@ def _java_controller_method_body(
         masked_content[class_opening + 1 : class_end]
     )
     route_mask = "".join(route_masked_content)
-    expected_arity = _java_parameter_arity(contract.parameters)
+    expected_types = _java_parameter_type_signature(contract.parameters)
+    if expected_types is None:
+        return None
     handler_marker = re.compile(rf"\b{re.escape(contract.handler)}\s*\(")
     for match in handler_marker.finditer(route_mask, class_opening + 1, class_end):
         parameter_opening = route_mask.find("(", match.start(), match.end())
         parameter_closing = _matching_parenthesis(file.content, parameter_opening)
         parameters = file.content[parameter_opening + 1 : parameter_closing]
-        if _java_parameter_arity(parameters) != expected_arity:
+        if _java_parameter_type_signature(parameters) != expected_types:
             continue
         method_tail = file.content[parameter_closing + 1 : class_end]
         body_match = re.match(
@@ -2538,10 +2592,14 @@ def _java_controller_method_body(
     return None
 
 
-def _java_parameter_arity(parameters: str) -> int:
+def _java_parameter_type_signature(parameters: str) -> tuple[str, ...] | None:
     if not parameters.strip():
-        return 0
-    return len(_split_top_level_java_components(parameters))
+        return ()
+    components = _split_top_level_java_components(parameters)
+    parameter_types = tuple(_parameter_types(parameters))
+    if len(parameter_types) != len(components):
+        return None
+    return parameter_types
 
 
 def _java_controller_declarations(
@@ -2688,6 +2746,7 @@ def _routes_after_mapping(
                 if signature.group("throws") is not None
                 else None
             ),
+            conditions=tuple(conditions),
             body=(
                 file.content[body_start + 1 : body_end]
                 if signature.group("terminator") == "{"

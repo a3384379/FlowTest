@@ -713,6 +713,45 @@ def test_database_distribution_rejects_unequal_singleton_extrema_at_generic_boun
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+@pytest.mark.parametrize("candidate", [1, 11], ids=["below-minimum", "above-maximum"])
+def test_database_distribution_rejects_numeric_candidates_outside_extrema_at_dedicated_boundary(
+    candidate: int,
+) -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {
+            "distinct_count": 2,
+            "minimum": 5.0,
+            "maximum": 10.0,
+            "enum_candidates": [candidate],
+        }
+    )
+
+    with pytest.raises(
+        ValidationError, match="numeric candidates must fall within observed extrema"
+    ):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+@pytest.mark.parametrize("candidate", [1, 11], ids=["below-minimum", "above-maximum"])
+def test_database_distribution_rejects_numeric_candidates_outside_extrema_at_generic_boundary(
+    candidate: int,
+) -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "distinct_count": 2,
+            "minimum": 5.0,
+            "maximum": 10.0,
+            "enum_candidates": [candidate],
+        }
+    )
+
+    with pytest.raises(
+        ValidationError, match="numeric candidates must fall within observed extrema"
+    ):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_distribution_rejects_distinct_count_above_row_count_at_dedicated_boundary() -> (
     None
 ):
@@ -2688,6 +2727,82 @@ class OrderController implements OrdersApi {
     assert [(claim.handler, claim.method, claim.path) for claim in routes] == [
         ("load", "GET", "/orders")
     ]
+
+
+def test_java_spring_poc_applies_controller_prefix_to_interface_mapping() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {
+                    "ref": "repository://prefixed-interface-route",
+                    "revision": "fixture-v1",
+                },
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @GetMapping("/orders")
+    Order load();
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+@RequestMapping("/v1")
+class OrderController implements OrdersApi {
+    public Order load() { return orderService.load(); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    route = next(claim for claim in evidence.claims if claim.kind == "controller_route")
+    assert (route.path, route.operation_ref) == ("/v1/orders", "operation://GET/v1/orders")
+
+
+def test_java_spring_poc_matches_interface_overloads_by_parameter_type() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://interface-overload", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @GetMapping("/orders/{id}")
+    Order find(String id);
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    public Order find(Integer id) { return integerService.find(id); }
+
+    public Order find(String id) { return stringService.find(id); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [claim.callee_ref for claim in calls] == ["java://stringService.find"]
 
 
 def test_java_spring_poc_does_not_select_an_arbitrary_unannotated_class() -> None:

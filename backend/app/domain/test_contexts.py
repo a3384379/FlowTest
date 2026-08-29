@@ -545,6 +545,19 @@ class ExternalDatabaseObservedDistribution(BaseModel):
             and self.minimum != self.maximum
         ):
             raise ValueError("database observed singleton extrema must be equal")
+        numeric_candidates = [
+            value
+            for value in self.enum_candidates
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        if (
+            self.minimum is not None
+            and any(candidate < self.minimum for candidate in numeric_candidates)
+        ) or (
+            self.maximum is not None
+            and any(candidate > self.maximum for candidate in numeric_candidates)
+        ):
+            raise ValueError("database numeric candidates must fall within observed extrema")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
