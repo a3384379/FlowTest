@@ -713,6 +713,47 @@ def test_database_distribution_rejects_unequal_singleton_extrema_at_generic_boun
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    "one_sided_extremum",
+    [{"minimum": 1.0}, {"maximum": 3.0}],
+    ids=["minimum", "maximum"],
+)
+def test_database_distribution_rejects_one_sided_singleton_mismatch_dedicated(
+    one_sided_extremum: dict[str, float],
+) -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {
+            "distinct_count": 1,
+            "enum_candidates": [2],
+            **one_sided_extremum,
+        }
+    )
+
+    with pytest.raises(ValidationError, match="singleton candidate must equal observed extrema"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "one_sided_extremum",
+    [{"minimum": 1.0}, {"maximum": 3.0}],
+    ids=["minimum", "maximum"],
+)
+def test_database_distribution_rejects_one_sided_singleton_mismatch_generic(
+    one_sided_extremum: dict[str, float],
+) -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "distinct_count": 1,
+            "enum_candidates": [2],
+            **one_sided_extremum,
+        }
+    )
+
+    with pytest.raises(ValidationError, match="singleton candidate must equal observed extrema"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 @pytest.mark.parametrize("candidate", [1, 11], ids=["below-minimum", "above-maximum"])
 def test_database_distribution_rejects_numeric_candidates_outside_extrema_at_dedicated_boundary(
     candidate: int,

@@ -437,6 +437,8 @@ class DatabaseObservedDistribution(BaseModel):
             for value in self.enum_candidates
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         ]
+        numeric_candidate_values = set(numeric_candidates)
+        self._validate_singleton_candidate_extrema(numeric_candidate_values)
         if (
             self.minimum is not None
             and any(candidate < self.minimum for candidate in numeric_candidates)
@@ -448,6 +450,17 @@ class DatabaseObservedDistribution(BaseModel):
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
+
+    def _validate_singleton_candidate_extrema(
+        self, numeric_candidate_values: set[int | float]
+    ) -> None:
+        if self.distinct_count != 1 or len(numeric_candidate_values) != 1:
+            return
+        singleton_candidate = next(iter(numeric_candidate_values))
+        if (self.minimum is not None and singleton_candidate != self.minimum) or (
+            self.maximum is not None and singleton_candidate != self.maximum
+        ):
+            raise ValueError("database observed singleton candidate must equal observed extrema")
 
     def _validate_zero_distinct_distribution(self) -> None:
         if self.distinct_count != 0:

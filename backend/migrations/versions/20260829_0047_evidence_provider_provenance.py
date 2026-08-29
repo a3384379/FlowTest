@@ -28,6 +28,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Revision snapshots embed provider types, so preserving only their evidence rows
+    # would leave an unreadable 0046 context. The declared CASCADE relationships remove
+    # all revisions and evidence for each affected context atomically.
+    op.execute(
+        "DELETE FROM test_contexts WHERE id IN ("
+        "SELECT DISTINCT revisions.context_id FROM test_context_revisions AS revisions "
+        "JOIN context_evidence_items AS evidence "
+        "ON evidence.context_revision_id = revisions.id "
+        "WHERE evidence.source_type IN "
+        "('service_topology', 'change', 'user_confirmed_rule'))"
+    )
     with op.batch_alter_table("context_evidence_items") as batch:
         batch.drop_constraint(op.f(_CONSTRAINT_NAME), type_="check")
         batch.create_check_constraint(op.f(_CONSTRAINT_NAME), _LEGACY_SOURCE_TYPES)

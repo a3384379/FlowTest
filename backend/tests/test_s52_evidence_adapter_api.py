@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -93,6 +99,7 @@ async def s52_context() -> AsyncIterator[dict[str, Any]]:
     ) as client:
         yield {
             "client": client,
+            "engine": engine,
             "project_id": project.id,
             "token": account.token,
         }
@@ -162,6 +169,7 @@ async def test_java_and_database_evidence_enter_context_and_expose_mapping(
 @pytest.mark.asyncio
 async def test_user_confirmed_rule_does_not_satisfy_repository_evidence(
     s52_context: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = s52_context["client"]
     headers = _headers(s52_context["token"])
@@ -225,6 +233,44 @@ async def test_user_confirmed_rule_does_not_satisfy_repository_evidence(
         "missing": ["repository"],
         "complete": False,
     }
+
+    migration_path = (
+        Path(__file__).parents[1]
+        / "migrations/versions/20260829_0047_evidence_provider_provenance.py"
+    )
+    spec = spec_from_file_location("s52_evidence_provider_provenance", migration_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("unable to load the S52 evidence provenance migration")
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    def downgrade(connection: Connection) -> None:
+        migration_context = MigrationContext.configure(connection)
+        monkeypatch.setattr(migration, "op", Operations(migration_context))
+        migration.downgrade()
+
+    engine = s52_context["engine"]
+    async with engine.connect() as connection:
+        await connection.execute(text("PRAGMA foreign_keys=ON"))
+        await connection.commit()
+    async with engine.begin() as connection:
+        await connection.run_sync(downgrade)
+        identifier = context_id.replace("-", "")
+        remaining_contexts = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_contexts WHERE id = :identifier"),
+            {"identifier": identifier},
+        )
+        remaining_revisions = await connection.scalar(
+            text("SELECT COUNT(*) FROM test_context_revisions WHERE context_id = :identifier"),
+            {"identifier": identifier},
+        )
+        remaining_evidence = await connection.scalar(
+            text(
+                "SELECT COUNT(*) FROM context_evidence_items "
+                "WHERE source_type = 'user_confirmed_rule'"
+            )
+        )
+    assert [remaining_contexts, remaining_revisions, remaining_evidence] == [0, 0, 0]
 
 
 @pytest.mark.asyncio
