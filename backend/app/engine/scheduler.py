@@ -101,6 +101,7 @@ class NodeStatusUpdate:
 
 
 NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
+NESTED_CHECKPOINT_PREFIX = "__nested_request__:"
 
 
 @dataclass(slots=True)
@@ -133,6 +134,15 @@ class ExecutionContext:
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
     request_budget: RequestBudget | None = field(default=None, repr=False)
+    status_callback: NodeStatusCallback | None = field(default=None, repr=False)
+    checkpoint_scope: str = field(default="", repr=False)
+    checkpoint_phase: WorkflowPhase | None = field(default=None, repr=False)
+    checkpoint_best_effort: bool = field(default=False, repr=False)
+    nested_checkpoint_records: dict[str, NodeRunRecord] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    reset_retry_budget: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")
@@ -263,6 +273,17 @@ class WorkflowScheduler:
         shared_request_budget: RequestBudget | None = None,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
+        if run_context.status_callback is None:
+            run_context.status_callback = on_node_status
+        if not run_context.nested_checkpoint_records:
+            run_context.nested_checkpoint_records.update(
+                {
+                    record.node_id: record
+                    for record in resume_records
+                    if record.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+                }
+            )
+        run_context.reset_retry_budget = reset_retry_budget
         token = cancellation or CancellationToken()
         main_nodes = tuple(node for node in definition.nodes if node.phase is WorkflowPhase.MAIN)
         main_ids = frozenset(node.id for node in main_nodes)
@@ -286,6 +307,8 @@ class WorkflowScheduler:
             resume_attempts,
             reset=reset_retry_budget,
             parent=shared_request_budget,
+            resume_records=resume_records,
+            phase=WorkflowPhase.MAIN,
         )
         run_context.request_budget = main_budget
         runtime_handle = _schedule_runtime_limit(
@@ -370,6 +393,8 @@ class WorkflowScheduler:
             resume_attempts,
             reset=reset_retry_budget,
             parent=shared_request_budget,
+            resume_records=resume_records,
+            phase=WorkflowPhase.CLEANUP,
         )
         context.request_budget = request_budget
         cleanup_cancellation = (
@@ -686,6 +711,8 @@ def _remaining_request_budget(
     *,
     reset: bool,
     parent: RequestBudget | None = None,
+    resume_records: tuple[NodeRunRecord, ...] = (),
+    phase: WorkflowPhase = WorkflowPhase.MAIN,
 ) -> RequestBudget | None:
     if limit is None:
         return parent
@@ -696,6 +723,7 @@ def _remaining_request_budget(
             for node in nodes
             if _node_consumes_request(node)
         )
+        used += _nested_request_attempts(resume_records, phase=phase)
     return RequestBudget(max(limit - used, 0), parent=parent)
 
 
@@ -716,12 +744,32 @@ def _store_attempt_reservation(
 
 
 def _node_consumes_request(node: WorkflowNode) -> bool:
-    return node.effective_type in {
+    return node_type_consumes_request(node.effective_type)
+
+
+def node_type_consumes_request(node_type: NodeType) -> bool:
+    return node_type in {
         NodeType.API,
         NodeType.SQL,
         NodeType.REDIS,
         NodeType.CAPABILITY,
     }
+
+
+def _nested_request_attempts(
+    records: tuple[NodeRunRecord, ...],
+    *,
+    phase: WorkflowPhase,
+) -> int:
+    attempts: dict[str, int] = {}
+    for record in records:
+        if (
+            record.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+            and record.phase is phase
+            and node_type_consumes_request(record.node_type)
+        ):
+            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+    return sum(attempts.values())
 
 
 def _schedule_runtime_limit(

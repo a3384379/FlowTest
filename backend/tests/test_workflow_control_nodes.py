@@ -16,7 +16,15 @@ from app.engine.contracts import (
 )
 from app.engine.control_nodes import execute_control_node
 from app.engine.mappings import MappingResolutionError, resolve_field_mappings
-from app.engine.scheduler import ExecutionContext, NodeExecutionError, WorkflowScheduler
+from app.engine.results import NodeResult
+from app.engine.scheduler import (
+    NESTED_CHECKPOINT_PREFIX,
+    ExecutionContext,
+    NodeExecutionError,
+    NodeRunRecord,
+    NodeStatusUpdate,
+    WorkflowScheduler,
+)
 from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
 from app.services.workflows import WorkflowService
 
@@ -449,6 +457,10 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
     wrapper = WorkflowDefinition.model_validate(wrapper_payload)
     context = ExecutionContext()
     context.record_output("source", {"items": ["a", "b"]})
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
 
     async with httpx.AsyncClient() as client:
         executor = WorkflowNodeExecutor(
@@ -458,7 +470,11 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
             OutboundNetworkPolicy(),
             subflows={node.id: prepared},
         )
-        result = await WorkflowScheduler(executor).run(wrapper, context=context)
+        result = await WorkflowScheduler(executor).run(
+            wrapper,
+            context=context,
+            on_node_status=capture,
+        )
 
     loop = next(record for record in result.records if record.node_id == "loop")
     assert isinstance(loop.output, dict)
@@ -472,6 +488,65 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
     ]
     assert [request["attempts"] for request in nested_requests] == [1, 0]
     assert nested_requests[1]["error_code"] == "REQUEST_BUDGET_EXHAUSTED"
+    reservation = next(
+        update
+        for update in updates
+        if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+        and update.status is NodeStatus.RUNNING
+        and update.request_reserved
+    )
+    reservation_record = NodeRunRecord(
+        node_id=reservation.node_id,
+        node_type=reservation.node_type,
+        name=reservation.name,
+        status=reservation.status,
+        attempts=reservation.attempts,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED),
+        error_code=None,
+        error_message=None,
+        started_at=reservation.started_at,
+        completed_at=reservation.occurred_at,
+        input_hash=reservation.input_hash,
+        phase=reservation.phase,
+        best_effort=reservation.best_effort,
+    )
+    resumed_context = ExecutionContext()
+    resumed_context.record_output("source", {"items": ["a", "b"]})
+    resumed_updates: list[NodeStatusUpdate] = []
+
+    async def capture_resumed(update: NodeStatusUpdate) -> None:
+        resumed_updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        resumed_executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        resumed = await WorkflowScheduler(resumed_executor).run(
+            wrapper,
+            context=resumed_context,
+            on_node_status=capture_resumed,
+            resume_records=(reservation_record,),
+            resume_attempts={reservation.node_id: reservation.attempts},
+        )
+
+    resumed_loop = next(record for record in resumed.records if record.node_id == "loop")
+    assert isinstance(resumed_loop.output, dict)
+    resumed_requests = [
+        next(
+            nested_node
+            for nested_node in item["result"]["nodes"]
+            if nested_node["node_id"] == "request"
+        )
+        for item in resumed_loop.output["items"]
+    ]
+    assert [request["attempts"] for request in resumed_requests] == [1, 0]
+    assert all(request["error_code"] == "REQUEST_BUDGET_EXHAUSTED" for request in resumed_requests)
+    assert not any(update.request_reserved for update in resumed_updates)
 
 
 @pytest.mark.asyncio

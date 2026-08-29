@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
@@ -25,6 +26,7 @@ from app.engine.contracts import (
     FieldMapping,
     ForEachNodeConfig,
     MappingTargetLocation,
+    NodeStatus,
     NodeType,
     RedisNodeConfig,
     RetryCategory,
@@ -32,6 +34,7 @@ from app.engine.contracts import (
     SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
+    WorkflowPhase,
     parse_node_config,
 )
 from app.engine.control_nodes import execute_control_node
@@ -58,13 +61,19 @@ from app.engine.results import (
     HttpResponseSnapshot,
     NodeInputMapping,
     NodeObservation,
+    NodeResult,
 )
 from app.engine.scheduler import (
+    NESTED_CHECKPOINT_PREFIX,
     ExecutionContext,
     NodeExecutionError,
+    NodeRunRecord,
+    NodeStatusCallback,
+    NodeStatusUpdate,
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
+    node_type_consumes_request,
 )
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.data_nodes import (
@@ -398,6 +407,16 @@ class WorkflowNodeExecutor:
             prepared,
             context.resolved_variables(),
             context.request_budget,
+            status_callback=context.status_callback,
+            checkpoint_scope=_nested_scope(context.checkpoint_scope, "subflow", node.id),
+            checkpoint_phase=context.checkpoint_phase or node.phase,
+            checkpoint_best_effort=(
+                context.checkpoint_best_effort
+                if context.checkpoint_phase is not None
+                else node.best_effort
+            ),
+            checkpoint_records=context.nested_checkpoint_records,
+            reset_retry_budget=context.reset_retry_budget,
         )
         output = _subflow_output(prepared, result)
         if result.status.value != "passed":
@@ -424,7 +443,7 @@ class WorkflowNodeExecutor:
             raise NodeExecutionError(code=error.code, message=error.message) from error
 
         prepared = self._prepared_subflow(node)
-        completed = await self._run_for_each_items(prepared, config, context, items)
+        completed = await self._run_for_each_items(node, prepared, config, context, items)
         output = _for_each_output(config, items, completed)
         if _for_each_failed(completed):
             raise NodeExecutionError(
@@ -466,6 +485,7 @@ class WorkflowNodeExecutor:
 
     async def _run_for_each_items(
         self,
+        node: WorkflowNode,
         prepared: PreparedSubflow,
         config: ForEachNodeConfig,
         context: ExecutionContext,
@@ -474,7 +494,15 @@ class WorkflowNodeExecutor:
         semaphore = asyncio.Semaphore(config.concurrency)
         tasks = [
             asyncio.create_task(
-                self._run_for_each_item(prepared, config, context, semaphore, index, item)
+                self._run_for_each_item(
+                    node,
+                    prepared,
+                    config,
+                    context,
+                    semaphore,
+                    index,
+                    item,
+                )
             )
             for index, item in enumerate(items)
         ]
@@ -482,6 +510,7 @@ class WorkflowNodeExecutor:
 
     async def _run_for_each_item(
         self,
+        node: WorkflowNode,
         prepared: PreparedSubflow,
         config: ForEachNodeConfig,
         context: ExecutionContext,
@@ -495,7 +524,26 @@ class WorkflowNodeExecutor:
                 config.item_variable: item,
                 config.index_variable: index,
             }
-            result = await self._run_subflow(prepared, variables, context.request_budget)
+            result = await self._run_subflow(
+                prepared,
+                variables,
+                context.request_budget,
+                status_callback=context.status_callback,
+                checkpoint_scope=_nested_scope(
+                    context.checkpoint_scope,
+                    "for_each",
+                    node.id,
+                    index=index,
+                ),
+                checkpoint_phase=context.checkpoint_phase or node.phase,
+                checkpoint_best_effort=(
+                    context.checkpoint_best_effort
+                    if context.checkpoint_phase is not None
+                    else node.best_effort
+                ),
+                checkpoint_records=context.nested_checkpoint_records,
+                reset_retry_budget=context.reset_retry_budget,
+            )
             return {
                 "index": index,
                 "item": item,
@@ -507,6 +555,13 @@ class WorkflowNodeExecutor:
         prepared: PreparedSubflow,
         runtime_variables: dict[str, JsonValue],
         request_budget: RequestBudget | None,
+        *,
+        status_callback: NodeStatusCallback | None,
+        checkpoint_scope: str,
+        checkpoint_phase: WorkflowPhase,
+        checkpoint_best_effort: bool,
+        checkpoint_records: dict[str, NodeRunRecord],
+        reset_retry_budget: bool,
     ) -> WorkflowRunResult:
         executor = WorkflowNodeExecutor(
             self._client,
@@ -520,13 +575,44 @@ class WorkflowNodeExecutor:
             protocol_nodes=prepared.protocol_nodes,
             event_nodes=prepared.event_nodes,
         )
+        resume_records = _nested_resume_records(
+            prepared.definition,
+            checkpoint_scope,
+            checkpoint_records,
+        )
+        resume_attempts = {record.node_id: record.attempts for record in resume_records}
+
+        async def publish_nested(update: NodeStatusUpdate) -> None:
+            if not node_type_consumes_request(update.node_type):
+                return
+            nested_id = _nested_checkpoint_id(checkpoint_scope, update.node_id)
+            mapped = replace(
+                update,
+                node_id=nested_id,
+                phase=checkpoint_phase,
+                best_effort=checkpoint_best_effort,
+            )
+            checkpoint_records[nested_id] = _checkpoint_record(mapped)
+            if status_callback is not None:
+                await status_callback(mapped)
+
         try:
             return await WorkflowScheduler(executor).run(
                 prepared.definition,
                 context=ExecutionContext(
                     workflow_variables=dict(prepared.definition.variables),
                     runtime_variables=runtime_variables,
+                    status_callback=status_callback,
+                    checkpoint_scope=checkpoint_scope,
+                    checkpoint_phase=checkpoint_phase,
+                    checkpoint_best_effort=checkpoint_best_effort,
+                    nested_checkpoint_records=checkpoint_records,
+                    reset_retry_budget=reset_retry_budget,
                 ),
+                on_node_status=publish_nested,
+                resume_records=resume_records,
+                resume_attempts=resume_attempts,
+                reset_retry_budget=reset_retry_budget,
                 shared_request_budget=request_budget,
             )
         finally:
@@ -572,6 +658,62 @@ def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dic
         ],
         "context": result.context,
     }
+
+
+def _nested_scope(
+    parent: str,
+    kind: str,
+    node_id: str,
+    *,
+    index: int | None = None,
+) -> str:
+    segment = f"{kind}:{node_id}" if index is None else f"{kind}:{node_id}:{index}"
+    return f"{parent}/{segment}" if parent else segment
+
+
+def _nested_checkpoint_id(scope: str, node_id: str) -> str:
+    digest = hashlib.sha256(f"{scope}\0{node_id}".encode()).hexdigest()
+    return f"{NESTED_CHECKPOINT_PREFIX}{digest}"
+
+
+def _nested_resume_records(
+    definition: WorkflowDefinition,
+    scope: str,
+    records: dict[str, NodeRunRecord],
+) -> tuple[NodeRunRecord, ...]:
+    restored: list[NodeRunRecord] = []
+    for node in definition.nodes:
+        checkpoint = records.get(_nested_checkpoint_id(scope, node.id))
+        if checkpoint is not None:
+            restored.append(
+                replace(
+                    checkpoint,
+                    node_id=node.id,
+                    phase=node.phase,
+                    best_effort=node.best_effort,
+                )
+            )
+    return tuple(restored)
+
+
+def _checkpoint_record(update: NodeStatusUpdate) -> NodeRunRecord:
+    result = update.result or NodeResult(status=NodeStatus.CANCELLED)
+    return NodeRunRecord(
+        node_id=update.node_id,
+        node_type=update.node_type,
+        name=update.name,
+        status=update.status,
+        attempts=update.attempts,
+        output=result.output,
+        result=result,
+        error_code=update.error_code,
+        error_message=update.error_message,
+        started_at=update.started_at,
+        completed_at=update.occurred_at,
+        input_hash=update.input_hash,
+        phase=update.phase,
+        best_effort=update.best_effort,
+    )
 
 
 async def _collect_for_each_tasks(
