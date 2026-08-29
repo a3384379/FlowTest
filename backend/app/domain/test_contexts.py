@@ -320,11 +320,19 @@ class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
     direction: Literal["request", "response"]
     dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
     field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    java_field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
 
     @model_validator(mode="after")
     def validate_field_type(self) -> ExternalJavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.field_type])
+        require_no_sensitive_scalar_values(
+            [
+                self.dto_type,
+                self.field_name,
+                *([self.java_field_name] if self.java_field_name is not None else []),
+                self.field_type,
+            ]
+        )
         return self
 
 

@@ -106,7 +106,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - Jackson `@JsonProperty(access = WRITE_ONLY)` 属性只生成 Request Evidence，`READ_ONLY` 只生成
   Response Evidence，Field、Record Component 和 Accessor 的显式方向都会传播到 DTO Claim。
 - Jackson `@JsonProperty("...")`/`value = "..."` 的显式线上属性名同样从 Field、Record Component 和
-  Accessor 传播到 DTO、Validation 与 Enum Evidence；Entity/Table Column 仍保留 Java 字段身份。
+  Accessor 传播到 DTO、Validation 与 Enum Evidence；DTO Claim 同时保留 `java_field_name`，因此线上字段身份用于
+  Request/Response Candidate，Java 成员身份仍可与 Entity/Table Column 精确关联。
 - Enum Constant 的 `@JsonProperty` 值按 Jackson 线上状态值生成 Evidence；遇到无法安全静态求值的
   `@JsonValue` 时停止生成对应状态候选，产生 `JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION` 并降级为非确定性，
   避免 Java 常量名制造错误 DB State 候选或冲突。
@@ -304,6 +305,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 精确 Head 复审随后指出嵌套 DTO 声明未使用顶层类型 Prefix Map，导致其 `@JsonNaming` 被跳过；当前实现会从
   嵌套声明之前最近的 Java Member 边界定位 Annotation Prefix，直接回归验证嵌套 Request 的 `userName` 生成
   `user_name` Evidence。
+- 下一轮精确复审指出 Jackson 重命名后只保留线上字段名会破坏显式 JPA Column 关联；当前 DTO Claim 同时携带
+  Java Member Name 与 Wire Name，`_table_column_claims_for_field` 使用前者匹配 JPA Claim，候选 Source/Field Ref
+  继续使用后者。直接回归覆盖 `@JsonProperty("login") userName` 与 `@Column(name="login_name")` 的可追溯映射。
 
 ### 待完成
 

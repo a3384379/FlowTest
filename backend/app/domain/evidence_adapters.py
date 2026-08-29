@@ -356,11 +356,19 @@ class JavaDtoFieldClaim(JavaClaimBase):
     direction: Literal["request", "response"]
     dto_type: str = Field(pattern=_IDENTIFIER)
     field_name: str = Field(pattern=_IDENTIFIER)
+    java_field_name: str | None = Field(default=None, pattern=_IDENTIFIER)
     field_type: str = Field(min_length=1, max_length=160)
 
     @model_validator(mode="after")
     def validate_field_type(self) -> JavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.field_type])
+        require_no_sensitive_scalar_values(
+            [
+                self.dto_type,
+                self.field_name,
+                *([self.java_field_name] if self.java_field_name is not None else []),
+                self.field_type,
+            ]
+        )
         return self
 
 
@@ -1862,6 +1870,7 @@ def _table_column_claims_for_field(
     parsed: _ParsedEvidence,
     field: JavaDtoFieldClaim,
 ) -> list[tuple[JavaTableColumnClaim, str]]:
+    java_field_name = field.java_field_name or field.field_name
     operation_entities = {
         entity.entity_ref
         for entity, _evidence_ref in parsed.entities
@@ -1875,7 +1884,7 @@ def _table_column_claims_for_field(
     return [
         item
         for item in parsed.table_columns
-        if item[0].field_name.casefold() == field.field_name.casefold()
+        if item[0].field_name.casefold() == java_field_name.casefold()
         and (
             item[0].entity_ref in operation_entities
             if operation_entities
@@ -4237,6 +4246,7 @@ def _dto_field_claims(
                 direction=direction,
                 dto_type=dto_type,
                 field_name=evidence_name,
+                java_field_name=field_name,
                 field_type=field_type,
                 confidence=0.9,
                 deterministic=True,

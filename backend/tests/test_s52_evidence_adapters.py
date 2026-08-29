@@ -1977,7 +1977,8 @@ def test_field_mapping_does_not_escape_unmatched_explicit_entity_scope() -> None
 def test_explicit_table_column_claim_drives_differently_named_field_mapping() -> None:
     java_payload = _java_submission()
     field = next(claim for claim in java_payload["claims"] if claim["id"] == "request-product")
-    field["field_name"] = "userName"
+    field["field_name"] = "login"
+    field["java_field_name"] = "userName"
     table_column = next(
         claim for claim in java_payload["claims"] if claim["id"] == "column-product"
     )
@@ -2024,6 +2025,7 @@ def test_explicit_table_column_claim_drives_differently_named_field_mapping() ->
         and candidate.target_ref == "column://public/orders/login_name"
     )
     assert table_column_evidence in candidate.evidence_refs
+    assert "/login?operation=" in candidate.source_ref
     assert candidate.confidence == 0.4
     assert candidate.deterministic is False
 
@@ -4319,6 +4321,15 @@ class AccessorDto {
         ("ClassDto", "response", "login"),
         ("RecordDto", "request", "recordLogin"),
         ("RecordDto", "response", "recordLogin"),
+    }
+    assert {
+        (claim.dto_type, claim.field_name, claim.java_field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field"
+    } >= {
+        ("AccessorDto", "accessorLogin", "userName"),
+        ("ClassDto", "login", "userName"),
+        ("RecordDto", "recordLogin", "userName"),
     }
 
 
