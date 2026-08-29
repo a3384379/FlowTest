@@ -250,6 +250,34 @@ async def test_graceful_cancel_runs_cleanup_and_force_cancel_can_skip_it() -> No
 
 
 @pytest.mark.asyncio
+async def test_force_cancel_runs_cleanup_when_snapshot_policy_requires_it() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("slow"),
+            cleanup_node("delete", run_when="cancel"),
+        ],
+        edges=[
+            {"id": "s-slow", "source": "start", "target": "slow"},
+            {"id": "slow-e", "source": "slow", "target": "end"},
+        ],
+        run_policy={"force_cancel_skips_cleanup": False},
+    )
+    token = CancellationToken()
+    executor = ControlledExecutor({"slow": {"delay": 5}})
+    task = asyncio.create_task(WorkflowScheduler(executor).run(definition, cancellation=token))
+    await asyncio.sleep(0.02)
+    token.cancel(force=True)
+
+    result = await task
+
+    assert result.status == "cancelled"
+    assert result.cleanup_status == "passed"
+    assert executor.attempts["delete"] == 1
+    assert result.cleanup_report is not None
+    assert result.cleanup_report.force_cancel_skipped is False
+
+
+@pytest.mark.asyncio
 async def test_cleanup_has_bounded_retry_request_budget_and_reverse_ordering() -> None:
     definition = workflow(
         middle_nodes=[
@@ -280,6 +308,66 @@ async def test_cleanup_has_bounded_retry_request_budget_and_reverse_ordering() -
     assert parent.error_code == "CLEANUP_REQUEST_BUDGET_EXHAUSTED"
     assert parent.started_at is not None
     assert child.completed_at <= parent.started_at
+
+
+@pytest.mark.asyncio
+async def test_cleanup_reclaim_preserves_consumed_request_budget() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("create"),
+            cleanup_node("cleanup-a", cleanup_for=["create"]),
+            cleanup_node("cleanup-b", cleanup_for=["create"], retry_budget=1),
+        ],
+        edges=[
+            {"id": "s-create", "source": "start", "target": "create"},
+            {"id": "create-e", "source": "create", "target": "end"},
+        ],
+        run_policy={"cleanup_request_budget": 2},
+    )
+    initial = await WorkflowScheduler(ControlledExecutor()).run(definition)
+    resumed_records = tuple(
+        record
+        for record in initial.records
+        if record.phase == "main" or record.node_id == "cleanup-a"
+    )
+    resume_attempts = {record.node_id: record.attempts for record in resumed_records}
+    executor = ControlledExecutor({"cleanup-b": {"failures": 1}})
+
+    reclaimed = await WorkflowScheduler(executor).run(
+        definition,
+        resume_records=resumed_records,
+        resume_attempts=resume_attempts,
+    )
+
+    cleanup_b = next(record for record in reclaimed.records if record.node_id == "cleanup-b")
+    assert executor.attempts == {"cleanup-b": 1}
+    assert cleanup_b.error_code == "CLEANUP_REQUEST_BUDGET_EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_best_effort_cleanup_failure_does_not_block_required_cleanup() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("parent"),
+            api_node("child"),
+            cleanup_node("cleanup-parent", cleanup_for=["parent"]),
+            cleanup_node("cleanup-child", cleanup_for=["child"], best_effort=True),
+        ],
+        edges=[
+            {"id": "s-parent", "source": "start", "target": "parent"},
+            {"id": "parent-child", "source": "parent", "target": "child"},
+            {"id": "child-e", "source": "child", "target": "end"},
+        ],
+    )
+    executor = ControlledExecutor({"cleanup-child": {"permanent_failure": True}})
+
+    result = await WorkflowScheduler(executor).run(definition)
+
+    assert executor.executed[-2:] == ["cleanup-child", "cleanup-parent"]
+    assert result.status == "passed"
+    assert result.cleanup_report is not None
+    assert result.cleanup_report.required_failures == ()
+    assert result.cleanup_report.best_effort_failures == ("cleanup-child",)
 
 
 @pytest.mark.asyncio

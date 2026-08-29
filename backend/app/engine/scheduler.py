@@ -322,12 +322,19 @@ class WorkflowScheduler:
         request_budget = definition.run_policy.cleanup_request_budget or sum(
             node.cleanup_retry_budget + 1 for node in activated
         )
+        if not reset_retry_budget:
+            request_budget -= sum((resume_attempts or {}).get(node.id, 0) for node in activated)
+        cleanup_cancellation = (
+            cancellation
+            if definition.run_policy.force_cancel_skips_cleanup
+            else CancellationToken()
+        )
         cleanup = await self._run_phase(
             definition,
             nodes_for_phase=cleanup_nodes,
             edges_for_phase=cleanup_edges,
             context=context,
-            cancellation=cancellation,
+            cancellation=cleanup_cancellation,
             on_node_status=on_node_status,
             selected_node_ids=activated_ids,
             resume_records=tuple(
@@ -337,7 +344,8 @@ class WorkflowScheduler:
             reset_retry_budget=reset_retry_budget,
             preserve_terminal_records=False,
             cancellation_force_only=True,
-            request_budget=_RequestBudget(request_budget),
+            request_budget=_RequestBudget(max(request_budget, 0)),
+            fail_fast_on_error=False,
             excluded_code="CLEANUP_NOT_ACTIVATED",
             excluded_message="清理条件或目标未激活",
         )
@@ -360,6 +368,7 @@ class WorkflowScheduler:
         preserve_terminal_records: bool,
         cancellation_force_only: bool = False,
         request_budget: _RequestBudget | None = None,
+        fail_fast_on_error: bool = True,
         excluded_code: str = "DEBUG_SCOPE_EXCLUDED",
         excluded_message: str = "节点不在本次调试范围内",
     ) -> WorkflowRunResult:
@@ -453,7 +462,7 @@ class WorkflowScheduler:
                 if record.status is NodeStatus.PASSED:
                     run_context.record_output(node_id, record.output)
                 else:
-                    failed = True
+                    failed = failed or fail_fast_on_error
 
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
@@ -860,8 +869,10 @@ def _edge_state(
     status = statuses[edge.source]
     if status in {NodeStatus.PENDING, NodeStatus.RUNNING}:
         return _EdgeState.PENDING
+    record = records.get(edge.source)
+    if record is not None and record.phase is WorkflowPhase.CLEANUP and record.status.is_terminal:
+        return _EdgeState.ACTIVE
     if status is NodeStatus.SKIPPED:
-        record = records.get(edge.source)
         return (
             _EdgeState.INACTIVE
             if record is not None and record.error_code == "BRANCH_NOT_SELECTED"
