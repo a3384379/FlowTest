@@ -3556,8 +3556,9 @@ def _routes_after_mapping(
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
     signature = re.match(
         r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*"
+        r"(?P<modifiers>"
         r"(?:(?:public|protected|abstract|default|final|native|static|strictfp|synchronized)"
-        r"\s+|@[A-Za-z0-9_$.]+\s*)*"
+        r"\s+|@[A-Za-z0-9_$.]+\s*)*)"
         r"(?:<[^>{};]+>\s+)?"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
         r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
@@ -3566,6 +3567,8 @@ def _routes_after_mapping(
         masked_following,
     )
     if signature is None:
+        return []
+    if allow_abstract_methods and re.search(r"\bstatic\b", signature.group("modifiers")):
         return []
     if signature.group("terminator") == ";" and not allow_abstract_methods:
         return []

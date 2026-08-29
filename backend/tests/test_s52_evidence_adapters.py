@@ -2975,6 +2975,46 @@ class OrderDto { private String status; }
     assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
 
 
+def test_java_spring_poc_excludes_static_interface_mapping_methods() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://static-interface", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrdersApi.java",
+                        "content": """
+interface OrdersApi {
+    @GetMapping("/static")
+    static Order staticOrder() { return staticService.load(); }
+
+    @GetMapping("/live")
+    Order live();
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController implements OrdersApi {
+    public Order live() { return orderService.load(); }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("live", "/live")]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
+
+
 def test_java_spring_poc_does_not_select_an_arbitrary_unannotated_class() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

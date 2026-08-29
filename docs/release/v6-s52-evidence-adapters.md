@@ -109,6 +109,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   显式空 `RequestMethod` 数组按 Annotation 默认值处理为八种受支持 HTTP Method。
 - Claim 配额截断、同名类型、继承字段/控制器父类路由和 JPA Property Access 等显式不完整边界都会
   使 Submission `deterministic=false`；未展开的 Controller 父类路由不会被静默当作完整分析。
+- Controller 本地接口 Contract 只继承可实例化的 Mapping 方法；Interface `static` Mapping 不会被绑定到
+  实现 Controller，也不会产生虚假 Route 或下游 Evidence。
 - Kafka Producer 会从 `KafkaTemplate<K,V>` 字段/构造参数识别实际变量名，不依赖固定 `kafkaTemplate` 命名；
   Mapping Handler 签名允许 Java 合法的 Modifier/Return Type Annotation 交错形式，如 `public @Nullable DTO`。
 - JPA `@Table`/`@Column` 的本地 `static final String`、接口常量和限定常量引用复用安全常量解析；无法解析的显式
@@ -183,7 +185,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；855 passed、4 skipped、总覆盖率 90.73%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；856 passed、4 skipped、总覆盖率 90.73%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -276,6 +278,8 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 最新复审指出 `@JsonProperty("login")` 仍以 Java `userName` 产生 DTO Evidence，可导致错误的线上字段与
   Column 候选；当前实现已将显式 Jackson 名称传播到 Field/Record/Accessor 证据，并保持
   `READ_ONLY`/`WRITE_ONLY` 方向及 Java Entity Field 身份；直接回归与全量后端门禁通过。
+- 后续复审指出 Interface `static` Mapping 方法不应被实现 Controller 继承；当前 Interface Contract
+  收集阶段已排除 `static` Handler，回归验证只保留可继承的实例 Route 与 Service Call，全量后端门禁通过。
 
 ### 待完成
 
