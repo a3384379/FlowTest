@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
+from app.domain.evidence_adapters import (
+    EntityMappingBudgetExceeded,
+    EntityMappingResult,
+    MappingEvidenceInput,
+    derive_entity_mapping,
+    with_mapping_conflict_findings,
+)
 from app.domain.test_contexts import (
     MAX_CONTEXT_CONFLICTS,
     MAX_CONTEXT_EVIDENCE_ITEMS,
@@ -19,15 +26,20 @@ from app.domain.test_contexts import (
     ContextConflict,
     ContextConflictSnapshot,
     ContextRevisionSnapshot,
+    DatabaseExternalEvidenceStructuredData,
+    EntityMappingExternalEvidenceStructuredData,
     EvidenceProviderType,
     EvidenceSemanticRole,
     ExternalEvidenceEnvelope,
+    ExternalEvidenceFinding,
+    JavaExternalEvidenceStructuredData,
     RevisionReference,
     TestContextStatus,
     completeness_snapshot,
     context_revision_fingerprint,
     external_evidence_fingerprint,
     external_evidence_item_fingerprint,
+    external_evidence_project_references,
     first_sensitive_value,
     normalize_revision_snapshot,
     referenced_project_id,
@@ -172,6 +184,47 @@ class TestContextService:
         context_id: UUID,
         envelope: ExternalEvidenceEnvelope,
     ) -> TestContextResponse:
+        response, _mapping = await self._ingest(
+            actor=actor,
+            context_id=context_id,
+            envelope=envelope,
+            return_entity_mapping=False,
+        )
+        return response
+
+    async def ingest_adapted(
+        self,
+        *,
+        actor: User,
+        context_id: UUID,
+        envelope: ExternalEvidenceEnvelope,
+    ) -> tuple[TestContextResponse, EntityMappingResult]:
+        response, mapping = await self._ingest(
+            actor=actor,
+            context_id=context_id,
+            envelope=envelope,
+            return_entity_mapping=True,
+        )
+        if mapping is None:
+            raise RuntimeError("adapted evidence ingestion must produce entity mapping")
+        return response, mapping
+
+    async def inspect_entity_mapping(self, *, actor: User, context_id: UUID) -> EntityMappingResult:
+        self._require_evidence_scope()
+        context = await self._load_context(actor=actor, context_id=context_id)
+        await self._mark_expired(actor=actor, context=context)
+        revision = await self._current_revision(context)
+        evidence = await self._evidence_items(revision.id)
+        return _derive_entity_mapping(_mapping_evidence_inputs(evidence))
+
+    async def _ingest(
+        self,
+        *,
+        actor: User,
+        context_id: UUID,
+        envelope: ExternalEvidenceEnvelope,
+        return_entity_mapping: bool,
+    ) -> tuple[TestContextResponse, EntityMappingResult | None]:
         self._require_evidence_scope()
         context = await self._load_context(
             actor=actor, context_id=context_id, editing=True, for_update=True
@@ -179,7 +232,24 @@ class TestContextService:
         await self._require_accepting_evidence(actor=actor, context=context)
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
-        existing = await self._evidence_items(current.id)
+        stored_evidence = await self._evidence_items(current.id)
+        recompute_mapping_conflicts = _has_mapping_adapter_findings(envelope)
+        retired_mapping_conflicts = (
+            {item.fingerprint for item in stored_evidence if _is_mapping_conflict_item(item)}
+            if recompute_mapping_conflicts
+            else set()
+        )
+        existing = [
+            item for item in stored_evidence if item.fingerprint not in retired_mapping_conflicts
+        ]
+        if recompute_mapping_conflicts:
+            try:
+                envelope = with_mapping_conflict_findings(
+                    envelope,
+                    _mapping_evidence_inputs(existing),
+                )
+            except EntityMappingBudgetExceeded as exc:
+                raise _mapping_budget_exceeded() from exc
         additions = _new_evidence_items(
             context=context,
             envelope=envelope,
@@ -190,12 +260,14 @@ class TestContextService:
             current=current_snapshot,
             envelope=envelope,
             evidence_count=len(existing) + len(additions),
+            retired_conflict_fingerprints=retired_mapping_conflicts,
         )
         snapshot = _next_snapshot(
             current=current_snapshot,
             envelope=envelope,
             evidence_fingerprints=[item.fingerprint for item in existing]
             + [item.fingerprint for item in additions],
+            retired_conflict_fingerprints=retired_mapping_conflicts,
         )
         now = datetime.now(UTC)
         actor_identity = _actor_identity(actor.id)
@@ -236,7 +308,13 @@ class TestContextService:
         await self._session.commit()
         await self._session.refresh(context)
         await self._session.refresh(revision)
-        return await self._response(context, revision)
+        response = await self._response(context, revision)
+        mapping = (
+            _derive_entity_mapping(_mapping_evidence_inputs([*existing, *additions]))
+            if return_entity_mapping
+            else None
+        )
+        return response, mapping
 
     async def close(self, *, actor: User, context_id: UUID) -> TestContextResponse:
         self._require_evidence_scope()
@@ -515,6 +593,50 @@ def _evidence_response(item: ContextEvidenceItem) -> ContextEvidenceItemResponse
     )
 
 
+def _mapping_evidence_inputs(
+    items: list[ContextEvidenceItem],
+) -> list[MappingEvidenceInput]:
+    return [
+        MappingEvidenceInput(
+            evidence_ref=f"evidence://context/{item.fingerprint}",
+            finding=ExternalEvidenceFinding.model_validate(item.finding_payload),
+            confidence=item.confidence,
+            deterministic=item.deterministic,
+        )
+        for item in items
+    ]
+
+
+def _is_mapping_conflict_item(item: ContextEvidenceItem) -> bool:
+    finding = ExternalEvidenceFinding.model_validate(item.finding_payload)
+    return isinstance(finding.structured_data, EntityMappingExternalEvidenceStructuredData)
+
+
+def _has_mapping_adapter_findings(envelope: ExternalEvidenceEnvelope) -> bool:
+    return any(
+        isinstance(
+            finding.structured_data,
+            (JavaExternalEvidenceStructuredData, DatabaseExternalEvidenceStructuredData),
+        )
+        for finding in envelope.findings
+    )
+
+
+def _derive_entity_mapping(evidence: list[MappingEvidenceInput]) -> EntityMappingResult:
+    try:
+        return derive_entity_mapping(evidence)
+    except EntityMappingBudgetExceeded as exc:
+        raise _mapping_budget_exceeded() from exc
+
+
+def _mapping_budget_exceeded() -> AppError:
+    return AppError(
+        code="ENTITY_MAPPING_BUDGET_EXCEEDED",
+        message="实体映射证据或候选数量超过安全上限",
+        status_code=422,
+    )
+
+
 def _initial_present_types(payload: BeginTestContextRequest) -> list[EvidenceProviderType]:
     present: list[EvidenceProviderType] = []
     if payload.repository_revisions:
@@ -596,6 +718,7 @@ def _next_snapshot(
     current: ContextRevisionSnapshot,
     envelope: ExternalEvidenceEnvelope,
     evidence_fingerprints: list[str],
+    retired_conflict_fingerprints: set[str],
 ) -> ContextRevisionSnapshot:
     repository = list(current.repository_revisions)
     contracts = list(current.contract_revisions)
@@ -621,7 +744,10 @@ def _next_snapshot(
     if envelope.provider.type is EvidenceProviderType.DATABASE:
         present.append(EvidenceProviderType.DATA_PROFILE)
     completeness = completeness_snapshot(current.completeness.required, present)
-    conflicts = list(current.conflict_snapshot.conflicts)
+    conflicts = _without_conflict_fingerprints(
+        current.conflict_snapshot.conflicts,
+        retired_conflict_fingerprints,
+    )
     conflicts.extend(_envelope_conflicts(envelope))
     return normalize_revision_snapshot(
         ContextRevisionSnapshot(
@@ -649,6 +775,24 @@ def _envelope_conflicts(envelope: ExternalEvidenceEnvelope) -> list[ContextConfl
     ]
 
 
+def _without_conflict_fingerprints(
+    conflicts: list[ContextConflict],
+    retired_fingerprints: set[str],
+) -> list[ContextConflict]:
+    retained: list[ContextConflict] = []
+    for conflict in conflicts:
+        finding_fingerprints = [
+            fingerprint
+            for fingerprint in conflict.finding_fingerprints
+            if fingerprint not in retired_fingerprints
+        ]
+        if finding_fingerprints:
+            retained.append(
+                conflict.model_copy(update={"finding_fingerprints": finding_fingerprints})
+            )
+    return retained
+
+
 def _with_reference(
     values: list[RevisionReference], new_value: RevisionReference
 ) -> list[RevisionReference]:
@@ -667,7 +811,7 @@ def _context_status(snapshot: ContextRevisionSnapshot, *, evidence_count: int) -
 
 
 def _require_same_project(project_id: UUID, envelope: ExternalEvidenceEnvelope) -> None:
-    _require_project_references(project_id, (envelope.source.ref, envelope.subject_ref))
+    _require_project_references(project_id, external_evidence_project_references(envelope))
 
 
 def _require_initial_references_same_project(
@@ -697,13 +841,18 @@ def _require_revision_capacity(
     current: ContextRevisionSnapshot,
     envelope: ExternalEvidenceEnvelope,
     evidence_count: int,
+    retired_conflict_fingerprints: set[str],
 ) -> None:
     if evidence_count > MAX_CONTEXT_EVIDENCE_ITEMS:
         raise _context_capacity_exceeded()
     new_conflicts = sum(
         finding.semantic_role is EvidenceSemanticRole.CONFLICT for finding in envelope.findings
     )
-    if len(current.conflict_snapshot.conflicts) + new_conflicts > MAX_CONTEXT_CONFLICTS:
+    retained_conflicts = _without_conflict_fingerprints(
+        current.conflict_snapshot.conflicts,
+        retired_conflict_fingerprints,
+    )
+    if len(retained_conflicts) + new_conflicts > MAX_CONTEXT_CONFLICTS:
         raise _context_capacity_exceeded()
     references = _revision_references_for_provider(current, envelope.provider.type)
     if references is None:

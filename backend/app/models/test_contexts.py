@@ -112,8 +112,9 @@ class ContextEvidenceItem(UuidPrimaryKeyMixin, Base):
         ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="context_evidence_confidence"),
         CheckConstraint(
-            "source_type IN ('repository', 'contract', 'data_profile', 'existing_test', "
-            "'workflow', 'runtime', 'database')",
+            "source_type IN ('repository', 'contract', 'data_profile', "
+            "'service_topology', 'existing_test', 'workflow', 'runtime', 'change', "
+            "'user_confirmed_rule', 'database')",
             name="context_evidence_source_type",
         ),
         CheckConstraint(

@@ -12,6 +12,7 @@ from app.domain.test_contexts import (
     RevisionReference,
     completeness_snapshot,
     context_revision_fingerprint,
+    external_evidence_fingerprint,
     external_evidence_item_fingerprint,
     referenced_project_id,
 )
@@ -80,6 +81,32 @@ def test_context_revision_fingerprint_is_stable_and_evidence_is_strict() -> None
     assert (
         referenced_project_id("flowtest://PROJECTS/00000000%2D0000-0000-0000-000000000002/contract")
         == "00000000-0000-0000-0000-000000000002"
+    )
+
+
+def test_legacy_empty_structured_data_fingerprints_remain_stable() -> None:
+    envelope = ExternalEvidenceEnvelope.model_validate(
+        _evidence_envelope(statement="The legacy contract finding remains immutable.")
+    )
+    legacy_envelope_payload = envelope.model_dump(mode="json")
+    legacy_finding_payload = legacy_envelope_payload["findings"][0]
+    legacy_finding_payload.pop("structured_data")
+
+    assert external_evidence_fingerprint(envelope) == _canonical_sha256(legacy_envelope_payload)
+
+    legacy_item_payload = {
+        "schema_version": envelope.schema_version,
+        "provider": envelope.provider.model_dump(mode="json"),
+        "source": envelope.source.model_dump(mode="json"),
+        "subject_ref": envelope.subject_ref,
+        "finding": legacy_finding_payload,
+        "redactions": [],
+        "warnings": [],
+        "confidence": envelope.confidence,
+        "deterministic": envelope.deterministic,
+    }
+    assert external_evidence_item_fingerprint(envelope, envelope.findings[0]) == _canonical_sha256(
+        legacy_item_payload
     )
 
 
@@ -162,3 +189,13 @@ def _evidence_envelope(*, statement: str) -> dict[str, Any]:
         "confidence": 0.98,
         "deterministic": True,
     }
+
+
+def _canonical_sha256(payload: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(serialized).hexdigest()

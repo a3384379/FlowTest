@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
+from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 from hashlib import sha256
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 CONTEXT_REVISION_SCHEMA_VERSION: Final[Literal["flowtest-context-revision-v1"]] = (
     "flowtest-context-revision-v1"
@@ -50,6 +52,24 @@ _CONNECTION_STRING = re.compile(
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
+_UUID_LITERAL = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+_JAVA_QUOTED_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+_JAVA_INTEGRAL_LITERAL = re.compile(r"(?<![A-Za-z0-9_$])[+-]?\d(?:[\d_]*\d)?[lL]?(?![A-Za-z0-9_$])")
+_ADAPTER_REF = r"^\S+$"
+_ADAPTER_IDENTIFIER = r"^[A-Za-z_$][A-Za-z0-9_$.-]{0,159}$"
+_WRITE_SQL = re.compile(
+    r"\b(?:alter|call|create|delete|drop|execute|grant|insert|merge|replace|revoke|truncate|update)\b",
+    re.IGNORECASE,
+)
+
+
+def evidence_state_scalar_text(value: str | int | float | bool) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 class TestContextStatus(StrEnum):
@@ -65,9 +85,12 @@ class EvidenceProviderType(StrEnum):
     REPOSITORY = "repository"
     CONTRACT = "contract"
     DATA_PROFILE = "data_profile"
+    SERVICE_TOPOLOGY = "service_topology"
     EXISTING_TEST = "existing_test"
     WORKFLOW = "workflow"
     RUNTIME = "runtime"
+    CHANGE = "change"
+    USER_CONFIRMED_RULE = "user_confirmed_rule"
     DATABASE = "database"
 
 
@@ -258,6 +281,482 @@ class ExternalEvidenceSource(BaseModel):
     revision: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
 
 
+class EmptyExternalEvidenceStructuredData(BaseModel):
+    """Preserve the pre-adapter empty-object fingerprint without accepting wildcard data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExternalJavaClaimBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160, pattern=_ADAPTER_IDENTIFIER)
+    source_path: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0, le=1)
+    deterministic: bool
+
+    @model_validator(mode="after")
+    def validate_source_path(self) -> ExternalJavaClaimBase:
+        require_no_sensitive_scalar_values([self.source_path])
+        require_no_sensitive_reference_values(self)
+        return self
+
+
+class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
+    kind: Literal["controller_route"] = "controller_route"
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    controller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    handler: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    method: Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]
+    path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
+
+    @model_validator(mode="after")
+    def validate_route_path(self) -> ExternalJavaControllerRouteClaim:
+        require_no_sensitive_scalar_values([self.handler, self.path])
+        return self
+
+
+class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
+    kind: Literal["dto_field"] = "dto_field"
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    direction: Literal["request", "response"]
+    dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
+    java_field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
+    field_type: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_field_type(self) -> ExternalJavaDtoFieldClaim:
+        require_no_sensitive_scalar_values(
+            [
+                self.dto_type,
+                self.field_name,
+                *([self.java_field_name] if self.java_field_name is not None else []),
+                self.field_type,
+            ]
+        )
+        return self
+
+
+class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
+    kind: Literal["bean_validation"] = "bean_validation"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    dto_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    field_name: str = Field(min_length=1, max_length=160)
+    annotation: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    constraint: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_constraint(self) -> ExternalJavaBeanValidationClaim:
+        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.annotation])
+        require_safe_java_validation_constraint(
+            annotation=self.annotation,
+            constraint=self.constraint,
+        )
+        return self
+
+
+class ExternalJavaCallClaim(ExternalJavaClaimBase):
+    kind: Literal["service_call", "feign_call"]
+    operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    caller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    callee_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+
+
+class ExternalJavaPersistenceClaim(ExternalJavaClaimBase):
+    kind: Literal["mapper_repository"] = "mapper_repository"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    repository_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    method_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    entity_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+
+
+class ExternalJavaEntityClaim(ExternalJavaClaimBase):
+    kind: Literal["entity"] = "entity"
+    entity_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    class_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    table_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    operation_refs: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_operation_refs(self) -> ExternalJavaEntityClaim:
+        require_no_sensitive_scalar_values([self.class_name])
+        if len(self.operation_refs) != len(set(self.operation_refs)):
+            raise ValueError("entity operation refs must be unique")
+        if any(re.fullmatch(_ADAPTER_REF, value) is None for value in self.operation_refs):
+            raise ValueError("entity operation refs must be bounded references")
+        return self
+
+
+class ExternalJavaTableColumnClaim(ExternalJavaClaimBase):
+    kind: Literal["table_column"] = "table_column"
+    entity_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    table_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    field_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    column_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalJavaTableColumnClaim:
+        require_no_sensitive_scalar_values([self.field_name, self.column_name])
+        return self
+
+
+class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
+    kind: Literal["enum_state"] = "enum_state"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    enum_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    direction: Literal["request", "response"] | None = None
+    dto_type: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
+    field_name: str | None = Field(default=None, min_length=1, max_length=160)
+    java_field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
+    values: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_state_values(self) -> ExternalJavaEnumStateClaim:
+        if (self.direction is None) != (self.dto_type is None):
+            raise ValueError("enum state DTO direction and type must be provided together")
+        if self.direction is not None and self.field_name is None:
+            raise ValueError("route-scoped enum state must identify its DTO field")
+        require_no_sensitive_scalar_values(
+            [
+                *([self.dto_type] if self.dto_type is not None else []),
+                *([self.field_name] if self.field_name is not None else []),
+                *([self.java_field_name] if self.java_field_name is not None else []),
+                *self.values,
+            ]
+        )
+        return self
+
+
+class ExternalJavaExceptionClaim(ExternalJavaClaimBase):
+    kind: Literal["exception"] = "exception"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    exception_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    outcome: str = Field(min_length=1, max_length=160, pattern=_ADAPTER_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalJavaExceptionClaim:
+        require_no_sensitive_scalar_values([self.exception_type, self.outcome])
+        return self
+
+
+class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
+    kind: Literal["kafka_event"] = "kafka_event"
+    operation_ref: str | None = Field(
+        default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
+    )
+    direction: Literal["produce", "consume"]
+    topic_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    event_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_event_type(self) -> ExternalJavaKafkaEventClaim:
+        require_no_sensitive_scalar_values([self.event_type])
+        return self
+
+
+type ExternalJavaClaim = Annotated[
+    ExternalJavaControllerRouteClaim
+    | ExternalJavaDtoFieldClaim
+    | ExternalJavaBeanValidationClaim
+    | ExternalJavaCallClaim
+    | ExternalJavaPersistenceClaim
+    | ExternalJavaEntityClaim
+    | ExternalJavaTableColumnClaim
+    | ExternalJavaEnumStateClaim
+    | ExternalJavaExceptionClaim
+    | ExternalJavaKafkaEventClaim,
+    Field(discriminator="kind"),
+]
+
+
+class JavaExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["java"] = "java"
+    claim_kind: Literal[
+        "controller_route",
+        "dto_field",
+        "bean_validation",
+        "service_call",
+        "feign_call",
+        "mapper_repository",
+        "entity",
+        "table_column",
+        "enum_state",
+        "exception",
+        "kafka_event",
+    ]
+    claim: ExternalJavaClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> JavaExternalEvidenceStructuredData:
+        if self.claim_kind != self.claim.kind:
+            raise ValueError("Java external claim kind must match its payload")
+        return self
+
+
+class ExternalDatabaseObservedDistribution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_count: int | None = Field(default=None, ge=0)
+    distinct_count: int | None = Field(default=None, ge=0)
+    null_ratio: float | None = Field(default=None, ge=0, le=1)
+    minimum: FiniteFloat | None = None
+    maximum: FiniteFloat | None = None
+    enum_candidates: list[str | int | FiniteFloat | bool] = Field(
+        default_factory=list, max_length=100
+    )
+
+    @model_validator(mode="after")
+    def validate_observed_values(self) -> ExternalDatabaseObservedDistribution:
+        if (
+            self.row_count is not None
+            and self.distinct_count is not None
+            and self.distinct_count > self.row_count
+        ):
+            raise ValueError("database observed distinct count must not exceed row count")
+        if self.row_count == 0 and (
+            self.enum_candidates or self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("database empty distribution must not include observed values")
+        if self.null_ratio == 1 and (
+            (self.distinct_count or 0) > 0
+            or self.enum_candidates
+            or self.minimum is not None
+            or self.maximum is not None
+        ):
+            raise ValueError("database all-null distribution must not include observed values")
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and self.distinct_count is not None
+            and Decimal(self.distinct_count)
+            > (
+                Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+            ).to_integral_value(rounding=ROUND_CEILING)
+        ):
+            raise ValueError("database distinct count must not exceed non-null row count")
+        self._validate_zero_distinct_distribution()
+        if (
+            self.distinct_count is not None
+            and len({evidence_state_scalar_text(value) for value in self.enum_candidates})
+            > self.distinct_count
+        ):
+            raise ValueError("database observed candidates must not exceed distinct count")
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("database observed minimum must not exceed maximum")
+        if (
+            self.distinct_count == 1
+            and self.minimum is not None
+            and self.maximum is not None
+            and self.minimum != self.maximum
+        ):
+            raise ValueError("database observed singleton extrema must be equal")
+        numeric_candidates = [
+            value
+            for value in self.enum_candidates
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        numeric_candidate_values = set(numeric_candidates)
+        self._validate_singleton_candidate_extrema(numeric_candidate_values)
+        if (
+            self.minimum is not None
+            and any(candidate < self.minimum for candidate in numeric_candidates)
+        ) or (
+            self.maximum is not None
+            and any(candidate > self.maximum for candidate in numeric_candidates)
+        ):
+            raise ValueError("database numeric candidates must fall within observed extrema")
+        extrema = [value for value in (self.minimum, self.maximum) if value is not None]
+        require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
+        return self
+
+    def _validate_singleton_candidate_extrema(
+        self, numeric_candidate_values: set[int | float]
+    ) -> None:
+        if self.distinct_count != 1 or len(numeric_candidate_values) != 1:
+            return
+        singleton_candidate = next(iter(numeric_candidate_values))
+        if (self.minimum is not None and singleton_candidate != self.minimum) or (
+            self.maximum is not None and singleton_candidate != self.maximum
+        ):
+            raise ValueError("database observed singleton candidate must equal observed extrema")
+
+    def _validate_zero_distinct_distribution(self) -> None:
+        if self.distinct_count != 0:
+            return
+        if (
+            self.row_count is not None
+            and self.null_ratio is not None
+            and Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio))) > 0
+        ):
+            raise ValueError("database non-null rows require a positive distinct count")
+        if self.enum_candidates or self.minimum is not None or self.maximum is not None:
+            raise ValueError("database zero-distinct distribution must not include observed values")
+
+
+class ExternalDatabaseTableClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalDatabaseTableClaim:
+        require_no_sensitive_scalar_values([self.schema_name, self.name])
+        return self
+
+
+class ExternalDatabaseColumnClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    table_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    name: str = Field(pattern=_ADAPTER_IDENTIFIER)
+    data_type: str = Field(min_length=1, max_length=160)
+    nullable: bool
+    primary_key: bool = False
+    foreign_key: str | None = Field(
+        default=None, min_length=1, max_length=320, pattern=_ADAPTER_REF
+    )
+    unique: bool = False
+    enum_values: list[str | int | FiniteFloat | bool] = Field(default_factory=list, max_length=100)
+    check_expression: str | None = Field(default=None, min_length=1, max_length=1000)
+    observed_distribution: ExternalDatabaseObservedDistribution | None = None
+    masked_example: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
+        if self.primary_key and self.nullable:
+            raise ValueError("database primary key must not be nullable")
+        if (
+            not self.nullable
+            and self.observed_distribution is not None
+            and self.observed_distribution.null_ratio is not None
+            and self.observed_distribution.null_ratio > 0
+        ):
+            raise ValueError("database non-nullable column must not have observed nulls")
+        require_no_sensitive_scalar_values(
+            [self.schema_name, self.table_name, self.name, self.data_type]
+        )
+        if self.foreign_key is not None:
+            require_no_sensitive_scalar_values([self.foreign_key])
+        if self.masked_example is not None and "***" not in self.masked_example:
+            raise ValueError("database examples must be masked")
+        if self.masked_example is not None:
+            require_no_sensitive_scalar_values([self.masked_example])
+        if self.check_expression is not None and _WRITE_SQL.search(self.check_expression):
+            raise ValueError("database evidence must not contain write SQL")
+        if self.check_expression is not None:
+            require_no_sensitive_scalar_values([self.check_expression])
+        require_no_sensitive_scalar_values(self.enum_values)
+        return self
+
+
+class DatabaseExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["database"] = "database"
+    claim_kind: Literal["table", "column"]
+    claim: ExternalDatabaseTableClaim | ExternalDatabaseColumnClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> DatabaseExternalEvidenceStructuredData:
+        expected = "column" if isinstance(self.claim, ExternalDatabaseColumnClaim) else "table"
+        if self.claim_kind != expected:
+            raise ValueError("database external claim kind must match its payload")
+        return self
+
+
+class ExternalEvidenceBundleClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    source_type: Literal[
+        "contract",
+        "source",
+        "data_profile",
+        "service_topology",
+        "workflow",
+        "runtime",
+        "change",
+        "existing_test",
+        "user_confirmed_rule",
+    ]
+    source_ref: str = Field(min_length=1, max_length=512)
+    subject_ref: str = Field(min_length=1, max_length=512)
+    kind: str = Field(min_length=1, max_length=80)
+    path: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0, le=1)
+    deterministic: bool
+    revision: str = Field(min_length=1, max_length=160)
+    sensitive: bool = False
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    structured_data_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_metadata(self) -> ExternalEvidenceBundleClaim:
+        require_no_sensitive_scalar_values([self.kind, self.path, *self.warnings])
+        return self
+
+
+class EvidenceBundleExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["evidence_bundle"] = "evidence_bundle"
+    claim_kind: str = Field(min_length=1, max_length=80)
+    claim: ExternalEvidenceBundleClaim
+
+    @model_validator(mode="after")
+    def validate_claim_kind(self) -> EvidenceBundleExternalEvidenceStructuredData:
+        require_no_sensitive_scalar_values([self.claim_kind])
+        if self.claim_kind != self.claim.kind:
+            raise ValueError("Evidence Bundle claim kind must match its payload")
+        return self
+
+
+class ExternalEntityMappingConflictClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mapping_kind: Literal[
+        "operation_entity",
+        "request_field_column",
+        "response_field_column",
+        "operation_state",
+    ]
+    source_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    candidate_count: int = Field(ge=2, le=1000)
+
+
+class EntityMappingExternalEvidenceStructuredData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["entity_mapping"] = "entity_mapping"
+    claim_kind: Literal["conflict"] = "conflict"
+    claim: ExternalEntityMappingConflictClaim
+
+
+type ExternalEvidenceAdapterStructuredData = Annotated[
+    JavaExternalEvidenceStructuredData
+    | DatabaseExternalEvidenceStructuredData
+    | EvidenceBundleExternalEvidenceStructuredData
+    | EntityMappingExternalEvidenceStructuredData,
+    Field(discriminator="adapter"),
+]
+type ExternalEvidenceStructuredData = (
+    EmptyExternalEvidenceStructuredData | ExternalEvidenceAdapterStructuredData
+)
+
+
 class ExternalEvidenceFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -271,12 +770,20 @@ class ExternalEvidenceFinding(BaseModel):
     source_content: EvidenceContentSource = EvidenceContentSource.STRUCTURED_ANALYSIS
     content_role: Literal["untrusted_data"] = "untrusted_data"
     statement: str = Field(min_length=1, max_length=2000)
+    structured_data: ExternalEvidenceStructuredData = Field(
+        default_factory=EmptyExternalEvidenceStructuredData
+    )
     confidence: float = Field(ge=0, le=1)
     deterministic: bool
     semantic_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
     @model_validator(mode="after")
     def validate_semantic_fingerprint(self) -> ExternalEvidenceFinding:
+        if isinstance(self.structured_data, EntityMappingExternalEvidenceStructuredData) and (
+            self.kind is not EvidenceFindingKind.CONFLICT
+            or self.semantic_role is not EvidenceSemanticRole.CONFLICT
+        ):
+            raise ValueError("entity mapping markers must be conflict findings")
         if self.semantic_fingerprint != finding_semantic_fingerprint(self):
             raise ValueError("finding semantic fingerprint does not match its content")
         return self
@@ -288,6 +795,11 @@ class ExternalEvidenceRedaction(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     method: Literal["removed", "masked", "hashed", "referenced"]
     reason: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_path(self) -> ExternalEvidenceRedaction:
+        require_no_sensitive_scalar_values([self.path])
+        return self
 
 
 class ExternalEvidenceWarning(BaseModel):
@@ -312,6 +824,10 @@ class ExternalEvidenceEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def validate_envelope(self) -> ExternalEvidenceEnvelope:
+        payload = self.model_dump(mode="json")
+        unsafe = first_sensitive_value(payload)
+        if unsafe is not None:
+            raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         identifiers = [finding.id for finding in self.findings]
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("evidence finding ids must be unique")
@@ -322,22 +838,99 @@ class ExternalEvidenceEnvelope(BaseModel):
                 raise ValueError("finding source_revision must match the envelope source")
             if finding.subject_ref != self.subject_ref:
                 raise ValueError("finding subject_ref must match the envelope subject")
-        payload = self.model_dump(mode="json")
+        _require_compatible_adapter_provider(self)
         if len(_canonical_json(payload)) > MAX_EXTERNAL_EVIDENCE_BYTES:
             raise ValueError("external evidence byte budget exceeded")
-        unsafe = first_sensitive_value(payload)
-        if unsafe is not None:
-            raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         return self
 
 
+def _require_compatible_adapter_provider(envelope: ExternalEvidenceEnvelope) -> None:
+    adapters = _envelope_adapters(envelope.findings)
+    primary_adapters = adapters - {"entity_mapping"}
+    if len(primary_adapters) > 1:
+        raise ValueError("external evidence adapters must not be mixed")
+    if "entity_mapping" in adapters and not primary_adapters.intersection({"java", "database"}):
+        raise ValueError("entity mapping markers require Java or database evidence")
+    if (
+        primary_adapters == {"java"}
+        and envelope.provider.type is not EvidenceProviderType.REPOSITORY
+    ):
+        raise ValueError("Java external evidence requires a repository provider")
+    if (
+        primary_adapters == {"database"}
+        and envelope.provider.type is not EvidenceProviderType.DATABASE
+    ):
+        raise ValueError("database external evidence requires a database provider")
+    if primary_adapters == {"evidence_bundle"}:
+        expected = _evidence_bundle_provider(envelope.findings)
+        if envelope.provider.type is not expected:
+            raise ValueError("Evidence Bundle provider does not match its source types")
+
+
+def _envelope_adapters(findings: list[ExternalEvidenceFinding]) -> set[str]:
+    adapter_types = (
+        JavaExternalEvidenceStructuredData,
+        DatabaseExternalEvidenceStructuredData,
+        EvidenceBundleExternalEvidenceStructuredData,
+        EntityMappingExternalEvidenceStructuredData,
+    )
+    return {
+        finding.structured_data.adapter
+        for finding in findings
+        if isinstance(finding.structured_data, adapter_types)
+    }
+
+
+def _evidence_bundle_provider(
+    findings: list[ExternalEvidenceFinding],
+) -> EvidenceProviderType:
+    source_types = {
+        finding.structured_data.claim.source_type
+        for finding in findings
+        if isinstance(finding.structured_data, EvidenceBundleExternalEvidenceStructuredData)
+    }
+    if len(source_types) != 1:
+        raise ValueError("Evidence Bundle must contain exactly one source type")
+    source_type = next(iter(source_types))
+    return {
+        "contract": EvidenceProviderType.CONTRACT,
+        "source": EvidenceProviderType.REPOSITORY,
+        "data_profile": EvidenceProviderType.DATA_PROFILE,
+        "service_topology": EvidenceProviderType.SERVICE_TOPOLOGY,
+        "existing_test": EvidenceProviderType.EXISTING_TEST,
+        "workflow": EvidenceProviderType.WORKFLOW,
+        "runtime": EvidenceProviderType.RUNTIME,
+        "change": EvidenceProviderType.CHANGE,
+        "user_confirmed_rule": EvidenceProviderType.USER_CONFIRMED_RULE,
+    }[source_type]
+
+
+def _external_evidence_finding_payload(
+    finding: ExternalEvidenceFinding,
+    *,
+    exclude_semantic_fingerprint: bool = False,
+) -> dict[str, object]:
+    exclude = {"semantic_fingerprint"} if exclude_semantic_fingerprint else None
+    payload: dict[str, object] = finding.model_dump(mode="json", exclude=exclude)
+    if not payload["structured_data"]:
+        del payload["structured_data"]
+    return payload
+
+
 def finding_semantic_fingerprint(finding: ExternalEvidenceFinding) -> str:
-    payload = finding.model_dump(mode="json", exclude={"semantic_fingerprint"})
+    payload = _external_evidence_finding_payload(
+        finding,
+        exclude_semantic_fingerprint=True,
+    )
     return sha256(_canonical_json(payload)).hexdigest()
 
 
 def external_evidence_fingerprint(envelope: ExternalEvidenceEnvelope) -> str:
-    return sha256(_canonical_json(envelope.model_dump(mode="json"))).hexdigest()
+    payload = envelope.model_dump(mode="json")
+    payload["findings"] = [
+        _external_evidence_finding_payload(finding) for finding in envelope.findings
+    ]
+    return sha256(_canonical_json(payload)).hexdigest()
 
 
 def external_evidence_item_fingerprint(
@@ -348,7 +941,7 @@ def external_evidence_item_fingerprint(
         "provider": envelope.provider.model_dump(mode="json"),
         "source": envelope.source.model_dump(mode="json"),
         "subject_ref": envelope.subject_ref,
-        "finding": finding.model_dump(mode="json"),
+        "finding": _external_evidence_finding_payload(finding),
         "redactions": [item.model_dump(mode="json") for item in envelope.redactions],
         "warnings": [item.model_dump(mode="json") for item in envelope.warnings],
         "confidence": envelope.confidence,
@@ -405,6 +998,39 @@ def completeness_snapshot(
     )
 
 
+def require_no_sensitive_scalar_values(
+    values: Sequence[str | int | float | bool],
+) -> None:
+    for value in values:
+        if first_sensitive_value({"value": str(value)}) is not None:
+            raise ValueError("external evidence contains sensitive scalar value")
+
+
+def require_safe_java_validation_constraint(*, annotation: str, constraint: str) -> None:
+    inspected = constraint
+    if annotation.rsplit(".", 1)[-1] in {"Max", "Min"}:
+        parts: list[str] = []
+        start = 0
+        for match in _JAVA_QUOTED_LITERAL.finditer(constraint):
+            parts.append(_JAVA_INTEGRAL_LITERAL.sub("0", constraint[start : match.start()]))
+            parts.append(match.group(0))
+            start = match.end()
+        parts.append(_JAVA_INTEGRAL_LITERAL.sub("0", constraint[start:]))
+        inspected = "".join(parts)
+    require_no_sensitive_scalar_values([inspected])
+
+
+def require_no_sensitive_reference_values(model: BaseModel) -> None:
+    values: list[str] = []
+    for field_name in type(model).model_fields:
+        value = getattr(model, field_name)
+        if field_name.endswith("_ref") and isinstance(value, str):
+            values.append(value)
+        elif field_name.endswith("_refs") and isinstance(value, list):
+            values.extend(item for item in value if isinstance(item, str))
+    require_no_sensitive_scalar_values(values)
+
+
 def first_sensitive_value(value: object, *, path: str = "$") -> str | None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -431,6 +1057,27 @@ def referenced_project_id(value: str) -> str | None:
     return segments[0] if segments else None
 
 
+def external_evidence_project_references(envelope: ExternalEvidenceEnvelope) -> list[str]:
+    values = [envelope.source.ref, envelope.subject_ref]
+    for finding in envelope.findings:
+        values.extend(_typed_string_values(finding.structured_data))
+    return [value for value in values if referenced_project_id(value) is not None]
+
+
+def _typed_string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, BaseModel):
+        return [
+            item
+            for field_name in type(value).model_fields
+            for item in _typed_string_values(getattr(value, field_name))
+        ]
+    if isinstance(value, (list, tuple)):
+        return [item for child in value for item in _typed_string_values(child)]
+    return []
+
+
 def _is_sensitive_literal(value: str, *, path: str) -> bool:
     if any(
         pattern.search(value)
@@ -449,6 +1096,7 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
         return True
     if _looks_like_high_entropy_credential(value):
         return True
+    phone_card_value = _UUID_LITERAL.sub("", value)
     if path.endswith(
         (
             ".statement",
@@ -459,8 +1107,11 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
             ".objective",
             ".name",
             ".id",
+            ".ref",
+            "_ref",
+            "_type",
         )
-    ) and any(pattern.search(value) for pattern in (_PHONE, _CARD)):
+    ) and any(pattern.search(phone_card_value) for pattern in (_PHONE, _CARD)):
         return True
     parsed = urlsplit(value)
     return parsed.username is not None or parsed.password is not None

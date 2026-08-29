@@ -3,10 +3,27 @@
   "target_type": "java_spring_full",
   "source_ref": "local-sibling://RuoYi",
   "source_revision_policy": "explicit commit required before evaluation",
+  "source_revision": "3b3941abeb5402297e5b4de82a30e6471c2239f3",
+  "poc_files": [
+    "ruoyi-admin/src/main/java/com/ruoyi/web/controller/system/SysUserController.java",
+    "ruoyi-system/src/main/java/com/ruoyi/system/mapper/SysUserMapper.java",
+    "ruoyi-common/src/main/java/com/ruoyi/common/core/domain/entity/SysUser.java"
+  ],
   "compose_file": "deploy/ruoyi/compose.yaml",
   "image": "flowtest-ruoyi:4.8.3",
   "database_profile": "mysql-8.4/ry",
   "expected_chain": ["route", "dto", "service", "mapper_or_entity", "table"],
+  "expected_claim_kinds": [
+    "controller_route",
+    "dto_field",
+    "bean_validation",
+    "service_call",
+    "mapper_repository",
+    "entity",
+    "table_column"
+  ],
+  "expected_route": {"method": "POST", "path": "/system/user/add"},
+  "expected_table_ref": "table://sys_user",
   "execute_analyzed_code": false,
   "ci_required": false
 }
