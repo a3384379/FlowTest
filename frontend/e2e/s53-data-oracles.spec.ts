@@ -36,8 +36,8 @@ test('S53 Login → Create → Query → DB Read 与跨系统断言真实执行'
     method: 'POST',
     path: `/api/v1/projects/${project.id}/services`,
     body: {
-      service_key: '000-s53-{{synthetic.service_key}}',
-      name: 'S53 {{synthetic.service_key}}',
+      service_key: 's53-placeholder',
+      name: 'S53 placeholder',
       description: 'S53 runtime data oracle acceptance',
       service_type: 'http',
       enabled: true,
@@ -249,6 +249,16 @@ async function createWorkflow(
     condition: null,
     mappings: [],
   }))
+  edges.push({
+    id: 'start-create-data',
+    source: 'start',
+    target: 'create',
+    condition: null,
+    mappings: [
+      syntheticBodyMapping('service_key', '000-s53-{{value}}'),
+      syntheticBodyMapping('name', 'S53 {{value}}'),
+    ],
+  })
   const response = await request.post(`/api/v1/projects/${projectId}/workflows`, {
     headers,
     data: {
@@ -259,6 +269,14 @@ async function createWorkflow(
   })
   expect(response.status(), await response.text()).toBe(201)
   return (await response.json()) as Identified
+}
+
+function syntheticBodyMapping(key: string, template: string) {
+  return {
+    source: { node_id: 'start', path: 'variables."synthetic.service_key"' },
+    transform: { kind: 'template', template },
+    target: { node_id: 'create', location: 'body', key },
+  }
 }
 
 async function waitForExecution(
