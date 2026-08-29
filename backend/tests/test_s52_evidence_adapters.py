@@ -713,6 +713,21 @@ def test_database_distribution_rejects_distinct_count_above_row_count_at_generic
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_column_rejects_observed_nulls_when_non_nullable_at_dedicated_boundary() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"]["null_ratio"] = 0.01
+
+    with pytest.raises(ValidationError, match="non-nullable column must not have observed nulls"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_column_rejects_observed_nulls_when_non_nullable_at_generic_boundary() -> None:
+    payload = _database_envelope_with_distribution_update({"null_ratio": 0.01})
+
+    with pytest.raises(ValidationError, match="non-nullable column must not have observed nulls"):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_column_rejects_nullable_primary_key_at_dedicated_boundary() -> None:
     payload = _database_submission()
     payload["tables"][0]["columns"][0]["nullable"] = True
@@ -2192,6 +2207,16 @@ class ModifierController {
         return syncService.load();
     }
 
+    @GetMapping("/protected")
+    protected final Order protectedLoad() {
+        return protectedService.load();
+    }
+
+    @GetMapping("/package")
+    Order packageLoad() {
+        return packageService.load();
+    }
+
     @GetMapping("/private")
     private Order privateLoad() {
         return privateService.load();
@@ -2210,8 +2235,16 @@ class ModifierController {
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
-    assert [(claim.handler, claim.path) for claim in routes] == [("synchronizedLoad", "/sync")]
-    assert [claim.callee_ref for claim in calls] == ["java://syncService.load"]
+    assert {(claim.handler, claim.path) for claim in routes} == {
+        ("synchronizedLoad", "/sync"),
+        ("protectedLoad", "/protected"),
+        ("packageLoad", "/package"),
+    }
+    assert {claim.callee_ref for claim in calls} == {
+        "java://syncService.load",
+        "java://protectedService.load",
+        "java://packageService.load",
+    }
 
 
 def test_java_spring_poc_parses_method_level_request_mapping_methods() -> None:

@@ -1929,6 +1929,52 @@ async def test_database_adapter_rejects_nullable_primary_keys_with_trace_id(
 
 
 @pytest.mark.asyncio
+async def test_database_adapter_rejects_observed_nulls_for_non_nullable_columns_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "数据库非空观测约束上下文",
+            "objective": "验证专用与通用入口拒绝非空列中的观测空值",
+            "required_evidence": ["data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    dedicated_payload = _database_evidence(project_id)
+    dedicated_payload["tables"][0]["columns"][2]["observed_distribution"] = {
+        "row_count": 100,
+        "null_ratio": 0.01,
+    }
+
+    dedicated = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": dedicated_payload},
+    )
+    generic = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={
+            "envelope": _database_envelope_with_invalid_distribution(
+                project_id,
+                {"null_ratio": 0.01},
+            )
+        },
+    )
+
+    for rejected in (dedicated, generic):
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_generic_evidence_rejects_inverted_extrema_with_trace_id(
     s52_context: dict[str, Any],
 ) -> None:

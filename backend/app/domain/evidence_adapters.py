@@ -351,6 +351,13 @@ class DatabaseColumnEvidence(BaseModel):
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
         if self.primary_key and self.nullable:
             raise ValueError("database primary key must not be nullable")
+        if (
+            not self.nullable
+            and self.observed_distribution is not None
+            and self.observed_distribution.null_ratio is not None
+            and self.observed_distribution.null_ratio > 0
+        ):
+            raise ValueError("database non-nullable column must not have observed nulls")
         require_no_sensitive_scalar_values([self.name, self.data_type])
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
@@ -2107,7 +2114,7 @@ def _routes_after_mapping(
     following = file.content[mapping_end : mapping_end + 2000]
     masked_following = _mask_java_annotation_arguments(_mask_java_non_code(following))
     signature = re.match(
-        r"(?:\s*@[A-Za-z0-9_$.]+)*\s*public\s+"
+        r"(?:\s*@[A-Za-z0-9_$.]+)*(?!\s*private\b)\s*(?:(?:public|protected)\s+)?"
         r"(?:(?:abstract|default|final|native|static|strictfp|synchronized)\s+)*"
         r"(?:<[^>{};]+>\s+)?"
         r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"

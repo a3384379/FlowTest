@@ -531,6 +531,13 @@ class ExternalDatabaseColumnClaim(BaseModel):
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
         if self.primary_key and self.nullable:
             raise ValueError("database primary key must not be nullable")
+        if (
+            not self.nullable
+            and self.observed_distribution is not None
+            and self.observed_distribution.null_ratio is not None
+            and self.observed_distribution.null_ratio > 0
+        ):
+            raise ValueError("database non-nullable column must not have observed nulls")
         require_no_sensitive_scalar_values(
             [self.schema_name, self.table_name, self.name, self.data_type]
         )
