@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260828_0046"
+BASELINE_REVISION = "20260829_0047"
 
 
 async def initialize_standalone_database() -> None:
@@ -133,7 +133,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044', '20260823_0045')"
+            "'20260823_0044', '20260823_0045', '20260828_0046')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -144,7 +144,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044', '20260823_0045')"
+            "'20260823_0044', '20260823_0045', '20260828_0046')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -168,6 +168,45 @@ async def _ensure_test_context_tables(connection: AsyncConnection) -> None:
         table = cast(Table, model.__table__)
         await connection.execute(CreateTable(table, if_not_exists=True))
         await _ensure_table_indexes(connection, table)
+    await _rebuild_context_evidence_source_type_if_needed(connection)
+
+
+async def _rebuild_context_evidence_source_type_if_needed(
+    connection: AsyncConnection,
+) -> None:
+    from app.models.test_contexts import ContextEvidenceItem
+
+    result = await connection.execute(
+        text(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_evidence_items'"
+        )
+    )
+    row = result.first()
+    table_sql = str(row[0]) if row and row[0] else ""
+    if not table_sql or "user_confirmed_rule" in table_sql:
+        return
+
+    table = cast(Table, ContextEvidenceItem.__table__)
+    await _drop_table_indexes(connection, "context_evidence_items")
+    await connection.execute(
+        text("ALTER TABLE context_evidence_items RENAME TO context_evidence_items_0046_legacy")
+    )
+    await connection.execute(CreateTable(table))
+    await connection.execute(
+        text(
+            "INSERT INTO context_evidence_items ("
+            "context_revision_id, source_type, provider_name, provider_version, source_ref, "
+            "source_revision, subject_ref, finding_payload, semantic_role, deterministic, "
+            "confidence, fingerprint, redactions, warnings, data_classification, created_at, "
+            "expires_at, id) SELECT context_revision_id, source_type, provider_name, "
+            "provider_version, source_ref, source_revision, subject_ref, finding_payload, "
+            "semantic_role, deterministic, confidence, fingerprint, redactions, warnings, "
+            "data_classification, created_at, expires_at, id "
+            "FROM context_evidence_items_0046_legacy"
+        )
+    )
+    await connection.execute(text("DROP TABLE context_evidence_items_0046_legacy"))
+    await _ensure_table_indexes(connection, table)
 
 
 async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:

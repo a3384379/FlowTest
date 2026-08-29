@@ -15,6 +15,7 @@ from app.core.config import Settings
 from app.core.storage import LocalObjectStorage
 from app.domain.runtime_profiles import RuntimeProfile, describe_runtime_profile
 from app.models import Base
+from app.models.test_contexts import ContextEvidenceItem
 from app.services.execution_events import (
     ExecutionEvent,
     ExecutionEventType,
@@ -188,6 +189,99 @@ async def test_standalone_schema_upgrades_0045_context_tables(
     }.issubset(tables)
     assert "ix_test_contexts_project_status" in context_indexes
     assert "ix_context_evidence_source" in evidence_indexes
+    assert baseline == standalone_schema.BASELINE_REVISION
+    assert alembic_revision == standalone_schema.BASELINE_REVISION
+
+
+@pytest.mark.asyncio
+async def test_standalone_schema_upgrades_0046_evidence_provider_constraint(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's52-schema.db'}")
+    evidence_id = uuid4().hex
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(standalone_schema.text("DROP TABLE context_evidence_items"))
+        current_ddl = str(
+            standalone_schema.CreateTable(ContextEvidenceItem.__table__).compile(
+                dialect=connection.dialect
+            )
+        )
+        legacy_ddl = current_ddl.replace(
+            "'data_profile', 'service_topology', 'existing_test'",
+            "'data_profile', 'existing_test'",
+        ).replace(
+            "'runtime', 'change', 'user_confirmed_rule', 'database'",
+            "'runtime', 'database'",
+        )
+        assert "user_confirmed_rule" not in legacy_ddl
+        await connection.execute(standalone_schema.text(legacy_ddl))
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO context_evidence_items ("
+                "context_revision_id, source_type, provider_name, provider_version, "
+                "source_ref, source_revision, subject_ref, finding_payload, semantic_role, "
+                "deterministic, confidence, fingerprint, expires_at, id) VALUES ("
+                ":revision_id, 'repository', 'legacy-provider', '1.0.0', "
+                "'repository://legacy', 'legacy-revision', 'flowtest://legacy', '{}', "
+                "'normative', 1, 1, :fingerprint, '2099-01-01T00:00:00Z', :id)"
+            ),
+            {
+                "revision_id": uuid4().hex,
+                "fingerprint": "a" * 64,
+                "id": evidence_id,
+            },
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE flowtest_standalone_meta "
+                "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO flowtest_standalone_meta VALUES ('schema_baseline', '20260828_0046')"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text("INSERT INTO alembic_version VALUES ('20260828_0046')")
+        )
+
+    monkeypatch.setattr(standalone_schema, "engine", test_engine)
+    await standalone_schema.initialize_standalone_database()
+    await standalone_schema.initialize_standalone_database()
+
+    async with test_engine.begin() as connection:
+        table_sql = await connection.scalar(
+            standalone_schema.text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'context_evidence_items'"
+            )
+        )
+        baseline = await connection.scalar(
+            standalone_schema.text(
+                "SELECT value FROM flowtest_standalone_meta WHERE key = 'schema_baseline'"
+            )
+        )
+        alembic_revision = await connection.scalar(
+            standalone_schema.text("SELECT version_num FROM alembic_version")
+        )
+        preserved_source_type = await connection.scalar(
+            standalone_schema.text("SELECT source_type FROM context_evidence_items WHERE id = :id"),
+            {"id": evidence_id},
+        )
+
+    await test_engine.dispose()
+    assert "service_topology" in str(table_sql)
+    assert "change" in str(table_sql)
+    assert "user_confirmed_rule" in str(table_sql)
+    assert preserved_source_type == "repository"
     assert baseline == standalone_schema.BASELINE_REVISION
     assert alembic_revision == standalone_schema.BASELINE_REVISION
 
