@@ -2189,6 +2189,41 @@ class FallbackController {
     }
 
 
+def test_java_spring_poc_does_not_select_an_arbitrary_unannotated_class() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://controller-candidate", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/UnrelatedFile.java",
+                        "content": """
+class ArbitraryHelper {
+    @GetMapping("/fabricated")
+    Order fabricated() {
+        return arbitraryService.load();
+    }
+}
+
+class AnotherHelper {}
+
+enum Marker { PRESENT; }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    assert not [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [claim.values for claim in evidence.claims if claim.kind == "enum_state"] == [
+        ["PRESENT"]
+    ]
+
+
 def test_java_spring_poc_binds_mapping_to_immediately_following_modified_method() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -2565,6 +2600,60 @@ class BaseConstantController {
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
+    assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
+
+
+def test_java_spring_poc_rejects_partial_mapping_path_expressions() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://mapping-expression", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/ExpressionController.java",
+                        "content": """
+@RestController
+class ExpressionController {
+    @GetMapping("/api/" + VERSION)
+    Order concatenated() {
+        return concatenatedService.load();
+    }
+
+    @GetMapping(path = {"/legacy", "/v" + VERSION})
+    Order mixedArray() {
+        return mixedService.load();
+    }
+
+    @GetMapping("/live")
+    Order live() {
+        return liveService.load();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/BaseExpressionController.java",
+                        "content": """
+@RestController
+@RequestMapping("/root/" + VERSION)
+class BaseExpressionController {
+    @GetMapping("/orders")
+    Order unresolvedBase() {
+        return baseService.load();
+    }
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("live", "/live")]
     assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
 
 
@@ -3328,6 +3417,151 @@ public class SharedController {
         assert not any(
             claim.kind == "dto_field" and claim.dto_type == "SharedDto" for claim in result.claims
         )
+        assert any(
+            warning.code == "JAVA_POC_INCOMPLETE_AMBIGUOUS_TYPE"
+            and "SharedDto" in warning.message
+            and "不完整" in warning.message
+            for warning in result.warnings
+        )
+
+
+def test_java_spring_poc_binds_enum_states_to_route_dto_fields() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://route-enum-state", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    OrderDto create(CreateOrderRequest request) {
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+class CreateOrderRequest {
+    private OrderStatus status;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": """
+class OrderDto {
+    private OrderStatus status;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderStatus.java",
+                        "content": "enum OrderStatus { CREATED, PAID; }",
+                    },
+                ],
+            }
+        )
+    )
+
+    scoped_states = [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "enum_state" and claim.operation_ref is not None
+    ]
+    assert {
+        (claim.operation_ref, claim.field_name, tuple(claim.values)) for claim in scoped_states
+    } == {("operation://POST/orders", "status", ("CREATED", "PAID"))}
+    assert len({claim.id for claim in scoped_states}) == 2
+
+
+def test_java_spring_poc_honors_explicit_jpa_table_names() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jpa-table-name", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/CustomerAccountEntity.java",
+                        "content": """
+@Entity
+@Table(name = "customer_accounts")
+class CustomerAccountEntity {
+    private String id;
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    entity = next(claim for claim in evidence.claims if claim.kind == "entity")
+    columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
+    assert entity.table_ref == "table://customer_accounts"
+    assert [(claim.table_ref, claim.field_name, claim.column_name) for claim in columns] == [
+        ("table://customer_accounts", "id", "id")
+    ]
+
+
+def test_java_spring_poc_marks_inherited_type_analysis_incomplete() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://inherited-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @GetMapping("/orders")
+    OrderDto load() {
+        return orderService.load();
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/BaseDto.java",
+                        "content": "class BaseDto { protected String tenantId; }",
+                    },
+                    {
+                        "path": "src/main/java/example/OrderDto.java",
+                        "content": "class OrderDto extends BaseDto { private String status; }",
+                    },
+                    {
+                        "path": "src/main/java/example/entity/BaseEntity.java",
+                        "content": "class BaseEntity { protected String id; }",
+                    },
+                    {
+                        "path": "src/main/java/example/entity/OrderEntity.java",
+                        "content": (
+                            "class OrderEntity extends BaseEntity { private String status; }"
+                        ),
+                    },
+                ],
+            }
+        )
+    )
+
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_INHERITANCE"
+        and "OrderDto" in warning.message
+        and "OrderEntity" in warning.message
+        and "不完整" in warning.message
+        for warning in evidence.warnings
+    )
 
 
 def test_ruoyi_full_golden_target_poc_without_execution() -> None:

@@ -81,6 +81,8 @@ _MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete|Request)
 _REQUEST_MAPPING = re.compile(r"@RequestMapping\b")
 _REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
 _CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
+_JPA_TABLE_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
+_JPA_TABLE_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -109,6 +111,7 @@ _KAFKA_SEND = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\s*\(\s*\"([^\
 _KAFKA_SEND_MARKER = re.compile(r"\b(?:kafkaTemplate|KafkaTemplate)\.send\b")
 _KAFKA_LISTENER = re.compile(r"@KafkaListener\b")
 _KAFKA_LISTENER_MARKER = re.compile(r"@KafkaListener\b")
+_JAVA_STRING_LITERAL = r'"(?:\\.|[^"\\])*"'
 _JAVA_NON_CODE = re.compile(
     r"//[^\r\n]*(?:\r?\n|$)"
     r"|/\*.*?(?:\*/|$)"
@@ -546,14 +549,14 @@ class JavaSpringPocProvider:
     """Statically inspect bounded Java text; never compile or execute analyzed code."""
 
     def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
-        type_fields = _java_type_fields(snapshot.files)
+        type_analysis = _java_type_analysis(snapshot.files)
         claims: list[JavaEvidenceClaim] = []
         structural_truncated = False
         for file in sorted(snapshot.files, key=lambda item: item.path):
             file_routes = _java_routes(file)
-            claims.extend(_route_claims(file, file_routes, type_fields))
+            claims.extend(_route_claims(file, file_routes, type_analysis))
             structural_claims, file_truncated = _structural_java_claims(
-                file, file_routes, type_fields
+                file, file_routes, type_analysis.fields
             )
             claims.extend(structural_claims)
             structural_truncated = structural_truncated or file_truncated
@@ -565,6 +568,26 @@ class JavaSpringPocProvider:
                 message="Java/Spring POC 仅执行静态文本分析，未编译或执行目标代码。",
             )
         ]
+        if type_analysis.ambiguous_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_AMBIGUOUS_TYPE",
+                    message=(
+                        "Java/Spring POC 发现同名类型，无法安全绑定字段，分析不完整："
+                        f"{_java_type_name_summary(type_analysis.ambiguous_types)}。"
+                    ),
+                )
+            )
+        if type_analysis.inherited_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_INHERITANCE",
+                    message=(
+                        "Java/Spring POC 不展开继承字段，以下类型的字段分析不完整："
+                        f"{_java_type_name_summary(type_analysis.inherited_types)}。"
+                    ),
+                )
+            )
         if truncated:
             warnings.append(
                 ExternalEvidenceWarning(
@@ -1821,13 +1844,32 @@ class _JavaRoute(BaseModel):
     source_line: int
 
 
-def _java_type_fields(
-    files: list[JavaSourceFileSnapshot],
-) -> dict[str, list[tuple[str, str, list[tuple[str, str]]]]]:
+JavaField = tuple[str, str, list[tuple[str, str]]]
+
+
+@dataclass(frozen=True)
+class _JavaEnumDefinition:
+    source_path: str
+    enum_ref: str
+    values: tuple[str, ...]
+    deterministic: bool
+
+
+@dataclass(frozen=True)
+class _JavaTypeAnalysis:
+    fields: dict[str, list[JavaField]]
+    enums: dict[str, _JavaEnumDefinition]
+    ambiguous_types: tuple[str, ...]
+    inherited_types: tuple[str, ...]
+
+
+def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysis:
     definitions: dict[
         str,
-        list[list[tuple[str, str, list[tuple[str, str]]]]],
+        list[list[JavaField]],
     ] = defaultdict(list)
+    enum_definitions: dict[str, list[_JavaEnumDefinition]] = defaultdict(list)
+    inherited_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
         for declaration in _TYPE_DECLARATION.finditer(masked_content):
@@ -1839,7 +1881,47 @@ def _java_type_fields(
                 else _class_fields(body)
             )
             definitions[name].append(fields)
-    return {name: items[0] for name, items in definitions.items() if len(items) == 1}
+            if _java_type_extends(masked_content, declaration):
+                inherited_types.add(name)
+            if declaration.group("kind") == "enum":
+                values, truncated = _enum_values(body)
+                if values:
+                    source_path = (
+                        f"{file.path}:{file.content.count(chr(10), 0, declaration.start()) + 1}"
+                    )
+                    enum_definitions[name].append(
+                        _JavaEnumDefinition(
+                            source_path=source_path,
+                            enum_ref=_java_structural_ref("java", source_path, name),
+                            values=tuple(values),
+                            deterministic=not truncated,
+                        )
+                    )
+    ambiguous_types = tuple(sorted(name for name, items in definitions.items() if len(items) > 1))
+    return _JavaTypeAnalysis(
+        fields={name: items[0] for name, items in definitions.items() if len(items) == 1},
+        enums={
+            name: items[0]
+            for name, items in enum_definitions.items()
+            if len(items) == 1 and name not in ambiguous_types
+        },
+        ambiguous_types=ambiguous_types,
+        inherited_types=tuple(sorted(inherited_types)),
+    )
+
+
+def _java_type_extends(masked_content: str, declaration: re.Match[str]) -> bool:
+    if declaration.group("kind") != "class":
+        return False
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return False
+    header = masked_content[declaration.end() : opening]
+    return re.search(r"\bextends\s+[A-Za-z_$][A-Za-z0-9_$.]*", header) is not None
+
+
+def _java_type_name_summary(names: tuple[str, ...]) -> str:
+    return ", ".join(names)[:800]
 
 
 def _type_body(content: str, start: int) -> str:
@@ -2056,7 +2138,7 @@ def _java_controller_declaration(
         if annotated
         else next(
             (candidate for candidate in candidates if candidate[0].group("name") == file_stem),
-            candidates[0],
+            None,
         ),
     )
 
@@ -2252,7 +2334,7 @@ def _mapping_paths(arguments: str) -> list[str]:
         if named is not None
         else _positional_mapping_expression(content)
     )
-    paths = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
+    paths = _java_literal_values(expression)
     if paths:
         return list(dict.fromkeys(paths))
     if named is not None or expression:
@@ -2278,16 +2360,41 @@ def _java_annotation_expression(
         index += 1
     if index >= len(content):
         return ""
-    if content[index] == "{":
-        closing = _matching_brace(content, index)
-        return content[index : closing + 1] if closing < len(content) else ""
-    string_expression = re.match(r'"(?:\\.|[^"\\])*"', content[index:])
-    if string_expression is not None:
-        return string_expression.group(0)
-    if allow_identifier:
-        identifier = re.match(r"[A-Za-z_$][A-Za-z0-9_$.]*", content[index:])
-        return identifier.group(0) if identifier is not None else ""
+    end = _java_annotation_expression_end(content, index)
+    expression = content[index:end].strip()
+    if expression.startswith("{") or re.match(_JAVA_STRING_LITERAL, expression) is not None:
+        return expression
+    if allow_identifier and re.match(r"[A-Za-z_$][A-Za-z0-9_$.]*", expression) is not None:
+        return expression
     return ""
+
+
+def _java_annotation_expression_end(content: str, start: int) -> int:
+    depth = 0
+    index = start
+    while index < len(content):
+        non_code = _JAVA_NON_CODE.match(content, index)
+        if non_code is not None:
+            index = non_code.end()
+            continue
+        character = content[index]
+        if character in "([{":
+            depth += 1
+        elif character in ")]}" and depth > 0:
+            depth -= 1
+        elif character == "," and depth == 0:
+            return index
+        index += 1
+    return len(content)
+
+
+def _java_literal_values(expression: str) -> list[str]:
+    stripped = expression.strip()
+    single_literal = re.fullmatch(_JAVA_STRING_LITERAL, stripped)
+    array_pattern = rf"\{{\s*{_JAVA_STRING_LITERAL}(?:\s*,\s*{_JAVA_STRING_LITERAL})*\s*,?\s*\}}"
+    if single_literal is None and re.fullmatch(array_pattern, stripped) is None:
+        return []
+    return [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', stripped)]
 
 
 def _mask_java_annotation_arguments(content: str) -> str:
@@ -2349,7 +2456,7 @@ def _matching_brace(content: str, opening: int) -> int:
 def _route_claims(
     file: JavaSourceFileSnapshot,
     routes: list[_JavaRoute],
-    type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
+    type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
     for route in routes:
@@ -2367,7 +2474,7 @@ def _route_claims(
                 deterministic=True,
             )
         )
-        claims.extend(_route_dto_claims(path, route, type_fields))
+        claims.extend(_route_dto_claims(path, route, type_analysis))
         claims.extend(_route_call_claims(path, route))
         claims.extend(_route_exception_claims(path, route))
         claims.extend(_route_kafka_claims(path, route))
@@ -2377,17 +2484,29 @@ def _route_claims(
 def _route_dto_claims(
     source_path: str,
     route: _JavaRoute,
-    type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
+    type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
     parameter_types = _parameter_types(route.parameters)
     for dto_type in parameter_types:
         claims.extend(
-            _dto_field_claims(source_path, route.operation_ref, "request", dto_type, type_fields)
+            _dto_field_claims(
+                source_path,
+                route.operation_ref,
+                "request",
+                dto_type,
+                type_analysis,
+            )
         )
     return_type = _simple_type(route.return_type)
     claims.extend(
-        _dto_field_claims(source_path, route.operation_ref, "response", return_type, type_fields)
+        _dto_field_claims(
+            source_path,
+            route.operation_ref,
+            "response",
+            return_type,
+            type_analysis,
+        )
     )
     return claims
 
@@ -2397,10 +2516,10 @@ def _dto_field_claims(
     operation_ref: str,
     direction: Literal["request", "response"],
     dto_type: str,
-    type_fields: dict[str, list[tuple[str, str, list[tuple[str, str]]]]],
+    type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
     claims: list[JavaEvidenceClaim] = []
-    for field_name, field_type, validation_annotations in type_fields.get(dto_type, []):
+    for field_name, field_type, validation_annotations in type_analysis.fields.get(dto_type, []):
         claims.append(
             JavaDtoFieldClaim(
                 id=_claim_id("dto", operation_ref, direction, dto_type, field_name),
@@ -2428,6 +2547,27 @@ def _dto_field_claims(
             )
             for annotation, arguments in validation_annotations
         )
+        enum_definition = type_analysis.enums.get(_simple_type(field_type))
+        if enum_definition is not None:
+            claims.append(
+                JavaEnumStateClaim(
+                    id=_claim_id(
+                        "enum-route",
+                        operation_ref,
+                        direction,
+                        dto_type,
+                        field_name,
+                        enum_definition.enum_ref,
+                    ),
+                    source_path=enum_definition.source_path,
+                    operation_ref=operation_ref,
+                    enum_ref=enum_definition.enum_ref,
+                    field_name=field_name,
+                    values=list(enum_definition.values),
+                    confidence=0.8,
+                    deterministic=enum_definition.deterministic,
+                )
+            )
     return claims
 
 
@@ -2529,10 +2669,8 @@ def _structural_java_claims(
     truncated = False
     masked_content = _mask_java_non_code(file.content)
     declarations = list(_TYPE_DECLARATION.finditer(masked_content))
-    top_level_starts = {
-        declaration.start()
-        for declaration in _TYPE_DECLARATION.finditer(_mask_nested_java_blocks(masked_content))
-    }
+    top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
+    top_level_starts = set(top_level_prefixes)
     for declaration in declarations:
         name = declaration.group("name")
         kind = declaration.group("kind")
@@ -2552,7 +2690,12 @@ def _structural_java_claims(
             and kind in {"class", "record"}
             and _is_entity_type(file.path, name)
         ):
-            table_name = _snake_case(name)
+            table_name = _java_entity_table_name(
+                file.content,
+                masked_content,
+                top_level_prefixes[declaration.start()],
+                declaration.start(),
+            ) or _snake_case(name)
             operation_refs = [
                 route.operation_ref
                 for route in routes
@@ -2599,6 +2742,45 @@ def _structural_java_claims(
                 )
     claims.extend(_listener_claims(file))
     return claims, truncated
+
+
+def _top_level_declaration_prefixes(content: str, masked_content: str) -> dict[int, int]:
+    declarations = list(_TYPE_DECLARATION.finditer(_mask_nested_java_blocks(masked_content)))
+    prefixes: dict[int, int] = {}
+    prefix_start = 0
+    for declaration in declarations:
+        prefixes[declaration.start()] = prefix_start
+        opening = masked_content.find("{", declaration.end())
+        if opening >= 0:
+            prefix_start = _matching_brace(content, opening) + 1
+    return prefixes
+
+
+def _java_entity_table_name(
+    content: str,
+    masked_content: str,
+    start: int,
+    end: int,
+) -> str | None:
+    matches = _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JPA_TABLE_ANNOTATION_MARKER,
+        _JPA_TABLE_ANNOTATION,
+        start=start,
+        end=end,
+    )
+    if not matches:
+        return None
+    arguments = _java_annotation_arguments(content, matches[-1].end())
+    inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    assignment = re.search(r"\bname\s*=", _mask_java_non_code(inner))
+    if assignment is None:
+        return None
+    values = _java_literal_values(_java_annotation_expression(inner, assignment.end()))
+    if len(values) != 1 or re.fullmatch(_IDENTIFIER, values[0]) is None:
+        return None
+    return values[0]
 
 
 def _is_entity_type(path: str, name: str) -> bool:
