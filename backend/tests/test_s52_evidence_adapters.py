@@ -903,6 +903,29 @@ def test_database_distribution_bounds_distinct_count_by_non_null_rows_at_generic
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+def test_database_distribution_allows_rounded_null_ratio_at_both_boundaries() -> None:
+    dedicated = _database_submission()
+    dedicated["tables"][0]["columns"][1]["nullable"] = True
+    dedicated["tables"][0]["columns"][1]["observed_distribution"] = {
+        "row_count": 3,
+        "null_ratio": 0.67,
+        "distinct_count": 1,
+        "enum_candidates": ["active"],
+    }
+    generic = _database_envelope_with_distribution_update(
+        {
+            "row_count": 3,
+            "null_ratio": 0.67,
+            "distinct_count": 1,
+            "enum_candidates": ["active"],
+        },
+        nullable=True,
+    )
+
+    DatabaseEvidenceSubmission.model_validate(dedicated)
+    ExternalEvidenceEnvelope.model_validate(generic)
+
+
 def test_database_distribution_counts_candidates_by_state_scalar_identity() -> None:
     payload = _database_submission()
     payload["tables"][0]["columns"][1]["observed_distribution"].update(
@@ -4299,6 +4322,89 @@ class AccessorDto {
     }
 
 
+def test_java_spring_poc_applies_snake_case_json_naming_to_dto_fields() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://json-naming", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AccountController.java",
+                        "content": """
+@RestController
+class AccountController {
+    @PostMapping("/class")
+    ClassDto classDto(ClassDto request) { return request; }
+
+    @PostMapping("/record")
+    RecordDto recordDto(RecordDto request) { return request; }
+}
+
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+class ClassDto {
+    private String userName;
+
+    @JsonProperty("explicitName")
+    private String displayName;
+}
+
+@com.fasterxml.jackson.databind.annotation.JsonNaming(
+    com.fasterxml.jackson.databind.PropertyNamingStrategies.SnakeCaseStrategy.class
+)
+record RecordDto(String userName) {}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    fields = {
+        (claim.dto_type, claim.field_name) for claim in evidence.claims if claim.kind == "dto_field"
+    }
+    assert fields == {
+        ("ClassDto", "explicitName"),
+        ("ClassDto", "user_name"),
+        ("RecordDto", "user_name"),
+    }
+
+
+def test_java_spring_poc_stops_dto_claims_for_unsupported_json_naming() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://unknown-json-naming", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AccountController.java",
+                        "content": """
+@RestController
+class AccountController {
+    @PostMapping("/accounts")
+    AccountDto create(AccountDto request) { return request; }
+}
+
+@JsonNaming(CustomNamingStrategy.class)
+class AccountDto { private String userName; }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [claim for claim in evidence.claims if claim.kind == "dto_field"]
+    assert evidence.deterministic is False
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_JSON_NAMING" and "AccountDto" in warning.message
+        for warning in evidence.warnings
+    )
+
+
 def test_java_spring_poc_preserves_qualified_and_repeated_validation_constraints() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4355,6 +4461,57 @@ class CreateOrderRequest {
     }
     assert len(patterns) == 2
     assert len({claim.id for claim in patterns}) == 2
+
+
+def test_java_spring_poc_preserves_remaining_standard_validation_constraints() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://standard-validation", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(CreateOrderRequest request) { return orderService.create(request); }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+class CreateOrderRequest {
+    @AssertFalse
+    @AssertTrue
+    @Digits(integer = 3, fraction = 2)
+    @Future
+    @FutureOrPresent
+    @Null
+    @Past
+    @PastOrPresent
+    private Object marker;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    assert {claim.annotation for claim in evidence.claims if claim.kind == "bean_validation"} == {
+        "AssertFalse",
+        "AssertTrue",
+        "Digits",
+        "Future",
+        "FutureOrPresent",
+        "Null",
+        "Past",
+        "PastOrPresent",
+    }
 
 
 def test_java_spring_poc_parses_every_multi_variable_field_declarator() -> None:
@@ -4888,7 +5045,8 @@ public enum OrderStatus {
         @Override
         public String code() { return "A"; }
     },
-    INACTIVE("I");
+    INACTIVE("I"),
+    @JsonProperty("1") ONE("1");
 
     private final String code;
 }
@@ -4901,7 +5059,50 @@ public enum OrderStatus {
 
     states = [claim for claim in evidence.claims if claim.kind == "enum_state"]
     assert len(states) == 1
-    assert states[0].values == ["ACTIVE", "INACTIVE"]
+    assert states[0].values == ["ACTIVE_CODE", "INACTIVE", "1"]
+
+
+def test_java_spring_poc_stops_enum_candidates_for_unresolved_json_value() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://json-value-enum", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    OrderDto create(OrderDto request) { return request; }
+}
+
+class OrderDto { private OrderStatus status; }
+
+enum OrderStatus {
+    ACTIVE("active"), INACTIVE("inactive");
+
+    private final String value;
+
+    @JsonValue
+    public String value() { return value; }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [claim for claim in evidence.claims if claim.kind == "enum_state"]
+    assert evidence.deterministic is False
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION"
+        and "OrderStatus" in warning.message
+        for warning in evidence.warnings
+    )
 
 
 def test_java_spring_poc_keeps_same_named_structural_claims_from_distinct_sources() -> None:

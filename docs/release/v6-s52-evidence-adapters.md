@@ -107,6 +107,15 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   Response Evidence，Field、Record Component 和 Accessor 的显式方向都会传播到 DTO Claim。
 - Jackson `@JsonProperty("...")`/`value = "..."` 的显式线上属性名同样从 Field、Record Component 和
   Accessor 传播到 DTO、Validation 与 Enum Evidence；Entity/Table Column 仍保留 Java 字段身份。
+- Enum Constant 的 `@JsonProperty` 值按 Jackson 线上状态值生成 Evidence；遇到无法安全静态求值的
+  `@JsonValue` 时停止生成对应状态候选，产生 `JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION` 并降级为非确定性，
+  避免 Java 常量名制造错误 DB State 候选或冲突。
+- DTO/Record 的 `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)` 会转换未显式命名的线上字段；
+  显式 `@JsonProperty` 继续优先。其他无法静态解析的 Naming Strategy 会停止对应 DTO Claim、产生
+  `JAVA_POC_INCOMPLETE_JSON_NAMING` 并降级为非确定性。
+- Bean Validation 静态证据覆盖 Jakarta/Javax 标准约束，包括 `@Digits`、`@Null`、`@Past`、`@Future`、
+  `@AssertTrue`/`@AssertFalse` 及其 OrPresent 变体；扫描字段声明前先屏蔽 Annotation 参数，数值参数不会被误识别
+  为 Java 字段声明。
 - Spring 方法级 `consumes`/`produces` 按框架语义覆盖类型级媒体条件，`params`/`headers` 仍合并；
   显式空 `RequestMethod` 数组按 Annotation 默认值处理为八种受支持 HTTP Method。
 - Claim 配额截断、同名类型、继承字段/控制器父类路由和 JPA Property Access 等显式不完整边界都会
@@ -138,6 +147,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 - DB Evidence 仅用于设计候选；不建立数据库连接，不接收原始数据行，不改变既有 Runtime DB Read Oracle。
 - DB 数值分布与 Enum 合同只接受有限浮点数，`NaN`/`Infinity` 在专用 Submission 与通用 External
   Evidence Envelope 两层边界都被拒绝，避免非标准 JSON 进入 PostgreSQL JSON 字段。
+- Observed Distribution 的非空行上限按整数行数向上取整，允许 Profiler 报告经过小数舍入的 Null Ratio；例如
+  三行中两行为空可表示为 `null_ratio=0.67`、`distinct_count=1`，专用与通用合同保持一致。
 - Java Enum State、DB Enum Values 与 Observed Distribution Enum Candidates 在专用与通用 Envelope 两层边界
   复用同一标量敏感值检查；Phone/Card/Credential 等未脱敏值返回标准 422，错误正文不回显原值。
 - Ingest 在锁定当前 Context Revision 后基于 Existing + New Evidence 计算歧义，避免在并发写入前静默遗漏冲突。
@@ -187,7 +198,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；857 passed、4 skipped、总覆盖率 90.73%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；861 passed、4 skipped、总覆盖率 90.73%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -285,6 +296,11 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 最新复审指出 RuoYi 风格动作路由 `/system/user/add` 会错把 `add` 当作资源，从而漏掉
   `SysUser`/`sys_user` Operation/Entity 候选；当前实现会在受控常见动作后缀前取资源段，直接回归覆盖
   Java Entity + Database Table 证据联合派生，且全量后端门禁通过。
+- 本轮复审提出 4 个 P2：Enum `@JsonProperty`/`@JsonValue` 线上值未正确建模、Bean Validation 标准约束缺项、
+  类级 `@JsonNaming` 未传播，以及舍入后的 Null Ratio 被精确小数运算误拒绝。当前实现支持可静态解析的
+  Enum/DTO 线上命名，对 `@JsonValue` 与未知 Naming Strategy 停止生成不可靠候选并显式降级，补齐标准约束，
+  同时在专用与通用 DB Distribution 合同中使用整数上界。S52 Domain/API 定向回归与全量后端门禁均已通过：
+  861 passed、4 skipped、总覆盖率 90.73%。
 
 ### 待完成
 

@@ -9,7 +9,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -225,6 +225,18 @@ _JACKSON_PROPERTY_ANNOTATION = re.compile(
 _JACKSON_PROPERTY_ANNOTATION_MARKER = re.compile(
     r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonProperty)\b"
 )
+_JACKSON_NAMING_ANNOTATION = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.databind\.annotation\.)?JsonNaming)\b"
+)
+_JACKSON_NAMING_ANNOTATION_MARKER = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.databind\.annotation\.)?JsonNaming)\b"
+)
+_JACKSON_VALUE_ANNOTATION = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonValue)\b"
+)
+_JACKSON_VALUE_ANNOTATION_MARKER = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonValue)\b"
+)
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -239,8 +251,9 @@ _JAVA_STRING_CONSTANT_DECLARATION = re.compile(
     r"(?P<expression>[^;]+);"
 )
 _VALIDATION_CONSTRAINT_ANNOTATION_NAMES = (
-    r"NotNull|NotBlank|NotEmpty|Size|Min|Max|Positive|PositiveOrZero|"
-    r"Negative|NegativeOrZero|Email|Pattern|DecimalMin|DecimalMax"
+    r"AssertFalse|AssertTrue|DecimalMax|DecimalMin|Digits|Email|Future|FutureOrPresent|"
+    r"Max|Min|Negative|NegativeOrZero|NotBlank|NotEmpty|NotNull|Null|Past|PastOrPresent|"
+    r"Pattern|Positive|PositiveOrZero|Size"
 )
 _VALIDATION_ANNOTATION_SOURCE = (
     rf"(?:(?:(?:jakarta|javax)\.validation\.constraints\.)?"
@@ -534,7 +547,9 @@ class DatabaseObservedDistribution(BaseModel):
             and self.null_ratio is not None
             and self.distinct_count is not None
             and Decimal(self.distinct_count)
-            > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+            > (
+                Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+            ).to_integral_value(rounding=ROUND_CEILING)
         ):
             raise ValueError("database distinct count must not exceed non-null row count")
         self._validate_zero_distinct_distribution()
@@ -879,6 +894,28 @@ class JavaSpringPocProvider:
                     ),
                 )
             )
+        if type_analysis.unresolved_enum_serialization_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION",
+                    message=(
+                        "Java/Spring POC 无法静态解析 @JsonValue 枚举序列化，"
+                        "已停止生成对应状态候选："
+                        f"{_java_type_name_summary(type_analysis.unresolved_enum_serialization_types)}。"
+                    ),
+                )
+            )
+        if type_analysis.unresolved_json_naming_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_JSON_NAMING",
+                    message=(
+                        "Java/Spring POC 无法静态解析部分 @JsonNaming 策略，"
+                        "已停止生成对应 DTO 字段证据："
+                        f"{_java_type_name_summary(type_analysis.unresolved_json_naming_types)}。"
+                    ),
+                )
+            )
         warnings.extend(
             _java_reference_warnings(
                 interface_contracts.unresolved_interfaces,
@@ -914,6 +951,8 @@ class JavaSpringPocProvider:
                 and not unresolved_kafka_topics
                 and not unresolved_jpa_tables
                 and not type_analysis.unresolved_column_types
+                and not type_analysis.unresolved_enum_serialization_types
+                and not type_analysis.unresolved_json_naming_types
             ),
             warnings=warnings,
         )
@@ -2296,6 +2335,8 @@ class _JavaTypeAnalysis:
     inherited_types: tuple[str, ...]
     property_access_types: tuple[str, ...]
     unresolved_column_types: tuple[str, ...]
+    unresolved_enum_serialization_types: tuple[str, ...]
+    unresolved_json_naming_types: tuple[str, ...]
 
 
 def _java_type_analysis(
@@ -2310,6 +2351,8 @@ def _java_type_analysis(
     inherited_types: set[str] = set()
     property_access_types: set[str] = set()
     unresolved_column_types: set[str] = set()
+    unresolved_enum_serialization_types: set[str] = set()
+    unresolved_json_naming_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
         top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
@@ -2321,6 +2364,15 @@ def _java_type_analysis(
                 if declaration.group("kind") == "record"
                 else _class_fields(body, string_constants, name)
             )
+            fields, unresolved_naming_types = _java_fields_with_json_naming(
+                file.content,
+                masked_content,
+                declaration,
+                top_level_prefixes,
+                fields,
+                name,
+            )
+            unresolved_json_naming_types.update(unresolved_naming_types)
             definitions[name].append(fields)
             if any(field[4] for field in fields):
                 unresolved_column_types.add(name)
@@ -2346,8 +2398,13 @@ def _java_type_analysis(
             ):
                 property_access_types.add(name)
             if declaration.group("kind") == "enum":
-                values, truncated = _enum_values(body)
-                if values:
+                values, truncated, serialization_unresolved = _enum_values(
+                    body,
+                    string_constants,
+                    name,
+                )
+                unresolved_enum_serialization_types.update((name,) * serialization_unresolved)
+                if values and not serialization_unresolved:
                     source_path = (
                         f"{file.path}:{file.content.count(chr(10), 0, declaration.start()) + 1}"
                     )
@@ -2371,7 +2428,31 @@ def _java_type_analysis(
         inherited_types=tuple(sorted(inherited_types)),
         property_access_types=tuple(sorted(property_access_types)),
         unresolved_column_types=tuple(sorted(unresolved_column_types)),
+        unresolved_enum_serialization_types=tuple(sorted(unresolved_enum_serialization_types)),
+        unresolved_json_naming_types=tuple(sorted(unresolved_json_naming_types)),
     )
+
+
+def _java_fields_with_json_naming(
+    content: str,
+    masked_content: str,
+    declaration: re.Match[str],
+    top_level_prefixes: dict[int, int],
+    fields: list[JavaField],
+    type_name: str,
+) -> tuple[list[JavaField], tuple[str, ...]]:
+    prefix_start = top_level_prefixes.get(declaration.start())
+    if prefix_start is None:
+        return fields, ()
+    naming_strategy, naming_unresolved = _java_json_naming_strategy(
+        content,
+        masked_content,
+        prefix_start,
+        declaration.start(),
+    )
+    if naming_strategy == "snake_case":
+        return [(*field[:6], field[6] or _snake_case(field[0])) for field in fields], ()
+    return fields, (type_name,) * naming_unresolved
 
 
 def _java_type_extends(masked_content: str, declaration: re.Match[str]) -> bool:
@@ -2550,7 +2631,8 @@ def _class_fields(
     fields: list[JavaField] = []
     code_body = _mask_java_non_code(body)
     masked_body = _mask_nested_java_blocks(code_body)
-    for match in _FIELD_DECLARATION.finditer(masked_body):
+    declaration_body = _mask_java_annotation_arguments(masked_body)
+    for match in _FIELD_DECLARATION.finditer(declaration_body):
         modifiers = set(match.group("modifiers").split())
         if modifiers.intersection({"static", "transient"}):
             continue
@@ -2867,6 +2949,33 @@ def _jackson_property_name_from_match(
     if value is None or re.fullmatch(_IDENTIFIER, value) is None:
         return None
     return value
+
+
+def _java_json_naming_strategy(
+    content: str,
+    masked_content: str,
+    start: int,
+    end: int,
+) -> tuple[Literal["snake_case"] | None, bool]:
+    matches = _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_NAMING_ANNOTATION_MARKER,
+        _JACKSON_NAMING_ANNOTATION,
+        start=start,
+        end=end,
+    )
+    if not matches:
+        return None, False
+    arguments = _java_annotation_arguments(content, matches[-1].end())
+    strategy = re.search(
+        r"(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?P<name>[A-Za-z_$][A-Za-z0-9_$]*Strategy)"
+        r"\s*\.class\b",
+        _mask_java_non_code(arguments),
+    )
+    if strategy is not None and strategy.group("name") == "SnakeCaseStrategy":
+        return "snake_case", False
+    return None, True
 
 
 def _jackson_accessor_property_metadata(
@@ -4093,6 +4202,8 @@ def _dto_field_claims(
     dto_type: str,
     type_analysis: _JavaTypeAnalysis,
 ) -> list[JavaEvidenceClaim]:
+    if dto_type in type_analysis.unresolved_json_naming_types:
+        return []
     claims: list[JavaEvidenceClaim] = []
     for (
         field_name,
@@ -4466,9 +4577,13 @@ def _structural_java_claims(
                     if not column_name_unresolved
                 )
         if kind == "enum":
-            values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
+            values, values_truncated, serialization_unresolved = _enum_values(
+                _type_body(file.content, declaration.end()),
+                string_constants,
+                name,
+            )
             truncated = truncated or values_truncated
-            if values:
+            if values and not serialization_unresolved:
                 claims.append(
                     JavaEnumStateClaim(
                         id=_claim_id("enum", source_path, name),
@@ -4582,16 +4697,89 @@ def _is_entity_type(path: str, name: str) -> bool:
     return "/domain/" in lowered or "/entity/" in lowered or name.endswith("Entity")
 
 
-def _enum_values(body: str) -> tuple[list[str], bool]:
+def _enum_values(
+    body: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> tuple[list[str], bool, bool]:
+    masked_body = _mask_java_non_code(body)
+    serialization_unresolved = bool(
+        _active_java_annotation_matches(
+            body,
+            masked_body,
+            _JACKSON_VALUE_ANNOTATION_MARKER,
+            _JACKSON_VALUE_ANNOTATION,
+        )
+    )
     header = _top_level_java_prefix(body, ";")
     values: list[str] = []
     for component in _split_top_level_java_components(header):
-        masked = _mask_java_annotation_arguments(_mask_java_non_code(component))
-        declaration = re.sub(r"@[A-Za-z_$][A-Za-z0-9_$.]*", " ", masked).lstrip()
-        match = re.match(r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\b", declaration)
+        component_start = _java_leading_annotations_end(component)
+        match = re.match(
+            r"\s*(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\b",
+            _mask_java_non_code(component)[component_start:],
+        )
         if match is not None:
-            values.append(match.group("name"))
-    return values[:100], len(values) > 100
+            annotation_prefix = component[:component_start]
+            property_present, serialized_name = _jackson_enum_property_value(
+                annotation_prefix,
+                _mask_java_non_code(annotation_prefix),
+                string_constants,
+                enclosing_type,
+            )
+            serialization_unresolved = serialization_unresolved or (
+                property_present and serialized_name is None
+            )
+            values.append(serialized_name or match.group("name"))
+    return values[:100], len(values) > 100, serialization_unresolved
+
+
+def _jackson_enum_property_value(
+    content: str,
+    masked_content: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> tuple[bool, str | None]:
+    matches = _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_PROPERTY_ANNOTATION_MARKER,
+        _JACKSON_PROPERTY_ANNOTATION,
+    )
+    if not matches:
+        return False, None
+    arguments = _java_annotation_arguments(content, matches[-1].end())
+    inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    if not inner.strip():
+        return False, None
+    assignment = re.search(r"\bvalue\s*=", _mask_java_non_code(inner))
+    if assignment is not None:
+        expression = _java_annotation_expression(inner, assignment.end(), allow_identifier=True)
+        return True, _java_string_expression_value(
+            expression,
+            string_constants,
+            enclosing_type,
+        )
+    if re.search(r"\b[A-Za-z_$][A-Za-z0-9_$]*\s*=", _mask_java_non_code(inner)):
+        return False, None
+    expression = _java_annotation_expression(inner, 0, allow_identifier=True)
+    return True, _java_string_expression_value(expression, string_constants, enclosing_type)
+
+
+def _java_leading_annotations_end(content: str) -> int:
+    masked_content = _mask_java_non_code(content)
+    index = 0
+    while True:
+        while index < len(masked_content) and masked_content[index].isspace():
+            index += 1
+        annotation = re.match(r"@[A-Za-z_$][A-Za-z0-9_$.]*", masked_content[index:])
+        if annotation is None:
+            return index
+        index += annotation.end()
+        while index < len(masked_content) and masked_content[index].isspace():
+            index += 1
+        if index < len(masked_content) and masked_content[index] == "(":
+            index = _matching_parenthesis(content, index) + 1
 
 
 def _top_level_java_prefix(content: str, delimiter: str) -> str:

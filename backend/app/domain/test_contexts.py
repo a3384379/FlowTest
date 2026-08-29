@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 from hashlib import sha256
 from typing import Annotated, Final, Literal
@@ -526,7 +526,9 @@ class ExternalDatabaseObservedDistribution(BaseModel):
             and self.null_ratio is not None
             and self.distinct_count is not None
             and Decimal(self.distinct_count)
-            > Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+            > (
+                Decimal(self.row_count) * (Decimal(1) - Decimal(str(self.null_ratio)))
+            ).to_integral_value(rounding=ROUND_CEILING)
         ):
             raise ValueError("database distinct count must not exceed non-null row count")
         self._validate_zero_distinct_distribution()
