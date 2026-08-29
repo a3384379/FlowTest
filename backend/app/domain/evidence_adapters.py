@@ -641,6 +641,9 @@ def adapt_evidence_bundle(
     source_revision: str,
     subject_ref: str,
 ) -> ExternalEvidenceEnvelope:
+    require_no_sensitive_scalar_values(bundle.warnings)
+    for finding in bundle.findings:
+        require_no_sensitive_scalar_values([finding.path, *finding.warnings])
     source = ExternalEvidenceSource(ref=source_ref, revision=source_revision)
     provider_type = _bundle_provider_type(bundle)
     findings = [
@@ -2110,12 +2113,23 @@ def _mapping_http_methods(
                 composed_method.upper(),
             )
         ]
-    methods = re.findall(
-        r"\bRequestMethod\.(GET|POST|PUT|PATCH|DELETE)\b",
-        arguments,
+    content = (
+        arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
-    if not methods:
+    method_expression = re.search(
+        r"\bmethod\s*=\s*(?P<value>\{[^}]*\}|[A-Za-z_$][A-Za-z0-9_$.]*)",
+        content,
+        re.DOTALL,
+    )
+    if method_expression is None:
+        if re.search(r"\bmethod\s*=", content) is not None:
+            return []
         methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    else:
+        methods = re.findall(
+            r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?(GET|POST|PUT|PATCH|DELETE)\b",
+            method_expression.group("value"),
+        )
     return [
         cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
         for method in dict.fromkeys(methods)

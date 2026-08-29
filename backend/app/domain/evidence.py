@@ -29,7 +29,7 @@ _BASIC_VALUE = re.compile(r"^Basic\s+[A-Za-z0-9+/=]{8,}$", re.IGNORECASE)
 _JWT_VALUE = re.compile(r"^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$")
 _CARD_VALUE = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
 _AWS_ACCESS_KEY = re.compile(r"^(?:AKIA|ASIA)[A-Z0-9]{16}$")
-_PHONE_VALUE = re.compile(r"^\+?[1-9]\d{9,14}$")
+_PHONE_VALUE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 
 
 class EvidenceSourceType(StrEnum):
@@ -99,6 +99,12 @@ class EvidenceFinding(BaseModel):
         unsafe_path = _sensitive_value_path(self.structured_data)
         if unsafe_path is not None:
             raise ValueError(f"evidence structured_data contains sensitive value at {unsafe_path}")
+        unsafe_metadata = _sensitive_value_path(
+            cast(JsonValue, {"path": self.path, "warnings": self.warnings}),
+            path="$.metadata",
+        )
+        if unsafe_metadata is not None:
+            raise ValueError(f"evidence metadata contains sensitive value at {unsafe_metadata}")
         return self
 
     def as_ref(self) -> EvidenceRef:
@@ -181,6 +187,9 @@ class EvidenceBundle(BaseModel):
             raise ValueError("evidence finding ids must be unique")
         if len(self.findings) > self.budget.max_findings:
             raise ValueError("evidence finding budget exceeded")
+        unsafe_warning = _sensitive_value_path(cast(JsonValue, self.warnings), path="$.warnings")
+        if unsafe_warning is not None:
+            raise ValueError(f"evidence metadata contains sensitive value at {unsafe_warning}")
         payload = self.model_dump(mode="json", exclude={"budget": {"max_bytes"}})
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if len(encoded.encode()) > self.budget.max_bytes:
@@ -818,6 +827,8 @@ def _sensitive_value_path(value: JsonValue, path: str = "$") -> str | None:
             nested = _sensitive_value_path(child, f"{path}[{index}]")
             if nested is not None:
                 return nested
+    elif isinstance(value, str) and _looks_sensitive_value(value):
+        return path
     return None
 
 
@@ -865,7 +876,7 @@ def _looks_sensitive_value(value: str) -> bool:
         or _JWT_VALUE.fullmatch(value)
         or _CARD_VALUE.search(value)
         or _AWS_ACCESS_KEY.fullmatch(value)
-        or _PHONE_VALUE.fullmatch(value)
+        or _PHONE_VALUE.search(value)
         or "-----BEGIN " in value
         or _url_contains_userinfo(value)
         or _high_entropy_credential(value)

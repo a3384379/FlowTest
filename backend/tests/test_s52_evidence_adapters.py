@@ -1605,6 +1605,78 @@ def test_python_provider_bundle_remains_compatible_with_context_adapter() -> Non
     assert len(structured_data.claim.structured_data_fingerprint) == 64
 
 
+def test_evidence_bundle_rejects_sensitive_path_and_warning_metadata() -> None:
+    sensitive_value = "13800138000"
+
+    def payload() -> dict[str, Any]:
+        return {
+            "subject_ref": SUBJECT_REF,
+            "findings": [
+                {
+                    "id": "profile-finding",
+                    "source_type": "data_profile",
+                    "source_ref": "database://orders",
+                    "subject_ref": SUBJECT_REF,
+                    "kind": "column_profile",
+                    "path": "$.orders.id",
+                    "structured_data": {"nullable": False},
+                    "confidence": 0.9,
+                    "deterministic": True,
+                    "revision": "profile-v1",
+                    "warnings": [],
+                }
+            ],
+            "warnings": [],
+        }
+
+    sensitive_path = payload()
+    sensitive_path["findings"][0]["path"] = f"$.customers.{sensitive_value}"
+    with pytest.raises(ValidationError, match="sensitive"):
+        EvidenceBundle.model_validate(sensitive_path)
+
+    sensitive_finding_warning = payload()
+    sensitive_finding_warning["findings"][0]["warnings"] = [f"customer {sensitive_value}"]
+    with pytest.raises(ValidationError, match="sensitive"):
+        EvidenceBundle.model_validate(sensitive_finding_warning)
+
+    sensitive_bundle_warning = payload()
+    sensitive_bundle_warning["warnings"] = [f"customer {sensitive_value}"]
+    with pytest.raises(ValidationError, match="sensitive"):
+        EvidenceBundle.model_validate(sensitive_bundle_warning)
+
+    safe_bundle = EvidenceBundle.model_validate(payload())
+    unsafe_finding = safe_bundle.findings[0].model_copy(
+        update={"path": f"$.customers.{sensitive_value}"}
+    )
+    unsafe_bundle = safe_bundle.model_copy(update={"findings": [unsafe_finding]})
+    with pytest.raises(ValueError, match="sensitive scalar"):
+        adapt_evidence_bundle(
+            unsafe_bundle,
+            provider_name="profile-provider",
+            provider_version="1.0.0",
+            source_ref="database://orders",
+            source_revision="profile-v1",
+            subject_ref=SUBJECT_REF,
+        )
+
+    safe_envelope = adapt_evidence_bundle(
+        safe_bundle,
+        provider_name="profile-provider",
+        provider_version="1.0.0",
+        source_ref="database://orders",
+        source_revision="profile-v1",
+        subject_ref=SUBJECT_REF,
+    )
+    for field_name, value in (
+        ("path", f"$.customers.{sensitive_value}"),
+        ("warnings", [f"customer {sensitive_value}"]),
+    ):
+        generic = safe_envelope.model_dump(mode="json")
+        generic["findings"][0]["structured_data"]["claim"][field_name] = value
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic)
+
+
 def test_evidence_bundle_adapter_rejects_mixed_source_semantics() -> None:
     mixed_bundle = EvidenceBundle.model_validate(
         {
@@ -2059,6 +2131,39 @@ class AnyMethodController {
     assert {claim.operation_ref for claim in calls} == {
         f"operation://{method}/api/orders" for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
     }
+
+
+def test_java_spring_poc_parses_statically_imported_request_method_constants() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://static-request-method", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/StaticMethodController.java",
+                        "content": """
+import static org.springframework.web.bind.annotation.RequestMethod.GET;
+
+@RestController
+class StaticMethodController {
+    @RequestMapping(path = "/orders", method = GET)
+    public Order load() {
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.method, claim.path) for claim in routes] == [("GET", "/orders")]
+    assert [claim.operation_ref for claim in calls] == ["operation://GET/orders"]
 
 
 def test_java_spring_poc_parses_formatted_generic_handler_return_types() -> None:

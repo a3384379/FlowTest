@@ -579,6 +579,11 @@ class ExternalEvidenceBundleClaim(BaseModel):
     warnings: list[str] = Field(default_factory=list, max_length=20)
     structured_data_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
+    @model_validator(mode="after")
+    def validate_metadata(self) -> ExternalEvidenceBundleClaim:
+        require_no_sensitive_scalar_values([self.path, *self.warnings])
+        return self
+
 
 class EvidenceBundleExternalEvidenceStructuredData(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -11,12 +11,14 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.evidence import EvidenceBundle
 from app.domain.evidence_adapters import (
     DatabaseEvidenceSubmission,
     EntityMappingBudgetExceeded,
     JavaEvidenceSubmission,
     MappingEvidenceInput,
     adapt_database_evidence,
+    adapt_evidence_bundle,
     adapt_java_evidence,
     with_mapping_conflict_findings,
 )
@@ -1430,6 +1432,42 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
     )
     generic_dto["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
 
+    safe_bundle = EvidenceBundle.model_validate(
+        {
+            "subject_ref": f"flowtest://projects/{project_id}/operations/orders",
+            "findings": [
+                {
+                    "id": "profile-finding",
+                    "source_type": "data_profile",
+                    "source_ref": "database://orders",
+                    "subject_ref": f"flowtest://projects/{project_id}/operations/orders",
+                    "kind": "column_profile",
+                    "path": "$.orders.id",
+                    "structured_data": {"nullable": False},
+                    "confidence": 0.9,
+                    "deterministic": True,
+                    "revision": "profile-v1",
+                }
+            ],
+        }
+    )
+    safe_bundle_envelope = adapt_evidence_bundle(
+        safe_bundle,
+        provider_name="profile-provider",
+        provider_version="1.0.0",
+        source_ref="database://orders",
+        source_revision="profile-v1",
+        subject_ref=f"flowtest://projects/{project_id}/operations/orders",
+    )
+    sensitive_bundle_metadata: list[tuple[str, dict[str, Any]]] = []
+    for field_name, value in (
+        ("path", f"$.customers.{sensitive_value}"),
+        ("warnings", [f"customer {sensitive_value}"]),
+    ):
+        generic_bundle = safe_bundle_envelope.model_dump(mode="json")
+        generic_bundle["findings"][0]["structured_data"]["claim"][field_name] = value
+        sensitive_bundle_metadata.append(("evidence", {"envelope": generic_bundle}))
+
     sensitive_identifiers: list[tuple[str, dict[str, Any]]] = []
     dedicated_entity = _java_evidence(project_id)
     dedicated_entity_claim = next(
@@ -1537,6 +1575,7 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
         ("evidence", {"envelope": generic_java}),
         ("evidence", {"envelope": generic_database}),
         ("evidence", {"envelope": generic_field_name}),
+        *sensitive_bundle_metadata,
         *sensitive_identifiers,
         *sensitive_columns,
     )
