@@ -111,7 +111,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
   `@JsonValue` 时停止生成对应状态候选，产生 `JAVA_POC_INCOMPLETE_ENUM_SERIALIZATION` 并降级为非确定性，
   避免 Java 常量名制造错误 DB State 候选或冲突。
 - DTO/Record 的 `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)` 会转换未显式命名的线上字段；
-  显式 `@JsonProperty` 继续优先。其他无法静态解析的 Naming Strategy 会停止对应 DTO Claim、产生
+  顶层与嵌套 DTO 声明使用同一规则，显式 `@JsonProperty` 继续优先。其他无法静态解析的 Naming Strategy 会停止对应 DTO Claim、产生
   `JAVA_POC_INCOMPLETE_JSON_NAMING` 并降级为非确定性。
 - Bean Validation 静态证据覆盖 Jakarta/Javax 标准约束，包括 `@Digits`、`@Null`、`@Past`、`@Future`、
   `@AssertTrue`/`@AssertFalse` 及其 OrPresent 变体；扫描字段声明前先屏蔽 Annotation 参数，数值参数不会被误识别
@@ -301,6 +301,9 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   Enum/DTO 线上命名，对 `@JsonValue` 与未知 Naming Strategy 停止生成不可靠候选并显式降级，补齐标准约束，
   同时在专用与通用 DB Distribution 合同中使用整数上界。S52 Domain/API 定向回归与全量后端门禁均已通过：
   861 passed、4 skipped、总覆盖率 90.73%。
+- 精确 Head 复审随后指出嵌套 DTO 声明未使用顶层类型 Prefix Map，导致其 `@JsonNaming` 被跳过；当前实现会从
+  嵌套声明之前最近的 Java Member 边界定位 Annotation Prefix，直接回归验证嵌套 Request 的 `userName` 生成
+  `user_name` Evidence。
 
 ### 待完成
 

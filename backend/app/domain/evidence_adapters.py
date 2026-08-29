@@ -2441,9 +2441,10 @@ def _java_fields_with_json_naming(
     fields: list[JavaField],
     type_name: str,
 ) -> tuple[list[JavaField], tuple[str, ...]]:
-    prefix_start = top_level_prefixes.get(declaration.start())
-    if prefix_start is None:
-        return fields, ()
+    prefix_start = top_level_prefixes.get(
+        declaration.start(),
+        _java_nested_declaration_prefix_start(masked_content, declaration.start()),
+    )
     naming_strategy, naming_unresolved = _java_json_naming_strategy(
         content,
         masked_content,
@@ -2453,6 +2454,17 @@ def _java_fields_with_json_naming(
     if naming_strategy == "snake_case":
         return [(*field[:6], field[6] or _snake_case(field[0])) for field in fields], ()
     return fields, (type_name,) * naming_unresolved
+
+
+def _java_nested_declaration_prefix_start(masked_content: str, declaration_start: int) -> int:
+    return (
+        max(
+            masked_content.rfind(";", 0, declaration_start),
+            masked_content.rfind("{", 0, declaration_start),
+            masked_content.rfind("}", 0, declaration_start),
+        )
+        + 1
+    )
 
 
 def _java_type_extends(masked_content: str, declaration: re.Match[str]) -> bool:

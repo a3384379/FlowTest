@@ -4340,6 +4340,9 @@ class AccountController {
 
     @PostMapping("/record")
     RecordDto recordDto(RecordDto request) { return request; }
+
+    @PostMapping("/nested")
+    Container.Request nested(Container.Request request) { return request; }
 }
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -4354,6 +4357,11 @@ class ClassDto {
     com.fasterxml.jackson.databind.PropertyNamingStrategies.SnakeCaseStrategy.class
 )
 record RecordDto(String userName) {}
+
+class Container {
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    static class Request { private String userName; }
+}
 """,
                     }
                 ],
@@ -4368,6 +4376,7 @@ record RecordDto(String userName) {}
         ("ClassDto", "explicitName"),
         ("ClassDto", "user_name"),
         ("RecordDto", "user_name"),
+        ("Request", "user_name"),
     }
 
 
