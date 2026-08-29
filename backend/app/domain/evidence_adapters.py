@@ -365,6 +365,13 @@ class DatabaseObservedDistribution(BaseModel):
             self.enum_candidates or self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("database empty distribution must not include observed values")
+        if self.null_ratio == 1 and (
+            (self.distinct_count or 0) > 0
+            or self.enum_candidates
+            or self.minimum is not None
+            or self.maximum is not None
+        ):
+            raise ValueError("database all-null distribution must not include observed values")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
@@ -2141,6 +2148,9 @@ def _class_fields(body: str) -> list[JavaField]:
         modifiers = set(match.group("modifiers").split())
         if modifiers.intersection({"static", "transient"}):
             continue
+        declarators = _java_field_declarators(match.group(0))
+        if not declarators:
+            continue
         prefix_start = max(0, match.start() - 500)
         masked_prefix = masked_body[prefix_start : match.start()]
         annotation_start = masked_prefix.rfind(";") + 1
@@ -2150,8 +2160,10 @@ def _class_fields(body: str) -> list[JavaField]:
             continue
         annotations = _java_validation_annotations(annotation_content, annotation_mask)
         column_name = _java_column_name(annotation_content, annotation_mask)
-        field_type = " ".join(match.group("type").split())
-        fields.append((match.group("name"), field_type, annotations, column_name))
+        fields.extend(
+            (field_name, field_type, annotations, column_name)
+            for field_name, field_type in declarators
+        )
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
@@ -2171,6 +2183,47 @@ def _class_fields(body: str) -> list[JavaField]:
                 old[3],
             )
     return fields
+
+
+def _java_field_declarators(declaration: str) -> list[tuple[str, str]]:
+    statement = declaration.removesuffix(";").strip()
+    modifier = re.compile(r"^(?:public|protected|private|static|final|transient)\b\s*")
+    while (match := modifier.match(statement)) is not None:
+        statement = statement[match.end() :]
+    components = _split_top_level_java_components(statement)
+    if not components:
+        return []
+    identifier = r"[A-Za-z_$][A-Za-z0-9_$]*"
+    first = re.fullmatch(
+        rf"(?P<type>.+?)\s+(?P<name>{identifier})"
+        r"(?P<dimensions>(?:\s*\[\])*)(?:\s*=.*)?",
+        components[0].strip(),
+        re.DOTALL,
+    )
+    if first is None:
+        return []
+    base_type = " ".join(first.group("type").split())
+    result = [
+        (
+            first.group("name"),
+            f"{base_type}{'[]' * first.group('dimensions').count('[')}",
+        )
+    ]
+    for component in components[1:]:
+        declarator = re.fullmatch(
+            rf"(?P<name>{identifier})(?P<dimensions>(?:\s*\[\])*)(?:\s*=.*)?",
+            component.strip(),
+            re.DOTALL,
+        )
+        if declarator is None:
+            return []
+        result.append(
+            (
+                declarator.group("name"),
+                f"{base_type}{'[]' * declarator.group('dimensions').count('[')}",
+            )
+        )
+    return result
 
 
 def _java_validation_annotations(
@@ -2234,9 +2287,18 @@ def _java_annotation_arguments_and_end(
 
 def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
     masked_content = _mask_java_non_code(file.content)
-    selected = _java_controller_declaration(file, masked_content)
-    if selected is None:
-        return []
+    return [
+        route
+        for selected in _java_controller_declarations(file, masked_content)
+        for route in _java_controller_routes(file, masked_content, selected)
+    ]
+
+
+def _java_controller_routes(
+    file: JavaSourceFileSnapshot,
+    masked_content: str,
+    selected: tuple[re.Match[str], int],
+) -> list[_JavaRoute]:
     declaration, declaration_prefix_start = selected
     class_opening = masked_content.find("{", declaration.end())
     if class_opening < 0:
@@ -2284,10 +2346,10 @@ def _java_routes(file: JavaSourceFileSnapshot) -> list[_JavaRoute]:
     ]
 
 
-def _java_controller_declaration(
+def _java_controller_declarations(
     file: JavaSourceFileSnapshot,
     masked_content: str,
-) -> tuple[re.Match[str], int] | None:
+) -> list[tuple[re.Match[str], int]]:
     top_level_mask = _mask_nested_java_blocks(masked_content)
     declarations = list(_TYPE_DECLARATION.finditer(top_level_mask))
     candidates: list[tuple[re.Match[str], int]] = []
@@ -2299,7 +2361,7 @@ def _java_controller_declaration(
         if opening >= 0:
             declaration_prefix_start = _matching_brace(file.content, opening) + 1
     if not candidates:
-        return None
+        return []
     file_stem = PurePosixPath(file.path).stem
     annotated = [
         candidate
@@ -2311,15 +2373,13 @@ def _java_controller_declaration(
         )
         is not None
     ]
-    return next(
-        (candidate for candidate in annotated if candidate[0].group("name") == file_stem),
-        annotated[0]
-        if annotated
-        else next(
-            (candidate for candidate in candidates if candidate[0].group("name") == file_stem),
-            None,
-        ),
+    if annotated:
+        return annotated
+    filename_match = next(
+        (candidate for candidate in candidates if candidate[0].group("name") == file_stem),
+        None,
     )
+    return [filename_match] if filename_match is not None else []
 
 
 def _mask_java_non_code(content: str) -> str:

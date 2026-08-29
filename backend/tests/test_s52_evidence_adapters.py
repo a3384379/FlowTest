@@ -726,6 +726,7 @@ def test_database_distribution_rejects_values_for_zero_rows_at_dedicated_boundar
     observed_values: dict[str, Any],
 ) -> None:
     payload = _database_submission()
+    payload["tables"][0]["columns"][1]["nullable"] = True
     payload["tables"][0]["columns"][1]["observed_distribution"] = {
         "row_count": 0,
         "distinct_count": 0,
@@ -758,11 +759,72 @@ def test_database_distribution_rejects_values_for_zero_rows_at_generic_boundary(
             "minimum": None,
             "maximum": None,
             **observed_values,
-        }
+        },
+        nullable=True,
     )
 
     with pytest.raises(
         ValidationError, match="empty distribution must not include observed values"
+    ):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"distinct_count": 1},
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["distinct-count", "enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_when_every_row_is_null_at_dedicated_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["nullable"] = True
+    payload["tables"][0]["columns"][1]["observed_distribution"] = {
+        "row_count": 10,
+        "distinct_count": 0,
+        "null_ratio": 1,
+        **observed_values,
+    }
+
+    with pytest.raises(
+        ValidationError, match="all-null distribution must not include observed values"
+    ):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"distinct_count": 1},
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["distinct-count", "enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_when_every_row_is_null_at_generic_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "row_count": 10,
+            "distinct_count": 0,
+            "null_ratio": 1,
+            "enum_candidates": [],
+            "minimum": None,
+            "maximum": None,
+            **observed_values,
+        },
+        nullable=True,
+    )
+
+    with pytest.raises(
+        ValidationError, match="all-null distribution must not include observed values"
     ):
         ExternalEvidenceEnvelope.model_validate(payload)
 
@@ -2394,6 +2456,47 @@ class QualifiedController {
     assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
 
 
+def test_java_spring_poc_analyzes_every_annotated_top_level_controller() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://multiple-controllers", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/PrimaryController.java",
+                        "content": """
+@RestController
+class PrimaryController {
+    @GetMapping("/primary")
+    Order primary() { return primaryService.load(); }
+}
+
+@Controller
+class SecondaryController {
+    @GetMapping("/secondary")
+    Order secondary() { return secondaryService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert {(claim.controller_ref, claim.handler, claim.path) for claim in routes} == {
+        ("java://PrimaryController", "primary", "/primary"),
+        ("java://SecondaryController", "secondary", "/secondary"),
+    }
+    assert {claim.callee_ref for claim in calls} == {
+        "java://primaryService.load",
+        "java://secondaryService.load",
+    }
+
+
 def test_java_spring_poc_binds_mapping_to_immediately_following_modified_method() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -2950,6 +3053,71 @@ class CreateOrderRequest {
     }
     assert len(patterns) == 2
     assert len({claim.id for claim in patterns}) == 2
+
+
+def test_java_spring_poc_parses_every_multi_variable_field_declarator() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://multi-fields", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    Order create(CreateOrderRequest request) { return orderService.create(request); }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": """
+class CreateOrderRequest {
+    private String first, last;
+    private int minimum = 1, maximum = 2;
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/entity/OrderEntity.java",
+                        "content": """
+class OrderEntity {
+    private String first, last;
+    private int minimum = 1, maximum = 2;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    request_fields = {
+        (claim.field_name, claim.field_type)
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "request"
+    }
+    entity_columns = {
+        (claim.field_name, claim.column_name)
+        for claim in evidence.claims
+        if claim.kind == "table_column"
+    }
+    assert request_fields == {
+        ("first", "String"),
+        ("last", "String"),
+        ("minimum", "int"),
+        ("maximum", "int"),
+    }
+    assert entity_columns == {
+        ("first", "first"),
+        ("last", "last"),
+        ("minimum", "minimum"),
+        ("maximum", "maximum"),
+    }
 
 
 def test_java_spring_poc_excludes_static_dto_and_entity_fields() -> None:
@@ -4068,10 +4236,15 @@ def _mapping_inputs(envelope: ExternalEvidenceEnvelope, prefix: str) -> list[Map
     ]
 
 
-def _database_envelope_with_distribution_update(update: dict[str, Any]) -> dict[str, Any]:
-    envelope = adapt_database_evidence(
-        DatabaseEvidenceSubmission.model_validate(_database_submission())
-    )
+def _database_envelope_with_distribution_update(
+    update: dict[str, Any],
+    *,
+    nullable: bool | None = None,
+) -> dict[str, Any]:
+    source_payload = _database_submission()
+    if nullable is not None:
+        source_payload["tables"][0]["columns"][1]["nullable"] = nullable
+    envelope = adapt_database_evidence(DatabaseEvidenceSubmission.model_validate(source_payload))
     finding_index, finding = next(
         (index, finding)
         for index, finding in enumerate(envelope.findings)

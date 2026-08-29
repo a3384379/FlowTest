@@ -1931,6 +1931,46 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
     assert rejected_generic_empty_values.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected_generic_empty_values.json()["error"]["trace_id"]
 
+    all_null_values = _database_evidence(project_id)
+    all_null_values["tables"][0]["columns"][2]["nullable"] = True
+    all_null_values["tables"][0]["columns"][2]["observed_distribution"] = {
+        "row_count": 10,
+        "distinct_count": 0,
+        "null_ratio": 1,
+        "enum_candidates": ["ghost"],
+    }
+    rejected_all_null_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": all_null_values},
+    )
+
+    assert rejected_all_null_values.status_code == 422, rejected_all_null_values.text
+    assert rejected_all_null_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_all_null_values.json()["error"]["trace_id"]
+
+    generic_all_null_values = _database_envelope_with_invalid_distribution(
+        project_id,
+        {
+            "row_count": 10,
+            "distinct_count": 0,
+            "null_ratio": 1,
+            "minimum": None,
+            "maximum": None,
+            "enum_candidates": ["ghost"],
+        },
+        nullable=True,
+    )
+    rejected_generic_all_null_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_all_null_values},
+    )
+
+    assert rejected_generic_all_null_values.status_code == 422
+    assert rejected_generic_all_null_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_generic_all_null_values.json()["error"]["trace_id"]
+
 
 @pytest.mark.asyncio
 async def test_database_adapter_rejects_nullable_primary_keys_with_trace_id(
@@ -2264,8 +2304,12 @@ def _oversized_java_evidence(project_id: str) -> dict[str, Any]:
 def _database_envelope_with_invalid_distribution(
     project_id: str,
     update: dict[str, Any],
+    *,
+    nullable: bool | None = None,
 ) -> dict[str, Any]:
     payload = _database_evidence(project_id)
+    if nullable is not None:
+        payload["tables"][0]["columns"][2]["nullable"] = nullable
     payload["tables"][0]["columns"][2]["observed_distribution"] = {
         "minimum": 1,
         "maximum": 10,
