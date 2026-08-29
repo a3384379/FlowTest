@@ -91,6 +91,8 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 - `JavaSpringPocProvider` 只接收有界、仓库相对路径的 `.java` 文本，使用静态文本分析；Contract 把
   `execute_analyzed_code` 固定为 `false`，不调用 Java Compiler、构建工具、ClassLoader 或被分析代码。
+- Route 只从显式 `@Controller`/`@RestController` 类型或其本地接口 Contract 生成，不再按文件名猜测 Controller；
+  `RequestMethod` 覆盖 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS/TRACE，避免合法 Mapping 被静默遗漏。
 - 转换后的 External Finding ID 在超长时保留有界可读前缀并附加 SHA-256 后缀；允许的 160 字符 Java Claim ID
   即使只在尾部不同也不会因 `java-` 前缀与截断发生碰撞。
 - Controller 方法签名中的 `throws` 声明与方法体中的显式 `throw new` 都转换为 Exception Evidence，不因
@@ -161,7 +163,7 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 | Backend Format          | `uv run ruff format --check .`   | Pass；465 files already formatted                             |
 | Backend Lint            | `uv run ruff check .`            | Pass                                                          |
 | Backend Types           | `uv run mypy app`                | Pass；337 source files                                        |
-| Backend Tests           | `uv run pytest`                  | Pass；844 passed、4 skipped、总覆盖率 90.73%                  |
+| Backend Tests           | `uv run pytest`                  | Pass；845 passed、4 skipped、总覆盖率 90.71%                  |
 | Backend Security Lint   | `uv run ruff check --select S .` | Pass                                                          |
 | Frontend Format         | `pnpm format:check`              | Pass                                                          |
 | Frontend Lint/Types     | `pnpm lint`                      | Pass；ESLint 与 TypeScript                                    |
@@ -231,6 +233,8 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
 - 最新复审指出集合容器 Overload 绑定、接口继承 Route、Mapping 常量、Framework 注入参数和迁移文档五项边界；
   当前实现已保留完整参数类型签名、递归解析本地接口继承、解析本地常量并对未知表达式显式标记分析不完整、排除
   Transport/Injected 参数，同时把本文件与 Migration Head 更新到 `20260829_0047`。五项均有直接回归。
+- 下一轮复审指出文件名回退会把普通类误报为 Controller，以及显式 HEAD Mapping 会被遗漏；当前实现改为只接收
+  明确 Spring Controller Annotation，并完整支持 Spring `RequestMethod` 的八种方法，含 HEAD/OPTIONS/TRACE 回归。
 
 ### 待完成
 

@@ -305,7 +305,7 @@ class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     controller_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     handler: str = Field(pattern=_ADAPTER_IDENTIFIER)
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+    method: Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]
     path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
 
     @model_validator(mode="after")

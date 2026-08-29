@@ -2658,7 +2658,7 @@ class SecondaryController {
     assert [(claim.handler, claim.path) for claim in routes] == [("live", "/api/live")]
 
 
-def test_java_spring_poc_selects_annotated_or_file_named_controller() -> None:
+def test_java_spring_poc_requires_controller_annotations() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
             {
@@ -2698,7 +2698,6 @@ class FallbackController {
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     assert {(claim.controller_ref, claim.handler, claim.path) for claim in routes} == {
         ("java://ActualController", "live", "/annotated/live"),
-        ("java://FallbackController", "fallback", "/fallback"),
     }
 
 
@@ -3219,6 +3218,42 @@ class RequestMappingController {
     }
 
 
+def test_java_spring_poc_includes_explicit_head_options_and_trace_mappings() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://extended-http-methods", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/HealthController.java",
+                        "content": """
+@RestController
+class HealthController {
+    @RequestMapping(
+        path = "/health",
+        method = {RequestMethod.HEAD, RequestMethod.OPTIONS, RequestMethod.TRACE}
+    )
+    Health health() { return healthService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert {claim.method for claim in routes} == {"HEAD", "OPTIONS", "TRACE"}
+    assert {claim.operation_ref for claim in calls} == {
+        "operation://HEAD/health",
+        "operation://OPTIONS/health",
+        "operation://TRACE/health",
+    }
+
+
 def test_java_spring_poc_distinguishes_condition_specific_mappings() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -3407,7 +3442,8 @@ class AnyMethodController {
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
     calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
     assert {(claim.method, claim.path) for claim in routes} == {
-        (method, "/api/orders") for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
+        (method, "/api/orders")
+        for method in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")
     }
     assert {claim.operation_ref for claim in calls} == {claim.operation_ref for claim in routes}
     assert all("#conditions-" in claim.operation_ref for claim in routes)
@@ -4577,7 +4613,7 @@ def test_java_spring_poc_reports_claim_quota_truncation() -> None:
             "files": [
                 {
                     "path": "src/main/java/example/OrderController.java",
-                    "content": f"public class OrderController {{\n{routes}\n}}",
+                    "content": f"@RestController\npublic class OrderController {{\n{routes}\n}}",
                 }
             ],
         }
@@ -4612,7 +4648,10 @@ def test_java_spring_poc_removes_claims_for_truncated_routes() -> None:
                 "files": [
                     {
                         "path": "src/main/java/example/OrderController.java",
-                        "content": f"{dtos}\npublic class OrderController {{\n{routes}\n}}",
+                        "content": (
+                            f"{dtos}\n@RestController\n"
+                            f"public class OrderController {{\n{routes}\n}}"
+                        ),
                     }
                 ],
             }

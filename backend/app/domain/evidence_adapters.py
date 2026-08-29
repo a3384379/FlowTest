@@ -212,6 +212,17 @@ _JAVA_NON_CODE = re.compile(
     re.DOTALL,
 )
 
+type JavaHttpMethod = Literal[
+    "GET",
+    "HEAD",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+    "TRACE",
+]
+
 
 class EvidenceAdapterProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -240,7 +251,7 @@ class JavaControllerRouteClaim(JavaClaimBase):
     operation_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     controller_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     handler: str = Field(pattern=_IDENTIFIER)
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+    method: JavaHttpMethod
     path: str = Field(min_length=1, max_length=500, pattern=r"^/[^\s]*$")
 
     @model_validator(mode="after")
@@ -2059,7 +2070,7 @@ def _table_ref_matches_database_table(
 
 
 class _JavaRoute(BaseModel):
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+    method: JavaHttpMethod
     path: str
     operation_ref: str
     controller_ref: str
@@ -2083,7 +2094,7 @@ class _JavaInterfaceDefinition:
     routes: tuple[_JavaRoute, ...]
     parents: tuple[str, ...]
     base_paths: tuple[str, ...]
-    base_methods: tuple[Literal["GET", "POST", "PUT", "PATCH", "DELETE"], ...] | None
+    base_methods: tuple[JavaHttpMethod, ...] | None
     base_conditions: tuple[str, ...]
 
 
@@ -2830,7 +2841,7 @@ def _java_type_mapping(
     string_constants: _JavaStringConstants,
 ) -> tuple[
     list[str],
-    list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
+    list[JavaHttpMethod] | None,
     list[str],
 ]:
     base_matches = _active_java_annotation_matches(
@@ -2952,7 +2963,6 @@ def _java_controller_declarations(
     ]
     if not candidates:
         return []
-    file_stem = PurePosixPath(file.path).stem
     annotated = [
         candidate
         for candidate in candidates
@@ -2963,13 +2973,7 @@ def _java_controller_declarations(
         )
         is not None
     ]
-    if annotated:
-        return annotated
-    filename_match = next(
-        (candidate for candidate in candidates if candidate[0].group("name") == file_stem),
-        None,
-    )
-    return [filename_match] if filename_match is not None else []
+    return annotated
 
 
 def _java_top_level_declarations(
@@ -3033,7 +3037,7 @@ def _routes_after_mapping(
     mapping_start: int,
     mapping: re.Match[str],
     base_paths: list[str],
-    base_methods: list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]] | None,
+    base_methods: list[JavaHttpMethod] | None,
     base_conditions: list[str],
     controller: str,
     string_constants: _JavaStringConstants,
@@ -3104,12 +3108,12 @@ def _routes_after_mapping(
 def _mapping_http_methods(
     mapping: re.Match[str],
     arguments: str,
-) -> list[Literal["GET", "POST", "PUT", "PATCH", "DELETE"]]:
+) -> list[JavaHttpMethod]:
     composed_method = mapping.groupdict().get("method")
     if composed_method is not None:
         return [
             cast(
-                Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
+                JavaHttpMethod,
                 composed_method.upper(),
             )
         ]
@@ -3118,7 +3122,7 @@ def _mapping_http_methods(
     )
     method_assignment = re.search(r"\bmethod\s*=", _mask_java_non_code(content))
     if method_assignment is None:
-        methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]
     else:
         expression = _java_annotation_expression(
             content,
@@ -3126,13 +3130,11 @@ def _mapping_http_methods(
             allow_identifier=True,
         )
         methods = re.findall(
-            r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?(GET|POST|PUT|PATCH|DELETE)\b",
+            r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?"
+            r"(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)\b",
             expression,
         )
-    return [
-        cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
-        for method in dict.fromkeys(methods)
-    ]
+    return [cast(JavaHttpMethod, method) for method in dict.fromkeys(methods)]
 
 
 def _mapping_conditions(arguments: str) -> list[str]:
@@ -3160,7 +3162,7 @@ def _mapping_conditions(arguments: str) -> list[str]:
 
 
 def _java_operation_ref(
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
+    method: JavaHttpMethod,
     path: str,
     conditions: list[str],
 ) -> str:
