@@ -4,11 +4,18 @@ import { authenticate } from './support/auth'
 
 type Identified = { id: string }
 type ExecutionDetail = {
-  execution: { status: string; context: Record<string, unknown> }
+  execution: {
+    status: string
+    context: Record<string, unknown>
+    error_code: string | null
+    error_message: string | null
+  }
   nodes: Array<{
     node_id: string
     status: string
     output: Record<string, unknown> | null
+    error_code: string | null
+    error_message: string | null
   }>
 }
 
@@ -21,7 +28,7 @@ test('S53 Login → Create → Query → DB Read 与跨系统断言真实执行'
   const headers = authorization(token)
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   const project = await createProject(page.request, headers, suffix)
-  await allowComposeBackend(page.request, headers, project.id)
+  await allowComposeTargets(page.request, headers, project.id)
   const environment = await createEnvironment(page.request, headers, project.id, suffix)
   await storeAccessToken(page.request, headers, project.id, environment.id, token)
   const credential = await createDatabaseCredential(page.request, headers, project.id, suffix)
@@ -68,7 +75,7 @@ test('S53 Login → Create → Query → DB Read 与跨系统断言真实执行'
   const execution = (await started.json()) as Identified
   const detail = await waitForExecution(page.request, headers, project.id, execution.id)
 
-  expect(detail.execution.status).toBe('passed')
+  expect(detail.execution.status, executionFailure(detail)).toBe('passed')
   const nodes = new Map(detail.nodes.map((node) => [node.node_id, node]))
   expect(nodes.get('login')?.status).toBe('passed')
   expect(nodes.get('create')?.status).toBe('passed')
@@ -99,14 +106,14 @@ async function createProject(
   return (await response.json()) as Identified
 }
 
-async function allowComposeBackend(
+async function allowComposeTargets(
   request: APIRequestContext,
   headers: { Authorization: string },
   projectId: string,
 ): Promise<void> {
   const response = await request.put(`/api/v1/projects/${projectId}/security-policy`, {
     headers,
-    data: { allowed_hosts: ['backend'], allowed_private_cidrs: ['172.16.0.0/12'] },
+    data: { allowed_hosts: ['backend', 'postgres'], allowed_private_cidrs: ['172.16.0.0/12'] },
   })
   expect(response.ok(), await response.text()).toBeTruthy()
 }
@@ -302,4 +309,14 @@ async function waitForExecution(
 
 function authorization(token: string) {
   return { Authorization: `Bearer ${token}` }
+}
+
+function executionFailure(detail: ExecutionDetail): string {
+  const failedNodes = detail.nodes
+    .filter((node) => node.status === 'failed')
+    .map((node) => `${node.node_id}: ${node.error_code ?? 'UNKNOWN'} ${node.error_message ?? ''}`)
+  return [
+    `execution: ${detail.execution.error_code ?? 'UNKNOWN'} ${detail.execution.error_message ?? ''}`,
+    ...failedNodes,
+  ].join('\n')
 }
