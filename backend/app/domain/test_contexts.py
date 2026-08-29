@@ -484,6 +484,8 @@ class ExternalDatabaseObservedDistribution(BaseModel):
 
     @model_validator(mode="after")
     def validate_observed_values(self) -> ExternalDatabaseObservedDistribution:
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self

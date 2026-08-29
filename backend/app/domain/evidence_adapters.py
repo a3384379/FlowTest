@@ -302,6 +302,7 @@ class JavaEvidenceSubmission(BaseModel):
     def validate_submission(self) -> JavaEvidenceSubmission:
         _require_unique_claim_ids(self.claims)
         _require_no_sensitive_data(self)
+        _require_java_envelope_budget(self)
         return self
 
 
@@ -319,6 +320,8 @@ class DatabaseObservedDistribution(BaseModel):
 
     @model_validator(mode="after")
     def validate_observed_values(self) -> DatabaseObservedDistribution:
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
         require_no_sensitive_scalar_values([*extrema, *self.enum_candidates])
         return self
@@ -630,6 +633,15 @@ def _require_database_envelope_budget(submission: DatabaseEvidenceSubmission) ->
         if "external evidence byte budget exceeded" not in str(exc):
             raise
         raise ValueError("database evidence envelope byte budget exceeded") from None
+
+
+def _require_java_envelope_budget(submission: JavaEvidenceSubmission) -> None:
+    try:
+        adapt_java_evidence(submission)
+    except ValidationError as exc:
+        if "external evidence byte budget exceeded" not in str(exc):
+            raise
+        raise ValueError("java evidence envelope byte budget exceeded") from None
 
 
 def adapt_evidence_bundle(
@@ -1913,7 +1925,7 @@ def _java_validation_annotations(
     return [
         (
             annotation.group("name"),
-            _java_annotation_arguments(content, annotation.end())[:300],
+            _java_annotation_arguments(content, annotation.end())[:500],
         )
         for annotation in _active_java_annotation_matches(
             content,

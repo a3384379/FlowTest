@@ -24,6 +24,7 @@ from app.domain.evidence_adapters import (
 )
 from app.domain.test_contexts import (
     DatabaseExternalEvidenceStructuredData,
+    ExternalDatabaseColumnClaim,
     ExternalEvidenceEnvelope,
     finding_semantic_fingerprint,
 )
@@ -1719,6 +1720,101 @@ async def test_database_adapter_rejects_oversized_derived_envelope_with_trace_id
 
 
 @pytest.mark.asyncio
+async def test_java_adapter_rejects_oversized_derived_envelope_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "Java 证据包预算上下文",
+            "objective": "验证派生证据包超限返回有界客户端错误",
+            "required_evidence": ["repository"],
+        },
+    )
+    context_id = begun.json()["id"]
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": _oversized_java_evidence(project_id)},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "数据库分布边界上下文",
+            "objective": "验证倒置极值返回标准验证错误",
+            "required_evidence": ["data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+    payload = _database_evidence(project_id)
+    payload["tables"][0]["columns"][2]["observed_distribution"] = {
+        "minimum": 10,
+        "maximum": 1,
+    }
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": payload},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_generic_evidence_rejects_inverted_extrema_with_trace_id(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "通用数据库分布边界上下文",
+            "objective": "验证通用入口拒绝倒置极值",
+            "required_evidence": ["data_profile"],
+        },
+    )
+    context_id = begun.json()["id"]
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": _inverted_database_envelope(project_id)},
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_mapping_budget_error_uses_standard_trace_envelope(
     s52_context: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -1881,6 +1977,62 @@ def _java_evidence(project_id: str) -> dict[str, Any]:
         "confidence": 0.98,
         "deterministic": True,
     }
+
+
+def _oversized_java_evidence(project_id: str) -> dict[str, Any]:
+    payload = _java_evidence(project_id)
+    payload["redactions"] = [
+        {
+            "path": f"src/{index:03d}/" + ("x" * 1012),
+            "method": "removed",
+            "reason": "bounded-" + ("y" * 492),
+        }
+        for index in range(100)
+    ]
+    payload["warnings"] = [
+        {
+            "code": f"LARGE_{index:03d}",
+            "message": "bounded-" + ("z" * 992),
+        }
+        for index in range(100)
+    ]
+    return payload
+
+
+def _inverted_database_envelope(project_id: str) -> dict[str, Any]:
+    payload = _database_evidence(project_id)
+    payload["tables"][0]["columns"][2]["observed_distribution"] = {
+        "minimum": 1,
+        "maximum": 10,
+    }
+    envelope = adapt_database_evidence(DatabaseEvidenceSubmission.model_validate(payload))
+    finding_index, finding = next(
+        (index, finding)
+        for index, finding in enumerate(envelope.findings)
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
+        and finding.structured_data.claim.name == "status"
+    )
+    structured_data = finding.structured_data
+    claim = structured_data.claim
+    assert isinstance(claim, ExternalDatabaseColumnClaim)
+    distribution = claim.observed_distribution
+    assert distribution is not None
+    inverted_distribution = distribution.model_copy(update={"minimum": 10.0, "maximum": 1.0})
+    inverted_claim = claim.model_copy(update={"observed_distribution": inverted_distribution})
+    inverted_structured_data = structured_data.model_copy(update={"claim": inverted_claim})
+    provisional = finding.model_copy(
+        update={
+            "structured_data": inverted_structured_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    inverted_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    findings = list(envelope.findings)
+    findings[finding_index] = inverted_finding
+    return envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
 
 
 def _add_archived_order_entity(payload: dict[str, Any]) -> None:

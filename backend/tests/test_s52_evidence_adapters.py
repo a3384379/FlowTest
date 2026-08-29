@@ -480,6 +480,28 @@ def test_database_submission_rejects_oversized_derived_envelope() -> None:
         DatabaseEvidenceSubmission.model_validate(payload)
 
 
+def test_java_submission_rejects_oversized_derived_envelope() -> None:
+    payload = _java_submission()
+    payload["redactions"] = [
+        {
+            "path": f"src/{index:03d}/" + ("x" * 1012),
+            "method": "removed",
+            "reason": "bounded-" + ("y" * 492),
+        }
+        for index in range(100)
+    ]
+    payload["warnings"] = [
+        {
+            "code": f"LARGE_{index:03d}",
+            "message": "bounded-" + ("z" * 992),
+        }
+        for index in range(100)
+    ]
+
+    with pytest.raises(ValidationError, match="java evidence envelope byte budget exceeded"):
+        JavaEvidenceSubmission.model_validate(payload)
+
+
 def test_database_finding_ids_use_unambiguous_tuple_identity() -> None:
     payload = _database_submission()
     payload["tables"] = [
@@ -653,6 +675,52 @@ def test_database_contract_rejects_raw_examples_pii_and_write_sql() -> None:
     masked_column["structured_data"]["claim"]["masked_example"] = "*** 4111111111111111"
     with pytest.raises(ValidationError, match="sensitive scalar"):
         ExternalEvidenceEnvelope.model_validate(external_masked_card)
+
+
+def test_database_distribution_rejects_inverted_extrema_at_dedicated_boundary() -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"].update(
+        {"minimum": 10, "maximum": 1}
+    )
+
+    with pytest.raises(ValidationError, match="minimum must not exceed maximum"):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+def test_database_distribution_rejects_inverted_extrema_at_generic_boundary() -> None:
+    envelope = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_submission())
+    )
+    finding_index, finding = next(
+        (index, finding)
+        for index, finding in enumerate(envelope.findings)
+        if isinstance(finding.structured_data, DatabaseExternalEvidenceStructuredData)
+        and isinstance(finding.structured_data.claim, ExternalDatabaseColumnClaim)
+        and finding.structured_data.claim.name == "status"
+    )
+    structured_data = cast(DatabaseExternalEvidenceStructuredData, finding.structured_data)
+    claim = cast(ExternalDatabaseColumnClaim, structured_data.claim)
+    assert claim.observed_distribution is not None
+    inverted_distribution = claim.observed_distribution.model_copy(
+        update={"minimum": 10.0, "maximum": 1.0}
+    )
+    inverted_claim = claim.model_copy(update={"observed_distribution": inverted_distribution})
+    inverted_structured_data = structured_data.model_copy(update={"claim": inverted_claim})
+    provisional = finding.model_copy(
+        update={
+            "structured_data": inverted_structured_data,
+            "semantic_fingerprint": "0" * 64,
+        }
+    )
+    inverted_finding = provisional.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional)}
+    )
+    findings = list(envelope.findings)
+    findings[finding_index] = inverted_finding
+    payload = envelope.model_copy(update={"findings": findings}).model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="minimum must not exceed maximum"):
+        ExternalEvidenceEnvelope.model_validate(payload)
 
 
 def test_java_adapter_bounds_finding_ids_without_collisions() -> None:
@@ -2388,6 +2456,45 @@ public class OrderEntity {
     assert constraint_fields == {"name"}
     assert entity_fields == {"status"}
     assert '(regexp = "^(foo|bar)$")' in constraints
+
+
+def test_java_spring_poc_preserves_supported_long_validation_arguments() -> None:
+    long_pattern = "x" * 340
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://long-validation", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+public class OrderController {
+    @PostMapping("/orders")
+    public Order create(@RequestBody CreateOrderRequest request) {
+        return orderService.create(request);
+    }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/CreateOrderRequest.java",
+                        "content": f"""
+public class CreateOrderRequest {{
+    @Pattern(regexp = "{long_pattern}")
+    private String code;
+}}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    constraints = [claim.constraint for claim in evidence.claims if claim.kind == "bean_validation"]
+    assert constraints == [f'(regexp = "{long_pattern}")']
 
 
 def test_java_spring_poc_discovers_every_supported_getter_constraint() -> None:
