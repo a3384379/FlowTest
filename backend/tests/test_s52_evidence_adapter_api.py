@@ -1758,7 +1758,7 @@ async def test_mapping_budget_error_uses_standard_trace_envelope(
 
 
 @pytest.mark.asyncio
-async def test_database_state_union_budget_uses_standard_trace_envelope(
+async def test_database_state_sets_at_budget_remain_conflicted_without_truncation(
     s52_context: dict[str, Any],
 ) -> None:
     client = s52_context["client"]
@@ -1770,7 +1770,7 @@ async def test_database_state_union_budget_uses_standard_trace_envelope(
         json={
             "project_id": project_id,
             "name": "状态集合预算上下文",
-            "objective": "验证声明值与观测值并集不会被静默截断",
+            "objective": "验证声明值与观测值保持独立冲突候选",
             "required_evidence": ["repository", "data_profile"],
         },
     )
@@ -1790,15 +1790,28 @@ async def test_database_state_union_budget_uses_standard_trace_envelope(
     status["observed_distribution"] = {
         "enum_candidates": [f"observed-{index:03d}" for index in range(100)]
     }
-    rejected = await client.post(
+    ingested = await client.post(
         f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
         headers=headers,
         json={"evidence": database_payload},
     )
 
-    assert rejected.status_code == 422, rejected.text
-    assert rejected.json()["error"]["code"] == "ENTITY_MAPPING_BUDGET_EXCEEDED"
-    assert rejected.json()["error"]["trace_id"]
+    assert ingested.status_code == 201, ingested.text
+    body = ingested.json()
+    assert body["context"]["status"] == "conflicted"
+    states = [
+        candidate
+        for candidate in body["entity_mapping"]["candidates"]
+        if candidate["kind"] == "operation_state"
+    ]
+    assert len(states) == 2
+    assert {len(candidate["state_values"]) for candidate in states} == {100}
+    conflict = next(
+        conflict
+        for conflict in body["entity_mapping"]["conflicts"]
+        if conflict["kind"] == "operation_state"
+    )
+    assert set(conflict["candidate_ids"]) == {candidate["id"] for candidate in states}
 
 
 def _headers(token: str) -> dict[str, str]:

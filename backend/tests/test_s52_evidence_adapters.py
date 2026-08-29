@@ -934,6 +934,50 @@ def test_database_boolean_state_values_corroborate_json_style_java_values() -> N
     )
 
 
+def test_database_normative_and_observed_state_sets_remain_conflicting_candidates() -> None:
+    java_payload = _java_submission()
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] != "enum_state"
+    ]
+    database_payload = _database_submission()
+    status_column = next(
+        column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
+    )
+    status_column["enum_values"] = ["open", "closed"]
+    status_column["observed_distribution"]["enum_candidates"] = ["broken"]
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
+                ),
+                "database",
+            ),
+        ]
+    )
+
+    states = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert {tuple(candidate.state_values) for candidate in states} == {
+        ("closed", "open"),
+        ("broken",),
+    }
+    conflict = next(
+        conflict
+        for conflict in mapping.conflicts
+        if conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+    )
+    assert set(conflict.candidate_ids) == {candidate.id for candidate in states}
+
+
 def test_differing_state_values_conflict_even_when_target_ref_matches() -> None:
     java_payload = _java_submission()
     first_state = next(claim for claim in java_payload["claims"] if claim["kind"] == "enum_state")
@@ -1414,7 +1458,11 @@ def test_operation_state_mapping_scopes_independent_fields() -> None:
     )
 
 
-def test_database_state_union_over_budget_is_rejected_without_truncation() -> None:
+def test_database_state_sets_at_budget_remain_separate_without_truncation() -> None:
+    java_payload = _java_submission()
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] != "enum_state"
+    ]
     database_payload = _database_submission()
     status = next(
         column for column in database_payload["tables"][0]["columns"] if column["name"] == "status"
@@ -1424,21 +1472,34 @@ def test_database_state_union_over_budget_is_rejected_without_truncation() -> No
         f"observed-{index:03d}" for index in range(100)
     ]
 
-    with pytest.raises(EntityMappingBudgetExceeded, match="state value budget"):
-        derive_entity_mapping(
-            [
-                *_mapping_inputs(
-                    adapt_java_evidence(JavaEvidenceSubmission.model_validate(_java_submission())),
-                    "java",
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(database_payload)
                 ),
-                *_mapping_inputs(
-                    adapt_database_evidence(
-                        DatabaseEvidenceSubmission.model_validate(database_payload)
-                    ),
-                    "database",
-                ),
-            ]
-        )
+                "database",
+            ),
+        ]
+    )
+
+    states = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert len(states) == 2
+    assert {len(candidate.state_values) for candidate in states} == {100}
+    conflict = next(
+        conflict
+        for conflict in mapping.conflicts
+        if conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+    )
+    assert set(conflict.candidate_ids) == {candidate.id for candidate in states}
 
 
 def test_dependent_mappings_preserve_heuristic_operation_table_reliability() -> None:
@@ -2420,6 +2481,43 @@ public class OrderController {
         "operation://GET/api/legacy",
         "operation://GET/compat/current",
         "operation://GET/compat/legacy",
+    }
+
+
+def test_java_spring_poc_parses_mapping_arrays_with_uri_template_braces() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://template-path-array", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/TemplateController.java",
+                        "content": """
+@RestController
+class TemplateController {
+    @GetMapping({"/orders/{id}", "/legacy/{id}"})
+    public Order load() {
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert {(claim.handler, claim.path) for claim in routes} == {
+        ("load", "/orders/{id}"),
+        ("load", "/legacy/{id}"),
+    }
+    assert {claim.operation_ref for claim in calls} == {
+        "operation://GET/orders/{id}",
+        "operation://GET/legacy/{id}",
     }
 
 

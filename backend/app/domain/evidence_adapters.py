@@ -1466,16 +1466,17 @@ def _operation_state_candidates(parsed: _ParsedEvidence) -> list[EntityMappingCa
             operation_table = table_candidates.get(entity_ref)
             if operation_table is None:
                 continue
-            candidate, corroborated_ids = _database_state_candidate(
+            column_candidates, corroborated_ids = _database_state_candidates(
                 operation_ref,
                 operation_table,
                 parsed_column,
                 java_candidates,
             )
-            if candidate is None:
+            if not column_candidates:
                 continue
             corroborated_java_ids.update(corroborated_ids)
-            _append_mapping_candidate(candidates, candidate)
+            for candidate in column_candidates:
+                _append_mapping_candidate(candidates, candidate)
     for candidate in java_candidates:
         if candidate.id not in corroborated_java_ids:
             _append_mapping_candidate(candidates, candidate)
@@ -1506,26 +1507,23 @@ def _java_state_candidates(
     ]
 
 
-def _database_state_candidate(
+def _database_state_candidates(
     operation_ref: str,
     operation_table: EntityMappingCandidate,
     parsed_column: _ParsedDatabaseColumn,
     java_candidates: list[EntityMappingCandidate],
-) -> tuple[EntityMappingCandidate | None, set[str]]:
+) -> tuple[list[EntityMappingCandidate], set[str]]:
     column = parsed_column.claim
-    values = _database_state_values(column)
+    value_sets = _database_state_value_sets(column)
     field_candidates = [
         candidate
         for candidate in java_candidates
         if _state_candidate_matches_column(candidate, operation_ref, column.name)
     ]
-    if not values or (
+    if not value_sets or (
         not field_candidates and _normalized_name(column.name) not in {"status", "state"}
     ):
-        return None, set()
-    corroborating = [
-        candidate for candidate in field_candidates if candidate.state_values == values
-    ]
+        return [], set()
     anchor = next(
         (candidate for candidate in field_candidates if candidate.field_ref is not None),
         field_candidates[0] if field_candidates else None,
@@ -1534,38 +1532,51 @@ def _database_state_candidate(
         anchor.source_ref if anchor is not None else _state_field_ref(operation_ref, column.name)
     )
     field_ref = anchor.field_ref if anchor is not None else source_ref
-    corroborating_evidence = sorted(
-        {evidence_ref for candidate in corroborating for evidence_ref in candidate.evidence_refs}
-    )[:6]
-    operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
-    return (
-        _candidate(
-            kind=EntityMappingCandidateKind.OPERATION_STATE,
-            source_ref=source_ref,
-            target_ref=(f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"),
-            operation_ref=operation_ref,
-            field_ref=field_ref,
-            state_values=values,
-            confidence=min(
-                [
-                    parsed_column.confidence,
-                    operation_table.confidence,
-                    *(candidate.confidence for candidate in corroborating),
-                ]
-            ),
-            deterministic=(
-                parsed_column.deterministic
-                and operation_table.deterministic
-                and all(candidate.deterministic for candidate in corroborating)
-            ),
-            evidence_refs=[
-                parsed_column.evidence_ref,
-                *corroborating_evidence,
-                *operation_evidence,
-            ],
-        ),
-        {candidate.id for candidate in corroborating},
-    )
+    candidates: list[EntityMappingCandidate] = []
+    corroborated_ids: set[str] = set()
+    for values in value_sets:
+        corroborating = [
+            candidate for candidate in field_candidates if candidate.state_values == values
+        ]
+        corroborated_ids.update(candidate.id for candidate in corroborating)
+        corroborating_evidence = sorted(
+            {
+                evidence_ref
+                for candidate in corroborating
+                for evidence_ref in candidate.evidence_refs
+            }
+        )[:6]
+        operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
+        candidates.append(
+            _candidate(
+                kind=EntityMappingCandidateKind.OPERATION_STATE,
+                source_ref=source_ref,
+                target_ref=(
+                    f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"
+                ),
+                operation_ref=operation_ref,
+                field_ref=field_ref,
+                state_values=values,
+                confidence=min(
+                    [
+                        parsed_column.confidence,
+                        operation_table.confidence,
+                        *(candidate.confidence for candidate in corroborating),
+                    ]
+                ),
+                deterministic=(
+                    parsed_column.deterministic
+                    and operation_table.deterministic
+                    and all(candidate.deterministic for candidate in corroborating)
+                ),
+                evidence_refs=[
+                    parsed_column.evidence_ref,
+                    *corroborating_evidence,
+                    *operation_evidence,
+                ],
+            )
+        )
+    return candidates, corroborated_ids
 
 
 def _state_candidate_matches_column(
@@ -1588,11 +1599,20 @@ def _state_field_ref(operation_ref: str, field_name: str | None) -> str:
     return f"state-field://{operation_identity}/{field_identity}"
 
 
-def _database_state_values(column: DatabaseColumnEvidence) -> list[str]:
-    values = list(column.enum_values)
-    if column.observed_distribution is not None:
-        values.extend(column.observed_distribution.enum_candidates)
-    return sorted({_state_scalar_text(value) for value in values})
+def _database_state_value_sets(column: DatabaseColumnEvidence) -> list[list[str]]:
+    declared = sorted({_state_scalar_text(value) for value in column.enum_values})
+    observed = (
+        sorted(
+            {_state_scalar_text(value) for value in column.observed_distribution.enum_candidates}
+        )
+        if column.observed_distribution is not None
+        else []
+    )
+    result: list[list[str]] = []
+    for values in (declared, observed):
+        if values and values not in result:
+            result.append(values)
+    return result
 
 
 def _state_scalar_text(value: str | int | float | bool) -> str:
@@ -2116,19 +2136,18 @@ def _mapping_http_methods(
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
-    method_expression = re.search(
-        r"\bmethod\s*=\s*(?P<value>\{[^}]*\}|[A-Za-z_$][A-Za-z0-9_$.]*)",
-        content,
-        re.DOTALL,
-    )
-    if method_expression is None:
-        if re.search(r"\bmethod\s*=", content) is not None:
-            return []
+    method_assignment = re.search(r"\bmethod\s*=", content)
+    if method_assignment is None:
         methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
     else:
+        expression = _java_annotation_expression(
+            content,
+            method_assignment.end(),
+            allow_identifier=True,
+        )
         methods = re.findall(
             r"(?<![A-Za-z0-9_$])(?:RequestMethod\.)?(GET|POST|PUT|PATCH|DELETE)\b",
-            method_expression.group("value"),
+            expression,
         )
     return [
         cast(Literal["GET", "POST", "PUT", "PATCH", "DELETE"], method)
@@ -2150,15 +2169,11 @@ def _mapping_paths(arguments: str) -> list[str]:
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
-    named = re.search(
-        r'\b(?:value|path)\s*=\s*(?P<value>\{[^}]*\}|"(?:\\.|[^"\\])*")',
-        content,
-        re.DOTALL,
-    )
-    if named is None and re.search(r"\b(?:value|path)\s*=", content) is not None:
-        return []
+    named = re.search(r"\b(?:value|path)\s*=", content)
     expression = (
-        named.group("value") if named is not None else _positional_mapping_expression(content)
+        _java_annotation_expression(content, named.end())
+        if named is not None
+        else _positional_mapping_expression(content)
     )
     paths = [match.group(1) for match in re.finditer(r'"((?:\\.|[^"\\])*)"', expression)]
     if paths:
@@ -2172,12 +2187,30 @@ def _mapping_paths(arguments: str) -> list[str]:
 
 
 def _positional_mapping_expression(arguments: str) -> str:
-    stripped = arguments.lstrip()
-    if stripped.startswith("{"):
-        closing = stripped.find("}")
-        return stripped[: closing + 1] if closing >= 0 else ""
-    match = re.match(r'"(?:\\.|[^"\\])*"', stripped)
-    return match.group(0) if match is not None else ""
+    return _java_annotation_expression(arguments, 0)
+
+
+def _java_annotation_expression(
+    content: str,
+    start: int,
+    *,
+    allow_identifier: bool = False,
+) -> str:
+    index = start
+    while index < len(content) and content[index].isspace():
+        index += 1
+    if index >= len(content):
+        return ""
+    if content[index] == "{":
+        closing = _matching_brace(content, index)
+        return content[index : closing + 1] if closing < len(content) else ""
+    string_expression = re.match(r'"(?:\\.|[^"\\])*"', content[index:])
+    if string_expression is not None:
+        return string_expression.group(0)
+    if allow_identifier:
+        identifier = re.match(r"[A-Za-z_$][A-Za-z0-9_$.]*", content[index:])
+        return identifier.group(0) if identifier is not None else ""
+    return ""
 
 
 def _mask_java_annotation_arguments(content: str) -> str:
