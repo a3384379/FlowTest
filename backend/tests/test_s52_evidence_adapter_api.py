@@ -1430,6 +1430,68 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
     )
     generic_dto["structured_data"]["claim"]["field_name"] = f"user{sensitive_value}"
 
+    sensitive_identifiers: list[tuple[str, dict[str, Any]]] = []
+    dedicated_entity = _java_evidence(project_id)
+    dedicated_entity_claim = next(
+        claim for claim in dedicated_entity["claims"] if claim["kind"] == "entity"
+    )
+    dedicated_entity_claim["class_name"] = f"User{sensitive_value}"
+    sensitive_identifiers.append(("java-evidence", {"evidence": dedicated_entity}))
+
+    generic_entity = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(_java_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_entity_claim = next(
+        finding
+        for finding in generic_entity["findings"]
+        if finding["structured_data"]["claim_kind"] == "entity"
+    )
+    generic_entity_claim["structured_data"]["claim"]["class_name"] = f"User{sensitive_value}"
+    sensitive_identifiers.append(("evidence", {"envelope": generic_entity}))
+
+    dedicated_schema = _database_evidence(project_id)
+    dedicated_schema["tables"][0]["schema_name"] = f"tenant{sensitive_value}"
+    sensitive_identifiers.append(("database-evidence", {"evidence": dedicated_schema}))
+
+    generic_schema = adapt_database_evidence(
+        DatabaseEvidenceSubmission.model_validate(_database_evidence(project_id))
+    ).model_dump(mode="json")
+    generic_table_claim = next(
+        finding
+        for finding in generic_schema["findings"]
+        if finding["structured_data"]["claim_kind"] == "table"
+    )
+    generic_table_claim["structured_data"]["claim"]["schema_name"] = f"tenant{sensitive_value}"
+    sensitive_identifiers.append(("evidence", {"envelope": generic_schema}))
+
+    enum_claim = {
+        "id": "state-order",
+        "kind": "enum_state",
+        "source_path": "src/OrderStatus.java:3",
+        "confidence": 0.98,
+        "deterministic": True,
+        "operation_ref": "operation://POST/api/orders",
+        "enum_ref": "java://OrderStatus",
+        "field_name": "status",
+        "values": ["created", "cancelled"],
+    }
+    dedicated_enum = _java_evidence(project_id)
+    dedicated_enum["claims"].append({**enum_claim, "field_name": f"card{sensitive_value}"})
+    sensitive_identifiers.append(("java-evidence", {"evidence": dedicated_enum}))
+
+    generic_enum_source = _java_evidence(project_id)
+    generic_enum_source["claims"].append(enum_claim)
+    generic_enum = adapt_java_evidence(
+        JavaEvidenceSubmission.model_validate(generic_enum_source)
+    ).model_dump(mode="json")
+    generic_enum_claim = next(
+        finding
+        for finding in generic_enum["findings"]
+        if finding["structured_data"]["claim_kind"] == "enum_state"
+    )
+    generic_enum_claim["structured_data"]["claim"]["field_name"] = f"card{sensitive_value}"
+    sensitive_identifiers.append(("evidence", {"envelope": generic_enum}))
+
     sensitive_columns: list[tuple[str, dict[str, Any]]] = []
     for identifier in ("field_name", "column_name"):
         dedicated_column = _java_evidence(project_id)
@@ -1475,6 +1537,7 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
         ("evidence", {"envelope": generic_java}),
         ("evidence", {"envelope": generic_database}),
         ("evidence", {"envelope": generic_field_name}),
+        *sensitive_identifiers,
         *sensitive_columns,
     )
     for endpoint, payload in requests:

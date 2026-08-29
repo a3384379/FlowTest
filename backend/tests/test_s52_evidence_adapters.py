@@ -249,6 +249,74 @@ def test_java_contracts_reject_sensitive_paths_at_both_boundaries() -> None:
             ExternalEvidenceEnvelope.model_validate(generic_persistence)
 
 
+def test_adapter_contracts_reject_all_remaining_sensitive_identifiers() -> None:
+    sensitive_value = "13800138000"
+    java_identifiers = (
+        ("controller_route", "handler"),
+        ("dto_field", "dto_type"),
+        ("bean_validation", "dto_type"),
+        ("bean_validation", "field_name"),
+        ("bean_validation", "annotation"),
+        ("entity", "class_name"),
+        ("enum_state", "field_name"),
+        ("exception", "exception_type"),
+        ("exception", "outcome"),
+        ("kafka_event", "event_type"),
+    )
+    for claim_kind, field_name in java_identifiers:
+        dedicated = _java_submission()
+        claim = next(claim for claim in dedicated["claims"] if claim["kind"] == claim_kind)
+        claim[field_name] = f"User{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            JavaEvidenceSubmission.model_validate(dedicated)
+
+        generic = adapt_java_evidence(
+            JavaEvidenceSubmission.model_validate(_java_submission())
+        ).model_dump(mode="json")
+        finding = next(
+            finding
+            for finding in generic["findings"]
+            if finding["structured_data"]["claim_kind"] == claim_kind
+        )
+        finding["structured_data"]["claim"][field_name] = f"User{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic)
+
+    dedicated_database_identifiers = (
+        ("table", "schema_name"),
+        ("table", "name"),
+        ("column", "name"),
+    )
+    for claim_kind, field_name in dedicated_database_identifiers:
+        dedicated = _database_submission()
+        if claim_kind == "table":
+            dedicated["tables"][0][field_name] = f"tenant{sensitive_value}"
+        else:
+            dedicated["tables"][0]["columns"][0][field_name] = f"tenant{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            DatabaseEvidenceSubmission.model_validate(dedicated)
+
+    generic_database_identifiers = (
+        ("table", "schema_name"),
+        ("table", "name"),
+        ("column", "schema_name"),
+        ("column", "table_name"),
+        ("column", "name"),
+    )
+    for claim_kind, field_name in generic_database_identifiers:
+        generic = adapt_database_evidence(
+            DatabaseEvidenceSubmission.model_validate(_database_submission())
+        ).model_dump(mode="json")
+        finding = next(
+            finding
+            for finding in generic["findings"]
+            if finding["structured_data"]["claim_kind"] == claim_kind
+        )
+        finding["structured_data"]["claim"][field_name] = f"tenant{sensitive_value}"
+        with pytest.raises(ValidationError, match="sensitive scalar"):
+            ExternalEvidenceEnvelope.model_validate(generic)
+
+
 def test_adapter_contracts_reject_sensitive_source_and_subject_refs() -> None:
     sensitive_value = "13800138000"
     for submission_factory, submission_type in (
@@ -1991,6 +2059,52 @@ class AnyMethodController {
     assert {claim.operation_ref for claim in calls} == {
         f"operation://{method}/api/orders" for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
     }
+
+
+def test_java_spring_poc_parses_formatted_generic_handler_return_types() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://generic-return", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/GenericController.java",
+                        "content": """
+class OrderDto {
+    private String id;
+}
+
+@RestController
+class GenericController {
+    @GetMapping("/orders")
+    public Map<String, OrderDto> load() throws OrderUnavailableException {
+        kafkaTemplate.send("orders.loaded", orderService.load());
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    response_fields = [
+        claim
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    ]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    exceptions = [claim for claim in evidence.claims if claim.kind == "exception"]
+    events = [claim for claim in evidence.claims if claim.kind == "kafka_event"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("load", "/orders")]
+    assert [(claim.dto_type, claim.field_name) for claim in response_fields] == [("OrderDto", "id")]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
+    assert [claim.exception_type for claim in exceptions] == ["OrderUnavailableException"]
+    assert [claim.topic_ref for claim in events] == ["kafka://orders.loaded"]
 
 
 def test_java_spring_poc_skips_unresolved_mapping_path_constants() -> None:

@@ -300,7 +300,7 @@ class ExternalJavaControllerRouteClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_route_path(self) -> ExternalJavaControllerRouteClaim:
-        require_no_sensitive_scalar_values([self.path])
+        require_no_sensitive_scalar_values([self.handler, self.path])
         return self
 
 
@@ -314,7 +314,7 @@ class ExternalJavaDtoFieldClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_field_type(self) -> ExternalJavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.field_name, self.field_type])
+        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.field_type])
         return self
 
 
@@ -330,7 +330,9 @@ class ExternalJavaBeanValidationClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_constraint(self) -> ExternalJavaBeanValidationClaim:
-        require_no_sensitive_scalar_values([self.constraint])
+        require_no_sensitive_scalar_values(
+            [self.dto_type, self.field_name, self.annotation, self.constraint]
+        )
         return self
 
 
@@ -360,6 +362,7 @@ class ExternalJavaEntityClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_operation_refs(self) -> ExternalJavaEntityClaim:
+        require_no_sensitive_scalar_values([self.class_name])
         if len(self.operation_refs) != len(set(self.operation_refs)):
             raise ValueError("entity operation refs must be unique")
         if any(re.fullmatch(_ADAPTER_REF, value) is None for value in self.operation_refs):
@@ -391,7 +394,9 @@ class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
 
     @model_validator(mode="after")
     def validate_state_values(self) -> ExternalJavaEnumStateClaim:
-        require_no_sensitive_scalar_values(self.values)
+        require_no_sensitive_scalar_values(
+            [*([self.field_name] if self.field_name is not None else []), *self.values]
+        )
         return self
 
 
@@ -403,6 +408,11 @@ class ExternalJavaExceptionClaim(ExternalJavaClaimBase):
     exception_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
     outcome: str = Field(min_length=1, max_length=160, pattern=_ADAPTER_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalJavaExceptionClaim:
+        require_no_sensitive_scalar_values([self.exception_type, self.outcome])
+        return self
+
 
 class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
     kind: Literal["kafka_event"] = "kafka_event"
@@ -412,6 +422,11 @@ class ExternalJavaKafkaEventClaim(ExternalJavaClaimBase):
     direction: Literal["produce", "consume"]
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
     event_type: str = Field(pattern=_ADAPTER_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_event_type(self) -> ExternalJavaKafkaEventClaim:
+        require_no_sensitive_scalar_values([self.event_type])
+        return self
 
 
 type ExternalJavaClaim = Annotated[
@@ -480,6 +495,11 @@ class ExternalDatabaseTableClaim(BaseModel):
     schema_name: str = Field(pattern=_ADAPTER_IDENTIFIER)
     name: str = Field(pattern=_ADAPTER_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> ExternalDatabaseTableClaim:
+        require_no_sensitive_scalar_values([self.schema_name, self.name])
+        return self
+
 
 class ExternalDatabaseColumnClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -501,7 +521,9 @@ class ExternalDatabaseColumnClaim(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> ExternalDatabaseColumnClaim:
-        require_no_sensitive_scalar_values([self.data_type])
+        require_no_sensitive_scalar_values(
+            [self.schema_name, self.table_name, self.name, self.data_type]
+        )
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
         if self.masked_example is not None and "***" not in self.masked_example:

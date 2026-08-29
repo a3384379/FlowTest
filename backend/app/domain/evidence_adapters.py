@@ -151,7 +151,7 @@ class JavaControllerRouteClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_route_path(self) -> JavaControllerRouteClaim:
-        require_no_sensitive_scalar_values([self.path])
+        require_no_sensitive_scalar_values([self.handler, self.path])
         return self
 
 
@@ -165,7 +165,7 @@ class JavaDtoFieldClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_field_type(self) -> JavaDtoFieldClaim:
-        require_no_sensitive_scalar_values([self.field_name, self.field_type])
+        require_no_sensitive_scalar_values([self.dto_type, self.field_name, self.field_type])
         return self
 
 
@@ -179,7 +179,9 @@ class JavaBeanValidationClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_constraint(self) -> JavaBeanValidationClaim:
-        require_no_sensitive_scalar_values([self.constraint])
+        require_no_sensitive_scalar_values(
+            [self.dto_type, self.field_name, self.annotation, self.constraint]
+        )
         return self
 
 
@@ -207,6 +209,7 @@ class JavaEntityClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_operation_refs(self) -> JavaEntityClaim:
+        require_no_sensitive_scalar_values([self.class_name])
         if len(self.operation_refs) != len(set(self.operation_refs)):
             raise ValueError("entity operation refs must be unique")
         if any(re.fullmatch(_REF, value) is None for value in self.operation_refs):
@@ -236,7 +239,9 @@ class JavaEnumStateClaim(JavaClaimBase):
 
     @model_validator(mode="after")
     def validate_state_values(self) -> JavaEnumStateClaim:
-        require_no_sensitive_scalar_values(self.values)
+        require_no_sensitive_scalar_values(
+            [*([self.field_name] if self.field_name is not None else []), *self.values]
+        )
         return self
 
 
@@ -246,6 +251,11 @@ class JavaExceptionClaim(JavaClaimBase):
     exception_type: str = Field(pattern=_IDENTIFIER)
     outcome: str = Field(min_length=1, max_length=160, pattern=_IDENTIFIER)
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> JavaExceptionClaim:
+        require_no_sensitive_scalar_values([self.exception_type, self.outcome])
+        return self
+
 
 class JavaKafkaEventClaim(JavaClaimBase):
     kind: Literal["kafka_event"] = "kafka_event"
@@ -253,6 +263,11 @@ class JavaKafkaEventClaim(JavaClaimBase):
     direction: Literal["produce", "consume"]
     topic_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     event_type: str = Field(pattern=_IDENTIFIER)
+
+    @model_validator(mode="after")
+    def validate_event_type(self) -> JavaKafkaEventClaim:
+        require_no_sensitive_scalar_values([self.event_type])
+        return self
 
 
 type JavaEvidenceClaim = Annotated[
@@ -325,7 +340,7 @@ class DatabaseColumnEvidence(BaseModel):
 
     @model_validator(mode="after")
     def validate_safe_constraints(self) -> DatabaseColumnEvidence:
-        require_no_sensitive_scalar_values([self.data_type])
+        require_no_sensitive_scalar_values([self.name, self.data_type])
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
         if self.masked_example is not None and "***" not in self.masked_example:
@@ -349,6 +364,7 @@ class DatabaseTableEvidence(BaseModel):
 
     @model_validator(mode="after")
     def validate_column_names(self) -> DatabaseTableEvidence:
+        require_no_sensitive_scalar_values([self.schema_name, self.name])
         names = [column.name for column in self.columns]
         if len(names) != len(set(names)):
             raise ValueError("database column names must be unique per table")
@@ -2046,7 +2062,8 @@ def _routes_after_mapping(
         r"(?:\s*@[A-Za-z0-9_$.]+)*\s*public\s+"
         r"(?:(?:abstract|default|final|native|static|strictfp|synchronized)\s+)*"
         r"(?:<[^>{};]+>\s+)?"
-        r"(?P<return>[A-Za-z0-9_$<>,.?\[\]]+)\s+(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
+        r"(?P<return>[A-Za-z0-9_$<>,.?\[\]\s]+?)\s+"
+        r"(?P<handler>[A-Za-z_$][A-Za-z0-9_$]*)"
         r"\s*\((?P<params>[^)]*)\)\s*(?:throws\s+(?P<throws>[^{]+))?\{",
         masked_following,
     )
