@@ -17,6 +17,7 @@ from app.domain.integration_plans import (
     PlanOracleValueSource,
     PlanStep,
     compile_integration_plan,
+    integration_plan_fingerprint,
     seal_integration_plan,
     validate_integration_plan,
 )
@@ -174,6 +175,34 @@ def test_low_confidence_or_non_deterministic_oracle_requires_review() -> None:
         PlanOracle.model_validate(
             {**common, "confidence": 1, "deterministic": True, "expected": "fixed-id"}
         )
+
+
+@pytest.mark.parametrize(
+    "strength",
+    [
+        {"deterministic": False, "requires_review": True},
+        {"requires_review": True},
+        {"confidence": 0.9},
+    ],
+)
+def test_v1_recipe_strength_fields_require_v2(strength: dict[str, object]) -> None:
+    plan = _golden_plan()
+    safe_recipe = PlanDataRecipe(
+        id="legacy-runtime-input",
+        kind="runtime",
+        name="Legacy runtime input",
+        evidence_refs=["context://s50/data/runtime-input"],
+    )
+    sealed = seal_integration_plan(
+        plan.model_copy(update={"data_recipes": [safe_recipe], "plan_fingerprint": "0" * 64})
+    )
+    tampered = sealed.model_copy(update={"data_recipes": [safe_recipe.model_copy(update=strength)]})
+
+    assert integration_plan_fingerprint(tampered) == sealed.plan_fingerprint
+    assert "S53_PLAN_VERSION_REQUIRED" in {
+        item.code for item in validate_integration_plan(tampered).diagnostics
+    }
+    assert compile_integration_plan(tampered).importable is False
 
 
 def test_side_effecting_setup_recipe_requires_cleanup_and_secret_is_reference_only() -> None:

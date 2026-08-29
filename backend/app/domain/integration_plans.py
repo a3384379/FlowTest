@@ -1767,6 +1767,10 @@ def _s53_version_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
         bool(plan.database_reads)
         or any(item.kind in s53_recipe_kinds for item in plan.data_recipes)
         or any(
+            not item.deterministic or item.requires_review or item.confidence != 1
+            for item in plan.data_recipes
+        )
+        or any(
             item.kind in {"header", "content_type", "time", "cross_api", "db_read"}
             or item.expected_source is not None
             for item in plan.oracles
