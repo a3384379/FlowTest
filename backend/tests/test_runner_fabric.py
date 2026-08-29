@@ -389,6 +389,26 @@ async def test_durable_command_and_checkpoint_edge_cases(
         await session.refresh(execution)
         assert execution.status == "failed"
         assert execution.error_code == "WORKER_CRASHED"
+
+        execution.status = "cancelled"
+        execution.cancel_requested_at = datetime.now(UTC)
+        execution.force_cancel_requested_at = datetime.now(UTC)
+        execution.force_cancel_reason = "runner did not stop"
+        await session.commit()
+        recovery, recovered_execution = await durable.prepare_recovery_command(
+            actor=actor,
+            project_id=project.id,
+            execution_id=execution.id,
+            command_type=ExecutionCommandType.RESUME,
+            actor_key="user:test",
+            idempotency_key=None,
+            payload={},
+        )
+        assert recovery.command_type == ExecutionCommandType.RESUME.value
+        assert recovered_execution.cancel_requested_at is None
+        assert recovered_execution.force_cancel_requested_at is None
+        assert recovered_execution.force_cancel_reason is None
+
         with pytest.raises(AppError) as missing_dispatch:
             await durable.mark_dispatched(uuid4())
         assert missing_dispatch.value.code == "EXECUTION_COMMAND_NOT_FOUND"

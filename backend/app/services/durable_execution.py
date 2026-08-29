@@ -118,6 +118,8 @@ class DurableExecutionService:
         execution.error_code = None
         execution.error_message = None
         execution.cancel_requested_at = None
+        execution.force_cancel_requested_at = None
+        execution.force_cancel_reason = None
         execution.completed_at = None
         self._repository.add(command)
         self._audit_command(command, actor.id, "execution.command.accepted")
