@@ -1549,6 +1549,22 @@ async def test_adapter_apis_reject_sensitive_redaction_paths_and_foreign_keys(
         generic_bundle = safe_bundle_envelope.model_dump(mode="json")
         generic_bundle["findings"][0]["structured_data"]["claim"][field_name] = value
         sensitive_bundle_metadata.append(("evidence", {"envelope": generic_bundle}))
+    bundle_finding = safe_bundle_envelope.findings[0]
+    bundle_data = bundle_finding.structured_data
+    changed_bundle_claim = bundle_data.claim.model_copy(update={"kind": sensitive_value})
+    changed_bundle_data = bundle_data.model_copy(
+        update={"claim_kind": sensitive_value, "claim": changed_bundle_claim}
+    )
+    provisional_bundle_finding = bundle_finding.model_copy(
+        update={"structured_data": changed_bundle_data, "semantic_fingerprint": "0" * 64}
+    )
+    changed_bundle_finding = provisional_bundle_finding.model_copy(
+        update={"semantic_fingerprint": finding_semantic_fingerprint(provisional_bundle_finding)}
+    )
+    generic_bundle_kind = safe_bundle_envelope.model_copy(
+        update={"findings": [changed_bundle_finding]}
+    ).model_dump(mode="json")
+    sensitive_bundle_metadata.append(("evidence", {"envelope": generic_bundle_kind}))
 
     sensitive_identifiers: list[tuple[str, dict[str, Any]]] = []
     dedicated_entity = _java_evidence(project_id)

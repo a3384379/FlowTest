@@ -100,7 +100,10 @@ class EvidenceFinding(BaseModel):
         if unsafe_path is not None:
             raise ValueError(f"evidence structured_data contains sensitive value at {unsafe_path}")
         unsafe_metadata = _sensitive_value_path(
-            cast(JsonValue, {"path": self.path, "warnings": self.warnings}),
+            cast(
+                JsonValue,
+                {"kind": self.kind, "path": self.path, "warnings": self.warnings},
+            ),
             path="$.metadata",
         )
         if unsafe_metadata is not None:

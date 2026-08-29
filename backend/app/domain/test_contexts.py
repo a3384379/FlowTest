@@ -389,13 +389,23 @@ class ExternalJavaEnumStateClaim(ExternalJavaClaimBase):
         default=None, min_length=1, max_length=512, pattern=_ADAPTER_REF
     )
     enum_ref: str = Field(min_length=1, max_length=512, pattern=_ADAPTER_REF)
+    direction: Literal["request", "response"] | None = None
+    dto_type: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     field_name: str | None = Field(default=None, pattern=_ADAPTER_IDENTIFIER)
     values: list[str] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_state_values(self) -> ExternalJavaEnumStateClaim:
+        if (self.direction is None) != (self.dto_type is None):
+            raise ValueError("enum state DTO direction and type must be provided together")
+        if self.direction is not None and self.field_name is None:
+            raise ValueError("route-scoped enum state must identify its DTO field")
         require_no_sensitive_scalar_values(
-            [*([self.field_name] if self.field_name is not None else []), *self.values]
+            [
+                *([self.dto_type] if self.dto_type is not None else []),
+                *([self.field_name] if self.field_name is not None else []),
+                *self.values,
+            ]
         )
         return self
 
@@ -598,7 +608,7 @@ class ExternalEvidenceBundleClaim(BaseModel):
 
     @model_validator(mode="after")
     def validate_metadata(self) -> ExternalEvidenceBundleClaim:
-        require_no_sensitive_scalar_values([self.path, *self.warnings])
+        require_no_sensitive_scalar_values([self.kind, self.path, *self.warnings])
         return self
 
 
@@ -611,6 +621,7 @@ class EvidenceBundleExternalEvidenceStructuredData(BaseModel):
 
     @model_validator(mode="after")
     def validate_claim_kind(self) -> EvidenceBundleExternalEvidenceStructuredData:
+        require_no_sensitive_scalar_values([self.claim_kind])
         if self.claim_kind != self.claim.kind:
             raise ValueError("Evidence Bundle claim kind must match its payload")
         return self

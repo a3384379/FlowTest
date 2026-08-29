@@ -1818,6 +1818,11 @@ def test_evidence_bundle_rejects_sensitive_path_and_warning_metadata() -> None:
     with pytest.raises(ValidationError, match="sensitive"):
         EvidenceBundle.model_validate(sensitive_bundle_warning)
 
+    sensitive_kind = payload()
+    sensitive_kind["findings"][0]["kind"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive"):
+        EvidenceBundle.model_validate(sensitive_kind)
+
     safe_bundle = EvidenceBundle.model_validate(payload())
     unsafe_finding = safe_bundle.findings[0].model_copy(
         update={"path": f"$.customers.{sensitive_value}"}
@@ -1849,6 +1854,13 @@ def test_evidence_bundle_rejects_sensitive_path_and_warning_metadata() -> None:
         generic["findings"][0]["structured_data"]["claim"][field_name] = value
         with pytest.raises(ValidationError, match="sensitive scalar"):
             ExternalEvidenceEnvelope.model_validate(generic)
+
+    sensitive_kinds = safe_envelope.model_dump(mode="json")
+    structured_data = sensitive_kinds["findings"][0]["structured_data"]
+    structured_data["claim_kind"] = sensitive_value
+    structured_data["claim"]["kind"] = sensitive_value
+    with pytest.raises(ValidationError, match="sensitive scalar"):
+        ExternalEvidenceEnvelope.model_validate(sensitive_kinds)
 
 
 def test_evidence_bundle_adapter_rejects_mixed_source_semantics() -> None:
@@ -2222,6 +2234,40 @@ enum Marker { PRESENT; }
     assert [claim.values for claim in evidence.claims if claim.kind == "enum_state"] == [
         ["PRESENT"]
     ]
+
+
+def test_java_spring_poc_recognizes_fully_qualified_spring_mapping_annotations() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://qualified-spring", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/QualifiedController.java",
+                        "content": """
+@org.springframework.web.bind.annotation.RestController
+@org.springframework.web.bind.annotation.RequestMapping("/api")
+class QualifiedController {
+    @org.springframework.web.bind.annotation.GetMapping("/orders")
+    Order load() {
+        return orderService.load();
+    }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.method, claim.path, claim.handler) for claim in routes] == [
+        ("GET", "/api/orders", "load")
+    ]
+    assert [claim.callee_ref for claim in calls] == ["java://orderService.load"]
 
 
 def test_java_spring_poc_binds_mapping_to_immediately_following_modified_method() -> None:
@@ -3449,7 +3495,7 @@ class OrderController {
                         "path": "src/main/java/example/CreateOrderRequest.java",
                         "content": """
 class CreateOrderRequest {
-    private OrderStatus status;
+    private RequestStatus status;
 }
 """,
                     },
@@ -3457,13 +3503,17 @@ class CreateOrderRequest {
                         "path": "src/main/java/example/OrderDto.java",
                         "content": """
 class OrderDto {
-    private OrderStatus status;
+    private ResponseStatus status;
 }
 """,
                     },
                     {
-                        "path": "src/main/java/example/OrderStatus.java",
-                        "content": "enum OrderStatus { CREATED, PAID; }",
+                        "path": "src/main/java/example/RequestStatus.java",
+                        "content": "enum RequestStatus { REQUESTED, RETRIED; }",
+                    },
+                    {
+                        "path": "src/main/java/example/ResponseStatus.java",
+                        "content": "enum ResponseStatus { CREATED, PAID; }",
                     },
                 ],
             }
@@ -3476,9 +3526,43 @@ class OrderDto {
         if claim.kind == "enum_state" and claim.operation_ref is not None
     ]
     assert {
-        (claim.operation_ref, claim.field_name, tuple(claim.values)) for claim in scoped_states
-    } == {("operation://POST/orders", "status", ("CREATED", "PAID"))}
+        (
+            claim.operation_ref,
+            claim.direction,
+            claim.dto_type,
+            claim.field_name,
+            tuple(claim.values),
+        )
+        for claim in scoped_states
+    } == {
+        (
+            "operation://POST/orders",
+            "request",
+            "CreateOrderRequest",
+            "status",
+            ("REQUESTED", "RETRIED"),
+        ),
+        (
+            "operation://POST/orders",
+            "response",
+            "OrderDto",
+            "status",
+            ("CREATED", "PAID"),
+        ),
+    }
     assert len({claim.id for claim in scoped_states}) == 2
+
+    mapping = derive_entity_mapping(
+        _mapping_inputs(adapt_java_evidence(evidence), "directional-state")
+    )
+    state_candidates = [
+        candidate for candidate in mapping.candidates if candidate.kind.value == "operation_state"
+    ]
+    assert len(state_candidates) == 2
+    assert len({candidate.source_ref for candidate in state_candidates}) == 2
+    assert not [
+        conflict for conflict in mapping.conflicts if conflict.kind.value == "operation_state"
+    ]
 
 
 def test_java_spring_poc_honors_explicit_jpa_table_names() -> None:
@@ -3601,6 +3685,74 @@ class CustomerEntity {
 
     columns = [claim for claim in evidence.claims if claim.kind == "table_column"]
     assert [(claim.field_name, claim.column_name) for claim in columns] == [("status", "status")]
+
+
+def test_java_spring_poc_marks_jpa_property_access_incomplete() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://property-access", "revision": "fixture-v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/entity/CustomerEntity.java",
+                        "content": """
+@Entity
+@jakarta.persistence.Access(jakarta.persistence.AccessType.PROPERTY)
+class CustomerEntity {
+    private String code;
+
+    @Column(name = "customer_code")
+    public String getCode() { return code; }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/entity/AccountEntity.java",
+                        "content": """
+@Entity
+class AccountEntity {
+    private String id;
+
+    @javax.persistence.Id
+    public String getId() { return id; }
+}
+""",
+                    },
+                    {
+                        "path": "src/main/java/example/model/FieldAccessEntity.java",
+                        "content": """
+@Entity
+@Access(AccessType.FIELD)
+class FieldAccessEntity {
+    @Id
+    private String id;
+}
+""",
+                    },
+                ],
+            }
+        )
+    )
+
+    assert {claim.class_name for claim in evidence.claims if claim.kind == "entity"} == {
+        "AccountEntity",
+        "CustomerEntity",
+        "FieldAccessEntity",
+    }
+    assert [
+        (claim.field_name, claim.column_name)
+        for claim in evidence.claims
+        if claim.kind == "table_column"
+    ] == [("id", "id")]
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_PROPERTY_ACCESS"
+        and "AccountEntity" in warning.message
+        and "CustomerEntity" in warning.message
+        and "不完整" in warning.message
+        for warning in evidence.warnings
+    )
 
 
 def test_java_spring_poc_preserves_explicit_jpa_table_schemas() -> None:

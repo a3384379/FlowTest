@@ -74,13 +74,20 @@ _WRITE_SQL = re.compile(
     r"\b(?:alter|call|create|delete|drop|execute|grant|insert|merge|replace|revoke|truncate|update)\b",
     re.IGNORECASE,
 )
+_SPRING_WEB_ANNOTATION_PREFIX = r"(?:(?:org\.springframework\.web\.bind\.annotation)\.)?"
 _MAPPING_ANNOTATION = re.compile(
-    r"@(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
+    rf"@{_SPRING_WEB_ANNOTATION_PREFIX}"
+    r"(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
 )
-_MAPPING_ANNOTATION_MARKER = re.compile(r"@(?:Get|Post|Put|Patch|Delete|Request)Mapping\b")
-_REQUEST_MAPPING = re.compile(r"@RequestMapping\b")
-_REQUEST_MAPPING_MARKER = re.compile(r"@RequestMapping\b")
-_CONTROLLER_ANNOTATION = re.compile(r"@(?:RestController|Controller)\b")
+_MAPPING_ANNOTATION_MARKER = re.compile(
+    rf"@{_SPRING_WEB_ANNOTATION_PREFIX}(?:Get|Post|Put|Patch|Delete|Request)Mapping\b"
+)
+_REQUEST_MAPPING = re.compile(rf"@{_SPRING_WEB_ANNOTATION_PREFIX}RequestMapping\b")
+_REQUEST_MAPPING_MARKER = re.compile(rf"@{_SPRING_WEB_ANNOTATION_PREFIX}RequestMapping\b")
+_CONTROLLER_ANNOTATION = re.compile(
+    r"@(?:(?:org\.springframework\.web\.bind\.annotation\.)?RestController|"
+    r"(?:org\.springframework\.stereotype\.)?Controller)\b"
+)
 _JPA_ENTITY_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
 _JPA_ENTITY_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
 _JPA_TABLE_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
@@ -89,6 +96,10 @@ _JPA_COLUMN_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Colu
 _JPA_COLUMN_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Column\b")
 _JPA_TRANSIENT_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Transient\b")
 _JPA_TRANSIENT_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Transient\b")
+_JPA_ACCESS_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Access\b")
+_JPA_ACCESS_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Access\b")
+_JPA_ID_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Id\b")
+_JPA_ID_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Id\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -243,13 +254,23 @@ class JavaEnumStateClaim(JavaClaimBase):
     kind: Literal["enum_state"] = "enum_state"
     operation_ref: str | None = Field(default=None, min_length=1, max_length=512, pattern=_REF)
     enum_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
+    direction: Literal["request", "response"] | None = None
+    dto_type: str | None = Field(default=None, pattern=_IDENTIFIER)
     field_name: str | None = Field(default=None, pattern=_IDENTIFIER)
     values: list[str] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_state_values(self) -> JavaEnumStateClaim:
+        if (self.direction is None) != (self.dto_type is None):
+            raise ValueError("enum state DTO direction and type must be provided together")
+        if self.direction is not None and self.field_name is None:
+            raise ValueError("route-scoped enum state must identify its DTO field")
         require_no_sensitive_scalar_values(
-            [*([self.field_name] if self.field_name is not None else []), *self.values]
+            [
+                *([self.dto_type] if self.dto_type is not None else []),
+                *([self.field_name] if self.field_name is not None else []),
+                *self.values,
+            ]
         )
         return self
 
@@ -562,7 +583,10 @@ class JavaSpringPocProvider:
             file_routes = _java_routes(file)
             claims.extend(_route_claims(file, file_routes, type_analysis))
             structural_claims, file_truncated = _structural_java_claims(
-                file, file_routes, type_analysis.fields
+                file,
+                file_routes,
+                type_analysis.fields,
+                type_analysis.property_access_types,
             )
             claims.extend(structural_claims)
             structural_truncated = structural_truncated or file_truncated
@@ -591,6 +615,16 @@ class JavaSpringPocProvider:
                     message=(
                         "Java/Spring POC 不展开继承字段，以下类型的字段分析不完整："
                         f"{_java_type_name_summary(type_analysis.inherited_types)}。"
+                    ),
+                )
+            )
+        if type_analysis.property_access_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_PROPERTY_ACCESS",
+                    message=(
+                        "Java/Spring POC 不解析 JPA 属性访问映射，以下实体的列分析不完整："
+                        f"{_java_type_name_summary(type_analysis.property_access_types)}。"
                     ),
                 )
             )
@@ -699,7 +733,7 @@ def adapt_evidence_bundle(
 ) -> ExternalEvidenceEnvelope:
     require_no_sensitive_scalar_values(bundle.warnings)
     for finding in bundle.findings:
-        require_no_sensitive_scalar_values([finding.path, *finding.warnings])
+        require_no_sensitive_scalar_values([finding.kind, finding.path, *finding.warnings])
     source = ExternalEvidenceSource(ref=source_ref, revision=source_revision)
     provider_type = _bundle_provider_type(bundle)
     findings = [
@@ -1545,11 +1579,21 @@ def _java_state_candidates(
     return [
         _candidate(
             kind=EntityMappingCandidateKind.OPERATION_STATE,
-            source_ref=_state_field_ref(state.operation_ref, state.field_name),
+            source_ref=_state_field_ref(
+                state.operation_ref,
+                state.field_name,
+                direction=state.direction,
+                dto_type=state.dto_type,
+            ),
             target_ref=f"state-set://{state.enum_ref.removeprefix('java://')}",
             operation_ref=state.operation_ref,
             field_ref=(
-                _state_field_ref(state.operation_ref, state.field_name)
+                _state_field_ref(
+                    state.operation_ref,
+                    state.field_name,
+                    direction=state.direction,
+                    dto_type=state.dto_type,
+                )
                 if state.field_name is not None
                 else None
             ),
@@ -1644,15 +1688,28 @@ def _state_candidate_matches_column(
         return False
     if candidate.field_ref is None:
         return _normalized_name(column_name) in {"status", "state"}
-    return candidate.field_ref == _state_field_ref(operation_ref, column_name)
+    return candidate.field_ref.rsplit("/", 1)[-1] == _state_field_identity(column_name)
 
 
-def _state_field_ref(operation_ref: str, field_name: str | None) -> str:
+def _state_field_ref(
+    operation_ref: str,
+    field_name: str | None,
+    *,
+    direction: Literal["request", "response"] | None = None,
+    dto_type: str | None = None,
+) -> str:
     if field_name is None:
         return operation_ref
     operation_identity = sha256(operation_ref.encode()).hexdigest()
-    field_identity = _normalized_name(field_name) or sha256(field_name.encode()).hexdigest()
+    field_identity = _state_field_identity(field_name)
+    if direction is not None and dto_type is not None:
+        dto_identity = sha256(dto_type.encode()).hexdigest()[:24]
+        return f"state-field://{operation_identity}/{direction}/{dto_identity}/{field_identity}"
     return f"state-field://{operation_identity}/{field_identity}"
+
+
+def _state_field_identity(field_name: str) -> str:
+    return _normalized_name(field_name) or sha256(field_name.encode()).hexdigest()
 
 
 def _database_state_value_sets(column: DatabaseColumnEvidence) -> list[list[str]]:
@@ -1867,6 +1924,7 @@ class _JavaTypeAnalysis:
     enums: dict[str, _JavaEnumDefinition]
     ambiguous_types: tuple[str, ...]
     inherited_types: tuple[str, ...]
+    property_access_types: tuple[str, ...]
 
 
 def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysis:
@@ -1876,8 +1934,10 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
     ] = defaultdict(list)
     enum_definitions: dict[str, list[_JavaEnumDefinition]] = defaultdict(list)
     inherited_types: set[str] = set()
+    property_access_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
+        top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
         for declaration in _TYPE_DECLARATION.finditer(masked_content):
             name = declaration.group("name")
             body = _type_body(file.content, declaration.end())
@@ -1889,6 +1949,25 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
             definitions[name].append(fields)
             if _java_type_extends(masked_content, declaration):
                 inherited_types.add(name)
+            if (
+                declaration.start() in top_level_prefixes
+                and (
+                    _is_entity_type(file.path, name)
+                    or _has_jpa_entity_annotation(
+                        file.content,
+                        masked_content,
+                        top_level_prefixes[declaration.start()],
+                        declaration.start(),
+                    )
+                )
+                and _java_uses_property_access(
+                    file.content,
+                    masked_content,
+                    declaration,
+                    top_level_prefixes[declaration.start()],
+                )
+            ):
+                property_access_types.add(name)
             if declaration.group("kind") == "enum":
                 values, truncated = _enum_values(body)
                 if values:
@@ -1913,6 +1992,7 @@ def _java_type_analysis(files: list[JavaSourceFileSnapshot]) -> _JavaTypeAnalysi
         },
         ambiguous_types=ambiguous_types,
         inherited_types=tuple(sorted(inherited_types)),
+        property_access_types=tuple(sorted(property_access_types)),
     )
 
 
@@ -1924,6 +2004,63 @@ def _java_type_extends(masked_content: str, declaration: re.Match[str]) -> bool:
         return False
     header = masked_content[declaration.end() : opening]
     return re.search(r"\bextends\s+[A-Za-z_$][A-Za-z0-9_$.]*", header) is not None
+
+
+def _java_uses_property_access(
+    content: str,
+    masked_content: str,
+    declaration: re.Match[str],
+    prefix_start: int,
+) -> bool:
+    if declaration.group("kind") != "class":
+        return False
+    access_matches = _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JPA_ACCESS_ANNOTATION_MARKER,
+        _JPA_ACCESS_ANNOTATION,
+        start=prefix_start,
+        end=declaration.start(),
+    )
+    if any(
+        re.search(
+            r"\bPROPERTY\b",
+            _mask_java_non_code(_java_annotation_arguments(content, match.end())),
+        )
+        is not None
+        for match in access_matches
+    ):
+        return True
+
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return False
+    closing = _matching_brace(content, opening)
+    body = content[opening + 1 : closing]
+    masked_body = _mask_nested_java_blocks(_mask_java_non_code(body))
+    for match in _active_java_annotation_matches(
+        body,
+        masked_body,
+        _JPA_ID_ANNOTATION_MARKER,
+        _JPA_ID_ANNOTATION,
+    ):
+        _arguments, annotation_end = _java_annotation_arguments_and_end(body, match.end())
+        following = _mask_java_annotation_arguments(
+            masked_body[annotation_end : annotation_end + 1000]
+        )
+        terminators = [
+            position for marker in (";", "{") if (position := following.find(marker)) >= 0
+        ]
+        member_declaration = following[: min(terminators)] if terminators else following
+        if (
+            re.search(
+                r"\bget[A-Z][A-Za-z0-9_$]*\s*\([^)]*\)",
+                member_declaration,
+            )
+            is not None
+        ):
+            return True
+    return False
 
 
 def _java_type_name_summary(names: tuple[str, ...]) -> str:
@@ -2603,6 +2740,8 @@ def _dto_field_claims(
                     source_path=enum_definition.source_path,
                     operation_ref=operation_ref,
                     enum_ref=enum_definition.enum_ref,
+                    direction=direction,
+                    dto_type=dto_type,
                     field_name=field_name,
                     values=list(enum_definition.values),
                     confidence=0.8,
@@ -2705,6 +2844,7 @@ def _structural_java_claims(
     file: JavaSourceFileSnapshot,
     routes: list[_JavaRoute],
     type_fields: dict[str, list[JavaField]],
+    property_access_types: tuple[str, ...],
 ) -> tuple[list[JavaEvidenceClaim], bool]:
     claims: list[JavaEvidenceClaim] = []
     truncated = False
@@ -2764,19 +2904,22 @@ def _structural_java_claims(
                     deterministic=False,
                 )
             )
-            claims.extend(
-                JavaTableColumnClaim(
-                    id=_claim_id("column", source_path, name, field_name),
-                    source_path=source_path,
-                    entity_ref=_java_structural_ref("entity", source_path, name),
-                    table_ref=table_ref,
-                    field_name=field_name,
-                    column_name=column_name or _snake_case(field_name),
-                    confidence=0.65,
-                    deterministic=False,
+            if name not in property_access_types:
+                claims.extend(
+                    JavaTableColumnClaim(
+                        id=_claim_id("column", source_path, name, field_name),
+                        source_path=source_path,
+                        entity_ref=_java_structural_ref("entity", source_path, name),
+                        table_ref=table_ref,
+                        field_name=field_name,
+                        column_name=column_name or _snake_case(field_name),
+                        confidence=0.65,
+                        deterministic=False,
+                    )
+                    for field_name, _field_type, _annotations, column_name in type_fields.get(
+                        name, []
+                    )
                 )
-                for field_name, _field_type, _annotations, column_name in type_fields.get(name, [])
-            )
         if kind == "enum":
             values, values_truncated = _enum_values(_type_body(file.content, declaration.end()))
             truncated = truncated or values_truncated
@@ -2951,7 +3094,7 @@ def _bounded_java_claims(
         "mapper_repository": 4,
         "entity": 4,
         "table_column": 8,
-        "enum_state": 3,
+        "enum_state": 8,
         "exception": 3,
         "kafka_event": 3,
     }
