@@ -3337,7 +3337,7 @@ class OrderDetailDto {
     assert all("view=" not in operation_ref for operation_ref in operation_by_handler.values())
 
 
-def test_java_spring_poc_preserves_unresolved_mapping_condition_identity() -> None:
+def test_java_spring_poc_drops_unresolved_mapping_conditions() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
             {
@@ -3360,6 +3360,11 @@ class TenantController {
     Order tenantB() {
         return tenantBService.load();
     }
+
+    @GetMapping("/live")
+    Order live() {
+        return liveService.load();
+    }
 }
 """,
                     }
@@ -3369,16 +3374,45 @@ class TenantController {
     )
 
     routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
-    operation_by_handler = {claim.handler: claim.operation_ref for claim in routes}
-    calls = {
-        claim.callee_ref: claim.operation_ref
-        for claim in evidence.claims
-        if claim.kind == "service_call"
+    calls = [claim for claim in evidence.claims if claim.kind == "service_call"]
+    assert [(claim.handler, claim.path) for claim in routes] == [("live", "/orders/live")]
+    assert [claim.callee_ref for claim in calls] == ["java://liveService.load"]
+    assert evidence.deterministic is False
+    assert "JAVA_POC_INCOMPLETE_MAPPING_CONDITION" in {
+        warning.code for warning in evidence.warnings
     }
-    assert set(operation_by_handler) == {"tenantA", "tenantB"}
-    assert operation_by_handler["tenantA"] != operation_by_handler["tenantB"]
-    assert calls["java://tenantAService.load"] == operation_by_handler["tenantA"]
-    assert calls["java://tenantBService.load"] == operation_by_handler["tenantB"]
+
+
+def test_java_spring_poc_resolves_standard_media_type_mapping_conditions() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://media-type-condition", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/MediaController.java",
+                        "content": """
+@RestController
+class MediaController {
+    @GetMapping(path = "/constant", produces = MediaType.APPLICATION_JSON_VALUE)
+    Order constant() { return constantService.load(); }
+
+    @GetMapping(path = "/literal", produces = "application/json")
+    Order literal() { return literalService.load(); }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = [claim for claim in evidence.claims if claim.kind == "controller_route"]
+    condition_suffixes = {claim.operation_ref.split("#", 1)[1] for claim in routes}
+    assert len(routes) == 2
+    assert len(condition_suffixes) == 1
 
 
 def test_java_spring_poc_intersects_class_and_method_mapping_methods() -> None:
@@ -3938,6 +3972,59 @@ public class OrderEntity {
     assert constraint_fields == {"name"}
     assert entity_fields == {"status"}
     assert '(regexp = "^(foo|bar)$")' in constraints
+
+
+def test_java_spring_poc_excludes_jackson_ignored_dto_fields_and_getters() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://jackson-ignore", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @PostMapping("/orders")
+    OrderDto create(@RequestBody OrderDto request) {
+        return orderService.create(request);
+    }
+}
+
+class OrderDto {
+    private String visible;
+
+    @JsonIgnore(false)
+    private String explicitlyVisible;
+
+    @JsonIgnore
+    private String internalToken;
+
+    private String serverOnly;
+
+    @JsonIgnore
+    public String getServerOnly() { return serverOnly; }
+}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    fields = {
+        (claim.direction, claim.field_name)
+        for claim in evidence.claims
+        if claim.kind == "dto_field"
+    }
+    assert fields == {
+        ("request", "explicitlyVisible"),
+        ("request", "visible"),
+        ("response", "explicitlyVisible"),
+        ("response", "visible"),
+    }
 
 
 def test_java_spring_poc_preserves_qualified_and_repeated_validation_constraints() -> None:

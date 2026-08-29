@@ -137,6 +137,34 @@ _TRANSPORT_ONLY_PARAMETER_TYPES: Final = (
     "WebRequest",
     "ZoneId",
 )
+_SPRING_STRING_CONSTANT_VALUES: Final = {
+    "MediaType.ALL_VALUE": "*/*",
+    "MediaType.APPLICATION_ATOM_XML_VALUE": "application/atom+xml",
+    "MediaType.APPLICATION_CBOR_VALUE": "application/cbor",
+    "MediaType.APPLICATION_FORM_URLENCODED_VALUE": "application/x-www-form-urlencoded",
+    "MediaType.APPLICATION_GRAPHQL_RESPONSE_VALUE": "application/graphql-response+json",
+    "MediaType.APPLICATION_JSON_VALUE": "application/json",
+    "MediaType.APPLICATION_NDJSON_VALUE": "application/x-ndjson",
+    "MediaType.APPLICATION_OCTET_STREAM_VALUE": "application/octet-stream",
+    "MediaType.APPLICATION_PDF_VALUE": "application/pdf",
+    "MediaType.APPLICATION_PROBLEM_JSON_VALUE": "application/problem+json",
+    "MediaType.APPLICATION_PROBLEM_XML_VALUE": "application/problem+xml",
+    "MediaType.APPLICATION_PROTOBUF_VALUE": "application/x-protobuf",
+    "MediaType.APPLICATION_RSS_XML_VALUE": "application/rss+xml",
+    "MediaType.APPLICATION_STREAM_JSON_VALUE": "application/stream+json",
+    "MediaType.APPLICATION_XHTML_XML_VALUE": "application/xhtml+xml",
+    "MediaType.APPLICATION_XML_VALUE": "application/xml",
+    "MediaType.IMAGE_GIF_VALUE": "image/gif",
+    "MediaType.IMAGE_JPEG_VALUE": "image/jpeg",
+    "MediaType.IMAGE_PNG_VALUE": "image/png",
+    "MediaType.MULTIPART_FORM_DATA_VALUE": "multipart/form-data",
+    "MediaType.MULTIPART_MIXED_VALUE": "multipart/mixed",
+    "MediaType.TEXT_EVENT_STREAM_VALUE": "text/event-stream",
+    "MediaType.TEXT_HTML_VALUE": "text/html",
+    "MediaType.TEXT_MARKDOWN_VALUE": "text/markdown",
+    "MediaType.TEXT_PLAIN_VALUE": "text/plain",
+    "MediaType.TEXT_XML_VALUE": "text/xml",
+}
 _MAPPING_ANNOTATION = re.compile(
     rf"@{_SPRING_WEB_ANNOTATION_PREFIX}"
     r"(?:(?P<method>Get|Post|Put|Patch|Delete)Mapping|RequestMapping)\b"
@@ -162,6 +190,12 @@ _JPA_ACCESS_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Acce
 _JPA_ACCESS_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Access\b")
 _JPA_ID_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Id\b")
 _JPA_ID_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Id\b")
+_JACKSON_IGNORE_ANNOTATION = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonIgnore)\b"
+)
+_JACKSON_IGNORE_ANNOTATION_MARKER = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonIgnore)\b"
+)
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -743,6 +777,10 @@ class JavaSpringPocProvider:
             snapshot.files,
             string_constants,
         )
+        unresolved_mapping_conditions = _java_unresolved_mapping_condition_locations(
+            snapshot.files,
+            string_constants,
+        )
         unresolved_kafka_topics = _java_unresolved_kafka_locations(
             snapshot.files,
             string_constants,
@@ -805,6 +843,7 @@ class JavaSpringPocProvider:
             _java_reference_warnings(
                 interface_contracts.unresolved_interfaces,
                 unresolved_mappings,
+                unresolved_mapping_conditions,
                 unresolved_kafka_topics,
                 tuple(sorted(unresolved_jpa_tables)),
                 type_analysis.unresolved_column_types,
@@ -827,6 +866,7 @@ class JavaSpringPocProvider:
                 all(claim.deterministic for claim in bounded_claims)
                 and not interface_contracts.unresolved_interfaces
                 and not unresolved_mappings
+                and not unresolved_mapping_conditions
                 and not unresolved_kafka_topics
                 and not unresolved_jpa_tables
                 and not type_analysis.unresolved_column_types
@@ -838,6 +878,7 @@ class JavaSpringPocProvider:
 def _java_reference_warnings(
     unresolved_interfaces: tuple[str, ...],
     unresolved_mappings: tuple[str, ...],
+    unresolved_mapping_conditions: tuple[str, ...],
     unresolved_kafka_topics: tuple[str, ...],
     unresolved_jpa_tables: tuple[str, ...],
     unresolved_jpa_columns: tuple[str, ...],
@@ -853,6 +894,11 @@ def _java_reference_warnings(
             unresolved_mappings,
             "JAVA_POC_INCOMPLETE_MAPPING_PATH",
             "Java/Spring POC 无法解析部分 Mapping 路径常量或表达式，分析不完整：",
+        ),
+        (
+            unresolved_mapping_conditions,
+            "JAVA_POC_INCOMPLETE_MAPPING_CONDITION",
+            "Java/Spring POC 无法解析部分 Mapping 条件常量或表达式，分析不完整：",
         ),
         (
             unresolved_kafka_topics,
@@ -2144,7 +2190,7 @@ class _JavaInterfaceDefinition:
     parents: tuple[str, ...]
     base_paths: tuple[str, ...]
     base_methods: tuple[JavaHttpMethod, ...] | None
-    base_conditions: tuple[str, ...]
+    base_conditions: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -2166,7 +2212,11 @@ class _JavaStringConstants:
         direct = self.qualified_values.get(reference)
         if direct is not None:
             return direct
-        return self.qualified_values.get(".".join(reference.rsplit(".", 2)[-2:]))
+        shortened = ".".join(reference.rsplit(".", 2)[-2:])
+        qualified = self.qualified_values.get(shortened)
+        if qualified is not None:
+            return qualified
+        return _SPRING_STRING_CONSTANT_VALUES.get(shortened)
 
 
 JavaField = tuple[str, str, list[tuple[str, str]], str | None, bool]
@@ -2398,7 +2448,9 @@ def _record_component_field(
     enclosing_type: str,
 ) -> JavaField | None:
     masked_component = _mask_java_non_code(component)
-    if _has_jpa_transient_annotation(component, masked_component):
+    if _has_jpa_transient_annotation(component, masked_component) or _has_jackson_ignore_annotation(
+        component, masked_component
+    ):
         return None
     annotations = _java_validation_annotations(component, masked_component)
     column_name, column_name_unresolved = _java_column_name(
@@ -2446,7 +2498,9 @@ def _class_fields(
         )
         annotation_content = body[prefix_start : match.start()]
         annotation_mask = masked_body[prefix_start : match.start()]
-        if _has_jpa_transient_annotation(annotation_content, annotation_mask):
+        if _has_jpa_transient_annotation(
+            annotation_content, annotation_mask
+        ) or _has_jackson_ignore_annotation(annotation_content, annotation_mask):
             continue
         annotations = _java_validation_annotations(annotation_content, annotation_mask)
         column_name, column_name_unresolved = _java_column_name(
@@ -2465,6 +2519,8 @@ def _class_fields(
             )
             for field_name, field_type in declarators
         )
+    ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
+    fields = [field for field in fields if field[0] not in ignored_getters]
     known = {field[0] for field in fields}
     for match in _VALIDATED_GETTER.finditer(masked_body):
         name = match.group("name")
@@ -2607,6 +2663,47 @@ def _has_jpa_transient_annotation(content: str, masked_content: str) -> bool:
     )
 
 
+def _has_jackson_ignore_annotation(content: str, masked_content: str) -> bool:
+    return any(
+        _jackson_ignore_enabled(content, match)
+        for match in _active_java_annotation_matches(
+            content,
+            masked_content,
+            _JACKSON_IGNORE_ANNOTATION_MARKER,
+            _JACKSON_IGNORE_ANNOTATION,
+        )
+    )
+
+
+def _jackson_ignored_getter_properties(content: str, masked_content: str) -> set[str]:
+    properties: set[str] = set()
+    for match in _active_java_annotation_matches(
+        content,
+        masked_content,
+        _JACKSON_IGNORE_ANNOTATION_MARKER,
+        _JACKSON_IGNORE_ANNOTATION,
+    ):
+        if not _jackson_ignore_enabled(content, match):
+            continue
+        _arguments, annotation_end = _java_annotation_arguments_and_end(content, match.end())
+        following = _mask_java_annotation_arguments(masked_content[annotation_end:])
+        getter = re.match(
+            r"\s*(?:(?:public|protected|final)\s+)*[A-Za-z0-9_$<>,.?\[\]\s]+?"
+            r"\s+(?:get|is)(?P<name>[A-Z][A-Za-z0-9_$]*)\s*\(",
+            following,
+        )
+        if getter is not None:
+            name = getter.group("name")
+            properties.add(name[0].lower() + name[1:])
+    return properties
+
+
+def _jackson_ignore_enabled(content: str, annotation: re.Match[str]) -> bool:
+    arguments = _java_annotation_arguments(content, annotation.end())
+    inner = arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
+    return re.fullmatch(r"\s*(?:value\s*=\s*)?false\s*", inner) is None
+
+
 def _java_annotation_arguments(content: str, annotation_end: int) -> str:
     return _java_annotation_arguments_and_end(content, annotation_end)[0]
 
@@ -2708,6 +2805,42 @@ def _java_unresolved_mapping_locations(
             ):
                 arguments = _java_annotation_arguments(file.content, match.end())
                 if not _mapping_paths(arguments, string_constants, declaration.group("name")):
+                    line = file.content.count("\n", 0, match.start()) + 1
+                    unresolved.add(f"{file.path}:{line}")
+    return tuple(sorted(unresolved))
+
+
+def _java_unresolved_mapping_condition_locations(
+    files: list[JavaSourceFileSnapshot],
+    string_constants: _JavaStringConstants,
+) -> tuple[str, ...]:
+    unresolved: set[str] = set()
+    for file in sorted(files, key=lambda item: item.path):
+        masked_content = _mask_java_non_code(file.content)
+        for declaration, prefix_start in _java_top_level_declarations(file, masked_content):
+            opening = masked_content.find("{", declaration.end())
+            if opening < 0:
+                continue
+            closing = _matching_brace(file.content, opening)
+            shallow_mask = list(masked_content)
+            shallow_mask[opening + 1 : closing] = _mask_nested_java_blocks(
+                masked_content[opening + 1 : closing]
+            )
+            for match in _active_java_annotation_matches(
+                file.content,
+                "".join(shallow_mask),
+                _MAPPING_ANNOTATION_MARKER,
+                _MAPPING_ANNOTATION,
+                start=prefix_start,
+                end=closing,
+            ):
+                arguments = _java_annotation_arguments(file.content, match.end())
+                conditions = _mapping_conditions(
+                    arguments,
+                    string_constants,
+                    declaration.group("name"),
+                )
+                if conditions is None:
                     line = file.content.count("\n", 0, match.start()) + 1
                     unresolved.add(f"{file.path}:{line}")
     return tuple(sorted(unresolved))
@@ -2842,7 +2975,9 @@ def _java_interface_route_contracts(
                     parents=_java_extended_interfaces(masked_content, declaration),
                     base_paths=tuple(base_paths),
                     base_methods=tuple(base_methods) if base_methods is not None else None,
-                    base_conditions=tuple(base_conditions),
+                    base_conditions=(
+                        tuple(base_conditions) if base_conditions is not None else None
+                    ),
                 )
             )
     unique = {name: items[0] for name, items in definitions.items() if len(items) == 1}
@@ -2878,6 +3013,8 @@ def _java_rebased_interface_routes(
     definition: _JavaInterfaceDefinition,
     interface_name: str,
 ) -> list[_JavaRoute]:
+    if definition.base_conditions is None:
+        return []
     routes: list[_JavaRoute] = []
     for contract in contracts:
         if definition.base_methods is not None and contract.method not in definition.base_methods:
@@ -2927,6 +3064,8 @@ def _java_controller_routes(
         declaration_prefix_start,
         string_constants,
     )
+    if base_conditions is None:
+        return []
     controller = declaration.group("name")
     return [
         route
@@ -2968,6 +3107,8 @@ def _java_bound_interface_routes(
         selected[1],
         string_constants,
     )
+    if base_conditions is None:
+        return []
     routes: list[_JavaRoute] = []
     for interface_name in _java_implemented_interfaces(masked_content, declaration):
         for contract in interface_routes.get(interface_name, ()):
@@ -3018,7 +3159,7 @@ def _java_type_mapping(
 ) -> tuple[
     list[str],
     list[JavaHttpMethod] | None,
-    list[str],
+    list[str] | None,
 ]:
     base_matches = _active_java_annotation_matches(
         file.content,
@@ -3038,7 +3179,11 @@ def _java_type_mapping(
             declaration.group("name"),
         ),
         _mapping_http_methods(base_matches[-1], base_arguments),
-        _mapping_conditions(base_arguments),
+        _mapping_conditions(
+            base_arguments,
+            string_constants,
+            declaration.group("name"),
+        ),
     )
 
 
@@ -3245,7 +3390,14 @@ def _routes_after_mapping(
     methods = _mapping_http_methods(mapping, mapping_arguments)
     if base_methods is not None:
         methods = [method for method in methods if method in base_methods]
-    conditions = [*base_conditions, *_mapping_conditions(mapping_arguments)]
+    mapping_conditions = _mapping_conditions(
+        mapping_arguments,
+        string_constants,
+        controller,
+    )
+    if mapping_conditions is None:
+        return []
+    conditions = [*base_conditions, *mapping_conditions]
     body_start = mapping_end + signature.end() - 1
     body_end = (
         _matching_brace(file.content, body_start)
@@ -3314,7 +3466,11 @@ def _mapping_http_methods(
     return [cast(JavaHttpMethod, method) for method in dict.fromkeys(methods)]
 
 
-def _mapping_conditions(arguments: str) -> list[str]:
+def _mapping_conditions(
+    arguments: str,
+    string_constants: _JavaStringConstants,
+    enclosing_type: str,
+) -> list[str] | None:
     content = (
         arguments[1:-1] if arguments.startswith("(") and arguments.endswith(")") else arguments
     )
@@ -3329,12 +3485,14 @@ def _mapping_conditions(arguments: str) -> list[str]:
             assignment.end(),
             allow_identifier=True,
         )
-        values = _java_literal_values(expression)
-        if values:
-            conditions.extend(f"{name}:{value}" for value in sorted(set(values)))
-        else:
-            normalized = " ".join(expression.split()) or sha256(content.encode()).hexdigest()
-            conditions.append(f"{name}:{normalized}")
+        values = _java_mapping_path_values(
+            expression,
+            string_constants,
+            enclosing_type,
+        )
+        if not values:
+            return None
+        conditions.extend(f"{name}:{value}" for value in sorted(set(values)))
     return conditions
 
 
