@@ -356,6 +356,10 @@ class DatabaseObservedDistribution(BaseModel):
             and self.distinct_count > self.row_count
         ):
             raise ValueError("database observed distinct count must not exceed row count")
+        if self.row_count == 0 and (
+            self.enum_candidates or self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("database empty distribution must not include observed values")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("database observed minimum must not exceed maximum")
         extrema = [value for value in (self.minimum, self.maximum) if value is not None]
@@ -1624,14 +1628,6 @@ def _database_state_candidates(
         not field_candidates and _normalized_name(column.name) not in {"status", "state"}
     ):
         return [], set()
-    anchor = next(
-        (candidate for candidate in field_candidates if candidate.field_ref is not None),
-        field_candidates[0] if field_candidates else None,
-    )
-    source_ref = (
-        anchor.source_ref if anchor is not None else _state_field_ref(operation_ref, column.name)
-    )
-    field_ref = anchor.field_ref if anchor is not None else source_ref
     candidates: list[EntityMappingCandidate] = []
     corroborated_ids: set[str] = set()
     for values in value_sets:
@@ -1639,43 +1635,45 @@ def _database_state_candidates(
             candidate for candidate in field_candidates if candidate.state_values == values
         ]
         corroborated_ids.update(candidate.id for candidate in corroborating)
-        corroborating_evidence = sorted(
-            {
-                evidence_ref
-                for candidate in corroborating
-                for evidence_ref in candidate.evidence_refs
-            }
-        )[:6]
-        operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
-        candidates.append(
-            _candidate(
-                kind=EntityMappingCandidateKind.OPERATION_STATE,
-                source_ref=source_ref,
-                target_ref=(
-                    f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"
-                ),
-                operation_ref=operation_ref,
-                field_ref=field_ref,
-                state_values=values,
-                confidence=min(
-                    [
-                        parsed_column.confidence,
-                        operation_table.confidence,
-                        *(candidate.confidence for candidate in corroborating),
-                    ]
-                ),
-                deterministic=(
-                    parsed_column.deterministic
-                    and operation_table.deterministic
-                    and all(candidate.deterministic for candidate in corroborating)
-                ),
-                evidence_refs=[
-                    parsed_column.evidence_ref,
-                    *corroborating_evidence,
-                    *operation_evidence,
-                ],
+        anchors: list[EntityMappingCandidate | None] = [*corroborating] or [None]
+        for anchor in anchors:
+            source_ref = (
+                anchor.source_ref
+                if anchor is not None
+                else _state_field_ref(operation_ref, column.name)
             )
-        )
+            field_ref = anchor.field_ref if anchor is not None else source_ref
+            corroborating_evidence = sorted(anchor.evidence_refs)[:6] if anchor is not None else []
+            operation_evidence = operation_table.evidence_refs[: 19 - len(corroborating_evidence)]
+            candidates.append(
+                _candidate(
+                    kind=EntityMappingCandidateKind.OPERATION_STATE,
+                    source_ref=source_ref,
+                    target_ref=(
+                        f"state-set://{parsed_column.schema}/{parsed_column.table}/{column.name}"
+                    ),
+                    operation_ref=operation_ref,
+                    field_ref=field_ref,
+                    state_values=values,
+                    confidence=min(
+                        [
+                            parsed_column.confidence,
+                            operation_table.confidence,
+                            *([anchor.confidence] if anchor is not None else []),
+                        ]
+                    ),
+                    deterministic=(
+                        parsed_column.deterministic
+                        and operation_table.deterministic
+                        and (anchor is None or anchor.deterministic)
+                    ),
+                    evidence_refs=[
+                        parsed_column.evidence_ref,
+                        *corroborating_evidence,
+                        *operation_evidence,
+                    ],
+                )
+            )
     return candidates, corroborated_ids
 
 

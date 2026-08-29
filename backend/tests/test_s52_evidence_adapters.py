@@ -713,6 +713,60 @@ def test_database_distribution_rejects_distinct_count_above_row_count_at_generic
         ExternalEvidenceEnvelope.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_for_zero_rows_at_dedicated_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_submission()
+    payload["tables"][0]["columns"][1]["observed_distribution"] = {
+        "row_count": 0,
+        "distinct_count": 0,
+        **observed_values,
+    }
+
+    with pytest.raises(
+        ValidationError, match="empty distribution must not include observed values"
+    ):
+        DatabaseEvidenceSubmission.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "observed_values",
+    [
+        {"enum_candidates": ["ghost"]},
+        {"minimum": 1},
+        {"maximum": 1},
+    ],
+    ids=["enum-candidates", "minimum", "maximum"],
+)
+def test_database_distribution_rejects_values_for_zero_rows_at_generic_boundary(
+    observed_values: dict[str, Any],
+) -> None:
+    payload = _database_envelope_with_distribution_update(
+        {
+            "row_count": 0,
+            "distinct_count": 0,
+            "enum_candidates": [],
+            "minimum": None,
+            "maximum": None,
+            **observed_values,
+        }
+    )
+
+    with pytest.raises(
+        ValidationError, match="empty distribution must not include observed values"
+    ):
+        ExternalEvidenceEnvelope.model_validate(payload)
+
+
 def test_database_column_rejects_observed_nulls_when_non_nullable_at_dedicated_boundary() -> None:
     payload = _database_submission()
     payload["tables"][0]["columns"][1]["observed_distribution"]["null_ratio"] = 0.01
@@ -1045,6 +1099,76 @@ def test_database_boolean_state_values_corroborate_json_style_java_values() -> N
         conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
         for conflict in mapping.conflicts
     )
+
+
+def test_database_state_corroborates_each_dto_direction_independently() -> None:
+    java_payload = _java_submission()
+    java_payload["claims"] = [
+        claim for claim in java_payload["claims"] if claim["kind"] != "enum_state"
+    ]
+    common = {
+        "kind": "enum_state",
+        "source_path": "src/OrderStatus.java:3",
+        "confidence": 0.96,
+        "deterministic": True,
+        "operation_ref": "operation://POST/api/orders",
+        "field_name": "status",
+    }
+    java_payload["claims"].extend(
+        [
+            {
+                **common,
+                "id": "request-state",
+                "enum_ref": "java://CreateOrderStatus",
+                "direction": "request",
+                "dto_type": "CreateOrderRequest",
+                "values": ["requested"],
+            },
+            {
+                **common,
+                "id": "response-state",
+                "enum_ref": "java://OrderStatus",
+                "direction": "response",
+                "dto_type": "OrderDto",
+                "values": ["created", "cancelled"],
+            },
+        ]
+    )
+
+    mapping = derive_entity_mapping(
+        [
+            *_mapping_inputs(
+                adapt_java_evidence(JavaEvidenceSubmission.model_validate(java_payload)),
+                "java-directional",
+            ),
+            *_mapping_inputs(
+                adapt_database_evidence(
+                    DatabaseEvidenceSubmission.model_validate(_database_submission())
+                ),
+                "database-directional",
+            ),
+        ]
+    )
+
+    states = [
+        candidate
+        for candidate in mapping.candidates
+        if candidate.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
+    assert len(states) == 2
+    request_state = next(candidate for candidate in states if "/request/" in candidate.source_ref)
+    response_state = next(candidate for candidate in states if "/response/" in candidate.source_ref)
+    assert request_state.target_ref == "state-set://CreateOrderStatus"
+    assert request_state.state_values == ["requested"]
+    assert response_state.target_ref == "state-set://public/orders/status"
+    assert response_state.state_values == ["cancelled", "created"]
+    assert any("database-directional" in ref for ref in response_state.evidence_refs)
+    assert any("java-directional" in ref for ref in response_state.evidence_refs)
+    assert not [
+        conflict
+        for conflict in mapping.conflicts
+        if conflict.kind is EntityMappingCandidateKind.OPERATION_STATE
+    ]
 
 
 def test_database_normative_and_observed_state_sets_remain_conflicting_candidates() -> None:

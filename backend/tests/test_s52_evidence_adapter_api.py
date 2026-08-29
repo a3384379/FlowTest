@@ -1895,6 +1895,42 @@ async def test_database_adapter_rejects_inverted_extrema_with_trace_id(
     assert rejected_counts.json()["error"]["code"] == "VALIDATION_ERROR"
     assert rejected_counts.json()["error"]["trace_id"]
 
+    empty_values = _database_evidence(project_id)
+    empty_values["tables"][0]["columns"][2]["observed_distribution"] = {
+        "row_count": 0,
+        "distinct_count": 0,
+        "enum_candidates": ["ghost"],
+    }
+    rejected_empty_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/database-evidence",
+        headers=headers,
+        json={"evidence": empty_values},
+    )
+
+    assert rejected_empty_values.status_code == 422, rejected_empty_values.text
+    assert rejected_empty_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_empty_values.json()["error"]["trace_id"]
+
+    generic_empty_values = _database_envelope_with_invalid_distribution(
+        project_id,
+        {
+            "row_count": 0,
+            "distinct_count": 0,
+            "minimum": None,
+            "maximum": None,
+            "enum_candidates": ["ghost"],
+        },
+    )
+    rejected_generic_empty_values = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/evidence",
+        headers=headers,
+        json={"envelope": generic_empty_values},
+    )
+
+    assert rejected_generic_empty_values.status_code == 422, rejected_generic_empty_values.text
+    assert rejected_generic_empty_values.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert rejected_generic_empty_values.json()["error"]["trace_id"]
+
 
 @pytest.mark.asyncio
 async def test_database_adapter_rejects_nullable_primary_keys_with_trace_id(
