@@ -65,6 +65,7 @@ from app.engine.results import (
 )
 from app.engine.scheduler import (
     NESTED_CHECKPOINT_PREFIX,
+    CancellationToken,
     ExecutionContext,
     NodeExecutionError,
     NodeRunRecord,
@@ -417,6 +418,7 @@ class WorkflowNodeExecutor:
             ),
             checkpoint_records=context.nested_checkpoint_records,
             reset_retry_budget=context.reset_retry_budget,
+            parent_cancellation=context.cancellation,
         )
         output = _subflow_output(prepared, result)
         if result.status.value != "passed":
@@ -543,6 +545,7 @@ class WorkflowNodeExecutor:
                 ),
                 checkpoint_records=context.nested_checkpoint_records,
                 reset_retry_budget=context.reset_retry_budget,
+                parent_cancellation=context.cancellation,
             )
             return {
                 "index": index,
@@ -562,6 +565,7 @@ class WorkflowNodeExecutor:
         checkpoint_best_effort: bool,
         checkpoint_records: dict[str, NodeRunRecord],
         reset_retry_budget: bool,
+        parent_cancellation: CancellationToken | None,
     ) -> WorkflowRunResult:
         executor = WorkflowNodeExecutor(
             self._client,
@@ -607,8 +611,9 @@ class WorkflowNodeExecutor:
             if status_callback is not None:
                 await status_callback(mapped)
 
-        try:
-            return await WorkflowScheduler(executor).run(
+        nested_cancellation = CancellationToken()
+        run_task = asyncio.create_task(
+            WorkflowScheduler(executor).run(
                 prepared.definition,
                 context=ExecutionContext(
                     workflow_variables=dict(prepared.definition.variables),
@@ -620,12 +625,26 @@ class WorkflowNodeExecutor:
                     nested_checkpoint_records=checkpoint_records,
                     reset_retry_budget=reset_retry_budget,
                 ),
+                cancellation=nested_cancellation,
                 on_node_status=publish_nested,
                 resume_records=resume_records,
                 resume_attempts=resume_attempts,
                 reset_retry_budget=reset_retry_budget,
                 shared_request_budget=request_budget,
             )
+        )
+        try:
+            return await asyncio.shield(run_task)
+        except asyncio.CancelledError:
+            nested_cancellation.cancel(
+                force=(
+                    parent_cancellation.force_cancelled
+                    if parent_cancellation is not None
+                    else False
+                )
+            )
+            await asyncio.shield(run_task)
+            raise
         finally:
             await executor.close()
 

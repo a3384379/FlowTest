@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from app.engine.mappings import MappingResolutionError, resolve_field_mappings
 from app.engine.results import NodeResult
 from app.engine.scheduler import (
     NESTED_CHECKPOINT_PREFIX,
+    CancellationToken,
     ExecutionContext,
     NodeExecutionError,
     NodeRunRecord,
@@ -647,6 +649,78 @@ async def test_nested_cleanup_resume_freezes_the_completed_main_phase() -> None:
     assert any(
         update.name == "cleanup" and update.status is NodeStatus.PASSED
         for update in resumed_updates
+    )
+
+
+@pytest.mark.asyncio
+async def test_graceful_parent_cancel_allows_nested_cleanup_to_finish() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000106")
+    node = WorkflowNode.model_validate(
+        _node(
+            "nested",
+            "subflow",
+            {"workflow_id": str(workflow_id), "workflow_version": 1},
+        )
+    )
+    slow = _capability_node("slow", "flow.delay", {"seconds": 5})
+    cleanup = _capability_node("cleanup", "flow.delay", {"seconds": 0})
+    cleanup.update(
+        {
+            "phase": "cleanup",
+            "run_when": "cancel",
+            "cleanup_for": ["slow"],
+        }
+    )
+    nested = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "3.0",
+            "nodes": [
+                _capability_node("start", "flow.start", {}),
+                slow,
+                _capability_node("end", "flow.end", {}),
+                cleanup,
+            ],
+            "edges": [_edge("start", "slow"), _edge("slow", "end")],
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="d" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={},
+    )
+    wrapper = _wrapper_workflow(node)
+    cancellation = CancellationToken()
+    updates: list[NodeStatusUpdate] = []
+
+    async def capture(update: NodeStatusUpdate) -> None:
+        updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        task = asyncio.create_task(
+            WorkflowScheduler(executor).run(
+                wrapper,
+                cancellation=cancellation,
+                on_node_status=capture,
+            )
+        )
+        await asyncio.sleep(0.02)
+        cancellation.cancel()
+        result = await task
+
+    assert result.status == "cancelled"
+    assert any(
+        update.name == "cleanup" and update.status is NodeStatus.PASSED for update in updates
     )
 
 

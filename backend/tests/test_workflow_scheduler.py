@@ -8,6 +8,7 @@ from pydantic import JsonValue, ValidationError
 
 from app.engine.contracts import NodeStatus, RetryCategory, WorkflowDefinition, WorkflowNode
 from app.engine.scheduler import (
+    NESTED_CHECKPOINT_PREFIX,
     CancellationToken,
     ExecutionContext,
     NodeExecutionError,
@@ -511,16 +512,18 @@ async def test_main_runtime_limit_accounts_for_reclaim_checkpoint_time() -> None
     )
     initial = await WorkflowScheduler(ControlledExecutor()).run(definition)
     start = initial.records[0]
-    expired_start = replace(
+    nested_running = replace(
         start,
+        node_id=f"{NESTED_CHECKPOINT_PREFIX}runtime",
+        status=NodeStatus.RUNNING,
         started_at=start.completed_at - timedelta(seconds=2),
     )
     executor = ControlledExecutor()
 
     reclaimed = await WorkflowScheduler(executor).run(
         definition,
-        resume_records=(expired_start,),
-        resume_attempts={"start": 1},
+        resume_records=(nested_running,),
+        resume_attempts={nested_running.node_id: 1},
     )
 
     assert reclaimed.main_status == "cancelled"

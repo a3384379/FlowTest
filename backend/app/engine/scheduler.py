@@ -143,6 +143,7 @@ class ExecutionContext:
         repr=False,
     )
     reset_retry_budget: bool = field(default=False, repr=False)
+    cancellation: "CancellationToken | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")
@@ -285,6 +286,7 @@ class WorkflowScheduler:
             )
         run_context.reset_retry_budget = reset_retry_budget
         token = cancellation or CancellationToken()
+        run_context.cancellation = token
         main_nodes = tuple(node for node in definition.nodes if node.phase is WorkflowPhase.MAIN)
         main_ids = frozenset(node.id for node in main_nodes)
         main_edges = tuple(
@@ -301,6 +303,15 @@ class WorkflowScheduler:
         main_resume_records = tuple(
             record for record in resume_records if record.node_id in main_ids
         )
+        main_runtime_records = tuple(
+            record
+            for record in resume_records
+            if record.node_id in main_ids
+            or (
+                record.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+                and record.phase is WorkflowPhase.MAIN
+            )
+        )
         main_budget = _remaining_request_budget(
             definition.run_policy.request_budget,
             main_nodes,
@@ -314,7 +325,7 @@ class WorkflowScheduler:
         runtime_handle = _schedule_runtime_limit(
             token,
             definition.run_policy.max_runtime_seconds,
-            main_resume_records,
+            main_runtime_records,
             reset=reset_retry_budget,
         )
         try:
