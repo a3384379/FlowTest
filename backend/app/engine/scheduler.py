@@ -104,6 +104,26 @@ NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
 
 
 @dataclass(slots=True)
+class RequestBudget:
+    remaining: int
+    parent: "RequestBudget | None" = None
+
+    def claim(self) -> bool:
+        if not self._can_claim():
+            return False
+        self._consume()
+        return True
+
+    def _can_claim(self) -> bool:
+        return self.remaining > 0 and (self.parent is None or self.parent._can_claim())
+
+    def _consume(self) -> None:
+        self.remaining -= 1
+        if self.parent is not None:
+            self.parent._consume()
+
+
+@dataclass(slots=True)
 class ExecutionContext:
     workflow_variables: dict[str, JsonValue] = field(default_factory=dict)
     dataset_variables: dict[str, JsonValue] = field(default_factory=dict)
@@ -112,6 +132,7 @@ class ExecutionContext:
     _extracted_variables: dict[str, JsonValue] = field(default_factory=dict)
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
+    request_budget: RequestBudget | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")
@@ -217,17 +238,6 @@ class CancellationToken:
         await (self._force_event if force_only else self._event).wait()
 
 
-@dataclass(slots=True)
-class _RequestBudget:
-    remaining: int
-
-    def claim(self) -> bool:
-        if self.remaining <= 0:
-            return False
-        self.remaining -= 1
-        return True
-
-
 @dataclass(frozen=True, slots=True)
 class _AttemptReservation:
     attempts: int
@@ -250,6 +260,7 @@ class WorkflowScheduler:
         resume_records: tuple[NodeRunRecord, ...] = (),
         resume_attempts: dict[str, int] | None = None,
         reset_retry_budget: bool = False,
+        shared_request_budget: RequestBudget | None = None,
     ) -> WorkflowRunResult:
         run_context = context or ExecutionContext()
         token = cancellation or CancellationToken()
@@ -274,7 +285,9 @@ class WorkflowScheduler:
             main_nodes,
             resume_attempts,
             reset=reset_retry_budget,
+            parent=shared_request_budget,
         )
+        run_context.request_budget = main_budget
         runtime_handle = _schedule_runtime_limit(
             token,
             definition.run_policy.max_runtime_seconds,
@@ -315,6 +328,7 @@ class WorkflowScheduler:
             resume_records=resume_records,
             resume_attempts=resume_attempts,
             reset_retry_budget=reset_retry_budget,
+            shared_request_budget=shared_request_budget,
         )
 
     async def _run_cleanup(
@@ -329,6 +343,7 @@ class WorkflowScheduler:
         resume_records: tuple[NodeRunRecord, ...],
         resume_attempts: dict[str, int] | None,
         reset_retry_budget: bool,
+        shared_request_budget: RequestBudget | None,
     ) -> WorkflowRunResult:
         activated = _activated_cleanup_nodes(cleanup_nodes, main)
         activated_ids = frozenset(node.id for node in activated)
@@ -354,7 +369,9 @@ class WorkflowScheduler:
             activated,
             resume_attempts,
             reset=reset_retry_budget,
+            parent=shared_request_budget,
         )
+        context.request_budget = request_budget
         cleanup_cancellation = (
             cancellation
             if definition.run_policy.force_cancel_skips_cleanup
@@ -398,7 +415,7 @@ class WorkflowScheduler:
         reset_retry_budget: bool,
         preserve_terminal_records: bool,
         cancellation_force_only: bool = False,
-        request_budget: _RequestBudget | None = None,
+        request_budget: RequestBudget | None = None,
         fail_fast_on_error: bool = True,
         excluded_code: str = "DEBUG_SCOPE_EXCLUDED",
         excluded_message: str = "节点不在本次调试范围内",
@@ -543,7 +560,7 @@ class WorkflowScheduler:
         default_timeout_seconds: int,
         initial_attempts: int = 0,
         reset_retry_budget: bool = False,
-        request_budget: _RequestBudget | None = None,
+        request_budget: RequestBudget | None = None,
         on_node_status: NodeStatusCallback | None = None,
         reservations: dict[str, _AttemptReservation] | None = None,
     ) -> NodeRunRecord:
@@ -668,9 +685,10 @@ def _remaining_request_budget(
     resume_attempts: dict[str, int] | None,
     *,
     reset: bool,
-) -> _RequestBudget | None:
+    parent: RequestBudget | None = None,
+) -> RequestBudget | None:
     if limit is None:
-        return None
+        return parent
     used = 0
     if not reset:
         used = sum(
@@ -678,7 +696,7 @@ def _remaining_request_budget(
             for node in nodes
             if _node_consumes_request(node)
         )
-    return _RequestBudget(max(limit - used, 0))
+    return RequestBudget(max(limit - used, 0), parent=parent)
 
 
 def _store_attempt_reservation(
@@ -700,8 +718,6 @@ def _store_attempt_reservation(
 def _node_consumes_request(node: WorkflowNode) -> bool:
     return node.effective_type in {
         NodeType.API,
-        NodeType.SUBFLOW,
-        NodeType.FOR_EACH,
         NodeType.SQL,
         NodeType.REDIS,
         NodeType.CAPABILITY,
@@ -985,7 +1001,7 @@ def _schedule_ready(
             int,
             int,
             bool,
-            _RequestBudget | None,
+            RequestBudget | None,
             NodeStatusCallback | None,
             dict[str, _AttemptReservation] | None,
         ],
@@ -993,7 +1009,7 @@ def _schedule_ready(
     ],
     attempt_offsets: dict[str, int],
     reset_retry_budget: bool,
-    request_budget: _RequestBudget | None,
+    request_budget: RequestBudget | None,
     on_node_status: NodeStatusCallback | None,
     reservations: dict[str, _AttemptReservation],
 ) -> None:

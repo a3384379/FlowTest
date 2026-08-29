@@ -409,6 +409,72 @@ async def test_for_each_runs_bounded_subflows_and_exposes_item_variables() -> No
 
 
 @pytest.mark.asyncio
+async def test_for_each_nested_requests_share_the_parent_request_budget() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000104")
+    node = WorkflowNode.model_validate(
+        _node(
+            "loop",
+            "for_each",
+            {
+                "workflow_id": str(workflow_id),
+                "workflow_version": 1,
+                "source_node_id": "source",
+                "expression": "items",
+                "concurrency": 1,
+                "fail_fast": False,
+            },
+        )
+    )
+    nested = WorkflowDefinition.model_validate(
+        {
+            "nodes": [
+                _node("start", "start", {}),
+                _node("request", "api", _api_config()),
+                _node("end", "end", {}),
+            ],
+            "edges": [_edge("start", "request"), _edge("request", "end")],
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="b" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={},
+    )
+    wrapper_payload = _wrapper_workflow(node).model_dump(mode="json")
+    wrapper_payload["run_policy"] = {"request_budget": 1}
+    wrapper = WorkflowDefinition.model_validate(wrapper_payload)
+    context = ExecutionContext()
+    context.record_output("source", {"items": ["a", "b"]})
+
+    async with httpx.AsyncClient() as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+        )
+        result = await WorkflowScheduler(executor).run(wrapper, context=context)
+
+    loop = next(record for record in result.records if record.node_id == "loop")
+    assert isinstance(loop.output, dict)
+    nested_requests = [
+        next(
+            nested_node
+            for nested_node in item["result"]["nodes"]
+            if nested_node["node_id"] == "request"
+        )
+        for item in loop.output["items"]
+    ]
+    assert [request["attempts"] for request in nested_requests] == [1, 0]
+    assert nested_requests[1]["error_code"] == "REQUEST_BUDGET_EXHAUSTED"
+
+
+@pytest.mark.asyncio
 async def test_for_each_rejects_non_arrays_and_more_than_one_thousand_items() -> None:
     workflow_id = "00000000-0000-0000-0000-000000000103"
     node = WorkflowNode.model_validate(

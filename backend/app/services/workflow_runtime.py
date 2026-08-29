@@ -62,6 +62,7 @@ from app.engine.results import (
 from app.engine.scheduler import (
     ExecutionContext,
     NodeExecutionError,
+    RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
 )
@@ -393,7 +394,11 @@ class WorkflowNodeExecutor:
                 message=f"节点 {node.name} 的子流程配置无效",
             )
         prepared = self._prepared_subflow(node)
-        result = await self._run_subflow(prepared, context.resolved_variables())
+        result = await self._run_subflow(
+            prepared,
+            context.resolved_variables(),
+            context.request_budget,
+        )
         output = _subflow_output(prepared, result)
         if result.status.value != "passed":
             raise NodeExecutionError(
@@ -490,7 +495,7 @@ class WorkflowNodeExecutor:
                 config.item_variable: item,
                 config.index_variable: index,
             }
-            result = await self._run_subflow(prepared, variables)
+            result = await self._run_subflow(prepared, variables, context.request_budget)
             return {
                 "index": index,
                 "item": item,
@@ -501,6 +506,7 @@ class WorkflowNodeExecutor:
         self,
         prepared: PreparedSubflow,
         runtime_variables: dict[str, JsonValue],
+        request_budget: RequestBudget | None,
     ) -> WorkflowRunResult:
         executor = WorkflowNodeExecutor(
             self._client,
@@ -521,6 +527,7 @@ class WorkflowNodeExecutor:
                     workflow_variables=dict(prepared.definition.variables),
                     runtime_variables=runtime_variables,
                 ),
+                shared_request_budget=request_budget,
             )
         finally:
             await executor.close()
