@@ -608,6 +608,68 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert historical_preview.status_code == 200, historical_preview.text
     assert historical_preview.json()["url"] == "https://auth.example.com/users/api"
     assert historical_preview.json()["target"]["service_key"] == "auth"
+    pinned_workflow = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "Pinned auth API",
+            "definition": {
+                "schema_version": "1.0",
+                "variables": {},
+                "nodes": [
+                    {
+                        "id": "start",
+                        "type": "start",
+                        "name": "Start",
+                        "position": {"x": 0, "y": 0},
+                        "config": {},
+                    },
+                    {
+                        "id": "request",
+                        "type": "api",
+                        "name": "Pinned request",
+                        "position": {"x": 180, "y": 0},
+                        "config": {
+                            "api_definition_id": definition_id,
+                            "api_version": 2,
+                        },
+                    },
+                    {
+                        "id": "end",
+                        "type": "end",
+                        "name": "End",
+                        "position": {"x": 360, "y": 0},
+                        "config": {},
+                    },
+                ],
+                "edges": [
+                    {"id": "start-request", "source": "start", "target": "request"},
+                    {"id": "request-end", "source": "request", "target": "end"},
+                ],
+                "settings": {
+                    "fail_fast": True,
+                    "concurrency": 1,
+                    "default_timeout_seconds": 30,
+                },
+            },
+        },
+    )
+    assert pinned_workflow.status_code == 201, pinned_workflow.text
+    auth_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{auth_id}/impact-preview",
+        headers=headers,
+    )
+    orders_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{order_id}/impact-preview",
+        headers=headers,
+    )
+    assert auth_impact.status_code == 200, auth_impact.text
+    assert orders_impact.status_code == 200, orders_impact.text
+    assert {item["id"] for item in auth_impact.json()["affected_apis"]} == {definition_id}
+    assert {item["id"] for item in auth_impact.json()["affected_workflows"]} == {
+        pinned_workflow.json()["id"]
+    }
+    assert orders_impact.json()["affected_workflows"] == []
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.domain.network import OutboundNetworkPolicy
 from app.models.access import Project, User
-from app.models.api_assets import APIDefinition, Environment
+from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.release_gate import ReleasePolicy
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import TestPlan, TestPlanItem
@@ -148,9 +148,24 @@ class ServiceTargetService:
         apis = list(
             (
                 await self._session.scalars(
-                    select(APIDefinition).where(
+                    select(APIDefinition)
+                    .join(APIVersion, APIVersion.api_definition_id == APIDefinition.id)
+                    .where(
                         APIDefinition.project_id == project_id,
-                        APIDefinition.service_id == service_id,
+                        APIVersion.service_id == service_id,
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        affected_versions = list(
+            (
+                await self._session.scalars(
+                    select(APIVersion)
+                    .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
+                    .where(
+                        APIDefinition.project_id == project_id,
+                        APIVersion.service_id == service_id,
                     )
                 )
             ).all()
@@ -162,11 +177,19 @@ class ServiceTargetService:
                 )
             ).all()
         )
-        api_ids = {str(api.id) for api in apis}
+        version_refs = {
+            (str(version.api_definition_id), version.version) for version in affected_versions
+        }
+        current_versions = {str(api.id): api.current_version for api in apis}
         affected_workflows = [
             workflow
             for workflow in workflows
-            if _workflow_uses_service(workflow.draft_definition, service.service_key, api_ids)
+            if _workflow_uses_service(
+                workflow.draft_definition,
+                service.service_key,
+                version_refs,
+                current_versions,
+            )
         ]
         workflow_ids = {workflow.id for workflow in affected_workflows}
         plans = await self._affected_plans(project_id, workflow_ids)
@@ -188,7 +211,7 @@ class ServiceTargetService:
             "strategy": "request_target_dependency_v1",
             "service_id": service.id,
             "service_key": service.service_key,
-            "affected_apis": [_impact_item(api, "API 默认 Service") for api in apis],
+            "affected_apis": [_impact_item(api, "API 版本绑定 Service") for api in apis],
             "affected_workflows": [
                 _impact_item(workflow, "Workflow 节点继承或覆盖 Service")
                 for workflow in affected_workflows
@@ -550,24 +573,41 @@ def _health_url(endpoint: ServiceEndpoint) -> str:
 
 
 def _workflow_uses_service(
-    definition: dict[str, object], service_key: str, api_ids: set[str]
+    definition: dict[str, object],
+    service_key: str,
+    version_refs: set[tuple[str, int]],
+    current_versions: dict[str, int],
 ) -> bool:
     nodes = definition.get("nodes")
     if not isinstance(nodes, list):
         return False
-    return any(_node_uses_service(node, service_key, api_ids) for node in nodes)
+    return any(
+        _node_uses_service(node, service_key, version_refs, current_versions) for node in nodes
+    )
 
 
-def _node_uses_service(node: object, service_key: str, api_ids: set[str]) -> bool:
+def _node_uses_service(
+    node: object,
+    service_key: str,
+    version_refs: set[tuple[str, int]],
+    current_versions: dict[str, int],
+) -> bool:
     if not isinstance(node, dict):
         return False
     config = node.get("config")
     if not isinstance(config, dict):
         return False
-    return (
-        config.get("service_override") == service_key
-        or str(config.get("api_definition_id")) in api_ids
+    service_override = config.get("service_override")
+    if service_override is not None:
+        return isinstance(service_override, str) and service_override == service_key
+    definition_id = str(config.get("api_definition_id"))
+    configured_version = config.get("api_version")
+    version = (
+        configured_version
+        if isinstance(configured_version, int)
+        else current_versions.get(definition_id)
     )
+    return version is not None and (definition_id, version) in version_refs
 
 
 class _ImpactNamed(Protocol):
