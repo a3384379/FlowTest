@@ -1289,6 +1289,7 @@ async def test_compiled_plan_creates_reviewed_workflow_draft_and_frozen_snapshot
         session.add(
             APIVersion(
                 api_definition_id=definition.id,
+                service_id=service.id,
                 version=1,
                 method=operation.method,
                 path=operation.path,

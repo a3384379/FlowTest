@@ -392,17 +392,20 @@ async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
 
 async def _ensure_api_version_service_identity(connection: AsyncConnection) -> None:
     columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
-    if "service_id" in {str(row[1]) for row in columns.fetchall()}:
+    column_names = {str(row[1]) for row in columns.fetchall()}
+    if not column_names or "service_id" in column_names:
         return
     await connection.execute(text("ALTER TABLE api_versions ADD COLUMN service_id CHAR(32)"))
-    await connection.execute(
-        text(
-            "UPDATE api_versions SET service_id = ("
-            "SELECT api_definitions.service_id FROM api_definitions "
-            "WHERE api_definitions.id = api_versions.api_definition_id"
-            ")"
+    definition_columns = await connection.execute(text("PRAGMA table_info(api_definitions)"))
+    if "service_id" in {str(row[1]) for row in definition_columns.fetchall()}:
+        await connection.execute(
+            text(
+                "UPDATE api_versions SET service_id = ("
+                "SELECT api_definitions.service_id FROM api_definitions "
+                "WHERE api_definitions.id = api_versions.api_definition_id"
+                ")"
+            )
         )
-    )
     await connection.execute(
         text("CREATE INDEX IF NOT EXISTS ix_api_versions_service_id ON api_versions (service_id)")
     )

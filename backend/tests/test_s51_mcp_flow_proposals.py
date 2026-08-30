@@ -158,6 +158,7 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         session.add(
             APIVersion(
                 api_definition_id=definition.id,
+                service_id=service.id,
                 version=1,
                 method="GET",
                 path="/health",
