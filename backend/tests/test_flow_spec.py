@@ -14,6 +14,7 @@ from app.domain.flow_spec import (
     FlowSpecAssertion,
     FlowSpecEdge,
     FlowSpecNode,
+    FlowSpecOperation,
     FlowSpecParameter,
     FlowSpecParameterSource,
     assess_flow_spec_compatibility,
@@ -22,9 +23,12 @@ from app.domain.flow_spec import (
     normalize_flow_spec,
     validate_flow_spec,
 )
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.api_assets import APIVersion
+from app.services.flow_spec import _operation_contract_matches
 
 ADMIN_EMAIL = "flowspec-admin@example.com"
 ADMIN_PASSWORD = "flowspec-password-123!"
@@ -154,6 +158,32 @@ def test_v3_fingerprint_includes_version_strategy_and_contract_identity() -> Non
     )
 
     assert flow_spec_fingerprint(pinned) != flow_spec_fingerprint(current)
+
+
+def test_flowspec_mapping_accepts_legacy_null_service_contract_fingerprint() -> None:
+    legacy_contract = OperationContract(
+        operation="legacy_health",
+        method="GET",
+        path="/health",
+        service=None,
+    )
+    legacy_fingerprint = fingerprint_contract(legacy_contract)
+    version = APIVersion(
+        canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
+        contract_fingerprint=legacy_fingerprint,
+    )
+    operation = FlowSpecOperation(
+        ref="operation:billing:health",
+        service_ref="billing",
+        name="Billing health",
+        method="GET",
+        path="/health",
+        version_strategy="pinned",
+        source_version=1,
+        contract_fingerprint=legacy_fingerprint,
+    )
+
+    assert _operation_contract_matches(version, operation)
 
 
 def test_flowspec_diff_and_compatibility_report_reviewable_changes() -> None:
