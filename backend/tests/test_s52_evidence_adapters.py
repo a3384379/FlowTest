@@ -54,10 +54,16 @@ def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str)
     [
         "使用Bearer AbCdEf1234567890进行请求",
         "使用Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==进行请求",
+        "使用password=hunter2进行请求",
     ],
 )
 def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:
     assert first_sensitive_value({"description": value}) == "$.description"
+
+
+def test_sensitive_scan_allows_declared_secret_references() -> None:
+    assert first_sensitive_value({"secret_ref": "secret://golden/orders-token"}) is None
+    assert first_sensitive_value({"credential_refs": ["secret://golden/orders-token"]}) is None
 
 
 def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> None:

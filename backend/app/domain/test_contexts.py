@@ -37,20 +37,27 @@ _VERSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$")
 _PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|CERTIFICATE)-----")
 _BEARER = re.compile(r"(?<![A-Za-z0-9_])Bearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
 _BASIC = re.compile(r"(?<![A-Za-z0-9_])Basic\s+[A-Za-z0-9+/=]{8,}", re.IGNORECASE)
-_JWT = re.compile(r"\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
-_AWS_KEY = re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")
+_JWT = re.compile(
+    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"(?![A-Za-z0-9_-])"
+)
+_AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")
 _SECRET_ASSIGNMENT = re.compile(
-    r"\b(?:authorization|cookie|password|passwd|secret|token|api[_ -]?key)"
+    r"(?<![A-Za-z0-9_])(?:authorization|cookie|password|passwd|secret|token|api[_ -]?key)"
     r"\s*[:=]\s*['\"]?[^\s,;'\"]{4,}",
     re.IGNORECASE,
 )
-_SET_COOKIE = re.compile(r"\bSet-Cookie\s*:\s*\S+", re.IGNORECASE)
+_SET_COOKIE = re.compile(r"(?<![A-Za-z0-9_])Set-Cookie\s*:\s*\S+", re.IGNORECASE)
 _CONNECTION_STRING = re.compile(
-    r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|mssql)://",
+    r"(?<![A-Za-z0-9_])(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|mssql)://",
     re.IGNORECASE,
 )
 _EMBEDDED_URL = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"'`]+")
-_EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_EMAIL = re.compile(
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![A-Z0-9.-])",
+    re.IGNORECASE,
+)
+_SECRET_REFERENCE_VALUE = re.compile(r"secret://[A-Za-z0-9._:/-]+")
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
 _UUID_LITERAL = re.compile(
@@ -1080,6 +1087,8 @@ def _typed_string_values(value: object) -> list[str]:
 
 
 def _is_sensitive_literal(value: str, *, path: str) -> bool:
+    if _is_declared_secret_reference(value, path=path):
+        return False
     if any(
         pattern.search(value)
         for pattern in (
@@ -1117,6 +1126,15 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
     return any(
         (parsed := urlsplit(candidate)).username is not None or parsed.password is not None
         for candidate in (value, *(_EMBEDDED_URL.findall(value)))
+    )
+
+
+def _is_declared_secret_reference(value: str, *, path: str) -> bool:
+    if _SECRET_REFERENCE_VALUE.fullmatch(value) is None:
+        return False
+    return (
+        path.endswith(".secret_ref")
+        or re.search(r"\.(?:secret_refs|credential_refs)\[\d+\]$", path) is not None
     )
 
 

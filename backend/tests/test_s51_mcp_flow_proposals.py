@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.dependencies import get_workflow_coordinator
 from app.core.database import get_session
 from app.core.security import password_service, token_service
+from app.domain.test_contexts import first_sensitive_value
 from app.domain.test_engineering import ContractResponse, OperationContract, fingerprint_contract
 from app.main import app
 from app.mcp.client import MCPReadGatewayClient
@@ -24,6 +25,7 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
+from app.schemas.test_contexts import FlowSpecProposalRequest
 from app.services.service_accounts import ServiceAccountService
 
 
@@ -300,21 +302,49 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     s51_context: dict[str, Any],
 ) -> None:
     context, plan, compilation = await _plan_chain(s51_context)
-    payload = _proposal_payload(s51_context, context, plan, compilation)
-    payload["spec"]["description"] = "使用Bearer AbCdEf1234567890进行请求"
+    for index, (description, secret) in enumerate(
+        (
+            ("使用Bearer AbCdEf1234567890进行请求", "AbCdEf1234567890"),
+            ("使用password=hunter2进行请求", "hunter2"),
+        )
+    ):
+        payload = _proposal_payload(s51_context, context, plan, compilation)
+        payload["spec"]["description"] = description
+        response = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-proposal-{index}",
+            },
+            json={**payload, "dry_run": False},
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert secret not in response.text
 
-    response = await s51_context["client"].post(
+    safe_payload = _proposal_payload(s51_context, context, plan, compilation)
+    safe_payload.pop("integration_plan")
+    safe_payload.pop("compilation")
+    safe_payload["spec"]["description"] = "Reviewed integration flow"
+    safe_payload["spec"]["parameters"] = [
+        {
+            "name": "orders_token",
+            "source": "secret_ref",
+            "secret_ref": "secret://golden/orders-token",
+        }
+    ]
+    validated_safe_payload = FlowSpecProposalRequest.model_validate(safe_payload)
+    assert first_sensitive_value(validated_safe_payload.model_dump(mode="json")) is None
+    safe_response = await s51_context["client"].post(
         "/api/v1/mcp/flow/proposals",
         headers={
             **s51_context["mcp_headers"],
-            "Idempotency-Key": "s51-sensitive-proposal",
+            "Idempotency-Key": "s51-safe-secret-reference",
         },
-        json={**payload, "dry_run": False},
+        json=safe_payload,
     )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "AbCdEf1234567890" not in response.text
+    assert safe_response.status_code == 422
+    assert safe_response.json()["error"]["code"] == "FLOWSPEC_IMPORT_INVALID"
     async with s51_context["sessions"]() as session:
         assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 0
 
