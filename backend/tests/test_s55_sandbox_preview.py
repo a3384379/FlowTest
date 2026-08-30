@@ -157,3 +157,20 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     assert report.status_code == 200, report.text
     assert report.json()["summary"]["workflow_id"] is None
     assert report.json()["summary"]["workflow_name"] == "Sandbox Preview"
+
+    async with s51_context["sessions"]() as session:
+        failed_preview = await session.get(WorkflowExecution, UUID(execution["id"]))
+        assert failed_preview is not None
+        failed_preview.status = "failed"
+        await session.commit()
+    for command_type in ("resume", "retry"):
+        recovered = await client.post(
+            f"/api/v1/projects/{s51_context['project_id']}/workflow-executions/"
+            f"{execution['id']}/{command_type}",
+            headers={
+                **s51_context["user_headers"],
+                "Idempotency-Key": f"s55-preview-{command_type}",
+            },
+        )
+        assert recovered.status_code == 409, recovered.text
+        assert recovered.json()["error"]["code"] == "PREVIEW_RECOVERY_FORBIDDEN"
