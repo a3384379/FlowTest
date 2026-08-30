@@ -28,6 +28,14 @@ from app.repositories.service_targets import ServiceTargetRepository
 SYSTEM_HEADERS = {"User-Agent": "FlowTest/0.1", "Accept": "*/*"}
 
 
+def _version_service_key(version: APIVersion) -> str | None:
+    service_key = version.canonical_contract.get("service")
+    if not isinstance(service_key, str):
+        return None
+    stripped = service_key.strip()
+    return stripped or None
+
+
 class RequestTargetResolver:
     """Resolve and finalize a request target using the S38 precedence rules."""
 
@@ -61,6 +69,7 @@ class RequestTargetResolver:
             project_id=project_id,
             environment=environment,
             definition=definition,
+            version=version,
             node_service_override=node_service_override,
         )
         endpoint = None
@@ -238,6 +247,7 @@ class RequestTargetResolver:
         project_id: UUID,
         environment: Environment,
         definition: APIDefinition,
+        version: APIVersion,
         node_service_override: str | None,
     ) -> Service | None:
         service: Service | None = None
@@ -245,6 +255,13 @@ class RequestTargetResolver:
             service = await self._targets.find_service_by_key(
                 project_id=project_id,
                 service_key=node_service_override,
+            )
+            if service is None:
+                raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        elif version_service_key := _version_service_key(version):
+            service = await self._targets.find_service_by_key(
+                project_id=project_id,
+                service_key=version_service_key,
             )
             if service is None:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)

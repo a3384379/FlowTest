@@ -55,6 +55,7 @@ def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str)
         "使用Bearer AbCdEf1234567890进行请求",
         "使用Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==进行请求",
         "使用password=hunter2进行请求",
+        '使用password="my secret phrase"进行请求',
     ],
 )
 def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:

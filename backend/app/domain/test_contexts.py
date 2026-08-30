@@ -44,7 +44,8 @@ _JWT = re.compile(
 _AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")
 _SECRET_ASSIGNMENT = re.compile(
     r"(?<![A-Za-z0-9_])(?:authorization|cookie|password|passwd|secret|token|api[_ -]?key)"
-    r"\s*[:=]\s*['\"]?[^\s,;'\"]{4,}",
+    r"\s*[:=]\s*(?:'(?:\\.|[^'\\\r\n]){4,}'|\"(?:\\.|[^\"\\\r\n]){4,}\"|"
+    r"[^\s,;'\"\r\n]{4,})",
     re.IGNORECASE,
 )
 _SET_COOKIE = re.compile(r"(?<![A-Za-z0-9_])Set-Cookie\s*:\s*\S+", re.IGNORECASE)

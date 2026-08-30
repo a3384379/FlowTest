@@ -306,6 +306,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         (
             ("使用Bearer AbCdEf1234567890进行请求", "AbCdEf1234567890"),
             ("使用password=hunter2进行请求", "hunter2"),
+            ('使用password="my secret phrase"进行请求', "my secret phrase"),
         )
     ):
         payload = _proposal_payload(s51_context, context, plan, compilation)

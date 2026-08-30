@@ -600,6 +600,14 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert historical_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
         historical_contract
     )
+    historical_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"], "version": 2},
+    )
+    assert historical_preview.status_code == 200, historical_preview.text
+    assert historical_preview.json()["url"] == "https://auth.example.com/users/api"
+    assert historical_preview.json()["target"]["service_key"] == "auth"
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,
