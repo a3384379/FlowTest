@@ -301,7 +301,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
 ) -> None:
     context, plan, compilation = await _plan_chain(s51_context)
     payload = _proposal_payload(s51_context, context, plan, compilation)
-    payload["spec"]["description"] = "Use Bearer AbCdEf1234567890 for the request"
+    payload["spec"]["description"] = "使用Bearer AbCdEf1234567890进行请求"
 
     response = await s51_context["client"].post(
         "/api/v1/mcp/flow/proposals",

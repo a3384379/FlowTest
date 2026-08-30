@@ -49,6 +49,17 @@ def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str)
     assert first_sensitive_value({"statement": value}) == "$.statement"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "使用Bearer AbCdEf1234567890进行请求",
+        "使用Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==进行请求",
+    ],
+)
+def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:
+    assert first_sensitive_value({"description": value}) == "$.description"
+
+
 def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> None:
     java = JavaEvidenceSubmission.model_validate(_java_submission())
     database = DatabaseEvidenceSubmission.model_validate(_database_submission())
