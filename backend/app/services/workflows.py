@@ -117,6 +117,19 @@ from app.services.workflow_snapshots import (
 SUPPORTED_NODE_TYPES = frozenset(NodeType)
 CANCELLATION_POLL_SECONDS = 0.05
 DATASET_CONCURRENCY = 5
+_PREVIEW_UNCLASSIFIED_CAPABILITIES = frozenset(
+    {
+        "graphql.request",
+        "grpc.call",
+        "kafka.produce",
+        "kafka.consume",
+        "websocket.connect",
+        "websocket.send",
+        "websocket.await",
+        "websocket.close",
+        "websocket.exchange",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,6 +582,7 @@ class WorkflowService:
             runtime_headers=runtime_headers,
         )
         prepared = _bounded_preview_prepared_workflow(prepared, budget)
+        _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
         request_limits = _preview_request_limits(bounded, prepared, budget)
         await self._ensure_execution_capacity(project_id)
         execution, plan = self._preview_execution_plan(
@@ -2057,6 +2071,27 @@ def _bounded_preview_definition(
         }
     )
     return definition.model_copy(update={"settings": settings, "run_policy": run_policy})
+
+
+def _validate_preview_target_classification(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> None:
+    unclassified = [
+        node.id
+        for node in definition.nodes
+        if node.effective_type in {NodeType.SQL, NodeType.REDIS}
+        or node.capability_id in _PREVIEW_UNCLASSIFIED_CAPABILITIES
+    ]
+    if unclassified:
+        raise AppError(
+            code="PREVIEW_TARGET_CLASSIFICATION_REQUIRED",
+            message="Sandbox Preview Beta 仅允许绑定所选 Test/Sandbox Environment 的 API Target",
+            status_code=409,
+            details={"unclassified_target_node_ids": sorted(unclassified)},
+        )
+    for prepared in subflows.values():
+        _validate_preview_target_classification(prepared.definition, prepared.subflows)
 
 
 def _bounded_preview_prepared_workflow(

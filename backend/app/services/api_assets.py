@@ -19,6 +19,7 @@ from app.domain.api_assets import (
     render_json,
     render_template,
 )
+from app.domain.sandbox_preview import EnvironmentClassification
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
 from app.domain.test_engineering import (
     ContractAuth,
@@ -125,6 +126,8 @@ class APIAssetService:
         headers: dict[str, str],
     ) -> Environment:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
+        if EnvironmentClassification(classification) is not EnvironmentClassification.UNCLASSIFIED:
+            await self._project_service.authorize_owner(actor=actor, project_id=project_id)
         normalized_name = name.strip()
         await self._ensure_environment_name(project_id=project_id, name=normalized_name)
         _validate_headers(headers)
@@ -181,6 +184,8 @@ class APIAssetService:
     ) -> Environment:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         environment = await self._get_environment(project_id, environment_id)
+        if classification is not None and classification != environment.classification:
+            await self._project_service.authorize_owner(actor=actor, project_id=project_id)
         if name is not None:
             normalized_name = name.strip()
             await self._ensure_environment_name(

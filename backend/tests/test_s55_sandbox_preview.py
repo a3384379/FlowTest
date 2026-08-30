@@ -19,7 +19,11 @@ from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
-from app.services.workflows import WorkflowService, _bounded_preview_prepared_workflow
+from app.services.workflows import (
+    WorkflowService,
+    _bounded_preview_prepared_workflow,
+    _validate_preview_target_classification,
+)
 
 
 def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
@@ -54,6 +58,29 @@ def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
         assert subflow.definition.run_policy.max_runtime_seconds == 120
     snapshot_policy = leaf.snapshot["workflow"]["definition"]["run_policy"]
     assert snapshot_policy["max_runtime_seconds"] == 120
+
+
+def test_preview_rejects_targets_without_environment_classification() -> None:
+    payload = _preview_test_definition(with_cleanup=True).model_dump(mode="json")
+    payload["nodes"][1] = {
+        "id": "work",
+        "type": "capability",
+        "name": "GraphQL production target",
+        "position": {"x": 180, "y": 0},
+        "capability_id": "graphql.request",
+        "capability_version": "3.0.0",
+        "configuration": {
+            "schema_id": "00000000-0000-0000-0000-000000000301",
+            "endpoint": "https://production.example.test/graphql",
+            "operation": "query Health { health }",
+        },
+        "bindings": [],
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+
+    with pytest.raises(AppError) as error_info:
+        _validate_preview_target_classification(definition, {})
+    assert error_info.value.code == "PREVIEW_TARGET_CLASSIFICATION_REQUIRED"
 
 
 @pytest.mark.asyncio
