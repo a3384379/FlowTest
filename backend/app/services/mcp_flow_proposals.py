@@ -1,7 +1,6 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
 import re
-from itertools import pairwise
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,8 +181,17 @@ class MCPFlowProposalService:
             )
 
 
-_SENSITIVE_PARAMETER_NAME_PARTS = frozenset(
-    {"authorization", "cookie", "password", "passwd", "secret", "token", "apikey"}
+_SENSITIVE_PARAMETER_NAME_SUFFIXES = (
+    "authorization",
+    "cookie",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "apikey",
+    "accesskey",
+    "privatekey",
+    "credential",
 )
 
 
@@ -191,15 +199,10 @@ def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
     for parameter in payload.spec.parameters:
         if parameter.value is None:
             continue
-        normalized_name = re.sub(
-            r"(?<=[a-z0-9])(?=[A-Z])",
-            "_",
-            parameter.name,
-        ).lower()
-        parts = [part for part in re.split(r"[._-]+", normalized_name) if part]
-        if any(part in _SENSITIVE_PARAMETER_NAME_PARTS for part in parts):
-            return True
-        if any(left == "api" and right == "key" for left, right in pairwise(parts)):
+        normalized_name = re.sub(r"[^a-z0-9]", "", parameter.name.lower())
+        if normalized_name.startswith(("authorization", "cookie")) or normalized_name.endswith(
+            _SENSITIVE_PARAMETER_NAME_SUFFIXES
+        ):
             return True
     return False
 

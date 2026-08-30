@@ -87,7 +87,7 @@ class TestEngineeringService:
                 ) from error
             return stored.model_copy(
                 update={
-                    "service": service_key,
+                    "service": stored.service if stored.service is not None else service_key,
                     "source_ref": (
                         stored.source_ref
                         or f"api-definition://{definition.id}/version/{version.version}"
