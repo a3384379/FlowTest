@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -548,7 +549,53 @@ async def test_service_endpoint_resolution_and_snapshot(
         },
     )
     assert created.status_code == 201, created.text
+    created_version = created.json()["version"]
+    created_contract = OperationContract.model_validate(created_version["canonical_contract"])
+    assert created_contract.service == "auth"
+    assert created_version["contract_fingerprint"] == fingerprint_contract(created_contract)
     definition_id = created.json()["definition"]["id"]
+    created_version_two = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/versions",
+        headers=headers,
+        json={
+            "method": "GET",
+            "path": "/users/{{layer}}",
+            "variables": {"layer": "api"},
+            "headers": {"X-Layer": "api"},
+            "body_kind": "none",
+        },
+    )
+    assert created_version_two.status_code == 201, created_version_two.text
+    version_two_contract = OperationContract.model_validate(
+        created_version_two.json()["canonical_contract"]
+    )
+    assert version_two_contract.service == "auth"
+    assert created_version_two.json()["contract_fingerprint"] == fingerprint_contract(
+        version_two_contract
+    )
+
+    rebound = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}",
+        headers=headers,
+        json={"service_id": order_id},
+    )
+    assert rebound.status_code == 200, rebound.text
+    rebound_detail = await asset_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}", headers=headers
+    )
+    rebound_contract = OperationContract.model_validate(
+        rebound_detail.json()["version"]["canonical_contract"]
+    )
+    assert rebound_contract.service == "orders"
+    assert rebound_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
+        rebound_contract
+    )
+    restored = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}",
+        headers=headers,
+        json={"service_id": auth_id},
+    )
+    assert restored.status_code == 200, restored.text
     preview = await asset_client.post(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
         headers=headers,

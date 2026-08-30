@@ -315,7 +315,7 @@ class APIAssetService:
     ) -> tuple[APIDefinition, APIVersion]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_folder(project_id=project_id, folder_id=folder_id)
-        await self._validate_service(project_id=project_id, service_id=service_id)
+        service = await self._validate_service(project_id=project_id, service_id=service_id)
         definition = APIDefinition(
             project_id=project_id,
             folder_id=folder_id,
@@ -333,6 +333,7 @@ class APIAssetService:
             version=1,
             actor_id=actor.id,
             request=request,
+            service_key=service.service_key if service is not None else None,
         )
         self._assets.add(version)
         await self._session.flush()
@@ -359,11 +360,16 @@ class APIAssetService:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         definition = await self._get_definition(project_id, definition_id)
         next_version = definition.current_version + 1
+        service = await self._validate_service(
+            project_id=project_id,
+            service_id=definition.service_id,
+        )
         version = self._version_model(
             definition_id=definition.id,
             version=next_version,
             actor_id=actor.id,
             request=request,
+            service_key=service.service_key if service is not None else None,
         )
         self._assets.add(version)
         definition.current_version = next_version
@@ -402,8 +408,12 @@ class APIAssetService:
             await self._validate_folder(project_id=project_id, folder_id=folder_id)
             definition.folder_id = folder_id
         if change_service:
-            await self._validate_service(project_id=project_id, service_id=service_id)
+            service = await self._validate_service(project_id=project_id, service_id=service_id)
             definition.service_id = service_id
+            await self._rebind_contract_service(
+                definition_id=definition.id,
+                service_key=service.service_key if service is not None else None,
+            )
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -679,10 +689,15 @@ class APIAssetService:
 
     @staticmethod
     def _version_model(
-        *, definition_id: UUID, version: int, actor_id: UUID, request: APIVersionSpec
+        *,
+        definition_id: UUID,
+        version: int,
+        actor_id: UUID,
+        request: APIVersionSpec,
+        service_key: str | None,
     ) -> APIVersion:
         _validate_headers(request.headers)
-        contract = _partial_contract(request)
+        contract = _partial_contract(request).model_copy(update={"service": service_key})
         return APIVersion(
             api_definition_id=definition_id,
             version=version,
@@ -740,12 +755,33 @@ class APIAssetService:
         await self._session.flush()
         return service
 
-    async def _validate_service(self, *, project_id: UUID, service_id: UUID | None) -> None:
+    async def _validate_service(
+        self,
+        *,
+        project_id: UUID,
+        service_id: UUID | None,
+    ) -> Service | None:
         if service_id is None:
-            return
+            return None
         service = await self._targets.get_service(service_id)
         if service is None or service.project_id != project_id:
             raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        return service
+
+    async def _rebind_contract_service(
+        self,
+        *,
+        definition_id: UUID,
+        service_key: str | None,
+    ) -> None:
+        for version in await self._assets.list_versions(definition_id):
+            if not version.canonical_contract:
+                continue
+            contract = OperationContract.model_validate(version.canonical_contract).model_copy(
+                update={"service": service_key}
+            )
+            version.canonical_contract = contract.model_dump(mode="json", by_alias=True)
+            version.contract_fingerprint = fingerprint_contract(contract)
 
     async def _sync_default_endpoint(
         self,
