@@ -499,6 +499,35 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert correlated_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
     assert "abc" not in correlated_secret.text
 
+    for node_kind in ("assert", "condition"):
+        assertion_payload = _proposal_payload(s51_context, context, plan, compilation)
+        assertion_payload["spec"]["nodes"].append(
+            {
+                "id": f"sensitive-{node_kind}",
+                "kind": node_kind,
+                "name": f"Sensitive {node_kind}",
+                "position": {"x": 810, "y": 0},
+                "config": {
+                    "source_node_id": "http-health",
+                    "expression": "body.password",
+                    "operator": "equals",
+                    "expected": "abc",
+                },
+                "depends_on": [],
+            }
+        )
+        assertion_secret = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-{node_kind}-expected",
+            },
+            json={**assertion_payload, "dry_run": False},
+        )
+        assert assertion_secret.status_code == 422
+        assert assertion_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert "abc" not in assertion_secret.text
+
     binding_payload = _proposal_payload(s51_context, context, plan, compilation)
     binding_payload["spec"]["nodes"].append(
         {

@@ -222,6 +222,7 @@ def _has_sensitive_mapping_literal(value: object) -> bool:
         ("name", "value"),
         ("key", "value"),
         ("input", "expression"),
+        ("expression", "expected"),
     ):
         named_value = value.get(identifier_field)
         if (
