@@ -132,7 +132,19 @@ class WorkflowRunCoordinator:
 
         tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
         try:
-            await asyncio.gather(*tasks)
+            batch = asyncio.gather(*tasks)
+            if plan.max_runtime_seconds is None:
+                await batch
+            else:
+                await asyncio.wait_for(batch, timeout=plan.max_runtime_seconds)
+        except TimeoutError:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            async with self._session_maker() as session:
+                await WorkflowService(session).cancel_incomplete_batch(
+                    plan.execution_id,
+                    error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                    error_message="Sandbox Preview 数据集已达到整批运行时预算",
+                )
         except asyncio.CancelledError:
             await asyncio.gather(*tasks, return_exceptions=True)
             async with self._session_maker() as session:

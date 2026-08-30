@@ -1,5 +1,7 @@
-from typing import Any
-from uuid import UUID
+import asyncio
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
 import respx
@@ -19,13 +21,102 @@ from app.models.api_assets import Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
+from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
 from app.services.workflows import (
+    WorkflowBatchPlan,
+    WorkflowRunPlan,
     WorkflowService,
     _bounded_preview_prepared_workflow,
     _validate_preview_target_classification,
 )
+
+
+@pytest.mark.asyncio
+async def test_preview_dataset_runtime_budget_spans_queued_and_active_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled: dict[str, str] = {}
+
+    class SessionContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class EventBus:
+        async def publish(self, _event: object) -> None:
+            return None
+
+    class CoordinatorWorkflowService:
+        def __init__(self, _session: object) -> None:
+            pass
+
+        async def cancel_incomplete_batch(
+            self,
+            _execution_id: UUID,
+            *,
+            error_code: str = "",
+            error_message: str = "",
+        ) -> None:
+            cancelled["code"] = error_code
+            cancelled["message"] = error_message
+
+        async def complete_batch(self, execution_id: UUID) -> object:
+            return SimpleNamespace(
+                id=execution_id,
+                status="cancelled",
+                error_code=cancelled["code"],
+                error_message=cancelled["message"],
+            )
+
+    definition = _preview_test_definition(with_cleanup=True)
+    prepared = PreparedExecution(snapshot={}, requests={}, dataset_variables={})
+    children = tuple(
+        WorkflowRunPlan(
+            execution_id=uuid4(),
+            actor_id=uuid4(),
+            project_id=uuid4(),
+            workflow_version=0,
+            definition=definition,
+            prepared=prepared,
+            runtime_variables={},
+        )
+        for _index in range(2)
+    )
+    coordinator = WorkflowRunCoordinator(
+        cast(Any, lambda: SessionContext()),
+        cast(Any, EventBus()),
+    )
+    started: list[UUID] = []
+
+    async def slow_execution(child: WorkflowRunPlan) -> object:
+        started.append(child.execution_id)
+        await asyncio.sleep(60)
+        raise AssertionError("deadline must cancel an active dataset child")
+
+    monkeypatch.setattr(
+        "app.services.workflow_coordinator.WorkflowService",
+        CoordinatorWorkflowService,
+    )
+    monkeypatch.setattr(coordinator, "_execute", slow_execution)
+    completed = await coordinator._execute_batch(
+        WorkflowBatchPlan(
+            execution_id=uuid4(),
+            actor_id=uuid4(),
+            project_id=uuid4(),
+            workflow_version=0,
+            children=children,
+            concurrency=1,
+            max_runtime_seconds=cast(int, 0.01),
+        )
+    )
+
+    assert completed.status == "cancelled"
+    assert len(started) == 1
+    assert cancelled["code"] == "PREVIEW_RUNTIME_BUDGET_EXCEEDED"
 
 
 def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:

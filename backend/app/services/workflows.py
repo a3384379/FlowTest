@@ -152,6 +152,7 @@ class WorkflowBatchPlan:
     workflow_version: int
     children: tuple[WorkflowRunPlan, ...]
     concurrency: int = DATASET_CONCURRENCY
+    max_runtime_seconds: int | None = None
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
@@ -972,15 +973,21 @@ class WorkflowService:
             child.completed_at = execution.completed_at
         return execution
 
-    async def cancel_incomplete_batch(self, execution_id: UUID) -> None:
+    async def cancel_incomplete_batch(
+        self,
+        execution_id: UUID,
+        *,
+        error_code: str = "DATASET_RUNNER_STOPPED",
+        error_message: str = "数据集子执行在运行服务停止时被取消",
+    ) -> None:
         children = await self._workflows.list_child_executions(execution_id)
         completed_at = datetime.now(UTC)
         for child in children:
             if child.status not in {"queued", "running"}:
                 continue
             child.status = "cancelled"
-            child.error_code = "DATASET_RUNNER_STOPPED"
-            child.error_message = "数据集子执行在运行服务停止时被取消"
+            child.error_code = error_code
+            child.error_message = error_message
             child.cancel_requested_at = child.cancel_requested_at or completed_at
             child.completed_at = completed_at
         await self._session.commit()
@@ -1766,6 +1773,7 @@ class WorkflowService:
             workflow_version=0,
             children=plans,
             concurrency=budget.max_parallelism,
+            max_runtime_seconds=budget.max_runtime_seconds,
         )
 
     @staticmethod
