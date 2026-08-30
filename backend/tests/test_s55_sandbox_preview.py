@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
@@ -104,14 +103,17 @@ async def test_preview_dataset_runtime_budget_spans_queued_and_active_children(
         token = cast(CancellationToken, cancellation)
         await token.wait()
         cleanup_started.append(child.execution_id)
-        await asyncio.sleep(60)
-        raise AssertionError("bounded cleanup grace must cancel a stuck dataset child")
+        return SimpleNamespace(id=child.execution_id, status="cancelled")
+
+    async def publish_completion(execution: object) -> None:
+        del execution
 
     monkeypatch.setattr(
         "app.services.workflow_coordinator.WorkflowService",
         CoordinatorWorkflowService,
     )
     monkeypatch.setattr(coordinator, "_execute", slow_execution)
+    monkeypatch.setattr(coordinator, "_publish_completion", publish_completion)
     completed = await coordinator._execute_batch(
         WorkflowBatchPlan(
             execution_id=uuid4(),

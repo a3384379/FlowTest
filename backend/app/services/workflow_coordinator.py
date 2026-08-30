@@ -110,26 +110,34 @@ class WorkflowRunCoordinator:
     async def _execute_batch(self, plan: WorkflowBatchPlan) -> WorkflowExecution:
         semaphore = asyncio.Semaphore(plan.concurrency)
         cancellation = CancellationToken()
+        active_tasks: set[asyncio.Task[None]] = set()
 
         async def execute_child(child: WorkflowRunPlan) -> None:
             async with semaphore:
-                await self._publish(
-                    ExecutionEvent(
-                        type=ExecutionEventType.EXECUTION_STARTED,
-                        execution_id=child.execution_id,
-                        emitted_at=datetime.now(UTC),
-                        execution_status="running",
-                    )
-                )
+                task = asyncio.current_task()
+                if task is not None:
+                    active_tasks.add(task)
                 try:
-                    execution = await self._execute(child, cancellation=cancellation)
-                except Exception:
-                    logger.exception(
-                        "Dataset child execution failed",
-                        extra={"execution_id": str(child.execution_id)},
+                    await self._publish(
+                        ExecutionEvent(
+                            type=ExecutionEventType.EXECUTION_STARTED,
+                            execution_id=child.execution_id,
+                            emitted_at=datetime.now(UTC),
+                            execution_status="running",
+                        )
                     )
-                    execution = await self._mark_failed(child)
-                await self._publish_completion(execution)
+                    try:
+                        execution = await self._execute(child, cancellation=cancellation)
+                    except Exception:
+                        logger.exception(
+                            "Dataset child execution failed",
+                            extra={"execution_id": str(child.execution_id)},
+                        )
+                        execution = await self._mark_failed(child)
+                    await self._publish_completion(execution)
+                finally:
+                    if task is not None:
+                        active_tasks.discard(task)
 
         tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
         try:
@@ -143,6 +151,7 @@ class WorkflowRunCoordinator:
                 if pending:
                     await _cancel_batch_tasks(
                         tasks,
+                        active_tasks=active_tasks,
                         cancellation=cancellation,
                         cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
                     )
@@ -155,6 +164,7 @@ class WorkflowRunCoordinator:
         except asyncio.CancelledError:
             await _cancel_batch_tasks(
                 tasks,
+                active_tasks=active_tasks,
                 cancellation=cancellation,
                 cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
             )
@@ -281,9 +291,13 @@ class WorkflowRunCoordinator:
 async def _cancel_batch_tasks(
     tasks: list[asyncio.Task[None]],
     *,
+    active_tasks: set[asyncio.Task[None]],
     cancellation: CancellationToken,
     cleanup_timeout_seconds: int | None,
 ) -> None:
+    for task in tasks:
+        if task not in active_tasks and not task.done():
+            task.cancel()
     cancellation.cancel()
     _done, pending = await asyncio.wait(
         tasks,
