@@ -194,6 +194,14 @@ def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
     for node in payload.spec.nodes:
         if _has_sensitive_mapping_literal(node.model_dump(mode="json")):
             return True
+    for edge in payload.spec.edges:
+        for mapping in edge.mappings:
+            if (
+                is_sensitive_identifier(mapping.target.key)
+                and mapping.transform.kind.value == "template"
+                and _contains_unsafe_literal(mapping.transform.template)
+            ):
+                return True
     return False
 
 

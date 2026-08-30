@@ -517,6 +517,31 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert binding_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
     assert "hunter2" not in binding_secret.text
 
+    edge_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
+    mapped_edge = edge_mapping_payload["spec"]["edges"][0]
+    mapped_edge["mappings"] = [
+        {
+            "source": {"node_id": mapped_edge["source"], "path": "$.credential"},
+            "transform": {"kind": "template", "template": "abc"},
+            "target": {
+                "node_id": mapped_edge["target"],
+                "location": "header",
+                "key": "password",
+            },
+        }
+    ]
+    edge_mapping_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-edge-mapping",
+        },
+        json={**edge_mapping_payload, "dry_run": False},
+    )
+    assert edge_mapping_secret.status_code == 422
+    assert edge_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "abc" not in edge_mapping_secret.text
+
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
     safe_payload.pop("compilation")
