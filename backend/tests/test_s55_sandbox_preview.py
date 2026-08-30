@@ -35,6 +35,7 @@ from app.services.workflows import (
     WorkflowService,
     _bounded_preview_definition,
     _bounded_preview_prepared_workflow,
+    _preview_request_limits,
     _validate_preview_target_classification,
 )
 
@@ -177,12 +178,50 @@ def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
     parent = bounded.runs[0].subflows["outer"]
     leaf = parent.subflows["nested"]
     for subflow in (parent, leaf):
-        assert subflow.definition.settings.concurrency == 2
-        assert subflow.definition.run_policy.request_budget == 10
-        assert subflow.definition.run_policy.cleanup_request_budget == 10
+        assert subflow.definition.settings.concurrency == 1
         assert subflow.definition.run_policy.max_runtime_seconds == 120
+    assert parent.definition.run_policy.request_budget == 2
+    assert parent.definition.run_policy.cleanup_request_budget == 1
+    assert leaf.definition.run_policy.request_budget == 1
+    assert leaf.definition.run_policy.cleanup_request_budget == 1
     snapshot_policy = leaf.snapshot["workflow"]["definition"]["run_policy"]
     assert snapshot_policy["max_runtime_seconds"] == 120
+
+
+def test_preview_counts_nested_nodes_and_reserves_cleanup_requests() -> None:
+    parent = _preview_test_definition(with_cleanup=True, subflow=True)
+    leaf = _preview_test_definition(with_cleanup=True)
+    nested = _preview_test_prepared_workflow(parent, leaf)
+
+    with pytest.raises(AppError) as node_error:
+        _preview_request_limits(
+            parent,
+            nested,
+            PreviewBudget(max_nodes=10),
+        )
+    assert node_error.value.code == "PREVIEW_BUDGET_EXCEEDED"
+    assert node_error.value.details["nodes"] == 12
+
+    retry_payload = leaf.model_dump(mode="json")
+    retry_payload["nodes"][1]["config"]["max_retries"] = 1
+    retrying = WorkflowDefinition.model_validate(retry_payload)
+    single = PreparedWorkflow(
+        snapshot={},
+        runs=(PreparedExecution(snapshot={}, requests={}, dataset_variables={}),),
+    )
+    with pytest.raises(AppError) as request_error:
+        _preview_request_limits(
+            retrying,
+            single,
+            PreviewBudget(max_requests=2),
+        )
+    assert request_error.value.code == "PREVIEW_BUDGET_EXCEEDED"
+    assert request_error.value.details["minimum_requests"] == 3
+    assert _preview_request_limits(
+        retrying,
+        single,
+        PreviewBudget(max_requests=3),
+    ) == (3,)
 
 
 def test_preview_rejects_cleanup_that_only_runs_after_success() -> None:
@@ -704,7 +743,9 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     assert len(s51_context["coordinator"].plans) == 1
     dispatched = s51_context["coordinator"].plans[0]
     assert dispatched.request_budget == 10
-    assert dispatched.definition.settings.concurrency == 2
+    assert dispatched.definition.settings.concurrency == 1
+    assert dispatched.definition.run_policy.request_budget == 9
+    assert dispatched.definition.run_policy.cleanup_request_budget == 1
     assert dispatched.definition.run_policy.max_runtime_seconds == 120
     assert any(node.phase.value == "cleanup" for node in dispatched.definition.nodes)
 

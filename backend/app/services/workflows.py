@@ -1923,6 +1923,16 @@ class WorkflowService:
         runtime_variables: dict[str, str],
         request_budget: int | None = None,
     ) -> WorkflowRunPlan:
+        if request_budget is not None:
+            _main_requests, cleanup_requests = _preview_request_requirements(
+                definition,
+                prepared.subflows,
+            )
+            definition = _preview_definition_with_phase_request_limits(
+                definition,
+                main_limit=max(request_budget - cleanup_requests, 1),
+                cleanup_limit=cleanup_requests,
+            )
         return WorkflowRunPlan(
             execution_id=execution.id,
             actor_id=actor.id,
@@ -2130,9 +2140,7 @@ def _bounded_preview_definition(
             message="Sandbox Preview 必须提供覆盖成功、失败和取消的 Cleanup",
             status_code=409,
         )
-    settings = definition.settings.model_copy(
-        update={"concurrency": min(definition.settings.concurrency, budget.max_parallelism)}
-    )
+    settings = definition.settings.model_copy(update={"concurrency": 1})
     policy = definition.run_policy
     run_policy = policy.model_copy(
         update={
@@ -2150,7 +2158,23 @@ def _bounded_preview_definition(
             "force_cancel_skips_cleanup": False,
         }
     )
-    return definition.model_copy(update={"settings": settings, "run_policy": run_policy})
+    return definition.model_copy(
+        update={
+            "nodes": [_serial_preview_node(node) for node in definition.nodes],
+            "settings": settings,
+            "run_policy": run_policy,
+        }
+    )
+
+
+def _serial_preview_node(node: WorkflowNode) -> WorkflowNode:
+    if node.effective_type is not NodeType.FOR_EACH:
+        return node
+    if node.type is NodeType.CAPABILITY:
+        return node.model_copy(
+            update={"configuration": {**(node.configuration or {}), "concurrency": 1}}
+        )
+    return node.model_copy(update={"config": {**node.config, "concurrency": 1}})
 
 
 def _preview_cleanup_covers_all_outcomes(cleanup_nodes: list[WorkflowNode]) -> bool:
@@ -2310,6 +2334,12 @@ def _bounded_preview_subflow(
         node_id: _bounded_preview_subflow(subflow, budget)
         for node_id, subflow in prepared.subflows.items()
     }
+    main_requests, cleanup_requests = _preview_request_requirements(definition, subflows)
+    definition = _preview_definition_with_phase_request_limits(
+        definition,
+        main_limit=main_requests,
+        cleanup_limit=cleanup_requests,
+    )
     return replace(
         prepared,
         definition=definition,
@@ -2356,7 +2386,7 @@ def _preview_request_limits(
     prepared: PreparedWorkflow,
     budget: PreviewBudget,
 ) -> tuple[int, ...]:
-    node_count = len(definition.nodes)
+    node_count = max(_preview_node_count(definition, run.subflows) for run in prepared.runs)
     row_count = len(prepared.runs)
     if node_count > budget.max_nodes or row_count > budget.max_dataset_rows:
         raise AppError(
@@ -2365,11 +2395,11 @@ def _preview_request_limits(
             status_code=422,
             details={"nodes": node_count, "dataset_rows": row_count},
         )
-    per_row_minimum = max(
-        1,
-        sum(node_type_consumes_request(node.effective_type) for node in definition.nodes),
+    per_row_minimums = tuple(
+        max(1, sum(_preview_request_requirements(definition, run.subflows)))
+        for run in prepared.runs
     )
-    minimum = per_row_minimum * row_count
+    minimum = sum(per_row_minimums)
     if minimum > budget.max_requests:
         raise AppError(
             code="PREVIEW_BUDGET_EXCEEDED",
@@ -2380,8 +2410,71 @@ def _preview_request_limits(
     remainder = budget.max_requests - minimum
     quotient, extra = divmod(remainder, row_count)
     return tuple(
-        per_row_minimum + quotient + (1 if index < extra else 0) for index in range(row_count)
+        row_minimum + quotient + (1 if index < extra else 0)
+        for index, row_minimum in enumerate(per_row_minimums)
     )
+
+
+def _preview_node_count(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> int:
+    return len(definition.nodes) + sum(
+        _preview_node_count(subflow.definition, subflow.subflows) for subflow in subflows.values()
+    )
+
+
+def _preview_request_requirements(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> tuple[int, int]:
+    main = 0
+    cleanup = 0
+    nodes = {node.id: node for node in definition.nodes}
+    for node in definition.nodes:
+        attempts = _preview_node_request_attempts(node)
+        if node.phase is WorkflowPhase.CLEANUP:
+            cleanup += attempts
+        else:
+            main += attempts
+    for node_id, subflow in subflows.items():
+        nested_main, nested_cleanup = _preview_request_requirements(
+            subflow.definition,
+            subflow.subflows,
+        )
+        parent_node = nodes.get(node_id)
+        if parent_node is not None and parent_node.phase is WorkflowPhase.CLEANUP:
+            cleanup += nested_main + nested_cleanup
+        else:
+            main += nested_main + nested_cleanup
+    return main, cleanup
+
+
+def _preview_node_request_attempts(node: WorkflowNode) -> int:
+    if not node_type_consumes_request(node.effective_type):
+        return 0
+    if node.phase is WorkflowPhase.CLEANUP:
+        return node.cleanup_retry_budget + 1
+    config = parse_node_config(node)
+    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
+
+
+def _preview_definition_with_phase_request_limits(
+    definition: WorkflowDefinition,
+    *,
+    main_limit: int,
+    cleanup_limit: int,
+) -> WorkflowDefinition:
+    policy = definition.run_policy
+    updates: dict[str, int] = {}
+    if main_limit > 0:
+        updates["request_budget"] = min(policy.request_budget or main_limit, main_limit)
+    if cleanup_limit > 0:
+        updates["cleanup_request_budget"] = min(
+            policy.cleanup_request_budget or cleanup_limit,
+            cleanup_limit,
+        )
+    return definition.model_copy(update={"run_policy": policy.model_copy(update=updates)})
 
 
 def _preview_run_evidence(
