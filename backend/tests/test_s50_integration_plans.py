@@ -359,6 +359,21 @@ def test_plan_contract_is_strict_and_fingerprint_is_canonical() -> None:
     assert normalize_integration_plan(resealed).plan_fingerprint == plan.plan_fingerprint
 
 
+def test_selected_operation_evidence_accepts_full_service_key_contract() -> None:
+    service_ref = "orders-" + ("a" * 153)
+    operation = _selected_operation(
+        ref="orders.create",
+        contract=_response_contract("orders.create", "/orders", "service-key"),
+        status=200,
+    )
+
+    validated = SelectedOperationEvidence.model_validate(
+        {**operation.model_dump(mode="json"), "service_ref": service_ref}
+    )
+
+    assert validated.service_ref == service_ref
+
+
 def test_multiple_binding_candidates_are_retained_without_guessing() -> None:
     first = _selected_operation(
         ref="orders.first",
