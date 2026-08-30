@@ -49,6 +49,7 @@ _CONNECTION_STRING = re.compile(
     r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|mssql)://",
     re.IGNORECASE,
 )
+_EMBEDDED_URL = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"'`]+")
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
@@ -1113,8 +1114,10 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
         )
     ) and any(pattern.search(phone_card_value) for pattern in (_PHONE, _CARD)):
         return True
-    parsed = urlsplit(value)
-    return parsed.username is not None or parsed.password is not None
+    return any(
+        (parsed := urlsplit(candidate)).username is not None or parsed.password is not None
+        for candidate in (value, *(_EMBEDDED_URL.findall(value)))
+    )
 
 
 def _looks_like_high_entropy_credential(value: str) -> bool:

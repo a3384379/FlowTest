@@ -296,6 +296,30 @@ async def test_mcp_plan_compile_dry_run_propose_and_inspect_are_draft_only(
 
 
 @pytest.mark.asyncio
+async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
+    s51_context: dict[str, Any],
+) -> None:
+    context, plan, compilation = await _plan_chain(s51_context)
+    payload = _proposal_payload(s51_context, context, plan, compilation)
+    payload["spec"]["description"] = "Use Bearer AbCdEf1234567890 for the request"
+
+    response = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-proposal",
+        },
+        json={**payload, "dry_run": False},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "AbCdEf1234567890" not in response.text
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 0
+
+
+@pytest.mark.asyncio
 async def test_expected_revision_review_gate_tenant_scope_and_stale_apply(
     s51_context: dict[str, Any],
 ) -> None:

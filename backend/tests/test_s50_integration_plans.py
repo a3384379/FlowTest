@@ -358,6 +358,24 @@ def test_untrusted_expressions_headers_and_secret_refs_fail_closed() -> None:
         "SECRET_REFERENCE_RUNTIME_UNSUPPORTED"
     }
 
+    nested_secret_request = login.request.model_copy(
+        update={"body": {"users": [{"password": "plaintext"}]}}
+    )
+    nested_secret_plan = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    login.model_copy(update={"request": nested_secret_request}),
+                    *plan.operations[1:],
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+    nested_secret_result = compile_integration_plan(nested_secret_plan)
+    assert nested_secret_result.flow_spec is None
+    assert {item.code for item in nested_secret_result.diagnostics} >= {"SECRET_LITERAL_FORBIDDEN"}
+
 
 def test_runtime_data_recipe_compiles_without_unsupported_metadata() -> None:
     plan = _golden_plan()

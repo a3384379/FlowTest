@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.flow_spec import FlowSpecIssue
+from app.domain.test_contexts import first_sensitive_value
 from app.models.access import User
 from app.schemas.flow_spec import FlowSpecImportRequest
 from app.schemas.test_contexts import (
@@ -36,6 +37,7 @@ class MCPFlowProposalService:
     ) -> FlowSpecProposalResponse:
         service_account_id = self._require_scope()
         key = require_idempotency_key(idempotency_key)
+        self._reject_sensitive(payload)
         if payload.dry_run:
             return await self._preview(
                 actor=actor,
@@ -166,6 +168,14 @@ class MCPFlowProposalService:
 
     def _require_scope(self) -> UUID:
         return require_mcp_flow_propose_scope()
+
+    def _reject_sensitive(self, payload: FlowSpecProposalRequest) -> None:
+        if first_sensitive_value(payload.model_dump(mode="json")) is not None:
+            raise AppError(
+                code="MCP_SENSITIVE_INPUT",
+                message="FlowSpec 提案不能包含 Secret、凭据或 PII, 请使用 secret:// 引用",
+                status_code=422,
+            )
 
 
 def require_mcp_flow_propose_scope() -> UUID:

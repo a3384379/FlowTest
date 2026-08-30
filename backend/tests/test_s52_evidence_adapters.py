@@ -29,12 +29,19 @@ from app.domain.test_contexts import (
     ExternalEvidenceEnvelope,
     JavaExternalEvidenceStructuredData,
     finding_semantic_fingerprint,
+    first_sensitive_value,
 )
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
 RUOYI_ROOT = FIXTURE_ROOT.parents[4] / "RuoYi"
 PROJECT_ID = "00000000-0000-0000-0000-000000000001"
 SUBJECT_REF = f"flowtest://projects/{PROJECT_ID}/operations/orders"
+
+
+def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose() -> None:
+    value = "Use https://alice:hunter2@example.com/resource for this import"
+
+    assert first_sensitive_value({"statement": value}) == "$.statement"
 
 
 def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> None:

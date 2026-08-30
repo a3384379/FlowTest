@@ -2633,6 +2633,12 @@ def _secret_literal_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
 
 
 def _body_secret_diagnostics(value: JsonValue, path: str) -> list[PlanDiagnostic]:
+    if isinstance(value, list):
+        return [
+            diagnostic
+            for index, item in enumerate(value)
+            for diagnostic in _body_secret_diagnostics(item, f"{path}[{index}]")
+        ]
     if not isinstance(value, dict):
         return []
     diagnostics: list[PlanDiagnostic] = []
