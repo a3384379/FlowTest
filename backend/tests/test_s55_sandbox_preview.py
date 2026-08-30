@@ -11,9 +11,48 @@ from test_s51_mcp_flow_proposals import (
     s51_context,  # noqa: F401 - imported pytest fixture
 )
 
+from app.core.errors import AppError
+from app.domain.sandbox_preview import PreviewBudget
+from app.engine.contracts import WorkflowDefinition
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.workflows import WorkflowExecution
-from app.services.workflows import WorkflowService
+from app.services.workflow_runtime import PreparedSubflow
+from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
+from app.services.workflows import WorkflowService, _bounded_preview_prepared_workflow
+
+
+def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
+    unsafe_leaf = _preview_test_definition(with_cleanup=False)
+    safe_parent = _preview_test_definition(with_cleanup=True, subflow=True)
+    unsafe_prepared = _preview_test_prepared_workflow(safe_parent, unsafe_leaf)
+
+    with pytest.raises(AppError) as error_info:
+        _bounded_preview_prepared_workflow(unsafe_prepared, PreviewBudget())
+    assert error_info.value.code == "PREVIEW_CLEANUP_REQUIRED"
+
+    budget = PreviewBudget(
+        max_nodes=100,
+        max_requests=10,
+        max_dataset_rows=20,
+        max_parallelism=2,
+        max_runtime_seconds=120,
+    )
+    bounded = _bounded_preview_prepared_workflow(
+        _preview_test_prepared_workflow(
+            safe_parent,
+            _preview_test_definition(with_cleanup=True),
+        ),
+        budget,
+    )
+    parent = bounded.runs[0].subflows["outer"]
+    leaf = parent.subflows["nested"]
+    for subflow in (parent, leaf):
+        assert subflow.definition.settings.concurrency == 2
+        assert subflow.definition.run_policy.request_budget == 10
+        assert subflow.definition.run_policy.cleanup_request_budget == 10
+        assert subflow.definition.run_policy.max_runtime_seconds == 120
+    snapshot_policy = leaf.snapshot["workflow"]["definition"]["run_policy"]
+    assert snapshot_policy["max_runtime_seconds"] == 120
 
 
 @pytest.mark.asyncio
@@ -174,3 +213,103 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         )
         assert recovered.status_code == 409, recovered.text
         assert recovered.json()["error"]["code"] == "PREVIEW_RECOVERY_FORBIDDEN"
+
+
+def _preview_test_definition(
+    *,
+    with_cleanup: bool,
+    subflow: bool = False,
+) -> WorkflowDefinition:
+    work_node = {
+        "id": "work",
+        "type": "subflow" if subflow else "api",
+        "name": "Work",
+        "position": {"x": 180, "y": 0},
+        "config": (
+            {
+                "workflow_id": "00000000-0000-0000-0000-000000000101",
+                "workflow_version": 1,
+            }
+            if subflow
+            else {"api_definition_id": "00000000-0000-0000-0000-000000000201"}
+        ),
+    }
+    nodes = [
+        {
+            "id": "start",
+            "type": "start",
+            "name": "Start",
+            "position": {"x": 0, "y": 0},
+            "config": {},
+        },
+        work_node,
+        {
+            "id": "end",
+            "type": "end",
+            "name": "End",
+            "position": {"x": 360, "y": 0},
+            "config": {},
+        },
+    ]
+    if with_cleanup:
+        nodes.append(
+            {
+                "id": "cleanup",
+                "type": "api",
+                "name": "Cleanup",
+                "position": {"x": 180, "y": 160},
+                "config": {"api_definition_id": "00000000-0000-0000-0000-000000000202"},
+                "phase": "cleanup",
+                "cleanup_for": ["work"],
+            }
+        )
+    return WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": nodes,
+            "edges": [
+                {"id": "start-work", "source": "start", "target": "work"},
+                {"id": "work-end", "source": "work", "target": "end"},
+            ],
+            "settings": {"concurrency": 9},
+            "run_policy": {
+                "request_budget": 200,
+                "cleanup_request_budget": 200,
+                "max_runtime_seconds": 900,
+            },
+        }
+    )
+
+
+def _preview_test_prepared_workflow(
+    parent_definition: WorkflowDefinition,
+    leaf_definition: WorkflowDefinition,
+) -> PreparedWorkflow:
+    leaf = PreparedSubflow(
+        workflow_id=UUID("00000000-0000-0000-0000-000000000102"),
+        workflow_version=1,
+        fingerprint="a" * 64,
+        definition=leaf_definition,
+        requests={},
+        subflows={},
+        snapshot={"workflow": {"definition": leaf_definition.model_dump(mode="json")}},
+    )
+    parent = PreparedSubflow(
+        workflow_id=UUID("00000000-0000-0000-0000-000000000101"),
+        workflow_version=1,
+        fingerprint="b" * 64,
+        definition=parent_definition,
+        requests={},
+        subflows={"nested": leaf},
+        snapshot={
+            "workflow": {"definition": parent_definition.model_dump(mode="json")},
+            "subflows": {"nested": leaf.snapshot},
+        },
+    )
+    prepared = PreparedExecution(
+        snapshot={"subflows": {"outer": parent.snapshot}},
+        requests={},
+        dataset_variables={},
+        subflows={"outer": parent},
+    )
+    return PreparedWorkflow(snapshot=prepared.snapshot, runs=(prepared,))

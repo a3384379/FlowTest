@@ -107,7 +107,7 @@ from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
-from app.services.workflow_runtime import WorkflowNodeExecutor
+from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
 from app.services.workflow_snapshots import (
     PreparedExecution,
     PreparedWorkflow,
@@ -562,6 +562,7 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        prepared = _bounded_preview_prepared_workflow(prepared, budget)
         request_limits = _preview_request_limits(bounded, prepared, budget)
         await self._ensure_execution_capacity(project_id)
         execution, plan = self._preview_execution_plan(
@@ -2050,6 +2051,83 @@ def _bounded_preview_definition(
         }
     )
     return definition.model_copy(update={"settings": settings, "run_policy": run_policy})
+
+
+def _bounded_preview_prepared_workflow(
+    prepared: PreparedWorkflow,
+    budget: PreviewBudget,
+) -> PreparedWorkflow:
+    runs = tuple(_bounded_preview_prepared_execution(run, budget) for run in prepared.runs)
+    return replace(
+        prepared,
+        snapshot=_preview_snapshot_with_subflows(prepared.snapshot, runs[0].subflows),
+        runs=runs,
+    )
+
+
+def _bounded_preview_prepared_execution(
+    prepared: PreparedExecution,
+    budget: PreviewBudget,
+) -> PreparedExecution:
+    subflows = {
+        node_id: _bounded_preview_subflow(subflow, budget)
+        for node_id, subflow in prepared.subflows.items()
+    }
+    return replace(
+        prepared,
+        snapshot=_preview_snapshot_with_subflows(prepared.snapshot, subflows),
+        subflows=subflows,
+    )
+
+
+def _bounded_preview_subflow(
+    prepared: PreparedSubflow,
+    budget: PreviewBudget,
+) -> PreparedSubflow:
+    definition = _bounded_preview_definition(prepared.definition, budget)
+    subflows = {
+        node_id: _bounded_preview_subflow(subflow, budget)
+        for node_id, subflow in prepared.subflows.items()
+    }
+    return replace(
+        prepared,
+        definition=definition,
+        subflows=subflows,
+        snapshot=_preview_subflow_snapshot(prepared.snapshot, definition, subflows),
+    )
+
+
+def _preview_subflow_snapshot(
+    snapshot: dict[str, JsonValue],
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> dict[str, JsonValue]:
+    bounded = _preview_snapshot_with_subflows(snapshot, subflows)
+    workflow = bounded.get("workflow")
+    if not isinstance(workflow, dict):
+        return bounded
+    serialized_definition = workflow.get("definition")
+    if not isinstance(serialized_definition, dict):
+        return bounded
+    bounded_definition = {
+        **serialized_definition,
+        "settings": definition.settings.model_dump(mode="json"),
+        "run_policy": definition.run_policy.model_dump(mode="json"),
+    }
+    return {
+        **bounded,
+        "workflow": {**workflow, "definition": bounded_definition},
+    }
+
+
+def _preview_snapshot_with_subflows(
+    snapshot: dict[str, JsonValue],
+    subflows: dict[str, PreparedSubflow],
+) -> dict[str, JsonValue]:
+    return {
+        **snapshot,
+        "subflows": {node_id: subflow.snapshot for node_id, subflow in subflows.items()},
+    }
 
 
 def _preview_request_limits(
