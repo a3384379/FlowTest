@@ -1008,6 +1008,22 @@ MCP 只读 Tool 的成功结果包含：
 
 排障时保留 `trace_id`、时间、Tool 名称、客户端版本和非敏感参数结构；不要把 Token、Authorization Header、Cookie 或原始请求/响应 Body 发到日志、聊天或工单。
 
+### 8.12 `flowtest-generate-integration-flow` Skill
+
+V6.0 Core 提供一个正式 Skill，位于仓库 `skills/flowtest-generate-integration-flow/`。安装后，外部 Agent
+按 Project → Context → Missing Evidence → Code/DB MCP → Ingest → Plan → Compile → Dry Run → Proposal
+→ Visual Review 的顺序生成可审核集成流程。完整安装和操作见
+[集成流程生成 Skill 手册](operations/mcp-integration-flow-skill.md)。
+
+使用时必须注意：
+
+- FlowTest MCP 至少为 `s55-sandbox-preview-v1`；
+- Code/DB MCP 由 Agent 直接连接，FlowTest Server 不连接第三方 MCP；
+- 所有外部结果先变成 Typed Evidence，Conflict、Missing Evidence 或 Stale Revision 必须停止；
+- Skill 只创建待审核 Proposal，不 Accept、Apply、Publish 或生产执行；
+- 可选 Preview 另需 `mcp:preview:execute`、test/sandbox 环境和未消费的一次性 Approval；
+- 当前 Golden Operation `3/3`、Binding `2/3` 只是 Fixture 基线，不代表 95% 总体准确率。
+
 ## 9. 其他业务模块
 
 ### 9.1 质量总览

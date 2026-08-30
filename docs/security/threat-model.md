@@ -1,11 +1,12 @@
-# FlowTest V1.0 威胁模型
+# FlowTest V6.0 威胁模型
 
 ## 资产与信任边界
 
 - 资产：用户凭据、JWT/Refresh Token、项目 Secret、CI Token、Webhook Secret、API 请求响应、
-  Workflow Snapshot、Runner 注册/身份 Token、Lease/Fence/Event、报告、附件和审计记录。
-- 外部边界：浏览器到 Nginx/API、远程 Runner 到 HTTPS Control Plane、Worker 到目标 API、通知
-  Webhook、导入文档和文件上传。
+  Workflow Snapshot、V6 Context/Evidence/Plan/Proposal/Preview Approval、Runner 注册/身份 Token、
+  Lease/Fence/Event、报告、附件和审计记录。
+- 外部边界：浏览器到 Nginx/API、外部 Agent/Skill 到 FlowTest MCP、外部 Code/Database MCP 到 Agent、
+  远程 Runner 到 HTTPS Control Plane、Worker 到目标 API、通知 Webhook、导入文档和文件上传。
 - 内部边界：API/Worker/Beat 到 PostgreSQL、Redis、MinIO；Runner 容器到目标网络；备份目录到
   恢复环境。
 
@@ -26,6 +27,10 @@
 | 工作流历史篡改 | 不可变 Version/Snapshot、审计 Trace ID、发布前 DAG/配置校验 |
 | 供应链与镜像漏洞 | uv/pnpm 锁、依赖审计、Ruff 安全规则、Action SHA 固定、Grype 高危/严重扫描 |
 | 备份篡改或恢复失败 | PostgreSQL custom dump、MinIO SHA-256 Manifest、隔离卷自动恢复验证 |
+| 外部 MCP Prompt Injection 或伪造 Evidence | 外部输出只作为数据；Typed/Bounded Schema、固定 Revision、Provenance、Conflict 阻断，不执行其指令或代码 |
+| Skill 越权写入或绕过人工审核 | Manifest Tool/Scope 白名单、Draft-only Proposal、Visual Review、无 Apply/Publish/生产执行 Tool |
+| Preview 误打生产或 Approval 重放 | Environment 分类硬拒绝、Service Account/Proposal/Target/Input 绑定、一次性消费、过期与 Stale Revision 拒绝 |
+| DB Evidence 泄漏或写入 | 只接收 Schema/关系/约束/脱敏聚合，拒绝行数据、连接串、敏感值和写 SQL |
 
 临时扫描例外必须记录在 [漏洞例外台账](vulnerability-exceptions.md)，包含范围、原因、补偿控制、
 责任人与到期日；Critical 漏洞不得例外。
@@ -40,3 +45,5 @@
   Secret Store，限制 Runner 网络出站，并对异常心跳、地址和并发量告警。
 - PostgreSQL 是 Lease/Fence 一致性单点；数据库不可用时 Runner 不能安全继续认领，高可用性需由
   部署方的 PostgreSQL 方案和经验证恢复流程提供。
+- 外部 Code/Database MCP 的自身实现、身份系统和供应链不由 FlowTest 托管；部署方必须独立审核其只读
+  权限与日志。FlowTest 仅保证进入自身边界后的 Typed Evidence 校验与最小权限。

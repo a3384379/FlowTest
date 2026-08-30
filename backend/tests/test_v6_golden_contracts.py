@@ -43,6 +43,8 @@ from app.domain.test_design import fingerprint_design
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.domain.v6_evaluation import (
     EvaluationAnnotation,
+    EvaluationGatePolicy,
+    EvaluationGateStatus,
     EvaluationMetric,
     summarize_evaluations,
 )
@@ -360,12 +362,21 @@ def test_evaluation_annotation_and_statistics_contract_is_reproducible() -> None
     summaries = {item.metric: item for item in summarize_evaluations(annotations)}
 
     assert summaries[EvaluationMetric.OPERATION_CANDIDATE_PRECISION].value == 1.0
-    assert summaries[EvaluationMetric.BINDING_CANDIDATE_PRECISION].value == 0.0
+    assert summaries[EvaluationMetric.BINDING_CANDIDATE_PRECISION].value == 0.666667
     assert summaries[EvaluationMetric.COMPILER_SUCCESS].value == 1.0
     assert summaries[EvaluationMetric.MANUAL_EDIT_RATE].value == 0.0
-    assert summaries[EvaluationMetric.PREVIEW_FIRST_PASS].value is None
-    assert summaries[EvaluationMetric.EVIDENCE_CONFLICT_RATE].value == 0.0
+    assert summaries[EvaluationMetric.PREVIEW_FIRST_PASS].value == 1.0
+    assert summaries[EvaluationMetric.EVIDENCE_CONFLICT_RATE].value == 1.0
+    assert summaries[EvaluationMetric.EVIDENCE_CONFLICT_DETECTION].value == 1.0
+    assert all(
+        item.gate_status is EvaluationGateStatus.PASSED
+        for item in summaries.values()
+        if item.gate_policy is not EvaluationGatePolicy.INFORMATIONAL
+    )
 
     invalid = annotations[0].model_dump(mode="json") | {"label": "pass"}
     with pytest.raises(ValidationError):
         EvaluationAnnotation.model_validate(invalid)
+
+    with pytest.raises(ValueError, match="must be unique"):
+        summarize_evaluations([annotations[0], annotations[0]])

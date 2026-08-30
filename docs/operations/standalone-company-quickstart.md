@@ -78,3 +78,11 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
 
 探针证据只包含健康状态、延迟和进程元数据，不包含业务响应、Cookie、Token 或 Secret；退出码非零时
 应保留 JSON、`logs\standalone.err.log` 和对应维护窗口记录供 IT 复核。
+
+## V6 集成流程 Skill
+
+Standalone 可通过本机 stdio 启动 `flowtest-mcp`，并安装仓库中的
+`skills/flowtest-generate-integration-flow/`。Skill 不要求 Docker，也不改变 Standalone 数据目录；其
+Minimum MCP Version、Scope、Visual Review 与 Preview 约束见
+[集成流程生成 Skill 手册](mcp-integration-flow-skill.md)。升级离线包后必须重新验证 Skill Manifest 与
+MCP Server 版本相容，不能把旧 Skill 与新 Gateway 的部分文件混用。

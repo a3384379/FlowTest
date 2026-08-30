@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EVALUATION_SCHEMA_VERSION = "flowtest-v6-evaluation-v1"
+EVALUATION_BASELINE_SCHEMA_VERSION = "flowtest-v6-evaluation-baseline-v1"
 
 
 class EvaluationMetric(StrEnum):
@@ -18,6 +19,30 @@ class EvaluationMetric(StrEnum):
     MANUAL_EDIT_RATE = "manual_edit_rate"
     PREVIEW_FIRST_PASS = "preview_first_pass"  # noqa: S105
     EVIDENCE_CONFLICT_RATE = "evidence_conflict_rate"
+    EVIDENCE_CONFLICT_DETECTION = "evidence_conflict_detection"
+    STATIC_VALIDATION = "static_validation"
+    SECRET_LEAK = "secret_leak"  # noqa: S105
+    CROSS_TENANT = "cross_tenant"
+    STALE_OVERWRITE = "stale_overwrite"
+    UNREVIEWED_APPLY = "unreviewed_apply"
+    PRODUCTION_MCP_PREVIEW = "production_mcp_preview"
+    ARBITRARY_CODE = "arbitrary_code"
+    WRITE_SQL = "write_sql"
+    CLEANUP_SILENT_FAILURE = "cleanup_silent_failure"
+    PRODUCT_DEFECT_AUTO_WEAKENING = "product_defect_auto_weakening"
+
+
+class EvaluationGatePolicy(StrEnum):
+    INFORMATIONAL = "informational"
+    MINIMUM = "minimum"
+    MAXIMUM = "maximum"
+
+
+class EvaluationGateStatus(StrEnum):
+    INFORMATIONAL = "informational"
+    PASSED = "passed"
+    FAILED = "failed"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
 EvaluationLabel = Literal[
@@ -64,6 +89,8 @@ class EvaluationAnnotation(BaseModel):
         elif self.metric in {
             EvaluationMetric.COMPILER_SUCCESS,
             EvaluationMetric.PREVIEW_FIRST_PASS,
+            EvaluationMetric.EVIDENCE_CONFLICT_DETECTION,
+            EvaluationMetric.STATIC_VALIDATION,
         }:
             allowed = _PASS_LABELS
         else:
@@ -81,25 +108,90 @@ class EvaluationMetricSummary(BaseModel):
     denominator: int = Field(ge=0)
     value: float | None = Field(default=None, ge=0, le=1)
     label_counts: dict[str, int]
+    gate_policy: EvaluationGatePolicy
+    gate_threshold: float | None = Field(default=None, ge=0, le=1)
+    gate_status: EvaluationGateStatus
+
+
+class EvaluationBaseline(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flowtest-v6-evaluation-baseline-v1"] = (
+        "flowtest-v6-evaluation-baseline-v1"
+    )
+    annotation_schema_version: Literal["flowtest-v6-evaluation-v1"] = "flowtest-v6-evaluation-v1"
+    annotation_count: int = Field(ge=1)
+    metrics: list[EvaluationMetricSummary] = Field(min_length=1)
+    release_gates_passed: bool
+
+
+_MINIMUM_GATES = frozenset(
+    {
+        EvaluationMetric.COMPILER_SUCCESS,
+        EvaluationMetric.PREVIEW_FIRST_PASS,
+        EvaluationMetric.EVIDENCE_CONFLICT_DETECTION,
+        EvaluationMetric.STATIC_VALIDATION,
+    }
+)
+_MAXIMUM_GATES = frozenset(
+    {
+        EvaluationMetric.SECRET_LEAK,
+        EvaluationMetric.CROSS_TENANT,
+        EvaluationMetric.STALE_OVERWRITE,
+        EvaluationMetric.UNREVIEWED_APPLY,
+        EvaluationMetric.PRODUCTION_MCP_PREVIEW,
+        EvaluationMetric.ARBITRARY_CODE,
+        EvaluationMetric.WRITE_SQL,
+        EvaluationMetric.CLEANUP_SILENT_FAILURE,
+        EvaluationMetric.PRODUCT_DEFECT_AUTO_WEAKENING,
+    }
+)
 
 
 def summarize_evaluations(
     annotations: list[EvaluationAnnotation],
 ) -> tuple[EvaluationMetricSummary, ...]:
+    identities = [(item.metric, item.case_id) for item in annotations]
+    if len(identities) != len(set(identities)):
+        raise ValueError("evaluation metric and case_id pairs must be unique")
     summaries: list[EvaluationMetricSummary] = []
     for metric in EvaluationMetric:
         counts = Counter(item.label for item in annotations if item.metric is metric)
         numerator, denominator = _score(metric, counts)
+        value = round(numerator / denominator, 6) if denominator else None
+        gate_policy, gate_threshold = _gate_policy(metric)
         summaries.append(
             EvaluationMetricSummary(
                 metric=metric,
                 numerator=numerator,
                 denominator=denominator,
-                value=round(numerator / denominator, 6) if denominator else None,
+                value=value,
                 label_counts=dict(sorted(counts.items())),
+                gate_policy=gate_policy,
+                gate_threshold=gate_threshold,
+                gate_status=_gate_status(
+                    policy=gate_policy,
+                    threshold=gate_threshold,
+                    value=value,
+                ),
             )
         )
     return tuple(summaries)
+
+
+def build_evaluation_baseline(annotations: list[EvaluationAnnotation]) -> EvaluationBaseline:
+    summaries = summarize_evaluations(annotations)
+    release_metrics = [
+        item for item in summaries if item.gate_policy is not EvaluationGatePolicy.INFORMATIONAL
+    ]
+    release_gates_passed = bool(release_metrics) and all(
+        item.gate_status is EvaluationGateStatus.PASSED for item in release_metrics
+    )
+    return EvaluationBaseline(
+        annotation_count=len(annotations),
+        metrics=list(summaries),
+        release_gates_passed=release_gates_passed,
+    )
 
 
 def _score(metric: EvaluationMetric, counts: Counter[EvaluationLabel]) -> tuple[int, int]:
@@ -108,6 +200,30 @@ def _score(metric: EvaluationMetric, counts: Counter[EvaluationLabel]) -> tuple[
         EvaluationMetric.BINDING_CANDIDATE_PRECISION,
     }:
         return counts["true_positive"], counts["true_positive"] + counts["false_positive"]
-    if metric in {EvaluationMetric.COMPILER_SUCCESS, EvaluationMetric.PREVIEW_FIRST_PASS}:
+    if metric in _MINIMUM_GATES:
         return counts["pass"], counts["pass"] + counts["fail"]
     return counts["yes"], counts["yes"] + counts["no"]
+
+
+def _gate_policy(metric: EvaluationMetric) -> tuple[EvaluationGatePolicy, float | None]:
+    if metric in _MINIMUM_GATES:
+        return EvaluationGatePolicy.MINIMUM, 1.0
+    if metric in _MAXIMUM_GATES:
+        return EvaluationGatePolicy.MAXIMUM, 0.0
+    return EvaluationGatePolicy.INFORMATIONAL, None
+
+
+def _gate_status(
+    *,
+    policy: EvaluationGatePolicy,
+    threshold: float | None,
+    value: float | None,
+) -> EvaluationGateStatus:
+    if value is None:
+        return EvaluationGateStatus.INSUFFICIENT_EVIDENCE
+    if policy is EvaluationGatePolicy.INFORMATIONAL:
+        return EvaluationGateStatus.INFORMATIONAL
+    if threshold is None:
+        raise ValueError("release-gated evaluation metric must define a threshold")
+    passed = value >= threshold if policy is EvaluationGatePolicy.MINIMUM else value <= threshold
+    return EvaluationGateStatus.PASSED if passed else EvaluationGateStatus.FAILED

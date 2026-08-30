@@ -1,0 +1,213 @@
+{
+  "schema_version": "flowtest-v6-evaluation-baseline-v1",
+  "annotation_schema_version": "flowtest-v6-evaluation-v1",
+  "annotation_count": 21,
+  "metrics": [
+    {
+      "metric": "operation_candidate_precision",
+      "numerator": 3,
+      "denominator": 3,
+      "value": 1.0,
+      "label_counts": {
+        "true_positive": 3
+      },
+      "gate_policy": "informational",
+      "gate_threshold": null,
+      "gate_status": "informational"
+    },
+    {
+      "metric": "binding_candidate_precision",
+      "numerator": 2,
+      "denominator": 3,
+      "value": 0.666667,
+      "label_counts": {
+        "false_positive": 1,
+        "true_positive": 2
+      },
+      "gate_policy": "informational",
+      "gate_threshold": null,
+      "gate_status": "informational"
+    },
+    {
+      "metric": "compiler_success",
+      "numerator": 1,
+      "denominator": 1,
+      "value": 1.0,
+      "label_counts": {
+        "pass": 1
+      },
+      "gate_policy": "minimum",
+      "gate_threshold": 1.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "manual_edit_rate",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "informational",
+      "gate_threshold": null,
+      "gate_status": "informational"
+    },
+    {
+      "metric": "preview_first_pass",
+      "numerator": 1,
+      "denominator": 1,
+      "value": 1.0,
+      "label_counts": {
+        "pass": 1
+      },
+      "gate_policy": "minimum",
+      "gate_threshold": 1.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "evidence_conflict_rate",
+      "numerator": 1,
+      "denominator": 1,
+      "value": 1.0,
+      "label_counts": {
+        "yes": 1
+      },
+      "gate_policy": "informational",
+      "gate_threshold": null,
+      "gate_status": "informational"
+    },
+    {
+      "metric": "evidence_conflict_detection",
+      "numerator": 1,
+      "denominator": 1,
+      "value": 1.0,
+      "label_counts": {
+        "pass": 1
+      },
+      "gate_policy": "minimum",
+      "gate_threshold": 1.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "static_validation",
+      "numerator": 1,
+      "denominator": 1,
+      "value": 1.0,
+      "label_counts": {
+        "pass": 1
+      },
+      "gate_policy": "minimum",
+      "gate_threshold": 1.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "secret_leak",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "cross_tenant",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "stale_overwrite",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "unreviewed_apply",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "production_mcp_preview",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "arbitrary_code",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "write_sql",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "cleanup_silent_failure",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    },
+    {
+      "metric": "product_defect_auto_weakening",
+      "numerator": 0,
+      "denominator": 1,
+      "value": 0.0,
+      "label_counts": {
+        "no": 1
+      },
+      "gate_policy": "maximum",
+      "gate_threshold": 0.0,
+      "gate_status": "passed"
+    }
+  ],
+  "release_gates_passed": true
+}

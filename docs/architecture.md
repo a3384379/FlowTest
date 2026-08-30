@@ -75,7 +75,27 @@ frontend/src/
 5. 节点状态机：pending、running、passed、failed、skipped、cancelled。
 6. 错误传播、超时、重试、并发和取消语义。
 
-## 5. 安全基线
+## 5. V6 外部 Agent 与 Skill 边界
+
+```text
+External Agent
+  ├── read-only Code MCP
+  ├── schema/profile-only Database MCP
+  └── flowtest-generate-integration-flow Skill
+            │ FlowTest MCP (stdio / Streamable HTTP)
+            ▼
+FlowTest Application API
+  Context Revision → Typed Evidence → Plan → Compile → Draft → Visual Review
+                                                        └→ optional Sandbox Preview
+```
+
+- FlowTest Server 不作为第三方 MCP Client，不发现、不认证、不保存 Code/Database MCP 地址或凭据。
+- Skill 只编排既有 MCP Application API，不创建第二套 Planner、Compiler、Review 或 Execution 状态机。
+- 外部 MCP 输出是非可信数据，只能转换为有界、强类型、带版本与 Provenance 的 Evidence。
+- Proposal 只进入既有 AIChangeSet/WorkflowDesigner 审核事实源；Skill 不 Accept、Apply、Publish 或执行。
+- Preview 必须是 test/sandbox、一次性 Approval、固定 Revision/Budget/Cleanup；production 硬拒绝。
+
+## 6. 安全基线
 
 - Secret 加密存储，日志和报告默认脱敏。
 - 目标 URL 执行 SSRF 校验并限制内网/元数据地址策略。
@@ -94,15 +114,16 @@ frontend/src/
 - Runner 只恢复加密的平台 Workflow Snapshot，校验计划 SHA-256 与结果 Schema，并重新执行
   项目 Host/CIDR 出站策略。过期 Fence 不能写入节点或终态。
 
-## 6. 质量策略
+## 7. 质量策略
 
 - 领域规则和执行引擎以单元测试为主。
 - 数据库、Redis、导入器和 HTTP 调用使用集成测试。
 - 一条稳定的示例业务流程作为端到端回归基线。
 - 工作流 Schema 与 API OpenAPI 契约进入版本控制。
-- 每次发布执行容量门槛、镜像 CVE 扫描和隔离卷恢复演练。
+- 普通变更执行路径选择的核心门禁；最新复审清除 P0/P1 后，再显式执行 Compact、容量、镜像和恢复等
+  RC 重门禁。重门禁不被删除，只从每次小修中后移到发布候选检查点。
 
-## 7. 运行与恢复边界
+## 8. 运行与恢复边界
 
 - API、Worker 与 Beat 共享 PostgreSQL、Redis 和 MinIO，但执行引擎不依赖 Celery。
 - Performance Worker 使用独立 `performance` 队列和非 root、只读 k6 镜像；用户定义不能包含脚本。

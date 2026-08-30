@@ -1,0 +1,6 @@
+interface:
+  display_name: "FlowTest 集成流程生成"
+  short_description: "根据授权证据生成可审核、可预览的 FlowTest 集成测试流程"
+  default_prompt: "Use $flowtest-generate-integration-flow to generate a review-only integration flow from authorized evidence."
+policy:
+  allow_implicit_invocation: true
