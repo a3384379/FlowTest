@@ -7,7 +7,7 @@
 | H0_READY | YES |
 | V6_ALPHA_READY | YES |
 | V6_BETA_READY | YES |
-| V6_RC_READY | NO — 等待本 S56 PR 最新 Head 的复审、Remote CI、RC 重门禁与普通合并 |
+| V6_RC_READY | YES — PR #67 复审、Remote CI、显式 RC 重门禁、普通合并与 Main Push 已闭环 |
 | GA_READY | NO — 连续 RC、公司实机、安全审批和人工签署尚未完成 |
 
 本文件记录 RC 候选的可复现证据，不创建 Tag 或 GitHub Release，也不把开发 Fixture 结果冒充公司试点或
@@ -18,9 +18,9 @@ GA 外部签署。
 | 项目 | 值 |
 | --- | --- |
 | Branch | `codex/v6-s56-rc-evidence` |
-| Branch Head | 合并前由 S56 PR 精确记录 |
-| Merge Commit | 普通 Squash Merge 后补录 |
-| Tree Equivalence | 合并后比较 S56 PR Tree 与 Main Merge Tree |
+| Branch Head | `39a532fd90762c92177fd5d04a334b6c774f8367` |
+| Merge Commit | `3c25a19959d0463582522b5263940ed5322368ae` |
+| Tree Equivalence | Head/Merge Tree 均为 `6e4bd6344088f3318ba1d05be284b82861e42c74` |
 | Alembic Head | `20260830_0050` |
 | Standalone Schema Revision | `20260830_0050` |
 | Skill | `flowtest-generate-integration-flow@1.0.0-rc.1` |
@@ -35,7 +35,7 @@ Evaluation 与文档可代码回滚，不能改变历史 Workflow/Execution Snap
 | --- | --- | --- |
 | Alpha | S51 Context → Evidence → Plan → Compile → MCP Dry Run/Draft → Visual Review，见 `v6-s51-mcp-visual-proposal.md` | 已合并并完成主线 CI |
 | Beta | H1 真实 Key Rotation 与 S55 Sandbox Preview/Cleanup/Approval，见 `v6-h1-real-key-rotation.md`、`v6-s55-sandbox-preview.md` | 已合并；S55 Main 7 项 CI 全绿 |
-| RC | Flagship Skill、模型无关 Evaluation、兼容性、文档与重门禁后移 | 本 PR 收口中 |
+| RC | Flagship Skill、模型无关 Evaluation、兼容性、文档与重门禁后移 | PR #67 已合并；RC 自动化证据闭环 |
 
 ## 4. Flagship Skill Contract
 
@@ -90,7 +90,7 @@ Baseline 做确定性比较并在任一硬门槛缺证或失败时退出非零�
 Smoke。Compact 验收及 API/Workflow/1000-task/S29 容量门禁保留在同一 Compose Workflow，但仅在最新复审
 无 P0/P1 后显式 `workflow_dispatch` 且 `run_rc_gates=true` 时执行。Required Gate 普通路径只等待核心
 `smoke`，避免每个小修重复消耗 RC 级资源；`skills/**` 仍由 Backend 与 Security 门禁覆盖。该策略已由
-普通合并的 Bootstrap PR #65/#66 固化，S56 RC 合并前仍必须记录一次成功的显式重门禁运行。
+普通合并的 Bootstrap PR #65/#66 固化；S56 RC 合并前已记录一次成功的显式重门禁运行。
 
 ## 8. Local Tests 与 Coverage
 
@@ -102,7 +102,8 @@ Smoke。Compact 验收及 API/Workflow/1000-task/S29 容量门禁保留在同一
 - Ruff Format、Ruff、Mypy：PASS；
 - `evaluate_v6_core.py --check`：PASS。
 
-最终 PR Remote Backend CI 负责仓库全量 Pytest 与 Coverage；本节不在结果产生前预填覆盖率。
+PR #67 Remote Backend CI 已完成仓库全量 Pytest 与 Coverage 门槛；本节只记录门槛结果，不从定向子集
+外推或伪造全库覆盖率。
 
 ## 9. Remote CI、Compose 与 Review
 
@@ -118,9 +119,34 @@ Smoke。Compact 验收及 API/Workflow/1000-task/S29 容量门禁保留在同一
 | Compose Smoke Test | `33308150834` | success |
 | Required Gate Controller | `33308150818` | success |
 
-S56 PR 的 Remote CI Run IDs、`run_rc_gates=true` RC Run、最新 `@codex review` P0/P1、Review Thread、
-Merge 与合并后 Main Push 结果在流程完成后补录。代码审计使用 GitHub `@codex review`，不以本地模型自审
-替代；最新复审 P0/P1 为零即可按用户指令合并，P2 记录为 Remaining Risk。
+### S56 PR #67
+
+| Workflow | Run ID | Conclusion |
+| --- | ---: | --- |
+| Backend CI | `33313742956` | success |
+| Security CI | `33313742934` | success |
+| Standalone Windows Bundle | `33313742979` | success |
+| V2 to V3 Upgrade CI | `33313743120` | success |
+| Compose Smoke Test | `33313743066` | success；`compact-smoke` 按普通路径跳过 |
+| Required Gate Controller | `33313743086` | success |
+| Frontend CI | 未触发 | PR 不含 Frontend 变更 |
+
+- 最新 GitHub `@codex review` 于 2026-08-30 完成：P0=`0`、P1=`0`、P2=`3`；审计未使用本地模型自审。
+- 显式 RC Compose Run `33314854497` 使用 `run_rc_gates=true`，`smoke` 与 `compact-smoke` 均 success；
+  API/Workflow、1000-task durable queue、S29 5000-queue/500-workflow、Backup/Recovery 全部通过。
+- PR #67 于 `2026-08-30T14:07:41Z` 普通 Squash Merge，无 Admin/Bypass；Head 与 Merge Tree 完全一致。
+
+### S56 合并后 Main Push
+
+| Workflow | Run ID | Conclusion |
+| --- | ---: | --- |
+| Backend CI | `33316015138` | success |
+| Security CI | `33316015155` | success |
+| Standalone Windows Bundle | `33316015132` | success |
+| V2 to V3 Upgrade CI | `33316015179` | success |
+| Compose Smoke Test | `33316015151` | success；Compact/容量步骤按普通路径跳过 |
+| Required Gate Controller | `33316015182` | success |
+| Frontend CI | 未触发 | Merge 不含 Frontend 变更 |
 
 ## 10. Security 与 Remaining Risks
 
@@ -128,5 +154,10 @@ Merge 与合并后 Main Push 结果在流程完成后补录。代码审计使用
 只写与脱敏、外部 MCP 不可信、无任意代码、无写 SQL、无自动 Apply/Publish、Cleanup 失败可见、Stale
 Revision 拒绝。
 
-外部门槛仍未宣称完成：连续 RC 观察、公司 Windows 实机/长时运行、独立安全审批和人工签署。因此本次
-可在代码与自动化证据闭环后判定 `V6_RC_READY=YES`，但 `GA_READY` 必须保持 `NO`。
+最新复审保留三个不阻塞 RC 的 P2：Preview 可选分支应更明确要求已接受且未 Apply 的 Proposal；硬门槛
+状态未来应直接比较未舍入的 numerator/denominator；独立安装 Skill 时 Evaluation Assets 与 Evaluator
+尚未内置在 Skill 目录。三个 Review Thread 已按用户批准的 P0/P1 阻塞策略记录并 Resolve，后续版本可
+独立处理，不能据此扩大当前 Golden Fixture 的质量宣称。
+
+外部门槛仍未宣称完成：连续 RC 观察、公司 Windows 实机/长时运行、独立安全审批和人工签署。代码与
+自动化证据已经闭环，因此判定 `V6_RC_READY=YES`；上述外部门槛未满足，`GA_READY` 必须保持 `NO`。

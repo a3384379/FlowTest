@@ -3,9 +3,9 @@
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
 当前状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并，`main` 已启用无 Bypass 的 Required Gate；V6.0
-Core 的 S48～S55 与 H1 真实 Key Rotation 已合并，S56 正在收口旗舰 Skill、模型无关 Evaluation、兼容性
-和 RC 自动化证据。当前没有正式 Tag 或 GitHub Release；连续 RC、公司实机、安全审批和人工签署仍待完成，
-因此 GA Ready 保持为否。
+Core 的 S48～S56 与 H1 真实 Key Rotation 已合并，旗舰 Skill、模型无关 Evaluation、兼容性和 RC 自动化
+证据已经闭环，`V6_RC_READY=YES`。当前没有正式 Tag 或 GitHub Release；连续 RC、公司实机、安全审批和
+人工签署仍待完成，因此 `GA_READY=NO`。
 正式开发范围见 [V6.0 完整开发方案](docs/development-plan-v6.md)，冻结事实见
 [V6.0 S48 契约基线](docs/release/v6-s48-contract-baseline.md)。
 
