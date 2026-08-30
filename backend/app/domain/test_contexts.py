@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 from hashlib import sha256
-from itertools import pairwise
 from typing import Annotated, Final, Literal
 from urllib.parse import unquote, urlsplit
 
@@ -121,7 +120,10 @@ def is_sensitive_identifier(name: str) -> bool:
     ]
     if any(part in _SENSITIVE_IDENTIFIER_PARTS for part in parts):
         return True
-    return any(pair in _SENSITIVE_IDENTIFIER_PAIRS for pair in pairwise(parts))
+    return any(
+        first in parts and second in parts[parts.index(first) + 1 :]
+        for first, second in _SENSITIVE_IDENTIFIER_PAIRS
+    )
 
 
 class TestContextStatus(StrEnum):

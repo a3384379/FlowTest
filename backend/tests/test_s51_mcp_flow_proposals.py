@@ -342,6 +342,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             "password1",
             "access_key2",
             "DBPassword",
+            "private_signing_key",
             "credentials",
             "client_credentials",
             "passwords",
