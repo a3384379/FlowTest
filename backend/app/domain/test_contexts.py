@@ -67,7 +67,9 @@ _SENSITIVE_IDENTIFIER_PAIRS = frozenset(
     {
         ("api", "key"),
         ("access", "key"),
+        ("encryption", "key"),
         ("private", "key"),
+        ("signing", "key"),
     }
 )
 _SET_COOKIE = re.compile(r"(?<![A-Za-z0-9_])Set-Cookie\s*:\s*\S+", re.IGNORECASE)
