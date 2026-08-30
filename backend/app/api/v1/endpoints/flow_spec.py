@@ -294,19 +294,24 @@ async def execute_sandbox_preview(
             project_id=project_id,
             change_set_id=change_set_id,
             payload=payload,
+            commit=False,
         )
-        command = await DurableExecutionService(session).create_start_command(
-            actor=current_user,
-            project_id=project_id,
-            execution_id=execution.id,
-            actor_key=f"user:{current_user.id}",
-            idempotency_key=idempotency_key,
-            payload={
-                "change_set_id": str(change_set_id),
-                "execution_id": str(execution.id),
-                "run_purpose": "preview",
-            },
-        )
+        try:
+            command = await DurableExecutionService(session).create_start_command(
+                actor=current_user,
+                project_id=project_id,
+                execution_id=execution.id,
+                actor_key=f"user:{current_user.id}",
+                idempotency_key=idempotency_key,
+                payload={
+                    "change_set_id": str(change_set_id),
+                    "execution_id": str(execution.id),
+                    "run_purpose": "preview",
+                },
+            )
+        except Exception:
+            await session.rollback()
+            raise
         try:
             await coordinator.start(plan)
             await DurableExecutionService(session).mark_dispatched(command.id)

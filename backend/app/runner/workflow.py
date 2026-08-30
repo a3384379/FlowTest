@@ -55,23 +55,31 @@ class RemoteWorkflowExecutor:
     ) -> RunnerExecutionResult:
         if isinstance(plan, WorkflowBatchPlan):
             semaphore = asyncio.Semaphore(plan.concurrency)
+            active_tasks: set[asyncio.Task[RunnerBatchChildResult]] = set()
 
             async def execute_child(child: WorkflowRunPlan) -> RunnerBatchChildResult:
                 async with semaphore:
-                    result = await self._execute_run(
-                        child,
-                        network_policy=network_policy,
-                        cancellation=cancellation,
-                        on_progress=on_progress,
-                        resume_checkpoints=(resume_checkpoints or {}).get(
-                            str(child.execution_id), []
-                        ),
-                        reset_retry_budget=reset_retry_budget,
-                    )
-                    return RunnerBatchChildResult(
-                        execution_id=child.execution_id,
-                        result=RunnerWorkflowResult.from_domain(result),
-                    )
+                    task = asyncio.current_task()
+                    if task is not None:
+                        active_tasks.add(task)
+                    try:
+                        result = await self._execute_run(
+                            child,
+                            network_policy=network_policy,
+                            cancellation=cancellation,
+                            on_progress=on_progress,
+                            resume_checkpoints=(resume_checkpoints or {}).get(
+                                str(child.execution_id), []
+                            ),
+                            reset_retry_budget=reset_retry_budget,
+                        )
+                        return RunnerBatchChildResult(
+                            execution_id=child.execution_id,
+                            result=RunnerWorkflowResult.from_domain(result),
+                        )
+                    finally:
+                        if task is not None:
+                            active_tasks.discard(task)
 
             tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
             if plan.max_runtime_seconds is None:
@@ -82,6 +90,9 @@ class RemoteWorkflowExecutor:
                     timeout=plan.max_runtime_seconds,
                 )
                 if pending:
+                    for task in pending:
+                        if task not in active_tasks:
+                            task.cancel()
                     cancellation.cancel()
                     _done, cleanup_pending = await asyncio.wait(
                         pending,

@@ -275,20 +275,25 @@ async def execute_flow_proposal_preview(
             project_id=payload.project_id,
             change_set_id=change_set_id,
             payload=request,
+            commit=False,
         )
         actor_key = f"service-account:{principal.account.id}"
-        command = await DurableExecutionService(session).create_start_command(
-            actor=principal.actor,
-            project_id=payload.project_id,
-            execution_id=execution.id,
-            actor_key=actor_key,
-            idempotency_key=key,
-            payload={
-                "change_set_id": str(change_set_id),
-                "execution_id": str(execution.id),
-                "run_purpose": "preview",
-            },
-        )
+        try:
+            command = await DurableExecutionService(session).create_start_command(
+                actor=principal.actor,
+                project_id=payload.project_id,
+                execution_id=execution.id,
+                actor_key=actor_key,
+                idempotency_key=key,
+                payload={
+                    "change_set_id": str(change_set_id),
+                    "execution_id": str(execution.id),
+                    "run_purpose": "preview",
+                },
+            )
+        except Exception:
+            await session.rollback()
+            raise
         try:
             await coordinator.start(plan)
             await DurableExecutionService(session).mark_dispatched(command.id)

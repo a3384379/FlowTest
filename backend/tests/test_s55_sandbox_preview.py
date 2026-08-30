@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import respx
 from httpx import Response
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from test_s51_mcp_flow_proposals import (
     _plan_chain,
@@ -22,6 +23,8 @@ from app.models.api_assets import Environment, Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
+from app.schemas.sandbox_preview import SandboxPreviewExecuteRequest
+from app.services.durable_execution import DurableExecutionService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
@@ -33,6 +36,19 @@ from app.services.workflows import (
     _bounded_preview_prepared_workflow,
     _validate_preview_target_classification,
 )
+
+
+@pytest.mark.parametrize(
+    "header_name",
+    ["Host", ":authority", "Forwarded", "X-Forwarded-Host", "X-Original-Host"],
+)
+def test_preview_rejects_runtime_routing_headers(header_name: str) -> None:
+    with pytest.raises(ValidationError):
+        SandboxPreviewExecuteRequest(
+            environment_id=uuid4(),
+            approval_id=uuid4(),
+            runtime_headers={header_name: "production.internal"},
+        )
 
 
 @pytest.mark.asyncio
@@ -481,6 +497,60 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         assert environment is not None
         environment.classification = "sandbox"
         await session.commit()
+
+    rollback_approval = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert rollback_approval.status_code == 201, rollback_approval.text
+
+    async def fail_start_command(*_args: Any, **_kwargs: Any) -> object:
+        raise RuntimeError("simulated command persistence failure")
+
+    with monkeypatch.context() as command_patch:
+        command_patch.setattr(
+            DurableExecutionService,
+            "create_start_command",
+            fail_start_command,
+        )
+        command_failed = await client.post(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": "s55-preview-command-failed",
+            },
+            json={
+                "project_id": str(s51_context["project_id"]),
+                "environment_id": str(s51_context["sandbox_environment_id"]),
+                "approval_id": rollback_approval.json()["id"],
+                "runtime_variables": {},
+                "runtime_headers": {},
+            },
+        )
+    assert command_failed.status_code == 500
+    async with s51_context["sessions"]() as session:
+        approval = await session.get(
+            SandboxPreviewApproval,
+            UUID(rollback_approval.json()["id"]),
+        )
+        assert approval is not None
+        assert approval.consumed_at is None
+        assert approval.execution_id is None
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(WorkflowExecution)
+                .where(
+                    WorkflowExecution.preview_approval_id == UUID(rollback_approval.json()["id"])
+                )
+            )
+            == 0
+        )
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"

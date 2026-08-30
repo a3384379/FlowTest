@@ -1,10 +1,35 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from app.domain.sandbox_preview import PreviewBudget
 from app.schemas.workflows import RuntimeVariableName, WorkflowExecutionResponse
+
+_PREVIEW_ROUTING_HEADERS = {
+    ":authority",
+    "forwarded",
+    "host",
+    "x-forwarded-host",
+    "x-forwarded-server",
+    "x-host",
+    "x-http-host-override",
+    "x-original-host",
+}
+
+
+def _reject_preview_routing_headers(headers: dict[str, str]) -> dict[str, str]:
+    blocked = sorted(name for name in headers if name.strip().lower() in _PREVIEW_ROUTING_HEADERS)
+    if blocked:
+        raise ValueError("Sandbox Preview runtime headers cannot override request routing")
+    return headers
+
+
+PreviewRuntimeHeaders = Annotated[
+    dict[str, str],
+    AfterValidator(_reject_preview_routing_headers),
+]
 
 
 class SandboxPreviewApprovalCreate(BaseModel):
@@ -14,7 +39,7 @@ class SandboxPreviewApprovalCreate(BaseModel):
     budget: PreviewBudget = Field(default_factory=PreviewBudget)
     executor_service_account_id: UUID | None = None
     runtime_variables: dict[RuntimeVariableName, str] = Field(default_factory=dict)
-    runtime_headers: dict[str, str] = Field(default_factory=dict)
+    runtime_headers: PreviewRuntimeHeaders = Field(default_factory=dict)
     ttl_seconds: int = Field(default=300, ge=30, le=900)
 
 
@@ -46,7 +71,7 @@ class SandboxPreviewExecuteRequest(BaseModel):
     environment_id: UUID
     approval_id: UUID
     runtime_variables: dict[RuntimeVariableName, str] = Field(default_factory=dict)
-    runtime_headers: dict[str, str] = Field(default_factory=dict)
+    runtime_headers: PreviewRuntimeHeaders = Field(default_factory=dict)
 
 
 class MCPSandboxPreviewExecuteRequest(SandboxPreviewExecuteRequest):

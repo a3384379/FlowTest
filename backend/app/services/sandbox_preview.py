@@ -152,6 +152,7 @@ class SandboxPreviewService:
         project_id: UUID,
         change_set_id: UUID,
         payload: SandboxPreviewExecuteRequest,
+        commit: bool = True,
     ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
         proposal = await self._previewable(
             actor=actor,
@@ -225,8 +226,11 @@ class SandboxPreviewService:
                 "run_purpose": "preview",
             },
         )
-        await self._session.commit()
-        await self._session.refresh(execution)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(execution)
+        else:
+            await self._session.flush()
         return execution, plan
 
     async def _previewable(
