@@ -7,17 +7,47 @@
 成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 已由 PR #60 普通 Squash Merge，最终
 P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53 Evidence Closure 也已
 普通合并且 Main Push Required Gate 成功。S54 Cleanup / Compensation Runtime 已由 PR #62 普通 Squash Merge，
-最终 PR 与 Merge 后 Main Push 七项门禁全部成功。当前正在完成 S55 前置 H1 真实 Key Rotation，
-本地实现和定向验证已通过；当前 Migration Head 为 `20260830_0049`，仍未发布 Alpha/Beta/RC/GA。
+最终 PR 与 Merge 后 Main Push 七项门禁全部成功。H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge，
+最终 P0/P1 为 0，PR 与 Merge 后 Main Push 七项门禁全部成功。当前正在完成 S55 Sandbox Preview Beta；
+实现和定向验证已通过，当前分支 Migration Head 为 `20260830_0050`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
-H1 Key Rotation 的代码能力已进入验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
+H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
 S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
 PR #33/#34 五项 CI 并 squash 合并。V2→V3 原地升级/回滚小阶段已完成真实资产执行、
 MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的独立服务目录、
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 已完成实现与定向验收：V6 S55 Sandbox Preview Beta
+
+### Implemented
+
+- Preview 复用现有 Workflow Snapshot、Execution、Scheduler、Runner、Checkpoint 与 Report；
+  `run_purpose=preview` 明确绑定 Proposal、Context、Environment、一次性 Approval 和 Budget。
+- Environment 新增 `test/sandbox/staging/production/unclassified` 分类，仅 Test/Sandbox 允许预览，
+  Production 使用独立错误码硬拒绝。
+- Approval 绑定 Organization、Project、Proposal/Context Fingerprint、Actor/Service Account、Environment、
+  Budget 与过期时间；数据库行锁与消费状态阻断 Replay。
+- 默认硬上限为 100 Nodes、50 Requests、20 Dataset Rows、5 Parallelism、600 Seconds；主/清理阶段
+  共用请求预算，恢复执行会扣除既有 Checkpoint 消耗。
+- 缺少 Cleanup、未接受或 Stale Proposal、过期 Context、未决 Blocker、无 Scope、跨租户、未配置 Secret、
+  不受支持节点及出站策略失败均 Fail Closed。
+- Proposal Mode 可创建一次性 Approval、启动 Preview、轮询 Live Node Status，并展示 Binding、Assert、
+  Cleanup、Budget、Redactions、Trace 与 Approval Evidence；不提供 Production 选项。
+- MCP 新增 `flowtest.preview_flow_proposal`，仅 `mcp:preview:execute` 服务账号可以消费为其签发的 Approval。
+
+### 当前证据
+
+- 后端 S55 真实链路覆盖人工接受、Production 硬拒绝、Sandbox 执行、幂等重放、Approval Replay 拒绝、
+  Main/Cleanup 实际请求及请求预算 Evidence；S55 + S51 定向集 `4 passed`。
+- 前端 Proposal Mode 定向集 `7 passed`，TypeScript、ESLint 与 Prettier 通过；MCP SDK、GA Red Team 与
+  golden contract 定向集 `3 passed`。
+- 受影响后端 20 个模块 mypy 通过；隔离 PostgreSQL 完成 `0049→0050→0049→0050`，临时库已删除。
+- 最终 GitHub Codex Review、一次完整门禁、PR 合并与 Merge 后 Main 验证仍待完成；未完成前不宣称
+  S55 Beta Exit 或进入 S56。
+- 完整边界与证据见 [S55 Release Evidence](release/v6-s55-sandbox-preview.md)。
 
 ## 已合并并通过主线验收：V6 S54 Cleanup / Compensation Runtime
 

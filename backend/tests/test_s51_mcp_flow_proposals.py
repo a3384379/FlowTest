@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.dependencies import get_workflow_coordinator
 from app.core.database import get_session
 from app.core.security import password_service, token_service
 from app.domain.test_engineering import ContractResponse, OperationContract, fingerprint_contract
@@ -19,9 +20,9 @@ from app.mcp.server import create_mcp_server
 from app.models import Base
 from app.models.access import Project, User
 from app.models.ai import AIChangeItem, AIChangeSet
-from app.models.api_assets import APIDefinition, APIVersion
+from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.organizations import Organization
-from app.models.service_targets import Service
+from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
 from app.services.service_accounts import ServiceAccountService
 
@@ -67,12 +68,32 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         )
         session.add_all([project, other_project])
         await session.flush()
+        sandbox_environment = Environment(
+            project_id=project.id,
+            name="S51 sandbox",
+            base_url="https://sandbox.example.test",
+            classification="sandbox",
+            variables={},
+            headers={},
+            created_by_id=actor.id,
+        )
+        production_environment = Environment(
+            project_id=project.id,
+            name="S51 production",
+            base_url="https://production.example.test",
+            classification="production",
+            variables={},
+            headers={},
+            created_by_id=actor.id,
+        )
+        session.add_all([sandbox_environment, production_environment])
+        await session.flush()
         account = await ServiceAccountService(session).create(
             actor=actor,
             organization_id=organization.id,
             name="S51 planner",
             account_key="s51-planner",
-            scopes=["mcp:evidence:write", "mcp:flow:propose"],
+            scopes=["mcp:evidence:write", "mcp:flow:propose", "mcp:preview:execute"],
             expires_at=None,
             metadata={},
         )
@@ -88,6 +109,23 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         )
         session.add(service)
         await session.flush()
+        sandbox_environment.default_service_id = service.id
+        session.add(
+            ServiceEndpoint(
+                project_id=project.id,
+                environment_id=sandbox_environment.id,
+                service_id=service.id,
+                variant="default",
+                base_url="https://sandbox.example.test",
+                enabled=True,
+                tls_verify=True,
+                headers={},
+                variables={},
+                secret_refs=[],
+                revision=1,
+                created_by_id=actor.id,
+            )
+        )
         contract = OperationContract(
             operation="health.check",
             method="GET",
@@ -152,7 +190,9 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         async with sessions() as session:
             yield session
 
+    coordinator = RecordingWorkflowCoordinator()
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_workflow_coordinator] = lambda: coordinator
     async with AsyncClient(
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://test",
@@ -165,6 +205,10 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
             "service_id": service.id,
             "definition_id": definition.id,
             "workflow_id": workflow.id,
+            "service_account_id": account.account.id,
+            "sandbox_environment_id": sandbox_environment.id,
+            "production_environment_id": production_environment.id,
+            "coordinator": coordinator,
             "mcp_headers": {"Authorization": f"Bearer {account.token}"},
             "user_headers": {
                 "Authorization": f"Bearer {token_service.create_access_token(actor.id)}",
@@ -173,6 +217,14 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         }
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+class RecordingWorkflowCoordinator:
+    def __init__(self) -> None:
+        self.plans: list[Any] = []
+
+    async def start(self, plan: Any) -> None:
+        self.plans.append(plan)
 
 
 @pytest.mark.asyncio
@@ -411,6 +463,8 @@ async def test_official_mcp_sdk_tools_complete_the_draft_only_chain(
 
 async def _plan_chain(
     context: dict[str, Any],
+    *,
+    with_cleanup: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     client = context["client"]
     begun = await client.post(
@@ -447,7 +501,19 @@ async def _plan_chain(
                 "evidence_refs": ["environment://s51/revision/1"],
             },
             "operations": [{"definition_id": str(context["definition_id"])}],
-            "cleanup_requirements": [],
+            "cleanup_requirements": (
+                [
+                    {
+                        "id": "cleanup-health",
+                        "operation_ref": "health.check",
+                        "cleanup_for_step_ids": ["health-check"],
+                        "best_effort": False,
+                        "evidence_refs": ["contract://orders/health"],
+                    }
+                ]
+                if with_cleanup
+                else []
+            ),
         },
     )
     assert planned.status_code == 200, planned.text

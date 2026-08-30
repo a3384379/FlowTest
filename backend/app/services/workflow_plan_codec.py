@@ -150,6 +150,7 @@ class StoredRunPlan(BaseModel):
     definition: WorkflowDefinition
     prepared: StoredPreparedExecution
     runtime_variables: dict[str, str]
+    request_budget: int | None = Field(default=None, ge=1, le=10_000)
 
 
 class StoredBatchPlan(BaseModel):
@@ -227,6 +228,7 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
+        request_budget=plan.request_budget,
     )
 
 
@@ -330,6 +332,7 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
             },
         ),
         runtime_variables=stored.runtime_variables,
+        request_budget=stored.request_budget,
     )
 
 

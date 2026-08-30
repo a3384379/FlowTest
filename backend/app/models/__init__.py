@@ -54,6 +54,7 @@ from app.models.runner_fabric import (
     RunnerRegistrationToken,
     RunnerTask,
 )
+from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import (
@@ -134,6 +135,7 @@ __all__ = [
     "RunnerPool",
     "RunnerRegistrationToken",
     "RunnerTask",
+    "SandboxPreviewApproval",
     "SchemaArtifact",
     "Secret",
     "SemanticGapWaiver",

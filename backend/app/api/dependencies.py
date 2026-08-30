@@ -17,6 +17,7 @@ from app.core.security import token_service
 from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
 from app.domain.mcp_read import MCP_READ_SCOPE
 from app.domain.runtime_profiles import RuntimeProfile
+from app.domain.sandbox_preview import MCP_PREVIEW_EXECUTE_SCOPE
 from app.domain.tenant import TenantContext
 from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
 from app.http.imports import HttpImportDocumentFetcher
@@ -204,6 +205,22 @@ async def get_mcp_flow_proposal_principal(
         reset_tenant_context(context_token)
 
 
+async def get_mcp_preview_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_PREVIEW_EXECUTE_SCOPE,
+        missing_scope_message="服务账号缺少 Sandbox Preview 执行权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
 async def _authenticate_mcp_principal(
     *,
     session: AsyncSession,
@@ -256,6 +273,11 @@ MCPEvidenceCurrent = Annotated[
 MCPFlowProposalCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_flow_proposal_principal),
+]
+
+MCPPreviewCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_preview_principal),
 ]
 
 

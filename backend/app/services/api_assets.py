@@ -120,6 +120,7 @@ class APIAssetService:
         project_id: UUID,
         name: str,
         base_url: str,
+        classification: str,
         variables: dict[str, str],
         headers: dict[str, str],
     ) -> Environment:
@@ -131,6 +132,7 @@ class APIAssetService:
             project_id=project_id,
             name=normalized_name,
             base_url=base_url.rstrip("/"),
+            classification=classification,
             variables=variables,
             headers=headers,
             created_by_id=actor.id,
@@ -171,6 +173,7 @@ class APIAssetService:
         environment_id: UUID,
         name: str | None,
         base_url: str | None,
+        classification: str | None,
         default_service_id: UUID | None,
         change_default_service: bool,
         variables: dict[str, str] | None,
@@ -193,6 +196,8 @@ class APIAssetService:
                 environment=environment,
                 previous_base_url=previous_base_url,
             )
+        if classification is not None:
+            environment.classification = classification
         if variables is not None:
             environment.variables = variables
         if headers is not None:

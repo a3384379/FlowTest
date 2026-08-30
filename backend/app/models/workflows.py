@@ -61,6 +61,14 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="workflow_execution_status",
         ),
         CheckConstraint(
+            "(run_purpose = 'standard' AND workflow_id IS NOT NULL "
+            "AND workflow_version_id IS NOT NULL AND source_change_set_id IS NULL "
+            "AND preview_approval_id IS NULL) OR "
+            "(run_purpose = 'preview' AND source_change_set_id IS NOT NULL "
+            "AND preview_approval_id IS NOT NULL)",
+            name="workflow_execution_run_purpose",
+        ),
+        CheckConstraint(
             "main_status IS NULL OR main_status IN ('passed', 'failed', 'cancelled')",
             name="workflow_execution_main_status",
         ),
@@ -84,10 +92,10 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
-    workflow_id: Mapped[UUID] = mapped_column(
+    workflow_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("workflows.id", ondelete="RESTRICT"), index=True
     )
-    workflow_version_id: Mapped[UUID] = mapped_column(
+    workflow_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("workflow_versions.id", ondelete="RESTRICT"), index=True
     )
     environment_id: Mapped[UUID] = mapped_column(
@@ -100,6 +108,19 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("workflow_executions.id", ondelete="CASCADE"), index=True
     )
     dataset_row_index: Mapped[int | None] = mapped_column(Integer)
+    run_purpose: Mapped[str] = mapped_column(
+        String(16), default="standard", server_default="standard", index=True
+    )
+    source_change_set_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_change_sets.id", ondelete="RESTRICT"), index=True
+    )
+    preview_approval_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sandbox_preview_approvals.id", ondelete="RESTRICT"), index=True
+    )
+    preview_budget: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+    preview_evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}"
+    )
     status: Mapped[str] = mapped_column(String(16), index=True)
     main_status: Mapped[str | None] = mapped_column(String(16))
     cleanup_status: Mapped[str | None] = mapped_column(String(16))

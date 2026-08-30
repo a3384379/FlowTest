@@ -91,6 +91,7 @@ async def create_environment(
         project_id=project_id,
         name=payload.name,
         base_url=str(payload.base_url),
+        classification=payload.classification.value,
         variables=payload.variables,
         headers=payload.headers,
     )
@@ -111,6 +112,9 @@ async def update_environment(
         environment_id=environment_id,
         name=payload.name,
         base_url=str(payload.base_url) if payload.base_url is not None else None,
+        classification=(
+            payload.classification.value if payload.classification is not None else None
+        ),
         default_service_id=payload.default_service_id,
         change_default_service="default_service_id" in payload.model_fields_set,
         variables=payload.variables,

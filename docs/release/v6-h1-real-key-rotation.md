@@ -3,7 +3,8 @@
 ## 1. 阶段状态
 
 S54 已由 PR #62 普通 Squash Merge，PR 与 Merge 后 Main Push 七项门禁全部成功。H1 从最新 Main
-创建独立分支 `codex/v6-h1-real-key-rotation`；当前实现与定向验证已完成，待 PR 复审和最终门禁。
+创建独立分支 `codex/v6-h1-real-key-rotation`，由 PR #63 普通 Squash Merge；最终复审 P0/P1 为 0，
+PR 与 Merge 后 Main Push 七项门禁全部成功。
 
 ## 2. 实现
 
@@ -39,8 +40,12 @@ S54 已由 PR #62 普通 Squash Merge，PR 与 Merge 后 Main Push 七项门禁�
 | Rollback | Pass | v2→v1 真实重加密回归 |
 | Audit | Pass | Applied/Rolled-back 计数与摘要 |
 | Full/Compact/Standalone 配置与迁移边界 | Pass | Compose/Standalone/Transfer 配置与文档 |
-| PR Review P0/P1 为 0 | Pending | 待 GitHub Codex 复审 |
-| 最终一次完整门禁 | Pending | P0/P1 清零后执行 |
+| PR Review P0/P1 为 0 | Pass | PR #63 最终 GitHub Codex Review |
+| 最终一次完整门禁 | Pass | PR #63 与 Merge 后 Main Push 七项门禁成功 |
+
+Merge 后 Main Push 运行：Compose `33292923475`、Security `33292923482`、Windows
+`33292923483`、Upgrade `33292923488`、Required `33292923491`、Frontend
+`33292923473`、Backend `33292923493`。
 
 ## 5. 边界
 

@@ -16,8 +16,10 @@ from app.engine.scheduler import (
     ExecutionContext,
     NodeRunRecord,
     NodeStatusUpdate,
+    RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
+    node_type_consumes_request,
 )
 from app.observability.tracing import TracingNodeExecutor
 from app.runner.results import (
@@ -129,6 +131,7 @@ class RemoteWorkflowExecutor:
                     output=item.output,
                     extracted_variables=item.extracted_variables,
                 )
+            request_budget = _remaining_request_budget(plan.request_budget, resume_records)
             try:
                 result = await WorkflowScheduler(TracingNodeExecutor(node_executor)).run(
                     plan.definition,
@@ -138,9 +141,17 @@ class RemoteWorkflowExecutor:
                     resume_records=resume_records,
                     resume_attempts=resume_attempts,
                     reset_retry_budget=reset_retry_budget,
+                    shared_request_budget=request_budget,
                 )
             finally:
                 await node_executor.close()
+        context_snapshot = cast(dict[str, JsonValue], redact(result.context))
+        if plan.request_budget is not None and request_budget is not None:
+            context_snapshot["preview_request_budget"] = {
+                "limit": plan.request_budget,
+                "used": plan.request_budget - request_budget.remaining,
+                "remaining": request_budget.remaining,
+            }
         return WorkflowRunResult(
             status=result.status,
             records=tuple(
@@ -153,11 +164,24 @@ class RemoteWorkflowExecutor:
                 )
                 for record in result.records
             ),
-            context=cast(dict[str, JsonValue], redact(result.context)),
+            context=context_snapshot,
             main_status=result.main_status,
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
         )
+
+
+def _remaining_request_budget(
+    limit: int | None,
+    records: tuple[NodeRunRecord, ...],
+) -> RequestBudget | None:
+    if limit is None:
+        return None
+    attempts: dict[str, int] = {}
+    for record in records:
+        if node_type_consumes_request(record.node_type):
+            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+    return RequestBudget(max(limit - sum(attempts.values()), 0))
 
 
 def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:

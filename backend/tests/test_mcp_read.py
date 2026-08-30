@@ -716,6 +716,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.inspect_test_evidence",
             "flowtest.list_projects",
             "flowtest.plan_integration_test",
+            "flowtest.preview_flow_proposal",
             "flowtest.propose_flow_draft",
             "flowtest.propose_test_design",
             "flowtest.validate_flowspec",

@@ -14,6 +14,7 @@ from pydantic import (
 
 from app.domain.api_assets import AuthKind, BodyKind, ExtractionKind, HttpMethod, JsonValue
 from app.domain.assertions import AssertionKind, ComparisonOperator
+from app.domain.sandbox_preview import EnvironmentClassification
 from app.domain.scopes import HeaderScope, VariableScope
 from app.domain.test_engineering import OperationContract
 
@@ -36,6 +37,7 @@ class ProjectConfigurationResponse(ProjectConfigurationUpdate):
 class EnvironmentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     base_url: HttpUrl
+    classification: EnvironmentClassification = EnvironmentClassification.UNCLASSIFIED
     variables: dict[VariableName, str] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
 
@@ -43,6 +45,7 @@ class EnvironmentCreate(BaseModel):
 class EnvironmentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     base_url: HttpUrl | None = None
+    classification: EnvironmentClassification | None = None
     default_service_id: UUID | None = None
     variables: dict[VariableName, str] | None = None
     headers: dict[str, str] | None = None
@@ -55,6 +58,7 @@ class EnvironmentResponse(BaseModel):
     project_id: UUID
     name: str
     base_url: str
+    classification: EnvironmentClassification
     default_service_id: UUID | None
     variables: dict[str, str]
     headers: dict[str, str]

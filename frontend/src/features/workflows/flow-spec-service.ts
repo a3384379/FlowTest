@@ -10,6 +10,11 @@ import {
   type FlowSpecMcpProposalPage,
   type FlowSpecValidationResult,
   type FlowSpecVisualProposal,
+  type ExecutionCheckpoint,
+  type PreviewBudget,
+  type SandboxPreviewApproval,
+  type WorkflowExecution,
+  type WorkflowExecutionDetail,
 } from '../../lib/api'
 
 export async function exportFlowSpec(
@@ -120,4 +125,56 @@ export async function getVisualFlowProposal(
     `/projects/${projectId}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
   )
   return response.data
+}
+
+export async function createSandboxPreviewApproval(
+  projectId: string,
+  changeSetId: string,
+  environmentId: string,
+  budget?: PreviewBudget,
+): Promise<SandboxPreviewApproval> {
+  const response = await apiClient.post<SandboxPreviewApproval>(
+    `/projects/${projectId}/flow-specs/change-sets/${changeSetId}/preview-approvals`,
+    {
+      environment_id: environmentId,
+      ...(budget ? { budget } : {}),
+    },
+  )
+  return response.data
+}
+
+export async function executeSandboxPreview(
+  projectId: string,
+  changeSetId: string,
+  environmentId: string,
+  approvalId: string,
+): Promise<WorkflowExecution> {
+  const response = await apiClient.post<{ execution: WorkflowExecution }>(
+    `/projects/${projectId}/flow-specs/change-sets/${changeSetId}/preview-executions`,
+    { environment_id: environmentId, approval_id: approvalId },
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+  )
+  return response.data.execution
+}
+
+export async function getSandboxPreviewExecution(
+  projectId: string,
+  executionId: string,
+): Promise<WorkflowExecutionDetail> {
+  return (
+    await apiClient.get<WorkflowExecutionDetail>(
+      `/projects/${projectId}/workflow-executions/${executionId}`,
+    )
+  ).data
+}
+
+export async function listSandboxPreviewCheckpoints(
+  projectId: string,
+  executionId: string,
+): Promise<ExecutionCheckpoint[]> {
+  return (
+    await apiClient.get<ExecutionCheckpoint[]>(
+      `/projects/${projectId}/workflow-executions/${executionId}/checkpoints`,
+    )
+  ).data
 }

@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Header, Query, status
 
-from app.api.dependencies import CurrentUser, SessionDependency
+from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
+from app.composition import build_workflow_service
 from app.core.errors import AppError
 from app.schemas.flow_spec import (
     FlowSpecApplyResponse,
@@ -22,7 +23,17 @@ from app.schemas.flow_spec import (
     FlowSpecValidationResponse,
     FlowSpecVisualProposalResponse,
 )
+from app.schemas.sandbox_preview import (
+    SandboxPreviewApprovalCreate,
+    SandboxPreviewApprovalResponse,
+    SandboxPreviewExecuteRequest,
+    SandboxPreviewExecutionResponse,
+)
+from app.schemas.workflows import WorkflowExecutionResponse
+from app.services.durable_execution import DurableExecutionService
 from app.services.flow_spec import FlowSpecChangeSetCursor, FlowSpecChangeSetView, FlowSpecService
+from app.services.idempotency import IdempotencyService
+from app.services.sandbox_preview import SandboxPreviewService
 
 router = APIRouter(prefix="/projects/{project_id}/flow-specs")
 
@@ -237,6 +248,89 @@ async def review_flow_spec_change_set(
         note=payload.note,
     )
     return _detail(view)
+
+
+@router.post(
+    "/change-sets/{change_set_id}/preview-approvals",
+    response_model=SandboxPreviewApprovalResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_sandbox_preview_approval(
+    project_id: UUID,
+    change_set_id: UUID,
+    payload: SandboxPreviewApprovalCreate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SandboxPreviewApprovalResponse:
+    approval = await SandboxPreviewService(session).create_approval(
+        actor=current_user,
+        project_id=project_id,
+        change_set_id=change_set_id,
+        payload=payload,
+    )
+    return SandboxPreviewApprovalResponse.model_validate(approval)
+
+
+@router.post(
+    "/change-sets/{change_set_id}/preview-executions",
+    response_model=SandboxPreviewExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def execute_sandbox_preview(
+    project_id: UUID,
+    change_set_id: UUID,
+    payload: SandboxPreviewExecuteRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> SandboxPreviewExecutionResponse:
+    async def start() -> SandboxPreviewExecutionResponse:
+        execution, plan = await SandboxPreviewService(
+            session,
+            workflows=build_workflow_service(session),
+        ).prepare_execution(
+            actor=current_user,
+            project_id=project_id,
+            change_set_id=change_set_id,
+            payload=payload,
+        )
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "change_set_id": str(change_set_id),
+                "execution_id": str(execution.id),
+                "run_purpose": "preview",
+            },
+        )
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command.id)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command.id,
+                error_code="PREVIEW_COMMAND_DISPATCH_FAILED",
+                error_message="Sandbox Preview 启动命令未能提交到执行运行时",
+            )
+            raise
+        return SandboxPreviewExecutionResponse(
+            execution=WorkflowExecutionResponse.model_validate(execution)
+        )
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"sandbox_preview.execute:{change_set_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return SandboxPreviewExecutionResponse.model_validate(response)
 
 
 @router.post(
