@@ -16,7 +16,7 @@ from test_s51_mcp_flow_proposals import (
 from app.core.encryption import secret_box
 from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
-from app.engine.contracts import WorkflowDefinition
+from app.engine.contracts import CleanupRunWhen, WorkflowDefinition
 from app.engine.scheduler import CancellationToken
 from app.models.api_assets import Environment, Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
@@ -29,6 +29,7 @@ from app.services.workflows import (
     WorkflowBatchPlan,
     WorkflowRunPlan,
     WorkflowService,
+    _bounded_preview_definition,
     _bounded_preview_prepared_workflow,
     _validate_preview_target_classification,
 )
@@ -165,6 +166,25 @@ def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
         assert subflow.definition.run_policy.max_runtime_seconds == 120
     snapshot_policy = leaf.snapshot["workflow"]["definition"]["run_policy"]
     assert snapshot_policy["max_runtime_seconds"] == 120
+
+
+def test_preview_rejects_cleanup_that_only_runs_after_success() -> None:
+    definition = _preview_test_definition(with_cleanup=True)
+    cleanup = next(node for node in definition.nodes if node.id == "cleanup")
+    success_only = definition.model_copy(
+        update={
+            "nodes": [
+                node.model_copy(update={"run_when": CleanupRunWhen.SUCCESS})
+                if node is cleanup
+                else node
+                for node in definition.nodes
+            ]
+        }
+    )
+
+    with pytest.raises(AppError) as error_info:
+        _bounded_preview_definition(success_only, PreviewBudget())
+    assert error_info.value.code == "PREVIEW_CLEANUP_REQUIRED"
 
 
 def test_preview_rejects_targets_without_environment_classification() -> None:

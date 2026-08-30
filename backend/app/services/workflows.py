@@ -43,6 +43,7 @@ from app.engine.contracts import (
     ApiNodeConfig,
     ApiNodeMultipartBody,
     AssertNodeConfig,
+    CleanupRunWhen,
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
@@ -2102,10 +2103,13 @@ def _bounded_preview_definition(
     budget: PreviewBudget,
 ) -> WorkflowDefinition:
     cleanup_nodes = [node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP]
-    if not cleanup_nodes or definition.run_policy.force_cancel_skips_cleanup:
+    if (
+        not _preview_cleanup_covers_all_outcomes(cleanup_nodes)
+        or definition.run_policy.force_cancel_skips_cleanup
+    ):
         raise AppError(
             code="PREVIEW_CLEANUP_REQUIRED",
-            message="Sandbox Preview 必须提供不可被普通取消跳过的 Cleanup",
+            message="Sandbox Preview 必须提供覆盖成功、失败和取消的 Cleanup",
             status_code=409,
         )
     settings = definition.settings.model_copy(
@@ -2129,6 +2133,22 @@ def _bounded_preview_definition(
         }
     )
     return definition.model_copy(update={"settings": settings, "run_policy": run_policy})
+
+
+def _preview_cleanup_covers_all_outcomes(cleanup_nodes: list[WorkflowNode]) -> bool:
+    required = {
+        CleanupRunWhen.SUCCESS,
+        CleanupRunWhen.FAILURE,
+        CleanupRunWhen.CANCEL,
+    }
+    coverage: dict[tuple[str, ...], set[CleanupRunWhen]] = {}
+    for node in cleanup_nodes:
+        outcomes = coverage.setdefault(tuple(sorted(node.cleanup_for)), set())
+        if node.run_when is CleanupRunWhen.ALWAYS:
+            outcomes.update(required)
+        else:
+            outcomes.add(node.run_when)
+    return bool(coverage) and all(required <= outcomes for outcomes in coverage.values())
 
 
 def _prepared_preview_target_fingerprint(prepared: PreparedWorkflow) -> str:
