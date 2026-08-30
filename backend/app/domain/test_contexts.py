@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 from hashlib import sha256
+from itertools import pairwise
 from typing import Annotated, Final, Literal
 from urllib.parse import unquote, urlsplit
 
@@ -42,11 +43,32 @@ _JWT = re.compile(
     r"(?![A-Za-z0-9_-])"
 )
 _AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")
-_SECRET_ASSIGNMENT = re.compile(
-    r"(?<![A-Za-z0-9_])(?:authorization|cookie|password|passwd|secret|token|api[_ -]?key)"
+_NAMED_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_])(?P<name>[A-Za-z][A-Za-z0-9_. -]{0,159}?)"
     r"\s*[:=]\s*(?:'(?:\\.|[^'\\\r\n]){4,}'|\"(?:\\.|[^\"\\\r\n]){4,}\"|"
     r"[^\s,;'\"\r\n]{4,})",
     re.IGNORECASE,
+)
+_SENSITIVE_IDENTIFIER_PARTS = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "cookie",
+        "credential",
+        "password",
+        "passwd",
+        "privatekey",
+        "accesskey",
+        "secret",
+        "token",
+    }
+)
+_SENSITIVE_IDENTIFIER_PAIRS = frozenset(
+    {
+        ("api", "key"),
+        ("access", "key"),
+        ("private", "key"),
+    }
 )
 _SET_COOKIE = re.compile(r"(?<![A-Za-z0-9_])Set-Cookie\s*:\s*\S+", re.IGNORECASE)
 _CONNECTION_STRING = re.compile(
@@ -79,6 +101,20 @@ def evidence_state_scalar_text(value: str | int | float | bool) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def is_sensitive_identifier(name: str) -> bool:
+    segmented = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
+    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", segmented)
+    segmented = re.sub(
+        r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])",
+        "_",
+        segmented,
+    )
+    parts = [part for part in re.split(r"[^a-z0-9]+", segmented.lower()) if part]
+    if any(part in _SENSITIVE_IDENTIFIER_PARTS for part in parts):
+        return True
+    return any(pair in _SENSITIVE_IDENTIFIER_PAIRS for pair in pairwise(parts))
 
 
 class TestContextStatus(StrEnum):
@@ -1098,11 +1134,14 @@ def _is_sensitive_literal(value: str, *, path: str) -> bool:
             _BASIC,
             _JWT,
             _AWS_KEY,
-            _SECRET_ASSIGNMENT,
             _SET_COOKIE,
             _CONNECTION_STRING,
             _EMAIL,
         )
+    ):
+        return True
+    if any(
+        is_sensitive_identifier(match.group("name")) for match in _NAMED_ASSIGNMENT.finditer(value)
     ):
         return True
     if _looks_like_high_entropy_credential(value):

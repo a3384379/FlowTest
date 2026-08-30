@@ -1,7 +1,5 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
-import re
-from itertools import pairwise
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.flow_spec import FlowSpecIssue
-from app.domain.test_contexts import first_sensitive_value
+from app.domain.test_contexts import first_sensitive_value, is_sensitive_identifier
 from app.models.access import User
 from app.schemas.flow_spec import FlowSpecImportRequest
 from app.schemas.test_contexts import (
@@ -182,49 +180,13 @@ class MCPFlowProposalService:
             )
 
 
-_SENSITIVE_PARAMETER_NAME_PARTS = frozenset(
-    {
-        "apikey",
-        "authorization",
-        "cookie",
-        "credential",
-        "password",
-        "passwd",
-        "privatekey",
-        "accesskey",
-        "secret",
-        "token",
-    }
-)
-_SENSITIVE_PARAMETER_NAME_PAIRS = frozenset(
-    {
-        ("api", "key"),
-        ("access", "key"),
-        ("private", "key"),
-    }
-)
-
-
-def _parameter_name_parts(name: str) -> list[str]:
-    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
-    segmented = re.sub(r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", "_", segmented)
-    return [part for part in re.split(r"[^a-z0-9]+", segmented.lower()) if part]
-
-
-def _is_sensitive_parameter_name(name: str) -> bool:
-    parts = _parameter_name_parts(name)
-    if any(part in _SENSITIVE_PARAMETER_NAME_PARTS for part in parts):
-        return True
-    return any(pair in _SENSITIVE_PARAMETER_NAME_PAIRS for pair in pairwise(parts))
-
-
 def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
-    if any(_is_sensitive_parameter_name(name) for name in payload.spec.variables):
+    if any(is_sensitive_identifier(name) for name in payload.spec.variables):
         return True
     for parameter in payload.spec.parameters:
         if parameter.value is None:
             continue
-        if _is_sensitive_parameter_name(parameter.name):
+        if is_sensitive_identifier(parameter.name):
             return True
     return False
 
