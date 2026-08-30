@@ -55,7 +55,14 @@ class RemoteWorkflowExecutor:
         reset_retry_budget: bool = False,
     ) -> RunnerExecutionResult:
         if isinstance(plan, WorkflowBatchPlan):
-            runtime_seconds = _batch_runtime_seconds_or_raise(plan, cancellation)
+            runtime_seconds = await self._batch_runtime_seconds_or_cleanup(
+                plan,
+                network_policy=network_policy,
+                cancellation=cancellation,
+                on_progress=on_progress,
+                resume_checkpoints=resume_checkpoints or {},
+                reset_retry_budget=reset_retry_budget,
+            )
             semaphore = asyncio.Semaphore(plan.concurrency)
             active_tasks: set[asyncio.Task[RunnerBatchChildResult]] = set()
 
@@ -123,6 +130,68 @@ class RemoteWorkflowExecutor:
             execution_id=plan.execution_id,
             result=RunnerWorkflowResult.from_domain(result),
         )
+
+    async def _batch_runtime_seconds_or_cleanup(
+        self,
+        plan: WorkflowBatchPlan,
+        *,
+        network_policy: OutboundNetworkPolicy,
+        cancellation: CancellationToken,
+        on_progress: RunnerProgressCallback | None,
+        resume_checkpoints: dict[str, list[RunnerCheckpointResume]],
+        reset_retry_budget: bool,
+    ) -> float | None:
+        runtime_seconds = _remaining_batch_runtime_seconds(plan)
+        if runtime_seconds is None or runtime_seconds > 0:
+            return runtime_seconds
+        await self._resume_expired_batch_cleanup(
+            plan,
+            network_policy=network_policy,
+            cancellation=cancellation,
+            on_progress=on_progress,
+            resume_checkpoints=resume_checkpoints,
+            reset_retry_budget=reset_retry_budget,
+        )
+        raise PreviewRuntimeBudgetExceeded("Sandbox Preview dataset runtime budget exceeded")
+
+    async def _resume_expired_batch_cleanup(
+        self,
+        plan: WorkflowBatchPlan,
+        *,
+        network_policy: OutboundNetworkPolicy,
+        cancellation: CancellationToken,
+        on_progress: RunnerProgressCallback | None,
+        resume_checkpoints: dict[str, list[RunnerCheckpointResume]],
+        reset_retry_budget: bool,
+    ) -> None:
+        cancellation.cancel()
+        semaphore = asyncio.Semaphore(plan.concurrency)
+
+        async def resume_child(child: WorkflowRunPlan) -> None:
+            async with semaphore:
+                await self._execute_run(
+                    child,
+                    network_policy=network_policy,
+                    cancellation=cancellation,
+                    on_progress=on_progress,
+                    resume_checkpoints=resume_checkpoints[str(child.execution_id)],
+                    reset_retry_budget=reset_retry_budget,
+                )
+
+        tasks = [
+            asyncio.create_task(resume_child(child))
+            for child in plan.children
+            if resume_checkpoints.get(str(child.execution_id))
+        ]
+        if not tasks:
+            return
+        _done, pending = await asyncio.wait(
+            tasks,
+            timeout=plan.cleanup_timeout_seconds or 1,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _execute_run(
         self,
@@ -206,17 +275,6 @@ class RemoteWorkflowExecutor:
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
         )
-
-
-def _batch_runtime_seconds_or_raise(
-    plan: WorkflowBatchPlan,
-    cancellation: CancellationToken,
-) -> float | None:
-    runtime_seconds = _remaining_batch_runtime_seconds(plan)
-    if runtime_seconds is not None and runtime_seconds <= 0:
-        cancellation.cancel()
-        raise PreviewRuntimeBudgetExceeded("Sandbox Preview dataset runtime budget exceeded")
-    return runtime_seconds
 
 
 def _remaining_batch_runtime_seconds(plan: WorkflowBatchPlan) -> float | None:

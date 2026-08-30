@@ -554,6 +554,119 @@ async def test_for_each_nested_requests_share_the_parent_request_budget() -> Non
 
 
 @pytest.mark.asyncio
+async def test_for_each_resume_reserves_only_remaining_nested_requests() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000107")
+    loop = WorkflowNode.model_validate(
+        _node(
+            "loop",
+            "for_each",
+            {
+                "workflow_id": str(workflow_id),
+                "workflow_version": 1,
+                "source_node_id": "source",
+                "expression": "items",
+                "concurrency": 1,
+                "fail_fast": False,
+            },
+        )
+    )
+    cleanup = _capability_node("cleanup", "flow.delay", {"seconds": 0})
+    cleanup.update(
+        {
+            "phase": "cleanup",
+            "run_when": "always",
+            "cleanup_for": ["request"],
+        }
+    )
+    nested = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "3.0",
+            "nodes": [
+                _capability_node("start", "flow.start", {}),
+                _capability_node("request", "flow.delay", {"seconds": 0}),
+                _capability_node("end", "flow.end", {}),
+                cleanup,
+            ],
+            "edges": [_edge("start", "request"), _edge("request", "end")],
+            "run_policy": {"request_budget": 1, "cleanup_request_budget": 1},
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="d" * 64,
+        definition=nested,
+        requests={},
+        subflows={},
+        snapshot={"preview_request_reservation": 2},
+    )
+    wrapper_payload = _wrapper_workflow(loop).model_dump(mode="json")
+    wrapper_payload["run_policy"] = {"request_budget": 2}
+    wrapper = WorkflowDefinition.model_validate(wrapper_payload)
+    initial_context = ExecutionContext()
+    initial_context.record_output("source", {"items": ["a"]})
+    initial_updates: list[NodeStatusUpdate] = []
+
+    async def capture_initial(update: NodeStatusUpdate) -> None:
+        initial_updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        initial_executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={loop.id: prepared},
+        )
+        initial = await WorkflowScheduler(initial_executor).run(
+            wrapper,
+            context=initial_context,
+            on_node_status=capture_initial,
+        )
+
+    assert initial.status == "passed"
+    terminal_main = tuple(
+        _checkpoint_record(update)
+        for update in initial_updates
+        if update.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+        and update.name in {"start", "request", "end"}
+        and update.status.is_terminal
+    )
+    assert len(terminal_main) == 3
+    resumed_context = ExecutionContext()
+    resumed_context.record_output("source", {"items": ["a"]})
+    resumed_updates: list[NodeStatusUpdate] = []
+
+    async def capture_resumed(update: NodeStatusUpdate) -> None:
+        resumed_updates.append(update)
+
+    async with httpx.AsyncClient() as client:
+        resumed_executor = WorkflowNodeExecutor(
+            client,
+            {},
+            wrapper,
+            OutboundNetworkPolicy(),
+            subflows={loop.id: prepared},
+        )
+        resumed = await WorkflowScheduler(resumed_executor).run(
+            wrapper,
+            context=resumed_context,
+            on_node_status=capture_resumed,
+            resume_records=terminal_main,
+            resume_attempts={record.node_id: record.attempts for record in terminal_main},
+        )
+
+    assert resumed.status == "passed"
+    assert not any(
+        update.name == "request" and update.request_reserved for update in resumed_updates
+    )
+    assert any(
+        update.name == "cleanup" and update.status is NodeStatus.PASSED
+        for update in resumed_updates
+    )
+
+
+@pytest.mark.asyncio
 async def test_nested_cleanup_resume_freezes_the_completed_main_phase() -> None:
     workflow_id = UUID("00000000-0000-0000-0000-000000000105")
     node = WorkflowNode.model_validate(

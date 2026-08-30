@@ -521,9 +521,17 @@ class WorkflowNodeExecutor:
         item: JsonValue,
     ) -> dict[str, JsonValue]:
         async with semaphore:
+            checkpoint_scope = _nested_scope(
+                context.checkpoint_scope,
+                "for_each",
+                node.id,
+                index=index,
+            )
             _require_preview_for_each_request_reservation(
                 prepared,
                 context.request_budget,
+                checkpoint_scope=checkpoint_scope,
+                checkpoint_records=context.nested_checkpoint_records,
             )
             variables = {
                 **context.resolved_variables(),
@@ -535,12 +543,7 @@ class WorkflowNodeExecutor:
                 variables,
                 context.request_budget,
                 status_callback=context.status_callback,
-                checkpoint_scope=_nested_scope(
-                    context.checkpoint_scope,
-                    "for_each",
-                    node.id,
-                    index=index,
-                ),
+                checkpoint_scope=checkpoint_scope,
                 checkpoint_phase=context.checkpoint_phase or node.phase,
                 checkpoint_best_effort=(
                     context.checkpoint_best_effort
@@ -684,15 +687,72 @@ class WorkflowNodeExecutor:
 def _require_preview_for_each_request_reservation(
     prepared: PreparedSubflow,
     request_budget: RequestBudget | None,
+    *,
+    checkpoint_scope: tuple[str, ...] = (),
+    checkpoint_records: dict[str, NodeRunRecord] | None = None,
 ) -> None:
     reservation = prepared.snapshot.get("preview_request_reservation")
     if not isinstance(reservation, int) or reservation <= 0 or request_budget is None:
         return
-    if not request_budget.can_claim(reservation):
+    remaining_reservation = _remaining_preview_request_reservation(
+        prepared,
+        reservation,
+        checkpoint_scope,
+        checkpoint_records or {},
+    )
+    if not request_budget.can_claim(remaining_reservation):
         raise NodeExecutionError(
             code="PREVIEW_REQUEST_BUDGET_EXHAUSTED",
             message="Sandbox Preview 剩余请求预算不足以安全执行下一次循环及其 Cleanup",
         )
+
+
+def _remaining_preview_request_reservation(
+    prepared: PreparedSubflow,
+    reservation: int,
+    checkpoint_scope: tuple[str, ...],
+    checkpoint_records: dict[str, NodeRunRecord],
+) -> int:
+    completed_reservation = 0
+    nodes = {node.id: node for node in prepared.definition.nodes}
+    for record in _nested_resume_records(
+        prepared.definition,
+        checkpoint_scope,
+        checkpoint_records,
+    ):
+        resumed_node = nodes[record.node_id]
+        maximum_attempts = _preview_node_request_attempts(resumed_node)
+        if maximum_attempts == 0:
+            continue
+        completed_reservation += (
+            maximum_attempts
+            if record.status in {NodeStatus.PASSED, NodeStatus.SKIPPED}
+            else min(record.attempts, maximum_attempts)
+        )
+    for node_id, subflow in prepared.subflows.items():
+        subflow_node = nodes.get(node_id)
+        if subflow_node is None or isinstance(parse_node_config(subflow_node), ForEachNodeConfig):
+            continue
+        nested_reservation = subflow.snapshot.get("preview_request_reservation")
+        if not isinstance(nested_reservation, int) or nested_reservation <= 0:
+            continue
+        nested_remaining = _remaining_preview_request_reservation(
+            subflow,
+            nested_reservation,
+            _nested_scope(checkpoint_scope, "subflow", node_id),
+            checkpoint_records,
+        )
+        completed_reservation += nested_reservation - nested_remaining
+    return max(reservation - completed_reservation, 0)
+
+
+def _preview_node_request_attempts(node: WorkflowNode) -> int:
+    if not node_type_consumes_request(node.effective_type):
+        return 0
+    if node.phase is WorkflowPhase.CLEANUP:
+        return node.cleanup_retry_budget + 1
+    config = parse_node_config(node)
+    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
 
 
 def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:

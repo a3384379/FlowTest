@@ -49,6 +49,7 @@ from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExec
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
+    RunnerCheckpointResume,
     RunnerCompleteRequest,
     RunnerFailRequest,
     RunnerHeartbeatRequest,
@@ -1114,6 +1115,58 @@ async def test_remote_preview_batch_reuses_expired_deadline_after_retry(
         )
 
     assert started == []
+    assert cancellation.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_remote_expired_preview_resumes_started_child_for_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started_child = _plan_fixture()
+    queued_child = replace(started_child, execution_id=uuid4())
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=started_child.actor_id,
+        project_id=started_child.project_id,
+        workflow_version=0,
+        children=(started_child, queued_child),
+        concurrency=1,
+        cleanup_timeout_seconds=1,
+        deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    checkpoint = RunnerCheckpointResume(
+        node_id="request",
+        node_type=NodeType.API,
+        name="Request",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        input_hash="0" * 64,
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    resumed: list[UUID] = []
+
+    async def record_resume(child: WorkflowRunPlan, **kwargs: object) -> object:
+        assert cast(CancellationToken, kwargs["cancellation"]).cancelled is True
+        resumed.append(child.execution_id)
+        return WorkflowRunResult(
+            status=WorkflowRunStatus.CANCELLED,
+            records=(),
+            context={},
+        )
+
+    monkeypatch.setattr(executor, "_execute_run", record_resume)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+            resume_checkpoints={str(started_child.execution_id): [checkpoint]},
+        )
+
+    assert resumed == [started_child.execution_id]
     assert cancellation.cancelled is True
 
 
