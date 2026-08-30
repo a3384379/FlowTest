@@ -1096,7 +1096,9 @@ AI 助手只接收 Schema 和脱敏元数据，生成可审核建议，不读取
 
 ### 9.14 组织治理
 
-组织 Owner/Admin 管理组织成员、Service Account、配额、Runner 策略、审计保留和 Support Bundle 脱敏清单。当前页面可以创建 Key Rotation Plan 和元数据，但真实 Key Apply/Rollback 尚未实现；不要把计划状态当作密钥已经轮换。
+组织 Owner/Admin 管理组织成员、Service Account、配额、Runner 策略、审计保留和 Support Bundle 脱敏清单。
+组织密钥轮换页面支持 Prepare、Apply 和 Rollback。管理员必须先在所有运行进程配置指定密钥引用；Apply 只有在
+组织内全部受管密文完成重加密和校验后才切换活动版本，失败时整体回滚。在回滚窗口结束前不得删除上一版密钥。
 
 ### 9.15 分布式执行面和平台管理
 

@@ -1,3 +1,5 @@
+from base64 import urlsafe_b64encode
+
 import pytest
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -47,6 +49,28 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
             s3_secret_key="production-object-storage-secret",
             secure_cookies=True,
         )
+
+
+def test_data_encryption_keyring_validates_references_and_key_material() -> None:
+    encoded_key = urlsafe_b64encode(b"k" * 32).decode()
+    configured = Settings(
+        _env_file=None,
+        data_encryption_keyring={"kms:flowtest/acme/v2": encoded_key},
+    )
+    assert configured.data_encryption_keyring == {"kms:flowtest/acme/v2": encoded_key}
+
+    with pytest.raises(ValidationError, match="不能覆盖默认引用"):
+        Settings(
+            _env_file=None,
+            data_encryption_keyring={"settings:data_encryption_key": encoded_key},
+        )
+    with pytest.raises(ValidationError, match="32 字节"):
+        Settings(
+            _env_file=None,
+            data_encryption_keyring={"kms:flowtest/acme/v2": urlsafe_b64encode(b"short").decode()},
+        )
+    with pytest.raises(ValidationError, match="1-200"):
+        Settings(_env_file=None, data_encryption_keyring={" padded ": encoded_key})
 
 
 @pytest.mark.parametrize(

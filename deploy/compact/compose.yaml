@@ -10,6 +10,7 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD:?Run deploy/compact/generate_env.sh first}
   FLOWTEST_SECURE_COOKIES: ${FLOWTEST_SECURE_COOKIES:-false}
   FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_DATA_ENCRYPTION_KEY:?Run deploy/compact/generate_env.sh first}
+  FLOWTEST_DATA_ENCRYPTION_KEYRING: '${FLOWTEST_DATA_ENCRYPTION_KEYRING:-{}}'
   FLOWTEST_CORS_ORIGINS: '["${FLOWTEST_PUBLIC_ORIGIN:-http://localhost:3000}"]'
   FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:${POSTGRES_PASSWORD:?Run deploy/compact/generate_env.sh first}@postgres:5432/flowtest
   FLOWTEST_REDIS_URL: redis://redis:6379/0

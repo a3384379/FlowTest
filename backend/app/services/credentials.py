@@ -16,6 +16,7 @@ from app.models.access import User
 from app.models.data_sources import Credential
 from app.repositories.data_sources import DataSourceRepository
 from app.services.audit import AuditService
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
 
 
@@ -211,6 +212,7 @@ class CredentialService:
             encrypted = self._secrets.encrypt(
                 secret,
                 associated_data=_associated_data(credential_id, project_id),
+                key_reference=await active_key_reference_for_project(self._session, project_id),
             )
             return encrypted.ciphertext, encrypted.nonce, None
         external = self._require_external_store(provider)
@@ -223,6 +225,9 @@ class CredentialService:
             encrypted = self._secrets.encrypt(
                 secret,
                 associated_data=_associated_data(credential.id, credential.project_id),
+                key_reference=await active_key_reference_for_project(
+                    self._session, credential.project_id
+                ),
             )
             credential.ciphertext = encrypted.ciphertext
             credential.nonce = encrypted.nonce

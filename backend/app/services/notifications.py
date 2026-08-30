@@ -18,6 +18,7 @@ from app.models.tasking import TestPlanRun
 from app.models.workflows import WorkflowExecution
 from app.repositories.reporting import ReportingRepository
 from app.services.audit import AuditService
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
 from app.services.projects import ProjectService
 
@@ -63,6 +64,7 @@ class NotificationWebhookService:
         encrypted = self._secrets.encrypt(
             secret,
             associated_data=_associated_data(webhook.id),
+            key_reference=await active_key_reference_for_project(self._session, project_id),
         )
         webhook.secret_ciphertext = encrypted.ciphertext
         webhook.secret_nonce = encrypted.nonce

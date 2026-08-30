@@ -34,6 +34,7 @@ from app.repositories.access import ProjectRepository
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
 from app.services.request_targets import RequestTargetResolver
 
@@ -231,7 +232,11 @@ class APIAssetService:
         if environment_id is not None:
             await self._get_environment(project_id, environment_id)
         associated_data = _secret_associated_data(project_id, environment_id, name)
-        encrypted = self._secrets.encrypt(value, associated_data=associated_data)
+        encrypted = self._secrets.encrypt(
+            value,
+            associated_data=associated_data,
+            key_reference=await active_key_reference_for_project(self._session, project_id),
+        )
         stored = await self._assets.find_secret(
             project_id=project_id,
             environment_id=environment_id,

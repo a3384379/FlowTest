@@ -124,10 +124,10 @@ export type OrganizationSecurity = {
   organization_id: string
   active_key_version: number
   key_versions: KeyVersion[]
-  capability_name: 'Key Lifecycle Metadata / Rotation Plan'
-  capability_mode: 'metadata_plan_only'
-  ciphertext_reencryption_available: false
-  ga_blocker: 'REAL_KEY_ROTATION_NOT_IMPLEMENTED'
+  capability_name: 'Organization Data Encryption Key Rotation'
+  capability_mode: 'reencrypt_verify_activate_rollback'
+  ciphertext_reencryption_available: true
+  ga_blocker: null
 }
 
 export type SupportBundleRedaction = {

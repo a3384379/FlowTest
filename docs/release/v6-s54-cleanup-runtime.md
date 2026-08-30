@@ -3,8 +3,8 @@
 ## 1. 阶段状态
 
 S53 实现与 Evidence Closure 已合并且 Main Push Required Gate 成功。S54 从最新 Main
-创建独立分支 `codex/v6-s54-cleanup-runtime`；当前实现与本地定向验证已完成，等待
-PR 精确 Head Review 与最终一次完整门禁。
+创建独立分支 `codex/v6-s54-cleanup-runtime`，由 PR #62 普通 Squash Merge。最终复审 P0/P1 为 0，
+PR 精确 Head 与 Merge 后 Main Push 七项门禁全部成功。
 
 ## 2. Implemented
 
@@ -54,8 +54,8 @@ PR 精确 Head Review 与最终一次完整门禁。
 | Snapshot/Report/Checkpoint 可持久化           | Pass     | API、Codec 与 Migration 回归   |
 | Resume/Reclaim 不重放已完成 Main              | Pass     | Runner Reclaim 回归            |
 | FlowSpec v2 与 S50 Cleanup Requirement 闭环   | Pass     | Golden 与 S50 兼容回归         |
-| 精确 Head Review P0/P1 为 0                   | Pending  | 五轮 14 个 P1 已修复，待复审   |
-| 最终一次完整门禁                              | Pending  | P0/P1 清零后执行               |
+| 精确 Head Review P0/P1 为 0                   | Pass     | PR #62 最终复审                  |
+| 最终一次完整门禁                              | Pass     | PR 与 Main Push 七项门禁成功     |
 
 ## 6. 范围边界
 

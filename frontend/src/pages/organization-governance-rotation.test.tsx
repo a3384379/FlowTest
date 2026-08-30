@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { rotationAction, type SecurityKeyVersion } from './organization-governance-rotation'
@@ -8,18 +9,37 @@ const keyVersion: SecurityKeyVersion = {
   version: 2,
   key_reference: 'kms://flowtest/key/2',
   key_fingerprint: 'fingerprint-2',
-  status: 'planned',
+  status: 'pending',
   migration_status: 'planned',
   previous_version: 1,
   created_at: '2026-08-23T00:00:00Z',
 }
 
 describe('rotationAction', () => {
-  it('keeps key rotation truthful for authorized and unauthorized viewers', () => {
+  it('keeps rotation actions permissioned and state-specific', async () => {
     expect(rotationAction(keyVersion, false)).toBeNull()
 
-    render(rotationAction(keyVersion, true))
+    let applied = ''
+    const { rerender } = render(
+      rotationAction(keyVersion, true, (id) => {
+        applied = id
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(applied).toBe(keyVersion.id)
 
-    expect(screen.getByText('仅元数据计划')).toBeVisible()
+    let rolledBack = ''
+    rerender(
+      rotationAction(
+        { ...keyVersion, status: 'active', migration_status: 'migrated' },
+        true,
+        undefined,
+        (id) => {
+          rolledBack = id
+        },
+      ),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Rollback' }))
+    expect(rolledBack).toBe(keyVersion.id)
   })
 })

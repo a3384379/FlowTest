@@ -105,14 +105,16 @@ FLOWTEST_RESTORE_CONFIRM=RESTORE \
 
 恢复在停服和覆盖前会先执行 `pg_restore --list`，并校验每个 Artifact 的文件名、大小和
 SHA-256；恢复后再比对远程对象集与 Readiness。备份不包含 `.env`，必须把
-`FLOWTEST_DATA_ENCRYPTION_KEY` 与备份分开托管，否则恢复后无法解密 Secret 和执行计划。
+`FLOWTEST_DATA_ENCRYPTION_KEY` 和 `FLOWTEST_DATA_ENCRYPTION_KEYRING` 与备份分开托管，否则恢复后无法解密
+Secret、Credential 和执行计划。密钥轮换和回滚期间必须在 Web、API 和 Worker 同时保留新旧引用。
 
 ### 从 Standalone 导入
 
 Standalone 使用 SQLite，不能把 `data/flowtest.db` 直接复制到 Compact。请在 Windows 云桌面先运行
 `deploy/standalone/export-to-compact.ps1` 生成 `standalone-compact-transfer-v1` 传输包，再通过公司
 批准的安全渠道复制到 Compact 主机。导入前必须将 Compact `.env` 中的
-`FLOWTEST_DATA_ENCRYPTION_KEY` 设置为 Standalone 的同一值；该密钥不进入传输包，也不要放在命令行：
+`FLOWTEST_DATA_ENCRYPTION_KEY` 和 `FLOWTEST_DATA_ENCRYPTION_KEYRING` 设置为 Standalone 的同一值；密钥和密钥环不进入
+传输包，也不要放在命令行：
 
 ```bash
 FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \

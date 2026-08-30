@@ -102,7 +102,10 @@ Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15
 
 S2 已提供项目变量/Header、环境、AES-256-GCM Secret、API Definition/不可变版本和请求预览。
 Secret 只允许写入，列表与详情不返回明文、密文或 nonce；生产部署必须替换
-`FLOWTEST_DATA_ENCRYPTION_KEY`，并安全备份该密钥。
+`FLOWTEST_DATA_ENCRYPTION_KEY`，并安全备份该密钥。组织数据密钥轮换使用
+`FLOWTEST_DATA_ENCRYPTION_KEYRING` 提前注入新旧密钥引用，Apply 会在同一数据库事务内完成
+重加密、逐项校验、激活与审计；Rollback 会用上一版密钥重加密回退。详见
+[密钥轮换决策](docs/adr/0044-real-key-rotation.md) 与 [备份恢复手册](docs/operations/backup-recovery.md)。
 
 S3 已提供 HTTPX 异步执行、GET/POST/PUT/PATCH/DELETE、响应与耗时查看、状态码、
 响应时间、Header、JSONPath、JMESPath、JSON Schema 断言和执行历史。Web 管理端可完成

@@ -1,4 +1,6 @@
 import re
+from base64 import urlsafe_b64decode
+from binascii import Error as BinasciiError
 from functools import lru_cache
 from urllib.parse import urlsplit
 
@@ -56,6 +58,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "FlowTest-Change-Me-123!"  # noqa: S105
     secure_cookies: bool = False
     data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
+    data_encryption_keyring: dict[str, str] = Field(default_factory=dict)
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "flowtest"
@@ -143,6 +146,7 @@ class Settings(BaseSettings):
         if self.retention_default_days > self.retention_max_days:
             raise ValueError("默认保留天数不能超过系统保留上限")
         self._validate_oidc()
+        self._validate_data_encryption_keyring()
         self._validate_vault()
         self._validate_ai()
         self._validate_environment_lab()
@@ -151,6 +155,22 @@ class Settings(BaseSettings):
         self._validate_cors()
         self._validate_production()
         return self
+
+    def _validate_data_encryption_keyring(self) -> None:
+        for key_reference, encoded_key in self.data_encryption_keyring.items():
+            if (
+                not key_reference
+                or key_reference != key_reference.strip()
+                or len(key_reference.encode()) > 200
+                or key_reference == "settings:data_encryption_key"
+            ):
+                raise ValueError("数据加密 Keyring 引用必须是 1-200 字节且不能覆盖默认引用")
+            try:
+                decoded = urlsafe_b64decode(encoded_key.encode())
+            except (BinasciiError, ValueError) as error:
+                raise ValueError("数据加密 Keyring 密钥必须使用 URL-safe base64") from error
+            if len(decoded) != 32:
+                raise ValueError("数据加密 Keyring 密钥必须解码为 32 字节")
 
     def _validate_cors(self) -> None:
         for origin in self.cors_origins:

@@ -6,17 +6,18 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time
-from hashlib import sha256
+from hmac import compare_digest
 from typing import Any, cast
 from uuid import UUID
 
+from cryptography.exceptions import InvalidTag
 from sqlalchemy import Table, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.dml import Insert
 
-from app.core.config import settings
+from app.core.encryption import DEFAULT_KEY_REFERENCE, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.governance import (
     DEFAULT_QUOTA_POLICIES,
@@ -53,8 +54,9 @@ class GovernanceRecords:
 
 
 class OrganizationGovernanceService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, secrets: SecretBox = secret_box) -> None:
         self._session = session
+        self._secrets = secrets
         self._organizations = OrganizationRepository(session)
         self._orgs = OrganizationService(session)
         self._audit = AuditService(session)
@@ -195,7 +197,20 @@ class OrganizationGovernanceService:
         policy, _created = await self._ensure_records(organization_id, actor.id)
         active = await self._active_key(organization_id, policy.active_key_version)
         normalized_fingerprint = key_fingerprint.lower()
-        if active.key_fingerprint == normalized_fingerprint:
+        if not self._secrets.has_reference(key_reference.strip()):
+            raise AppError(
+                code="KEY_ROTATION_KEY_UNAVAILABLE",
+                message="新密钥引用未在服务端 Keyring 中配置",
+                status_code=409,
+            )
+        actual_fingerprint = self._secrets.fingerprint(key_reference.strip())
+        if not compare_digest(normalized_fingerprint, actual_fingerprint):
+            raise AppError(
+                code="KEY_ROTATION_FINGERPRINT_MISMATCH",
+                message="新密钥指纹与服务端 Keyring 不匹配",
+                status_code=409,
+            )
+        if compare_digest(active.key_fingerprint, normalized_fingerprint):
             raise AppError(
                 code="KEY_ROTATION_SAME_FINGERPRINT",
                 message="新密钥指纹不能与当前密钥相同",
@@ -251,10 +266,11 @@ class OrganizationGovernanceService:
     async def apply_key_rotation(
         self, *, actor: User, organization_id: UUID, key_version_id: UUID
     ) -> OrganizationKeyVersion:
-        await self._orgs.authorize(
+        organization = await self._orgs.authorize(
             actor=actor, organization_id=organization_id, capability="rotate_keys"
         )
         await self._ensure_records(organization_id, actor.id)
+        policy = await self._locked_policy(organization_id)
         version = await self._get_key_version(organization_id, key_version_id)
         if version.status != "pending" or version.migration_status != "planned":
             raise AppError(
@@ -262,37 +278,122 @@ class OrganizationGovernanceService:
                 message="Key Lifecycle Plan 不在待确认状态",
                 status_code=409,
             )
-        raise AppError(
-            code="KEY_ROTATION_REENCRYPTION_UNAVAILABLE",
-            message=(
-                "当前仅支持 Key Lifecycle Metadata / Rotation Plan，"
-                "未实现密文重加密、检查点与可验证回滚"
-            ),
-            status_code=409,
+        if version.previous_version != policy.active_key_version:
+            raise AppError(
+                code="KEY_ROTATION_STALE_PLAN",
+                message="当前活动密钥已变化，请重新创建轮换计划",
+                status_code=409,
+            )
+        self._validate_available_key(version)
+        previous = await self._active_key(organization_id, policy.active_key_version)
+        version.migration_status = "migrating"
+        await self._session.flush()
+        try:
+            from app.services.key_rotation import reencrypt_organization_ciphertexts
+
+            evidence = await reencrypt_organization_ciphertexts(
+                self._session,
+                organization_id=organization_id,
+                target_key_reference=version.key_reference,
+                secrets=self._secrets,
+            )
+        except (InvalidTag, UnicodeDecodeError, ValueError) as error:
+            await self._session.rollback()
+            raise AppError(
+                code="KEY_ROTATION_REENCRYPTION_FAILED",
+                message="组织密文重加密或校验失败，事务已回滚",
+                status_code=409,
+            ) from error
+        now = datetime.now(UTC)
+        previous.status = "retiring"
+        version.status = "active"
+        version.migration_status = "migrated"
+        version.migrated_at = now
+        version.activated_at = now
+        policy.active_key_version = version.version
+        self._audit.record(
+            actor_user_id=actor.id,
+            organization_id=organization.organization.id,
+            project_id=None,
+            action="organization.key_rotation_applied",
+            resource_type="organization_key_version",
+            resource_id=version.id,
             details={
-                "capability_mode": "metadata_plan_only",
-                "ciphertext_reencryption_completed": False,
-                "ga_blocker": "REAL_KEY_ROTATION_NOT_IMPLEMENTED",
+                "version": version.version,
+                "previous_version": previous.version,
+                "migrated": evidence.total,
+                "verified": evidence.verified,
+                "resource_counts": evidence.resource_counts,
+                "ciphertext_digest": evidence.ciphertext_digest,
             },
         )
+        await self._session.commit()
+        await self._session.refresh(version)
+        return version
 
     async def rollback_key_rotation(
         self, *, actor: User, organization_id: UUID, key_version_id: UUID
     ) -> OrganizationKeyVersion:
-        await self._orgs.authorize(
+        organization = await self._orgs.authorize(
             actor=actor, organization_id=organization_id, capability="rotate_keys"
         )
         await self._ensure_records(organization_id, actor.id)
-        await self._get_key_version(organization_id, key_version_id)
-        raise AppError(
-            code="KEY_ROTATION_ROLLBACK_UNAVAILABLE",
-            message="未执行真实密文轮换，因此不存在可验证的密文回滚",
-            status_code=409,
+        policy = await self._locked_policy(organization_id)
+        version = await self._get_key_version(organization_id, key_version_id)
+        if (
+            version.status != "active"
+            or version.migration_status != "migrated"
+            or policy.active_key_version != version.version
+            or version.previous_version is None
+        ):
+            raise AppError(
+                code="KEY_ROTATION_NOT_ROLLBACKABLE",
+                message="密钥版本不是当前可回滚的活动版本",
+                status_code=409,
+            )
+        previous = await self._active_key(organization_id, version.previous_version)
+        self._validate_available_key(previous)
+        try:
+            from app.services.key_rotation import reencrypt_organization_ciphertexts
+
+            evidence = await reencrypt_organization_ciphertexts(
+                self._session,
+                organization_id=organization_id,
+                target_key_reference=previous.key_reference,
+                secrets=self._secrets,
+            )
+        except (InvalidTag, UnicodeDecodeError, ValueError) as error:
+            await self._session.rollback()
+            raise AppError(
+                code="KEY_ROTATION_ROLLBACK_FAILED",
+                message="组织密文回滚重加密或校验失败，事务已回滚",
+                status_code=409,
+            ) from error
+        now = datetime.now(UTC)
+        version.status = "rolled_back"
+        version.migration_status = "rolled_back"
+        version.rolled_back_at = now
+        previous.status = "active"
+        policy.active_key_version = previous.version
+        self._audit.record(
+            actor_user_id=actor.id,
+            organization_id=organization.organization.id,
+            project_id=None,
+            action="organization.key_rotation_rolled_back",
+            resource_type="organization_key_version",
+            resource_id=version.id,
             details={
-                "capability_mode": "metadata_plan_only",
-                "ciphertext_reencryption_completed": False,
+                "version": version.version,
+                "restored_version": previous.version,
+                "migrated": evidence.total,
+                "verified": evidence.verified,
+                "resource_counts": evidence.resource_counts,
+                "ciphertext_digest": evidence.ciphertext_digest,
             },
         )
+        await self._session.commit()
+        await self._session.refresh(version)
+        return version
 
     async def support_bundle_redaction(
         self, *, actor: User, organization_id: UUID
@@ -369,13 +470,13 @@ class OrganizationGovernanceService:
                 {
                     "organization_id": organization_id,
                     "version": 1,
-                    "key_reference": "settings:data_encryption_key",
-                    "key_fingerprint": sha256(settings.data_encryption_key.encode()).hexdigest(),
+                    "key_reference": DEFAULT_KEY_REFERENCE,
+                    "key_fingerprint": self._secrets.fingerprint(DEFAULT_KEY_REFERENCE),
                     "status": "active",
-                    "migration_status": "planned",
+                    "migration_status": "migrated",
                     "created_by_id": actor_id,
                     "activated_at": now,
-                    "migrated_at": None,
+                    "migrated_at": now,
                 },
                 conflict_columns=("organization_id", "version"),
             )
@@ -423,6 +524,35 @@ class OrganizationGovernanceService:
                 code="ACTIVE_KEY_VERSION_NOT_FOUND", message="当前密钥版本不存在", status_code=409
             )
         return key
+
+    async def _locked_policy(self, organization_id: UUID) -> OrganizationGovernance:
+        policy = await self._session.scalar(
+            select(OrganizationGovernance)
+            .where(OrganizationGovernance.organization_id == organization_id)
+            .with_for_update()
+        )
+        if policy is None:
+            raise AppError(
+                code="ORGANIZATION_GOVERNANCE_NOT_FOUND",
+                message="组织治理策略不存在",
+                status_code=409,
+            )
+        return policy
+
+    def _validate_available_key(self, version: OrganizationKeyVersion) -> None:
+        if not self._secrets.has_reference(version.key_reference):
+            raise AppError(
+                code="KEY_ROTATION_KEY_UNAVAILABLE",
+                message="密钥引用未在服务端 Keyring 中配置",
+                status_code=409,
+            )
+        actual_fingerprint = self._secrets.fingerprint(version.key_reference)
+        if not compare_digest(actual_fingerprint, version.key_fingerprint):
+            raise AppError(
+                code="KEY_ROTATION_FINGERPRINT_MISMATCH",
+                message="密钥指纹与服务端 Keyring 不匹配",
+                status_code=409,
+            )
 
     async def _get_key_version(
         self, organization_id: UUID, key_version_id: UUID

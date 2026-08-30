@@ -91,7 +91,7 @@ FLOWTEST_SECURE_COOKIES=true
 ## 备份与升级
 
 业务数据存在 Docker Volume，不在 Git 仓库中。升级前必须同时备份 PostgreSQL、MinIO 和独立托管的
-`FLOWTEST_DATA_ENCRYPTION_KEY`：
+`FLOWTEST_DATA_ENCRYPTION_KEY` / `FLOWTEST_DATA_ENCRYPTION_KEYRING`：
 
 ```bash
 ./deploy/compact/backup.sh /srv/flowtest-backups/2026-08-19

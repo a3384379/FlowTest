@@ -20,7 +20,7 @@
 | Backend package | `flowtest-backend 3.0.0b3.dev29` |
 | Backend application | `3.0.0-beta.3-dev.29` |
 | Frontend package | `3.0.0-beta.3-dev.29` |
-| 产品事实 | V5 功能 PR #40 已合并；真实 Key Rotation 和外部发布门槛未完成，不是 GA |
+| 产品事实 | V5 功能 PR #40 已合并；V6 H1 已实现真实 Key Rotation，外部发布门槛未完成，不是 GA |
 | Alembic Head | `20260823_0045`（单 Head） |
 | Standalone baseline | `20260823_0045` |
 
@@ -134,7 +134,8 @@ Compose CI 会仅在验收环境显式开启现有 V3/V5 所需 Flag。H0 不增
 
 ## 10. 未完成 GA Blocker
 
-- 真实 Key Rotation：当前仅 Planned Metadata，未完成 re-encrypt/verify/activate/rollback/audit。
+- 真实 Key Rotation 已由 V6 H1 实现 re-encrypt/verify/activate/rollback/audit，不再是代码阻塞项；
+  外部恢复演练与签署仍归入 H2。
 - Windows 公司云桌面真实试点与至少 72 小时观察。
 - Standalone/Compact 长时运行及真实 Standalone→Compact 迁移。
 - 真实 Backup/Restore 与 Upgrade/Rollback 外部环境签署。

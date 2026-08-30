@@ -161,6 +161,8 @@ async def export_bundle(source_data: Path, output: Path) -> dict[str, Any]:
             "passwords": "password_hashes_only",
             "ciphertexts": "preserved",
             "requires_same_data_encryption_key": True,
+            "key_references": "preserved",
+            "requires_configured_data_encryption_keyring": True,
             "data_classification": TRANSFER_DATA_CLASSIFICATION,
         },
     }
