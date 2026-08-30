@@ -79,7 +79,11 @@ class SandboxPreviewService:
             change_set_id=change_set_id,
             lock=False,
         )
-        environment = await self._preview_environment(project_id, payload.environment_id)
+        environment = await self._preview_environment(
+            project_id,
+            payload.environment_id,
+            lock=True,
+        )
         environment_fingerprint = await self._environment_fingerprint(environment)
         target_snapshot_fingerprint = await self._workflows.prepare_preview_target_fingerprint(
             actor=actor,
@@ -198,6 +202,12 @@ class SandboxPreviewService:
                 message="Sandbox Preview 精确目标快照在审批后已变更, 请重新审批",
                 status_code=409,
             )
+        await self._session.refresh(environment, attribute_names=["classification"])
+        try:
+            self._require_preview_classification(environment)
+        except AppError:
+            await self._workflows.discard_prepared_execution(execution.id)
+            raise
         now = datetime.now(UTC)
         approval.consumed_at = now
         approval.execution_id = execution.id
@@ -286,15 +296,27 @@ class SandboxPreviewService:
             )
         return "service_account", service_account_id
 
-    async def _preview_environment(self, project_id: UUID, environment_id: UUID) -> Environment:
-        environment = await self._session.scalar(
-            select(Environment).where(
-                Environment.id == environment_id,
-                Environment.project_id == project_id,
-            )
+    async def _preview_environment(
+        self,
+        project_id: UUID,
+        environment_id: UUID,
+        *,
+        lock: bool = False,
+    ) -> Environment:
+        query = select(Environment).where(
+            Environment.id == environment_id,
+            Environment.project_id == project_id,
         )
+        if lock:
+            query = query.with_for_update()
+        environment = await self._session.scalar(query)
         if environment is None:
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        self._require_preview_classification(environment)
+        return environment
+
+    @staticmethod
+    def _require_preview_classification(environment: Environment) -> None:
         classification = EnvironmentClassification(environment.classification)
         if classification is EnvironmentClassification.PRODUCTION:
             raise AppError(
@@ -309,7 +331,6 @@ class SandboxPreviewService:
                 status_code=409,
                 details={"classification": classification.value},
             )
-        return environment
 
     async def _approval_for_update(
         self,

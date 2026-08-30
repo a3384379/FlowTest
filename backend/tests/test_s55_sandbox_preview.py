@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 import respx
 from httpx import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from test_s51_mcp_flow_proposals import (
     _plan_chain,
     _proposal_payload,
@@ -19,7 +19,7 @@ from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import WorkflowDefinition
 from app.engine.scheduler import CancellationToken
-from app.models.api_assets import Secret
+from app.models.api_assets import Environment, Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
@@ -419,6 +419,46 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         )
     assert raced_target.status_code == 409, raced_target.text
     assert raced_target.json()["error"]["code"] == "PREVIEW_APPROVAL_TARGET_CHANGED"
+
+    async def prepare_then_reclassify(
+        service: WorkflowService,
+        **kwargs: Any,
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan | WorkflowBatchPlan]:
+        execution, plan = await original_prepare(service, **kwargs)
+        await service._session.execute(
+            update(Environment)
+            .where(Environment.id == s51_context["sandbox_environment_id"])
+            .values(classification="production")
+        )
+        return execution, plan
+
+    with monkeypatch.context() as classification_patch:
+        classification_patch.setattr(
+            WorkflowService,
+            "prepare_preview_execution",
+            prepare_then_reclassify,
+        )
+        reclassified = await client.post(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": "s55-preview-reclassified",
+            },
+            json={
+                "project_id": str(s51_context["project_id"]),
+                "environment_id": str(s51_context["sandbox_environment_id"]),
+                "approval_id": target_bound.json()["id"],
+                "runtime_variables": {},
+                "runtime_headers": {},
+            },
+        )
+    assert reclassified.status_code == 403, reclassified.text
+    assert reclassified.json()["error"]["code"] == "PRODUCTION_PREVIEW_FORBIDDEN"
+    async with s51_context["sessions"]() as session:
+        environment = await session.get(Environment, s51_context["sandbox_environment_id"])
+        assert environment is not None
+        environment.classification = "sandbox"
+        await session.commit()
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"

@@ -141,14 +141,11 @@ class WorkflowRunCoordinator:
                     timeout=plan.max_runtime_seconds,
                 )
                 if pending:
-                    cancellation.cancel()
-                    _done, cleanup_pending = await asyncio.wait(
-                        pending,
-                        timeout=plan.cleanup_timeout_seconds or 1,
+                    await _cancel_batch_tasks(
+                        tasks,
+                        cancellation=cancellation,
+                        cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
                     )
-                    for task in cleanup_pending:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
                     async with self._session_maker() as session:
                         await WorkflowService(session).cancel_incomplete_batch(
                             plan.execution_id,
@@ -156,7 +153,11 @@ class WorkflowRunCoordinator:
                             error_message="Sandbox Preview 数据集已达到整批运行时预算",
                         )
         except asyncio.CancelledError:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await _cancel_batch_tasks(
+                tasks,
+                cancellation=cancellation,
+                cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+            )
             async with self._session_maker() as session:
                 await WorkflowService(session).cancel_incomplete_batch(plan.execution_id)
         async with self._session_maker() as session:
@@ -275,3 +276,19 @@ class WorkflowRunCoordinator:
                 extra={"execution_id": str(event.execution_id), "event_type": event.type.value},
                 exc_info=True,
             )
+
+
+async def _cancel_batch_tasks(
+    tasks: list[asyncio.Task[None]],
+    *,
+    cancellation: CancellationToken,
+    cleanup_timeout_seconds: int | None,
+) -> None:
+    cancellation.cancel()
+    _done, pending = await asyncio.wait(
+        tasks,
+        timeout=cleanup_timeout_seconds or 1,
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
