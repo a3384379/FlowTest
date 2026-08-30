@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.domain.protocols import ProtocolKind
@@ -76,6 +77,7 @@ def test_preview_batch_plan_round_trip_preserves_global_runtime_budget() -> None
         prepared=PreparedExecution(snapshot={}, requests={}, dataset_variables={}),
         runtime_variables={},
     )
+    deadline = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
     plan = WorkflowBatchPlan(
         execution_id=WORKFLOW_ID,
         actor_id=ACTOR_ID,
@@ -85,6 +87,7 @@ def test_preview_batch_plan_round_trip_preserves_global_runtime_budget() -> None
         concurrency=1,
         max_runtime_seconds=600,
         cleanup_timeout_seconds=120,
+        deadline_at=deadline,
     )
 
     restored = decode_execution_plan(encode_execution_plan(plan))
@@ -92,6 +95,7 @@ def test_preview_batch_plan_round_trip_preserves_global_runtime_budget() -> None
     assert isinstance(restored, WorkflowBatchPlan)
     assert restored.max_runtime_seconds == 600
     assert restored.cleanup_timeout_seconds == 120
+    assert restored.deadline_at == deadline
 
 
 def test_execution_plan_round_trip_preserves_pinned_protocol_schema() -> None:

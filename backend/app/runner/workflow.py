@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
@@ -54,6 +55,7 @@ class RemoteWorkflowExecutor:
         reset_retry_budget: bool = False,
     ) -> RunnerExecutionResult:
         if isinstance(plan, WorkflowBatchPlan):
+            runtime_seconds = _batch_runtime_seconds_or_raise(plan, cancellation)
             semaphore = asyncio.Semaphore(plan.concurrency)
             active_tasks: set[asyncio.Task[RunnerBatchChildResult]] = set()
 
@@ -82,12 +84,12 @@ class RemoteWorkflowExecutor:
                             active_tasks.discard(task)
 
             tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
-            if plan.max_runtime_seconds is None:
+            if runtime_seconds is None:
                 children = await asyncio.gather(*tasks)
             else:
                 _done, pending = await asyncio.wait(
                     tasks,
-                    timeout=plan.max_runtime_seconds,
+                    timeout=runtime_seconds,
                 )
                 if pending:
                     for task in pending:
@@ -204,6 +206,26 @@ class RemoteWorkflowExecutor:
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
         )
+
+
+def _batch_runtime_seconds_or_raise(
+    plan: WorkflowBatchPlan,
+    cancellation: CancellationToken,
+) -> float | None:
+    runtime_seconds = _remaining_batch_runtime_seconds(plan)
+    if runtime_seconds is not None and runtime_seconds <= 0:
+        cancellation.cancel()
+        raise PreviewRuntimeBudgetExceeded("Sandbox Preview dataset runtime budget exceeded")
+    return runtime_seconds
+
+
+def _remaining_batch_runtime_seconds(plan: WorkflowBatchPlan) -> float | None:
+    if plan.deadline_at is not None:
+        deadline = plan.deadline_at
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+    return float(plan.max_runtime_seconds) if plan.max_runtime_seconds is not None else None
 
 
 def _remaining_request_budget(

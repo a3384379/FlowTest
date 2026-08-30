@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -161,6 +161,7 @@ class WorkflowBatchPlan:
     concurrency: int = DATASET_CONCURRENCY
     max_runtime_seconds: int | None = None
     cleanup_timeout_seconds: int | None = None
+    deadline_at: datetime | None = None
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
@@ -1832,6 +1833,7 @@ class WorkflowService:
             concurrency=budget.max_parallelism,
             max_runtime_seconds=budget.max_runtime_seconds,
             cleanup_timeout_seconds=budget.max_runtime_seconds,
+            deadline_at=datetime.now(UTC) + timedelta(seconds=budget.max_runtime_seconds),
         )
 
     @staticmethod

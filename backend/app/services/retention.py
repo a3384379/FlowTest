@@ -18,7 +18,7 @@ from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.tasking import TestPlanRun
-from app.models.test_contexts import TestContext
+from app.models.test_contexts import TestContext, TestContextRevision
 from app.models.workflows import WorkflowExecution
 
 logger = logging.getLogger(__name__)
@@ -73,8 +73,25 @@ class RetentionCleanupService:
         totals.refresh_sessions_deleted += await self._delete(
             delete(RefreshSession).where(RefreshSession.expires_at < cleanup_at)
         )
+        await self._delete(
+            delete(SandboxPreviewApproval).where(
+                SandboxPreviewApproval.consumed_at.is_(None),
+                SandboxPreviewApproval.expires_at < cleanup_at,
+            )
+        )
+        referenced_context = exists(
+            select(TestContextRevision.id)
+            .join(
+                SandboxPreviewApproval,
+                SandboxPreviewApproval.context_revision_id == TestContextRevision.id,
+            )
+            .where(TestContextRevision.context_id == TestContext.id)
+        )
         totals.test_contexts_deleted += await self._delete(
-            delete(TestContext).where(TestContext.expires_at < cleanup_at)
+            delete(TestContext).where(
+                TestContext.expires_at < cleanup_at,
+                ~referenced_context,
+            )
         )
         governance = list((await self._session.scalars(select(OrganizationGovernance))).all())
         for policy in governance:

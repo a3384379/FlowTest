@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -164,6 +165,7 @@ class StoredBatchPlan(BaseModel):
     concurrency: int
     max_runtime_seconds: int | None = Field(default=None, ge=1, le=3600)
     cleanup_timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
+    deadline_at: datetime | None = None
 
 
 StoredPlan = Annotated[StoredRunPlan | StoredBatchPlan, Field(discriminator="kind")]
@@ -187,6 +189,7 @@ def decode_execution_plan(payload: str) -> WorkflowExecutionPlan:
             concurrency=stored.concurrency,
             max_runtime_seconds=stored.max_runtime_seconds,
             cleanup_timeout_seconds=stored.cleanup_timeout_seconds,
+            deadline_at=stored.deadline_at,
         )
     return _load_run(stored)
 
@@ -201,6 +204,7 @@ def _store_batch(plan: WorkflowBatchPlan) -> StoredBatchPlan:
         concurrency=plan.concurrency,
         max_runtime_seconds=plan.max_runtime_seconds,
         cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+        deadline_at=plan.deadline_at,
     )
 
 

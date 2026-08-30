@@ -1082,6 +1082,42 @@ async def test_remote_preview_batch_enforces_one_deadline_across_queued_children
 
 
 @pytest.mark.asyncio
+async def test_remote_preview_batch_reuses_expired_deadline_after_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = _plan_fixture()
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=child.actor_id,
+        project_id=child.project_id,
+        workflow_version=0,
+        children=(child,),
+        concurrency=1,
+        max_runtime_seconds=600,
+        cleanup_timeout_seconds=1,
+        deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    started: list[UUID] = []
+
+    async def record_start(child_plan: WorkflowRunPlan, **_kwargs: object) -> object:
+        started.append(child_plan.execution_id)
+        raise AssertionError("an expired preview retry must not start a child")
+
+    monkeypatch.setattr(executor, "_execute_run", record_start)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+        )
+
+    assert started == []
+    assert cancellation.cancelled is True
+
+
+@pytest.mark.asyncio
 async def test_runner_agent_retries_transient_control_plane_failure() -> None:
     plan = _plan_fixture()
     lease = _lease_fixture(plan)

@@ -501,6 +501,29 @@ async def test_main_runtime_limit_cancels_work_and_still_allows_cleanup() -> Non
 
 
 @pytest.mark.asyncio
+async def test_cleanup_phase_has_a_bounded_runtime_grace() -> None:
+    definition = workflow(
+        middle_nodes=[
+            api_node("create"),
+            cleanup_node("delete"),
+        ],
+        edges=[
+            {"id": "s-create", "source": "start", "target": "create"},
+            {"id": "create-e", "source": "create", "target": "end"},
+        ],
+        run_policy={"max_runtime_seconds": 1},
+    )
+    executor = ControlledExecutor({"delete": {"delay": 2}})
+
+    result = await WorkflowScheduler(executor).run(definition)
+
+    cleanup = next(record for record in result.records if record.node_id == "delete")
+    assert result.main_status == "passed"
+    assert result.cleanup_status == "failed"
+    assert cleanup.status is NodeStatus.CANCELLED
+
+
+@pytest.mark.asyncio
 async def test_main_runtime_limit_accounts_for_reclaim_checkpoint_time() -> None:
     definition = workflow(
         middle_nodes=[api_node("request")],
