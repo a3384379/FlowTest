@@ -59,6 +59,12 @@ def test_required_gate_selects_backend_dependent_checks() -> None:
     assert _keys(plan) == {"backend", "security", "compose", "standalone", "upgrade"}
 
 
+def test_required_gate_selects_backend_contract_for_skill_changes() -> None:
+    plan = required_gate.build_gate_plan(["skills/flowtest-generate-integration-flow/SKILL.md"])
+
+    assert _keys(plan) == {"backend", "security"}
+
+
 def test_required_gate_selects_frontend_dependent_checks() -> None:
     plan = required_gate.build_gate_plan(["frontend/src/main.tsx"])
 
