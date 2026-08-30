@@ -590,6 +590,16 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert rebound_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
         rebound_contract
     )
+    historical_detail = await asset_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}?version=2", headers=headers
+    )
+    historical_contract = OperationContract.model_validate(
+        historical_detail.json()["version"]["canonical_contract"]
+    )
+    assert historical_contract.service == "auth"
+    assert historical_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
+        historical_contract
+    )
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,

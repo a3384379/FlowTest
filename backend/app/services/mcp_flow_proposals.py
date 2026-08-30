@@ -1,5 +1,7 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
+import re
+from itertools import pairwise
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -170,12 +172,36 @@ class MCPFlowProposalService:
         return require_mcp_flow_propose_scope()
 
     def _reject_sensitive(self, payload: FlowSpecProposalRequest) -> None:
-        if first_sensitive_value(payload.model_dump(mode="json")) is not None:
+        if first_sensitive_value(
+            payload.model_dump(mode="json")
+        ) is not None or _has_sensitive_parameter_literal(payload):
             raise AppError(
                 code="MCP_SENSITIVE_INPUT",
                 message="FlowSpec 提案不能包含 Secret、凭据或 PII, 请使用 secret:// 引用",
                 status_code=422,
             )
+
+
+_SENSITIVE_PARAMETER_NAME_PARTS = frozenset(
+    {"authorization", "cookie", "password", "passwd", "secret", "token", "apikey"}
+)
+
+
+def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
+    for parameter in payload.spec.parameters:
+        if parameter.value is None:
+            continue
+        normalized_name = re.sub(
+            r"(?<=[a-z0-9])(?=[A-Z])",
+            "_",
+            parameter.name,
+        ).lower()
+        parts = [part for part in re.split(r"[._-]+", normalized_name) if part]
+        if any(part in _SENSITIVE_PARAMETER_NAME_PARTS for part in parts):
+            return True
+        if any(left == "api" and right == "key" for left, right in pairwise(parts)):
+            return True
+    return False
 
 
 def require_mcp_flow_propose_scope() -> UUID:

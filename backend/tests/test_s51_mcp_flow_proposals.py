@@ -322,6 +322,22 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
         assert secret not in response.text
 
+    named_secret_payload = _proposal_payload(s51_context, context, plan, compilation)
+    named_secret_payload["spec"]["parameters"] = [
+        {"name": "db_password", "source": "constant", "value": "hunter2"}
+    ]
+    named_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-parameter-name",
+        },
+        json={**named_secret_payload, "dry_run": False},
+    )
+    assert named_secret.status_code == 422
+    assert named_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in named_secret.text
+
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
     safe_payload.pop("compilation")

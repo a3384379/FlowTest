@@ -1,5 +1,6 @@
 import re
 from base64 import b64encode
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -410,9 +411,10 @@ class APIAssetService:
         if change_service:
             service = await self._validate_service(project_id=project_id, service_id=service_id)
             definition.service_id = service_id
-            await self._rebind_contract_service(
-                definition_id=definition.id,
+            await self._create_service_rebound_version(
+                definition=definition,
                 service_key=service.service_key if service is not None else None,
+                actor_id=actor.id,
             )
         self._audit.record(
             actor_user_id=actor.id,
@@ -768,20 +770,50 @@ class APIAssetService:
             raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
         return service
 
-    async def _rebind_contract_service(
+    async def _create_service_rebound_version(
         self,
         *,
-        definition_id: UUID,
+        definition: APIDefinition,
         service_key: str | None,
+        actor_id: UUID,
     ) -> None:
-        for version in await self._assets.list_versions(definition_id):
-            if not version.canonical_contract:
-                continue
-            contract = OperationContract.model_validate(version.canonical_contract).model_copy(
+        current = await self._assets.get_version(
+            definition_id=definition.id,
+            version=definition.current_version,
+        )
+        if current is None:
+            raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
+        canonical_contract = deepcopy(current.canonical_contract)
+        contract_fingerprint = current.contract_fingerprint
+        if canonical_contract:
+            contract = OperationContract.model_validate(canonical_contract).model_copy(
                 update={"service": service_key}
             )
-            version.canonical_contract = contract.model_dump(mode="json", by_alias=True)
-            version.contract_fingerprint = fingerprint_contract(contract)
+            canonical_contract = contract.model_dump(mode="json", by_alias=True)
+            contract_fingerprint = fingerprint_contract(contract)
+        next_version = definition.current_version + 1
+        self._assets.add(
+            APIVersion(
+                api_definition_id=definition.id,
+                version=next_version,
+                method=current.method,
+                path=current.path,
+                query_parameters=deepcopy(current.query_parameters),
+                headers=deepcopy(current.headers),
+                variables=deepcopy(current.variables),
+                body_kind=current.body_kind,
+                body=deepcopy(current.body),
+                auth_kind=current.auth_kind,
+                auth_config=deepcopy(current.auth_config),
+                extraction_rules=deepcopy(current.extraction_rules),
+                assertions=deepcopy(current.assertions),
+                canonical_contract=canonical_contract,
+                contract_fingerprint=contract_fingerprint,
+                contract_completeness=current.contract_completeness,
+                created_by_id=actor_id,
+            )
+        )
+        definition.current_version = next_version
 
     async def _sync_default_endpoint(
         self,
