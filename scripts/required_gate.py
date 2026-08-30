@@ -104,7 +104,7 @@ GATE_SPECS = (
         label="Backend CI",
         workflow_path=".github/workflows/backend-ci.yml",
         checks=("test", "integration"),
-        prefixes=("backend/",),
+        prefixes=("backend/", "skills/"),
         exact_paths=BACKEND_SCRIPTS | {".github/workflows/backend-ci.yml"},
     ),
     GateSpec(
