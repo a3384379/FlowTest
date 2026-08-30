@@ -1,13 +1,14 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-29（Asia/Shanghai）
+最后更新：2026-08-30（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S51 实现及 Evidence Closure。S52 External Evidence Adapter、Entity Mapping 与 Java/Spring POC
 已由 PR #58 普通 Squash Merge，Evidence Closure PR #59 也已普通 Squash Merge 且 Main Push Required Gate
 成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 已由 PR #60 普通 Squash Merge，最终
-P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；当前正在独立文档分支完成 S53
-Evidence Closure，尚未进入 S54。当前 Migration Head 为
-`20260829_0047`，仍未发布 Alpha/Beta/RC/GA。
+P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53 Evidence Closure 也已
+普通合并且 Main Push Required Gate 成功。S54 Cleanup / Compensation Runtime 已完成
+本地实现与定向验证，正准备 PR 精确 Head Review。当前 Migration Head 为
+`20260830_0048`，仍未发布 Alpha/Beta/RC/GA。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 真实 Key Rotation 与外部门槛未完成，仍不是 GA Ready；S30 Failure Intelligence 与 S31 Release Gate/全局搜索已分别通过
@@ -16,6 +17,30 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 实现与本地验证已完成：V6 S54 Cleanup / Compensation Runtime
+
+### Implemented
+
+- Workflow 与 FlowSpec v2 原生区分 Main/Cleanup Phase，支持条件激活、关联 Main Node、
+  Required/Best-effort、独立 Timeout/Retry/Request Budget 和反向清理顺序。
+- Scheduler 不可变地保留 Main Result；Graceful Cancel 继续 Cleanup，Force Cancel 需显式原因并
+  可按快照策略跳过。Execution、Node/Durable Checkpoint、Runner Ack 与 Report 已完成持久化。
+- S50 Cleanup Requirement 不再标记为 Deferred，可完整编译、Review、Apply 并以 FlowSpec v2
+  再导出。Web 分离展示 Main/Cleanup Status 与 Node Phase。
+
+### 当前门槛
+
+- S54 后端定向集 `85 passed`，兼容回归 `47 passed`，前端相关测试 `6 passed`；
+  Ruff、Mypy、TypeScript 与隔离 PostgreSQL Migration 升级/回滚/再升级通过。
+- 五轮复审的 14 个 P1 已完成 Force Cancel Policy、Reclaim Budget、Best-effort
+  Fail-fast、Main Request/Runtime Budget、非 API Cleanup Timeout、持久化 Runtime/Request
+  Reservation、预算拒绝激活语义、取消终态 Reservation、Standalone 持久化与
+  Policy-only v2 导出、Main Phase 完整终态标记与 Capability 请求计费定向修复；
+  修复后 S54 合并定向集 `113 passed`，正等待最终复审。
+- 下一门槛：提交 PR 并复审；只修复 P0/P1。P0/P1 为 0 后只执行一次最终完整
+  本地/远程门禁，然后普通合并。
+- 完整实现、验证与边界见 [S54 Release Evidence](release/v6-s54-cleanup-runtime.md)。
 
 ## 已完成实现验收：V6 S53 Data Recipe 与 Cross-system Oracle
 

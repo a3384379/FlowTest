@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
-from app.engine.contracts import NodeStatus, NodeType
+from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
 from app.runner.results import RunnerExecutionResult
 
@@ -140,13 +140,15 @@ class RunnerCheckpointResume(BaseModel):
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
     output: JsonValue = None
-    result: NodeResult
+    result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=1000)
     started_at: datetime | None
     completed_at: datetime
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
 
 
 class RunnerCheckpointRequest(BaseModel):
@@ -159,7 +161,7 @@ class RunnerCheckpointRequest(BaseModel):
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
     output: JsonValue = None
-    result: NodeResult
+    result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=1000)
     started_at: datetime | None
@@ -168,6 +170,16 @@ class RunnerCheckpointRequest(BaseModel):
     extracted_variables: dict[str, JsonValue] = Field(default_factory=dict)
     snapshot_revision: int = Field(default=1, ge=1, le=1000000)
     fencing_token: int = Field(ge=0)
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    best_effort: bool = False
+
+    @model_validator(mode="after")
+    def validate_reservation_shape(self) -> RunnerCheckpointRequest:
+        if self.status is NodeStatus.RUNNING and self.result is not None:
+            raise ValueError("Running checkpoint reservations cannot include a terminal result")
+        if self.status.is_terminal and self.result is None:
+            raise ValueError("Terminal checkpoints require a NodeResult")
+        return self
 
 
 class RunnerLeaseResponse(BaseModel):
@@ -204,6 +216,7 @@ class RunnerLeaseAckResponse(BaseModel):
     task_status: str
     expires_at: datetime | None = None
     cancel_requested: bool = False
+    force_cancel_requested: bool = False
 
 
 class RunnerTaskResponse(BaseModel):

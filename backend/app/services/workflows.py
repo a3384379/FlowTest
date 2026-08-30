@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID, uuid4
@@ -594,7 +594,7 @@ class WorkflowService:
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
         token = CancellationToken()
         if execution.cancel_requested_at is not None:
-            token.cancel()
+            token.cancel(force=execution.force_cancel_requested_at is not None)
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
         from app.repositories.durable_execution import DurableExecutionRepository
 
@@ -620,7 +620,7 @@ class WorkflowService:
                 output=cast(JsonValue, checkpoint.output),
                 extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
             )
-        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoints)
+        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoint_history)
         async with httpx.AsyncClient(follow_redirects=False) as client:
             node_executor = WorkflowNodeExecutor(
                 client,
@@ -727,10 +727,24 @@ class WorkflowService:
         result: WorkflowRunResult,
     ) -> None:
         execution.status = result.status.value
+        execution.main_status = (result.main_status or result.status).value
+        execution.cleanup_status = (
+            result.cleanup_status.value if result.cleanup_status is not None else None
+        )
+        execution.cleanup_report = cast(
+            dict[str, JsonValue],
+            redact(asdict(result.cleanup_report)) if result.cleanup_report is not None else {},
+        )
         execution.context = cast(dict[str, JsonValue], redact(result.context))
         execution.completed_at = datetime.now(UTC)
         failed = next(
-            (record for record in result.records if record.status.value == "failed"), None
+            (
+                record
+                for record in result.records
+                if record.status.value == "failed"
+                and (record.phase.value == "main" or not record.best_effort)
+            ),
+            None,
         )
         if failed is not None:
             execution.error_code = failed.error_code
@@ -741,7 +755,15 @@ class WorkflowService:
             action="workflow.executed",
             resource_type="workflow_execution",
             resource_id=execution.id,
-            details={"status": result.status.value, "workflow_version": plan.workflow_version},
+            details={
+                "status": result.status.value,
+                "main_status": execution.main_status,
+                "cleanup_status": execution.cleanup_status,
+                "cleanup_warning_count": len(
+                    result.cleanup_report.warnings if result.cleanup_report is not None else ()
+                ),
+                "workflow_version": plan.workflow_version,
+            },
         )
 
     @staticmethod
@@ -799,6 +821,9 @@ class WorkflowService:
                 for record in result.records
             ),
             context=cast(dict[str, JsonValue], redact(result.context)),
+            main_status=result.main_status,
+            cleanup_status=result.cleanup_status,
+            cleanup_report=result.cleanup_report,
         )
 
     async def load_execution_for_run(self, execution_id: UUID) -> WorkflowExecution:
@@ -857,9 +882,21 @@ class WorkflowService:
         await self._session.commit()
 
     async def request_cancel(
-        self, *, actor: User, project_id: UUID, execution_id: UUID
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        force: bool = False,
+        reason: str | None = None,
     ) -> WorkflowExecution:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        if force and (reason is None or not reason.strip()):
+            raise AppError(
+                code="FORCE_CANCEL_REASON_REQUIRED",
+                message="强制取消必须提供审计原因",
+                status_code=422,
+            )
         execution = await self._get_execution(project_id, execution_id)
         if execution.status not in {"queued", "running"}:
             raise AppError(
@@ -867,11 +904,20 @@ class WorkflowService:
                 message="工作流执行已结束, 不能取消",
                 status_code=409,
             )
-        if execution.cancel_requested_at is None:
-            requested_at = datetime.now(UTC)
+        changed = execution.cancel_requested_at is None or (
+            force and execution.force_cancel_requested_at is None
+        )
+        if changed:
+            requested_at = execution.cancel_requested_at or datetime.now(UTC)
             execution.cancel_requested_at = requested_at
+            if force:
+                execution.force_cancel_requested_at = datetime.now(UTC)
+                execution.force_cancel_reason = reason.strip() if reason is not None else None
             await self._workflows.request_child_cancellation(execution.id, requested_at)
             for child in await self._workflows.list_child_executions(execution.id):
+                if force and child.status in {"queued", "running"}:
+                    child.force_cancel_requested_at = execution.force_cancel_requested_at
+                    child.force_cancel_reason = execution.force_cancel_reason
                 if child.status != "queued":
                     continue
                 child.status = "cancelled"
@@ -890,6 +936,19 @@ class WorkflowService:
                 if task is not None and task.status == "queued":
                     task.status = "cancelled"
                     task.completed_at = requested_at
+            self._audit.record(
+                actor_user_id=actor.id,
+                project_id=project_id,
+                action=(
+                    "workflow.force_cancel_requested" if force else "workflow.cancel_requested"
+                ),
+                resource_type="workflow_execution",
+                resource_id=execution.id,
+                details={
+                    "force": force,
+                    "reason_present": bool(reason),
+                },
+            )
             await self._session.commit()
             await self._session.refresh(execution)
         return execution
@@ -1596,9 +1655,15 @@ class WorkflowService:
         try:
             while not task.done():
                 await asyncio.wait({task}, timeout=CANCELLATION_POLL_SECONDS)
-                await self._session.refresh(execution, attribute_names=["cancel_requested_at"])
+                await self._session.refresh(
+                    execution,
+                    attribute_names=[
+                        "cancel_requested_at",
+                        "force_cancel_requested_at",
+                    ],
+                )
                 if execution.cancel_requested_at is not None:
-                    token.cancel()
+                    token.cancel(force=execution.force_cancel_requested_at is not None)
             return await task
         except asyncio.CancelledError:
             token.cancel()
@@ -1693,6 +1758,8 @@ class WorkflowService:
                 node_id=record.node_id,
                 node_type=record.node_type.value,
                 name=record.name,
+                phase=record.phase.value,
+                best_effort=record.best_effort,
                 status=record.status.value,
                 attempts=record.attempts,
                 output=cast(JsonValue, redact(record.output)),

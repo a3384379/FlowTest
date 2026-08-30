@@ -564,7 +564,7 @@ function WorkflowTable({
 
 type DisplayNode = Pick<
   WorkflowNodeExecution,
-  'node_id' | 'node_type' | 'name' | 'status' | 'attempts' | 'error_message'
+  'node_id' | 'node_type' | 'name' | 'phase' | 'status' | 'attempts' | 'error_message'
 >
 
 function NodeTable({
@@ -585,6 +585,13 @@ function NodeTable({
       locale={{ emptyText: '尚未运行工作流' }}
       columns={[
         { title: '节点', dataIndex: 'name' },
+        {
+          title: '阶段',
+          dataIndex: 'phase',
+          width: 90,
+          render: (phase: WorkflowNodeExecution['phase']) =>
+            phase === 'cleanup' ? <Tag color="purple">Cleanup</Tag> : <Tag>Main</Tag>,
+        },
         { title: '类型', dataIndex: 'node_type', width: 100 },
         {
           title: '状态',
@@ -711,6 +718,18 @@ function ExecutionTable({
           dataIndex: 'status',
           width: 100,
           render: (status: string) => <StatusTag status={status} />,
+        },
+        {
+          title: 'Main',
+          width: 90,
+          render: (_value: unknown, item: WorkflowExecution) =>
+            item.main_status ? <StatusTag status={item.main_status} /> : '—',
+        },
+        {
+          title: 'Cleanup',
+          width: 100,
+          render: (_value: unknown, item: WorkflowExecution) =>
+            item.cleanup_status ? <StatusTag status={item.cleanup_status} /> : '—',
         },
         {
           title: '开始时间',

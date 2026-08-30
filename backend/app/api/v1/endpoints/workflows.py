@@ -15,6 +15,7 @@ from app.schemas.durable_execution import (
     ExecutionCommandResponse,
 )
 from app.schemas.workflows import (
+    WorkflowCancelRequest,
     WorkflowCreate,
     WorkflowDebugNodeResponse,
     WorkflowDebugRequest,
@@ -437,11 +438,15 @@ async def cancel_workflow_execution(
     execution_id: UUID,
     session: SessionDependency,
     current_user: CurrentUser,
+    payload: WorkflowCancelRequest | None = None,
 ) -> WorkflowExecutionResponse:
+    request = payload or WorkflowCancelRequest()
     execution = await WorkflowService(session).request_cancel(
         actor=current_user,
         project_id=project_id,
         execution_id=execution_id,
+        force=request.force,
+        reason=request.reason,
     )
     return WorkflowExecutionResponse.model_validate(execution)
 

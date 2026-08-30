@@ -64,6 +64,18 @@ class WorkflowRunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class WorkflowPhase(StrEnum):
+    MAIN = "main"
+    CLEANUP = "cleanup"
+
+
+class CleanupRunWhen(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CANCEL = "cancel"
+    ALWAYS = "always"
+
+
 class RetryCategory(StrEnum):
     NETWORK_ERROR = "network_error"
     SERVER_ERROR = "5xx"
@@ -144,6 +156,12 @@ class WorkflowNode(BaseModel):
     capability_version: SemanticVersion | None = None
     configuration: dict[str, JsonValue] | None = None
     bindings: list[CapabilityBinding] | None = None
+    phase: WorkflowPhase = WorkflowPhase.MAIN
+    run_when: CleanupRunWhen = CleanupRunWhen.ALWAYS
+    cleanup_for: list[str] = Field(default_factory=list, max_length=200)
+    best_effort: bool = False
+    cleanup_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    cleanup_retry_budget: int = Field(default=0, ge=0, le=3)
 
     @model_validator(mode="after")
     def validate_capability_contract(self) -> "WorkflowNode":
@@ -165,6 +183,20 @@ class WorkflowNode(BaseModel):
                 raise ValueError("Capability binding inputs must be unique")
         elif any(value is not None for value in capability_fields):
             raise ValueError("Legacy node cannot declare V3 capability fields")
+        if self.phase is WorkflowPhase.MAIN and (
+            self.run_when is not CleanupRunWhen.ALWAYS
+            or self.cleanup_for
+            or self.best_effort
+            or self.cleanup_timeout_seconds != 30
+            or self.cleanup_retry_budget != 0
+        ):
+            raise ValueError("Main nodes cannot declare cleanup execution metadata")
+        if self.phase is WorkflowPhase.CLEANUP and self.effective_type in {
+            NodeType.START,
+            NodeType.END,
+            NodeType.DATASET,
+        }:
+            raise ValueError("Cleanup nodes cannot use workflow boundary or dataset types")
         return self
 
     @property
@@ -199,6 +231,15 @@ class WorkflowSettings(BaseModel):
     fail_fast: bool = True
     concurrency: int = Field(default=20, ge=1, le=100)
     default_timeout_seconds: int = Field(default=30, ge=1, le=300)
+
+
+class WorkflowRunPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_budget: int | None = Field(default=None, ge=1, le=10_000)
+    max_runtime_seconds: int | None = Field(default=None, ge=1, le=3600)
+    cleanup_request_budget: int | None = Field(default=None, ge=1, le=1000)
+    force_cancel_skips_cleanup: bool = False
 
 
 class StartNodeConfig(BaseModel):
@@ -419,6 +460,7 @@ class WorkflowDefinition(BaseModel):
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
     settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
+    run_policy: WorkflowRunPolicy = Field(default_factory=WorkflowRunPolicy)
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowDefinition":
@@ -429,13 +471,15 @@ class WorkflowDefinition(BaseModel):
         if len(edge_ids) != len(set(edge_ids)):
             raise ValueError("Workflow edge IDs must be unique")
 
-        starts = [node for node in self.nodes if node.effective_type is NodeType.START]
-        ends = [node for node in self.nodes if node.effective_type is NodeType.END]
+        main_nodes = [node for node in self.nodes if node.phase is WorkflowPhase.MAIN]
+        cleanup_nodes = [node for node in self.nodes if node.phase is WorkflowPhase.CLEANUP]
+        starts = [node for node in main_nodes if node.effective_type is NodeType.START]
+        ends = [node for node in main_nodes if node.effective_type is NodeType.END]
         if len(starts) != 1:
             raise ValueError("Workflow must contain exactly one start node")
         if not ends:
             raise ValueError("Workflow must contain at least one end node")
-        datasets = [node for node in self.nodes if node.effective_type is NodeType.DATASET]
+        datasets = [node for node in main_nodes if node.effective_type is NodeType.DATASET]
         if len(datasets) > 1:
             raise ValueError("Workflow can contain at most one dataset node")
 
@@ -446,12 +490,38 @@ class WorkflowDefinition(BaseModel):
                 raise ValueError(f"Edge {edge.id} references an unknown node")
             if edge.source == edge.target:
                 raise ValueError(f"Edge {edge.id} cannot connect a node to itself")
+            if nodes_by_id[edge.source].phase is not nodes_by_id[edge.target].phase:
+                raise ValueError(f"Edge {edge.id} cannot cross workflow phases")
             self._validate_edge(edge, nodes_by_id)
         self._validate_condition_branches(nodes_by_id)
         self._validate_acyclic(known_nodes)
+        main_node_ids = {node.id for node in main_nodes}
         self._validate_endpoints(starts[0].id, {node.id for node in ends})
-        self._validate_connected(starts[0].id, {node.id for node in ends}, known_nodes)
+        self._validate_connected(starts[0].id, {node.id for node in ends}, main_node_ids)
+        self._validate_cleanup_targets(cleanup_nodes, main_node_ids)
+        self._validate_cleanup_request_budget(cleanup_nodes)
         return self
+
+    @staticmethod
+    def _validate_cleanup_targets(
+        cleanup_nodes: list[WorkflowNode], main_node_ids: set[str]
+    ) -> None:
+        for node in cleanup_nodes:
+            unknown = sorted(set(node.cleanup_for) - main_node_ids)
+            if unknown:
+                raise ValueError(f"Cleanup node {node.id} references unknown main nodes: {unknown}")
+
+    def _validate_cleanup_request_budget(self, cleanup_nodes: list[WorkflowNode]) -> None:
+        structural = [
+            node.id
+            for node in cleanup_nodes
+            if node.effective_type in {NodeType.SUBFLOW, NodeType.FOR_EACH}
+        ]
+        if structural and self.run_policy.cleanup_request_budget is None:
+            raise ValueError(
+                "Cleanup subflow and for-each nodes require an explicit cleanup request budget: "
+                f"{structural}"
+            )
 
     @staticmethod
     def _validate_edge(edge: WorkflowEdge, nodes: dict[str, WorkflowNode]) -> None:
@@ -481,10 +551,22 @@ class WorkflowDefinition(BaseModel):
                 )
 
     def _validate_endpoints(self, start_id: str, end_ids: set[str]) -> None:
-        if any(edge.target == start_id for edge in self.edges):
+        main_edges = [
+            edge
+            for edge in self.edges
+            if edge.source == start_id
+            or edge.target == start_id
+            or edge.source in end_ids
+            or edge.target in end_ids
+            or self._node_phase(edge.source) is WorkflowPhase.MAIN
+        ]
+        if any(edge.target == start_id for edge in main_edges):
             raise ValueError("Start node cannot have incoming edges")
-        if any(edge.source in end_ids for edge in self.edges):
+        if any(edge.source in end_ids for edge in main_edges):
             raise ValueError("End nodes cannot have outgoing edges")
+
+    def _node_phase(self, node_id: str) -> WorkflowPhase:
+        return next(node.phase for node in self.nodes if node.id == node_id)
 
     def _validate_acyclic(self, node_ids: set[str]) -> None:
         incoming = dict.fromkeys(node_ids, 0)
@@ -509,6 +591,8 @@ class WorkflowDefinition(BaseModel):
         outgoing: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
         incoming: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
         for edge in self.edges:
+            if edge.source not in node_ids or edge.target not in node_ids:
+                continue
             outgoing[edge.source].add(edge.target)
             incoming[edge.target].add(edge.source)
 

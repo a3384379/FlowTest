@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-from app.engine.contracts import NodeStatus, NodeType
+from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.schemas.workflows import WorkflowExecutionResponse
 
 
@@ -36,6 +36,8 @@ class ExecutionCheckpointResponse(BaseModel):
     node_id: str
     node_type: NodeType
     node_name: str
+    phase: WorkflowPhase
+    best_effort: bool
     attempt: int
     input_hash: str
     status: NodeStatus

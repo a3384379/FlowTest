@@ -386,9 +386,15 @@ def diff_flow_specs(before: FlowSpec | None, after: FlowSpec) -> tuple[FlowSpecD
         else cast(dict[str, JsonValue], normalize_flow_spec(before).model_dump(mode="json"))
     )
     after_payload = cast(dict[str, JsonValue], normalize_flow_spec(after).model_dump(mode="json"))
+    return diff_flow_spec_payloads(before_payload, after_payload)
+
+
+def diff_flow_spec_payloads(
+    before: dict[str, JsonValue] | None, after: dict[str, JsonValue]
+) -> tuple[FlowSpecDiffItem, ...]:
     return tuple(
         FlowSpecDiffItem(path=path, before=old, after=new)
-        for path, old, new in _mapping_diff(before_payload, after_payload)
+        for path, old, new in _mapping_diff(before or {}, after)
     )
 
 

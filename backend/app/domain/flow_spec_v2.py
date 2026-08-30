@@ -14,19 +14,34 @@ from app.domain.flow_spec import (
     FLOW_SPEC_FINGERPRINT_VERSION,
     FlowSpec,
     FlowSpecAssertion,
+    FlowSpecCompatibilityResult,
     FlowSpecConfidence,
+    FlowSpecDiffItem,
     FlowSpecEdge,
     FlowSpecIssue,
     FlowSpecNode,
+    FlowSpecNodeTarget,
     FlowSpecOperation,
     FlowSpecParameter,
     FlowSpecSecurityPolicy,
     FlowSpecService,
     FlowSpecValidationResult,
+    assess_flow_spec_compatibility,
+    diff_flow_spec_payloads,
+    flow_spec_to_workflow_definition,
     normalize_flow_spec,
     validate_flow_spec,
+    workflow_definition_to_flow_spec,
 )
-from app.engine.contracts import WorkflowSettings
+from app.engine.contracts import (
+    NodeType,
+    Position,
+    WorkflowDefinition,
+    WorkflowNode,
+    WorkflowPhase,
+    WorkflowRunPolicy,
+    WorkflowSettings,
+)
 
 FLOW_SPEC_V2_SCHEMA_VERSION = "flowtest-flow-spec-v2"
 FLOW_SPEC_V2_FINGERPRINT_VERSION = "flowtest-flow-spec-v2-fingerprint-v1"
@@ -108,6 +123,10 @@ class FlowSpecV2(BaseModel):
         cleanup_ids = [item.id for item in self.cleanup]
         if len(cleanup_ids) != len(set(cleanup_ids)):
             raise ValueError("FlowSpec cleanup IDs must be unique")
+        node_ids = {item.id for item in self.nodes}
+        conflicts = sorted(node_ids.intersection(cleanup_ids))
+        if conflicts:
+            raise ValueError(f"FlowSpec cleanup IDs conflict with main nodes: {conflicts}")
         return self
 
 
@@ -196,6 +215,20 @@ def flow_spec_v2_fingerprint(spec: FlowSpecV2) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def diff_flow_specs_v2(
+    before: FlowSpecV2 | None, after: FlowSpecV2
+) -> tuple[FlowSpecDiffItem, ...]:
+    before_payload = (
+        None
+        if before is None
+        else cast(dict[str, JsonValue], normalize_flow_spec_v2(before).model_dump(mode="json"))
+    )
+    after_payload = cast(
+        dict[str, JsonValue], normalize_flow_spec_v2(after).model_dump(mode="json")
+    )
+    return diff_flow_spec_payloads(before_payload, after_payload)
+
+
 def validate_flow_spec_v2(spec: FlowSpecV2) -> FlowSpecValidationResult:
     base = validate_flow_spec(_v1_projection(spec))
     issues = list(base.issues)
@@ -242,6 +275,192 @@ def validate_flow_spec_v2(spec: FlowSpecV2) -> FlowSpecValidationResult:
         issues=issues,
         warnings=base.warnings,
         requires_review=base.requires_review,
+    )
+
+
+def flow_spec_v2_main_projection(spec: FlowSpecV2) -> FlowSpec:
+    """Return only v1-compatible main-graph semantics for shared adapters."""
+
+    projected = _v1_projection(normalize_flow_spec_v2(spec))
+    return projected.model_copy(update={"cleanup": []})
+
+
+def assess_flow_spec_v2_compatibility(spec: FlowSpecV2) -> FlowSpecCompatibilityResult:
+    """Allow executable v2 cleanup while preserving every v1 compatibility guard."""
+
+    normalized = normalize_flow_spec_v2(spec)
+    base = assess_flow_spec_compatibility(flow_spec_v2_main_projection(normalized))
+    validation = validate_flow_spec_v2(normalized)
+    blockers = _unique_issues([*base.blockers, *validation.issues])
+    warnings = _unique_issues([*base.warnings, *validation.warnings])
+    return FlowSpecCompatibilityResult(
+        compatible=not blockers,
+        source_schema_version=normalized.schema_version,
+        blockers=blockers,
+        warnings=warnings,
+        requires_review=base.requires_review or validation.requires_review,
+    )
+
+
+def _unique_issues(issues: list[FlowSpecIssue]) -> list[FlowSpecIssue]:
+    seen: set[tuple[str, str | None, str]] = set()
+    result: list[FlowSpecIssue] = []
+    for issue in issues:
+        key = (issue.code, issue.path, issue.message)
+        if key not in seen:
+            seen.add(key)
+            result.append(issue)
+    return result
+
+
+def flow_spec_v2_to_workflow_definition(
+    spec: FlowSpecV2,
+    *,
+    operation_mappings: Mapping[str, UUID] | None = None,
+    service_keys: Mapping[str, str] | None = None,
+    operation_versions: Mapping[str, int] | None = None,
+) -> WorkflowDefinition:
+    """Compile a validated v2 document into immutable main and cleanup phases."""
+
+    normalized = normalize_flow_spec_v2(spec)
+    mappings = operation_mappings or {}
+    services = service_keys or {}
+    versions = operation_versions or {}
+    main = flow_spec_to_workflow_definition(
+        flow_spec_v2_main_projection(normalized),
+        operation_mappings=mappings,
+        service_keys=services,
+        operation_versions=versions,
+    )
+    operations = {operation.ref: operation for operation in normalized.operations}
+    cleanup_nodes = [
+        _cleanup_workflow_node(
+            item,
+            index=index,
+            operations=operations,
+            operation_mappings=mappings,
+            service_keys=services,
+            operation_versions=versions,
+        )
+        for index, item in enumerate(normalized.cleanup, start=1)
+    ]
+    return WorkflowDefinition(
+        schema_version="2.0",
+        variables=main.variables,
+        nodes=[*main.nodes, *cleanup_nodes],
+        edges=main.edges,
+        settings=main.settings,
+        run_policy=WorkflowRunPolicy.model_validate(
+            normalized.run_policy.model_dump(mode="python")
+        ),
+    )
+
+
+def workflow_definition_to_flow_spec_v2(
+    definition: WorkflowDefinition,
+    *,
+    project_id: UUID | None = None,
+    name: str = "Imported Flow",
+    description: str = "",
+    source_evidence: list[str] | None = None,
+    operation_refs: Mapping[str, str] | None = None,
+    node_targets: Mapping[str, FlowSpecNodeTarget] | None = None,
+    services: list[FlowSpecService] | None = None,
+    operations: list[FlowSpecOperation] | None = None,
+) -> FlowSpecV2:
+    """Export a runtime definition without flattening cleanup into the main DAG."""
+
+    main_ids = {node.id for node in definition.nodes if node.phase is WorkflowPhase.MAIN}
+    main = definition.model_copy(
+        update={
+            "nodes": [node for node in definition.nodes if node.id in main_ids],
+            "edges": [
+                edge
+                for edge in definition.edges
+                if edge.source in main_ids and edge.target in main_ids
+            ],
+        }
+    )
+    base = workflow_definition_to_flow_spec(
+        main,
+        project_id=project_id,
+        name=name,
+        description=description,
+        source_evidence=source_evidence,
+        operation_refs={
+            key: value for key, value in (operation_refs or {}).items() if key in main_ids
+        },
+        node_targets={key: value for key, value in (node_targets or {}).items() if key in main_ids},
+        services=services,
+        operations=operations,
+    )
+    cleanup = []
+    for node in definition.nodes:
+        if node.phase is not WorkflowPhase.CLEANUP:
+            continue
+        operation_ref = (operation_refs or {}).get(node.id)
+        if operation_ref is None:
+            raise ValueError(f"Cleanup node {node.id} has no portable operation reference")
+        cleanup.append(
+            FlowSpecCleanupV2(
+                id=node.id,
+                operation_ref=operation_ref,
+                run_when=node.run_when.value,
+                cleanup_for=node.cleanup_for,
+                best_effort=node.best_effort,
+                cleanup_timeout_seconds=node.cleanup_timeout_seconds,
+                cleanup_retry_budget=node.cleanup_retry_budget,
+            )
+        )
+    payload = cast(dict[str, object], base.model_dump(mode="json", by_alias=True))
+    payload.update(
+        {
+            "schema_version": FLOW_SPEC_V2_SCHEMA_VERSION,
+            "fingerprint_version": FLOW_SPEC_V2_FINGERPRINT_VERSION,
+            "cleanup": cleanup,
+            "plan_metadata": {},
+            "run_policy": definition.run_policy.model_dump(mode="json"),
+        }
+    )
+    return normalize_flow_spec_v2(payload)
+
+
+def _cleanup_workflow_node(
+    cleanup: FlowSpecCleanupV2,
+    *,
+    index: int,
+    operations: Mapping[str, FlowSpecOperation],
+    operation_mappings: Mapping[str, UUID],
+    service_keys: Mapping[str, str],
+    operation_versions: Mapping[str, int],
+) -> WorkflowNode:
+    operation = operations.get(cleanup.operation_ref)
+    mapped = operation_mappings.get(cleanup.operation_ref)
+    if operation is None or mapped is None:
+        raise ValueError(f"Cleanup operation {cleanup.operation_ref} has no target mapping")
+    config: dict[str, JsonValue] = {"api_definition_id": str(mapped)}
+    version = operation_versions.get(cleanup.operation_ref)
+    if version is None and operation.version_strategy is None:
+        version = operation.api_version
+    if operation.version_strategy != "current" and version is not None:
+        config["api_version"] = version
+    if operation.service_ref is not None:
+        service_key = service_keys.get(operation.service_ref)
+        if service_key is None:
+            raise ValueError(f"Service {operation.service_ref} has no target mapping")
+        config["service_override"] = service_key
+    return WorkflowNode(
+        id=cleanup.id,
+        type=NodeType.API,
+        name=(f"Cleanup: {operation.name or cleanup.operation_ref}")[:200],
+        position=Position(x=200, y=200 + index * 80),
+        config=config,
+        phase=WorkflowPhase.CLEANUP,
+        run_when=cleanup.run_when,
+        cleanup_for=cleanup.cleanup_for,
+        best_effort=cleanup.best_effort,
+        cleanup_timeout_seconds=cleanup.cleanup_timeout_seconds,
+        cleanup_retry_budget=cleanup.cleanup_retry_budget,
     )
 
 

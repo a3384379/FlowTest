@@ -389,6 +389,26 @@ async def test_durable_command_and_checkpoint_edge_cases(
         await session.refresh(execution)
         assert execution.status == "failed"
         assert execution.error_code == "WORKER_CRASHED"
+
+        execution.status = "cancelled"
+        execution.cancel_requested_at = datetime.now(UTC)
+        execution.force_cancel_requested_at = datetime.now(UTC)
+        execution.force_cancel_reason = "runner did not stop"
+        await session.commit()
+        recovery, recovered_execution = await durable.prepare_recovery_command(
+            actor=actor,
+            project_id=project.id,
+            execution_id=execution.id,
+            command_type=ExecutionCommandType.RESUME,
+            actor_key="user:test",
+            idempotency_key=None,
+            payload={},
+        )
+        assert recovery.command_type == ExecutionCommandType.RESUME.value
+        assert recovered_execution.cancel_requested_at is None
+        assert recovered_execution.force_cancel_requested_at is None
+        assert recovered_execution.force_cancel_reason is None
+
         with pytest.raises(AppError) as missing_dispatch:
             await durable.mark_dispatched(uuid4())
         assert missing_dispatch.value.code == "EXECUTION_COMMAND_NOT_FOUND"
@@ -422,6 +442,63 @@ async def test_durable_command_and_checkpoint_edge_cases(
                 payload=checkpoint_payload.model_copy(update={"status": NodeStatus.PENDING}),
             )
         assert non_terminal.value.code == "EXECUTION_CHECKPOINT_NOT_TERMINAL"
+
+        reservation_payload = RunnerCheckpointRequest.model_validate(
+            {
+                **checkpoint_payload.model_dump(mode="python"),
+                "node_id": "reserved-api",
+                "node_type": NodeType.API,
+                "name": "Reserved API",
+                "status": NodeStatus.RUNNING,
+                "output": None,
+                "result": None,
+            }
+        )
+        reservation = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=reservation_payload,
+        )
+        assert reservation.status == NodeStatus.RUNNING.value
+        resume_reservation = checkpoint_to_runner_resume(reservation)
+        assert resume_reservation.result is None
+        assert resume_reservation.started_at == reservation_payload.started_at
+        finalized_reservation = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=RunnerCheckpointRequest.model_validate(
+                {
+                    **reservation_payload.model_dump(mode="python"),
+                    "status": NodeStatus.PASSED,
+                    "output": result.output,
+                    "result": result,
+                }
+            ),
+        )
+        assert finalized_reservation.id == reservation.id
+        assert finalized_reservation.status == NodeStatus.PASSED.value
+
+        zero_attempt = await durable.record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=RunnerCheckpointRequest.model_validate(
+                {
+                    **checkpoint_payload.model_dump(mode="python"),
+                    "node_id": "not-dispatched",
+                    "status": NodeStatus.CANCELLED,
+                    "attempts": 0,
+                    "output": None,
+                    "result": NodeResult(status=NodeStatus.CANCELLED),
+                }
+            ),
+        )
+        assert zero_attempt.attempt == 0
 
         with pytest.raises(AppError) as missing_checkpoint_execution:
             await durable.record_checkpoint(
@@ -469,7 +546,7 @@ async def test_durable_command_and_checkpoint_edge_cases(
 
         repository = DurableExecutionRepository(session)
         resumable = await repository.list_checkpoints(execution_id, resumable_only=True)
-        assert [item.node_id for item in resumable] == ["start"]
+        assert [item.node_id for item in resumable] == ["reserved-api", "start"]
         assert await repository.list_checkpoints_for_executions([]) == {}
         with pytest.raises(AppError):
             await durable.list_checkpoints(actor=actor, project_id=project.id, execution_id=uuid4())
@@ -1088,6 +1165,21 @@ def test_runner_checkpoint_and_token_guards(tmp_path: Path) -> None:
     )
     checkpoint = _checkpoint_payload(lease, update)
     assert checkpoint.extracted_variables == {}
+    reservation_started_at = datetime.now(UTC)
+    reservation = _checkpoint_payload(
+        lease,
+        replace(
+            update,
+            status=NodeStatus.RUNNING,
+            result=None,
+            occurred_at=reservation_started_at,
+            started_at=reservation_started_at,
+            request_reserved=True,
+        ),
+    )
+    assert reservation.status is NodeStatus.RUNNING
+    assert reservation.result is None
+    assert reservation.started_at == reservation_started_at
     with pytest.raises(ValueError, match="NodeResult"):
         _checkpoint_payload(lease, replace(update, result=None))
 

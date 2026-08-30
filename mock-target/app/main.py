@@ -376,6 +376,12 @@ def _change_set_workflow_definition() -> dict[str, object]:
             "concurrency": 20,
             "default_timeout_seconds": 30,
         },
+        "run_policy": {
+            "request_budget": None,
+            "max_runtime_seconds": None,
+            "cleanup_request_budget": None,
+            "force_cancel_skips_cleanup": False,
+        },
     }
 
 
@@ -396,4 +402,10 @@ def _change_set_workflow_node(
         "capability_version": None,
         "configuration_json": None,
         "bindings": None,
+        "phase": "main",
+        "run_when": "always",
+        "cleanup_for": [],
+        "best_effort": False,
+        "cleanup_timeout_seconds": 30,
+        "cleanup_retry_budget": 0,
     }

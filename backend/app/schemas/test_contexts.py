@@ -12,6 +12,7 @@ from app.domain.evidence_adapters import (
     JavaEvidenceSubmission,
 )
 from app.domain.flow_spec import FlowSpec
+from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlanCompilation,
@@ -217,7 +218,7 @@ class FlowSpecProposalRequest(BaseModel):
     project_id: UUID
     context_id: UUID
     context_revision_id: UUID
-    spec: FlowSpec
+    spec: FlowSpec | FlowSpecV2
     workflow_id: UUID | None = None
     source_ref: str | None = Field(
         default=None,

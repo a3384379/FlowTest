@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from app.core.logging import redact
 from app.domain.network import OutboundNetworkPolicy
+from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.runner.client import RunnerControlPlaneClient
@@ -105,11 +106,14 @@ class RunnerAgent:
                         _progress_percent(update),
                         f"节点 {update.name}: {update.status.value}",
                     )
-                    if (
-                        update.result is not None
-                        and update.status.is_terminal
-                        and hasattr(self._control_plane, "checkpoint")
-                    ):
+                    should_checkpoint = (
+                        update.status.is_terminal and update.result is not None
+                    ) or (
+                        update.status is NodeStatus.RUNNING
+                        and update.attempts > 0
+                        and update.request_reserved
+                    )
+                    if should_checkpoint and hasattr(self._control_plane, "checkpoint"):
                         checkpoint = _checkpoint_payload(
                             lease,
                             update,
@@ -119,7 +123,9 @@ class RunnerAgent:
                             lease.lease_id, checkpoint
                         )
                     if acknowledgment.cancel_requested:
-                        cancellation.cancel()
+                        cancellation.cancel(
+                            force=bool(getattr(acknowledgment, "force_cancel_requested", False))
+                        )
 
                 result = await self._executor.execute(
                     plan,
@@ -170,7 +176,9 @@ class RunnerAgent:
                 lease.lease_id, lease.task.fencing_token
             )
             if acknowledgment.cancel_requested:
-                cancellation.cancel()
+                cancellation.cancel(
+                    force=bool(getattr(acknowledgment, "force_cancel_requested", False))
+                )
 
     async def _reap_tasks(self) -> None:
         completed = {task for task in self._tasks if task.done()}
@@ -248,9 +256,13 @@ def _checkpoint_payload(
     execution_id: UUID | None = None,
 ) -> RunnerCheckpointRequest:
     result = update.result
-    if result is None:
+    if update.status.is_terminal and result is None:
         raise ValueError("terminal Runner status requires a NodeResult")
-    redacted_result = NodeResult.model_validate(redact(result.model_dump(mode="json")))
+    redacted_result = (
+        None
+        if result is None
+        else NodeResult.model_validate(redact(result.model_dump(mode="json")))
+    )
     snapshot = update.context_snapshot or {}
     extracted = snapshot.get("extracted_variables", {})
     if not isinstance(extracted, dict):
@@ -262,17 +274,19 @@ def _checkpoint_payload(
         node_type=update.node_type,
         name=update.name,
         status=update.status,
-        attempts=max(1, update.attempts),
-        output=redacted_result.output,
+        attempts=update.attempts,
+        output=redacted_result.output if redacted_result is not None else None,
         result=redacted_result,
         error_code=update.error_code,
         error_message=update.error_message,
-        started_at=None,
+        started_at=update.started_at,
         finished_at=update.occurred_at,
         input_hash=input_hash,
         extracted_variables=cast(dict[str, JsonValue], redact(extracted)),
         snapshot_revision=1,
         fencing_token=lease.task.fencing_token,
+        phase=update.phase,
+        best_effort=update.best_effort,
     )
 
 

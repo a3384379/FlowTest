@@ -803,6 +803,71 @@ async def test_publish_rejects_invalid_or_cross_project_api_configuration(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_cleanup_runtime_persists_separate_main_and_cleanup_report(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = _workflow_definition(api_id)
+    definition["nodes"].insert(
+        -1,
+        {
+            "id": "cleanup",
+            "type": "api",
+            "name": "清理用户",
+            "position": {"x": 200, "y": 100},
+            "config": {"api_definition_id": api_id},
+            "phase": "cleanup",
+            "run_when": "always",
+            "cleanup_for": ["api"],
+            "best_effort": False,
+            "cleanup_timeout_seconds": 5,
+            "cleanup_retry_budget": 0,
+        },
+    )
+    definition["run_policy"] = {"cleanup_request_budget": 1}
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "清理报告流程", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[Response(200, json={"id": 7}), Response(500, json={"error": "cleanup"})]
+    )
+
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, started.json()["id"]
+    )
+
+    execution = detail["execution"]
+    assert execution["status"] == "failed"
+    assert execution["main_status"] == "passed"
+    assert execution["cleanup_status"] == "failed"
+    assert execution["cleanup_report"]["required_failures"] == ["cleanup"]
+    assert [item["phase"] for item in detail["nodes"]] == [
+        "main",
+        "main",
+        "cleanup",
+        "main",
+    ]
+    assert len(target.calls) == 2
+    assert execution["snapshot"]["workflow"]["definition"]["nodes"][2]["phase"] == "cleanup"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -> None:
     headers = await _login_headers(workflow_client)
     project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
@@ -829,6 +894,27 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     )
     assert running.status_code == 202, running.text
     execution_id = running.json()["id"]
+    running_checkpoint: dict[str, Any] | None = None
+    for _ in range(50):
+        checkpoints = await workflow_client.get(
+            f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+            headers=headers,
+        )
+        running_checkpoint = next(
+            (
+                item
+                for item in checkpoints.json()
+                if item["node_id"] == "api" and item["status"] == "running"
+            ),
+            None,
+        )
+        if running_checkpoint is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert running_checkpoint is not None
+    assert running_checkpoint["attempt"] == 1
+    assert running_checkpoint["started_at"] is not None
+    reserved_input_hash = running_checkpoint["input_hash"]
     cancelled = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/cancel",
         headers=headers,
@@ -839,6 +925,38 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     result = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
     assert result["execution"]["status"] == "cancelled"
     assert result["nodes"][1]["status"] == "cancelled"
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+        headers=headers,
+    )
+    cancelled_api = next(item for item in checkpoints.json() if item["node_id"] == "api")
+    assert cancelled_api["status"] == "cancelled"
+    assert cancelled_api["attempt"] == 1
+    assert cancelled_api["input_hash"] == reserved_input_hash
+
+    forced = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    missing_reason = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{forced.json()['id']}/cancel",
+        headers=headers,
+        json={"force": True},
+    )
+    assert missing_reason.status_code == 422
+    force_cancelled = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{forced.json()['id']}/cancel",
+        headers=headers,
+        json={"force": True, "reason": "测试 Runner 无响应时的强制终止"},
+    )
+    assert force_cancelled.status_code == 200, force_cancelled.text
+    assert force_cancelled.json()["force_cancel_requested_at"] is not None
+    assert force_cancelled.json()["force_cancel_reason"] == "测试 Runner 无响应时的强制终止"
+    forced_result = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, forced.json()["id"]
+    )
+    assert forced_result["execution"]["status"] == "cancelled"
 
     interrupted = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",

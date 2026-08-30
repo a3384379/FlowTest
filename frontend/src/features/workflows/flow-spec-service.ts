@@ -1,6 +1,6 @@
 import {
   apiClient,
-  type FlowSpec,
+  type FlowSpecDocument,
   type FlowSpecApplyResult,
   type FlowSpecChangeSetDetail,
   type FlowSpecChangeSetCursor,
@@ -26,10 +26,10 @@ export async function exportFlowSpec(
 
 export async function validateFlowSpec(
   projectId: string,
-  spec: FlowSpec,
+  spec: FlowSpecDocument,
 ): Promise<{
   fingerprint: string
-  spec: FlowSpec
+  spec: FlowSpecDocument
   validation: FlowSpecValidationResult
   compatibility: FlowSpecCompatibilityResult
 }> {
@@ -39,8 +39,8 @@ export async function validateFlowSpec(
 
 export async function diffFlowSpecs(
   projectId: string,
-  before: FlowSpec | null,
-  after: FlowSpec,
+  before: FlowSpecDocument | null,
+  after: FlowSpecDocument,
 ): Promise<FlowSpecDiff> {
   const response = await apiClient.post<FlowSpecDiff>(`/projects/${projectId}/flow-specs/diff`, {
     before,
@@ -51,7 +51,7 @@ export async function diffFlowSpecs(
 
 export async function importFlowSpec(
   projectId: string,
-  spec: FlowSpec,
+  spec: FlowSpecDocument,
   workflowId?: string,
   sourceRef?: string,
   mappings?: {
