@@ -418,6 +418,32 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         if literal is not None:
             assert literal not in overridden.text
 
+    capability_payload = _proposal_payload(s51_context, context, plan, compilation)
+    capability_payload["spec"]["nodes"].append(
+        {
+            "id": "credential-capability",
+            "kind": "capability",
+            "name": "Credential capability",
+            "position": {"x": 540, "y": 0},
+            "config": {},
+            "capability_id": "flowtest.credential-check",
+            "capability_version": "1.0.0",
+            "configuration": {"access_key": "abc"},
+            "depends_on": [],
+        }
+    )
+    capability_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-capability-configuration",
+        },
+        json={**capability_payload, "dry_run": False},
+    )
+    assert capability_secret.status_code == 422
+    assert capability_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "abc" not in capability_secret.text
+
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
     safe_payload.pop("compilation")

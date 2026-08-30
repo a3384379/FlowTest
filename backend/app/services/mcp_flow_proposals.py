@@ -192,8 +192,7 @@ def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
         if is_sensitive_identifier(parameter.name):
             return True
     for node in payload.spec.nodes:
-        request_overrides = node.config.get("request_overrides")
-        if _has_sensitive_mapping_literal(request_overrides):
+        if _has_sensitive_mapping_literal(node.model_dump(mode="json")):
             return True
     return False
 
