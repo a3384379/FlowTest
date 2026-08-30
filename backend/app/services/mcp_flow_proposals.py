@@ -207,6 +207,7 @@ _SENSITIVE_PARAMETER_NAME_PAIRS = frozenset(
 
 def _parameter_name_parts(name: str) -> list[str]:
     segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    segmented = re.sub(r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", "_", segmented)
     return [part for part in re.split(r"[^a-z0-9]+", segmented.lower()) if part]
 
 

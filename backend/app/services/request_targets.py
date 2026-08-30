@@ -19,9 +19,8 @@ from app.domain.api_assets import TEMPLATE_PATTERN, build_variables, render_temp
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.request_targets import ResolvedRequestTarget
 from app.domain.scopes import HeaderScope, ResolvedValue
-from app.domain.test_engineering import canonical_contract_service_key
 from app.models.access import Project, User
-from app.models.api_assets import APIDefinition, APIVersion, Environment
+from app.models.api_assets import APIVersion, Environment
 from app.models.service_targets import Service
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
@@ -44,7 +43,6 @@ class RequestTargetResolver:
         actor: User,
         project_id: UUID,
         environment: Environment,
-        definition: APIDefinition,
         version: APIVersion,
         path: str,
         node_service_override: str | None,
@@ -61,7 +59,6 @@ class RequestTargetResolver:
         service = await self._select_service(
             project_id=project_id,
             environment=environment,
-            definition=definition,
             version=version,
             node_service_override=node_service_override,
         )
@@ -239,7 +236,6 @@ class RequestTargetResolver:
         *,
         project_id: UUID,
         environment: Environment,
-        definition: APIDefinition,
         version: APIVersion,
         node_service_override: str | None,
     ) -> Service | None:
@@ -251,15 +247,8 @@ class RequestTargetResolver:
             )
             if service is None:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
-        elif version_service_key := canonical_contract_service_key(version.canonical_contract):
-            service = await self._targets.find_service_by_key(
-                project_id=project_id,
-                service_key=version_service_key,
-            )
-            if service is None:
-                raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
-        elif definition.service_id is not None:
-            service = await self._targets.get_service(definition.service_id)
+        elif version.service_id is not None:
+            service = await self._targets.get_service(version.service_id)
         elif environment.default_service_id is not None:
             service = await self._targets.get_service(environment.default_service_id)
         if service is not None:

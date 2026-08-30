@@ -332,6 +332,8 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             "database_credential",
             "client_secret_value",
             "db_password_value",
+            "password1",
+            "access_key2",
         )
     ):
         named_secret_payload = _proposal_payload(s51_context, context, plan, compilation)

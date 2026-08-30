@@ -584,6 +584,7 @@ class ImportService:
         await self._session.flush()
         version = _version_model(
             definition.id,
+            definition.service_id,
             1,
             actor.id,
             operation.request,
@@ -613,6 +614,7 @@ class ImportService:
         definition.current_version += 1
         version = _version_model(
             definition.id,
+            definition.service_id,
             definition.current_version,
             actor.id,
             operation.request,
@@ -709,6 +711,7 @@ class ImportService:
 
 def _version_model(
     definition_id: UUID,
+    service_id: UUID | None,
     version: int,
     actor_id: UUID,
     request: APIVersionSpec,
@@ -719,6 +722,7 @@ def _version_model(
     )
     return APIVersion(
         api_definition_id=definition_id,
+        service_id=service_id,
         version=version,
         method=request.method.value,
         path=request.path,

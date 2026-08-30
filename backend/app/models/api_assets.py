@@ -117,6 +117,9 @@ class APIVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):
     api_definition_id: Mapped[UUID] = mapped_column(
         ForeignKey("api_definitions.id", ondelete="CASCADE"), index=True
     )
+    service_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("services.id", ondelete="RESTRICT"), index=True
+    )
     version: Mapped[int] = mapped_column(Integer)
     method: Mapped[str] = mapped_column(String(10))
     path: Mapped[str] = mapped_column(String(2048))

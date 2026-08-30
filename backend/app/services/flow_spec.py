@@ -46,7 +46,6 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
-from app.domain.test_engineering import canonical_contract_service_key
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -828,7 +827,7 @@ class FlowSpecService:
         elif operation.api_version is not None:
             query = query.where(APIVersion.version == operation.api_version)
         if service_id is not None:
-            query = query.where(APIDefinition.service_id == service_id)
+            query = query.where(APIVersion.service_id == service_id)
         candidates = list((await self._session.scalars(query)).all())
         semantic_key = operation.ref.rsplit(":", 1)[-1]
         exact = [item for item in candidates if item.import_key == semantic_key]
@@ -899,7 +898,7 @@ class FlowSpecService:
                 message=f"Operation {operation.ref} 的 method/path 与目标 API 不一致",
                 path=f"$.operation_mappings.{operation.ref}",
             )
-        if expected_service_id is not None and definition.service_id != expected_service_id:
+        if expected_service_id is not None and version.service_id != expected_service_id:
             raise _mapping_error(
                 code="FLOWSPEC_OPERATION_SERVICE_MISMATCH",
                 message=f"Operation {operation.ref} 与目标 Service 不一致",
@@ -1007,8 +1006,7 @@ class FlowSpecService:
             service = await self._portable_target_service(
                 project_id=project_id,
                 service_override=config.service_override,
-                version_service_key=canonical_contract_service_key(api_version.canonical_contract),
-                definition_service_id=api_definition.service_id,
+                version_service_id=api_version.service_id,
             )
             service_ref = service.service_key if service is not None else None
             operation_ref = _portable_operation_ref(
@@ -1082,19 +1080,14 @@ class FlowSpecService:
         *,
         project_id: UUID,
         service_override: str | None,
-        version_service_key: str | None,
-        definition_service_id: UUID | None,
+        version_service_id: UUID | None,
     ) -> Service | None:
         if service_override is not None:
             service = await self._targets.find_service_by_key(
                 project_id=project_id, service_key=service_override
             )
-        elif version_service_key is not None:
-            service = await self._targets.find_service_by_key(
-                project_id=project_id, service_key=version_service_key
-            )
-        elif definition_service_id is not None:
-            service = await self._targets.get_service(definition_service_id)
+        elif version_service_id is not None:
+            service = await self._targets.get_service(version_service_id)
         else:
             return None
         if service is None or service.project_id != project_id:

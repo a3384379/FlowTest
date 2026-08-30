@@ -676,6 +676,28 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert legacy_preview.status_code == 200, legacy_preview.text
     assert legacy_preview.json()["target"]["service_key"] == "orders"
     assert legacy_preview.json()["url"] == "https://orders.example.com/health"
+    bound_legacy = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}",
+        headers=headers,
+        json={"service_id": auth_id},
+    )
+    assert bound_legacy.status_code == 200, bound_legacy.text
+    pinned_unassigned_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"], "version": 1},
+    )
+    assert pinned_unassigned_preview.status_code == 200, pinned_unassigned_preview.text
+    assert pinned_unassigned_preview.json()["target"]["service_key"] == "orders"
+    assert pinned_unassigned_preview.json()["url"] == "https://orders.example.com/health"
+    bound_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"]},
+    )
+    assert bound_preview.status_code == 200, bound_preview.text
+    assert bound_preview.json()["target"]["service_key"] == "auth"
+    assert bound_preview.json()["url"] == "https://auth.example.com/health"
     assert default_service_id != order_id
 
 

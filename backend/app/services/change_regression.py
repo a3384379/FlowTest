@@ -2418,19 +2418,17 @@ class ChangeRegressionService:
         # A missing pinned version is unknown coverage; never fall back to current.
         if version is None:
             return None
-        service_key = "unassigned"
-        if definition.service_id is not None:
-            service = await self._session.get(Service, definition.service_id)
+        version_service_key = "unassigned"
+        if version.service_id is not None:
+            service = await self._session.get(Service, version.service_id)
             if service is None or service.project_id != project_id:
                 return None
-            service_key = service.service_key
+            version_service_key = service.service_key
         if version.canonical_contract:
             try:
                 contract = OperationContract.model_validate(version.canonical_contract)
             except ValueError:
                 return None
-            if contract.service is None and definition.service_id is not None:
-                contract = contract.model_copy(update={"service": service_key})
         else:
             contract = await TestEngineeringService(self._session).contract_for_api(
                 project_id=project_id,
@@ -2438,7 +2436,7 @@ class ChangeRegressionService:
             )
             if target_version != definition.current_version:
                 return None
-        version_service_key = contract.service or "unassigned"
+        version_service_key = contract.service or version_service_key
         identity = OperationIdentity(
             api_definition_id=str(definition.id),
             api_version=version.version,
@@ -2446,7 +2444,7 @@ class ChangeRegressionService:
             service_key=version_service_key,
             method=version.method,
             normalized_path=_semantic_path(version.path),
-            contract_fingerprint=fingerprint_contract(contract),
+            contract_fingerprint=version.contract_fingerprint or fingerprint_contract(contract),
         )
         return identity, contract
 

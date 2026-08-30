@@ -147,7 +147,7 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
         source_ref="contract://legacy-orders/orders.get",
         revision="1",
     )
-    historical_contract = legacy_contract.model_copy(update={"service": old_service.service_key})
+    legacy_fingerprint = fingerprint_contract(legacy_contract)
     definition = APIDefinition(
         project_id=project.id,
         folder_id=None,
@@ -157,34 +157,34 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
         current_version=1,
         is_active=True,
         import_key="orders.get",
-        import_fingerprint=fingerprint_contract(legacy_contract),
+        import_fingerprint=legacy_fingerprint,
         import_source="s50-history-test",
         import_source_key="orders.get",
         created_by_id=actor.id,
     )
     session.add(definition)
     await session.flush()
-    session.add(
-        APIVersion(
-            api_definition_id=definition.id,
-            version=1,
-            method=legacy_contract.method,
-            path=legacy_contract.path,
-            query_parameters=[],
-            headers={},
-            variables={},
-            body_kind="none",
-            body=None,
-            auth_kind="none",
-            auth_config={},
-            extraction_rules=[],
-            assertions=[],
-            canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
-            contract_fingerprint=fingerprint_contract(legacy_contract),
-            contract_completeness="complete",
-            created_by_id=actor.id,
-        )
+    legacy_version = APIVersion(
+        api_definition_id=definition.id,
+        service_id=old_service.id,
+        version=1,
+        method=legacy_contract.method,
+        path=legacy_contract.path,
+        query_parameters=[],
+        headers={},
+        variables={},
+        body_kind="none",
+        body=None,
+        auth_kind="none",
+        auth_config={},
+        extraction_rules=[],
+        assertions=[],
+        canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
+        contract_fingerprint=legacy_fingerprint,
+        contract_completeness="complete",
+        created_by_id=actor.id,
     )
+    session.add(legacy_version)
     await session.commit()
 
     await APIAssetService(session).update_definition(
@@ -204,8 +204,10 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
         definition_id=definition.id,
         version_number=1,
     )
-    assert resolved_contract.service == old_service.service_key
-    assert fingerprint_contract(resolved_contract) == fingerprint_contract(historical_contract)
+    assert resolved_contract.service is None
+    assert fingerprint_contract(resolved_contract) == legacy_fingerprint
+    assert legacy_version.contract_fingerprint == legacy_fingerprint
+    assert legacy_version.canonical_contract["service"] is None
 
     resolved_identity = await ChangeRegressionService(session)._operation_identity(
         project_id=project.id,
@@ -214,9 +216,9 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
     )
     assert resolved_identity is not None
     identity, regression_contract = resolved_identity
-    assert regression_contract.service == old_service.service_key
+    assert regression_contract.service is None
     assert identity.service_key == old_service.service_key
-    assert identity.contract_fingerprint == fingerprint_contract(historical_contract)
+    assert identity.contract_fingerprint == legacy_fingerprint
 
     current_contract = await TestEngineeringService(session).contract_for_api(
         project_id=project.id,
@@ -237,6 +239,16 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
     assert portable_payload["operations"][0]["service_ref"] == old_service.service_key
     request_node = next(node for node in portable_payload["nodes"] if node["id"] == "login")
     assert request_node["target"]["service_ref"] == old_service.service_key
+
+    operation_ref = portable_payload["operations"][0]["ref"]
+    mappings = await FlowSpecService(session)._resolve_mappings(
+        project_id=project.id,
+        spec=portable,
+        service_mappings={old_service.service_key: old_service.id},
+        operation_mappings={operation_ref: definition.id},
+        operation_version_mappings={operation_ref: 1},
+    )
+    assert mappings.operation_versions[operation_ref] == 1
 
 
 def test_golden_plan_compiles_to_executable_traceable_flowspec() -> None:

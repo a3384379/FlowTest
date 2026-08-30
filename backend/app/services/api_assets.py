@@ -331,6 +331,7 @@ class APIAssetService:
         await self._session.flush()
         version = self._version_model(
             definition_id=definition.id,
+            service_id=service_id,
             version=1,
             actor_id=actor.id,
             request=request,
@@ -367,6 +368,7 @@ class APIAssetService:
         )
         version = self._version_model(
             definition_id=definition.id,
+            service_id=definition.service_id,
             version=next_version,
             actor_id=actor.id,
             request=request,
@@ -410,15 +412,9 @@ class APIAssetService:
             definition.folder_id = folder_id
         if change_service:
             service = await self._validate_service(project_id=project_id, service_id=service_id)
-            previous_service = await self._validate_service(
-                project_id=project_id,
-                service_id=definition.service_id,
-            )
             await self._create_service_rebound_version(
                 definition=definition,
-                previous_service_key=(
-                    previous_service.service_key if previous_service is not None else None
-                ),
+                service_id=service_id,
                 service_key=service.service_key if service is not None else None,
                 actor_id=actor.id,
             )
@@ -495,7 +491,6 @@ class APIAssetService:
             actor=actor,
             project_id=project_id,
             environment=environment,
-            definition=_definition,
             version=api_version,
             path=api_version.path,
             node_service_override=service_override,
@@ -700,6 +695,7 @@ class APIAssetService:
     def _version_model(
         *,
         definition_id: UUID,
+        service_id: UUID | None,
         version: int,
         actor_id: UUID,
         request: APIVersionSpec,
@@ -709,6 +705,7 @@ class APIAssetService:
         contract = _partial_contract(request).model_copy(update={"service": service_key})
         return APIVersion(
             api_definition_id=definition_id,
+            service_id=service_id,
             version=version,
             method=request.method.value,
             path=request.path,
@@ -781,7 +778,7 @@ class APIAssetService:
         self,
         *,
         definition: APIDefinition,
-        previous_service_key: str | None,
+        service_id: UUID | None,
         service_key: str | None,
         actor_id: UUID,
     ) -> None:
@@ -791,16 +788,6 @@ class APIAssetService:
         )
         if current is None:
             raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
-        if previous_service_key is not None:
-            for version in await self._assets.list_versions(definition.id):
-                if not version.canonical_contract:
-                    continue
-                stored = OperationContract.model_validate(version.canonical_contract)
-                if stored.service is not None:
-                    continue
-                backfilled = stored.model_copy(update={"service": previous_service_key})
-                version.canonical_contract = backfilled.model_dump(mode="json", by_alias=True)
-                version.contract_fingerprint = fingerprint_contract(backfilled)
         canonical_contract = deepcopy(current.canonical_contract)
         contract_fingerprint = current.contract_fingerprint
         if canonical_contract:
@@ -813,6 +800,7 @@ class APIAssetService:
         self._assets.add(
             APIVersion(
                 api_definition_id=definition.id,
+                service_id=service_id,
                 version=next_version,
                 method=current.method,
                 path=current.path,
