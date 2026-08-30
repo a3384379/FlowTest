@@ -30,6 +30,7 @@ from app.repositories.api_assets import APIAssetRepository
 from app.repositories.imports import ImportRepository
 from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
 
 
@@ -261,6 +262,7 @@ class ImportService:
         encrypted = self._secrets.encrypt(
             base64.b64encode(content).decode(),
             associated_data=_preview_associated_data(run_id),
+            key_reference=await active_key_reference_for_project(self._session, project_id),
         )
         run = ImportRun(
             id=run_id,

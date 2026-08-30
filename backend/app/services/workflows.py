@@ -97,6 +97,7 @@ from app.services.audit import AuditService
 from app.services.credentials import ExternalCredentialSecretStore
 from app.services.datasets import WorkflowDatasetService
 from app.services.durable_execution import DurableExecutionService, checkpoint_to_node_record
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
@@ -579,6 +580,9 @@ class WorkflowService:
         encrypted = self._secrets.encrypt(
             encode_execution_plan(plan),
             associated_data=_execution_plan_associated_data(execution.id),
+            key_reference=await active_key_reference_for_project(
+                self._session, execution.project_id
+            ),
         )
         execution.run_payload_ciphertext = encrypted.ciphertext
         execution.run_payload_nonce = encrypted.nonce

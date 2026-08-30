@@ -1,4 +1,6 @@
+from base64 import urlsafe_b64encode
 from collections.abc import AsyncIterator
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -7,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.context import reset_tenant_context, set_tenant_context
 from app.core.database import get_session
 from app.core.errors import AppError
@@ -473,6 +476,7 @@ async def test_service_account_context_cannot_create_a_project(
 @pytest.mark.asyncio
 async def test_organization_governance_quota_audit_and_key_lifecycle(
     client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     token = await _login(client)
     headers = _authorization(token)
@@ -551,15 +555,21 @@ async def test_organization_governance_quota_audit_and_key_lifecycle(
         f"/api/v1/organizations/{organization_id}/security", headers=scoped_headers
     )
     assert security.status_code == 200, security.text
-    assert security.json()["capability_name"] == "Key Lifecycle Metadata / Rotation Plan"
-    assert security.json()["capability_mode"] == "metadata_plan_only"
-    assert security.json()["ciphertext_reencryption_available"] is False
-    assert security.json()["ga_blocker"] == "REAL_KEY_ROTATION_NOT_IMPLEMENTED"
+    assert security.json()["capability_name"] == "Organization Data Encryption Key Rotation"
+    assert security.json()["capability_mode"] == "reencrypt_verify_activate_rollback"
+    assert security.json()["ciphertext_reencryption_available"] is True
+    assert security.json()["ga_blocker"] is None
     initial_version_id = security.json()["key_versions"][0]["id"]
+    key_reference = "vault:flowtest/data-key-v2"
+    encoded_key = urlsafe_b64encode(b"flowtest-key-rotation-v2-32-byte").decode()
+    monkeypatch.setattr(settings, "data_encryption_keyring", {key_reference: encoded_key})
     prepared = await client.post(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/prepare",
         headers=scoped_headers,
-        json={"key_reference": "vault:flowtest/data-key-v2", "key_fingerprint": "a" * 64},
+        json={
+            "key_reference": key_reference,
+            "key_fingerprint": sha256(encoded_key.encode()).hexdigest(),
+        },
     )
     assert prepared.status_code == 201, prepared.text
     prepared_version_id = prepared.json()["id"]
@@ -568,22 +578,34 @@ async def test_organization_governance_quota_audit_and_key_lifecycle(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/apply",
         headers=scoped_headers,
     )
-    assert applied.status_code == 409, applied.text
-    assert applied.json()["error"]["code"] == "KEY_ROTATION_REENCRYPTION_UNAVAILABLE"
-    assert applied.json()["error"]["details"]["ciphertext_reencryption_completed"] is False
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "active"
+    assert applied.json()["migration_status"] == "migrated"
     rolled_back = await client.post(
         f"/api/v1/organizations/{organization_id}/security/key-rotation/{prepared_version_id}/rollback",
         headers=scoped_headers,
     )
-    assert rolled_back.status_code == 409, rolled_back.text
-    assert rolled_back.json()["error"]["code"] == "KEY_ROTATION_ROLLBACK_UNAVAILABLE"
+    assert rolled_back.status_code == 200, rolled_back.text
+    assert rolled_back.json()["status"] == "rolled_back"
+    assert rolled_back.json()["migration_status"] == "rolled_back"
     security_after = await client.get(
         f"/api/v1/organizations/{organization_id}/security", headers=scoped_headers
     )
     assert security_after.json()["active_key_version"] == 1
     assert security_after.json()["key_versions"][0]["id"] == prepared_version_id
-    assert security_after.json()["key_versions"][0]["migration_status"] == "planned"
+    assert security_after.json()["key_versions"][0]["migration_status"] == "rolled_back"
     assert security_after.json()["key_versions"][1]["id"] == initial_version_id
+    rotation_audit = await client.get(
+        f"/api/v1/organizations/{organization_id}/audit-logs",
+        headers=scoped_headers,
+        params={"resource_type": "organization_key_version", "page_size": 20},
+    )
+    rotation_actions = {item["action"] for item in rotation_audit.json()["items"]}
+    assert {
+        "organization.key_rotation_prepared",
+        "organization.key_rotation_applied",
+        "organization.key_rotation_rolled_back",
+    } <= rotation_actions
 
     support_bundle = await client.get(
         f"/api/v1/organizations/{organization_id}/support-bundle/redaction",

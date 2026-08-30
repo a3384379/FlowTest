@@ -16,6 +16,10 @@
 4. 若数据迁移不可逆或校验失败，按备份手册恢复整个 PostgreSQL + MinIO 恢复点。
 5. 验证 readiness、核心业务链路和报告下载后再恢复流量。
 
+V6 H1 开始，新写入或完成轮换的受管密文使用 `FTK1` 密钥引用包络，旧版应用无法读取。
+`20260830_0049` 的 downgrade 会在任一受管表存在该包络时明确拒绝，不会伪装成可用回滚。
+此时必须保留当前应用，或恢复经验证的升级前 PostgreSQL + MinIO 一致恢复点；不得强行切换旧镜像。
+
 V1.0 的 `20260809_0010`、S14 的 `20260809_0011`、S15 的 `20260810_0012`、S17 的 `20260810_0013`、S18 的 `20260811_0014`、S19 的 `20260811_0015`、S20 的 `20260811_0016/0017` 与 S21 的 `20260812_0018` 迁移均包含 downgrade；正式回滚仍必须先备份当前状态。
 
 S16 不新增数据库迁移，数据库仍停留在 `20260810_0012`。回滚到 v1.1.0 不需要执行 Alembic downgrade；停止新执行并切换镜像即可。已创建的 SubFlow/ForEach 草稿或发布版本使用旧应用无法编辑或执行，回滚前应导出这些定义，回升 v1.5.0 后可继续使用；既有 V1 Execution、Snapshot 和报告不受影响。
@@ -34,16 +38,18 @@ scripts/verify_v2_v3_upgrade.sh
 
 1. 使用 V2 镜像在 `0018` 创建 Project、Environment、API、Workflow、Execution 和 Report。
 2. 导出 PostgreSQL custom-format 安全检查点，并生成 MinIO SHA-256 清单。
-3. 使用当前代码原地升级到 `0028`，执行 `alembic check`，校验旧资产并再运行。
-4. 使用当前代码降级到 `0018`，切回 V2 应用，再次校验和执行。
-5. 重新升级到 `0028`，再次执行 `alembic check`、旧资产执行与 MinIO 哈希校验。
+3. 使用当前代码原地升级到当前 Head，执行 `alembic check`，校验旧资产并再运行；该运行会产生
+   `FTK1` 加密执行计划。
+4. 证明直接降级到 `0018` 被密钥包络保护明确拒绝且 revision 不变，再恢复第 2 步的 PostgreSQL + MinIO
+   一致恢复点，切回 V2 应用并再次校验和执行。
+5. 重新升级到当前 Head，再次执行 `alembic check`、旧资产执行与 MinIO 哈希校验。
 
 每次退出都会删除该次演练的容器、卷、临时源码和临时镜像，不读写开发环境的
 PostgreSQL/MinIO 数据卷。脚本只用于 CI 和发布演练，不是生产环境的一键升级器。
 
-`0028 → 0018` 是 destructive downgrade：S22–S31 新增的 Capability、Schema、Performance、
+H1 之前，`0028 → 0018` 是 destructive downgrade：S22–S31 新增的 Capability、Schema、Performance、
 Environment、Contract、Impact、Runner、Failure Intelligence 和 Release Gate 数据都会被删除。
-演练会特意创建一条 V3 Release Policy，并在重新升级后确认它已被回滚删除，同时
+当前演练会特意创建一条 V3 Release Policy，并在恢复、重新升级后确认它已被回滚删除，同时
 V2 业务资产仍完整。需保留 V3 证据时不得执行此 downgrade，应使用升级前已验证的
 PostgreSQL + MinIO 恢复点。
 

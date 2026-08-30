@@ -1,9 +1,10 @@
-from base64 import urlsafe_b64encode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 
 import pytest
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app.core.encryption import SecretBox
+from app.core.encryption import EncryptedValue, SecretBox
 from app.domain.api_assets import merge_headers, render_json, render_template
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
 
@@ -18,6 +19,35 @@ def test_secret_box_uses_authenticated_encryption() -> None:
     assert box.decrypt(encrypted, associated_data=b"project:secret") == "sensitive"
     with pytest.raises(InvalidTag):
         box.decrypt(encrypted, associated_data=b"different")
+
+
+def test_secret_box_supports_key_references_and_legacy_ciphertexts() -> None:
+    key_v1 = urlsafe_b64encode(b"0123456789abcdef0123456789abcdef").decode()
+    key_v2 = urlsafe_b64encode(b"abcdef0123456789abcdef0123456789").decode()
+    box = SecretBox(key_v1, keyring={"kms:data-key-v2": key_v2})
+    associated_data = b"project:secret"
+
+    rotated = box.encrypt(
+        "rotated",
+        associated_data=associated_data,
+        key_reference="kms:data-key-v2",
+    )
+    assert box.reference(rotated.ciphertext) == "kms:data-key-v2"
+    assert box.decrypt(rotated, associated_data=associated_data) == "rotated"
+
+    nonce = b"legacy-nonce"
+    legacy_ciphertext = AESGCM(urlsafe_b64decode(key_v1)).encrypt(
+        nonce,
+        b"legacy",
+        associated_data,
+    )
+    assert (
+        box.decrypt(
+            EncryptedValue(ciphertext=legacy_ciphertext, nonce=nonce),
+            associated_data=associated_data,
+        )
+        == "legacy"
+    )
 
 
 def test_template_rendering_is_recursive_and_reports_all_missing_names() -> None:

@@ -1,4 +1,4 @@
-import { Tag } from 'antd'
+import { Button, Tag } from 'antd'
 import { createElement, type ReactNode } from 'react'
 
 export type SecurityKeyVersion = {
@@ -12,7 +12,30 @@ export type SecurityKeyVersion = {
   created_at: string
 }
 
-export function rotationAction(_item: SecurityKeyVersion, canRotate: boolean): ReactNode {
+export function rotationAction(
+  item: SecurityKeyVersion,
+  canRotate: boolean,
+  onApply?: (id: string) => void,
+  onRollback?: (id: string) => void,
+): ReactNode {
   if (!canRotate) return null
-  return createElement(Tag, { color: 'warning' }, '仅元数据计划')
+  if (item.status === 'pending' && item.migration_status === 'planned') {
+    return createElement(Button, { size: 'small', onClick: () => onApply?.(item.id) }, 'Apply')
+  }
+  if (
+    item.status === 'active' &&
+    item.migration_status === 'migrated' &&
+    item.previous_version !== null
+  ) {
+    return createElement(
+      Button,
+      { size: 'small', danger: true, onClick: () => onRollback?.(item.id) },
+      'Rollback',
+    )
+  }
+  return createElement(
+    Tag,
+    { color: item.status === 'rolled_back' ? 'default' : 'success' },
+    '已验证',
+  )
 }

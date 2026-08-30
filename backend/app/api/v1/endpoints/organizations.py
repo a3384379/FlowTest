@@ -1,5 +1,4 @@
 # Product copy intentionally uses Chinese punctuation.
-# ruff: noqa: RUF001
 
 from datetime import datetime
 from uuid import UUID
@@ -336,7 +335,7 @@ async def get_organization_security(
     "/{organization_id}/security/key-rotation/prepare",
     response_model=OrganizationKeyVersionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="创建 Key Lifecycle Metadata / Rotation Plan",
+    summary="创建组织数据加密密钥轮换版本",
 )
 async def prepare_organization_key_rotation(
     organization_id: UUID,
@@ -356,8 +355,7 @@ async def prepare_organization_key_rotation(
 @router.post(
     "/{organization_id}/security/key-rotation/{key_version_id}/apply",
     response_model=OrganizationKeyVersionResponse,
-    deprecated=True,
-    summary="不可用：真实密文重加密尚未实现",
+    summary="重加密、校验并激活组织密钥版本",
 )
 async def apply_organization_key_rotation(
     organization_id: UUID,
@@ -374,8 +372,7 @@ async def apply_organization_key_rotation(
 @router.post(
     "/{organization_id}/security/key-rotation/{key_version_id}/rollback",
     response_model=OrganizationKeyVersionResponse,
-    deprecated=True,
-    summary="不可用：真实密文回滚尚未实现",
+    summary="重加密回上一组织密钥版本",
 )
 async def rollback_organization_key_rotation(
     organization_id: UUID,

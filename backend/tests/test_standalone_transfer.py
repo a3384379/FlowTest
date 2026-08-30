@@ -249,6 +249,8 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
             "runner_runtime_state",
         ],
     }
+    assert payload.manifest["security"]["key_references"] == "preserved"
+    assert payload.manifest["security"]["requires_configured_data_encryption_keyring"] is True
     secret = payload.rows_by_table["secrets"][0]
     assert secret["ciphertext"] == {
         "__flowtest_transfer_type__": "bytes",

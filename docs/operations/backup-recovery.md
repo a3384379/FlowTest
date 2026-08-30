@@ -10,7 +10,25 @@ scripts/backup.sh "${backup_directory}"
 ```
 
 产物包括 PostgreSQL custom dump、MinIO 对象、版本化 Manifest、每个对象的 SHA-256 和源提交。
-备份系统还必须独立保存 `FLOWTEST_DATA_ENCRYPTION_KEY`；缺失该密钥时 Secret、计划和通知配置无法解密。
+备份系统还必须独立保存 `FLOWTEST_DATA_ENCRYPTION_KEY` 及
+`FLOWTEST_DATA_ENCRYPTION_KEYRING` 中当前活动版本和仍在回滚窗口内的上一版密钥。密钥材料不进入
+业务备份、传输包或审计详情；密文内的密钥引用会随数据库备份保留。缺失任一被引用密钥时，
+Secret、Credential、执行计划、导入预览或 Webhook 配置可能无法解密。
+
+## 组织密钥轮换操作顺序
+
+1. 在 Secret Manager 或受保护的 `.env` 中生成新的 32 字节 URL-safe Base64 密钥，并以稳定引用写入
+   `FLOWTEST_DATA_ENCRYPTION_KEYRING`，例如 `{"kms:flowtest/acme/v2":"<base64>"}`。
+2. 在 Full/Compact 的 API、Worker、Beat 或 Standalone 进程中同时部署该密钥环并重启；轮换和回滚完成前
+   不得删除旧密钥。
+3. 在组织治理页创建新 Key Version，提交引用和对已编码密钥计算的 SHA-256 fingerprint。
+4. 执行 Apply。服务会锁定组织治理和相关密文行，重加密并立即解密校验；任一项失败都会回滚
+   整个事务，不会切换活动版本。
+5. 核对 `organization.key_rotation_applied` 审计事件中的 migrated/verified 计数、分类计数和密文摘要；
+   审计事件不包含明文或密钥材料。
+6. 若需回退，在保留旧密钥的前提下对当前活动版本执行 Rollback，并核对
+   `organization.key_rotation_rolled_back`。只有回滚窗口结束、备份策略已刷新且确认没有密文再引用旧版本后，
+   才能从密钥环删除它。
 
 ## 隔离恢复验证
 
@@ -30,7 +48,8 @@ FLOWTEST_RESTORE_CONFIRM=RESTORE scripts/restore.sh "/absolute/path/to/backup"
 ```
 
 恢复顺序为停止 API/Worker/Beat、重建 PostgreSQL 数据库、恢复 MinIO、重新启动并等待健康检查。
-恢复后立即执行 S11 冒烟，并核对最新项目、执行、报告和附件。
+恢复前必须先恢复与该恢复点匹配的默认密钥和密钥环。恢复后立即执行 S11 冒烟，并核对最新项目、
+执行、报告、附件以及每个组织的活动 Key Version。
 
 ## 可选 WAL-G 时间点恢复（PITR）
 

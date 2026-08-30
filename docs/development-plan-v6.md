@@ -602,7 +602,7 @@ WorkflowDesigner
 
 ### 修改八：Key Rotation 不能留到最后
 
-真实 Key Rotation 仍未实现。
+H1 启动前，真实 Key Rotation 仍未实现。
 
 V6 会新增：
 
@@ -1670,6 +1670,11 @@ flowtest-triage-and-repair
 V6 功能开发可以与 V5 发布验证并行，但不能忽略。
 
 ## H1：真实 Key Rotation
+
+> 实施状态（2026-08-30）：已在 H1 独立阶段完成事务性 Re-encrypt/Verify/Activate/Rollback/Audit，
+> 覆盖当前已持久化的 Secret、本地 Credential、Encrypted Execution Plan、Import Preview 和 Webhook Secret。
+> Full/Compact/Standalone 共享同一套密文包络和密钥引用语义，Backup/Restore 保留引用并要求独立恢复密钥环。
+> S55 新增任何需要加密的 Preview 持久化数据必须复用活动组织密钥解析器。
 
 必须在 Sandbox Preview 前完成：
 

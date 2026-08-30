@@ -60,7 +60,7 @@ cd C:\flowtest-standalone
 2. 检查输出目录仅包含 `manifest.json`、`database\` 和 `artifacts\`，确认 manifest 声明 `.env`、日志和
    数据加密密钥未包含。使用公司批准的安全渠道传输整个目录。
 3. 在全新、已初始化到 `20260822_0036` 的 Compact 目录设置与 Standalone 完全相同的
-   `FLOWTEST_DATA_ENCRYPTION_KEY`，然后执行：
+   `FLOWTEST_DATA_ENCRYPTION_KEY` 和 `FLOWTEST_DATA_ENCRYPTION_KEYRING`，然后执行：
 
    ```bash
    FLOWTEST_IMPORT_CONFIRM=IMPORT_STANDALONE \

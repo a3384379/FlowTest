@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/upgrade/compose.yaml"
 v2_ref="${FLOWTEST_UPGRADE_V2_REF:-v2.0.0-rc.1}"
 expected_v2_commit="06699d54bceee091a2efac838e426cf7ef5c9c9e"
-current_head_revision="20260830_0048"
+current_head_revision="20260830_0049"
 actual_v2_commit="$(git -C "${repo_root}" rev-parse "${v2_ref}^{commit}")"
 
 if [[ "${actual_v2_commit}" != "${expected_v2_commit}" ]]; then
@@ -61,11 +61,12 @@ assert_revision() {
 
 storage_transfer() {
   action="$1"
+  shift
   "${compose[@]}" --profile current run --rm --no-deps \
     --user "$(id -u):$(id -g)" \
     --volume "${repo_root}/scripts/storage_transfer.py:/tmp/storage_transfer.py:ro" \
     --volume "${backup_root}/minio:/backup:rw" \
-    current-api python /tmp/storage_transfer.py "${action}" /backup
+    current-api python /tmp/storage_transfer.py "${action}" /backup "$@"
 }
 
 verify_phase() {
@@ -128,10 +129,35 @@ assert_revision "${current_head_revision}"
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-upgrade
 
-echo "Downgrading the same data set to the V2 revision..."
+echo "Verifying that FTK1 ciphertexts block an unsafe downgrade..."
 "${compose[@]}" --profile current stop current-api current-worker
-"${compose[@]}" --profile current run --rm --no-deps current-api \
-  alembic downgrade 20260812_0018
+set +e
+downgrade_output="$(
+  "${compose[@]}" --profile current run --rm --no-deps current-api \
+    alembic downgrade 20260812_0018 2>&1
+)"
+downgrade_status=$?
+set -e
+if [[ "${downgrade_status}" -eq 0 ]]; then
+  echo "Unsafe downgrade unexpectedly succeeded after V3 created FTK1 ciphertexts" >&2
+  exit 1
+fi
+if [[ "${downgrade_output}" != *"Cannot downgrade key-reference encryption while FTK1 ciphertexts exist"* ]]; then
+  echo "Downgrade failed for an unexpected reason:" >&2
+  echo "${downgrade_output}" >&2
+  exit 1
+fi
+assert_revision "${current_head_revision}"
+
+echo "Restoring the verified pre-upgrade PostgreSQL and MinIO recovery point..."
+"${compose[@]}" exec -T postgres dropdb --force --if-exists \
+  --username flowtest flowtest
+"${compose[@]}" exec -T postgres createdb --username flowtest flowtest
+"${compose[@]}" exec -T postgres pg_restore \
+  --username flowtest --dbname flowtest --no-owner --no-acl \
+  < "${backup_root}/postgres.dump"
+storage_transfer restore --replace
+storage_transfer verify
 assert_revision 20260812_0018
 "${compose[@]}" --profile v2 up --detach --wait v2-api v2-worker
 verify_phase v2-rollback
@@ -144,5 +170,5 @@ assert_revision "${current_head_revision}"
 "${compose[@]}" --profile current up --detach --wait current-api current-worker
 verify_phase v3-reupgrade
 
-printf '{"status":"passed","baseline":"%s","upgrade":"20260812_0018->%s","rollback":"%s->20260812_0018","reupgrade":"20260812_0018->%s"}\n' \
-  "${v2_ref}" "${current_head_revision}" "${current_head_revision}" "${current_head_revision}"
+printf '{"status":"passed","baseline":"%s","upgrade":"20260812_0018->%s","unsafe_downgrade":"blocked","rollback":"restored-pre-upgrade-recovery-point","reupgrade":"20260812_0018->%s"}\n' \
+  "${v2_ref}" "${current_head_revision}" "${current_head_revision}"

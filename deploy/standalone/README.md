@@ -128,7 +128,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 备份不包含 `.env`、管理员密码、加密密钥或日志；必须使用原来的
-`FLOWTEST_DATA_ENCRYPTION_KEY`，否则加密 Secret、凭据和执行 Snapshot 无法解密。
+`FLOWTEST_DATA_ENCRYPTION_KEY` 和 `FLOWTEST_DATA_ENCRYPTION_KEYRING`，否则加密 Secret、凭据和执行 Snapshot 无法解密。
+轮换时先通过安全渠道更新 `.env` 并重启 Standalone，再在组织治理页执行 Prepare/Apply；回滚窗口结束前
+保留新旧密钥。
 
 ## 迁移到 Compact
 
@@ -141,8 +143,8 @@ Standalone 不能把 `data\flowtest.db` 直接放入 PostgreSQL。迁移时先�
 
 传输包是一次性新目录，禁止覆盖旧包。它会排除登录会话、OIDC 事务、通知重试队列、Runner 租约/任务
 等临时状态；密码只保留现有密码哈希，加密字段保持密文。传输包属于敏感备份，只能通过公司批准的
-安全渠道传输。Compact 的 `FLOWTEST_DATA_ENCRYPTION_KEY` 必须设置为 Standalone `.env` 中的同一值，
-但不要把该值写入传输包或命令行。
+安全渠道传输。Compact 的 `FLOWTEST_DATA_ENCRYPTION_KEY` 和 `FLOWTEST_DATA_ENCRYPTION_KEYRING` 必须设置为 Standalone
+`.env` 中的同一值，但不要把它们写入传输包或命令行。
 
 在已配置好 Compact `.env`、且允许脚本初始化空数据库的 Compact 目录执行（脚本会先启动
 PostgreSQL/Redis/MinIO 并运行 `alembic upgrade head`，不会启动业务 Web/API）：

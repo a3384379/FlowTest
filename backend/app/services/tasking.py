@@ -30,6 +30,7 @@ from app.repositories.workflows import WorkflowRepository
 from app.schemas.tasking import TestPlanItemInput
 from app.schemas.test_assets import PublishedTestCaseDefinition
 from app.services.audit import AuditService
+from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
 
 
@@ -110,6 +111,7 @@ class TestPlanService:
         encrypted = self._secrets.encrypt(
             webhook_secret,
             associated_data=_webhook_associated_data(plan_id),
+            key_reference=await active_key_reference_for_project(self._session, project_id),
         )
         next_run_at = _next_run_at(
             now,

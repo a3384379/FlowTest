@@ -30,9 +30,9 @@ describe('OrganizationGovernancePage', () => {
     expect(screen.getByText('Runner 容量')).toBeVisible()
 
     await browser.click(screen.getByRole('tab', { name: /审计与安全/ }))
-    expect(await screen.findByText('Key Lifecycle Metadata / Rotation Plan')).toBeVisible()
-    expect(screen.getByText('真实 Key Rotation 尚未实现')).toBeVisible()
-    expect(screen.getByText(/GA Blocker/)).toBeVisible()
+    expect(await screen.findByText('Organization Data Encryption Key Rotation')).toBeVisible()
+    expect(screen.getByText('真实 Key Rotation 可用')).toBeVisible()
+    expect(screen.getByText(/Apply 在同一事务内/)).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Rollback' })).not.toBeInTheDocument()
     expect(screen.getByText(/Support Bundle 只生成经过字段级脱敏的诊断清单/)).toBeVisible()
@@ -118,7 +118,7 @@ describe('OrganizationGovernancePage', () => {
     await browser.click(screen.getByText('审计与安全'))
     const panel = screen.getByRole('tabpanel')
     await browser.type(within(panel).getByPlaceholderText('64 位十六进制指纹'), 'b'.repeat(64))
-    await browser.click(within(panel).getByRole('button', { name: '创建 Rotation Plan' }))
+    await browser.click(within(panel).getByRole('button', { name: '创建轮换版本' }))
 
     await waitFor(() =>
       expect(submitted).toEqual({
@@ -167,10 +167,10 @@ function installHandlers() {
       HttpResponse.json({
         organization_id: organizationId,
         active_key_version: 1,
-        capability_name: 'Key Lifecycle Metadata / Rotation Plan',
-        capability_mode: 'metadata_plan_only',
-        ciphertext_reencryption_available: false,
-        ga_blocker: 'REAL_KEY_ROTATION_NOT_IMPLEMENTED',
+        capability_name: 'Organization Data Encryption Key Rotation',
+        capability_mode: 'reencrypt_verify_activate_rollback',
+        ciphertext_reencryption_available: true,
+        ga_blocker: null,
         key_versions: [
           {
             id: 'key-701',
@@ -179,11 +179,11 @@ function installHandlers() {
             key_reference: 'settings:data_encryption_key',
             key_fingerprint: 'a'.repeat(64),
             status: 'active',
-            migration_status: 'planned',
+            migration_status: 'migrated',
             previous_version: null,
             created_by_id: user.id,
             activated_at: '2026-08-22T00:00:00Z',
-            migrated_at: null,
+            migrated_at: '2026-08-22T00:00:00Z',
             rolled_back_at: null,
             created_at: '2026-08-22T00:00:00Z',
             updated_at: '2026-08-22T00:00:00Z',
