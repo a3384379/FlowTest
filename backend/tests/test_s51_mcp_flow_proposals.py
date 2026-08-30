@@ -303,8 +303,11 @@ async def test_mcp_plan_compile_dry_run_propose_and_inspect_are_draft_only(
 def test_jmespath_secret_literal_detection_preserves_dynamic_paths() -> None:
     assert _contains_unsafe_jmespath_literal("'hunter2'")
     assert _contains_unsafe_jmespath_literal('`"hunter2"`')
+    assert _contains_unsafe_jmespath_literal("to_string('hunter2')")
+    assert _contains_unsafe_jmespath_literal("items[?password == 'hunter2']")
     assert not _contains_unsafe_jmespath_literal("steps.login.output.password")
     assert not _contains_unsafe_jmespath_literal("'secret://runtime/password'")
+    assert not _contains_unsafe_jmespath_literal("to_string('secret://runtime/password')")
 
 
 @pytest.mark.asyncio
@@ -527,6 +530,34 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert assertion_secret.status_code == 422
         assert assertion_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
         assert "abc" not in assertion_secret.text
+
+    extract_payload = _proposal_payload(s51_context, context, plan, compilation)
+    extract_payload["spec"]["nodes"].append(
+        {
+            "id": "sensitive-extract",
+            "kind": "extract",
+            "name": "Sensitive extract",
+            "position": {"x": 900, "y": 0},
+            "config": {
+                "source_node_id": "http-health",
+                "expression": "to_string('hunter2')",
+                "variable": "password",
+                "required": True,
+            },
+            "depends_on": [],
+        }
+    )
+    extract_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-extract-expression",
+        },
+        json={**extract_payload, "dry_run": False},
+    )
+    assert extract_secret.status_code == 422
+    assert extract_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in extract_secret.text
 
     binding_payload = _proposal_payload(s51_context, context, plan, compilation)
     binding_payload["spec"]["nodes"].append(

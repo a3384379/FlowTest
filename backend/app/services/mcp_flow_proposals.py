@@ -1,9 +1,10 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
-import json
 import re
 from uuid import UUID
 
+import jmespath
+from jmespath.exceptions import JMESPathError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context
@@ -24,8 +25,6 @@ from app.services.test_contexts import ProposableContext, TestContextService
 MCP_FLOW_PROPOSE_SCOPE = "mcp:flow:propose"
 _SECRET_TEMPLATE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
 _SECRET_REFERENCE = re.compile(r"secret://[A-Za-z0-9._:/-]+")
-_JMESPATH_RAW_LITERAL = re.compile(r"^\s*'(?P<value>(?:\\.|[^'\\])*)'\s*$")
-_JMESPATH_JSON_LITERAL = re.compile(r"^\s*`(?P<value>(?:\\.|[^`\\])*)`\s*$")
 
 
 class MCPFlowProposalService:
@@ -231,6 +230,15 @@ def _has_sensitive_mapping_literal(value: object) -> bool:
             and _contains_unsafe_literal(value.get(literal_field))
         ):
             return True
+    variable = value.get("variable")
+    expression = value.get("expression")
+    if (
+        isinstance(variable, str)
+        and is_sensitive_identifier(variable)
+        and isinstance(expression, str)
+        and _contains_unsafe_jmespath_literal(expression)
+    ):
+        return True
     for name, child in value.items():
         if is_sensitive_identifier(str(name)) and _contains_unsafe_literal(child):
             return True
@@ -254,17 +262,21 @@ def _contains_unsafe_literal(value: object) -> bool:
 
 
 def _contains_unsafe_jmespath_literal(expression: str) -> bool:
-    raw_match = _JMESPATH_RAW_LITERAL.fullmatch(expression)
-    if raw_match is not None:
-        return _contains_unsafe_literal(raw_match.group("value").replace("\\'", "'"))
-    json_match = _JMESPATH_JSON_LITERAL.fullmatch(expression)
-    if json_match is None:
-        return False
     try:
-        value = json.loads(json_match.group("value"))
-    except json.JSONDecodeError:
+        parsed = jmespath.compile(expression).parsed
+    except JMESPathError:
         return True
-    return _contains_unsafe_literal(value)
+    return _contains_unsafe_jmespath_ast(parsed)
+
+
+def _contains_unsafe_jmespath_ast(value: object) -> bool:
+    if isinstance(value, list):
+        return any(_contains_unsafe_jmespath_ast(child) for child in value)
+    if not isinstance(value, dict):
+        return False
+    if value.get("type") == "literal" and _contains_unsafe_literal(value.get("value")):
+        return True
+    return _contains_unsafe_jmespath_ast(value.get("children"))
 
 
 def require_mcp_flow_propose_scope() -> UUID:
