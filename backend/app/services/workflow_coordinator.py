@@ -14,6 +14,7 @@ from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
+from app.repositories.durable_execution import DurableExecutionRepository
 from app.schemas.runner_fabric import RunnerCheckpointRequest
 from app.services.durable_execution import DurableExecutionService
 from app.services.execution_events import (
@@ -111,6 +112,11 @@ class WorkflowRunCoordinator:
         semaphore = asyncio.Semaphore(plan.concurrency)
         cancellation = CancellationToken()
         active_tasks: set[asyncio.Task[None]] = set()
+        runtime_seconds = _remaining_batch_runtime_seconds(plan)
+        children = plan.children
+        if runtime_seconds is not None and runtime_seconds <= 0:
+            cancellation.cancel()
+            children = await self._checkpointed_children(plan.children)
 
         async def execute_child(child: WorkflowRunPlan) -> None:
             async with semaphore:
@@ -139,14 +145,20 @@ class WorkflowRunCoordinator:
                     if task is not None:
                         active_tasks.discard(task)
 
-        tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
+        tasks = [asyncio.create_task(execute_child(child)) for child in children]
         try:
-            if plan.max_runtime_seconds is None:
+            if runtime_seconds is None:
                 await asyncio.gather(*tasks)
+            elif runtime_seconds <= 0:
+                await _finish_batch_cleanup(
+                    tasks,
+                    cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+                )
+                await self._cancel_expired_batch(plan.execution_id)
             else:
                 _done, pending = await asyncio.wait(
                     tasks,
-                    timeout=plan.max_runtime_seconds,
+                    timeout=runtime_seconds,
                 )
                 if pending:
                     await _cancel_batch_tasks(
@@ -172,6 +184,29 @@ class WorkflowRunCoordinator:
                 await WorkflowService(session).cancel_incomplete_batch(plan.execution_id)
         async with self._session_maker() as session:
             return await WorkflowService(session).complete_batch(plan.execution_id)
+
+    async def _checkpointed_children(
+        self,
+        children: tuple[WorkflowRunPlan, ...],
+    ) -> tuple[WorkflowRunPlan, ...]:
+        async with self._session_maker() as session:
+            repository = DurableExecutionRepository(session)
+            checkpointed: list[WorkflowRunPlan] = []
+            for child in children:
+                execution = await session.get(WorkflowExecution, child.execution_id)
+                if execution is None or execution.status not in {"queued", "running"}:
+                    continue
+                if await repository.list_checkpoints(child.execution_id):
+                    checkpointed.append(child)
+            return tuple(checkpointed)
+
+    async def _cancel_expired_batch(self, execution_id: UUID) -> None:
+        async with self._session_maker() as session:
+            await WorkflowService(session).cancel_incomplete_batch(
+                execution_id,
+                error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                error_message="Sandbox Preview 数据集已达到整批运行时预算",
+            )
 
     async def _execute(
         self,
@@ -306,3 +341,28 @@ async def _cancel_batch_tasks(
     for task in pending:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _finish_batch_cleanup(
+    tasks: list[asyncio.Task[None]],
+    *,
+    cleanup_timeout_seconds: int | None,
+) -> None:
+    if not tasks:
+        return
+    _done, pending = await asyncio.wait(
+        tasks,
+        timeout=cleanup_timeout_seconds or 1,
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _remaining_batch_runtime_seconds(plan: WorkflowBatchPlan) -> float | None:
+    if plan.deadline_at is not None:
+        deadline = plan.deadline_at
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+    return float(plan.max_runtime_seconds) if plan.max_runtime_seconds is not None else None

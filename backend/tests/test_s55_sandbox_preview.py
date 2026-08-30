@@ -156,6 +156,111 @@ async def test_preview_dataset_runtime_budget_spans_queued_and_active_children(
     assert cancelled["code"] == "PREVIEW_RUNTIME_BUDGET_EXCEEDED"
 
 
+@pytest.mark.asyncio
+async def test_standalone_preview_recovery_honors_expired_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled: dict[str, str] = {}
+
+    class SessionContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class EventBus:
+        async def publish(self, _event: object) -> None:
+            return None
+
+    class CoordinatorWorkflowService:
+        def __init__(self, _session: object) -> None:
+            pass
+
+        async def cancel_incomplete_batch(
+            self,
+            _execution_id: UUID,
+            *,
+            error_code: str = "",
+            error_message: str = "",
+        ) -> None:
+            cancelled["code"] = error_code
+            cancelled["message"] = error_message
+
+        async def complete_batch(self, execution_id: UUID) -> object:
+            return SimpleNamespace(
+                id=execution_id,
+                status="cancelled",
+                error_code=cancelled["code"],
+                error_message=cancelled["message"],
+            )
+
+    definition = _preview_test_definition(with_cleanup=True)
+    prepared = PreparedExecution(snapshot={}, requests={}, dataset_variables={})
+    first = WorkflowRunPlan(
+        execution_id=uuid4(),
+        actor_id=uuid4(),
+        project_id=uuid4(),
+        workflow_version=0,
+        definition=definition,
+        prepared=prepared,
+        runtime_variables={},
+    )
+    queued = replace(first, execution_id=uuid4())
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=first.actor_id,
+        project_id=first.project_id,
+        workflow_version=0,
+        children=(first, queued),
+        concurrency=1,
+        max_runtime_seconds=600,
+        cleanup_timeout_seconds=1,
+        deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    coordinator = WorkflowRunCoordinator(
+        cast(Any, lambda: SessionContext()),
+        cast(Any, EventBus()),
+    )
+    resumed: list[UUID] = []
+
+    async def checkpointed_children(
+        _children: tuple[WorkflowRunPlan, ...],
+    ) -> tuple[WorkflowRunPlan, ...]:
+        return (first,)
+
+    async def resume_cleanup(
+        child: WorkflowRunPlan,
+        *,
+        cancellation: object | None = None,
+    ) -> object:
+        assert cast(CancellationToken, cancellation).cancelled is True
+        resumed.append(child.execution_id)
+        return SimpleNamespace(
+            id=child.execution_id,
+            status="cancelled",
+            error_code=None,
+            error_message=None,
+        )
+
+    async def publish_completion(_execution: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.services.workflow_coordinator.WorkflowService",
+        CoordinatorWorkflowService,
+    )
+    monkeypatch.setattr(coordinator, "_checkpointed_children", checkpointed_children)
+    monkeypatch.setattr(coordinator, "_execute", resume_cleanup)
+    monkeypatch.setattr(coordinator, "_publish_completion", publish_completion)
+
+    completed = await coordinator._execute_batch(plan)
+
+    assert completed.status == "cancelled"
+    assert resumed == [first.execution_id]
+    assert cancelled["code"] == "PREVIEW_RUNTIME_BUDGET_EXCEEDED"
+
+
 def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
     unsafe_leaf = _preview_test_definition(with_cleanup=False)
     safe_parent = _preview_test_definition(with_cleanup=True, subflow=True)
