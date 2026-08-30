@@ -27,6 +27,7 @@ from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
 from app.schemas.test_contexts import FlowSpecProposalRequest
+from app.services.mcp_flow_proposals import _contains_unsafe_jmespath_literal
 from app.services.service_accounts import ServiceAccountService
 
 
@@ -299,6 +300,13 @@ async def test_mcp_plan_compile_dry_run_propose_and_inspect_are_draft_only(
         assert await session.scalar(select(func.count()).select_from(WorkflowExecution)) == 0
 
 
+def test_jmespath_secret_literal_detection_preserves_dynamic_paths() -> None:
+    assert _contains_unsafe_jmespath_literal("'hunter2'")
+    assert _contains_unsafe_jmespath_literal('`"hunter2"`')
+    assert not _contains_unsafe_jmespath_literal("steps.login.output.password")
+    assert not _contains_unsafe_jmespath_literal("'secret://runtime/password'")
+
+
 @pytest.mark.asyncio
 async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     s51_context: dict[str, Any],
@@ -317,6 +325,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             ("使用password=abc进行请求", "abc"),
             ("使用signing_key=abc进行请求", "abc"),
             ("使用encryption_key=abc进行请求", "abc"),
+            ("使用hmac_key=abc进行请求", "abc"),
             ('使用config["password"]="abc"进行请求', "abc"),
             ("使用headers['token']='abc'进行请求", "abc"),
         )
@@ -349,6 +358,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             "private_signing_key",
             "signing_key",
             "encryption_key",
+            "hmac_key",
             "credentials",
             "client_credentials",
             "passwords",
@@ -546,7 +556,32 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert edge_mapping_secret.status_code == 422
     assert edge_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "abc" not in edge_mapping_secret.text
+    assert "abc" not in edge_mapping_secret.json()["error"]["message"]
+
+    identity_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
+    identity_edge = identity_mapping_payload["spec"]["edges"][0]
+    identity_edge["mappings"] = [
+        {
+            "source": {"node_id": identity_edge["source"], "path": "'hunter2'"},
+            "transform": {"kind": "identity", "template": "{{value}}"},
+            "target": {
+                "node_id": identity_edge["target"],
+                "location": "header",
+                "key": "password",
+            },
+        }
+    ]
+    identity_mapping_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-identity-edge-mapping",
+        },
+        json={**identity_mapping_payload, "dry_run": False},
+    )
+    assert identity_mapping_secret.status_code == 422
+    assert identity_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in identity_mapping_secret.text
 
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")

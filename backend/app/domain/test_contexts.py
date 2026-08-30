@@ -68,6 +68,7 @@ _SENSITIVE_IDENTIFIER_PAIRS = frozenset(
         ("api", "key"),
         ("access", "key"),
         ("encryption", "key"),
+        ("hmac", "key"),
         ("private", "key"),
         ("signing", "key"),
     }
