@@ -9,7 +9,7 @@ import json
 from hashlib import sha256
 from typing import Final
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -69,8 +69,8 @@ async def _prepare() -> None:
         )
         session.add(definition)
         await session.flush()
-        session.add(
-            APIVersion(
+        await session.execute(
+            insert(APIVersion.__table__).values(
                 api_definition_id=definition.id,
                 version=1,
                 method="POST",
@@ -99,11 +99,16 @@ async def _verify() -> None:
     engine = create_async_engine(settings.database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
-        version = await session.scalar(
-            select(APIVersion)
+        result = await session.execute(
+            select(
+                APIVersion.canonical_contract,
+                APIVersion.contract_fingerprint,
+                APIVersion.contract_completeness,
+            )
             .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
             .where(APIDefinition.import_key == _IMPORT_KEY)
         )
+        version = result.one_or_none()
         if version is None:
             raise RuntimeError("S47.2 migration fixture is missing")
         encoded = json.dumps(version.canonical_contract, ensure_ascii=False, sort_keys=True)
