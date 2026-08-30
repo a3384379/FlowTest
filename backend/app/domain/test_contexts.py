@@ -113,6 +113,12 @@ def is_sensitive_identifier(name: str) -> bool:
         segmented,
     )
     parts = [part for part in re.split(r"[^a-z0-9]+", segmented.lower()) if part]
+    sensitive_parts = _SENSITIVE_IDENTIFIER_PARTS | {
+        item for pair in _SENSITIVE_IDENTIFIER_PAIRS for item in pair
+    }
+    parts = [
+        part[:-1] if part.endswith("s") and part[:-1] in sensitive_parts else part for part in parts
+    ]
     if any(part in _SENSITIVE_IDENTIFIER_PARTS for part in parts):
         return True
     return any(pair in _SENSITIVE_IDENTIFIER_PAIRS for pair in pairwise(parts))

@@ -740,6 +740,7 @@ class SelectedOperationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation_ref: str = Field(pattern=_IDENTIFIER)
+    service_ref: str | None = Field(default=None, pattern=_IDENTIFIER)
     service_name: str = Field(min_length=1, max_length=200)
     source_version: int = Field(ge=1)
     contract: OperationContract
@@ -1253,7 +1254,7 @@ def _planned_operation(item: SelectedOperationEvidence) -> PlanOperation:
     )
     return PlanOperation(
         ref=item.operation_ref,
-        service_ref=contract.service or "default",
+        service_ref=item.service_ref or contract.service or "default",
         service_name=item.service_name,
         name=item.operation_ref,
         method=contract.method,

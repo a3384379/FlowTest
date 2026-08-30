@@ -207,7 +207,11 @@ class IntegrationPlanAssetService:
             ),
         )
         scenario = _select_local_scenario(design, selection.scenario_id)
-        service_name = await self._service_name(project_id, definition)
+        service_ref, service_name = await self._service_identity(
+            project_id,
+            version.service_id,
+            contract.service,
+        )
         source_ref = f"api-definition://{definition.id}/version/{version.version}"
         evidence_refs = sorted(
             set(
@@ -227,6 +231,7 @@ class IntegrationPlanAssetService:
         ]
         return SelectedOperationEvidence(
             operation_ref=contract.operation,
+            service_ref=service_ref,
             service_name=service_name,
             source_version=version.version,
             contract=contract,
@@ -247,17 +252,28 @@ class IntegrationPlanAssetService:
             )
         return definition
 
-    async def _service_name(self, project_id: UUID, definition: APIDefinition) -> str:
-        if definition.service_id is None:
-            return "Default HTTP Service"
-        service = await self._targets.get_service(definition.service_id)
+    async def _service_identity(
+        self,
+        project_id: UUID,
+        service_id: UUID | None,
+        contract_service: str | None,
+    ) -> tuple[str | None, str]:
+        if service_id is not None:
+            service = await self._targets.get_service(service_id)
+        elif contract_service is not None:
+            service = await self._targets.find_service_by_key(
+                project_id=project_id,
+                service_key=contract_service,
+            )
+        else:
+            return None, "Default HTTP Service"
         if service is None or service.project_id != project_id or not service.enabled:
             raise AppError(
                 code="SERVICE_NOT_FOUND",
                 message="用户选择的 API 关联 Service 不存在或已停用",
                 status_code=404,
             )
-        return service.name
+        return service.service_key, service.name
 
     async def _reusable_auth(
         self,

@@ -187,6 +187,32 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
     session.add(legacy_version)
     await session.commit()
 
+    migrated_plan = await IntegrationPlanAssetService(session).build(
+        actor=actor,
+        project_id=project.id,
+        command=IntegrationPlanAssetCommand(
+            context_revision_id=UUID("00000000-0000-0000-0000-000000000050"),
+            context_fingerprint="5" * 64,
+            objective="Plan an API whose immutable contract predates service identity",
+            actors=(
+                PlanActor(
+                    id="operator",
+                    role="integration tester",
+                    evidence_refs=["context://s50/migrated-service-actor"],
+                ),
+            ),
+            preconditions=(),
+            target_environment=PlanTargetEnvironment(
+                key="test",
+                source_ref="environment://test",
+                evidence_refs=["environment://test/revision/1"],
+            ),
+            operations=(OperationPlanSelection(definition_id=definition.id),),
+        ),
+    )
+    assert migrated_plan.operations[0].service_ref == old_service.service_key
+    assert migrated_plan.operations[0].contract_fingerprint == legacy_fingerprint
+
     await APIAssetService(session).update_definition(
         actor=actor,
         project_id=project.id,
