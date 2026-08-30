@@ -398,6 +398,10 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             ),
             ({"body": {"kind": "json", "value": {"password": 1234}}}, "1234"),
             ({"body": {"kind": "json", "value": {"password": True}}}, None),
+            (
+                {"query_parameters": [{"name": "access_key", "value": "abc", "enabled": True}]},
+                "abc",
+            ),
         )
     ):
         override_payload = _proposal_payload(s51_context, context, plan, compilation)
