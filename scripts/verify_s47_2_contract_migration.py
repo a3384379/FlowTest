@@ -7,9 +7,9 @@ import argparse
 import asyncio
 import json
 from hashlib import sha256
-from typing import Final
+from typing import Final, cast
 
-from sqlalchemy import insert, select
+from sqlalchemy import Table, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -69,8 +69,9 @@ async def _prepare() -> None:
         )
         session.add(definition)
         await session.flush()
+        version_table = cast(Table, APIVersion.__table__)
         await session.execute(
-            insert(APIVersion.__table__).values(
+            insert(version_table).values(
                 api_definition_id=definition.id,
                 version=1,
                 method="POST",
