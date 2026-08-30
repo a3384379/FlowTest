@@ -17,7 +17,8 @@ S54 已由 PR #62 普通 Squash Merge，PR 与 Merge 后 Main Push 七项门禁�
 - Organization Governance 页面按权限和密钥状态展示 Prepare、Apply 或 Rollback，并如实展示真实轮换能力。
 - Full/Compact/Standalone 配置传递密钥环；Standalone→Compact 传输 Manifest 明确保留密钥引用，
   但不携带密钥材料。
-- Migration `20260830_0049` 把旧版活动初始密钥如实标记为已迁移，并提供可逆 downgrade。
+- Migration `20260830_0049` 把旧版活动初始密钥如实标记为已迁移。未产生新包络密文时可往返；
+  一旦存在 `FTK1` 密文，downgrade 会明确拒绝并要求保留当前应用或恢复升级前一致备份。
 
 ## 3. 已完成的定向验证
 
@@ -25,7 +26,7 @@ S54 已由 PR #62 普通 Squash Merge，PR 与 Merge 后 Main Push 七项门禁�
 - 内存数据库中六类真实密文完成 v1→v2 和 v2→v1 重加密、解密校验与计数校验。
 - Organization API 完整 Prepare→Apply→Rollback 生命周期及审计动作。
 - Frontend 轮换动作状态机、TypeScript、Prettier、ESLint 和相关 Vitest。
-- Migration `0048→0049→0048→0049` 定向往返已通过。
+- Migration `0048→0049→0048→0049` 无新密文定向往返已通过；`FTK1` 存在时的安全拒绝回归已通过。
 
 ## 4. H1 Exit Criteria
 

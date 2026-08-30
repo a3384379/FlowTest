@@ -1,8 +1,12 @@
 from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+from types import ModuleType
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +23,34 @@ from app.models.tasking import TestPlan as TestPlanModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowVersion
 from app.services.encryption_keys import active_key_reference_for_project
 from app.services.key_rotation import reencrypt_organization_ciphertexts
+
+
+def _load_rotation_migration() -> ModuleType:
+    migration_path = (
+        Path(__file__).parents[1] / "migrations/versions/20260830_0049_real_key_rotation.py"
+    )
+    spec = spec_from_file_location("real_key_rotation_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def test_migration_downgrade_guard_detects_key_reference_envelopes() -> None:
+    migration = _load_rotation_migration()
+    metadata = sa.MetaData()
+    for table_name, column_name in migration._ENCRYPTED_COLUMNS:
+        sa.Table(table_name, metadata, sa.Column(column_name, sa.LargeBinary()))
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        assert migration._enveloped_ciphertext_locations(connection) == []
+        connection.execute(
+            metadata.tables["secrets"].insert().values(ciphertext=b"FTK1-test-envelope")
+        )
+        assert migration._enveloped_ciphertext_locations(connection) == ["secrets.ciphertext"]
+    engine.dispose()
 
 
 @pytest.mark.asyncio
