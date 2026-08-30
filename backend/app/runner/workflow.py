@@ -74,21 +74,26 @@ class RemoteWorkflowExecutor:
                     )
 
             tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
-            batch = asyncio.gather(*tasks)
-            try:
-                if plan.max_runtime_seconds is None:
-                    children = await batch
-                else:
-                    children = await asyncio.wait_for(
-                        batch,
-                        timeout=plan.max_runtime_seconds,
+            if plan.max_runtime_seconds is None:
+                children = await asyncio.gather(*tasks)
+            else:
+                _done, pending = await asyncio.wait(
+                    tasks,
+                    timeout=plan.max_runtime_seconds,
+                )
+                if pending:
+                    cancellation.cancel()
+                    _done, cleanup_pending = await asyncio.wait(
+                        pending,
+                        timeout=plan.cleanup_timeout_seconds or 1,
                     )
-            except TimeoutError as error:
-                cancellation.cancel(force=True)
-                await asyncio.gather(*tasks, return_exceptions=True)
-                raise PreviewRuntimeBudgetExceeded(
-                    "Sandbox Preview dataset runtime budget exceeded"
-                ) from error
+                    for task in cleanup_pending:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise PreviewRuntimeBudgetExceeded(
+                        "Sandbox Preview dataset runtime budget exceeded"
+                    )
+                children = [task.result() for task in tasks]
             return RunnerBatchExecutionResult(
                 execution_id=plan.execution_id,
                 children=tuple(children),

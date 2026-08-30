@@ -163,6 +163,7 @@ class StoredBatchPlan(BaseModel):
     children: list[StoredRunPlan]
     concurrency: int
     max_runtime_seconds: int | None = Field(default=None, ge=1, le=3600)
+    cleanup_timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
 
 
 StoredPlan = Annotated[StoredRunPlan | StoredBatchPlan, Field(discriminator="kind")]
@@ -185,6 +186,7 @@ def decode_execution_plan(payload: str) -> WorkflowExecutionPlan:
             children=tuple(_load_run(child) for child in stored.children),
             concurrency=stored.concurrency,
             max_runtime_seconds=stored.max_runtime_seconds,
+            cleanup_timeout_seconds=stored.cleanup_timeout_seconds,
         )
     return _load_run(stored)
 
@@ -198,6 +200,7 @@ def _store_batch(plan: WorkflowBatchPlan) -> StoredBatchPlan:
         children=[_store_run(child) for child in plan.children],
         concurrency=plan.concurrency,
         max_runtime_seconds=plan.max_runtime_seconds,
+        cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
     )
 
 

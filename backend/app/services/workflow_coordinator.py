@@ -12,7 +12,7 @@ from app.core.logging import redact
 from app.domain.durable_execution import checkpoint_input_hash
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
-from app.engine.scheduler import NodeStatusUpdate
+from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
 from app.schemas.runner_fabric import RunnerCheckpointRequest
 from app.services.durable_execution import DurableExecutionService
@@ -109,6 +109,7 @@ class WorkflowRunCoordinator:
 
     async def _execute_batch(self, plan: WorkflowBatchPlan) -> WorkflowExecution:
         semaphore = asyncio.Semaphore(plan.concurrency)
+        cancellation = CancellationToken()
 
         async def execute_child(child: WorkflowRunPlan) -> None:
             async with semaphore:
@@ -121,7 +122,7 @@ class WorkflowRunCoordinator:
                     )
                 )
                 try:
-                    execution = await self._execute(child)
+                    execution = await self._execute(child, cancellation=cancellation)
                 except Exception:
                     logger.exception(
                         "Dataset child execution failed",
@@ -132,19 +133,28 @@ class WorkflowRunCoordinator:
 
         tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
         try:
-            batch = asyncio.gather(*tasks)
             if plan.max_runtime_seconds is None:
-                await batch
+                await asyncio.gather(*tasks)
             else:
-                await asyncio.wait_for(batch, timeout=plan.max_runtime_seconds)
-        except TimeoutError:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            async with self._session_maker() as session:
-                await WorkflowService(session).cancel_incomplete_batch(
-                    plan.execution_id,
-                    error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
-                    error_message="Sandbox Preview 数据集已达到整批运行时预算",
+                _done, pending = await asyncio.wait(
+                    tasks,
+                    timeout=plan.max_runtime_seconds,
                 )
+                if pending:
+                    cancellation.cancel()
+                    _done, cleanup_pending = await asyncio.wait(
+                        pending,
+                        timeout=plan.cleanup_timeout_seconds or 1,
+                    )
+                    for task in cleanup_pending:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    async with self._session_maker() as session:
+                        await WorkflowService(session).cancel_incomplete_batch(
+                            plan.execution_id,
+                            error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                            error_message="Sandbox Preview 数据集已达到整批运行时预算",
+                        )
         except asyncio.CancelledError:
             await asyncio.gather(*tasks, return_exceptions=True)
             async with self._session_maker() as session:
@@ -152,7 +162,12 @@ class WorkflowRunCoordinator:
         async with self._session_maker() as session:
             return await WorkflowService(session).complete_batch(plan.execution_id)
 
-    async def _execute(self, plan: WorkflowRunPlan) -> WorkflowExecution:
+    async def _execute(
+        self,
+        plan: WorkflowRunPlan,
+        *,
+        cancellation: CancellationToken | None = None,
+    ) -> WorkflowExecution:
         async with self._session_maker() as session:
             service = WorkflowService(session)
             execution = await service.load_execution_for_run(plan.execution_id)
@@ -231,6 +246,7 @@ class WorkflowRunCoordinator:
                 execution=execution,
                 plan=plan,
                 on_node_status=publish_status,
+                cancellation=cancellation,
             )
             return completed
 

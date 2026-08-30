@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import json
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ import httpx
 import jmespath
 from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -153,6 +154,7 @@ class WorkflowBatchPlan:
     children: tuple[WorkflowRunPlan, ...]
     concurrency: int = DATASET_CONCURRENCY
     max_runtime_seconds: int | None = None
+    cleanup_timeout_seconds: int | None = None
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
@@ -605,6 +607,52 @@ class WorkflowService:
         await self._session.flush()
         return execution, plan
 
+    async def prepare_preview_target_fingerprint(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        change_set_id: UUID,
+        proposal_fingerprint: str,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        budget: PreviewBudget,
+    ) -> str:
+        """Prepare, but do not persist, the exact targets governed by an approval."""
+
+        if workflow_id is not None:
+            await self._get_workflow(project_id, workflow_id)
+        bounded = _bounded_preview_definition(definition, budget)
+        await self._validate_publishable(project_id, workflow_id or change_set_id, bounded)
+        prepared = await self._snapshots.prepare_preview(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            definition=bounded,
+            fingerprint=proposal_fingerprint,
+            environment_id=environment_id,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
+        prepared = _bounded_preview_prepared_workflow(prepared, budget)
+        _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
+        _preview_request_limits(bounded, prepared, budget)
+        return _prepared_preview_target_fingerprint(prepared)
+
+    async def discard_prepared_execution(self, execution_id: UUID) -> None:
+        """Remove an uncommitted preview plan rejected by the final target binding."""
+
+        await self._session.execute(
+            delete(WorkflowExecution).where(WorkflowExecution.parent_execution_id == execution_id)
+        )
+        await self._session.execute(
+            delete(WorkflowExecution).where(WorkflowExecution.id == execution_id)
+        )
+        await self._session.flush()
+
     async def _ensure_execution_capacity(self, project_id: UUID) -> None:
         result = await self._session.execute(
             select(Project).where(Project.id == project_id).with_for_update()
@@ -680,8 +728,9 @@ class WorkflowService:
         execution: WorkflowExecution,
         plan: WorkflowRunPlan,
         on_node_status: NodeStatusCallback | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
-        token = CancellationToken()
+        token = cancellation or CancellationToken()
         if execution.cancel_requested_at is not None:
             token.cancel(force=execution.force_cancel_requested_at is not None)
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
@@ -1774,6 +1823,7 @@ class WorkflowService:
             children=plans,
             concurrency=budget.max_parallelism,
             max_runtime_seconds=budget.max_runtime_seconds,
+            cleanup_timeout_seconds=budget.max_runtime_seconds,
         )
 
     @staticmethod
@@ -2079,6 +2129,65 @@ def _bounded_preview_definition(
         }
     )
     return definition.model_copy(update={"settings": settings, "run_policy": run_policy})
+
+
+def _prepared_preview_target_fingerprint(prepared: PreparedWorkflow) -> str:
+    return _preview_target_fingerprint_for_runs(prepared.runs)
+
+
+def _preview_plan_target_fingerprint(plan: WorkflowExecutionPlan) -> str:
+    runs = (
+        tuple(child.prepared for child in plan.children)
+        if isinstance(plan, WorkflowBatchPlan)
+        else (plan.prepared,)
+    )
+    return _preview_target_fingerprint_for_runs(runs)
+
+
+def _preview_target_fingerprint_for_runs(
+    runs: tuple[PreparedExecution, ...],
+) -> str:
+    payload = [_prepared_execution_target_payload(run) for run in runs]
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hmac.new(
+        settings.secret_key.encode(),
+        canonical.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _prepared_execution_target_payload(prepared: PreparedExecution) -> dict[str, JsonValue]:
+    return {
+        "requests": {
+            node_id: {
+                "method": request.request.method.value,
+                "url": request.request.url,
+                "target_snapshot": request.request.target_snapshot,
+            }
+            for node_id, request in sorted(prepared.requests.items())
+        },
+        "subflows": {
+            node_id: _prepared_subflow_target_payload(subflow)
+            for node_id, subflow in sorted(prepared.subflows.items())
+        },
+    }
+
+
+def _prepared_subflow_target_payload(subflow: PreparedSubflow) -> dict[str, JsonValue]:
+    return {
+        "requests": {
+            node_id: {
+                "method": request.request.method.value,
+                "url": request.request.url,
+                "target_snapshot": request.request.target_snapshot,
+            }
+            for node_id, request in sorted(subflow.requests.items())
+        },
+        "subflows": {
+            node_id: _prepared_subflow_target_payload(child)
+            for node_id, child in sorted(subflow.subflows.items())
+        },
+    }
 
 
 def _validate_preview_target_classification(

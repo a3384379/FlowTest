@@ -30,7 +30,11 @@ from app.services.audit import AuditService
 from app.services.flow_spec import FlowSpecService, FlowSpecVisualProposal
 from app.services.projects import ProjectService
 from app.services.test_contexts import ProposableContext, TestContextService
-from app.services.workflows import WorkflowExecutionPlan, WorkflowService
+from app.services.workflows import (
+    WorkflowExecutionPlan,
+    WorkflowService,
+    _preview_plan_target_fingerprint,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +81,18 @@ class SandboxPreviewService:
         )
         environment = await self._preview_environment(project_id, payload.environment_id)
         environment_fingerprint = await self._environment_fingerprint(environment)
+        target_snapshot_fingerprint = await self._workflows.prepare_preview_target_fingerprint(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=proposal.visual.view.item.target_resource_id,
+            change_set_id=change_set_id,
+            proposal_fingerprint=proposal.visual.view.pipeline.fingerprint,
+            definition=proposal.visual.proposed_definition,
+            environment_id=payload.environment_id,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+            budget=payload.budget,
+        )
         executor_kind, executor_id = await self._approval_executor(
             actor=actor,
             project_id=project_id,
@@ -89,6 +105,7 @@ class SandboxPreviewService:
             change_set_id=change_set_id,
             environment_id=payload.environment_id,
             environment_fingerprint=environment_fingerprint,
+            target_snapshot_fingerprint=target_snapshot_fingerprint,
             runtime_input_fingerprint=_runtime_input_fingerprint(
                 payload.runtime_variables,
                 payload.runtime_headers,
@@ -171,6 +188,16 @@ class SandboxPreviewService:
             runtime_headers=payload.runtime_headers,
             budget=budget,
         )
+        if not hmac.compare_digest(
+            approval.target_snapshot_fingerprint,
+            _preview_plan_target_fingerprint(plan),
+        ):
+            await self._workflows.discard_prepared_execution(execution.id)
+            raise AppError(
+                code="PREVIEW_APPROVAL_TARGET_CHANGED",
+                message="Sandbox Preview 精确目标快照在审批后已变更, 请重新审批",
+                status_code=409,
+            )
         now = datetime.now(UTC)
         approval.consumed_at = now
         approval.execution_id = execution.id

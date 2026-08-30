@@ -617,6 +617,11 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
                 "WHERE type = 'table' AND name = 'sandbox_preview_approvals'"
             )
         )
+        approval_columns = (
+            await connection.execute(
+                standalone_schema.text("PRAGMA table_info(sandbox_preview_approvals)")
+            )
+        ).fetchall()
         preserved = (
             await connection.execute(
                 standalone_schema.text(
@@ -641,6 +646,7 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
     assert execution_contract["workflow_id"] is False
     assert execution_contract["workflow_version_id"] is False
     assert approval_table == "sandbox_preview_approvals"
+    assert "target_snapshot_fingerprint" in {str(row[1]) for row in approval_columns}
     assert "'running'" in str(checkpoint_sql)
     assert "attempt >= 0" in str(checkpoint_sql)
     assert preserved == ("standard", "passed")

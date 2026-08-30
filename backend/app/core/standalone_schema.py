@@ -177,6 +177,12 @@ async def _ensure_s55_schema(connection: AsyncConnection) -> None:
 
     approval_table = cast(Table, SandboxPreviewApproval.__table__)
     await connection.execute(CreateTable(approval_table, if_not_exists=True))
+    await _add_column_if_missing(
+        connection,
+        table="sandbox_preview_approvals",
+        column="target_snapshot_fingerprint",
+        definition="VARCHAR(64) NOT NULL DEFAULT ''",
+    )
     await _ensure_table_indexes(connection, approval_table)
 
     workflow_table = cast(Table, WorkflowExecution.__table__)

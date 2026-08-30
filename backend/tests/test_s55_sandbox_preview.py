@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from app.core.encryption import secret_box
 from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import WorkflowDefinition
+from app.engine.scheduler import CancellationToken
 from app.models.api_assets import Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
@@ -91,11 +93,19 @@ async def test_preview_dataset_runtime_budget_spans_queued_and_active_children(
         cast(Any, EventBus()),
     )
     started: list[UUID] = []
+    cleanup_started: list[UUID] = []
 
-    async def slow_execution(child: WorkflowRunPlan) -> object:
+    async def slow_execution(
+        child: WorkflowRunPlan,
+        *,
+        cancellation: object | None = None,
+    ) -> object:
         started.append(child.execution_id)
+        token = cast(CancellationToken, cancellation)
+        await token.wait()
+        cleanup_started.append(child.execution_id)
         await asyncio.sleep(60)
-        raise AssertionError("deadline must cancel an active dataset child")
+        raise AssertionError("bounded cleanup grace must cancel a stuck dataset child")
 
     monkeypatch.setattr(
         "app.services.workflow_coordinator.WorkflowService",
@@ -111,11 +121,13 @@ async def test_preview_dataset_runtime_budget_spans_queued_and_active_children(
             children=children,
             concurrency=1,
             max_runtime_seconds=cast(int, 0.01),
+            cleanup_timeout_seconds=cast(int, 0.01),
         )
     )
 
     assert completed.status == "cancelled"
     assert len(started) == 1
+    assert cleanup_started == started
     assert cancelled["code"] == "PREVIEW_RUNTIME_BUDGET_EXCEEDED"
 
 
@@ -179,6 +191,7 @@ def test_preview_rejects_targets_without_environment_classification() -> None:
 @pytest.mark.asyncio
 async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     s51_context: dict[str, Any],  # noqa: F811 - pytest injects the imported fixture
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     test_context, plan, compilation = await _plan_chain(s51_context, with_cleanup=True)
     client = s51_context["client"]
@@ -361,6 +374,51 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         endpoint.secret_refs = []
         await session.delete(secret)
         await session.commit()
+
+    original_prepare = WorkflowService.prepare_preview_execution
+
+    async def prepare_with_reversible_target_race(
+        service: WorkflowService,
+        **kwargs: Any,
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan | WorkflowBatchPlan]:
+        execution, plan = await original_prepare(service, **kwargs)
+        assert isinstance(plan, WorkflowRunPlan)
+        node_id, prepared_request = next(iter(plan.prepared.requests.items()))
+        raced_request = replace(
+            prepared_request,
+            request=replace(
+                prepared_request.request,
+                url="https://raced-target.example.test/health",
+            ),
+        )
+        raced_prepared = replace(
+            plan.prepared,
+            requests={**plan.prepared.requests, node_id: raced_request},
+        )
+        return execution, replace(plan, prepared=raced_prepared)
+
+    with monkeypatch.context() as race_patch:
+        race_patch.setattr(
+            WorkflowService,
+            "prepare_preview_execution",
+            prepare_with_reversible_target_race,
+        )
+        raced_target = await client.post(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": "s55-preview-raced-target",
+            },
+            json={
+                "project_id": str(s51_context["project_id"]),
+                "environment_id": str(s51_context["sandbox_environment_id"]),
+                "approval_id": target_bound.json()["id"],
+                "runtime_variables": {},
+                "runtime_headers": {},
+            },
+        )
+    assert raced_target.status_code == 409, raced_target.text
+    assert raced_target.json()["error"]["code"] == "PREVIEW_APPROVAL_TARGET_CHANGED"
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"

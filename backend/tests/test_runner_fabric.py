@@ -1046,15 +1046,23 @@ async def test_remote_preview_batch_enforces_one_deadline_across_queued_children
         children=(first, second),
         concurrency=1,
         max_runtime_seconds=cast(int, 0.01),
+        cleanup_timeout_seconds=cast(int, 0.01),
     )
     executor = RemoteWorkflowExecutor()
     cancellation = CancellationToken()
     started: list[UUID] = []
+    cleanup_started: list[UUID] = []
 
-    async def slow_execution(child: WorkflowRunPlan, **_kwargs: object) -> object:
+    async def slow_execution(
+        child: WorkflowRunPlan,
+        **kwargs: object,
+    ) -> object:
         started.append(child.execution_id)
+        token = cast(CancellationToken, kwargs["cancellation"])
+        await token.wait()
+        cleanup_started.append(child.execution_id)
         await asyncio.sleep(60)
-        raise AssertionError("shared deadline must cancel the active remote child")
+        raise AssertionError("bounded cleanup grace must cancel a stuck remote child")
 
     monkeypatch.setattr(executor, "_execute_run", slow_execution)
     with pytest.raises(PreviewRuntimeBudgetExceeded):
@@ -1065,7 +1073,9 @@ async def test_remote_preview_batch_enforces_one_deadline_across_queued_children
         )
 
     assert len(started) == 1
-    assert cancellation.force_cancelled is True
+    assert cleanup_started == started
+    assert cancellation.cancelled is True
+    assert cancellation.force_cancelled is False
 
 
 @pytest.mark.asyncio

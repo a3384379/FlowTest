@@ -84,12 +84,14 @@ def test_preview_batch_plan_round_trip_preserves_global_runtime_budget() -> None
         children=(child,),
         concurrency=1,
         max_runtime_seconds=600,
+        cleanup_timeout_seconds=120,
     )
 
     restored = decode_execution_plan(encode_execution_plan(plan))
 
     assert isinstance(restored, WorkflowBatchPlan)
     assert restored.max_runtime_seconds == 600
+    assert restored.cleanup_timeout_seconds == 120
 
 
 def test_execution_plan_round_trip_preserves_pinned_protocol_schema() -> None:
