@@ -202,12 +202,16 @@ def _has_sensitive_mapping_literal(value: object) -> bool:
         return any(_has_sensitive_mapping_literal(item) for item in value)
     if not isinstance(value, dict):
         return False
-    for identifier_field in ("name", "key"):
+    for identifier_field, literal_field in (
+        ("name", "value"),
+        ("key", "value"),
+        ("input", "expression"),
+    ):
         named_value = value.get(identifier_field)
         if (
             isinstance(named_value, str)
             and is_sensitive_identifier(named_value)
-            and _contains_unsafe_literal(value.get("value"))
+            and _contains_unsafe_literal(value.get(literal_field))
         ):
             return True
     for name, child in value.items():

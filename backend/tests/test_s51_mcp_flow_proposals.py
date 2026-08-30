@@ -483,6 +483,40 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert correlated_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
     assert "abc" not in correlated_secret.text
 
+    binding_payload = _proposal_payload(s51_context, context, plan, compilation)
+    binding_payload["spec"]["nodes"].append(
+        {
+            "id": "grpc-sensitive-binding",
+            "kind": "capability",
+            "name": "gRPC sensitive binding",
+            "position": {"x": 900, "y": 0},
+            "config": {},
+            "capability_id": "grpc.call",
+            "capability_version": "3.0.0",
+            "configuration": {
+                "descriptor_id": "00000000-0000-0000-0000-000000000001",
+                "endpoint": "grpc.example.com:443",
+                "service": "flowtest.UserService",
+                "method": "GetUser",
+                "request": {"password": ""},
+                "call_type": "unary",
+            },
+            "bindings": [{"input": "request.password", "expression": "'hunter2'"}],
+            "depends_on": [],
+        }
+    )
+    binding_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-capability-binding",
+        },
+        json={**binding_payload, "dry_run": False},
+    )
+    assert binding_secret.status_code == 422
+    assert binding_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in binding_secret.text
+
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
     safe_payload.pop("compilation")
