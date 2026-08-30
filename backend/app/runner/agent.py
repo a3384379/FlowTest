@@ -17,7 +17,7 @@ from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.runner.client import RunnerControlPlaneClient
-from app.runner.workflow import RemoteWorkflowExecutor
+from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
@@ -140,6 +140,15 @@ class RunnerAgent:
                     reset_retry_budget=lease.task.reset_retry_budget,
                 )
                 await self._control_plane.complete(lease.lease_id, lease.task.fencing_token, result)
+            except PreviewRuntimeBudgetExceeded:
+                with suppress(httpx.HTTPError):
+                    await self._control_plane.fail(
+                        lease.lease_id,
+                        lease.task.fencing_token,
+                        error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                        error_message="Sandbox Preview 数据集已达到整批运行时预算",
+                        retryable=False,
+                    )
             except httpx.HTTPStatusError as error:
                 if error.response.status_code != 409:
                     logger.warning(

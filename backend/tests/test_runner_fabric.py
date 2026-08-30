@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -44,7 +45,7 @@ from app.runner.agent import (
 )
 from app.runner.client import RunnerControlPlaneClient
 from app.runner.results import RunnerExecutionResult
-from app.runner.workflow import RemoteWorkflowExecutor
+from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
@@ -1029,6 +1030,42 @@ async def test_runner_agent_reports_batch_checkpoints_for_actual_child_execution
         second.execution_id,
     }
     assert lease.task.execution_id not in {item.execution_id for item in control.checkpoints}
+
+
+@pytest.mark.asyncio
+async def test_remote_preview_batch_enforces_one_deadline_across_queued_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _plan_fixture()
+    second = replace(first, execution_id=uuid4())
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=first.actor_id,
+        project_id=first.project_id,
+        workflow_version=0,
+        children=(first, second),
+        concurrency=1,
+        max_runtime_seconds=cast(int, 0.01),
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    started: list[UUID] = []
+
+    async def slow_execution(child: WorkflowRunPlan, **_kwargs: object) -> object:
+        started.append(child.execution_id)
+        await asyncio.sleep(60)
+        raise AssertionError("shared deadline must cancel the active remote child")
+
+    monkeypatch.setattr(executor, "_execute_run", slow_execution)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+        )
+
+    assert len(started) == 1
+    assert cancellation.force_cancelled is True
 
 
 @pytest.mark.asyncio

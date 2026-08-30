@@ -36,6 +36,10 @@ from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, Wor
 RunnerProgressCallback = Callable[[UUID, NodeStatusUpdate], Awaitable[None]]
 
 
+class PreviewRuntimeBudgetExceeded(RuntimeError):
+    """The governed dataset preview exceeded its shared wall-clock budget."""
+
+
 class RemoteWorkflowExecutor:
     """Executes an immutable plan without persisting a terminal database state."""
 
@@ -69,7 +73,22 @@ class RemoteWorkflowExecutor:
                         result=RunnerWorkflowResult.from_domain(result),
                     )
 
-            children = await asyncio.gather(*(execute_child(child) for child in plan.children))
+            tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
+            batch = asyncio.gather(*tasks)
+            try:
+                if plan.max_runtime_seconds is None:
+                    children = await batch
+                else:
+                    children = await asyncio.wait_for(
+                        batch,
+                        timeout=plan.max_runtime_seconds,
+                    )
+            except TimeoutError as error:
+                cancellation.cancel(force=True)
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise PreviewRuntimeBudgetExceeded(
+                    "Sandbox Preview dataset runtime budget exceeded"
+                ) from error
             return RunnerBatchExecutionResult(
                 execution_id=plan.execution_id,
                 children=tuple(children),
