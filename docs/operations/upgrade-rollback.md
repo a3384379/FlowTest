@@ -38,16 +38,18 @@ scripts/verify_v2_v3_upgrade.sh
 
 1. 使用 V2 镜像在 `0018` 创建 Project、Environment、API、Workflow、Execution 和 Report。
 2. 导出 PostgreSQL custom-format 安全检查点，并生成 MinIO SHA-256 清单。
-3. 使用当前代码原地升级到 `0028`，执行 `alembic check`，校验旧资产并再运行。
-4. 使用当前代码降级到 `0018`，切回 V2 应用，再次校验和执行。
-5. 重新升级到 `0028`，再次执行 `alembic check`、旧资产执行与 MinIO 哈希校验。
+3. 使用当前代码原地升级到当前 Head，执行 `alembic check`，校验旧资产并再运行；该运行会产生
+   `FTK1` 加密执行计划。
+4. 证明直接降级到 `0018` 被密钥包络保护明确拒绝且 revision 不变，再恢复第 2 步的 PostgreSQL + MinIO
+   一致恢复点，切回 V2 应用并再次校验和执行。
+5. 重新升级到当前 Head，再次执行 `alembic check`、旧资产执行与 MinIO 哈希校验。
 
 每次退出都会删除该次演练的容器、卷、临时源码和临时镜像，不读写开发环境的
 PostgreSQL/MinIO 数据卷。脚本只用于 CI 和发布演练，不是生产环境的一键升级器。
 
-`0028 → 0018` 是 destructive downgrade：S22–S31 新增的 Capability、Schema、Performance、
+H1 之前，`0028 → 0018` 是 destructive downgrade：S22–S31 新增的 Capability、Schema、Performance、
 Environment、Contract、Impact、Runner、Failure Intelligence 和 Release Gate 数据都会被删除。
-演练会特意创建一条 V3 Release Policy，并在重新升级后确认它已被回滚删除，同时
+当前演练会特意创建一条 V3 Release Policy，并在恢复、重新升级后确认它已被回滚删除，同时
 V2 业务资产仍完整。需保留 V3 证据时不得执行此 downgrade，应使用升级前已验证的
 PostgreSQL + MinIO 恢复点。
 

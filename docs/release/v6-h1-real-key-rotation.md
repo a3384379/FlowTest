@@ -27,6 +27,8 @@ S54 已由 PR #62 普通 Squash Merge，PR 与 Merge 后 Main Push 七项门禁�
 - Organization API 完整 Prepare→Apply→Rollback 生命周期及审计动作。
 - Frontend 轮换动作状态机、TypeScript、Prettier、ESLint 和相关 Vitest。
 - Migration `0048→0049→0048→0049` 无新密文定向往返已通过；`FTK1` 存在时的安全拒绝回归已通过。
+- V2→当前 Head 演练会在产生 `FTK1` 执行计划后验证直接 downgrade 被拒绝，再使用升级前
+  PostgreSQL + MinIO 一致恢复点完成 V2 回滚验证与当前 Head 再升级。
 
 ## 4. H1 Exit Criteria
 
