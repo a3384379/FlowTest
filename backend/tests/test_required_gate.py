@@ -178,6 +178,33 @@ def test_required_gate_path_rules_match_child_workflow_triggers() -> None:
         assert set(gate_spec.exact_paths) == workflow_exact_paths
 
 
+def test_compose_rc_gates_only_run_after_explicit_post_review_dispatch() -> None:
+    workflow = yaml.load(
+        (WORKSPACE_ROOT / ".github/workflows/compose-ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+
+    run_rc_gates = workflow["on"]["workflow_dispatch"]["inputs"]["run_rc_gates"]
+    assert run_rc_gates["default"] == "false"
+    assert run_rc_gates["required"] == "true"
+
+    expected_condition = "${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}"
+    assert workflow["jobs"]["compact-smoke"]["if"] == expected_condition
+    smoke_steps = workflow["jobs"]["smoke"]["steps"]
+    capacity_steps = [step for step in smoke_steps if "capacity" in step.get("name", "").lower()]
+    assert {step["name"] for step in capacity_steps} == {
+        "Run API capacity gate",
+        "Run real Workflow capacity gate",
+        "Run durable 1000-task queue capacity gate",
+        "Enable S29 Runner Fabric capacity plane",
+        "Run S29 5000-queue and 500-workflow multi-Worker capacity gate",
+    }
+    assert all(step["if"] == expected_condition for step in capacity_steps)
+
+    compose_spec = next(spec for spec in required_gate.GATE_SPECS if spec.key == "compose")
+    assert compose_spec.checks == ("smoke",)
+
+
 def test_required_gate_controller_runs_trusted_base_code() -> None:
     workflow = yaml.load(
         (WORKSPACE_ROOT / ".github/workflows/required-gate.yml").read_text(encoding="utf-8"),

@@ -87,12 +87,19 @@ on:
       - "scripts/verify_restore.sh"
       - ".github/workflows/compose-ci.yml"
   workflow_dispatch:
+    inputs:
+      run_rc_gates:
+        description: "仅在复审清除 P0/P1 后执行 Compact 与容量 RC 门禁"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
   compact-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -399,16 +406,21 @@ jobs:
             --topic flowtest.compat --partitions 1 --replication-factor 1
           uv run --project backend python scripts/verify_kafka_compat.py
       - name: Run API capacity gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
         run: uv run --project backend python scripts/capacity_s11.py
       - name: Run real Workflow capacity gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
         run: uv run --project backend python scripts/capacity_workflow.py
       - name: Run durable 1000-task queue capacity gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
         run: uv run --project backend python scripts/capacity_s19.py
       - name: Enable S29 Runner Fabric capacity plane
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
         env:
           FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
         run: docker compose up -d --force-recreate --wait backend worker beat
       - name: Run S29 5000-queue and 500-workflow multi-Worker capacity gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_rc_gates }}
         env:
           FLOWTEST_FEATURE_RUNNER_FABRIC_ENABLED: "true"
         run: uv run --project backend python scripts/capacity_s29.py

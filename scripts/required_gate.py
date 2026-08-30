@@ -126,7 +126,7 @@ GATE_SPECS = (
         key="compose",
         label="Compose Smoke Test",
         workflow_path=".github/workflows/compose-ci.yml",
-        checks=("compact-smoke", "smoke"),
+        checks=("smoke",),
         prefixes=(
             "backend/",
             "frontend/",
