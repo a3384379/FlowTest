@@ -517,7 +517,7 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         flow_spec_client, headers, "Source"
     )
     target_project, target_service, target_api = await _create_portable_assets(
-        flow_spec_client, headers, "Target"
+        flow_spec_client, headers, "Target", service_key="orders-v2"
     )
     source_override = await flow_spec_client.post(
         f"/api/v1/projects/{source_project}/services",
@@ -854,7 +854,11 @@ async def test_test_engineering_proposal_materializes_existing_assets(
 
 
 async def _create_portable_assets(
-    client: AsyncClient, headers: dict[str, str], label: str
+    client: AsyncClient,
+    headers: dict[str, str],
+    label: str,
+    *,
+    service_key: str = "orders",
 ) -> tuple[str, str, str]:
     project = await client.post(
         "/api/v1/projects", headers=headers, json={"name": f"{label} portable project"}
@@ -864,7 +868,7 @@ async def _create_portable_assets(
     service = await client.post(
         f"/api/v1/projects/{project_id}/services",
         headers=headers,
-        json={"service_key": "orders", "name": f"{label} orders"},
+        json={"service_key": service_key, "name": f"{label} orders"},
     )
     assert service.status_code == 201, service.text
     api = await client.post(
