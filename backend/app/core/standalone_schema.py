@@ -395,16 +395,19 @@ async def _ensure_api_version_service_identity(connection: AsyncConnection) -> N
     column_names = {str(row[1]) for row in columns.fetchall()}
     if not column_names:
         return
-    if "service_id" not in column_names:
+    service_identity_added = "service_id" not in column_names
+    if service_identity_added:
         await connection.execute(text("ALTER TABLE api_versions ADD COLUMN service_id CHAR(32)"))
     definition_columns = await connection.execute(text("PRAGMA table_info(api_definitions)"))
-    if "service_id" in {str(row[1]) for row in definition_columns.fetchall()}:
+    if service_identity_added and "service_id" in {
+        str(row[1]) for row in definition_columns.fetchall()
+    }:
         await connection.execute(
             text(
                 "UPDATE api_versions SET service_id = ("
                 "SELECT api_definitions.service_id FROM api_definitions "
                 "WHERE api_definitions.id = api_versions.api_definition_id"
-                ") WHERE service_id IS NULL"
+                ")"
             )
         )
     await connection.execute(

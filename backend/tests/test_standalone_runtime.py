@@ -709,7 +709,9 @@ async def test_standalone_schema_upgrades_s47_test_design_columns(tmp_path) -> N
 
 
 @pytest.mark.asyncio
-async def test_standalone_api_version_service_identity_is_backfilled_once(tmp_path) -> None:
+async def test_standalone_api_version_service_identity_is_backfilled_only_with_new_column(
+    tmp_path,
+) -> None:
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's51-schema.db'}")
     async with test_engine.begin() as connection:
         await connection.execute(
@@ -724,23 +726,19 @@ async def test_standalone_api_version_service_identity_is_backfilled_once(tmp_pa
             )
         )
         await connection.execute(
-            standalone_schema.text("INSERT INTO api_definitions VALUES ('api-1', NULL)")
+            standalone_schema.text("INSERT INTO api_definitions VALUES ('api-1', 'service-old')")
         )
         await connection.execute(
             standalone_schema.text("INSERT INTO api_versions VALUES ('version-1', 'api-1')")
         )
         await standalone_schema._ensure_api_version_service_identity(connection)
-        before_target_backfill = await connection.scalar(
+        migrated_identity = await connection.scalar(
             standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
         )
         await connection.execute(
             standalone_schema.text(
-                "UPDATE api_definitions SET service_id = 'service-old' WHERE id = 'api-1'"
+                "UPDATE api_versions SET service_id = NULL WHERE id = 'version-1'"
             )
-        )
-        await standalone_schema._ensure_api_version_service_identity(connection)
-        after_target_backfill = await connection.scalar(
-            standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
         )
         await connection.execute(
             standalone_schema.text(
@@ -748,14 +746,13 @@ async def test_standalone_api_version_service_identity_is_backfilled_once(tmp_pa
             )
         )
         await standalone_schema._ensure_api_version_service_identity(connection)
-        after_definition_change = await connection.scalar(
+        explicitly_unassigned_identity = await connection.scalar(
             standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
         )
 
     await test_engine.dispose()
-    assert before_target_backfill is None
-    assert after_target_backfill == "service-old"
-    assert after_definition_change == "service-old"
+    assert migrated_identity == "service-old"
+    assert explicitly_unassigned_identity is None
 
 
 @pytest.mark.asyncio
