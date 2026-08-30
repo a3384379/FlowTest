@@ -93,6 +93,7 @@ export type Environment = {
   project_id: string
   name: string
   base_url: string
+  classification?: 'unclassified' | 'test' | 'sandbox' | 'staging' | 'production'
   default_service_id?: string | null
   variables: Record<string, string>
   headers: Record<string, string>
@@ -696,6 +697,47 @@ export type FlowSpecApplyResult = {
   applied_at: string
 }
 
+export type PreviewBudget = {
+  max_nodes: number
+  max_requests: number
+  max_dataset_rows: number
+  max_parallelism: number
+  max_runtime_seconds: number
+}
+
+export type SandboxPreviewApproval = {
+  id: string
+  organization_id: string
+  project_id: string
+  change_set_id: string
+  environment_id: string
+  executor_kind: 'user' | 'service_account'
+  executor_id: string
+  proposal_fingerprint: string
+  context_revision_id: string
+  context_fingerprint: string
+  budget: PreviewBudget
+  expires_at: string
+  consumed_at: string | null
+  execution_id: string | null
+  created_by_id: string
+  created_at: string
+}
+
+export type ExecutionCheckpoint = {
+  id: string
+  execution_id: string
+  node_id: string
+  node_type: string
+  node_name: string
+  phase: 'main' | 'cleanup'
+  best_effort: boolean
+  attempt: number
+  status: WorkflowNodeExecution['status']
+  started_at: string | null
+  finished_at: string
+}
+
 export type IntegrationPlanDiagnostic = {
   code: string
   severity: 'blocker' | 'review' | 'warning' | 'info'
@@ -842,12 +884,17 @@ export type WorkflowDebugResult = {
 export type WorkflowExecution = {
   id: string
   project_id: string
-  workflow_id: string
-  workflow_version_id: string
+  workflow_id: string | null
+  workflow_version_id: string | null
   environment_id: string
   triggered_by_id: string
   parent_execution_id: string | null
   dataset_row_index: number | null
+  run_purpose?: 'standard' | 'preview'
+  source_change_set_id?: string | null
+  preview_approval_id?: string | null
+  preview_budget?: Partial<PreviewBudget>
+  preview_evidence?: Record<string, unknown>
   status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   main_status?: 'passed' | 'failed' | 'cancelled' | null
   cleanup_status?: 'passed' | 'failed' | 'cancelled' | null
@@ -1153,7 +1200,7 @@ export type FailureCategory =
 
 export type ReportExecution = {
   id: string
-  workflow_id: string
+  workflow_id: string | null
   workflow_name: string
   workflow_version: number
   status: 'running' | 'passed' | 'failed' | 'cancelled'

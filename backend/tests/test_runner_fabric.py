@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -24,9 +25,9 @@ from app.core.security import password_service
 from app.domain.durable_execution import ExecutionCommandType
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.runner_fabric import RunnerProfile, normalize_labels
-from app.engine.contracts import NodeStatus, NodeType, WorkflowDefinition
+from app.engine.contracts import NodeStatus, NodeType, WorkflowDefinition, WorkflowRunStatus
 from app.engine.results import NodeResult
-from app.engine.scheduler import CancellationToken, NodeStatusUpdate
+from app.engine.scheduler import CancellationToken, NodeStatusUpdate, WorkflowRunResult
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
@@ -44,10 +45,11 @@ from app.runner.agent import (
 )
 from app.runner.client import RunnerControlPlaneClient
 from app.runner.results import RunnerExecutionResult
-from app.runner.workflow import RemoteWorkflowExecutor
+from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
+    RunnerCheckpointResume,
     RunnerCompleteRequest,
     RunnerFailRequest,
     RunnerHeartbeatRequest,
@@ -1029,6 +1031,143 @@ async def test_runner_agent_reports_batch_checkpoints_for_actual_child_execution
         second.execution_id,
     }
     assert lease.task.execution_id not in {item.execution_id for item in control.checkpoints}
+
+
+@pytest.mark.asyncio
+async def test_remote_preview_batch_enforces_one_deadline_across_queued_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _plan_fixture()
+    second = replace(first, execution_id=uuid4())
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=first.actor_id,
+        project_id=first.project_id,
+        workflow_version=0,
+        children=(first, second),
+        concurrency=1,
+        max_runtime_seconds=cast(int, 0.01),
+        cleanup_timeout_seconds=cast(int, 0.01),
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    started: list[UUID] = []
+    cleanup_started: list[UUID] = []
+
+    async def slow_execution(
+        child: WorkflowRunPlan,
+        **kwargs: object,
+    ) -> object:
+        started.append(child.execution_id)
+        token = cast(CancellationToken, kwargs["cancellation"])
+        await token.wait()
+        cleanup_started.append(child.execution_id)
+        return WorkflowRunResult(
+            status=WorkflowRunStatus.CANCELLED,
+            records=(),
+            context={},
+        )
+
+    monkeypatch.setattr(executor, "_execute_run", slow_execution)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+        )
+
+    assert len(started) == 1
+    assert cleanup_started == started
+    assert cancellation.cancelled is True
+    assert cancellation.force_cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_remote_preview_batch_reuses_expired_deadline_after_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = _plan_fixture()
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=child.actor_id,
+        project_id=child.project_id,
+        workflow_version=0,
+        children=(child,),
+        concurrency=1,
+        max_runtime_seconds=600,
+        cleanup_timeout_seconds=1,
+        deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    started: list[UUID] = []
+
+    async def record_start(child_plan: WorkflowRunPlan, **_kwargs: object) -> object:
+        started.append(child_plan.execution_id)
+        raise AssertionError("an expired preview retry must not start a child")
+
+    monkeypatch.setattr(executor, "_execute_run", record_start)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+        )
+
+    assert started == []
+    assert cancellation.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_remote_expired_preview_resumes_started_child_for_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started_child = _plan_fixture()
+    queued_child = replace(started_child, execution_id=uuid4())
+    plan = WorkflowBatchPlan(
+        execution_id=uuid4(),
+        actor_id=started_child.actor_id,
+        project_id=started_child.project_id,
+        workflow_version=0,
+        children=(started_child, queued_child),
+        concurrency=1,
+        cleanup_timeout_seconds=1,
+        deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    checkpoint = RunnerCheckpointResume(
+        node_id="request",
+        node_type=NodeType.API,
+        name="Request",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        input_hash="0" * 64,
+    )
+    executor = RemoteWorkflowExecutor()
+    cancellation = CancellationToken()
+    resumed: list[UUID] = []
+
+    async def record_resume(child: WorkflowRunPlan, **kwargs: object) -> object:
+        assert cast(CancellationToken, kwargs["cancellation"]).cancelled is True
+        resumed.append(child.execution_id)
+        return WorkflowRunResult(
+            status=WorkflowRunStatus.CANCELLED,
+            records=(),
+            context={},
+        )
+
+    monkeypatch.setattr(executor, "_execute_run", record_resume)
+    with pytest.raises(PreviewRuntimeBudgetExceeded):
+        await executor.execute(
+            plan,
+            network_policy=OutboundNetworkPolicy(),
+            cancellation=cancellation,
+            resume_checkpoints={str(started_child.execution_id): [checkpoint]},
+        )
+
+    assert resumed == [started_child.execution_id]
+    assert cancellation.cancelled is True
 
 
 @pytest.mark.asyncio

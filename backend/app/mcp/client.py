@@ -15,6 +15,7 @@ from app.domain.integration_plans import (
     PlanValidationResult,
 )
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.sandbox_preview import SandboxPreviewExecutionResponse
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
     ContextRequirementsResponse,
@@ -393,6 +394,22 @@ class MCPReadGatewayClient:
             token=token,
         )
         return _validate_response(response, FlowSpecProposalInspectionResponse)
+
+    async def preview_flow_proposal(
+        self,
+        change_set_id: UUID | str,
+        payload: Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> SandboxPreviewExecutionResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            payload=payload,
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, SandboxPreviewExecutionResponse)
 
     async def plan_integration_test(
         self,

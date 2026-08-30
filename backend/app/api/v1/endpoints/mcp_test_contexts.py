@@ -1,5 +1,6 @@
 """Thin MCP HTTP adapters for test contexts and FlowSpec proposals."""
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -8,10 +9,18 @@ from fastapi import APIRouter, Header, status
 from app.api.dependencies import (
     MCPEvidenceCurrent,
     MCPFlowProposalCurrent,
+    MCPPreviewCurrent,
     SessionDependency,
+    WorkflowCoordinator,
 )
+from app.composition import build_workflow_service
 from app.domain.evidence_adapters import EntityMappingResult
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.schemas.sandbox_preview import (
+    MCPSandboxPreviewExecuteRequest,
+    SandboxPreviewExecuteRequest,
+    SandboxPreviewExecutionResponse,
+)
 from app.schemas.test_contexts import (
     BeginTestContextRequest,
     CompilerDiagnosticsResponse,
@@ -29,13 +38,18 @@ from app.schemas.test_contexts import (
     IntegrationPlanValidationResponse,
     TestContextResponse,
 )
+from app.schemas.workflows import WorkflowExecutionResponse
+from app.services.durable_execution import DurableExecutionService
 from app.services.evidence_adapters import EvidenceAdapterService
+from app.services.idempotency import IdempotencyService, require_idempotency_key
 from app.services.mcp_flow_proposals import MCPFlowProposalService
 from app.services.mcp_integration_plans import MCPIntegrationPlanService
+from app.services.sandbox_preview import SandboxPreviewService
 from app.services.test_contexts import TestContextService
 
 evidence_router = APIRouter(prefix="/mcp/evidence/contexts")
 flow_router = APIRouter(prefix="/mcp/flow")
+logger = logging.getLogger(__name__)
 
 
 @evidence_router.post(
@@ -234,3 +248,85 @@ async def inspect_flow_proposal(
         project_id=project_id,
         change_set_id=change_set_id,
     )
+
+
+@flow_router.post(
+    "/proposals/{change_set_id}/preview-executions",
+    response_model=SandboxPreviewExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def execute_flow_proposal_preview(
+    change_set_id: UUID,
+    payload: MCPSandboxPreviewExecuteRequest,
+    session: SessionDependency,
+    principal: MCPPreviewCurrent,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> SandboxPreviewExecutionResponse:
+    key = require_idempotency_key(idempotency_key)
+    request = SandboxPreviewExecuteRequest.model_validate(
+        payload.model_dump(mode="json", exclude={"project_id"})
+    )
+
+    async def start() -> SandboxPreviewExecutionResponse:
+        execution, plan = await SandboxPreviewService(
+            session,
+            workflows=build_workflow_service(session),
+        ).prepare_execution(
+            actor=principal.actor,
+            project_id=payload.project_id,
+            change_set_id=change_set_id,
+            payload=request,
+            commit=False,
+        )
+        actor_key = f"service-account:{principal.account.id}"
+        try:
+            command = await DurableExecutionService(session).create_start_command(
+                actor=principal.actor,
+                project_id=payload.project_id,
+                execution_id=execution.id,
+                actor_key=actor_key,
+                idempotency_key=key,
+                payload={
+                    "change_set_id": str(change_set_id),
+                    "execution_id": str(execution.id),
+                    "run_purpose": "preview",
+                },
+            )
+        except Exception:
+            await session.rollback()
+            raise
+        response = SandboxPreviewExecutionResponse(
+            execution=WorkflowExecutionResponse.model_validate(execution)
+        )
+        execution_id = execution.id
+        command_id = command.id
+        try:
+            await coordinator.start(plan)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command.id,
+                error_code="PREVIEW_COMMAND_DISPATCH_FAILED",
+                error_message="Sandbox Preview 启动命令未能提交到执行运行时",
+            )
+            raise
+        try:
+            await DurableExecutionService(session).mark_dispatched(command_id)
+        except Exception:
+            await session.rollback()
+            logger.exception(
+                "MCP Sandbox Preview dispatch accepted but status persistence failed",
+                extra={"execution_id": str(execution_id), "command_id": str(command_id)},
+            )
+        return response
+
+    response = await IdempotencyService(session).run(
+        key=key,
+        project_id=payload.project_id,
+        actor_key=f"service-account:{principal.account.id}",
+        operation=f"sandbox_preview.execute:{change_set_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return SandboxPreviewExecutionResponse.model_validate(response)

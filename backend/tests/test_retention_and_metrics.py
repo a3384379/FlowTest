@@ -9,11 +9,16 @@ from sqlalchemy.pool import StaticPool
 from app.core.logging import redact
 from app.models import Base
 from app.models.access import AuditLog, Project, User
+from app.models.ai import AIChangeSet
+from app.models.api_assets import Environment
 from app.models.artifacts import Artifact
 from app.models.data_sources import MockRequestLog, MockService
 from app.models.governance import IdempotencyRecord, OrganizationGovernance
 from app.models.organizations import Organization
+from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.test_contexts import TestContext as ContextModel
+from app.models.test_contexts import TestContextRevision as ContextRevisionModel
+from app.models.workflows import WorkflowExecution
 from app.observability.metrics import MetricsRegistry, normalize_path, render_metrics
 from app.observability.task_metrics import TaskMetricsSnapshot
 from app.services.retention import RetentionCleanupService
@@ -67,6 +72,198 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
         )
         session.add(project)
         await session.flush()
+        environment = Environment(
+            project_id=project.id,
+            name="Retention sandbox",
+            base_url="https://sandbox.example.test",
+            classification="sandbox",
+            variables={},
+            headers={},
+            created_by_id=user.id,
+        )
+        preview_context = ContextModel(
+            organization_id=organization.id,
+            project_id=project.id,
+            name="Retained preview context",
+            objective="Verify preview retention",
+            target_environment_id=None,
+            status="expired",
+            current_revision=1,
+            created_by_type="user",
+            created_by_id=user.id,
+            expires_at=old,
+            closed_at=None,
+        )
+        change_set = AIChangeSet(
+            project_id=project.id,
+            title="Retained preview",
+            status="accepted",
+            source_snapshot={},
+            source_fingerprint="a" * 64,
+            source_type="mcp",
+            source_ref=None,
+            actor_type="user",
+            actor_id=user.id,
+            created_by_id=user.id,
+        )
+        session.add_all([environment, preview_context, change_set])
+        await session.flush()
+        revision = ContextRevisionModel(
+            context_id=preview_context.id,
+            revision=1,
+            repository_revisions=[],
+            contract_revisions=[],
+            data_profile_revisions=[],
+            existing_test_revision=None,
+            knowledge_snapshot={},
+            completeness={},
+            conflict_snapshot={},
+            evidence_fingerprints=[],
+            fingerprint="b" * 64,
+            created_by_type="user",
+            created_by_id=user.id,
+        )
+        session.add(revision)
+        await session.flush()
+        approval = SandboxPreviewApproval(
+            organization_id=organization.id,
+            project_id=project.id,
+            change_set_id=change_set.id,
+            environment_id=environment.id,
+            environment_fingerprint="c" * 64,
+            target_snapshot_fingerprint="d" * 64,
+            runtime_input_fingerprint="e" * 64,
+            executor_kind="user",
+            executor_id=user.id,
+            proposal_fingerprint="f" * 64,
+            context_revision_id=revision.id,
+            context_fingerprint="1" * 64,
+            budget={"max_requests": 2},
+            expires_at=old,
+            consumed_at=None,
+            execution_id=None,
+            created_by_id=user.id,
+        )
+        session.add(approval)
+        await session.flush()
+        preview_execution = WorkflowExecution(
+            project_id=project.id,
+            workflow_id=None,
+            workflow_version_id=None,
+            environment_id=environment.id,
+            triggered_by_id=user.id,
+            parent_execution_id=None,
+            dataset_row_index=None,
+            run_purpose="preview",
+            source_change_set_id=change_set.id,
+            preview_approval_id=approval.id,
+            preview_budget={"max_requests": 2},
+            preview_evidence={},
+            status="passed",
+            main_status="passed",
+            cleanup_status="passed",
+            cleanup_report={},
+            snapshot={},
+            context={},
+            error_code=None,
+            error_message=None,
+            cancel_requested_at=None,
+            force_cancel_requested_at=None,
+            force_cancel_reason=None,
+            started_at=old,
+            completed_at=old,
+        )
+        session.add(preview_execution)
+        await session.flush()
+        approval.consumed_at = old
+        approval.execution_id = preview_execution.id
+        retained_context = ContextModel(
+            organization_id=organization.id,
+            project_id=project.id,
+            name="Referenced expired context",
+            objective="Retain while preview evidence is retained",
+            target_environment_id=None,
+            status="expired",
+            current_revision=1,
+            created_by_type="user",
+            created_by_id=user.id,
+            expires_at=old,
+            closed_at=None,
+        )
+        session.add(retained_context)
+        await session.flush()
+        retained_revision = ContextRevisionModel(
+            context_id=retained_context.id,
+            revision=1,
+            repository_revisions=[],
+            contract_revisions=[],
+            data_profile_revisions=[],
+            existing_test_revision=None,
+            knowledge_snapshot={},
+            completeness={},
+            conflict_snapshot={},
+            evidence_fingerprints=[],
+            fingerprint="2" * 64,
+            created_by_type="user",
+            created_by_id=user.id,
+        )
+        session.add(retained_revision)
+        await session.flush()
+        retained_approval = SandboxPreviewApproval(
+            organization_id=organization.id,
+            project_id=project.id,
+            change_set_id=change_set.id,
+            environment_id=environment.id,
+            environment_fingerprint="3" * 64,
+            target_snapshot_fingerprint="4" * 64,
+            runtime_input_fingerprint="5" * 64,
+            executor_kind="user",
+            executor_id=user.id,
+            proposal_fingerprint="6" * 64,
+            context_revision_id=retained_revision.id,
+            context_fingerprint="7" * 64,
+            budget={"max_requests": 2},
+            expires_at=old,
+            consumed_at=None,
+            execution_id=None,
+            created_by_id=user.id,
+        )
+        session.add(retained_approval)
+        await session.flush()
+        retained_execution = WorkflowExecution(
+            project_id=project.id,
+            workflow_id=None,
+            workflow_version_id=None,
+            environment_id=environment.id,
+            triggered_by_id=user.id,
+            parent_execution_id=None,
+            dataset_row_index=None,
+            run_purpose="preview",
+            source_change_set_id=change_set.id,
+            preview_approval_id=retained_approval.id,
+            preview_budget={"max_requests": 2},
+            preview_evidence={},
+            status="passed",
+            main_status="passed",
+            cleanup_status="passed",
+            cleanup_report={},
+            snapshot={},
+            context={},
+            error_code=None,
+            error_message=None,
+            cancel_requested_at=None,
+            force_cancel_requested_at=None,
+            force_cancel_reason=None,
+            started_at=now,
+            completed_at=now,
+        )
+        session.add(retained_execution)
+        await session.flush()
+        retained_approval.consumed_at = now
+        retained_approval.execution_id = retained_execution.id
+        retained_context_id = retained_context.id
+        retained_approval_id = retained_approval.id
+        retained_execution_id = retained_execution.id
         session.add(
             OrganizationGovernance(
                 organization_id=organization.id,
@@ -151,6 +348,8 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
         mock_logs = list((await session.scalars(select(MockRequestLog))).all())
         audit_logs = list((await session.scalars(select(AuditLog))).all())
         contexts = list((await session.scalars(select(ContextModel))).all())
+        preview_executions = list((await session.scalars(select(WorkflowExecution))).all())
+        preview_approvals = list((await session.scalars(select(SandboxPreviewApproval))).all())
 
     assert summary.projects_scanned == 1
     assert summary.artifacts_deleted == 1
@@ -158,13 +357,16 @@ async def test_retention_cleanup_removes_expired_state_and_preserves_failures() 
     assert summary.idempotency_records_deleted == 1
     assert summary.audit_logs_deleted == 1
     assert summary.mock_request_logs_deleted == 1
-    assert summary.test_contexts_deleted == 1
+    assert summary.test_contexts_deleted == 2
+    assert summary.workflow_executions_deleted == 1
     assert storage.deleted == ["expired.bin"]
     assert remaining == {"failed.bin", "current.bin"}
     assert idempotency == []
     assert len(mock_logs) == 1
     assert [log.action for log in audit_logs] == ["current.audit"]
-    assert contexts == []
+    assert {item.id for item in contexts} == {retained_context_id}
+    assert {item.id for item in preview_executions} == {retained_execution_id}
+    assert {item.id for item in preview_approvals} == {retained_approval_id}
     await engine.dispose()
 
 

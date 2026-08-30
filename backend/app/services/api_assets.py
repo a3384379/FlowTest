@@ -19,6 +19,7 @@ from app.domain.api_assets import (
     render_json,
     render_template,
 )
+from app.domain.sandbox_preview import EnvironmentClassification
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
 from app.domain.test_engineering import (
     ContractAuth,
@@ -120,10 +121,13 @@ class APIAssetService:
         project_id: UUID,
         name: str,
         base_url: str,
+        classification: str,
         variables: dict[str, str],
         headers: dict[str, str],
     ) -> Environment:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
+        if EnvironmentClassification(classification) is not EnvironmentClassification.UNCLASSIFIED:
+            await self._project_service.authorize_owner(actor=actor, project_id=project_id)
         normalized_name = name.strip()
         await self._ensure_environment_name(project_id=project_id, name=normalized_name)
         _validate_headers(headers)
@@ -131,6 +135,7 @@ class APIAssetService:
             project_id=project_id,
             name=normalized_name,
             base_url=base_url.rstrip("/"),
+            classification=classification,
             variables=variables,
             headers=headers,
             created_by_id=actor.id,
@@ -171,6 +176,7 @@ class APIAssetService:
         environment_id: UUID,
         name: str | None,
         base_url: str | None,
+        classification: str | None,
         default_service_id: UUID | None,
         change_default_service: bool,
         variables: dict[str, str] | None,
@@ -178,6 +184,8 @@ class APIAssetService:
     ) -> Environment:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         environment = await self._get_environment(project_id, environment_id)
+        if classification is not None and classification != environment.classification:
+            await self._project_service.authorize_owner(actor=actor, project_id=project_id)
         if name is not None:
             normalized_name = name.strip()
             await self._ensure_environment_name(
@@ -193,6 +201,8 @@ class APIAssetService:
                 environment=environment,
                 previous_base_url=previous_base_url,
             )
+        if classification is not None:
+            environment.classification = classification
         if variables is not None:
             environment.variables = variables
         if headers is not None:

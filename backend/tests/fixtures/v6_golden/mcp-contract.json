@@ -1,6 +1,6 @@
 {
   "server_name": "flowtest",
-  "server_version": "s52-evidence-adapter-v1",
+  "server_version": "s55-sandbox-preview-v1",
   "read_schema_version": "flowtest-mcp-read-schema-v1",
   "tools": [
     "flowtest.analyze_test_coverage",
@@ -29,6 +29,7 @@
     "flowtest.inspect_test_evidence",
     "flowtest.list_projects",
     "flowtest.plan_integration_test",
+    "flowtest.preview_flow_proposal",
     "flowtest.propose_flow_draft",
     "flowtest.propose_test_design",
     "flowtest.validate_flowspec",

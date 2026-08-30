@@ -247,6 +247,7 @@ function EnvironmentManagement({ state, canEdit }: { state: AssetState; canEdit:
     const input = {
       name: values.name,
       base_url: values.base_url,
+      classification: values.classification,
       variables: parseRecord(values.variables),
       headers: parseRecord(values.headers),
     }
@@ -275,6 +276,19 @@ function EnvironmentManagement({ state, canEdit }: { state: AssetState; canEdit:
           <Form.Item name="base_url" label="基础 URL" rules={[{ required: true, type: 'url' }]}>
             <Input className="environment-url-input" readOnly={!canEdit} />
           </Form.Item>
+          <Form.Item name="classification" label="环境分类" rules={[{ required: true }]}>
+            <Select
+              className="management-select"
+              disabled={!canEdit}
+              options={[
+                { value: 'unclassified', label: '未分类（禁止预览）' },
+                { value: 'test', label: 'Test' },
+                { value: 'sandbox', label: 'Sandbox' },
+                { value: 'staging', label: 'Staging（禁止预览）' },
+                { value: 'production', label: 'Production（永久禁止预览）' },
+              ]}
+            />
+          </Form.Item>
         </Space>
         <Form.Item name="variables" label="环境变量（JSON）" rules={[jsonRecordRule]}>
           <Input.TextArea rows={5} className="code-input" readOnly={!canEdit} />
@@ -295,6 +309,7 @@ function EnvironmentManagement({ state, canEdit }: { state: AssetState; canEdit:
 type EnvironmentFields = {
   name: string
   base_url: string
+  classification: NonNullable<Environment['classification']>
   variables: string
   headers: string
 }
@@ -387,6 +402,7 @@ function environmentFields(environment?: Environment): EnvironmentFields {
   return {
     name: environment?.name ?? '',
     base_url: environment?.base_url ?? '',
+    classification: environment?.classification ?? 'unclassified',
     variables: formatRecord(environment?.variables),
     headers: formatRecord(environment?.headers),
   }

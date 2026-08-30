@@ -39,6 +39,7 @@ async function createCase(
   await chooseOption(page, dialog.getByLabel('运行环境'), environmentName)
   await dialog.getByLabel('标签').fill('s15')
   await page.keyboard.press('Enter')
+  await page.keyboard.press('Escape')
   const created = waitForProjectPost(page, '/test-cases')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
   await expectSuccessful(created)

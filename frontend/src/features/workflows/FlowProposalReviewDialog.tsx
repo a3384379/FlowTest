@@ -22,21 +22,29 @@ import {
   type ApiDefinition,
   type Artifact,
   type Credential,
+  type Environment,
   type FlowSpecChangeSetCursor,
   type FlowSpecVisualProposal,
+  type ExecutionCheckpoint,
   type IntegrationPlan,
+  type WorkflowExecutionDetail,
   type Workflow,
   type WorkflowDefinition,
 } from '../../lib/api'
 import type { EventSource, SchemaArtifact } from '../protocols/protocol-service'
 import {
   applyFlowSpec,
+  createSandboxPreviewApproval,
+  executeSandboxPreview,
   getVisualFlowProposal,
   getMcpFlowProposalPage,
+  getSandboxPreviewExecution,
+  listSandboxPreviewCheckpoints,
   reviewFlowSpec,
 } from './flow-spec-service'
 
 type ProposalResources = {
+  environments: Environment[]
   apis: ApiDefinition[]
   artifacts: Artifact[]
   workflows: Workflow[]
@@ -60,6 +68,40 @@ type VisualOverride = {
   visual: FlowSpecVisualProposal
 }
 
+type PreviewLiveState = {
+  detail: WorkflowExecutionDetail
+  checkpoints: ExecutionCheckpoint[]
+}
+
+function useSandboxPreview(
+  projectId: string,
+  open: boolean,
+  proposalId: string | undefined,
+  resources: ProposalResources,
+  environmentSelection: string | undefined,
+  executionId: string | undefined,
+) {
+  const environments = resources.environments.filter((environment) =>
+    ['test', 'sandbox'].includes(environment.classification ?? 'unclassified'),
+  )
+  const environmentId = environments.some((environment) => environment.id === environmentSelection)
+    ? environmentSelection
+    : environments.at(0)?.id
+  const query = useQuery({
+    queryKey: ['sandbox-preview', projectId, proposalId, executionId],
+    queryFn: async (): Promise<PreviewLiveState> => ({
+      detail: await getSandboxPreviewExecution(projectId, requiredId(executionId)),
+      checkpoints: await listSandboxPreviewCheckpoints(projectId, requiredId(executionId)),
+    }),
+    enabled: open && Boolean(executionId),
+    refetchInterval: (result) => {
+      const status = result.state.data?.detail.execution.status
+      return status === 'queued' || status === 'running' ? 750 : false
+    },
+  })
+  return { environments, environmentId, query }
+}
+
 export default function FlowProposalReviewDialog(props: FlowProposalReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
@@ -67,6 +109,8 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
   const [graphView, setGraphView] = useState<'existing' | 'proposed'>('proposed')
   const [busy, setBusy] = useState(false)
   const [visualOverride, setVisualOverride] = useState<VisualOverride>()
+  const [previewExecutionId, setPreviewExecutionId] = useState<string>()
+  const [previewEnvironmentSelection, setPreviewEnvironmentSelection] = useState<string>()
   const proposals = useInfiniteQuery({
     queryKey: ['flow-proposals', props.projectId],
     queryFn: ({ pageParam }) => getMcpFlowProposalPage(props.projectId, pageParam),
@@ -92,6 +136,17 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     placeholderData: (previous) => previous,
   })
   const displayedVisual = selectedVisual(proposalId, visual.data, visualOverride)
+  const previewState = useSandboxPreview(
+    props.projectId,
+    props.open,
+    proposalId,
+    props.resources,
+    previewEnvironmentSelection,
+    previewExecutionId,
+  )
+  const previewEnvironments = previewState.environments
+  const previewEnvironmentId = previewState.environmentId
+  const preview = previewState.query
 
   async function review(accept: boolean, currentVisual: FlowSpecVisualProposal): Promise<void> {
     if (!proposalId) return
@@ -134,6 +189,24 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     }, '流程提案已应用到工作流草稿，可继续安全编辑')
   }
 
+  async function startPreview(): Promise<void> {
+    if (!proposalId || !previewEnvironmentId) return
+    await act(async () => {
+      const approval = await createSandboxPreviewApproval(
+        props.projectId,
+        proposalId,
+        previewEnvironmentId,
+      )
+      const execution = await executeSandboxPreview(
+        props.projectId,
+        proposalId,
+        previewEnvironmentId,
+        approval.id,
+      )
+      setPreviewExecutionId(execution.id)
+    }, 'Sandbox Preview 已启动；一次性审批已消费')
+  }
+
   async function act(operation: () => Promise<void>, success: string): Promise<void> {
     setBusy(true)
     try {
@@ -159,8 +232,8 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
         <Alert
           showIcon
           type="info"
-          title="流程提案只会进入 AIChangeSet 草稿；本视图没有发布、执行或自动应用操作。"
-          description="先检查流程图、映射、断言、证据、置信度与未决项，再由人工接受；应用后进入现有工作流设计器草稿继续安全编辑。"
+          title="流程提案不会自动发布或应用；人工接受后只能使用一次性审批在 Test / Sandbox 环境预览。"
+          description="Production、Staging 与未分类环境永久不进入 Preview；预览复用正式执行引擎，并受固定请求、数据行、并发、运行时与 Cleanup 预算约束。"
         />
         <Select
           aria-label="流程提案"
@@ -175,6 +248,8 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           onChange={(value) => {
             setSelectedId(value)
             setVisualOverride(undefined)
+            setPreviewExecutionId(undefined)
+            setPreviewEnvironmentSelection(undefined)
           }}
         />
         {proposals.hasNextPage ? (
@@ -194,10 +269,15 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
             graphView={graphView}
             resources={props.resources}
             busy={busy}
+            preview={preview.data}
+            previewEnvironments={previewEnvironments}
+            previewEnvironmentId={previewEnvironmentId}
             onGraphView={setGraphView}
             onReview={(accept) => review(accept, displayedVisual)}
             onApply={() => apply(displayedVisual)}
             onOpenRawMapping={props.onOpenRawMapping}
+            onPreviewEnvironment={setPreviewEnvironmentSelection}
+            onStartPreview={startPreview}
           />
         ) : null}
       </Space>
@@ -210,25 +290,36 @@ function ProposalWorkspace({
   graphView,
   resources,
   busy,
+  preview,
+  previewEnvironments,
+  previewEnvironmentId,
   onGraphView,
   onReview,
   onApply,
   onOpenRawMapping,
+  onPreviewEnvironment,
+  onStartPreview,
 }: {
   proposal: FlowSpecVisualProposal
   graphView: 'existing' | 'proposed'
   resources: ProposalResources
   busy: boolean
+  preview: PreviewLiveState | undefined
+  previewEnvironments: Environment[]
+  previewEnvironmentId: string | undefined
   onGraphView: (value: 'existing' | 'proposed') => void
   onReview: (accept: boolean) => Promise<void>
   onApply: () => Promise<void>
   onOpenRawMapping: (proposal: FlowSpecVisualProposal) => void
+  onPreviewEnvironment: (environmentId: string) => void
+  onStartPreview: () => Promise<void>
 }) {
   const changes = graphChanges(proposal.existing_definition, proposal.proposed_definition)
   const definition =
     graphView === 'existing' ? proposal.existing_definition : proposal.proposed_definition
   const nodeStatuses = graphView === 'existing' ? changes.existingNodes : changes.proposedNodes
   const edgeStatuses = graphView === 'existing' ? changes.existingEdges : changes.proposedEdges
+  const previewStatuses = graphView === 'proposed' ? previewNodeStatuses(preview) : {}
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <ReviewActions
@@ -237,6 +328,10 @@ function ProposalWorkspace({
         onReview={onReview}
         onApply={onApply}
         onOpenRawMapping={onOpenRawMapping}
+        previewEnvironments={previewEnvironments}
+        previewEnvironmentId={previewEnvironmentId}
+        onPreviewEnvironment={onPreviewEnvironment}
+        onStartPreview={onStartPreview}
       />
       <Segmented
         aria-label="流程提案图视图"
@@ -259,7 +354,7 @@ function ProposalWorkspace({
           graphqlSchemas={resources.graphqlSchemas}
           grpcDescriptors={resources.grpcDescriptors}
           eventSources={resources.eventSources}
-          statuses={{}}
+          statuses={previewStatuses}
           proposalNodeStatuses={nodeStatuses}
           proposalEdgeStatuses={edgeStatuses}
           editable={false}
@@ -269,6 +364,7 @@ function ProposalWorkspace({
         <Empty description="该提案将新建工作流，没有现有流程图" />
       )}
       <ProposalEvidence proposal={proposal} />
+      <PreviewEvidence preview={preview} />
     </Space>
   )
 }
@@ -279,12 +375,20 @@ function ReviewActions({
   onReview,
   onApply,
   onOpenRawMapping,
+  previewEnvironments,
+  previewEnvironmentId,
+  onPreviewEnvironment,
+  onStartPreview,
 }: {
   proposal: FlowSpecVisualProposal
   busy: boolean
   onReview: (accept: boolean) => Promise<void>
   onApply: () => Promise<void>
   onOpenRawMapping: (proposal: FlowSpecVisualProposal) => void
+  previewEnvironments: Environment[]
+  previewEnvironmentId: string | undefined
+  onPreviewEnvironment: (environmentId: string) => void
+  onStartPreview: () => Promise<void>
 }) {
   const item = proposal.proposal
   return (
@@ -317,6 +421,28 @@ function ReviewActions({
           onClick={() => void onApply()}
         >
           应用到工作流草稿
+        </Button>
+        <Select
+          aria-label="Sandbox Preview 环境"
+          placeholder="选择 Test / Sandbox 环境"
+          value={previewEnvironmentId}
+          disabled={item.review_status !== 'accepted' || Boolean(item.applied_at)}
+          style={{ minWidth: 240 }}
+          options={previewEnvironments.map((environment) => ({
+            value: environment.id,
+            label: `${environment.name} · ${environment.classification}`,
+          }))}
+          onChange={onPreviewEnvironment}
+        />
+        <Button
+          aria-label="一次性批准并运行 Sandbox Preview"
+          loading={busy}
+          disabled={
+            item.review_status !== 'accepted' || Boolean(item.applied_at) || !previewEnvironmentId
+          }
+          onClick={() => void onStartPreview()}
+        >
+          一次性批准并运行 Sandbox Preview
         </Button>
         <Button onClick={() => onOpenRawMapping(proposal)}>原始 JSON / 跨实例映射</Button>
       </Space>
@@ -380,6 +506,57 @@ function ProposalEvidence({ proposal }: { proposal: FlowSpecVisualProposal }) {
       <UnresolvedCard plan={proposal.integration_plan} />
     </div>
   )
+}
+
+function PreviewEvidence({ preview }: { preview: PreviewLiveState | undefined }) {
+  if (!preview) return null
+  const execution = preview.detail.execution
+  const evidence = execution.preview_evidence ?? {}
+  return (
+    <Card title="Sandbox Preview Evidence" size="small">
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        <Descriptions bordered size="small" column={3}>
+          <Descriptions.Item label="Purpose">{execution.run_purpose}</Descriptions.Item>
+          <Descriptions.Item label="状态">
+            <Tag color={execution.status === 'passed' ? 'green' : 'processing'}>
+              {execution.status}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Cleanup">
+            {execution.cleanup_status ?? '运行中'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Approval">
+            {execution.preview_approval_id ?? '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Checkpoint">{preview.checkpoints.length}</Descriptions.Item>
+          <Descriptions.Item label="环境">{execution.environment_id}</Descriptions.Item>
+        </Descriptions>
+        <div className="flow-proposal-review-grid">
+          <EvidenceJson title="Binding Trace" value={evidence.binding_trace} />
+          <EvidenceJson title="Assert Result" value={evidence.assert_result} />
+          <EvidenceJson title="Cleanup Result" value={evidence.cleanup_result} />
+          <EvidenceJson title="Budget Usage" value={evidence.budget_usage} />
+        </div>
+      </Space>
+    </Card>
+  )
+}
+
+function EvidenceJson({ title, value }: { title: string; value: unknown }) {
+  return (
+    <Card title={title} size="small">
+      <pre className="code-preview">{JSON.stringify(value ?? {}, null, 2)}</pre>
+    </Card>
+  )
+}
+
+function previewNodeStatuses(preview: PreviewLiveState | undefined): Record<string, string> {
+  if (!preview) return {}
+  const statuses = Object.fromEntries(
+    preview.checkpoints.map((checkpoint) => [checkpoint.node_id, checkpoint.status]),
+  )
+  for (const node of preview.detail.nodes) statuses[node.node_id] = node.status
+  return statuses
 }
 
 function MappingDiffCard({ proposal }: { proposal: FlowSpecVisualProposal }) {

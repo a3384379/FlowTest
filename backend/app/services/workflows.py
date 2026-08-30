@@ -1,8 +1,9 @@
 import asyncio
 import hashlib
+import hmac
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -10,10 +11,11 @@ import httpx
 import jmespath
 from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import get_trace_id
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
@@ -34,22 +36,30 @@ from app.domain.protocols import (
     ProtocolSchemaError,
     validate_graphql_operation,
 )
+from app.domain.sandbox_preview import (
+    PreviewBudget,
+    WorkflowRunPurpose,
+    is_preview_routing_header,
+)
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
     ApiNodeConfig,
     ApiNodeMultipartBody,
     AssertNodeConfig,
+    CleanupRunWhen,
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
     ForEachNodeConfig,
+    MappingTargetLocation,
     NodeType,
     RedisNodeConfig,
     SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
     WorkflowNode,
+    WorkflowPhase,
     parse_node_config,
 )
 from app.engine.event_nodes import (
@@ -72,8 +82,10 @@ from app.engine.scheduler import (
     ExecutionContext,
     NodeRunRecord,
     NodeStatusCallback,
+    RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
+    node_type_consumes_request,
 )
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
@@ -102,7 +114,7 @@ from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
-from app.services.workflow_runtime import WorkflowNodeExecutor
+from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
 from app.services.workflow_snapshots import (
     PreparedExecution,
     PreparedWorkflow,
@@ -112,6 +124,19 @@ from app.services.workflow_snapshots import (
 SUPPORTED_NODE_TYPES = frozenset(NodeType)
 CANCELLATION_POLL_SECONDS = 0.05
 DATASET_CONCURRENCY = 5
+_PREVIEW_UNCLASSIFIED_CAPABILITIES = frozenset(
+    {
+        "graphql.request",
+        "grpc.call",
+        "kafka.produce",
+        "kafka.consume",
+        "websocket.connect",
+        "websocket.send",
+        "websocket.await",
+        "websocket.close",
+        "websocket.exchange",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +148,7 @@ class WorkflowRunPlan:
     definition: WorkflowDefinition
     prepared: PreparedExecution
     runtime_variables: dict[str, str]
+    request_budget: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +159,9 @@ class WorkflowBatchPlan:
     workflow_version: int
     children: tuple[WorkflowRunPlan, ...]
     concurrency: int = DATASET_CONCURRENCY
+    max_runtime_seconds: int | None = None
+    cleanup_timeout_seconds: int | None = None
+    deadline_at: datetime | None = None
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
@@ -413,6 +442,12 @@ class WorkflowService:
     ) -> WorkflowRunResult:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         execution = await self._get_execution(project_id, execution_id)
+        if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
+            raise AppError(
+                code="PREVIEW_REPLAY_FORBIDDEN",
+                message="Sandbox Preview 不支持节点重放, 请重新审批后发起新预览",
+                status_code=409,
+            )
         plan = await self.load_execution_plan(execution.id)
         if isinstance(plan, WorkflowBatchPlan):
             raise AppError(
@@ -525,6 +560,108 @@ class WorkflowService:
         await self._persist_execution_plan(execution, plan)
         return execution, plan
 
+    async def prepare_preview_execution(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        change_set_id: UUID,
+        approval_id: UUID,
+        proposal_fingerprint: str,
+        context_fingerprint: str,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        budget: PreviewBudget,
+    ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        if workflow_id is not None:
+            await self._get_workflow(project_id, workflow_id)
+        bounded = _bounded_preview_definition(definition, budget)
+        await self._validate_publishable(project_id, workflow_id or change_set_id, bounded)
+        prepared = await self._snapshots.prepare_preview(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            definition=bounded,
+            fingerprint=proposal_fingerprint,
+            environment_id=environment_id,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
+        _validate_preview_prepared_headers(prepared)
+        prepared = _bounded_preview_prepared_workflow(prepared, budget)
+        _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
+        request_limits = _preview_request_limits(bounded, prepared, budget)
+        await self._ensure_execution_capacity(project_id)
+        execution, plan = self._preview_execution_plan(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            change_set_id=change_set_id,
+            approval_id=approval_id,
+            proposal_fingerprint=proposal_fingerprint,
+            context_fingerprint=context_fingerprint,
+            definition=bounded,
+            environment_id=environment_id,
+            prepared=prepared,
+            runtime_variables=runtime_variables,
+            budget=budget,
+            request_limits=request_limits,
+        )
+        await self._stage_execution_plan(execution, plan)
+        await self._session.flush()
+        return execution, plan
+
+    async def prepare_preview_target_fingerprint(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        change_set_id: UUID,
+        proposal_fingerprint: str,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+        budget: PreviewBudget,
+    ) -> str:
+        """Prepare, but do not persist, the exact targets governed by an approval."""
+
+        if workflow_id is not None:
+            await self._get_workflow(project_id, workflow_id)
+        bounded = _bounded_preview_definition(definition, budget)
+        await self._validate_publishable(project_id, workflow_id or change_set_id, bounded)
+        prepared = await self._snapshots.prepare_preview(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            definition=bounded,
+            fingerprint=proposal_fingerprint,
+            environment_id=environment_id,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
+        _validate_preview_prepared_headers(prepared)
+        prepared = _bounded_preview_prepared_workflow(prepared, budget)
+        _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
+        _preview_request_limits(bounded, prepared, budget)
+        return _prepared_preview_target_fingerprint(prepared)
+
+    async def discard_prepared_execution(self, execution_id: UUID) -> None:
+        """Remove an uncommitted preview plan rejected by the final target binding."""
+
+        await self._session.execute(
+            delete(WorkflowExecution).where(WorkflowExecution.parent_execution_id == execution_id)
+        )
+        await self._session.execute(
+            delete(WorkflowExecution).where(WorkflowExecution.id == execution_id)
+        )
+        await self._session.flush()
+
     async def _ensure_execution_capacity(self, project_id: UUID) -> None:
         result = await self._session.execute(
             select(Project).where(Project.id == project_id).with_for_update()
@@ -575,6 +712,13 @@ class WorkflowService:
     async def _persist_execution_plan(
         self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
     ) -> None:
+        await self._stage_execution_plan(execution, plan)
+        await self._session.commit()
+        await self._session.refresh(execution)
+
+    async def _stage_execution_plan(
+        self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
+    ) -> None:
         from app.services.workflow_plan_codec import encode_execution_plan
 
         encrypted = self._secrets.encrypt(
@@ -586,8 +730,6 @@ class WorkflowService:
         )
         execution.run_payload_ciphertext = encrypted.ciphertext
         execution.run_payload_nonce = encrypted.nonce
-        await self._session.commit()
-        await self._session.refresh(execution)
 
     async def run_prepared(
         self,
@@ -595,8 +737,9 @@ class WorkflowService:
         execution: WorkflowExecution,
         plan: WorkflowRunPlan,
         on_node_status: NodeStatusCallback | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
-        token = CancellationToken()
+        token = cancellation or CancellationToken()
         if execution.cancel_requested_at is not None:
             token.cancel(force=execution.force_cancel_requested_at is not None)
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
@@ -604,6 +747,10 @@ class WorkflowService:
 
         checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
             execution.id
+        )
+        shared_request_budget = _remaining_preview_request_budget(
+            plan.request_budget,
+            tuple(checkpoint_to_node_record(item) for item in checkpoint_history),
         )
         reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
             execution.id
@@ -656,9 +803,15 @@ class WorkflowService:
                         resume_records=resume_records,
                         resume_attempts=resume_attempts,
                         reset_retry_budget=reset_retry_budget,
+                        shared_request_budget=shared_request_budget,
                     )
             finally:
                 await node_executor.close()
+        result = _with_preview_budget_usage(
+            result,
+            limit=plan.request_budget,
+            budget=shared_request_budget,
+        )
         nodes = self._node_models(execution.id, result)
         await self._workflows.replace_node_executions(execution.id, nodes)
         self._stage_run_result(execution=execution, plan=plan, result=result)
@@ -741,6 +894,8 @@ class WorkflowService:
         )
         execution.context = cast(dict[str, JsonValue], redact(result.context))
         execution.completed_at = datetime.now(UTC)
+        if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
+            execution.preview_evidence = _preview_run_evidence(execution, plan, result)
         failed = next(
             (
                 record
@@ -756,7 +911,11 @@ class WorkflowService:
         self._audit.record(
             actor_user_id=plan.actor_id,
             project_id=plan.project_id,
-            action="workflow.executed",
+            action=(
+                "sandbox_preview.executed"
+                if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value
+                else "workflow.executed"
+            ),
             resource_type="workflow_execution",
             resource_id=execution.id,
             details={
@@ -872,15 +1031,21 @@ class WorkflowService:
             child.completed_at = execution.completed_at
         return execution
 
-    async def cancel_incomplete_batch(self, execution_id: UUID) -> None:
+    async def cancel_incomplete_batch(
+        self,
+        execution_id: UUID,
+        *,
+        error_code: str = "DATASET_RUNNER_STOPPED",
+        error_message: str = "数据集子执行在运行服务停止时被取消",
+    ) -> None:
         children = await self._workflows.list_child_executions(execution_id)
         completed_at = datetime.now(UTC)
         for child in children:
             if child.status not in {"queued", "running"}:
                 continue
             child.status = "cancelled"
-            child.error_code = "DATASET_RUNNER_STOPPED"
-            child.error_message = "数据集子执行在运行服务停止时被取消"
+            child.error_code = error_code
+            child.error_message = error_message
             child.cancel_requested_at = child.cancel_requested_at or completed_at
             child.completed_at = completed_at
         await self._session.commit()
@@ -1025,10 +1190,16 @@ class WorkflowService:
             }
         }
         execution.completed_at = datetime.now(UTC)
+        if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
+            execution.preview_evidence = _preview_batch_evidence(execution, children)
         self._audit.record(
             actor_user_id=execution.triggered_by_id,
             project_id=execution.project_id,
-            action="workflow.dataset_executed",
+            action=(
+                "sandbox_preview.dataset_executed"
+                if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value
+                else "workflow.dataset_executed"
+            ),
             resource_type="workflow_execution",
             resource_id=execution.id,
             details=cast(dict[str, JsonValue], execution.context["dataset_summary"]),
@@ -1572,6 +1743,99 @@ class WorkflowService:
             children=plans,
         )
 
+    def _preview_execution_plan(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        change_set_id: UUID,
+        approval_id: UUID,
+        proposal_fingerprint: str,
+        context_fingerprint: str,
+        definition: WorkflowDefinition,
+        environment_id: UUID,
+        prepared: PreparedWorkflow,
+        runtime_variables: dict[str, str],
+        budget: PreviewBudget,
+        request_limits: tuple[int, ...],
+    ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
+        def new_execution(
+            snapshot: dict[str, JsonValue],
+            execution_budget: PreviewBudget,
+            *,
+            parent_execution_id: UUID | None = None,
+            dataset_row_index: int | None = None,
+        ) -> WorkflowExecution:
+            return self._preview_execution_model(
+                actor=actor,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                change_set_id=change_set_id,
+                approval_id=approval_id,
+                proposal_fingerprint=proposal_fingerprint,
+                context_fingerprint=context_fingerprint,
+                environment_id=environment_id,
+                snapshot=snapshot,
+                budget=execution_budget,
+                parent_execution_id=parent_execution_id,
+                dataset_row_index=dataset_row_index,
+            )
+
+        if len(prepared.runs) == 1:
+            execution = new_execution(prepared.runs[0].snapshot, budget)
+            self._workflows.add(execution)
+            return execution, self._run_plan(
+                execution=execution,
+                actor=actor,
+                project_id=project_id,
+                workflow_version=0,
+                definition=definition,
+                prepared=prepared.runs[0],
+                runtime_variables=runtime_variables,
+                request_budget=request_limits[0],
+            )
+        parent = new_execution(prepared.snapshot, budget)
+        children = [
+            new_execution(
+                run.snapshot,
+                budget.model_copy(update={"max_requests": request_limit}),
+                parent_execution_id=parent.id,
+                dataset_row_index=index,
+            )
+            for index, (run, request_limit) in enumerate(
+                zip(prepared.runs, request_limits, strict=True)
+            )
+        ]
+        self._workflows.add(parent)
+        self._workflows.add_all(children)
+        plans = tuple(
+            self._run_plan(
+                execution=child,
+                actor=actor,
+                project_id=project_id,
+                workflow_version=0,
+                definition=definition,
+                prepared=run,
+                runtime_variables=runtime_variables,
+                request_budget=request_limit,
+            )
+            for child, run, request_limit in zip(
+                children, prepared.runs, request_limits, strict=True
+            )
+        )
+        return parent, WorkflowBatchPlan(
+            execution_id=parent.id,
+            actor_id=actor.id,
+            project_id=project_id,
+            workflow_version=0,
+            children=plans,
+            concurrency=budget.max_parallelism,
+            max_runtime_seconds=budget.max_runtime_seconds,
+            cleanup_timeout_seconds=budget.max_runtime_seconds,
+            deadline_at=datetime.now(UTC) + timedelta(seconds=budget.max_runtime_seconds),
+        )
+
     @staticmethod
     def _execution_model(
         *,
@@ -1604,6 +1868,52 @@ class WorkflowService:
         )
 
     @staticmethod
+    def _preview_execution_model(
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        change_set_id: UUID,
+        approval_id: UUID,
+        proposal_fingerprint: str,
+        context_fingerprint: str,
+        environment_id: UUID,
+        snapshot: dict[str, JsonValue],
+        budget: PreviewBudget,
+        parent_execution_id: UUID | None = None,
+        dataset_row_index: int | None = None,
+    ) -> WorkflowExecution:
+        return WorkflowExecution(
+            id=uuid4(),
+            project_id=project_id,
+            workflow_id=workflow_id,
+            workflow_version_id=None,
+            environment_id=environment_id,
+            triggered_by_id=actor.id,
+            parent_execution_id=parent_execution_id,
+            dataset_row_index=dataset_row_index,
+            run_purpose=WorkflowRunPurpose.PREVIEW.value,
+            source_change_set_id=change_set_id,
+            preview_approval_id=approval_id,
+            preview_budget=budget.model_dump(mode="json"),
+            preview_evidence={
+                "proposal_fingerprint": proposal_fingerprint,
+                "context_fingerprint": context_fingerprint,
+                "approval_id": str(approval_id),
+                "trace_id": get_trace_id(),
+                "redactions": [],
+            },
+            status="running",
+            snapshot=snapshot,
+            context={},
+            error_code=None,
+            error_message=None,
+            cancel_requested_at=None,
+            started_at=datetime.now(UTC),
+            completed_at=None,
+        )
+
+    @staticmethod
     def _run_plan(
         *,
         execution: WorkflowExecution,
@@ -1613,7 +1923,18 @@ class WorkflowService:
         definition: WorkflowDefinition,
         prepared: PreparedExecution,
         runtime_variables: dict[str, str],
+        request_budget: int | None = None,
     ) -> WorkflowRunPlan:
+        if request_budget is not None:
+            _main_requests, cleanup_requests = _preview_request_requirements(
+                definition,
+                prepared.subflows,
+            )
+            definition = _preview_definition_with_phase_request_limits(
+                definition,
+                main_limit=max(request_budget - cleanup_requests, 1),
+                cleanup_limit=cleanup_requests,
+            )
         return WorkflowRunPlan(
             execution_id=execution.id,
             actor_id=actor.id,
@@ -1622,6 +1943,7 @@ class WorkflowService:
             definition=definition,
             prepared=prepared,
             runtime_variables=dict(runtime_variables),
+            request_budget=request_budget,
         )
 
     async def _run_with_cancellation_poll(
@@ -1639,6 +1961,7 @@ class WorkflowService:
         resume_records: tuple[NodeRunRecord, ...] = (),
         resume_attempts: dict[str, int] | None = None,
         reset_retry_budget: bool = False,
+        shared_request_budget: RequestBudget | None = None,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
@@ -1654,6 +1977,7 @@ class WorkflowService:
                 resume_records=resume_records,
                 resume_attempts=resume_attempts,
                 reset_retry_budget=reset_retry_budget,
+                shared_request_budget=shared_request_budget,
             )
         )
         try:
@@ -1791,6 +2115,521 @@ def _with_api_version(node: WorkflowNode, version: int) -> WorkflowNode:
 def _fingerprint(definition: dict[str, object]) -> str:
     canonical = json.dumps(definition, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _bounded_preview_definition(
+    definition: WorkflowDefinition,
+    budget: PreviewBudget,
+) -> WorkflowDefinition:
+    if any(
+        mapping.target.location is MappingTargetLocation.HEADER
+        and is_preview_routing_header(mapping.target.key)
+        for edge in definition.edges
+        for mapping in edge.mappings
+    ):
+        raise AppError(
+            code="PREVIEW_ROUTING_HEADER_FORBIDDEN",
+            message="Sandbox Preview 禁止覆盖请求路由 Header",
+            status_code=409,
+        )
+    cleanup_nodes = [node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP]
+    if (
+        not _preview_cleanup_covers_all_outcomes(cleanup_nodes)
+        or definition.run_policy.force_cancel_skips_cleanup
+    ):
+        raise AppError(
+            code="PREVIEW_CLEANUP_REQUIRED",
+            message="Sandbox Preview 必须提供覆盖成功、失败和取消的 Cleanup",
+            status_code=409,
+        )
+    settings = definition.settings.model_copy(update={"concurrency": 1})
+    policy = definition.run_policy
+    run_policy = policy.model_copy(
+        update={
+            "request_budget": min(
+                policy.request_budget or budget.max_requests, budget.max_requests
+            ),
+            "cleanup_request_budget": min(
+                policy.cleanup_request_budget or budget.max_requests,
+                budget.max_requests,
+            ),
+            "max_runtime_seconds": min(
+                policy.max_runtime_seconds or budget.max_runtime_seconds,
+                budget.max_runtime_seconds,
+            ),
+            "force_cancel_skips_cleanup": False,
+        }
+    )
+    return definition.model_copy(
+        update={
+            "nodes": [_serial_preview_node(node) for node in definition.nodes],
+            "settings": settings,
+            "run_policy": run_policy,
+        }
+    )
+
+
+def _serial_preview_node(node: WorkflowNode) -> WorkflowNode:
+    if node.effective_type is not NodeType.FOR_EACH:
+        return node
+    if node.type is NodeType.CAPABILITY:
+        return node.model_copy(
+            update={"configuration": {**(node.configuration or {}), "concurrency": 1}}
+        )
+    return node.model_copy(update={"config": {**node.config, "concurrency": 1}})
+
+
+def _preview_cleanup_covers_all_outcomes(cleanup_nodes: list[WorkflowNode]) -> bool:
+    required = {
+        CleanupRunWhen.SUCCESS,
+        CleanupRunWhen.FAILURE,
+        CleanupRunWhen.CANCEL,
+    }
+    coverage: dict[tuple[str, ...], set[CleanupRunWhen]] = {}
+    for node in cleanup_nodes:
+        outcomes = coverage.setdefault(tuple(sorted(node.cleanup_for)), set())
+        if node.run_when is CleanupRunWhen.ALWAYS:
+            outcomes.update(required)
+        else:
+            outcomes.add(node.run_when)
+    return bool(coverage) and all(required <= outcomes for outcomes in coverage.values())
+
+
+def _validate_preview_prepared_headers(prepared: PreparedWorkflow) -> None:
+    for run in prepared.runs:
+        _validate_preview_run_headers(run)
+
+
+def _validate_preview_run_headers(run: PreparedExecution | PreparedSubflow) -> None:
+    blocked = sorted(
+        {
+            header.name
+            for request in run.requests.values()
+            for header in request.request.headers
+            if is_preview_routing_header(header.name)
+        }
+    )
+    if blocked:
+        raise AppError(
+            code="PREVIEW_ROUTING_HEADER_FORBIDDEN",
+            message="Sandbox Preview 最终请求禁止包含路由 Header",
+            status_code=409,
+            details={"headers": blocked},
+        )
+    for subflow in run.subflows.values():
+        _validate_preview_run_headers(subflow)
+
+
+def _prepared_preview_target_fingerprint(prepared: PreparedWorkflow) -> str:
+    return _preview_target_fingerprint_for_runs(prepared.runs)
+
+
+def _preview_plan_target_fingerprint(plan: WorkflowExecutionPlan) -> str:
+    runs = (
+        tuple(child.prepared for child in plan.children)
+        if isinstance(plan, WorkflowBatchPlan)
+        else (plan.prepared,)
+    )
+    return _preview_target_fingerprint_for_runs(runs)
+
+
+def _preview_target_fingerprint_for_runs(
+    runs: tuple[PreparedExecution, ...],
+) -> str:
+    payload = [_prepared_execution_target_payload(run) for run in runs]
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hmac.new(
+        settings.secret_key.encode(),
+        canonical.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _prepared_execution_target_payload(prepared: PreparedExecution) -> dict[str, JsonValue]:
+    return {
+        "requests": {
+            node_id: {
+                "method": request.request.method.value,
+                "url": request.request.url,
+                "target_snapshot": request.request.target_snapshot,
+            }
+            for node_id, request in sorted(prepared.requests.items())
+        },
+        "subflows": {
+            node_id: _prepared_subflow_target_payload(subflow)
+            for node_id, subflow in sorted(prepared.subflows.items())
+        },
+    }
+
+
+def _prepared_subflow_target_payload(subflow: PreparedSubflow) -> dict[str, JsonValue]:
+    return {
+        "requests": {
+            node_id: {
+                "method": request.request.method.value,
+                "url": request.request.url,
+                "target_snapshot": request.request.target_snapshot,
+            }
+            for node_id, request in sorted(subflow.requests.items())
+        },
+        "subflows": {
+            node_id: _prepared_subflow_target_payload(child)
+            for node_id, child in sorted(subflow.subflows.items())
+        },
+    }
+
+
+def _validate_preview_target_classification(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> None:
+    unclassified = [
+        node.id
+        for node in definition.nodes
+        if node.effective_type in {NodeType.SQL, NodeType.REDIS}
+        or node.capability_id in _PREVIEW_UNCLASSIFIED_CAPABILITIES
+    ]
+    if unclassified:
+        raise AppError(
+            code="PREVIEW_TARGET_CLASSIFICATION_REQUIRED",
+            message="Sandbox Preview Beta 仅允许绑定所选 Test/Sandbox Environment 的 API Target",
+            status_code=409,
+            details={"unclassified_target_node_ids": sorted(unclassified)},
+        )
+    for prepared in subflows.values():
+        _validate_preview_target_classification(prepared.definition, prepared.subflows)
+
+
+def _bounded_preview_prepared_workflow(
+    prepared: PreparedWorkflow,
+    budget: PreviewBudget,
+) -> PreparedWorkflow:
+    runs = tuple(_bounded_preview_prepared_execution(run, budget) for run in prepared.runs)
+    return replace(
+        prepared,
+        snapshot=_preview_snapshot_with_subflows(prepared.snapshot, runs[0].subflows),
+        runs=runs,
+    )
+
+
+def _bounded_preview_prepared_execution(
+    prepared: PreparedExecution,
+    budget: PreviewBudget,
+) -> PreparedExecution:
+    subflows = {
+        node_id: _bounded_preview_subflow(subflow, budget)
+        for node_id, subflow in prepared.subflows.items()
+    }
+    return replace(
+        prepared,
+        snapshot=_preview_snapshot_with_subflows(prepared.snapshot, subflows),
+        subflows=subflows,
+    )
+
+
+def _bounded_preview_subflow(
+    prepared: PreparedSubflow,
+    budget: PreviewBudget,
+) -> PreparedSubflow:
+    definition = _bounded_preview_definition(prepared.definition, budget)
+    subflows = {
+        node_id: _bounded_preview_subflow(subflow, budget)
+        for node_id, subflow in prepared.subflows.items()
+    }
+    main_requests, cleanup_requests = _preview_request_requirements(definition, subflows)
+    definition = _preview_definition_with_phase_request_limits(
+        definition,
+        main_limit=main_requests,
+        cleanup_limit=cleanup_requests,
+    )
+    return replace(
+        prepared,
+        definition=definition,
+        subflows=subflows,
+        snapshot={
+            **_preview_subflow_snapshot(prepared.snapshot, definition, subflows),
+            "preview_request_reservation": main_requests + cleanup_requests,
+        },
+    )
+
+
+def _preview_subflow_snapshot(
+    snapshot: dict[str, JsonValue],
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> dict[str, JsonValue]:
+    bounded = _preview_snapshot_with_subflows(snapshot, subflows)
+    workflow = bounded.get("workflow")
+    if not isinstance(workflow, dict):
+        return bounded
+    serialized_definition = workflow.get("definition")
+    if not isinstance(serialized_definition, dict):
+        return bounded
+    bounded_definition = {
+        **serialized_definition,
+        "settings": definition.settings.model_dump(mode="json"),
+        "run_policy": definition.run_policy.model_dump(mode="json"),
+    }
+    return {
+        **bounded,
+        "workflow": {**workflow, "definition": bounded_definition},
+    }
+
+
+def _preview_snapshot_with_subflows(
+    snapshot: dict[str, JsonValue],
+    subflows: dict[str, PreparedSubflow],
+) -> dict[str, JsonValue]:
+    return {
+        **snapshot,
+        "subflows": {node_id: subflow.snapshot for node_id, subflow in subflows.items()},
+    }
+
+
+def _preview_request_limits(
+    definition: WorkflowDefinition,
+    prepared: PreparedWorkflow,
+    budget: PreviewBudget,
+) -> tuple[int, ...]:
+    node_count = max(_preview_node_count(definition, run.subflows) for run in prepared.runs)
+    row_count = len(prepared.runs)
+    if node_count > budget.max_nodes or row_count > budget.max_dataset_rows:
+        raise AppError(
+            code="PREVIEW_BUDGET_EXCEEDED",
+            message="Sandbox Preview 结构超过审批预算",
+            status_code=422,
+            details={"nodes": node_count, "dataset_rows": row_count},
+        )
+    per_row_minimums = tuple(
+        max(1, sum(_preview_request_requirements(definition, run.subflows)))
+        for run in prepared.runs
+    )
+    minimum = sum(per_row_minimums)
+    if minimum > budget.max_requests:
+        raise AppError(
+            code="PREVIEW_BUDGET_EXCEEDED",
+            message="Sandbox Preview 最小请求次数超过审批预算",
+            status_code=422,
+            details={"minimum_requests": minimum, "max_requests": budget.max_requests},
+        )
+    remainder = budget.max_requests - minimum
+    quotient, extra = divmod(remainder, row_count)
+    return tuple(
+        row_minimum + quotient + (1 if index < extra else 0)
+        for index, row_minimum in enumerate(per_row_minimums)
+    )
+
+
+def _preview_node_count(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> int:
+    return len(definition.nodes) + sum(
+        _preview_node_count(subflow.definition, subflow.subflows) for subflow in subflows.values()
+    )
+
+
+def _preview_request_requirements(
+    definition: WorkflowDefinition,
+    subflows: dict[str, PreparedSubflow],
+) -> tuple[int, int]:
+    main = 0
+    cleanup = 0
+    nodes = {node.id: node for node in definition.nodes}
+    for node in definition.nodes:
+        attempts = _preview_node_request_attempts(node)
+        if node.phase is WorkflowPhase.CLEANUP:
+            cleanup += attempts
+        else:
+            main += attempts
+    for node_id, subflow in subflows.items():
+        nested_main, nested_cleanup = _preview_request_requirements(
+            subflow.definition,
+            subflow.subflows,
+        )
+        parent_node = nodes.get(node_id)
+        if parent_node is not None and parent_node.phase is WorkflowPhase.CLEANUP:
+            cleanup += nested_main + nested_cleanup
+        else:
+            main += nested_main + nested_cleanup
+    return main, cleanup
+
+
+def _preview_node_request_attempts(node: WorkflowNode) -> int:
+    if not node_type_consumes_request(node.effective_type):
+        return 0
+    if node.phase is WorkflowPhase.CLEANUP:
+        return node.cleanup_retry_budget + 1
+    config = parse_node_config(node)
+    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
+
+
+def _preview_definition_with_phase_request_limits(
+    definition: WorkflowDefinition,
+    *,
+    main_limit: int,
+    cleanup_limit: int,
+) -> WorkflowDefinition:
+    policy = definition.run_policy
+    updates: dict[str, int] = {}
+    if main_limit > 0:
+        updates["request_budget"] = min(policy.request_budget or main_limit, main_limit)
+    if cleanup_limit > 0:
+        updates["cleanup_request_budget"] = min(
+            policy.cleanup_request_budget or cleanup_limit,
+            cleanup_limit,
+        )
+    return definition.model_copy(update={"run_policy": policy.model_copy(update=updates)})
+
+
+def _preview_run_evidence(
+    execution: WorkflowExecution,
+    plan: WorkflowRunPlan,
+    result: WorkflowRunResult,
+) -> dict[str, JsonValue]:
+    bindings = [
+        {
+            "node_id": record.node_id,
+            "attempt": observation.attempt,
+            "mappings": [item.model_dump(mode="json") for item in observation.mappings],
+        }
+        for record in result.records
+        for observation in record.result.observations
+        if observation.mappings
+    ]
+    assertions = [
+        {
+            "node_id": record.node_id,
+            "assertions": [item.model_dump(mode="json") for item in record.result.assertions],
+        }
+        for record in result.records
+        if record.result.assertions
+    ]
+    redactions = sorted(
+        {path for record in result.records for path in record.result.redacted_paths}
+    )
+    request_usage = result.context.get("preview_request_budget", {})
+    completed_at = execution.completed_at or datetime.now(UTC)
+    return cast(
+        dict[str, JsonValue],
+        redact(
+            {
+                **execution.preview_evidence,
+                "execution_snapshot": execution.snapshot,
+                "binding_trace": bindings,
+                "assert_result": assertions,
+                "cleanup_result": execution.cleanup_report,
+                "budget_usage": {
+                    "nodes": len(plan.definition.nodes),
+                    "requests": request_usage,
+                    "dataset_rows": 1,
+                    "parallelism_limit": plan.definition.settings.concurrency,
+                    "runtime_seconds": _elapsed_seconds(execution.started_at, completed_at),
+                },
+                "redactions": redactions,
+            }
+        ),
+    )
+
+
+def _preview_batch_evidence(
+    execution: WorkflowExecution,
+    children: list[WorkflowExecution],
+) -> dict[str, JsonValue]:
+    completed_at = execution.completed_at or datetime.now(UTC)
+    request_used = sum(
+        int(child.preview_evidence.get("budget_usage", {}).get("requests", {}).get("used", 0))
+        for child in children
+    )
+    return cast(
+        dict[str, JsonValue],
+        redact(
+            {
+                **execution.preview_evidence,
+                "execution_snapshot": execution.snapshot,
+                "binding_trace": [
+                    {
+                        "dataset_row_index": child.dataset_row_index,
+                        "items": child.preview_evidence.get("binding_trace", []),
+                    }
+                    for child in children
+                ],
+                "assert_result": [
+                    {
+                        "dataset_row_index": child.dataset_row_index,
+                        "items": child.preview_evidence.get("assert_result", []),
+                    }
+                    for child in children
+                ],
+                "cleanup_result": [
+                    {
+                        "dataset_row_index": child.dataset_row_index,
+                        "result": child.preview_evidence.get("cleanup_result", {}),
+                    }
+                    for child in children
+                ],
+                "budget_usage": {
+                    "nodes": execution.preview_budget.get("max_nodes"),
+                    "requests": {
+                        "limit": execution.preview_budget.get("max_requests"),
+                        "used": request_used,
+                        "remaining": max(
+                            0,
+                            int(execution.preview_budget.get("max_requests", 0)) - request_used,
+                        ),
+                    },
+                    "dataset_rows": len(children),
+                    "parallelism_limit": execution.preview_budget.get("max_parallelism"),
+                    "runtime_seconds": _elapsed_seconds(execution.started_at, completed_at),
+                },
+                "redactions": sorted(
+                    {
+                        str(path)
+                        for child in children
+                        for path in child.preview_evidence.get("redactions", [])
+                    }
+                ),
+            }
+        ),
+    )
+
+
+def _remaining_preview_request_budget(
+    limit: int | None,
+    records: tuple[NodeRunRecord, ...],
+) -> RequestBudget | None:
+    if limit is None:
+        return None
+    attempts: dict[str, int] = {}
+    for record in records:
+        if node_type_consumes_request(record.node_type):
+            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+    return RequestBudget(max(limit - sum(attempts.values()), 0))
+
+
+def _elapsed_seconds(started_at: datetime, completed_at: datetime) -> float:
+    start = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
+    end = completed_at.replace(tzinfo=UTC) if completed_at.tzinfo is None else completed_at
+    return max(0.0, (end - start).total_seconds())
+
+
+def _with_preview_budget_usage(
+    result: WorkflowRunResult,
+    *,
+    limit: int | None,
+    budget: RequestBudget | None,
+) -> WorkflowRunResult:
+    if limit is None or budget is None:
+        return result
+    context = {
+        **result.context,
+        "preview_request_budget": {
+            "limit": limit,
+            "used": limit - budget.remaining,
+            "remaining": budget.remaining,
+        },
+    }
+    return replace(result, context=cast(dict[str, JsonValue], context))
 
 
 def _grpc_method_matches(

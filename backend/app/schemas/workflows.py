@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.domain.sandbox_preview import WorkflowRunPurpose
 from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowPhase, WorkflowRunStatus
 
 RuntimeVariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
@@ -95,12 +96,17 @@ class WorkflowExecutionResponse(BaseModel):
 
     id: UUID
     project_id: UUID
-    workflow_id: UUID
-    workflow_version_id: UUID
+    workflow_id: UUID | None
+    workflow_version_id: UUID | None
     environment_id: UUID
     triggered_by_id: UUID
     parent_execution_id: UUID | None
     dataset_row_index: int | None
+    run_purpose: WorkflowRunPurpose
+    source_change_set_id: UUID | None
+    preview_approval_id: UUID | None
+    preview_budget: dict[str, JsonValue]
+    preview_evidence: dict[str, JsonValue]
     status: WorkflowRunStatus
     main_status: WorkflowRunStatus | None
     cleanup_status: WorkflowRunStatus | None

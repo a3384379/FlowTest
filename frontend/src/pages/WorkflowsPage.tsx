@@ -489,6 +489,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
 function workflowDesignerResources(state: WorkflowState, workflowId: string) {
   const workflows = pageItems(state.workflows.data)
   return {
+    environments: state.environments.data ?? [],
     apis: pageItems(state.apis.data),
     artifacts: pageItems(state.artifacts.data),
     workflows: workflows.filter((item) => item.id !== workflowId),

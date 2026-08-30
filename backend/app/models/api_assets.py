@@ -21,13 +21,22 @@ from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
 class Environment(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "environments"
-    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_environments_project_name"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_environments_project_name"),
+        CheckConstraint(
+            "classification IN ('unclassified', 'test', 'sandbox', 'staging', 'production')",
+            name="environment_classification",
+        ),
+    )
 
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(160))
     base_url: Mapped[str] = mapped_column(String(2048))
+    classification: Mapped[str] = mapped_column(
+        String(24), default="unclassified", server_default="unclassified", index=True
+    )
     default_service_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("services.id", ondelete="SET NULL"), index=True
     )

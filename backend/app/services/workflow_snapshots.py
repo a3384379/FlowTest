@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -47,7 +47,6 @@ from app.engine.protocol_nodes import (
 )
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
-from app.models.workflows import Workflow, WorkflowVersion
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.api_assets import MultipartBody
@@ -81,6 +80,38 @@ class PreparedExecution:
 class PreparedWorkflow:
     snapshot: dict[str, JsonValue]
     runs: tuple[PreparedExecution, ...]
+
+
+class WorkflowSnapshotSource(Protocol):
+    @property
+    def id(self) -> UUID | None: ...
+
+
+class WorkflowVersionSnapshotSource(Protocol):
+    @property
+    def id(self) -> UUID | None: ...
+
+    @property
+    def version(self) -> int: ...
+
+    @property
+    def fingerprint(self) -> str: ...
+
+    @property
+    def definition(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewWorkflowSnapshot:
+    id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewVersionSnapshot:
+    id: UUID | None
+    version: int
+    fingerprint: str
+    definition: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +151,8 @@ class WorkflowSnapshotBuilder:
         *,
         actor: User,
         project_id: UUID,
-        workflow: Workflow,
-        version: WorkflowVersion,
+        workflow: WorkflowSnapshotSource,
+        version: WorkflowVersionSnapshotSource,
         definition: WorkflowDefinition,
         environment_id: UUID,
         runtime_variables: dict[str, str],
@@ -202,6 +233,35 @@ class WorkflowSnapshotBuilder:
                 "dataset": dataset.snapshot(),
             }
         return PreparedWorkflow(snapshot=parent_snapshot, runs=tuple(runs))
+
+    async def prepare_preview(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID | None,
+        definition: WorkflowDefinition,
+        fingerprint: str,
+        environment_id: UUID,
+        runtime_variables: dict[str, str],
+        runtime_headers: dict[str, str],
+    ) -> PreparedWorkflow:
+        serialized = definition.model_dump(mode="json", exclude_none=True)
+        return await self.prepare(
+            actor=actor,
+            project_id=project_id,
+            workflow=PreviewWorkflowSnapshot(id=workflow_id),
+            version=PreviewVersionSnapshot(
+                id=None,
+                version=0,
+                fingerprint=fingerprint,
+                definition=serialized,
+            ),
+            definition=definition,
+            environment_id=environment_id,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+        )
 
     async def _prepare_subflows(
         self,
@@ -641,8 +701,8 @@ class WorkflowSnapshotBuilder:
 
 def _snapshot(
     *,
-    workflow: Workflow,
-    version: WorkflowVersion,
+    workflow: WorkflowSnapshotSource,
+    version: WorkflowVersionSnapshotSource,
     environment: Environment,
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
@@ -657,8 +717,8 @@ def _snapshot(
     return {
         "schema_version": "1.0",
         "workflow": {
-            "id": str(workflow.id),
-            "version_id": str(version.id),
+            "id": str(workflow.id) if workflow.id is not None else None,
+            "version_id": str(version.id) if version.id is not None else None,
             "version": version.version,
             "fingerprint": version.fingerprint,
             "definition": _redacted_workflow_definition(version.definition, apis),
@@ -685,8 +745,8 @@ def _snapshot(
 
 def _nested_snapshot(
     *,
-    workflow: Workflow,
-    version: WorkflowVersion,
+    workflow: WorkflowSnapshotSource,
+    version: WorkflowVersionSnapshotSource,
     apis: dict[str, JsonValue],
     subflows: dict[str, PreparedSubflow],
     data_nodes: dict[str, PreparedDataNode],
@@ -695,8 +755,8 @@ def _nested_snapshot(
 ) -> dict[str, JsonValue]:
     return {
         "workflow": {
-            "id": str(workflow.id),
-            "version_id": str(version.id),
+            "id": str(workflow.id) if workflow.id is not None else None,
+            "version_id": str(version.id) if version.id is not None else None,
             "version": version.version,
             "fingerprint": version.fingerprint,
             "definition": _redacted_workflow_definition(version.definition, apis),

@@ -542,6 +542,148 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's55-schema.db'}")
+    execution_id = uuid4().hex
+    project_id = uuid4().hex
+    workflow_id = uuid4().hex
+    workflow_version_id = uuid4().hex
+    environment_id = uuid4().hex
+    actor_id = uuid4().hex
+    async with test_engine.begin() as connection:
+        await connection.execute(standalone_schema.text("PRAGMA foreign_keys = ON"))
+        for table in ("projects", "workflows", "workflow_versions", "environments", "users"):
+            await connection.execute(
+                standalone_schema.text(f"CREATE TABLE {table} (id CHAR(32) PRIMARY KEY)")
+            )
+        for table, identifier in (
+            ("projects", project_id),
+            ("workflows", workflow_id),
+            ("workflow_versions", workflow_version_id),
+            ("environments", environment_id),
+            ("users", actor_id),
+        ):
+            await connection.execute(
+                standalone_schema.text(f"INSERT INTO {table} (id) VALUES (:id)"),
+                {"id": identifier},
+            )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE workflow_executions ("
+                "project_id CHAR(32) NOT NULL, workflow_id CHAR(32) NOT NULL, "
+                "workflow_version_id CHAR(32) NOT NULL, environment_id CHAR(32) NOT NULL, "
+                "triggered_by_id CHAR(32) NOT NULL, parent_execution_id CHAR(32), "
+                "dataset_row_index INTEGER, status VARCHAR(16) NOT NULL, snapshot JSON NOT NULL, "
+                "context JSON NOT NULL, error_code VARCHAR(100), error_message TEXT, "
+                "cancel_requested_at DATETIME, started_at DATETIME NOT NULL, "
+                "completed_at DATETIME, run_payload_ciphertext BLOB, run_payload_nonce BLOB, "
+                "id CHAR(32) PRIMARY KEY, created_at DATETIME NOT NULL, "
+                "updated_at DATETIME NOT NULL)"
+            )
+        )
+        now = datetime.now(UTC).isoformat()
+        await connection.execute(
+            standalone_schema.text(
+                "INSERT INTO workflow_executions ("
+                "project_id, workflow_id, workflow_version_id, environment_id, triggered_by_id, "
+                "status, snapshot, context, started_at, id, created_at, updated_at) VALUES ("
+                ":project, :workflow, :version, :environment, :actor, 'passed', '{}', '{}', "
+                ":now, :id, :now, :now)"
+            ),
+            {
+                "project": project_id,
+                "workflow": workflow_id,
+                "version": workflow_version_id,
+                "environment": environment_id,
+                "actor": actor_id,
+                "now": now,
+                "id": execution_id,
+            },
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE workflow_node_executions (id CHAR(32) PRIMARY KEY)"
+            )
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE execution_checkpoints (id CHAR(32) PRIMARY KEY, "
+                "attempt INTEGER CHECK (attempt >= 1), "
+                "status VARCHAR(16) CHECK (status IN ('passed', 'failed', 'skipped', 'cancelled')))"
+            )
+        )
+        await connection.run_sync(Base.metadata.create_all)
+
+        await standalone_schema._ensure_s55_schema(connection)
+        await standalone_schema._ensure_s55_schema(connection)
+        environment_columns = (
+            await connection.execute(standalone_schema.text("PRAGMA table_info(environments)"))
+        ).fetchall()
+        execution_columns = (
+            await connection.execute(
+                standalone_schema.text("PRAGMA table_info(workflow_executions)")
+            )
+        ).fetchall()
+        checkpoint_sql = await connection.scalar(
+            standalone_schema.text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'execution_checkpoints'"
+            )
+        )
+        approval_table = await connection.scalar(
+            standalone_schema.text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'sandbox_preview_approvals'"
+            )
+        )
+        approval_columns = (
+            await connection.execute(
+                standalone_schema.text("PRAGMA table_info(sandbox_preview_approvals)")
+            )
+        ).fetchall()
+        approval_foreign_keys = (
+            await connection.execute(
+                standalone_schema.text("PRAGMA foreign_key_list(sandbox_preview_approvals)")
+            )
+        ).fetchall()
+        foreign_key_violations = (
+            await connection.execute(standalone_schema.text("PRAGMA foreign_key_check"))
+        ).fetchall()
+        preserved = (
+            await connection.execute(
+                standalone_schema.text(
+                    "SELECT run_purpose, main_status FROM workflow_executions WHERE id = :id"
+                ),
+                {"id": execution_id},
+            )
+        ).one()
+
+    await test_engine.dispose()
+    environment_names = {str(row[1]) for row in environment_columns}
+    execution_contract = {str(row[1]): bool(row[3]) for row in execution_columns}
+    assert "classification" in environment_names
+    assert {
+        "run_purpose",
+        "source_change_set_id",
+        "preview_approval_id",
+        "preview_budget",
+        "preview_evidence",
+        "cleanup_report",
+    }.issubset(execution_contract)
+    assert execution_contract["workflow_id"] is False
+    assert execution_contract["workflow_version_id"] is False
+    assert approval_table == "sandbox_preview_approvals"
+    assert "target_snapshot_fingerprint" in {str(row[1]) for row in approval_columns}
+    approval_targets = {str(row[2]) for row in approval_foreign_keys}
+    assert "workflow_executions" in approval_targets
+    assert "workflow_executions_0047_legacy" not in approval_targets
+    assert foreign_key_violations == []
+    assert "'running'" in str(checkpoint_sql)
+    assert "attempt >= 0" in str(checkpoint_sql)
+    assert preserved == ("standard", "passed")
+
+
+@pytest.mark.asyncio
 async def test_standalone_schema_upgrades_s47_test_design_columns(tmp_path) -> None:
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's47-schema.db'}")
     async with test_engine.begin() as connection:

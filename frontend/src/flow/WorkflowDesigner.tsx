@@ -389,7 +389,7 @@ function displayNodeStatus(
   statuses: Record<string, string>,
   proposalStatuses: Record<string, ProposalGraphStatus>,
 ): string | undefined {
-  return proposalStatuses[nodeId] ?? statuses[nodeId]
+  return statuses[nodeId] ?? proposalStatuses[nodeId]
 }
 
 function isCanvasEditable(editable: boolean, mode: 'edit' | 'proposal'): boolean {

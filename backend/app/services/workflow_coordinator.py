@@ -12,8 +12,9 @@ from app.core.logging import redact
 from app.domain.durable_execution import checkpoint_input_hash
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
-from app.engine.scheduler import NodeStatusUpdate
+from app.engine.scheduler import CancellationToken, NodeStatusUpdate
 from app.models.workflows import WorkflowExecution
+from app.repositories.durable_execution import DurableExecutionRepository
 from app.schemas.runner_fabric import RunnerCheckpointRequest
 from app.services.durable_execution import DurableExecutionService
 from app.services.execution_events import (
@@ -109,38 +110,110 @@ class WorkflowRunCoordinator:
 
     async def _execute_batch(self, plan: WorkflowBatchPlan) -> WorkflowExecution:
         semaphore = asyncio.Semaphore(plan.concurrency)
+        cancellation = CancellationToken()
+        active_tasks: set[asyncio.Task[None]] = set()
+        runtime_seconds = _remaining_batch_runtime_seconds(plan)
+        children = plan.children
+        if runtime_seconds is not None and runtime_seconds <= 0:
+            cancellation.cancel()
+            children = await self._checkpointed_children(plan.children)
 
         async def execute_child(child: WorkflowRunPlan) -> None:
             async with semaphore:
-                await self._publish(
-                    ExecutionEvent(
-                        type=ExecutionEventType.EXECUTION_STARTED,
-                        execution_id=child.execution_id,
-                        emitted_at=datetime.now(UTC),
-                        execution_status="running",
-                    )
-                )
+                task = asyncio.current_task()
+                if task is not None:
+                    active_tasks.add(task)
                 try:
-                    execution = await self._execute(child)
-                except Exception:
-                    logger.exception(
-                        "Dataset child execution failed",
-                        extra={"execution_id": str(child.execution_id)},
+                    await self._publish(
+                        ExecutionEvent(
+                            type=ExecutionEventType.EXECUTION_STARTED,
+                            execution_id=child.execution_id,
+                            emitted_at=datetime.now(UTC),
+                            execution_status="running",
+                        )
                     )
-                    execution = await self._mark_failed(child)
-                await self._publish_completion(execution)
+                    try:
+                        execution = await self._execute(child, cancellation=cancellation)
+                    except Exception:
+                        logger.exception(
+                            "Dataset child execution failed",
+                            extra={"execution_id": str(child.execution_id)},
+                        )
+                        execution = await self._mark_failed(child)
+                    await self._publish_completion(execution)
+                finally:
+                    if task is not None:
+                        active_tasks.discard(task)
 
-        tasks = [asyncio.create_task(execute_child(child)) for child in plan.children]
+        tasks = [asyncio.create_task(execute_child(child)) for child in children]
         try:
-            await asyncio.gather(*tasks)
+            if runtime_seconds is None:
+                await asyncio.gather(*tasks)
+            elif runtime_seconds <= 0:
+                await _finish_batch_cleanup(
+                    tasks,
+                    cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+                )
+                await self._cancel_expired_batch(plan.execution_id)
+            else:
+                _done, pending = await asyncio.wait(
+                    tasks,
+                    timeout=runtime_seconds,
+                )
+                if pending:
+                    await _cancel_batch_tasks(
+                        tasks,
+                        active_tasks=active_tasks,
+                        cancellation=cancellation,
+                        cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+                    )
+                    async with self._session_maker() as session:
+                        await WorkflowService(session).cancel_incomplete_batch(
+                            plan.execution_id,
+                            error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                            error_message="Sandbox Preview 数据集已达到整批运行时预算",
+                        )
         except asyncio.CancelledError:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await _cancel_batch_tasks(
+                tasks,
+                active_tasks=active_tasks,
+                cancellation=cancellation,
+                cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+            )
             async with self._session_maker() as session:
                 await WorkflowService(session).cancel_incomplete_batch(plan.execution_id)
         async with self._session_maker() as session:
             return await WorkflowService(session).complete_batch(plan.execution_id)
 
-    async def _execute(self, plan: WorkflowRunPlan) -> WorkflowExecution:
+    async def _checkpointed_children(
+        self,
+        children: tuple[WorkflowRunPlan, ...],
+    ) -> tuple[WorkflowRunPlan, ...]:
+        async with self._session_maker() as session:
+            repository = DurableExecutionRepository(session)
+            checkpointed: list[WorkflowRunPlan] = []
+            for child in children:
+                execution = await session.get(WorkflowExecution, child.execution_id)
+                if execution is None or execution.status not in {"queued", "running"}:
+                    continue
+                if await repository.list_checkpoints(child.execution_id):
+                    checkpointed.append(child)
+            return tuple(checkpointed)
+
+    async def _cancel_expired_batch(self, execution_id: UUID) -> None:
+        async with self._session_maker() as session:
+            await WorkflowService(session).cancel_incomplete_batch(
+                execution_id,
+                error_code="PREVIEW_RUNTIME_BUDGET_EXCEEDED",
+                error_message="Sandbox Preview 数据集已达到整批运行时预算",
+            )
+
+    async def _execute(
+        self,
+        plan: WorkflowRunPlan,
+        *,
+        cancellation: CancellationToken | None = None,
+    ) -> WorkflowExecution:
         async with self._session_maker() as session:
             service = WorkflowService(session)
             execution = await service.load_execution_for_run(plan.execution_id)
@@ -219,6 +292,7 @@ class WorkflowRunCoordinator:
                 execution=execution,
                 plan=plan,
                 on_node_status=publish_status,
+                cancellation=cancellation,
             )
             return completed
 
@@ -247,3 +321,48 @@ class WorkflowRunCoordinator:
                 extra={"execution_id": str(event.execution_id), "event_type": event.type.value},
                 exc_info=True,
             )
+
+
+async def _cancel_batch_tasks(
+    tasks: list[asyncio.Task[None]],
+    *,
+    active_tasks: set[asyncio.Task[None]],
+    cancellation: CancellationToken,
+    cleanup_timeout_seconds: int | None,
+) -> None:
+    for task in tasks:
+        if task not in active_tasks and not task.done():
+            task.cancel()
+    cancellation.cancel()
+    _done, pending = await asyncio.wait(
+        tasks,
+        timeout=cleanup_timeout_seconds or 1,
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _finish_batch_cleanup(
+    tasks: list[asyncio.Task[None]],
+    *,
+    cleanup_timeout_seconds: int | None,
+) -> None:
+    if not tasks:
+        return
+    _done, pending = await asyncio.wait(
+        tasks,
+        timeout=cleanup_timeout_seconds or 1,
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _remaining_batch_runtime_seconds(plan: WorkflowBatchPlan) -> float | None:
+    if plan.deadline_at is not None:
+        deadline = plan.deadline_at
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+    return float(plan.max_runtime_seconds) if plan.max_runtime_seconds is not None else None

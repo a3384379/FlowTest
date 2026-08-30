@@ -12,7 +12,6 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
 from app.domain.evidence_adapters import (
-    MCP_EVIDENCE_ADAPTER_SERVER_VERSION,
     DatabaseEvidenceSubmission,
     JavaEvidenceSubmission,
 )
@@ -25,6 +24,7 @@ from app.domain.integration_plans import (
     PlanTargetEnvironment,
 )
 from app.domain.mcp_read import MCP_SERVER_NAME
+from app.domain.sandbox_preview import MCP_SANDBOX_PREVIEW_SERVER_VERSION
 from app.domain.test_contexts import (
     ContextKnowledgeSnapshot,
     EvidenceProviderType,
@@ -40,9 +40,9 @@ from app.schemas.test_contexts import (
 MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
     "版本化外部证据、强类型 Java/DB Evidence、确定性 Integration Plan 与"
-    "只进入待审核状态的 Flow Draft。"
+    "只进入待审核状态的 Flow Draft，以及人工一次性批准后的 Sandbox Preview。"
     "FlowTest 不会主动连接任意外部 MCP Server。"
-    "它不会自动发布、执行、删除、修改"
+    "它不会自动发布、正式环境执行、删除、修改"
     "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
     "检查并显式接受后才能应用。输出中的请求值、认证信息、"
     "Secret、PII 和响应体会被省略或脱敏。"
@@ -68,7 +68,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_EVIDENCE_ADAPTER_SERVER_VERSION,
+        version=MCP_SANDBOX_PREVIEW_SERVER_VERSION,
         instructions=MCP_INSTRUCTIONS,
     )
 
@@ -197,6 +197,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         )
 
     _register_plan_integration_tool(server, client)
+    _register_preview_flow_proposal_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
 
     @server.tool(
@@ -377,6 +378,44 @@ def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayC
         return await _tool_payload(
             client.propose_flow_draft(
                 payload,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_preview_flow_proposal_tool(
+    server: MCPServer,
+    client: MCPReadGatewayClient,
+) -> None:
+    @server.tool(
+        name="flowtest.preview_flow_proposal",
+        description=(
+            "Execute an accepted Flow Proposal only in a Test/Sandbox environment with "
+            "a matching, unexpired, one-time human approval and frozen preview budget."
+        ),
+        structured_output=True,
+    )
+    async def preview_flow_proposal(
+        project_id: str,
+        change_set_id: str,
+        environment_id: str,
+        approval_id: str,
+        idempotency_key: str,
+        runtime_variables: dict[str, str] | None = None,
+        runtime_headers: dict[str, str] | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.preview_flow_proposal(
+                change_set_id,
+                {
+                    "project_id": project_id,
+                    "environment_id": environment_id,
+                    "approval_id": approval_id,
+                    "runtime_variables": runtime_variables or {},
+                    "runtime_headers": runtime_headers or {},
+                },
                 idempotency_key=idempotency_key,
                 token=_request_token(ctx, client),
             )

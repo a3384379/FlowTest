@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -150,6 +151,7 @@ class StoredRunPlan(BaseModel):
     definition: WorkflowDefinition
     prepared: StoredPreparedExecution
     runtime_variables: dict[str, str]
+    request_budget: int | None = Field(default=None, ge=1, le=10_000)
 
 
 class StoredBatchPlan(BaseModel):
@@ -161,6 +163,9 @@ class StoredBatchPlan(BaseModel):
     workflow_version: int
     children: list[StoredRunPlan]
     concurrency: int
+    max_runtime_seconds: int | None = Field(default=None, ge=1, le=3600)
+    cleanup_timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
+    deadline_at: datetime | None = None
 
 
 StoredPlan = Annotated[StoredRunPlan | StoredBatchPlan, Field(discriminator="kind")]
@@ -182,6 +187,9 @@ def decode_execution_plan(payload: str) -> WorkflowExecutionPlan:
             workflow_version=stored.workflow_version,
             children=tuple(_load_run(child) for child in stored.children),
             concurrency=stored.concurrency,
+            max_runtime_seconds=stored.max_runtime_seconds,
+            cleanup_timeout_seconds=stored.cleanup_timeout_seconds,
+            deadline_at=stored.deadline_at,
         )
     return _load_run(stored)
 
@@ -194,6 +202,9 @@ def _store_batch(plan: WorkflowBatchPlan) -> StoredBatchPlan:
         workflow_version=plan.workflow_version,
         children=[_store_run(child) for child in plan.children],
         concurrency=plan.concurrency,
+        max_runtime_seconds=plan.max_runtime_seconds,
+        cleanup_timeout_seconds=plan.cleanup_timeout_seconds,
+        deadline_at=plan.deadline_at,
     )
 
 
@@ -227,6 +238,7 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
             dataset_variables=plan.prepared.dataset_variables,
         ),
         runtime_variables=plan.runtime_variables,
+        request_budget=plan.request_budget,
     )
 
 
@@ -330,6 +342,7 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
             },
         ),
         runtime_variables=stored.runtime_variables,
+        request_budget=stored.request_budget,
     )
 
 

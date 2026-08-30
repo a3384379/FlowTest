@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.domain.protocols import ProtocolKind
@@ -7,7 +8,7 @@ from app.engine.protocol_nodes import PreparedProtocolNode
 from app.services.workflow_plan_codec import decode_execution_plan, encode_execution_plan
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution
-from app.services.workflows import WorkflowRunPlan
+from app.services.workflows import WorkflowBatchPlan, WorkflowRunPlan
 
 EXECUTION_ID = UUID("00000000-0000-0000-0000-000000000201")
 ACTOR_ID = UUID("00000000-0000-0000-0000-000000000202")
@@ -64,6 +65,37 @@ def test_v1_execution_plan_without_subflows_remains_decodable() -> None:
 
     assert isinstance(restored, WorkflowRunPlan)
     assert restored.prepared.subflows == {}
+
+
+def test_preview_batch_plan_round_trip_preserves_global_runtime_budget() -> None:
+    child = WorkflowRunPlan(
+        execution_id=EXECUTION_ID,
+        actor_id=ACTOR_ID,
+        project_id=PROJECT_ID,
+        workflow_version=0,
+        definition=_definition(),
+        prepared=PreparedExecution(snapshot={}, requests={}, dataset_variables={}),
+        runtime_variables={},
+    )
+    deadline = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+    plan = WorkflowBatchPlan(
+        execution_id=WORKFLOW_ID,
+        actor_id=ACTOR_ID,
+        project_id=PROJECT_ID,
+        workflow_version=0,
+        children=(child,),
+        concurrency=1,
+        max_runtime_seconds=600,
+        cleanup_timeout_seconds=120,
+        deadline_at=deadline,
+    )
+
+    restored = decode_execution_plan(encode_execution_plan(plan))
+
+    assert isinstance(restored, WorkflowBatchPlan)
+    assert restored.max_runtime_seconds == 600
+    assert restored.cleanup_timeout_seconds == 120
+    assert restored.deadline_at == deadline
 
 
 def test_execution_plan_round_trip_preserves_pinned_protocol_schema() -> None:

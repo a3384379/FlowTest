@@ -1807,6 +1807,8 @@ async def test_quality_repository_uses_complete_terminal_failure_population() ->
     assert " LIMIT " not in terminal_query.upper()
     assert "workflow_executions.completed_at IS NOT NULL" in terminal_query
     assert "workflow_executions.completed_at <=" in terminal_query
+    assert "workflow_executions.run_purpose" in terminal_query
+    assert "standard" in terminal_statement.compile().params.values()
     assert ["passed", "failed"] in terminal_statement.compile().params.values()
 
     observations = await repository.failure_observations(

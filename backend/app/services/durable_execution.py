@@ -18,6 +18,7 @@ from app.domain.durable_execution import (
     json_object,
     request_hash,
 )
+from app.domain.sandbox_preview import WorkflowRunPurpose
 from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
 from app.engine.scheduler import NodeRunRecord
@@ -92,6 +93,12 @@ class DurableExecutionService:
         if execution is None:
             raise AppError(
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
+            )
+        if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
+            raise AppError(
+                code="PREVIEW_RECOVERY_FORBIDDEN",
+                message="Sandbox Preview 不支持通用 Resume 或 Retry, 请重新审批后发起新预览",
+                status_code=409,
             )
         if execution.status in {"queued", "running"}:
             raise AppError(
@@ -197,7 +204,7 @@ class DurableExecutionService:
             select(ExecutionCommand)
             .where(
                 ExecutionCommand.execution_id == execution_id,
-                ExecutionCommand.status == "dispatched",
+                ExecutionCommand.status.in_(("accepted", "dispatched")),
             )
             .order_by(ExecutionCommand.created_at.desc())
             .with_for_update()

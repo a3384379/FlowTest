@@ -196,7 +196,7 @@ async function reviewAndApplyInUI(page: Page, projectId: string): Promise<void> 
   await expect(dialog.getByText('证据 / 置信度')).toBeVisible()
   await expect(dialog.getByText('映射差异 / 人工检查')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '发布版本' })).toHaveCount(0)
-  await expect(dialog.getByRole('button', { name: '运行' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '运行', exact: true })).toHaveCount(0)
   const apply = dialog.getByRole('button', { name: '应用到工作流草稿' })
   await expect(apply).toBeDisabled()
   await dialog.getByRole('button', { name: '接受' }).click()

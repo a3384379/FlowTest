@@ -6,7 +6,13 @@ import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
 import type { FlowSpec, FlowSpecVisualProposal } from '../../lib/api'
-import { apiDefinition, project, workflow, workflowDefinition } from '../../test/fixtures'
+import {
+  apiDefinition,
+  environment,
+  project,
+  workflow,
+  workflowDefinition,
+} from '../../test/fixtures'
 import { server } from '../../test/server'
 import FlowProposalReviewDialog from './FlowProposalReviewDialog'
 
@@ -317,6 +323,78 @@ describe('FlowProposalReviewDialog', () => {
     )
     expect(within(dialog).getByText('第二提案查询')).toBeInTheDocument()
   })
+
+  it('runs an accepted proposal only in sandbox and renders live preview evidence', async () => {
+    const executionId = '00000000-0000-4000-8000-000000005500'
+    const approvalId = '00000000-0000-4000-8000-000000005501'
+    let approvalEnvironment = ''
+    let executeCalls = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [summary('accepted')], next_cursor: null, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(visualProposal('accepted')),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/preview-approvals`,
+        async ({ request }) => {
+          const body = (await request.json()) as { environment_id: string }
+          approvalEnvironment = body.environment_id
+          return HttpResponse.json({ id: approvalId }, { status: 201 })
+        },
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/preview-executions`,
+        () => {
+          executeCalls += 1
+          return HttpResponse.json({ execution: { id: executionId } }, { status: 202 })
+        },
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflow-executions/${executionId}`, () =>
+        HttpResponse.json({
+          execution: {
+            id: executionId,
+            environment_id: environment.id,
+            run_purpose: 'preview',
+            status: 'passed',
+            cleanup_status: 'passed',
+            preview_approval_id: approvalId,
+            preview_evidence: {
+              binding_trace: [{ node_id: 'api', mappings: [] }],
+              assert_result: [{ node_id: 'assert-status', assertions: [{ passed: true }] }],
+              cleanup_result: { required_failures: [] },
+              budget_usage: { requests: { limit: 10, used: 2, remaining: 8 } },
+            },
+          },
+          nodes: [{ node_id: 'api', status: 'passed' }],
+        }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/workflow-executions/${executionId}/checkpoints`,
+        () => HttpResponse.json([{ node_id: 'assert-status', status: 'passed' }]),
+      ),
+    )
+
+    renderDialog(() => undefined)
+    const browser = userEvent.setup()
+    const dialog = await screen.findByRole('dialog')
+    const previewButton = await within(dialog).findByRole('button', {
+      name: '一次性批准并运行 Sandbox Preview',
+    })
+    expect(previewButton).not.toBeDisabled()
+    await browser.click(previewButton)
+
+    expect(await within(dialog).findByText('Sandbox Preview Evidence')).toBeInTheDocument()
+    expect(within(dialog).getByText('Binding Trace')).toBeInTheDocument()
+    expect(within(dialog).getByText('Assert Result')).toBeInTheDocument()
+    expect(within(dialog).getByText('Cleanup Result')).toBeInTheDocument()
+    expect(within(dialog).getByText('Budget Usage')).toBeInTheDocument()
+    expect(within(dialog).getByText(/"used": 2/)).toBeInTheDocument()
+    expect(approvalEnvironment).toBe(environment.id)
+    expect(executeCalls).toBe(1)
+  })
 })
 
 function renderDialog(
@@ -333,6 +411,15 @@ function renderDialog(
           open
           projectId={project.id}
           resources={{
+            environments: [
+              { ...environment, classification: 'sandbox' },
+              {
+                ...environment,
+                id: '00000000-0000-4000-8000-000000005599',
+                name: '生产环境',
+                classification: 'production',
+              },
+            ],
             apis: [apiDefinition],
             artifacts: [],
             workflows: [workflow],

@@ -110,13 +110,17 @@ class RequestBudget:
     parent: "RequestBudget | None" = None
 
     def claim(self) -> bool:
-        if not self._can_claim():
+        if not self.can_claim():
             return False
         self._consume()
         return True
 
-    def _can_claim(self) -> bool:
-        return self.remaining > 0 and (self.parent is None or self.parent._can_claim())
+    def can_claim(self, amount: int = 1) -> bool:
+        return (
+            amount >= 0
+            and self.remaining >= amount
+            and (self.parent is None or self.parent.can_claim(amount))
+        )
 
     def _consume(self) -> None:
         self.remaining -= 1
@@ -413,26 +417,44 @@ class WorkflowScheduler:
             if definition.run_policy.force_cancel_skips_cleanup
             else CancellationToken()
         )
-        cleanup = await self._run_phase(
-            definition,
-            nodes_for_phase=cleanup_nodes,
-            edges_for_phase=cleanup_edges,
-            context=context,
-            cancellation=cleanup_cancellation,
-            on_node_status=on_node_status,
-            selected_node_ids=activated_ids,
-            resume_records=tuple(
-                record for record in resume_records if record.node_id in cleanup_ids
-            ),
-            resume_attempts=resume_attempts,
-            reset_retry_budget=reset_retry_budget,
-            preserve_terminal_records=False,
-            cancellation_force_only=True,
-            request_budget=request_budget,
-            fail_fast_on_error=False,
-            excluded_code="CLEANUP_NOT_ACTIVATED",
-            excluded_message="清理条件或目标未激活",
+        cleanup_resume_records = tuple(
+            record
+            for record in resume_records
+            if record.node_id in cleanup_ids
+            or (
+                record.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
+                and record.phase is WorkflowPhase.CLEANUP
+            )
         )
+        cleanup_runtime_handle = _schedule_runtime_limit(
+            cleanup_cancellation,
+            definition.run_policy.max_runtime_seconds,
+            cleanup_resume_records,
+            reset=reset_retry_budget,
+        )
+        try:
+            cleanup = await self._run_phase(
+                definition,
+                nodes_for_phase=cleanup_nodes,
+                edges_for_phase=cleanup_edges,
+                context=context,
+                cancellation=cleanup_cancellation,
+                on_node_status=on_node_status,
+                selected_node_ids=activated_ids,
+                resume_records=tuple(
+                    record for record in resume_records if record.node_id in cleanup_ids
+                ),
+                resume_attempts=resume_attempts,
+                reset_retry_budget=reset_retry_budget,
+                preserve_terminal_records=False,
+                cancellation_force_only=definition.run_policy.force_cancel_skips_cleanup,
+                request_budget=request_budget,
+                fail_fast_on_error=False,
+                excluded_code="CLEANUP_NOT_ACTIVATED",
+                excluded_message="清理条件或目标未激活",
+            )
+        finally:
+            _cancel_runtime_limit(cleanup_runtime_handle)
         report = _cleanup_report(cleanup.records, activated_ids)
         return _combined_result(definition, main, cleanup.records, context, report)
 

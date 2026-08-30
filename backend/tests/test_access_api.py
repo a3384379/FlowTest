@@ -201,6 +201,37 @@ async def test_user_project_isolation_roles_and_folder_invariants(client: AsyncC
     )
     assert edited_project.status_code == 200
     assert edited_project.json()["description"] == "Updated by editor"
+    classified_by_editor = await client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=_authorization(editor_token),
+        json={
+            "name": "Editor sandbox",
+            "base_url": "https://editor-sandbox.example.test",
+            "classification": "sandbox",
+        },
+    )
+    assert classified_by_editor.status_code == 403
+    editor_environment = await client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=_authorization(editor_token),
+        json={
+            "name": "Editor unclassified",
+            "base_url": "https://editor-unclassified.example.test",
+        },
+    )
+    assert editor_environment.status_code == 201, editor_environment.text
+    reclassified_by_editor = await client.patch(
+        f"/api/v1/projects/{project_id}/environments/{editor_environment.json()['id']}",
+        headers=_authorization(editor_token),
+        json={"classification": "sandbox"},
+    )
+    assert reclassified_by_editor.status_code == 403
+    reclassified_by_owner = await client.patch(
+        f"/api/v1/projects/{project_id}/environments/{editor_environment.json()['id']}",
+        headers=admin_headers,
+        json={"classification": "sandbox"},
+    )
+    assert reclassified_by_owner.status_code == 200
     editor_projects = await client.get("/api/v1/projects", headers=_authorization(editor_token))
     assert editor_projects.json()["items"][0]["role"] == "editor"
 

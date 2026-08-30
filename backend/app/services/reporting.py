@@ -24,7 +24,7 @@ from app.services.projects import ProjectService
 @dataclass(frozen=True, slots=True)
 class ExecutionReportSummary:
     id: UUID
-    workflow_id: UUID
+    workflow_id: UUID | None
     workflow_name: str
     workflow_version: int
     status: str
@@ -182,12 +182,22 @@ class ReportService:
         execution: WorkflowExecution,
         nodes: list[WorkflowNodeExecution] | None = None,
     ) -> ExecutionReportSummary:
-        workflow = await self._reports.get_workflow(execution.workflow_id)
+        workflow = (
+            await self._reports.get_workflow(execution.workflow_id)
+            if execution.workflow_id is not None
+            else None
+        )
         records = nodes if nodes is not None else await self._reports.list_nodes(execution.id)
         return ExecutionReportSummary(
             id=execution.id,
             workflow_id=execution.workflow_id,
-            workflow_name=workflow.name if workflow is not None else "已删除工作流",
+            workflow_name=(
+                workflow.name
+                if workflow is not None
+                else "Sandbox Preview"
+                if execution.run_purpose == "preview"
+                else "已删除工作流"
+            ),
             workflow_version=_workflow_version(execution.snapshot),
             status=execution.status,
             failure_category=classify_failure(
