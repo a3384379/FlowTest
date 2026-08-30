@@ -608,53 +608,83 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert historical_preview.status_code == 200, historical_preview.text
     assert historical_preview.json()["url"] == "https://auth.example.com/users/api"
     assert historical_preview.json()["target"]["service_key"] == "auth"
+    pinned_definition = {
+        "schema_version": "1.0",
+        "variables": {},
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Start",
+                "position": {"x": 0, "y": 0},
+                "config": {},
+            },
+            {
+                "id": "request",
+                "type": "api",
+                "name": "Pinned request",
+                "position": {"x": 180, "y": 0},
+                "config": {
+                    "api_definition_id": definition_id,
+                    "api_version": 2,
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "End",
+                "position": {"x": 360, "y": 0},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "start-request", "source": "start", "target": "request"},
+            {"id": "request-end", "source": "request", "target": "end"},
+        ],
+        "settings": {
+            "fail_fast": True,
+            "concurrency": 1,
+            "default_timeout_seconds": 30,
+        },
+    }
     pinned_workflow = await asset_client.post(
         f"/api/v1/projects/{project_id}/workflows",
         headers=headers,
         json={
             "name": "Pinned auth API",
-            "definition": {
-                "schema_version": "1.0",
-                "variables": {},
-                "nodes": [
-                    {
-                        "id": "start",
-                        "type": "start",
-                        "name": "Start",
-                        "position": {"x": 0, "y": 0},
-                        "config": {},
-                    },
-                    {
-                        "id": "request",
-                        "type": "api",
-                        "name": "Pinned request",
-                        "position": {"x": 180, "y": 0},
-                        "config": {
-                            "api_definition_id": definition_id,
-                            "api_version": 2,
-                        },
-                    },
-                    {
-                        "id": "end",
-                        "type": "end",
-                        "name": "End",
-                        "position": {"x": 360, "y": 0},
-                        "config": {},
-                    },
-                ],
-                "edges": [
-                    {"id": "start-request", "source": "start", "target": "request"},
-                    {"id": "request-end", "source": "request", "target": "end"},
-                ],
-                "settings": {
-                    "fail_fast": True,
-                    "concurrency": 1,
-                    "default_timeout_seconds": 30,
-                },
-            },
+            "definition": pinned_definition,
         },
     )
     assert pinned_workflow.status_code == 201, pinned_workflow.text
+    workflow_id = pinned_workflow.json()["id"]
+    published = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    pinned_plan = await asset_client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "Pinned auth plan",
+            "schedule_interval_seconds": 60,
+            "items": [
+                {
+                    "workflow_id": workflow_id,
+                    "workflow_version": 1,
+                    "environment_id": environment["id"],
+                }
+            ],
+        },
+    )
+    assert pinned_plan.status_code == 201, pinned_plan.text
+    pinned_definition["nodes"][1]["config"]["api_version"] = 3
+    updated_draft = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}",
+        headers=headers,
+        json={"expected_revision": 1, "definition": pinned_definition},
+    )
+    assert updated_draft.status_code == 200, updated_draft.text
     auth_impact = await asset_client.get(
         f"/api/v1/projects/{project_id}/services/{auth_id}/impact-preview",
         headers=headers,
@@ -666,10 +696,15 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert auth_impact.status_code == 200, auth_impact.text
     assert orders_impact.status_code == 200, orders_impact.text
     assert {item["id"] for item in auth_impact.json()["affected_apis"]} == {definition_id}
-    assert {item["id"] for item in auth_impact.json()["affected_workflows"]} == {
-        pinned_workflow.json()["id"]
+    assert {item["id"] for item in auth_impact.json()["affected_workflows"]} == {workflow_id}
+    assert {item["id"] for item in auth_impact.json()["affected_test_plans"]} == {
+        pinned_plan.json()["id"]
     }
-    assert orders_impact.json()["affected_workflows"] == []
+    assert {item["id"] for item in auth_impact.json()["affected_scheduled_runs"]} == {
+        pinned_plan.json()["id"]
+    }
+    assert {item["id"] for item in orders_impact.json()["affected_workflows"]} == {workflow_id}
+    assert orders_impact.json()["affected_test_plans"] == []
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,

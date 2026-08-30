@@ -1,5 +1,6 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
+import re
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from app.services.idempotency import IdempotencyService, require_idempotency_key
 from app.services.test_contexts import ProposableContext, TestContextService
 
 MCP_FLOW_PROPOSE_SCOPE = "mcp:flow:propose"
+_SECRET_TEMPLATE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
 
 
 class MCPFlowProposalService:
@@ -188,6 +190,35 @@ def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
             continue
         if is_sensitive_identifier(parameter.name):
             return True
+    for node in payload.spec.nodes:
+        request_overrides = node.config.get("request_overrides")
+        if _has_sensitive_mapping_literal(request_overrides):
+            return True
+    return False
+
+
+def _has_sensitive_mapping_literal(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for name, child in value.items():
+        if is_sensitive_identifier(str(name)) and _contains_unsafe_literal(child):
+            return True
+        if _has_sensitive_mapping_literal(child):
+            return True
+        if isinstance(child, list) and any(_has_sensitive_mapping_literal(item) for item in child):
+            return True
+    return False
+
+
+def _contains_unsafe_literal(value: object) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, str):
+        return not value.startswith("secret://") and _SECRET_TEMPLATE.search(value) is None
+    if isinstance(value, dict):
+        return any(_contains_unsafe_literal(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_unsafe_literal(child) for child in value)
     return False
 
 

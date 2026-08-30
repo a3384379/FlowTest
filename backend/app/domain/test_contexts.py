@@ -36,8 +36,8 @@ _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9._/-]{0,159}$")
 _VERSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$")
 _PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|CERTIFICATE)-----")
-_BEARER = re.compile(r"(?<![A-Za-z0-9_])Bearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
-_BASIC = re.compile(r"(?<![A-Za-z0-9_])Basic\s+[A-Za-z0-9+/=]{8,}", re.IGNORECASE)
+_BEARER = re.compile(r"(?<![A-Za-z0-9_])Bearer\s+[A-Za-z0-9._~+/=-]{1,}", re.IGNORECASE)
+_BASIC = re.compile(r"(?<![A-Za-z0-9_])Basic\s+[A-Za-z0-9+/=]{1,}", re.IGNORECASE)
 _JWT = re.compile(
     r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
     r"(?![A-Za-z0-9_-])"

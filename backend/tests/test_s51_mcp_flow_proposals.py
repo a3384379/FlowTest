@@ -307,6 +307,8 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     for index, (description, secret) in enumerate(
         (
             ("使用Bearer AbCdEf1234567890进行请求", "AbCdEf1234567890"),
+            ("Use Bearer abc", "abc"),
+            ("Use Basic abc", "abc"),
             ("使用password=hunter2进行请求", "hunter2"),
             ('使用password="my secret phrase"进行请求', "my secret phrase"),
             ("使用client_secret=hunter2进行请求", "hunter2"),
@@ -375,6 +377,29 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert legacy_variable.status_code == 422
     assert legacy_variable.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
     assert "hunter2" not in legacy_variable.text
+
+    for index, request_overrides in enumerate(
+        (
+            {"headers": {"X-Access-Key": "abc"}},
+            {"body": {"kind": "json", "value": {"password": "abc"}}},
+        )
+    ):
+        override_payload = _proposal_payload(s51_context, context, plan, compilation)
+        api_node = next(
+            node for node in override_payload["spec"]["nodes"] if node["kind"] == "http"
+        )
+        api_node["config"]["request_overrides"] = request_overrides
+        overridden = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-request-override-{index}",
+            },
+            json={**override_payload, "dry_run": False},
+        )
+        assert overridden.status_code == 422
+        assert overridden.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert "abc" not in overridden.text
 
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")

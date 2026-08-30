@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -16,7 +16,7 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.release_gate import ReleasePolicy
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import TestPlan, TestPlanItem
-from app.models.workflows import Workflow
+from app.models.workflows import Workflow, WorkflowVersion
 from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
@@ -181,7 +181,7 @@ class ServiceTargetService:
             (str(version.api_definition_id), version.version) for version in affected_versions
         }
         current_versions = {str(api.id): api.current_version for api in apis}
-        affected_workflows = [
+        draft_affected_workflows = [
             workflow
             for workflow in workflows
             if _workflow_uses_service(
@@ -191,8 +191,41 @@ class ServiceTargetService:
                 current_versions,
             )
         ]
-        workflow_ids = {workflow.id for workflow in affected_workflows}
-        plans = await self._affected_plans(project_id, workflow_ids)
+        referenced_versions = (
+            await self._session.execute(
+                select(TestPlanItem, WorkflowVersion)
+                .join(TestPlan, TestPlan.id == TestPlanItem.test_plan_id)
+                .join(
+                    WorkflowVersion,
+                    and_(
+                        WorkflowVersion.workflow_id == TestPlanItem.workflow_id,
+                        WorkflowVersion.version == TestPlanItem.workflow_version,
+                    ),
+                )
+                .where(
+                    TestPlan.project_id == project_id,
+                    TestPlanItem.target_type == "workflow",
+                )
+            )
+        ).all()
+        published_workflow_ids: set[UUID] = set()
+        affected_plan_ids: set[UUID] = set()
+        for item, version in referenced_versions:
+            if _workflow_uses_service(
+                version.definition,
+                service.service_key,
+                version_refs,
+                current_versions,
+            ):
+                published_workflow_ids.add(version.workflow_id)
+                affected_plan_ids.add(item.test_plan_id)
+        affected_workflow_ids = {
+            workflow.id for workflow in draft_affected_workflows
+        } | published_workflow_ids
+        affected_workflows = [
+            workflow for workflow in workflows if workflow.id in affected_workflow_ids
+        ]
+        plans = await self._affected_plans(project_id, affected_plan_ids)
         release_policies = (
             list(
                 (
@@ -230,19 +263,15 @@ class ServiceTargetService:
             ],
         }
 
-    async def _affected_plans(self, project_id: UUID, workflow_ids: set[UUID]) -> list[TestPlan]:
-        if not workflow_ids:
+    async def _affected_plans(self, project_id: UUID, plan_ids: set[UUID]) -> list[TestPlan]:
+        if not plan_ids:
             return []
         return list(
             (
                 await self._session.scalars(
-                    select(TestPlan)
-                    .join(TestPlanItem, TestPlanItem.test_plan_id == TestPlan.id)
-                    .where(
-                        TestPlan.project_id == project_id,
-                        TestPlanItem.workflow_id.in_(workflow_ids),
+                    select(TestPlan).where(
+                        TestPlan.project_id == project_id, TestPlan.id.in_(plan_ids)
                     )
-                    .distinct()
                 )
             ).all()
         )
