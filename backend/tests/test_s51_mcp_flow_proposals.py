@@ -323,7 +323,14 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert secret not in response.text
 
     for index, parameter_name in enumerate(
-        ("db_password", "private_key", "access_key", "database_credential")
+        (
+            "db_password",
+            "private_key",
+            "access_key",
+            "database_credential",
+            "client_secret_value",
+            "db_password_value",
+        )
     ):
         named_secret_payload = _proposal_payload(s51_context, context, plan, compilation)
         named_secret_payload["spec"]["parameters"] = [

@@ -1,6 +1,7 @@
 """Controlled MCP adapter for draft-only FlowSpec proposals."""
 
 import re
+from itertools import pairwise
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,28 +182,46 @@ class MCPFlowProposalService:
             )
 
 
-_SENSITIVE_PARAMETER_NAME_SUFFIXES = (
-    "authorization",
-    "cookie",
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "apikey",
-    "accesskey",
-    "privatekey",
-    "credential",
+_SENSITIVE_PARAMETER_NAME_PARTS = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "cookie",
+        "credential",
+        "password",
+        "passwd",
+        "privatekey",
+        "accesskey",
+        "secret",
+        "token",
+    }
 )
+_SENSITIVE_PARAMETER_NAME_PAIRS = frozenset(
+    {
+        ("api", "key"),
+        ("access", "key"),
+        ("private", "key"),
+    }
+)
+
+
+def _parameter_name_parts(name: str) -> list[str]:
+    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    return [part for part in re.split(r"[^a-z0-9]+", segmented.lower()) if part]
+
+
+def _is_sensitive_parameter_name(name: str) -> bool:
+    parts = _parameter_name_parts(name)
+    if any(part in _SENSITIVE_PARAMETER_NAME_PARTS for part in parts):
+        return True
+    return any(pair in _SENSITIVE_PARAMETER_NAME_PAIRS for pair in pairwise(parts))
 
 
 def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
     for parameter in payload.spec.parameters:
         if parameter.value is None:
             continue
-        normalized_name = re.sub(r"[^a-z0-9]", "", parameter.name.lower())
-        if normalized_name.startswith(("authorization", "cookie")) or normalized_name.endswith(
-            _SENSITIVE_PARAMETER_NAME_SUFFIXES
-        ):
+        if _is_sensitive_parameter_name(parameter.name):
             return True
     return False
 
