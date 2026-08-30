@@ -2,14 +2,16 @@
 
 最后更新：2026-08-30（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
-已完成 S48～S54 实现及主线验收。S52 External Evidence Adapter、Entity Mapping 与 Java/Spring POC
+已完成 S48～S55、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
+已完成实现和定向验收，正在完成 PR Review、Remote CI、显式 RC 重门禁与合并。S52 External Evidence Adapter、Entity Mapping 与 Java/Spring POC
 已由 PR #58 普通 Squash Merge，Evidence Closure PR #59 也已普通 Squash Merge 且 Main Push Required Gate
 成功。S53 Data Recipe、Cross-API Oracle 与 DB Read Oracle 已由 PR #60 普通 Squash Merge，最终
 P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53 Evidence Closure 也已
 普通合并且 Main Push Required Gate 成功。S54 Cleanup / Compensation Runtime 已由 PR #62 普通 Squash Merge，
 最终 PR 与 Merge 后 Main Push 七项门禁全部成功。H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge，
-最终 P0/P1 为 0，PR 与 Merge 后 Main Push 七项门禁全部成功。当前正在完成 S55 Sandbox Preview Beta；
-实现和定向验证已通过，当前分支 Migration Head 为 `20260830_0050`，仍未发布 Alpha/Beta/RC/GA。
+最终 P0/P1 为 0，PR 与 Merge 后 Main Push 七项门禁全部成功。S55 Sandbox Preview Beta 已由 PR #64
+普通 Squash Merge，合并后 Main 七项门禁全部成功。当前分支 Migration Head 为 `20260830_0050`；
+V6 RC 候选正在收口，尚未创建正式 Tag/Release，GA 外部门槛仍未满足。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -19,6 +21,29 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 已完成实现与定向验收：V6 S56 Flagship Skill、Evaluation 与 RC Closure
+
+### Implemented
+
+- 新增可安装 `flowtest-generate-integration-flow@1.0.0-rc.1`，固定 MCP 最小版本、Tools/Scopes、外部
+  Code/DB MCP 只读边界、Human Approval、Stop Conditions、Security Rules、Examples 与 Changelog。
+- 完整链路覆盖 Project → Context → Missing Evidence → External Evidence → Plan → Compile → Dry Run →
+  Proposal → Visual Review，并将 Sandbox Preview 保持为用户显式请求的一次性审批分支。
+- 扩展模型无关 Golden Evaluation：Operation `3/3`、Binding `2/3`，以及 Compiler/Preview/Conflict/
+  Static 与九项零事件安全门槛；空分母失败关闭，不伪造 95% Accuracy。
+- 新增 Skill Contract、Evidence Ref 解析和 Baseline 一致性测试；所有 pytest Evidence 必须指向真实函数。
+- CI Bootstrap PR #65/#66 已普通合并并恢复唯一 Required Gate；普通变更跳过 Compact/容量重门禁，
+  `skills/**` 仍触发 Backend Skill Contract 与 Security；复审清除 P0/P1 后用
+  `run_rc_gates=true` 显式执行，门槛没有删除或弱化。
+
+### 当前证据
+
+- Skill Creator Validation：PASS；S56 Skill/Evaluation + V6 Golden：`17 passed`；S48～S55 跨阶段
+  Evidence/Compiler/Stale/Conflict/MCP/Preview/Cleanup 定向回归：`26 passed`；Ruff/Mypy/Evaluator：PASS。
+- S55 合并后 Main 的 7 项远程工作流全部 Success；S56 PR Review、Remote CI、显式 RC Gate、合并与
+  Main Push 仍须完成后才能把 `V6_RC_READY` 从 NO 改为 YES。
+- 连续 RC、公司实机、安全审批和人工签署不属于已完成证据，`GA_READY=NO`。
 
 ## 已完成实现与定向验收：V6 S55 Sandbox Preview Beta
 

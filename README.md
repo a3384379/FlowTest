@@ -3,8 +3,9 @@
 FlowTest 是一个基于 Python 的可视化接口自动化测试平台，目标是打通 API 资产管理、单接口调试、可视化工作流、异步执行、测试计划与报告。
 
 当前状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并，`main` 已启用无 Bypass 的 Required Gate；V6.0
-Core 已完成 S48 契约冻结，尚未进入 S49，运行时能力尚未交付，也没有 Alpha、Beta、RC、Tag 或 GitHub Release。
-Windows 云桌面 72 小时试点、Standalone→Compact 真实迁移、真实 Key Rotation 和人工签署仍待完成。
+Core 的 S48～S55 与 H1 真实 Key Rotation 已合并，S56 正在收口旗舰 Skill、模型无关 Evaluation、兼容性
+和 RC 自动化证据。当前没有正式 Tag 或 GitHub Release；连续 RC、公司实机、安全审批和人工签署仍待完成，
+因此 GA Ready 保持为否。
 正式开发范围见 [V6.0 完整开发方案](docs/development-plan-v6.md)，冻结事实见
 [V6.0 S48 契约基线](docs/release/v6-s48-contract-baseline.md)。
 
@@ -21,6 +22,7 @@ Windows 云桌面 72 小时试点、Standalone→Compact 真实迁移、真实 K
 FlowTest/
 ├── backend/            # Python API 与执行引擎
 ├── frontend/           # Web 管理端与流程设计器
+├── skills/             # 可安装的 FlowTest Agent Skills
 ├── docs/               # 架构、迭代计划、设计决策
 ├── scripts/            # 本地开发和质量检查脚本
 ├── .github/            # CI 与协作模板
@@ -32,8 +34,10 @@ FlowTest/
 [docs/development-plan-v5.md](docs/development-plan-v5.md)，当前 V6.0 Core 方案见
 [docs/development-plan-v6.md](docs/development-plan-v6.md)。
 
-系统各模块的完整使用说明见 [FlowTest V5 系统使用手册](docs/system-user-guide.md)，其中详细介绍了
+系统各模块的完整使用说明见 [FlowTest V6.0 Core 系统使用手册](docs/system-user-guide.md)，其中详细介绍了
 接口管理、接口工作流、FlowSpec，以及对外 MCP 的 stdio/Streamable HTTP 接入与安全边界。
+旗舰 `flowtest-generate-integration-flow` Skill 的安装、证据链、Visual Review 和 Sandbox Preview 流程见
+[集成流程生成 Skill 手册](docs/operations/mcp-integration-flow-skill.md)。
 
 ## 公司电脑快速运行
 

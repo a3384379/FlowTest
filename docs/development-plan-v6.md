@@ -2047,6 +2047,16 @@ PRODUCTION_MCP_PREVIEW = NO
 - FlowSpec/Workflow Compatibility；
 - Skill Contract Test。
 
+### S56 实现与证据入口
+
+- Flagship Skill：`skills/flowtest-generate-integration-flow/`；
+- Model-independent Eval：`scripts/evaluate_v6_core.py` 与 `backend/tests/fixtures/v6_golden/evaluation-baseline.json`；
+- 使用手册：`docs/operations/mcp-integration-flow-skill.md`；
+- RC Evidence：`docs/release/v6-core-rc-acceptance.md`。
+
+Operation/Binding Precision 只报告 Golden Set 的精确分子与分母，不在无统计依据时补写 95%/90% 发布
+阈值。普通 PR 运行核心路径门禁；Compact 与容量 RC 重门禁在最新复审无 P0/P1 后显式触发。
+
 ### V6.0 GA 门槛
 
 - H2 外部证据完成；

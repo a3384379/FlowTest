@@ -141,3 +141,10 @@ cd flowtest-compact-*/
 - 未向 Git 提交 `.env`、`images.env`、离线镜像包、诊断目录或业务备份。
 - 需要跨主机访问时已启用公司 TLS、受控内网地址和 Secure Cookie。
 - 首次录入业务数据前已验证备份目录、恢复责任人与升级维护窗口。
+
+## V6 集成流程 Skill
+
+Compact 可让受控内网 Agent 通过 Streamable HTTP 连接 FlowTest MCP，并安装
+`skills/flowtest-generate-integration-flow/`。不要把 Gateway Token 写进 Skill 文件或浏览器截图；Service
+Account 仅授予实际使用的 `mcp:read`、Evidence、Flow Proposal 和可选 Preview Scope。完整流程与
+生产 Preview 硬拒绝见 [集成流程生成 Skill 手册](mcp-integration-flow-skill.md)。
