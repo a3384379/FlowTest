@@ -38,9 +38,14 @@ PROJECT_ID = "00000000-0000-0000-0000-000000000001"
 SUBJECT_REF = f"flowtest://projects/{PROJECT_ID}/operations/orders"
 
 
-def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose() -> None:
-    value = "Use https://alice:hunter2@example.com/resource for this import"
-
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Use https://alice:hunter2@example.com/resource for this import",
+        "访问https://alice:hunter2@example.com/resource",
+    ],
+)
+def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str) -> None:
     assert first_sensitive_value({"statement": value}) == "$.statement"
 
 

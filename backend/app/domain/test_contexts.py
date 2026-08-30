@@ -49,7 +49,7 @@ _CONNECTION_STRING = re.compile(
     r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|mssql)://",
     re.IGNORECASE,
 )
-_EMBEDDED_URL = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"'`]+")
+_EMBEDDED_URL = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"'`]+")
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE = re.compile(r"(?<!\d)\+?[1-9]\d{9,14}(?!\d)")
 _CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
