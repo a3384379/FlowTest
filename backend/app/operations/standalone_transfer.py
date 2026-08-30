@@ -81,6 +81,9 @@ EXCLUDED_TABLE_REASONS: dict[str, str] = {
 _TYPE_TAG = "__flowtest_transfer_type__"
 _MAX_ROWS_PER_INSERT = 500
 _MISSING = object()
+_DEFERRED_REFERENCE_COMPANIONS: dict[str, tuple[str, ...]] = {
+    "sandbox_preview_approvals": ("consumed_at",),
+}
 
 
 class TransferError(RuntimeError):
@@ -508,35 +511,30 @@ async def _validate_target_database(engine: AsyncEngine, payload: BundlePayload)
 async def _import_rows(engine: AsyncEngine, payload: BundlePayload) -> None:
     order = _import_order(payload.rows_by_table)
     async with engine.begin() as connection:
-        pending_updates: list[tuple[Table, tuple[Any, ...], str, Any]] = []
+        pending_updates: list[tuple[Table, tuple[Any, ...], dict[str, Any]]] = []
         for table_name in order:
             table = Base.metadata.tables[table_name]
             rows: list[dict[str, Any]] = []
-            self_columns = _self_reference_columns(table)
+            deferred_columns = _deferred_reference_columns(table)
             for raw_row in payload.rows_by_table[table_name]:
                 row = _decode_row(table, raw_row)
                 primary_key = tuple(row[column.name] for column in table.primary_key.columns)
-                for column in self_columns:
-                    value = row.get(column.name)
-                    if value is None:
-                        continue
-                    if column.nullable is False:
-                        raise TransferError(f"表 {table.name} 的自引用列 {column.name} 必须可为空")
-                    pending_updates.append((table, primary_key, column.name, value))
-                    row[column.name] = None
+                deferred_values = _take_deferred_values(table, row, deferred_columns)
+                if deferred_values:
+                    pending_updates.append((table, primary_key, deferred_values))
                 rows.append(row)
             for offset in range(0, len(rows), _MAX_ROWS_PER_INSERT):
                 chunk = rows[offset : offset + _MAX_ROWS_PER_INSERT]
                 if chunk:
                     await connection.execute(table.insert(), chunk)
-        for table, primary_key, column_name, value in pending_updates:
+        for table, primary_key, values in pending_updates:
             predicate = and_(
                 *tuple(
                     column == key
                     for column, key in zip(table.primary_key.columns, primary_key, strict=True)
                 )
             )
-            await connection.execute(update(table).where(predicate).values({column_name: value}))
+            await connection.execute(update(table).where(predicate).values(values))
 
 
 def _import_order(rows_by_table: Mapping[str, Sequence[Mapping[str, Any]]]) -> tuple[str, ...]:
@@ -545,7 +543,9 @@ def _import_order(rows_by_table: Mapping[str, Sequence[Mapping[str, Any]]]) -> t
         name: {
             foreign_key.column.table.name
             for foreign_key in Base.metadata.tables[name].foreign_keys
-            if foreign_key.column.table.name in names and foreign_key.column.table.name != name
+            if foreign_key.column.table.name in names
+            and foreign_key.column.table.name != name
+            and not foreign_key.use_alter
         }
         for name in names
     }
@@ -753,12 +753,38 @@ def _canonical_value(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _self_reference_columns(table: Table) -> tuple[Any, ...]:
+def _deferred_reference_columns(table: Table) -> tuple[Any, ...]:
     return tuple(
         foreign_key.parent
         for foreign_key in table.foreign_keys
-        if foreign_key.column.table.name == table.name
+        if foreign_key.column.table.name == table.name or foreign_key.use_alter
     )
+
+
+def _take_deferred_values(
+    table: Table, row: dict[str, Any], deferred_columns: tuple[Any, ...]
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for column in deferred_columns:
+        value = row.get(column.name)
+        if value is None:
+            continue
+        if column.nullable is False:
+            raise TransferError(f"表 {table.name} 的延迟引用列 {column.name} 必须可为空")
+        values[column.name] = value
+        row[column.name] = None
+    if not values:
+        return values
+    for column_name in _DEFERRED_REFERENCE_COMPANIONS.get(table.name, ()):
+        value = row.get(column_name)
+        if value is None:
+            continue
+        column = table.c[column_name]
+        if column.nullable is False:
+            raise TransferError(f"表 {table.name} 的延迟伴随列 {column_name} 必须可为空")
+        values[column_name] = value
+        row[column_name] = None
+    return values
 
 
 def _mapping_entry(value: Any, keys: set[str], label: str) -> dict[str, Any]:
