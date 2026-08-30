@@ -2437,8 +2437,6 @@ class ChangeRegressionService:
             if target_version != definition.current_version:
                 return None
         version_service_key = contract.service or version_service_key
-        identity_service = None if version_service_key == "unassigned" else version_service_key
-        identity_contract = contract.model_copy(update={"service": identity_service})
         identity = OperationIdentity(
             api_definition_id=str(definition.id),
             api_version=version.version,
@@ -2446,7 +2444,7 @@ class ChangeRegressionService:
             service_key=version_service_key,
             method=version.method,
             normalized_path=_semantic_path(version.path),
-            contract_fingerprint=fingerprint_contract(identity_contract),
+            contract_fingerprint=version.contract_fingerprint or fingerprint_contract(contract),
         )
         return identity, contract
 
