@@ -335,6 +335,27 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
                 {"type": "string", "minLength": 2, "maxLength": 1_000_000}
             ),
             "bindings": _nullable_schema({"type": "array", "maxItems": 500, "items": binding}),
+            "phase": {"type": "string", "enum": ["main", "cleanup"]},
+            "run_when": {
+                "type": "string",
+                "enum": ["success", "failure", "cancel", "always"],
+            },
+            "cleanup_for": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
+            "best_effort": {"type": "boolean"},
+            "cleanup_timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 300,
+            },
+            "cleanup_retry_budget": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+            },
         }
     )
     mapping_source = _strict_object(
@@ -386,6 +407,20 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
             },
         }
     )
+    run_policy = _strict_object(
+        {
+            "request_budget": _nullable_schema(
+                {"type": "integer", "minimum": 1, "maximum": 10_000}
+            ),
+            "max_runtime_seconds": _nullable_schema(
+                {"type": "integer", "minimum": 1, "maximum": 3600}
+            ),
+            "cleanup_request_budget": _nullable_schema(
+                {"type": "integer", "minimum": 1, "maximum": 1000}
+            ),
+            "force_cancel_skips_cleanup": {"type": "boolean"},
+        }
+    )
     return _strict_object(
         {
             "schema_version": {"type": "string", "minLength": 1, "maxLength": 32},
@@ -393,6 +428,7 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
             "nodes": {"type": "array", "minItems": 2, "maxItems": 1000, "items": node},
             "edges": {"type": "array", "maxItems": 5000, "items": edge},
             "settings": settings,
+            "run_policy": run_policy,
         }
     )
 
