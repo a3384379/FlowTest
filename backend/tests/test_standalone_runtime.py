@@ -545,10 +545,28 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
 async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None:
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's55-schema.db'}")
     execution_id = uuid4().hex
+    project_id = uuid4().hex
+    workflow_id = uuid4().hex
+    workflow_version_id = uuid4().hex
+    environment_id = uuid4().hex
+    actor_id = uuid4().hex
     async with test_engine.begin() as connection:
-        await connection.execute(
-            standalone_schema.text("CREATE TABLE environments (id CHAR(32) PRIMARY KEY)")
-        )
+        await connection.execute(standalone_schema.text("PRAGMA foreign_keys = ON"))
+        for table in ("projects", "workflows", "workflow_versions", "environments", "users"):
+            await connection.execute(
+                standalone_schema.text(f"CREATE TABLE {table} (id CHAR(32) PRIMARY KEY)")
+            )
+        for table, identifier in (
+            ("projects", project_id),
+            ("workflows", workflow_id),
+            ("workflow_versions", workflow_version_id),
+            ("environments", environment_id),
+            ("users", actor_id),
+        ):
+            await connection.execute(
+                standalone_schema.text(f"INSERT INTO {table} (id) VALUES (:id)"),
+                {"id": identifier},
+            )
         await connection.execute(
             standalone_schema.text(
                 "CREATE TABLE workflow_executions ("
@@ -573,11 +591,11 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
                 ":now, :id, :now, :now)"
             ),
             {
-                "project": uuid4().hex,
-                "workflow": uuid4().hex,
-                "version": uuid4().hex,
-                "environment": uuid4().hex,
-                "actor": uuid4().hex,
+                "project": project_id,
+                "workflow": workflow_id,
+                "version": workflow_version_id,
+                "environment": environment_id,
+                "actor": actor_id,
                 "now": now,
                 "id": execution_id,
             },
@@ -594,6 +612,7 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
                 "status VARCHAR(16) CHECK (status IN ('passed', 'failed', 'skipped', 'cancelled')))"
             )
         )
+        await connection.run_sync(Base.metadata.create_all)
 
         await standalone_schema._ensure_s55_schema(connection)
         await standalone_schema._ensure_s55_schema(connection)
@@ -622,6 +641,14 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
                 standalone_schema.text("PRAGMA table_info(sandbox_preview_approvals)")
             )
         ).fetchall()
+        approval_foreign_keys = (
+            await connection.execute(
+                standalone_schema.text("PRAGMA foreign_key_list(sandbox_preview_approvals)")
+            )
+        ).fetchall()
+        foreign_key_violations = (
+            await connection.execute(standalone_schema.text("PRAGMA foreign_key_check"))
+        ).fetchall()
         preserved = (
             await connection.execute(
                 standalone_schema.text(
@@ -647,6 +674,10 @@ async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None
     assert execution_contract["workflow_version_id"] is False
     assert approval_table == "sandbox_preview_approvals"
     assert "target_snapshot_fingerprint" in {str(row[1]) for row in approval_columns}
+    approval_targets = {str(row[2]) for row in approval_foreign_keys}
+    assert "workflow_executions" in approval_targets
+    assert "workflow_executions_0047_legacy" not in approval_targets
+    assert foreign_key_violations == []
     assert "'running'" in str(checkpoint_sql)
     assert "attempt >= 0" in str(checkpoint_sql)
     assert preserved == ("standard", "passed")

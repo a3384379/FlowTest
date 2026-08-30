@@ -177,13 +177,6 @@ async def _ensure_s55_schema(connection: AsyncConnection) -> None:
 
     approval_table = cast(Table, SandboxPreviewApproval.__table__)
     await connection.execute(CreateTable(approval_table, if_not_exists=True))
-    await _add_column_if_missing(
-        connection,
-        table="sandbox_preview_approvals",
-        column="target_snapshot_fingerprint",
-        definition="VARCHAR(64) NOT NULL DEFAULT ''",
-    )
-    await _ensure_table_indexes(connection, approval_table)
 
     workflow_table = cast(Table, WorkflowExecution.__table__)
     workflow_columns = await _table_column_contract(connection, workflow_table.name)
@@ -220,6 +213,29 @@ async def _ensure_s55_schema(connection: AsyncConnection) -> None:
     elif not workflow_columns:
         await connection.execute(CreateTable(workflow_table))
         await _ensure_table_indexes(connection, workflow_table)
+
+    approval_columns = await _table_column_contract(connection, approval_table.name)
+    approval_foreign_keys = (
+        await connection.execute(text("PRAGMA foreign_key_list(sandbox_preview_approvals)"))
+    ).fetchall()
+    approval_references_legacy_execution = any(
+        str(row[2]) == "workflow_executions_0047_legacy" for row in approval_foreign_keys
+    )
+    if approval_columns and approval_references_legacy_execution:
+        await _rebuild_table_from_metadata(
+            connection,
+            approval_table,
+            legacy_name="sandbox_preview_approvals_s55_legacy",
+        )
+    elif not approval_columns:
+        await connection.execute(CreateTable(approval_table))
+    await _add_column_if_missing(
+        connection,
+        table="sandbox_preview_approvals",
+        column="target_snapshot_fingerprint",
+        definition="VARCHAR(64) NOT NULL DEFAULT ''",
+    )
+    await _ensure_table_indexes(connection, approval_table)
 
     node_table = cast(Table, WorkflowNodeExecution.__table__)
     node_columns = await _table_column_contract(connection, node_table.name)
