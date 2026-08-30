@@ -20,6 +20,7 @@ from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import CleanupRunWhen, WorkflowDefinition
 from app.engine.scheduler import CancellationToken
 from app.models.api_assets import Environment, Secret
+from app.models.durable_execution import ExecutionCommand
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
@@ -262,6 +263,28 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     )
     assert production.status_code == 403
     assert production.json()["error"]["code"] == "PRODUCTION_PREVIEW_FORBIDDEN"
+
+    async with s51_context["sessions"]() as session:
+        environment = await session.get(Environment, s51_context["sandbox_environment_id"])
+        assert environment is not None
+        environment.headers = {"Host": "production.internal"}
+        await session.commit()
+    configured_routing_header = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert configured_routing_header.status_code == 409
+    assert configured_routing_header.json()["error"]["code"] == "PREVIEW_ROUTING_HEADER_FORBIDDEN"
+    async with s51_context["sessions"]() as session:
+        environment = await session.get(Environment, s51_context["sandbox_environment_id"])
+        assert environment is not None
+        environment.headers = {}
+        await session.commit()
 
     target_bound = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
@@ -552,6 +575,58 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
             == 0
         )
 
+    uncertain_approval = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert uncertain_approval.status_code == 201, uncertain_approval.text
+
+    async def fail_mark_dispatched(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("simulated dispatch status persistence failure")
+
+    with monkeypatch.context() as dispatch_patch:
+        dispatch_patch.setattr(
+            DurableExecutionService,
+            "mark_dispatched",
+            fail_mark_dispatched,
+        )
+        dispatch_uncertain = await client.post(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": "s55-preview-dispatch-uncertain",
+            },
+            json={
+                "project_id": str(s51_context["project_id"]),
+                "environment_id": str(s51_context["sandbox_environment_id"]),
+                "approval_id": uncertain_approval.json()["id"],
+                "runtime_variables": {},
+                "runtime_headers": {},
+            },
+        )
+    assert dispatch_uncertain.status_code == 202, dispatch_uncertain.text
+    uncertain_execution_id = UUID(dispatch_uncertain.json()["execution"]["id"])
+    async with s51_context["sessions"]() as session:
+        command = await session.scalar(
+            select(ExecutionCommand).where(ExecutionCommand.execution_id == uncertain_execution_id)
+        )
+        execution_model = await session.get(WorkflowExecution, uncertain_execution_id)
+        assert command is not None and command.status == "accepted"
+        assert execution_model is not None and execution_model.status == "running"
+        assert execution_model.error_code is None
+        await DurableExecutionService(session).mark_execution_command_completed(
+            uncertain_execution_id,
+            execution_status="passed",
+        )
+        await session.refresh(command)
+        assert command.status == "completed"
+    s51_context["coordinator"].plans.clear()
+
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
         f"{change_set_id}/preview-approvals",
@@ -618,7 +693,14 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         approval = await session.get(SandboxPreviewApproval, UUID(approval_id))
         assert approval is not None and approval.consumed_at is not None
         assert str(approval.execution_id) == execution["id"]
-        assert await session.scalar(select(func.count()).select_from(WorkflowExecution)) == 1
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(WorkflowExecution)
+                .where(WorkflowExecution.preview_approval_id == UUID(approval_id))
+            )
+            == 1
+        )
     assert len(s51_context["coordinator"].plans) == 1
     dispatched = s51_context["coordinator"].plans[0]
     assert dispatched.request_budget == 10

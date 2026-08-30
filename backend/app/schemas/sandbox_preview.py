@@ -4,23 +4,12 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from app.domain.sandbox_preview import PreviewBudget
+from app.domain.sandbox_preview import PreviewBudget, is_preview_routing_header
 from app.schemas.workflows import RuntimeVariableName, WorkflowExecutionResponse
-
-_PREVIEW_ROUTING_HEADERS = {
-    ":authority",
-    "forwarded",
-    "host",
-    "x-forwarded-host",
-    "x-forwarded-server",
-    "x-host",
-    "x-http-host-override",
-    "x-original-host",
-}
 
 
 def _reject_preview_routing_headers(headers: dict[str, str]) -> dict[str, str]:
-    blocked = sorted(name for name in headers if name.strip().lower() in _PREVIEW_ROUTING_HEADERS)
+    blocked = sorted(name for name in headers if is_preview_routing_header(name))
     if blocked:
         raise ValueError("Sandbox Preview runtime headers cannot override request routing")
     return headers

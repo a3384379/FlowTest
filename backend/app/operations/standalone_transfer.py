@@ -45,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from app.models import Base
 
 TRANSFER_SCHEMA_VERSION = "standalone-compact-transfer-v1"
-STANDALONE_SCHEMA_REVISION = "20260829_0047"
+STANDALONE_SCHEMA_REVISION = "20260830_0050"
 TRANSFER_DATA_CLASSIFICATION: dict[str, list[str]] = {
     "portable": [
         "durable_domain_records",

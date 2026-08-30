@@ -32,3 +32,20 @@ class PreviewBudget(BaseModel):
 
 MCP_PREVIEW_EXECUTE_SCOPE = "mcp:preview:execute"
 MCP_SANDBOX_PREVIEW_SERVER_VERSION = "s55-sandbox-preview-v1"
+
+_PREVIEW_ROUTING_HEADERS = frozenset(
+    {
+        ":authority",
+        "forwarded",
+        "host",
+        "x-forwarded-host",
+        "x-forwarded-server",
+        "x-host",
+        "x-http-host-override",
+        "x-original-host",
+    }
+)
+
+
+def is_preview_routing_header(name: str) -> bool:
+    return name.strip().lower() in _PREVIEW_ROUTING_HEADERS

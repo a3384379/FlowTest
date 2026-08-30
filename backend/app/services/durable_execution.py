@@ -204,7 +204,7 @@ class DurableExecutionService:
             select(ExecutionCommand)
             .where(
                 ExecutionCommand.execution_id == execution_id,
-                ExecutionCommand.status == "dispatched",
+                ExecutionCommand.status.in_(("accepted", "dispatched")),
             )
             .order_by(ExecutionCommand.created_at.desc())
             .with_for_update()

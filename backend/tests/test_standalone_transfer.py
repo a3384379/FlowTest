@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from sqlalchemy import Column, Date, Numeric, Time, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from app.core.standalone_schema import BASELINE_REVISION
 from app.domain.access import ProjectRole
 from app.models import Base
 from app.operations import standalone_transfer as transfer
@@ -40,6 +41,10 @@ from app.operations.standalone_transfer import (
     import_bundle,
     validate_bundle,
 )
+
+
+def test_transfer_revision_matches_standalone_baseline() -> None:
+    assert STANDALONE_SCHEMA_REVISION == BASELINE_REVISION
 
 
 async def _create_database(path: Path, *, target: bool = False) -> AsyncEngine:

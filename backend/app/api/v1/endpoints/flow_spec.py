@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
@@ -36,6 +37,7 @@ from app.services.idempotency import IdempotencyService
 from app.services.sandbox_preview import SandboxPreviewService
 
 router = APIRouter(prefix="/projects/{project_id}/flow-specs")
+logger = logging.getLogger(__name__)
 
 
 @router.get("/workflows/{workflow_id}/export", response_model=FlowSpecExportResponse)
@@ -312,9 +314,13 @@ async def execute_sandbox_preview(
         except Exception:
             await session.rollback()
             raise
+        response = SandboxPreviewExecutionResponse(
+            execution=WorkflowExecutionResponse.model_validate(execution)
+        )
+        execution_id = execution.id
+        command_id = command.id
         try:
             await coordinator.start(plan)
-            await DurableExecutionService(session).mark_dispatched(command.id)
         except Exception:
             await session.rollback()
             await DurableExecutionService(session).mark_failed(
@@ -323,9 +329,15 @@ async def execute_sandbox_preview(
                 error_message="Sandbox Preview 启动命令未能提交到执行运行时",
             )
             raise
-        return SandboxPreviewExecutionResponse(
-            execution=WorkflowExecutionResponse.model_validate(execution)
-        )
+        try:
+            await DurableExecutionService(session).mark_dispatched(command_id)
+        except Exception:
+            await session.rollback()
+            logger.exception(
+                "Sandbox Preview dispatch accepted but status persistence failed",
+                extra={"execution_id": str(execution_id), "command_id": str(command_id)},
+            )
+        return response
 
     response = await IdempotencyService(session).run(
         key=idempotency_key,

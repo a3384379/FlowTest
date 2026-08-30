@@ -36,7 +36,11 @@ from app.domain.protocols import (
     ProtocolSchemaError,
     validate_graphql_operation,
 )
-from app.domain.sandbox_preview import PreviewBudget, WorkflowRunPurpose
+from app.domain.sandbox_preview import (
+    PreviewBudget,
+    WorkflowRunPurpose,
+    is_preview_routing_header,
+)
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
@@ -48,6 +52,7 @@ from app.engine.contracts import (
     DatasetNodeConfig,
     ExtractNodeConfig,
     ForEachNodeConfig,
+    MappingTargetLocation,
     NodeType,
     RedisNodeConfig,
     SqlNodeConfig,
@@ -585,6 +590,7 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        _validate_preview_prepared_headers(prepared)
         prepared = _bounded_preview_prepared_workflow(prepared, budget)
         _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
         request_limits = _preview_request_limits(bounded, prepared, budget)
@@ -638,6 +644,7 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        _validate_preview_prepared_headers(prepared)
         prepared = _bounded_preview_prepared_workflow(prepared, budget)
         _validate_preview_target_classification(bounded, prepared.runs[0].subflows)
         _preview_request_limits(bounded, prepared, budget)
@@ -2102,6 +2109,17 @@ def _bounded_preview_definition(
     definition: WorkflowDefinition,
     budget: PreviewBudget,
 ) -> WorkflowDefinition:
+    if any(
+        mapping.target.location is MappingTargetLocation.HEADER
+        and is_preview_routing_header(mapping.target.key)
+        for edge in definition.edges
+        for mapping in edge.mappings
+    ):
+        raise AppError(
+            code="PREVIEW_ROUTING_HEADER_FORBIDDEN",
+            message="Sandbox Preview 禁止覆盖请求路由 Header",
+            status_code=409,
+        )
     cleanup_nodes = [node for node in definition.nodes if node.phase is WorkflowPhase.CLEANUP]
     if (
         not _preview_cleanup_covers_all_outcomes(cleanup_nodes)
@@ -2149,6 +2167,31 @@ def _preview_cleanup_covers_all_outcomes(cleanup_nodes: list[WorkflowNode]) -> b
         else:
             outcomes.add(node.run_when)
     return bool(coverage) and all(required <= outcomes for outcomes in coverage.values())
+
+
+def _validate_preview_prepared_headers(prepared: PreparedWorkflow) -> None:
+    for run in prepared.runs:
+        _validate_preview_run_headers(run)
+
+
+def _validate_preview_run_headers(run: PreparedExecution | PreparedSubflow) -> None:
+    blocked = sorted(
+        {
+            header.name
+            for request in run.requests.values()
+            for header in request.request.headers
+            if is_preview_routing_header(header.name)
+        }
+    )
+    if blocked:
+        raise AppError(
+            code="PREVIEW_ROUTING_HEADER_FORBIDDEN",
+            message="Sandbox Preview 最终请求禁止包含路由 Header",
+            status_code=409,
+            details={"headers": blocked},
+        )
+    for subflow in run.subflows.values():
+        _validate_preview_run_headers(subflow)
 
 
 def _prepared_preview_target_fingerprint(prepared: PreparedWorkflow) -> str:
