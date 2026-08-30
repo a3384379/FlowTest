@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.quality_intelligence import FailureObservation
 from app.domain.reporting import classify_failure
+from app.domain.sandbox_preview import WorkflowRunPurpose
 from app.models.contracts import DeploymentCompatibilityCheck
 from app.models.impact import CoverageSnapshot, ImpactRun, TestSelection
 from app.models.performance import PerformanceRun
@@ -115,6 +116,7 @@ class QualityIntelligenceRepository:
                         )
                         .where(
                             WorkflowExecution.project_id == project_id,
+                            WorkflowExecution.run_purpose == WorkflowRunPurpose.STANDARD.value,
                             WorkflowExecution.status == "failed",
                             WorkflowExecution.completed_at.is_not(None),
                             WorkflowExecution.completed_at <= ended_at,
@@ -166,6 +168,7 @@ class QualityIntelligenceRepository:
             .where(
                 WorkflowExecution.project_id == project_id,
                 WorkflowExecution.parent_execution_id.is_(None),
+                WorkflowExecution.run_purpose == WorkflowRunPurpose.STANDARD.value,
                 WorkflowExecution.status.in_(_OUTCOME_EXECUTION_STATUSES),
                 WorkflowExecution.started_at >= started_at,
                 WorkflowExecution.started_at < ended_at,
