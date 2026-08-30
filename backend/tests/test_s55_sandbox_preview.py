@@ -138,6 +138,22 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         assert endpoint is not None
         endpoint.base_url = original_base_url
         await session.commit()
+    input_changed = await client.post(
+        f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s55-preview-changed-input",
+        },
+        json={
+            "project_id": str(s51_context["project_id"]),
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "approval_id": target_bound.json()["id"],
+            "runtime_variables": {"host": "production.example.test"},
+            "runtime_headers": {},
+        },
+    )
+    assert input_changed.status_code == 409, input_changed.text
+    assert input_changed.json()["error"]["code"] == "PREVIEW_APPROVAL_INPUT_MISMATCH"
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
@@ -146,6 +162,7 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         json={
             "environment_id": str(s51_context["sandbox_environment_id"]),
             "executor_service_account_id": str(s51_context["service_account_id"]),
+            "runtime_variables": {"approved_target": "sandbox"},
             "budget": {
                 "max_nodes": 100,
                 "max_requests": 10,
@@ -161,7 +178,7 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         "project_id": str(s51_context["project_id"]),
         "environment_id": str(s51_context["sandbox_environment_id"]),
         "approval_id": approval_id,
-        "runtime_variables": {},
+        "runtime_variables": {"approved_target": "sandbox"},
         "runtime_headers": {},
     }
     execution_headers = {

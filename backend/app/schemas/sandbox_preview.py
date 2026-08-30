@@ -13,6 +13,8 @@ class SandboxPreviewApprovalCreate(BaseModel):
     environment_id: UUID
     budget: PreviewBudget = Field(default_factory=PreviewBudget)
     executor_service_account_id: UUID | None = None
+    runtime_variables: dict[RuntimeVariableName, str] = Field(default_factory=dict)
+    runtime_headers: dict[str, str] = Field(default_factory=dict)
     ttl_seconds: int = Field(default=300, ge=30, le=900)
 
 

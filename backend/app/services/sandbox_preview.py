@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -7,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.sandbox_preview import (
@@ -86,6 +88,10 @@ class SandboxPreviewService:
             change_set_id=change_set_id,
             environment_id=payload.environment_id,
             environment_fingerprint=environment_fingerprint,
+            runtime_input_fingerprint=_runtime_input_fingerprint(
+                payload.runtime_variables,
+                payload.runtime_headers,
+            ),
             executor_kind=executor_kind,
             executor_id=executor_id,
             proposal_fingerprint=proposal.visual.view.pipeline.fingerprint,
@@ -144,6 +150,10 @@ class SandboxPreviewService:
             proposal=proposal,
             environment_id=payload.environment_id,
             environment_fingerprint=environment_fingerprint,
+            runtime_input_fingerprint=_runtime_input_fingerprint(
+                payload.runtime_variables,
+                payload.runtime_headers,
+            ),
         )
         budget = PreviewBudget.model_validate(approval.budget)
         execution, plan = await self._workflows.prepare_preview_execution(
@@ -321,6 +331,7 @@ class SandboxPreviewService:
         proposal: PreviewableProposal,
         environment_id: UUID,
         environment_fingerprint: str,
+        runtime_input_fingerprint: str,
     ) -> None:
         if approval.consumed_at is not None or approval.execution_id is not None:
             raise AppError(
@@ -338,6 +349,15 @@ class SandboxPreviewService:
             raise AppError(
                 code="PREVIEW_APPROVAL_TARGET_CHANGED",
                 message="Sandbox Preview 环境目标在审批后已变更, 请重新审批",
+                status_code=409,
+            )
+        if not hmac.compare_digest(
+            approval.runtime_input_fingerprint,
+            runtime_input_fingerprint,
+        ):
+            raise AppError(
+                code="PREVIEW_APPROVAL_INPUT_MISMATCH",
+                message="Sandbox Preview 运行时输入与审批内容不匹配",
                 status_code=409,
             )
         executor_kind, executor_id = _current_executor(actor)
@@ -484,6 +504,26 @@ def _environment_target_fingerprint(
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _runtime_input_fingerprint(
+    runtime_variables: dict[str, str],
+    runtime_headers: dict[str, str],
+) -> str:
+    canonical = json.dumps(
+        {
+            "runtime_variables": runtime_variables,
+            "runtime_headers": runtime_headers,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hmac.new(
+        settings.secret_key.encode(),
+        canonical.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _snapshot_string(visual: FlowSpecVisualProposal, key: str) -> str | None:

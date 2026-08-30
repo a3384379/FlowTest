@@ -35,6 +35,7 @@ class SandboxPreviewApproval(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("environments.id", ondelete="RESTRICT"), index=True
     )
     environment_fingerprint: Mapped[str] = mapped_column(String(64))
+    runtime_input_fingerprint: Mapped[str] = mapped_column(String(64))
     executor_kind: Mapped[str] = mapped_column(String(24), index=True)
     executor_id: Mapped[UUID] = mapped_column(index=True)
     proposal_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
