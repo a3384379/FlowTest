@@ -58,6 +58,8 @@ def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str)
         '使用password="my secret phrase"进行请求',
         "使用client_secret=hunter2进行请求",
         "使用db_password=hunter2进行请求",
+        '提案包含 {"password":"hunter2"}',
+        "提案包含 {'client_secret':'hunter2'}",
     ],
 )
 def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:

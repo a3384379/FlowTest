@@ -310,6 +310,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             ('使用password="my secret phrase"进行请求', "my secret phrase"),
             ("使用client_secret=hunter2进行请求", "hunter2"),
             ("使用db_password=hunter2进行请求", "hunter2"),
+            ('提案包含 {"password":"hunter2"}', "hunter2"),
         )
     ):
         payload = _proposal_payload(s51_context, context, plan, compilation)
