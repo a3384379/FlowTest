@@ -410,12 +410,19 @@ class APIAssetService:
             definition.folder_id = folder_id
         if change_service:
             service = await self._validate_service(project_id=project_id, service_id=service_id)
-            definition.service_id = service_id
+            previous_service = await self._validate_service(
+                project_id=project_id,
+                service_id=definition.service_id,
+            )
             await self._create_service_rebound_version(
                 definition=definition,
+                previous_service_key=(
+                    previous_service.service_key if previous_service is not None else None
+                ),
                 service_key=service.service_key if service is not None else None,
                 actor_id=actor.id,
             )
+            definition.service_id = service_id
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -774,6 +781,7 @@ class APIAssetService:
         self,
         *,
         definition: APIDefinition,
+        previous_service_key: str | None,
         service_key: str | None,
         actor_id: UUID,
     ) -> None:
@@ -783,6 +791,16 @@ class APIAssetService:
         )
         if current is None:
             raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
+        if previous_service_key is not None:
+            for version in await self._assets.list_versions(definition.id):
+                if not version.canonical_contract:
+                    continue
+                stored = OperationContract.model_validate(version.canonical_contract)
+                if stored.service is not None:
+                    continue
+                backfilled = stored.model_copy(update={"service": previous_service_key})
+                version.canonical_contract = backfilled.model_dump(mode="json", by_alias=True)
+                version.contract_fingerprint = fingerprint_contract(backfilled)
         canonical_contract = deepcopy(current.canonical_contract)
         contract_fingerprint = current.contract_fingerprint
         if canonical_contract:

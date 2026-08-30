@@ -218,6 +218,8 @@ def _is_sensitive_parameter_name(name: str) -> bool:
 
 
 def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
+    if any(_is_sensitive_parameter_name(name) for name in payload.spec.variables):
+        return True
     for parameter in payload.spec.parameters:
         if parameter.value is None:
             continue

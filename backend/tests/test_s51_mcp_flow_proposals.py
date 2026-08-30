@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
@@ -349,6 +350,20 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert named_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
         assert "hunter2" not in named_secret.text
 
+    legacy_variable_payload = _proposal_payload(s51_context, context, plan, compilation)
+    legacy_variable_payload["spec"]["variables"] = {"access_key": "hunter2"}
+    legacy_variable = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-legacy-variable",
+        },
+        json={**legacy_variable_payload, "dry_run": False},
+    )
+    assert legacy_variable.status_code == 422
+    assert legacy_variable.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in legacy_variable.text
+
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
     safe_payload.pop("compilation")
@@ -633,7 +648,7 @@ def _proposal_payload(
         "project_id": str(context["project_id"]),
         "context_id": test_context["id"],
         "context_revision_id": test_context["revision"]["id"],
-        "spec": compilation["flow_spec"],
+        "spec": deepcopy(compilation["flow_spec"]),
         "integration_plan": plan,
         "compilation": compilation,
         "service_mappings": {"orders": str(context["service_id"])},

@@ -128,6 +128,14 @@ class OperationContract(BaseModel):
         return self.request
 
 
+def canonical_contract_service_key(payload: Mapping[str, JsonValue]) -> str | None:
+    service_key = payload.get("service")
+    if not isinstance(service_key, str):
+        return None
+    stripped = service_key.strip()
+    return stripped or None
+
+
 def fingerprint_contract(contract: OperationContract) -> str:
     return semantic_contract_fingerprint(
         contract.model_dump(mode="json", by_alias=True, exclude_none=False)

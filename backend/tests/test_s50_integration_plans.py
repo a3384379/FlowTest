@@ -59,6 +59,7 @@ from app.models.organizations import Organization
 from app.models.service_targets import Service
 from app.models.workflows import Workflow, WorkflowVersion
 from app.schemas.flow_spec import FlowSpecImportRequest
+from app.services.api_assets import APIAssetService
 from app.services.change_regression import ChangeRegressionService
 from app.services.flow_spec import FlowSpecImportProvenance, FlowSpecService
 from app.services.integration_plans import (
@@ -137,66 +138,66 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
     )
     session.add_all([old_service, current_service])
     await session.flush()
-    historical_contract = OperationContract(
+    legacy_contract = OperationContract(
         operation="orders.get",
         method="GET",
         path="/orders/{id}",
-        service=old_service.service_key,
+        service=None,
         responses={"200": ContractResponse(description="OK")},
         source_ref="contract://legacy-orders/orders.get",
         revision="1",
     )
-    current_contract = historical_contract.model_copy(
-        update={
-            "service": current_service.service_key,
-            "source_ref": "contract://orders/orders.get",
-            "revision": "2",
-        }
-    )
+    historical_contract = legacy_contract.model_copy(update={"service": old_service.service_key})
     definition = APIDefinition(
         project_id=project.id,
         folder_id=None,
-        service_id=current_service.id,
+        service_id=old_service.id,
         name="orders.get",
         description="",
-        current_version=2,
+        current_version=1,
         is_active=True,
         import_key="orders.get",
-        import_fingerprint=fingerprint_contract(current_contract),
+        import_fingerprint=fingerprint_contract(legacy_contract),
         import_source="s50-history-test",
         import_source_key="orders.get",
         created_by_id=actor.id,
     )
     session.add(definition)
     await session.flush()
-    session.add_all(
-        [
-            APIVersion(
-                api_definition_id=definition.id,
-                version=version_number,
-                method=contract.method,
-                path=contract.path,
-                query_parameters=[],
-                headers={},
-                variables={},
-                body_kind="none",
-                body=None,
-                auth_kind="none",
-                auth_config={},
-                extraction_rules=[],
-                assertions=[],
-                canonical_contract=contract.model_dump(mode="json", by_alias=True),
-                contract_fingerprint=fingerprint_contract(contract),
-                contract_completeness="complete",
-                created_by_id=actor.id,
-            )
-            for version_number, contract in (
-                (1, historical_contract),
-                (2, current_contract),
-            )
-        ]
+    session.add(
+        APIVersion(
+            api_definition_id=definition.id,
+            version=1,
+            method=legacy_contract.method,
+            path=legacy_contract.path,
+            query_parameters=[],
+            headers={},
+            variables={},
+            body_kind="none",
+            body=None,
+            auth_kind="none",
+            auth_config={},
+            extraction_rules=[],
+            assertions=[],
+            canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
+            contract_fingerprint=fingerprint_contract(legacy_contract),
+            contract_completeness="complete",
+            created_by_id=actor.id,
+        )
     )
     await session.commit()
+
+    await APIAssetService(session).update_definition(
+        actor=actor,
+        project_id=project.id,
+        definition_id=definition.id,
+        name=None,
+        description=None,
+        folder_id=None,
+        change_folder=False,
+        service_id=current_service.id,
+        change_service=True,
+    )
 
     resolved_contract = await TestEngineeringService(session).contract_for_api(
         project_id=project.id,
@@ -216,6 +217,26 @@ async def test_historical_api_contract_keeps_its_original_service_identity(
     assert regression_contract.service == old_service.service_key
     assert identity.service_key == old_service.service_key
     assert identity.contract_fingerprint == fingerprint_contract(historical_contract)
+
+    current_contract = await TestEngineeringService(session).contract_for_api(
+        project_id=project.id,
+        definition_id=definition.id,
+        version_number=2,
+    )
+    assert current_contract.service == current_service.service_key
+
+    portable = await FlowSpecService(session)._portable_spec(
+        definition=WorkflowDefinition.model_validate(_auth_workflow_definition(definition.id)),
+        project_id=project.id,
+        name="Pinned legacy service",
+        description="",
+        evidence=[],
+    )
+    portable_payload = portable.model_dump(mode="json")
+    assert portable_payload["services"][0]["ref"] == old_service.service_key
+    assert portable_payload["operations"][0]["service_ref"] == old_service.service_key
+    request_node = next(node for node in portable_payload["nodes"] if node["id"] == "login")
+    assert request_node["target"]["service_ref"] == old_service.service_key
 
 
 def test_golden_plan_compiles_to_executable_traceable_flowspec() -> None:

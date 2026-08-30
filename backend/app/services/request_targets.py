@@ -19,6 +19,7 @@ from app.domain.api_assets import TEMPLATE_PATTERN, build_variables, render_temp
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.request_targets import ResolvedRequestTarget
 from app.domain.scopes import HeaderScope, ResolvedValue
+from app.domain.test_engineering import canonical_contract_service_key
 from app.models.access import Project, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.service_targets import Service
@@ -26,14 +27,6 @@ from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
 
 SYSTEM_HEADERS = {"User-Agent": "FlowTest/0.1", "Accept": "*/*"}
-
-
-def _version_service_key(version: APIVersion) -> str | None:
-    service_key = version.canonical_contract.get("service")
-    if not isinstance(service_key, str):
-        return None
-    stripped = service_key.strip()
-    return stripped or None
 
 
 class RequestTargetResolver:
@@ -258,7 +251,7 @@ class RequestTargetResolver:
             )
             if service is None:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
-        elif version_service_key := _version_service_key(version):
+        elif version_service_key := canonical_contract_service_key(version.canonical_contract):
             service = await self._targets.find_service_by_key(
                 project_id=project_id,
                 service_key=version_service_key,

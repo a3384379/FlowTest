@@ -46,6 +46,7 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
+from app.domain.test_engineering import canonical_contract_service_key
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -1006,6 +1007,7 @@ class FlowSpecService:
             service = await self._portable_target_service(
                 project_id=project_id,
                 service_override=config.service_override,
+                version_service_key=canonical_contract_service_key(api_version.canonical_contract),
                 definition_service_id=api_definition.service_id,
             )
             service_ref = service.service_key if service is not None else None
@@ -1080,11 +1082,16 @@ class FlowSpecService:
         *,
         project_id: UUID,
         service_override: str | None,
+        version_service_key: str | None,
         definition_service_id: UUID | None,
     ) -> Service | None:
         if service_override is not None:
             service = await self._targets.find_service_by_key(
                 project_id=project_id, service_key=service_override
+            )
+        elif version_service_key is not None:
+            service = await self._targets.find_service_by_key(
+                project_id=project_id, service_key=version_service_key
             )
         elif definition_service_id is not None:
             service = await self._targets.get_service(definition_service_id)
