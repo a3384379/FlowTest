@@ -92,7 +92,6 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         column="variables",
         definition="JSON NOT NULL DEFAULT '{}'",
     )
-    await _ensure_api_version_service_identity(connection)
     await _add_column_if_missing(
         connection,
         table="api_versions",
@@ -128,6 +127,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         )
     await _ensure_default_organization(connection)
     await _ensure_default_targets(connection)
+    await _ensure_api_version_service_identity(connection)
     await connection.execute(
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
@@ -393,9 +393,10 @@ async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
 async def _ensure_api_version_service_identity(connection: AsyncConnection) -> None:
     columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
     column_names = {str(row[1]) for row in columns.fetchall()}
-    if not column_names or "service_id" in column_names:
+    if not column_names:
         return
-    await connection.execute(text("ALTER TABLE api_versions ADD COLUMN service_id CHAR(32)"))
+    if "service_id" not in column_names:
+        await connection.execute(text("ALTER TABLE api_versions ADD COLUMN service_id CHAR(32)"))
     definition_columns = await connection.execute(text("PRAGMA table_info(api_definitions)"))
     if "service_id" in {str(row[1]) for row in definition_columns.fetchall()}:
         await connection.execute(
@@ -403,7 +404,7 @@ async def _ensure_api_version_service_identity(connection: AsyncConnection) -> N
                 "UPDATE api_versions SET service_id = ("
                 "SELECT api_definitions.service_id FROM api_definitions "
                 "WHERE api_definitions.id = api_versions.api_definition_id"
-                ")"
+                ") WHERE service_id IS NULL"
             )
         )
     await connection.execute(

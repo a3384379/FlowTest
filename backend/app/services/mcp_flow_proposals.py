@@ -198,6 +198,8 @@ def _has_sensitive_parameter_literal(payload: FlowSpecProposalRequest) -> bool:
 
 
 def _has_sensitive_mapping_literal(value: object) -> bool:
+    if isinstance(value, list):
+        return any(_has_sensitive_mapping_literal(item) for item in value)
     if not isinstance(value, dict):
         return False
     named_value = value.get("name")
@@ -211,8 +213,6 @@ def _has_sensitive_mapping_literal(value: object) -> bool:
         if is_sensitive_identifier(str(name)) and _contains_unsafe_literal(child):
             return True
         if _has_sensitive_mapping_literal(child):
-            return True
-        if isinstance(child, list) and any(_has_sensitive_mapping_literal(item) for item in child):
             return True
     return False
 

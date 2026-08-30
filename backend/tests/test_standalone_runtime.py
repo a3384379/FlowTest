@@ -724,13 +724,22 @@ async def test_standalone_api_version_service_identity_is_backfilled_once(tmp_pa
             )
         )
         await connection.execute(
-            standalone_schema.text("INSERT INTO api_definitions VALUES ('api-1', 'service-old')")
+            standalone_schema.text("INSERT INTO api_definitions VALUES ('api-1', NULL)")
         )
         await connection.execute(
             standalone_schema.text("INSERT INTO api_versions VALUES ('version-1', 'api-1')")
         )
         await standalone_schema._ensure_api_version_service_identity(connection)
-        first = await connection.scalar(
+        before_target_backfill = await connection.scalar(
+            standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "UPDATE api_definitions SET service_id = 'service-old' WHERE id = 'api-1'"
+            )
+        )
+        await standalone_schema._ensure_api_version_service_identity(connection)
+        after_target_backfill = await connection.scalar(
             standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
         )
         await connection.execute(
@@ -739,13 +748,14 @@ async def test_standalone_api_version_service_identity_is_backfilled_once(tmp_pa
             )
         )
         await standalone_schema._ensure_api_version_service_identity(connection)
-        second = await connection.scalar(
+        after_definition_change = await connection.scalar(
             standalone_schema.text("SELECT service_id FROM api_versions WHERE id = 'version-1'")
         )
 
     await test_engine.dispose()
-    assert first == "service-old"
-    assert second == "service-old"
+    assert before_target_backfill is None
+    assert after_target_backfill == "service-old"
+    assert after_definition_change == "service-old"
 
 
 @pytest.mark.asyncio

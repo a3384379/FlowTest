@@ -399,6 +399,15 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             ({"body": {"kind": "json", "value": {"password": 1234}}}, "1234"),
             ({"body": {"kind": "json", "value": {"password": True}}}, None),
             (
+                {
+                    "body": {
+                        "kind": "json",
+                        "value": {"matrix": [[{"password": "abc"}]]},
+                    }
+                },
+                "abc",
+            ),
+            (
                 {"query_parameters": [{"name": "access_key", "value": "abc", "enabled": True}]},
                 "abc",
             ),
