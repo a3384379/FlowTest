@@ -11,9 +11,11 @@ from test_s51_mcp_flow_proposals import (
     s51_context,  # noqa: F401 - imported pytest fixture
 )
 
+from app.core.encryption import secret_box
 from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import WorkflowDefinition
+from app.models.api_assets import Secret
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
@@ -181,6 +183,93 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     )
     assert input_changed.status_code == 409, input_changed.text
     assert input_changed.json()["error"]["code"] == "PREVIEW_APPROVAL_INPUT_MISMATCH"
+
+    async with s51_context["sessions"]() as session:
+        endpoint = await session.scalar(
+            select(ServiceEndpoint).where(
+                ServiceEndpoint.environment_id == s51_context["sandbox_environment_id"]
+            )
+        )
+        assert endpoint is not None
+        endpoint.base_url = "https://{{secret.host}}"
+        endpoint.secret_refs = ["host"]
+        associated_data = (
+            f"{s51_context['project_id']}:{s51_context['sandbox_environment_id']}:host".encode()
+        )
+        encrypted = secret_box.encrypt(
+            "sandbox.example.test",
+            associated_data=associated_data,
+        )
+        secret = Secret(
+            project_id=s51_context["project_id"],
+            environment_id=s51_context["sandbox_environment_id"],
+            name="host",
+            ciphertext=encrypted.ciphertext,
+            nonce=encrypted.nonce,
+            created_by_id=endpoint.created_by_id,
+        )
+        session.add(secret)
+        await session.commit()
+    secret_bound = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert secret_bound.status_code == 201, secret_bound.text
+    async with s51_context["sessions"]() as session:
+        secret = await session.scalar(
+            select(Secret).where(
+                Secret.environment_id == s51_context["sandbox_environment_id"],
+                Secret.name == "host",
+            )
+        )
+        assert secret is not None
+        encrypted = secret_box.encrypt(
+            "production.example.test",
+            associated_data=(
+                f"{s51_context['project_id']}:{s51_context['sandbox_environment_id']}:host"
+            ).encode(),
+        )
+        secret.ciphertext = encrypted.ciphertext
+        secret.nonce = encrypted.nonce
+        await session.commit()
+    secret_changed = await client.post(
+        f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s55-preview-changed-secret",
+        },
+        json={
+            "project_id": str(s51_context["project_id"]),
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "approval_id": secret_bound.json()["id"],
+            "runtime_variables": {},
+            "runtime_headers": {},
+        },
+    )
+    assert secret_changed.status_code == 409, secret_changed.text
+    assert secret_changed.json()["error"]["code"] == "PREVIEW_APPROVAL_TARGET_CHANGED"
+    async with s51_context["sessions"]() as session:
+        endpoint = await session.scalar(
+            select(ServiceEndpoint).where(
+                ServiceEndpoint.environment_id == s51_context["sandbox_environment_id"]
+            )
+        )
+        secret = await session.scalar(
+            select(Secret).where(
+                Secret.environment_id == s51_context["sandbox_environment_id"],
+                Secret.name == "host",
+            )
+        )
+        assert endpoint is not None and secret is not None
+        endpoint.base_url = original_base_url
+        endpoint.secret_refs = []
+        await session.delete(secret)
+        await session.commit()
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"

@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260829_0047"
+BASELINE_REVISION = "20260830_0050"
 
 
 async def initialize_standalone_database() -> None:
@@ -67,6 +67,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_s47_test_design_columns(connection)
     await _ensure_change_regression_tables(connection)
     await _ensure_semantic_gap_waiver_revision_schema(connection)
+    await _ensure_s55_schema(connection)
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -133,7 +134,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044', '20260823_0045', '20260828_0046')"
+            "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
+            "'20260830_0048', '20260830_0049')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -144,10 +146,150 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "('20260822_0032', '20260822_0033', '20260822_0034', '20260822_0035', "
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
-            "'20260823_0044', '20260823_0045', '20260828_0046')"
+            "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
+            "'20260830_0048', '20260830_0049')"
         ),
         {"revision": BASELINE_REVISION},
     )
+
+
+async def _ensure_s55_schema(connection: AsyncConnection) -> None:
+    """Upgrade pre-S55 Standalone SQLite schemas without Alembic."""
+
+    from app.models.durable_execution import ExecutionCheckpoint
+    from app.models.sandbox_preview import SandboxPreviewApproval
+    from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+
+    await _add_column_if_missing(
+        connection,
+        table="environments",
+        column="classification",
+        definition="VARCHAR(24) NOT NULL DEFAULT 'unclassified'",
+    )
+    environment_columns = await _table_column_contract(connection, "environments")
+    if "classification" in environment_columns:
+        await connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_environments_classification "
+                "ON environments (classification)"
+            )
+        )
+
+    approval_table = cast(Table, SandboxPreviewApproval.__table__)
+    await connection.execute(CreateTable(approval_table, if_not_exists=True))
+    await _ensure_table_indexes(connection, approval_table)
+
+    workflow_table = cast(Table, WorkflowExecution.__table__)
+    workflow_columns = await _table_column_contract(connection, workflow_table.name)
+    workflow_required = {
+        "run_purpose",
+        "source_change_set_id",
+        "preview_approval_id",
+        "preview_budget",
+        "preview_evidence",
+        "main_status",
+        "cleanup_status",
+        "cleanup_report",
+        "force_cancel_requested_at",
+        "force_cancel_reason",
+    }
+    workflow_ids_nullable = all(
+        name in workflow_columns and not workflow_columns[name]
+        for name in ("workflow_id", "workflow_version_id")
+    )
+    if workflow_columns and (
+        not workflow_required.issubset(workflow_columns) or not workflow_ids_nullable
+    ):
+        await _rebuild_table_from_metadata(
+            connection,
+            workflow_table,
+            legacy_name="workflow_executions_0047_legacy",
+        )
+        await connection.execute(
+            text(
+                "UPDATE workflow_executions SET main_status = status "
+                "WHERE main_status IS NULL AND status IN ('passed', 'failed', 'cancelled')"
+            )
+        )
+    elif not workflow_columns:
+        await connection.execute(CreateTable(workflow_table))
+        await _ensure_table_indexes(connection, workflow_table)
+
+    node_table = cast(Table, WorkflowNodeExecution.__table__)
+    node_columns = await _table_column_contract(connection, node_table.name)
+    if node_columns and not {"phase", "best_effort"}.issubset(node_columns):
+        await _rebuild_table_from_metadata(
+            connection,
+            node_table,
+            legacy_name="workflow_node_executions_0047_legacy",
+        )
+    elif not node_columns:
+        await connection.execute(CreateTable(node_table))
+        await _ensure_table_indexes(connection, node_table)
+
+    checkpoint_table = cast(Table, ExecutionCheckpoint.__table__)
+    checkpoint_columns = await _table_column_contract(connection, checkpoint_table.name)
+    checkpoint_sql = await connection.scalar(
+        text(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'execution_checkpoints'"
+        )
+    )
+    checkpoint_contract_current = (
+        checkpoint_columns
+        and {"phase", "best_effort"}.issubset(checkpoint_columns)
+        and "'running'" in str(checkpoint_sql or "")
+        and "attempt >= 0" in str(checkpoint_sql or "")
+    )
+    if checkpoint_columns and not checkpoint_contract_current:
+        await _rebuild_table_from_metadata(
+            connection,
+            checkpoint_table,
+            legacy_name="execution_checkpoints_0047_legacy",
+        )
+    elif not checkpoint_columns:
+        await connection.execute(CreateTable(checkpoint_table))
+        await _ensure_table_indexes(connection, checkpoint_table)
+
+
+async def _table_column_contract(
+    connection: AsyncConnection,
+    table: str,
+) -> dict[str, bool]:
+    rows = (await connection.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+    return {str(row[1]): bool(row[3]) for row in rows}
+
+
+async def _rebuild_table_from_metadata(
+    connection: AsyncConnection,
+    table: Table,
+    *,
+    legacy_name: str,
+) -> None:
+    """Rebuild a SQLite table while preserving every compatible legacy column."""
+
+    legacy_columns = await _table_column_contract(connection, table.name)
+    if not legacy_columns:
+        await connection.execute(CreateTable(table, if_not_exists=True))
+        await _ensure_table_indexes(connection, table)
+        return
+    await _drop_table_indexes(connection, table.name)
+    await connection.execute(text("PRAGMA defer_foreign_keys = ON"))
+    await connection.execute(text("PRAGMA legacy_alter_table = ON"))
+    try:
+        await connection.execute(text(f'ALTER TABLE "{table.name}" RENAME TO "{legacy_name}"'))
+        await connection.execute(CreateTable(table))
+        common_columns = [column.name for column in table.columns if column.name in legacy_columns]
+        quoted_columns = ", ".join(f'"{name}"' for name in common_columns)
+        await connection.execute(
+            text(
+                f'INSERT INTO "{table.name}" ({quoted_columns}) '  # noqa: S608
+                f'SELECT {quoted_columns} FROM "{legacy_name}"'
+            )
+        )
+        await connection.execute(text(f'DROP TABLE "{legacy_name}"'))
+    finally:
+        await connection.execute(text("PRAGMA legacy_alter_table = OFF"))
+    await _ensure_table_indexes(connection, table)
 
 
 async def _ensure_s42_controlled_write_tables(connection: AsyncConnection) -> None:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.context import get_tenant_context
+from app.core.encryption import EncryptedValue, secret_box
 from app.core.errors import AppError
 from app.domain.sandbox_preview import (
     MCP_PREVIEW_EXECUTE_SCOPE,
@@ -18,7 +19,7 @@ from app.domain.sandbox_preview import (
 )
 from app.models.access import User
 from app.models.ai import AIChangeSet
-from app.models.api_assets import Environment
+from app.models.api_assets import Environment, Secret
 from app.models.organizations import ServiceAccount
 from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.service_targets import ServiceEndpoint
@@ -321,7 +322,29 @@ class SandboxPreviewService:
                 )
             ).all()
         )
-        return _environment_target_fingerprint(environment, endpoints)
+        secrets = list(
+            (
+                await self._session.scalars(
+                    select(Secret)
+                    .where(
+                        Secret.project_id == environment.project_id,
+                        (Secret.environment_id.is_(None))
+                        | (Secret.environment_id == environment.id),
+                    )
+                    .order_by(
+                        Secret.environment_id.nulls_first(),
+                        Secret.name,
+                        Secret.id,
+                    )
+                )
+            ).all()
+        )
+        secret_fingerprints = [_secret_value_fingerprint(secret) for secret in secrets]
+        return _environment_target_fingerprint(
+            environment,
+            endpoints,
+            secret_fingerprints=secret_fingerprints,
+        )
 
     def _validate_approval(
         self,
@@ -467,6 +490,8 @@ def _snapshot_uuid(visual: FlowSpecVisualProposal, key: str) -> UUID | None:
 def _environment_target_fingerprint(
     environment: Environment,
     endpoints: list[ServiceEndpoint],
+    *,
+    secret_fingerprints: list[dict[str, str]] | None = None,
 ) -> str:
     payload = {
         "environment": {
@@ -501,9 +526,38 @@ def _environment_target_fingerprint(
             }
             for endpoint in endpoints
         ],
+        "secret_fingerprints": secret_fingerprints or [],
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _secret_value_fingerprint(secret: Secret) -> dict[str, str]:
+    associated_data = _secret_associated_data(
+        secret.project_id,
+        secret.environment_id,
+        secret.name,
+    )
+    plaintext = secret_box.decrypt(
+        EncryptedValue(ciphertext=secret.ciphertext, nonce=secret.nonce),
+        associated_data=associated_data,
+    )
+    scope = str(secret.environment_id) if secret.environment_id is not None else "project"
+    digest = hmac.new(
+        settings.secret_key.encode(),
+        f"{secret.project_id}:{scope}:{secret.name}\0{plaintext}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return {"scope": scope, "name": secret.name, "digest": digest}
+
+
+def _secret_associated_data(
+    project_id: UUID,
+    environment_id: UUID | None,
+    name: str,
+) -> bytes:
+    environment = str(environment_id) if environment_id is not None else "project"
+    return f"{project_id}:{environment}:{name}".encode()
 
 
 def _runtime_input_fingerprint(
