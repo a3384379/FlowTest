@@ -22,6 +22,7 @@ from app.services.test_contexts import ProposableContext, TestContextService
 
 MCP_FLOW_PROPOSE_SCOPE = "mcp:flow:propose"
 _SECRET_TEMPLATE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
+_SECRET_REFERENCE = re.compile(r"secret://[A-Za-z0-9._:/-]+")
 
 
 class MCPFlowProposalService:
@@ -214,12 +215,14 @@ def _contains_unsafe_literal(value: object) -> bool:
     if value is None or value == "":
         return False
     if isinstance(value, str):
-        return not value.startswith("secret://") and _SECRET_TEMPLATE.search(value) is None
+        return (
+            _SECRET_REFERENCE.fullmatch(value) is None and _SECRET_TEMPLATE.fullmatch(value) is None
+        )
     if isinstance(value, dict):
         return any(_contains_unsafe_literal(child) for child in value.values())
     if isinstance(value, list):
         return any(_contains_unsafe_literal(child) for child in value)
-    return False
+    return True
 
 
 def require_mcp_flow_propose_scope() -> UUID:

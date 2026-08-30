@@ -379,10 +379,25 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert legacy_variable.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
     assert "hunter2" not in legacy_variable.text
 
-    for index, request_overrides in enumerate(
+    for index, (request_overrides, literal) in enumerate(
         (
-            {"headers": {"X-Access-Key": "abc"}},
-            {"body": {"kind": "json", "value": {"password": "abc"}}},
+            ({"headers": {"X-Access-Key": "abc"}}, "abc"),
+            ({"body": {"kind": "json", "value": {"password": "abc"}}}, "abc"),
+            (
+                {"body": {"kind": "json", "value": {"password": "hunter2 {{suffix}}"}}},
+                "hunter2",
+            ),
+            (
+                {
+                    "body": {
+                        "kind": "json",
+                        "value": {"password": "secret://golden/ref hunter2"},
+                    }
+                },
+                "hunter2",
+            ),
+            ({"body": {"kind": "json", "value": {"password": 1234}}}, "1234"),
+            ({"body": {"kind": "json", "value": {"password": True}}}, None),
         )
     ):
         override_payload = _proposal_payload(s51_context, context, plan, compilation)
@@ -400,7 +415,8 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         )
         assert overridden.status_code == 422
         assert overridden.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-        assert "abc" not in overridden.text
+        if literal is not None:
+            assert literal not in overridden.text
 
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
@@ -413,6 +429,10 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
             "secret_ref": "secret://golden/orders-token",
         }
     ]
+    safe_api_node = next(node for node in safe_payload["spec"]["nodes"] if node["kind"] == "http")
+    safe_api_node["config"]["request_overrides"] = {
+        "headers": {"X-Access-Key": "{{secret.orders_token}}"}
+    }
     validated_safe_payload = FlowSpecProposalRequest.model_validate(safe_payload)
     assert first_sensitive_value(validated_safe_payload.model_dump(mode="json")) is None
     safe_response = await s51_context["client"].post(
