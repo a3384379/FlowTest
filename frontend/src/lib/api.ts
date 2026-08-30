@@ -1200,7 +1200,7 @@ export type FailureCategory =
 
 export type ReportExecution = {
   id: string
-  workflow_id: string
+  workflow_id: string | null
   workflow_name: string
   workflow_version: number
   status: 'running' | 'passed' | 'failed' | 'cancelled'

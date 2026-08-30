@@ -12,7 +12,7 @@ WebhookName = Annotated[str, Field(min_length=1, max_length=160)]
 
 class ReportExecutionResponse(BaseModel):
     id: UUID
-    workflow_id: UUID
+    workflow_id: UUID | None
     workflow_name: str
     workflow_version: int
     status: str

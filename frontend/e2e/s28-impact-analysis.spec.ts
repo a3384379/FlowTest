@@ -24,6 +24,7 @@ test('S28 Git 变更经显式映射形成可解释推荐集合与覆盖矩阵', 
     .getByText(/OpenAPI 契约 · s28-browser\.json/)
     .last()
     .click()
+  await page.keyboard.press('Escape')
   const mapped = page.waitForResponse(
     (item) => item.url().endsWith('/impact/mappings') && item.request().method() === 'POST',
   )

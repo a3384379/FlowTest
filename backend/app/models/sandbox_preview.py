@@ -13,12 +13,12 @@ class SandboxPreviewApproval(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint(
             "executor_kind IN ('user', 'service_account')",
-            name="sandbox_preview_approval_executor_kind",
+            name="preview_approval_executor_kind",
         ),
         CheckConstraint(
             "(consumed_at IS NULL AND execution_id IS NULL) OR "
             "(consumed_at IS NOT NULL AND execution_id IS NOT NULL)",
-            name="sandbox_preview_approval_consumption",
+            name="preview_approval_consumption",
         ),
     )
 
@@ -45,7 +45,13 @@ class SandboxPreviewApproval(UuidPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     execution_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("workflow_executions.id", ondelete="RESTRICT"), index=True
+        ForeignKey(
+            "workflow_executions.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_sandbox_preview_approvals_execution_id_workflow_executions",
+        ),
+        index=True,
     )
     created_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True

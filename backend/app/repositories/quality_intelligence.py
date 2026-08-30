@@ -136,6 +136,8 @@ class QualityIntelligenceRepository:
                     first_failure_evidence.setdefault(root_id, (evidence_execution, node))
         observations = []
         for execution, workflow_name in failed_rows:
+            if execution.workflow_id is None:
+                continue
             evidence_execution, failed_node = first_failure_evidence.get(
                 execution.id, (execution, None)
             )

@@ -61,12 +61,12 @@ def _create_preview_approvals() -> None:
         ),
         sa.CheckConstraint(
             "executor_kind IN ('user', 'service_account')",
-            name="sandbox_preview_approval_executor_kind",
+            name=op.f("ck_sandbox_preview_approvals_preview_approval_executor_kind"),
         ),
         sa.CheckConstraint(
             "(consumed_at IS NULL AND execution_id IS NULL) OR "
             "(consumed_at IS NOT NULL AND execution_id IS NOT NULL)",
-            name="sandbox_preview_approval_consumption",
+            name=op.f("ck_sandbox_preview_approvals_preview_approval_consumption"),
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],

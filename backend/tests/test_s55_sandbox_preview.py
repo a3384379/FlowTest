@@ -149,3 +149,11 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         "remaining": 8,
     }
     assert completed.preview_evidence["redactions"] == []
+
+    report = await client.get(
+        f"/api/v1/projects/{s51_context['project_id']}/reports/executions/{execution['id']}",
+        headers=s51_context["user_headers"],
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["summary"]["workflow_id"] is None
+    assert report.json()["summary"]["workflow_name"] == "Sandbox Preview"
