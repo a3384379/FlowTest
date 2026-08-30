@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -566,6 +567,69 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
         assert environment is not None
         environment.classification = "sandbox"
         await session.commit()
+
+    expiring_approval = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert expiring_approval.status_code == 201, expiring_approval.text
+
+    async def prepare_then_expire_approval(
+        service: WorkflowService,
+        **kwargs: Any,
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan | WorkflowBatchPlan]:
+        execution, plan = await original_prepare(service, **kwargs)
+        approval = await service._session.get(
+            SandboxPreviewApproval,
+            kwargs["approval_id"],
+        )
+        assert approval is not None
+        approval.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        return execution, plan
+
+    with monkeypatch.context() as expiry_patch:
+        expiry_patch.setattr(
+            WorkflowService,
+            "prepare_preview_execution",
+            prepare_then_expire_approval,
+        )
+        expired_during_prepare = await client.post(
+            f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": "s55-preview-expired-during-prepare",
+            },
+            json={
+                "project_id": str(s51_context["project_id"]),
+                "environment_id": str(s51_context["sandbox_environment_id"]),
+                "approval_id": expiring_approval.json()["id"],
+                "runtime_variables": {},
+                "runtime_headers": {},
+            },
+        )
+    assert expired_during_prepare.status_code == 409, expired_during_prepare.text
+    assert expired_during_prepare.json()["error"]["code"] == "PREVIEW_APPROVAL_EXPIRED"
+    async with s51_context["sessions"]() as session:
+        approval = await session.get(
+            SandboxPreviewApproval,
+            UUID(expiring_approval.json()["id"]),
+        )
+        assert approval is not None
+        assert approval.consumed_at is None
+        assert approval.execution_id is None
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(WorkflowExecution)
+                .where(WorkflowExecution.preview_approval_id == approval.id)
+            )
+            == 0
+        )
 
     rollback_approval = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"

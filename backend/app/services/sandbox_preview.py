@@ -209,7 +209,10 @@ class SandboxPreviewService:
         except AppError:
             await self._workflows.discard_prepared_execution(execution.id)
             raise
-        now = datetime.now(UTC)
+        now = await self._revalidate_approval_expiry(
+            approval=approval,
+            execution_id=execution.id,
+        )
         approval.consumed_at = now
         approval.execution_id = execution.id
         self._audit.record(
@@ -232,6 +235,22 @@ class SandboxPreviewService:
         else:
             await self._session.flush()
         return execution, plan
+
+    async def _revalidate_approval_expiry(
+        self,
+        *,
+        approval: SandboxPreviewApproval,
+        execution_id: UUID,
+    ) -> datetime:
+        now = datetime.now(UTC)
+        if _as_utc(approval.expires_at) > now:
+            return now
+        await self._workflows.discard_prepared_execution(execution_id)
+        raise AppError(
+            code="PREVIEW_APPROVAL_EXPIRED",
+            message="Sandbox Preview 一次性 Approval 已过期",
+            status_code=409,
+        )
 
     async def _previewable(
         self,
