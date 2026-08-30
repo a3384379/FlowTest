@@ -29,12 +29,53 @@ from app.domain.test_contexts import (
     ExternalEvidenceEnvelope,
     JavaExternalEvidenceStructuredData,
     finding_semantic_fingerprint,
+    first_sensitive_value,
 )
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
 RUOYI_ROOT = FIXTURE_ROOT.parents[4] / "RuoYi"
 PROJECT_ID = "00000000-0000-0000-0000-000000000001"
 SUBJECT_REF = f"flowtest://projects/{PROJECT_ID}/operations/orders"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Use https://alice:hunter2@example.com/resource for this import",
+        "访问https://alice:hunter2@example.com/resource",
+    ],
+)
+def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str) -> None:
+    assert first_sensitive_value({"statement": value}) == "$.statement"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "使用Bearer AbCdEf1234567890进行请求",
+        "使用Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==进行请求",
+        "Use Bearer abc",
+        "Use Basic abc",
+        "使用password=hunter2进行请求",
+        '使用password="my secret phrase"进行请求',
+        "使用client_secret=hunter2进行请求",
+        "使用db_password=hunter2进行请求",
+        '提案包含 {"password":"hunter2"}',
+        "提案包含 {'client_secret':'hunter2'}",
+        "使用password=abc进行请求",
+        "使用credentials=abc进行请求",
+        "使用private_signing_key=abc进行请求",
+        "使用_password=abc进行请求",
+        '提案包含 {"_password":"abc"}',
+    ],
+)
+def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:
+    assert first_sensitive_value({"description": value}) == "$.description"
+
+
+def test_sensitive_scan_allows_declared_secret_references() -> None:
+    assert first_sensitive_value({"secret_ref": "secret://golden/orders-token"}) is None
+    assert first_sensitive_value({"credential_refs": ["secret://golden/orders-token"]}) is None
 
 
 def test_java_and_database_contracts_adapt_to_revisioned_external_evidence() -> None:

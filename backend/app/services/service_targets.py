@@ -6,17 +6,17 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.network import OutboundNetworkPolicy
 from app.models.access import Project, User
-from app.models.api_assets import APIDefinition, Environment
+from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.release_gate import ReleasePolicy
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import TestPlan, TestPlanItem
-from app.models.workflows import Workflow
+from app.models.workflows import Workflow, WorkflowVersion
 from app.repositories.service_targets import ServiceTargetRepository
 from app.services.audit import AuditService
 from app.services.outbound import OutboundRequestGuard, outbound_request_guard
@@ -145,12 +145,43 @@ class ServiceTargetService:
     ) -> dict[str, object]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         service = await self._get_service(project_id=project_id, service_id=service_id)
+        default_environment_ids = set(
+            (
+                await self._session.scalars(
+                    select(Environment.id).where(
+                        Environment.project_id == project_id,
+                        Environment.default_service_id == service_id,
+                    )
+                )
+            ).all()
+        )
+        affected_version_filter = APIVersion.service_id == service_id
+        if default_environment_ids:
+            affected_version_filter = or_(
+                affected_version_filter,
+                APIVersion.service_id.is_(None),
+            )
         apis = list(
             (
                 await self._session.scalars(
-                    select(APIDefinition).where(
+                    select(APIDefinition)
+                    .join(APIVersion, APIVersion.api_definition_id == APIDefinition.id)
+                    .where(
                         APIDefinition.project_id == project_id,
-                        APIDefinition.service_id == service_id,
+                        affected_version_filter,
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        affected_versions = list(
+            (
+                await self._session.scalars(
+                    select(APIVersion)
+                    .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
+                    .where(
+                        APIDefinition.project_id == project_id,
+                        affected_version_filter,
                     )
                 )
             ).all()
@@ -162,14 +193,67 @@ class ServiceTargetService:
                 )
             ).all()
         )
-        api_ids = {str(api.id) for api in apis}
-        affected_workflows = [
+        explicit_version_refs = {
+            (str(version.api_definition_id), version.version)
+            for version in affected_versions
+            if version.service_id == service_id
+        }
+        default_version_refs = {
+            (str(version.api_definition_id), version.version)
+            for version in affected_versions
+            if version.service_id is None
+        }
+        draft_version_refs = explicit_version_refs | default_version_refs
+        current_versions = {str(api.id): api.current_version for api in apis}
+        draft_affected_workflows = [
             workflow
             for workflow in workflows
-            if _workflow_uses_service(workflow.draft_definition, service.service_key, api_ids)
+            if _workflow_uses_service(
+                workflow.draft_definition,
+                service.service_key,
+                draft_version_refs,
+                current_versions,
+            )
         ]
-        workflow_ids = {workflow.id for workflow in affected_workflows}
-        plans = await self._affected_plans(project_id, workflow_ids)
+        referenced_versions = (
+            await self._session.execute(
+                select(TestPlanItem, WorkflowVersion, Environment.default_service_id)
+                .join(TestPlan, TestPlan.id == TestPlanItem.test_plan_id)
+                .join(
+                    WorkflowVersion,
+                    and_(
+                        WorkflowVersion.workflow_id == TestPlanItem.workflow_id,
+                        WorkflowVersion.version == TestPlanItem.workflow_version,
+                    ),
+                )
+                .join(Environment, Environment.id == TestPlanItem.environment_id)
+                .where(
+                    TestPlan.project_id == project_id,
+                    TestPlanItem.target_type == "workflow",
+                )
+            )
+        ).all()
+        published_workflow_ids: set[UUID] = set()
+        affected_plan_ids: set[UUID] = set()
+        for item, version, environment_default_service_id in referenced_versions:
+            version_refs = explicit_version_refs
+            if environment_default_service_id == service_id:
+                version_refs = version_refs | default_version_refs
+            if _workflow_uses_service(
+                version.definition,
+                service.service_key,
+                version_refs,
+                current_versions,
+            ):
+                published_workflow_ids.add(version.workflow_id)
+                affected_plan_ids.add(item.test_plan_id)
+        affected_workflow_ids = {
+            workflow.id for workflow in draft_affected_workflows
+        } | published_workflow_ids
+        affected_workflows = [
+            workflow for workflow in workflows if workflow.id in affected_workflow_ids
+        ]
+        plans = await self._affected_plans(project_id, affected_plan_ids)
         release_policies = (
             list(
                 (
@@ -188,7 +272,7 @@ class ServiceTargetService:
             "strategy": "request_target_dependency_v1",
             "service_id": service.id,
             "service_key": service.service_key,
-            "affected_apis": [_impact_item(api, "API 默认 Service") for api in apis],
+            "affected_apis": [_impact_item(api, "API 版本绑定 Service") for api in apis],
             "affected_workflows": [
                 _impact_item(workflow, "Workflow 节点继承或覆盖 Service")
                 for workflow in affected_workflows
@@ -207,19 +291,15 @@ class ServiceTargetService:
             ],
         }
 
-    async def _affected_plans(self, project_id: UUID, workflow_ids: set[UUID]) -> list[TestPlan]:
-        if not workflow_ids:
+    async def _affected_plans(self, project_id: UUID, plan_ids: set[UUID]) -> list[TestPlan]:
+        if not plan_ids:
             return []
         return list(
             (
                 await self._session.scalars(
-                    select(TestPlan)
-                    .join(TestPlanItem, TestPlanItem.test_plan_id == TestPlan.id)
-                    .where(
-                        TestPlan.project_id == project_id,
-                        TestPlanItem.workflow_id.in_(workflow_ids),
+                    select(TestPlan).where(
+                        TestPlan.project_id == project_id, TestPlan.id.in_(plan_ids)
                     )
-                    .distinct()
                 )
             ).all()
         )
@@ -550,24 +630,41 @@ def _health_url(endpoint: ServiceEndpoint) -> str:
 
 
 def _workflow_uses_service(
-    definition: dict[str, object], service_key: str, api_ids: set[str]
+    definition: dict[str, object],
+    service_key: str,
+    version_refs: set[tuple[str, int]],
+    current_versions: dict[str, int],
 ) -> bool:
     nodes = definition.get("nodes")
     if not isinstance(nodes, list):
         return False
-    return any(_node_uses_service(node, service_key, api_ids) for node in nodes)
+    return any(
+        _node_uses_service(node, service_key, version_refs, current_versions) for node in nodes
+    )
 
 
-def _node_uses_service(node: object, service_key: str, api_ids: set[str]) -> bool:
+def _node_uses_service(
+    node: object,
+    service_key: str,
+    version_refs: set[tuple[str, int]],
+    current_versions: dict[str, int],
+) -> bool:
     if not isinstance(node, dict):
         return False
     config = node.get("config")
     if not isinstance(config, dict):
         return False
-    return (
-        config.get("service_override") == service_key
-        or str(config.get("api_definition_id")) in api_ids
+    service_override = config.get("service_override")
+    if service_override is not None:
+        return isinstance(service_override, str) and service_override == service_key
+    definition_id = str(config.get("api_definition_id"))
+    configured_version = config.get("api_version")
+    version = (
+        configured_version
+        if isinstance(configured_version, int)
+        else current_versions.get(definition_id)
     )
+    return version is not None and (definition_id, version) in version_refs
 
 
 class _ImpactNamed(Protocol):

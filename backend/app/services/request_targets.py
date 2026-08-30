@@ -20,7 +20,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.domain.request_targets import ResolvedRequestTarget
 from app.domain.scopes import HeaderScope, ResolvedValue
 from app.models.access import Project, User
-from app.models.api_assets import APIDefinition, APIVersion, Environment
+from app.models.api_assets import APIVersion, Environment
 from app.models.service_targets import Service
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
@@ -43,7 +43,6 @@ class RequestTargetResolver:
         actor: User,
         project_id: UUID,
         environment: Environment,
-        definition: APIDefinition,
         version: APIVersion,
         path: str,
         node_service_override: str | None,
@@ -60,7 +59,7 @@ class RequestTargetResolver:
         service = await self._select_service(
             project_id=project_id,
             environment=environment,
-            definition=definition,
+            version=version,
             node_service_override=node_service_override,
         )
         endpoint = None
@@ -237,7 +236,7 @@ class RequestTargetResolver:
         *,
         project_id: UUID,
         environment: Environment,
-        definition: APIDefinition,
+        version: APIVersion,
         node_service_override: str | None,
     ) -> Service | None:
         service: Service | None = None
@@ -248,8 +247,8 @@ class RequestTargetResolver:
             )
             if service is None:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
-        elif definition.service_id is not None:
-            service = await self._targets.get_service(definition.service_id)
+        elif version.service_id is not None:
+            service = await self._targets.get_service(version.service_id)
         elif environment.default_service_id is not None:
             service = await self._targets.get_service(environment.default_service_id)
         if service is not None:

@@ -14,6 +14,7 @@ from app.domain.flow_spec import (
     FlowSpecAssertion,
     FlowSpecEdge,
     FlowSpecNode,
+    FlowSpecOperation,
     FlowSpecParameter,
     FlowSpecParameterSource,
     assess_flow_spec_compatibility,
@@ -22,9 +23,12 @@ from app.domain.flow_spec import (
     normalize_flow_spec,
     validate_flow_spec,
 )
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.api_assets import APIVersion
+from app.services.flow_spec import _operation_contract_matches
 
 ADMIN_EMAIL = "flowspec-admin@example.com"
 ADMIN_PASSWORD = "flowspec-password-123!"
@@ -154,6 +158,32 @@ def test_v3_fingerprint_includes_version_strategy_and_contract_identity() -> Non
     )
 
     assert flow_spec_fingerprint(pinned) != flow_spec_fingerprint(current)
+
+
+def test_flowspec_mapping_accepts_legacy_null_service_contract_fingerprint() -> None:
+    legacy_contract = OperationContract(
+        operation="legacy_health",
+        method="GET",
+        path="/health",
+        service=None,
+    )
+    legacy_fingerprint = fingerprint_contract(legacy_contract)
+    version = APIVersion(
+        canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
+        contract_fingerprint=legacy_fingerprint,
+    )
+    operation = FlowSpecOperation(
+        ref="operation:billing:health",
+        service_ref="billing",
+        name="Billing health",
+        method="GET",
+        path="/health",
+        version_strategy="pinned",
+        source_version=1,
+        contract_fingerprint=legacy_fingerprint,
+    )
+
+    assert _operation_contract_matches(version, operation)
 
 
 def test_flowspec_diff_and_compatibility_report_reviewable_changes() -> None:
@@ -517,8 +547,20 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         flow_spec_client, headers, "Source"
     )
     target_project, target_service, target_api = await _create_portable_assets(
-        flow_spec_client, headers, "Target"
+        flow_spec_client, headers, "Target", service_key="orders-v2"
     )
+    source_override = await flow_spec_client.post(
+        f"/api/v1/projects/{source_project}/services",
+        headers=headers,
+        json={"service_key": "routing", "name": "Source routing"},
+    )
+    target_override = await flow_spec_client.post(
+        f"/api/v1/projects/{target_project}/services",
+        headers=headers,
+        json={"service_key": "routing", "name": "Target routing"},
+    )
+    assert source_override.status_code == 201, source_override.text
+    assert target_override.status_code == 201, target_override.text
     for project_id, api_id, versions in (
         (source_project, source_api, (2, 3)),
         (target_project, target_api, (2, 3, 4)),
@@ -559,7 +601,7 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
                         "config": {
                             "api_definition_id": source_api,
                             "api_version": 1,
-                            "service_override": "orders",
+                            "service_override": "routing",
                             "endpoint_variant": "canary",
                             "request_overrides": {
                                 "headers": {},
@@ -601,11 +643,11 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     assert spec["operations"][0]["source_version"] == 1
     assert spec["operations"][0]["api_version"] is None
     assert len(spec["operations"][0]["contract_fingerprint"]) == 64
-    service_ref = spec["services"][0]["ref"]
     request_node = next(node for node in spec["nodes"] if node["id"] == "request")
     assert request_node["operation_ref"] == operation_ref
+    assert spec["operations"][0]["service_ref"] == "orders"
     assert request_node["target"] == {
-        "service_ref": "orders",
+        "service_ref": "routing",
         "endpoint_variant": "canary",
     }
     assert source_api not in str(spec)
@@ -615,7 +657,10 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         headers=headers,
         json={
             "spec": spec,
-            "service_mappings": {service_ref: source_service},
+            "service_mappings": {
+                "orders": source_service,
+                "routing": source_override.json()["id"],
+            },
             "operation_mappings": {operation_ref: source_api},
         },
     )
@@ -627,7 +672,10 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         headers=headers,
         json={
             "spec": spec,
-            "service_mappings": {service_ref: target_service},
+            "service_mappings": {
+                "orders": target_service,
+                "routing": target_override.json()["id"],
+            },
             "operation_mappings": {operation_ref: target_api},
         },
     )
@@ -652,7 +700,7 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         node for node in materialized.json()["draft_definition"]["nodes"] if node["id"] == "request"
     )["config"]
     assert config["api_definition_id"] == target_api
-    assert config["service_override"] == "orders"
+    assert config["service_override"] == "routing"
     assert config["endpoint_variant"] == "canary"
     assert config["api_version"] == 1
     assert config["request_overrides"]["auth_disabled"] is True
@@ -836,7 +884,11 @@ async def test_test_engineering_proposal_materializes_existing_assets(
 
 
 async def _create_portable_assets(
-    client: AsyncClient, headers: dict[str, str], label: str
+    client: AsyncClient,
+    headers: dict[str, str],
+    label: str,
+    *,
+    service_key: str = "orders",
 ) -> tuple[str, str, str]:
     project = await client.post(
         "/api/v1/projects", headers=headers, json={"name": f"{label} portable project"}
@@ -846,7 +898,7 @@ async def _create_portable_assets(
     service = await client.post(
         f"/api/v1/projects/{project_id}/services",
         headers=headers,
-        json={"service_key": "orders", "name": f"{label} orders"},
+        json={"service_key": service_key, "name": f"{label} orders"},
     )
     assert service.status_code == 201, service.text
     api = await client.post(

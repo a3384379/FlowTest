@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260830_0050"
+BASELINE_REVISION = "20260831_0051"
 
 
 async def initialize_standalone_database() -> None:
@@ -127,6 +127,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
         )
     await _ensure_default_organization(connection)
     await _ensure_default_targets(connection)
+    await _ensure_api_version_service_identity(connection)
     await connection.execute(
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
@@ -135,7 +136,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049')"
+            "'20260830_0048', '20260830_0049', '20260830_0050')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -147,7 +148,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049')"
+            "'20260830_0048', '20260830_0049', '20260830_0050')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -387,6 +388,31 @@ async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
             column=column,
             definition=definition,
         )
+
+
+async def _ensure_api_version_service_identity(connection: AsyncConnection) -> None:
+    columns = await connection.execute(text("PRAGMA table_info(api_versions)"))
+    column_names = {str(row[1]) for row in columns.fetchall()}
+    if not column_names:
+        return
+    service_identity_added = "service_id" not in column_names
+    if service_identity_added:
+        await connection.execute(text("ALTER TABLE api_versions ADD COLUMN service_id CHAR(32)"))
+    definition_columns = await connection.execute(text("PRAGMA table_info(api_definitions)"))
+    if service_identity_added and "service_id" in {
+        str(row[1]) for row in definition_columns.fetchall()
+    }:
+        await connection.execute(
+            text(
+                "UPDATE api_versions SET service_id = ("
+                "SELECT api_definitions.service_id FROM api_definitions "
+                "WHERE api_definitions.id = api_versions.api_definition_id"
+                ")"
+            )
+        )
+    await connection.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_api_versions_service_id ON api_versions (service_id)")
+    )
 
 
 async def _ensure_s471_api_version_contracts(connection: AsyncConnection) -> None:

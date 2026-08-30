@@ -75,7 +75,7 @@ class TestEngineeringService:
         )
         if version is None:
             raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
-        service_key = await self._service_key(project_id, definition)
+        service_key = await self._service_key(project_id, version.service_id)
         if version.canonical_contract:
             try:
                 stored = OperationContract.model_validate(version.canonical_contract)
@@ -87,7 +87,7 @@ class TestEngineeringService:
                 ) from error
             return stored.model_copy(
                 update={
-                    "service": service_key,
+                    "service": stored.service,
                     "source_ref": (
                         stored.source_ref
                         or f"api-definition://{definition.id}/version/{version.version}"
@@ -121,10 +121,10 @@ class TestEngineeringService:
             completeness="legacy_partial",
         )
 
-    async def _service_key(self, project_id: UUID, definition: APIDefinition) -> str | None:
-        if definition.service_id is None:
+    async def _service_key(self, project_id: UUID, service_id: UUID | None) -> str | None:
+        if service_id is None:
             return None
-        service = await self._targets.get_service(definition.service_id)
+        service = await self._targets.get_service(service_id)
         if service is None or service.project_id != project_id:
             raise AppError(
                 code="SERVICE_NOT_FOUND", message="API 关联的 Service 不存在", status_code=404

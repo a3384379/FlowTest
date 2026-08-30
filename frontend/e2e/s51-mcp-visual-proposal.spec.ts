@@ -65,7 +65,10 @@ test('S51 MCP Draft 可视化审阅后只应用到 Workflow Draft', async ({ pag
   const accessToken = await refreshAccessToken(page.request)
   const userHeaders = { Authorization: `Bearer ${accessToken}` }
   const organizationId = await firstOrganizationId(page.request, userHeaders)
-  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  // Decimal millisecond timestamps can look like phone/card literals to the
+  // proposal security scanner. Base36 keeps the fixture unique without
+  // introducing deliberately sensitive-looking test data.
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
   const project = await createProject(page.request, organizationId, suffix, userHeaders)
   const account = await createServiceAccount(
     page.request,

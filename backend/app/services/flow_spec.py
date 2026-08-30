@@ -46,6 +46,7 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -806,7 +807,7 @@ class FlowSpecService:
         service_id: UUID | None,
     ) -> list[APIDefinition]:
         query = (
-            select(APIDefinition)
+            select(APIDefinition, APIVersion)
             .join(APIVersion, APIVersion.api_definition_id == APIDefinition.id)
             .where(
                 APIDefinition.project_id == project_id,
@@ -814,21 +815,20 @@ class FlowSpecService:
                 APIVersion.method == operation.method,
                 APIVersion.path == operation.path,
             )
-            .distinct()
         )
         if operation.version_strategy == "current":
             query = query.where(APIVersion.version == APIDefinition.current_version)
-            if operation.contract_fingerprint is not None:
-                query = query.where(
-                    APIVersion.contract_fingerprint == operation.contract_fingerprint
-                )
-        elif operation.contract_fingerprint is not None:
-            query = query.where(APIVersion.contract_fingerprint == operation.contract_fingerprint)
-        elif operation.api_version is not None:
+        elif operation.contract_fingerprint is None and operation.api_version is not None:
             query = query.where(APIVersion.version == operation.api_version)
         if service_id is not None:
-            query = query.where(APIDefinition.service_id == service_id)
-        candidates = list((await self._session.scalars(query)).all())
+            query = query.where(APIVersion.service_id == service_id)
+        rows = (await self._session.execute(query)).all()
+        candidates_by_id = {
+            definition.id: definition
+            for definition, version in rows
+            if _operation_contract_matches(version, operation)
+        }
+        candidates = list(candidates_by_id.values())
         semantic_key = operation.ref.rsplit(":", 1)[-1]
         exact = [item for item in candidates if item.import_key == semantic_key]
         return exact if exact else candidates
@@ -854,25 +854,16 @@ class FlowSpecService:
         version_number = requested_version
         if version_number is None and operation.version_strategy == "current":
             version_number = definition.current_version
-        version_identity = (
-            APIVersion.version == version_number
-            if version_number is not None
-            else (
-                APIVersion.contract_fingerprint == operation.contract_fingerprint
-                if operation.contract_fingerprint is not None
-                else APIVersion.version == operation.api_version
-            )
-        )
-        versions = list(
-            (
-                await self._session.scalars(
-                    select(APIVersion).where(
-                        APIVersion.api_definition_id == definition.id,
-                        version_identity,
-                    )
-                )
-            ).all()
-        )
+        version_query = select(APIVersion).where(APIVersion.api_definition_id == definition.id)
+        if version_number is not None:
+            version_query = version_query.where(APIVersion.version == version_number)
+        elif operation.contract_fingerprint is None:
+            version_query = version_query.where(APIVersion.version == operation.api_version)
+        versions = list((await self._session.scalars(version_query)).all())
+        if operation.contract_fingerprint is not None:
+            versions = [
+                version for version in versions if _operation_contract_matches(version, operation)
+            ]
         if len(versions) != 1:
             raise _mapping_error(
                 code="FLOWSPEC_API_VERSION_INCOMPATIBLE",
@@ -880,9 +871,8 @@ class FlowSpecService:
                 path=f"$.operation_mappings.{operation.ref}",
             )
         version = versions[0]
-        if (
-            operation.contract_fingerprint is not None
-            and version.contract_fingerprint != operation.contract_fingerprint
+        if operation.contract_fingerprint is not None and not _operation_contract_matches(
+            version, operation
         ):
             raise _mapping_error(
                 code="FLOWSPEC_API_VERSION_INCOMPATIBLE",
@@ -898,7 +888,7 @@ class FlowSpecService:
                 message=f"Operation {operation.ref} 的 method/path 与目标 API 不一致",
                 path=f"$.operation_mappings.{operation.ref}",
             )
-        if expected_service_id is not None and definition.service_id != expected_service_id:
+        if expected_service_id is not None and version.service_id != expected_service_id:
             raise _mapping_error(
                 code="FLOWSPEC_OPERATION_SERVICE_MISMATCH",
                 message=f"Operation {operation.ref} 与目标 Service 不一致",
@@ -1003,38 +993,50 @@ class FlowSpecService:
             api_definition, api_version = await self._portable_api_asset(
                 project_id=project_id, config=config
             )
-            service = await self._portable_target_service(
+            operation_service = await self._portable_target_service(
+                project_id=project_id,
+                service_override=None,
+                version_service_id=api_version.service_id,
+            )
+            target_service = await self._portable_target_service(
                 project_id=project_id,
                 service_override=config.service_override,
-                definition_service_id=api_definition.service_id,
+                version_service_id=api_version.service_id,
             )
-            service_ref = service.service_key if service is not None else None
+            operation_service_ref = (
+                operation_service.service_key if operation_service is not None else None
+            )
+            target_service_ref = target_service.service_key if target_service is not None else None
             operation_ref = _portable_operation_ref(
-                service_ref=service_ref,
+                service_ref=operation_service_ref,
                 definition=api_definition,
                 version=api_version,
             )
             operation_refs[node.id] = operation_ref
             targets[node.id] = FlowSpecNodeTarget(
-                service_ref=service_ref,
+                service_ref=target_service_ref,
                 endpoint_variant=config.endpoint_variant,
             )
             operations[operation_ref] = FlowSpecOperation(
                 ref=operation_ref,
-                service_ref=service_ref,
+                service_ref=operation_service_ref,
                 name=api_definition.name,
                 method=api_version.method,
                 path=api_version.path,
                 version_strategy="pinned" if config.api_version is not None else "current",
                 source_version=api_version.version,
-                contract_fingerprint=api_version.contract_fingerprint,
+                contract_fingerprint=_portable_contract_fingerprint(
+                    api_version,
+                    service_ref=operation_service_ref,
+                ),
             )
-            if service is not None:
-                services[service.service_key] = PortableService(
-                    ref=service.service_key,
-                    name=service.name,
-                    service_type=service.service_type,
-                )
+            for service in (operation_service, target_service):
+                if service is not None:
+                    services[service.service_key] = PortableService(
+                        ref=service.service_key,
+                        name=service.name,
+                        service_type=service.service_type,
+                    )
         converter = (
             workflow_definition_to_flow_spec_v2
             if any(node.phase.value == "cleanup" for node in definition.nodes)
@@ -1080,14 +1082,14 @@ class FlowSpecService:
         *,
         project_id: UUID,
         service_override: str | None,
-        definition_service_id: UUID | None,
+        version_service_id: UUID | None,
     ) -> Service | None:
         if service_override is not None:
             service = await self._targets.find_service_by_key(
                 project_id=project_id, service_key=service_override
             )
-        elif definition_service_id is not None:
-            service = await self._targets.get_service(definition_service_id)
+        elif version_service_id is not None:
+            service = await self._targets.get_service(version_service_id)
         else:
             return None
         if service is None or service.project_id != project_id:
@@ -1363,6 +1365,32 @@ def _mapping_error(*, code: str, message: str, path: str) -> AppError:
         status_code=422,
         details={"blockers": [{"code": code, "message": message, "path": path}]},
     )
+
+
+def _portable_contract_fingerprint(
+    version: APIVersion,
+    *,
+    service_ref: str | None,
+) -> str | None:
+    if not version.canonical_contract:
+        return version.contract_fingerprint
+    contract = OperationContract.model_validate(version.canonical_contract).model_copy(
+        update={"service": service_ref}
+    )
+    return fingerprint_contract(contract)
+
+
+def _operation_contract_matches(version: APIVersion, operation: FlowSpecOperation) -> bool:
+    fingerprint = operation.contract_fingerprint
+    if fingerprint is None:
+        return True
+    return fingerprint in {
+        version.contract_fingerprint,
+        _portable_contract_fingerprint(
+            version,
+            service_ref=operation.service_ref,
+        ),
+    }
 
 
 def _spec_json(spec: FlowSpec | FlowSpecV2) -> dict[str, JsonValue]:

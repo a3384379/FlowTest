@@ -1,5 +1,6 @@
 import re
 from base64 import b64encode
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -315,7 +316,7 @@ class APIAssetService:
     ) -> tuple[APIDefinition, APIVersion]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_folder(project_id=project_id, folder_id=folder_id)
-        await self._validate_service(project_id=project_id, service_id=service_id)
+        service = await self._validate_service(project_id=project_id, service_id=service_id)
         definition = APIDefinition(
             project_id=project_id,
             folder_id=folder_id,
@@ -330,9 +331,11 @@ class APIAssetService:
         await self._session.flush()
         version = self._version_model(
             definition_id=definition.id,
+            service_id=service_id,
             version=1,
             actor_id=actor.id,
             request=request,
+            service_key=service.service_key if service is not None else None,
         )
         self._assets.add(version)
         await self._session.flush()
@@ -359,11 +362,17 @@ class APIAssetService:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
         definition = await self._get_definition(project_id, definition_id)
         next_version = definition.current_version + 1
+        service = await self._validate_service(
+            project_id=project_id,
+            service_id=definition.service_id,
+        )
         version = self._version_model(
             definition_id=definition.id,
+            service_id=definition.service_id,
             version=next_version,
             actor_id=actor.id,
             request=request,
+            service_key=service.service_key if service is not None else None,
         )
         self._assets.add(version)
         definition.current_version = next_version
@@ -402,7 +411,13 @@ class APIAssetService:
             await self._validate_folder(project_id=project_id, folder_id=folder_id)
             definition.folder_id = folder_id
         if change_service:
-            await self._validate_service(project_id=project_id, service_id=service_id)
+            service = await self._validate_service(project_id=project_id, service_id=service_id)
+            await self._create_service_rebound_version(
+                definition=definition,
+                service_id=service_id,
+                service_key=service.service_key if service is not None else None,
+                actor_id=actor.id,
+            )
             definition.service_id = service_id
         self._audit.record(
             actor_user_id=actor.id,
@@ -476,7 +491,6 @@ class APIAssetService:
             actor=actor,
             project_id=project_id,
             environment=environment,
-            definition=_definition,
             version=api_version,
             path=api_version.path,
             node_service_override=service_override,
@@ -679,12 +693,19 @@ class APIAssetService:
 
     @staticmethod
     def _version_model(
-        *, definition_id: UUID, version: int, actor_id: UUID, request: APIVersionSpec
+        *,
+        definition_id: UUID,
+        service_id: UUID | None,
+        version: int,
+        actor_id: UUID,
+        request: APIVersionSpec,
+        service_key: str | None,
     ) -> APIVersion:
         _validate_headers(request.headers)
-        contract = _partial_contract(request)
+        contract = _partial_contract(request).model_copy(update={"service": service_key})
         return APIVersion(
             api_definition_id=definition_id,
+            service_id=service_id,
             version=version,
             method=request.method.value,
             path=request.path,
@@ -740,12 +761,65 @@ class APIAssetService:
         await self._session.flush()
         return service
 
-    async def _validate_service(self, *, project_id: UUID, service_id: UUID | None) -> None:
+    async def _validate_service(
+        self,
+        *,
+        project_id: UUID,
+        service_id: UUID | None,
+    ) -> Service | None:
         if service_id is None:
-            return
+            return None
         service = await self._targets.get_service(service_id)
         if service is None or service.project_id != project_id:
             raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        return service
+
+    async def _create_service_rebound_version(
+        self,
+        *,
+        definition: APIDefinition,
+        service_id: UUID | None,
+        service_key: str | None,
+        actor_id: UUID,
+    ) -> None:
+        current = await self._assets.get_version(
+            definition_id=definition.id,
+            version=definition.current_version,
+        )
+        if current is None:
+            raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
+        canonical_contract = deepcopy(current.canonical_contract)
+        contract_fingerprint = current.contract_fingerprint
+        if canonical_contract:
+            contract = OperationContract.model_validate(canonical_contract).model_copy(
+                update={"service": service_key}
+            )
+            canonical_contract = contract.model_dump(mode="json", by_alias=True)
+            contract_fingerprint = fingerprint_contract(contract)
+        next_version = definition.current_version + 1
+        self._assets.add(
+            APIVersion(
+                api_definition_id=definition.id,
+                service_id=service_id,
+                version=next_version,
+                method=current.method,
+                path=current.path,
+                query_parameters=deepcopy(current.query_parameters),
+                headers=deepcopy(current.headers),
+                variables=deepcopy(current.variables),
+                body_kind=current.body_kind,
+                body=deepcopy(current.body),
+                auth_kind=current.auth_kind,
+                auth_config=deepcopy(current.auth_config),
+                extraction_rules=deepcopy(current.extraction_rules),
+                assertions=deepcopy(current.assertions),
+                canonical_contract=canonical_contract,
+                contract_fingerprint=contract_fingerprint,
+                contract_completeness=current.contract_completeness,
+                created_by_id=actor_id,
+            )
+        )
+        definition.current_version = next_version
 
     async def _sync_default_endpoint(
         self,

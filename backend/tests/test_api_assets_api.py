@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.main import app
 from app.models import Base
 from app.models.access import User
@@ -548,7 +549,168 @@ async def test_service_endpoint_resolution_and_snapshot(
         },
     )
     assert created.status_code == 201, created.text
+    created_version = created.json()["version"]
+    created_contract = OperationContract.model_validate(created_version["canonical_contract"])
+    assert created_contract.service == "auth"
+    assert created_version["contract_fingerprint"] == fingerprint_contract(created_contract)
     definition_id = created.json()["definition"]["id"]
+    created_version_two = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/versions",
+        headers=headers,
+        json={
+            "method": "GET",
+            "path": "/users/{{layer}}",
+            "variables": {"layer": "api"},
+            "headers": {"X-Layer": "api"},
+            "body_kind": "none",
+        },
+    )
+    assert created_version_two.status_code == 201, created_version_two.text
+    version_two_contract = OperationContract.model_validate(
+        created_version_two.json()["canonical_contract"]
+    )
+    assert version_two_contract.service == "auth"
+    assert created_version_two.json()["contract_fingerprint"] == fingerprint_contract(
+        version_two_contract
+    )
+
+    rebound = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}",
+        headers=headers,
+        json={"service_id": order_id},
+    )
+    assert rebound.status_code == 200, rebound.text
+    rebound_detail = await asset_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}", headers=headers
+    )
+    rebound_contract = OperationContract.model_validate(
+        rebound_detail.json()["version"]["canonical_contract"]
+    )
+    assert rebound_contract.service == "orders"
+    assert rebound_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
+        rebound_contract
+    )
+    historical_detail = await asset_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}?version=2", headers=headers
+    )
+    historical_contract = OperationContract.model_validate(
+        historical_detail.json()["version"]["canonical_contract"]
+    )
+    assert historical_contract.service == "auth"
+    assert historical_detail.json()["version"]["contract_fingerprint"] == fingerprint_contract(
+        historical_contract
+    )
+    historical_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"], "version": 2},
+    )
+    assert historical_preview.status_code == 200, historical_preview.text
+    assert historical_preview.json()["url"] == "https://auth.example.com/users/api"
+    assert historical_preview.json()["target"]["service_key"] == "auth"
+    pinned_definition = {
+        "schema_version": "1.0",
+        "variables": {},
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Start",
+                "position": {"x": 0, "y": 0},
+                "config": {},
+            },
+            {
+                "id": "request",
+                "type": "api",
+                "name": "Pinned request",
+                "position": {"x": 180, "y": 0},
+                "config": {
+                    "api_definition_id": definition_id,
+                    "api_version": 2,
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "End",
+                "position": {"x": 360, "y": 0},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "start-request", "source": "start", "target": "request"},
+            {"id": "request-end", "source": "request", "target": "end"},
+        ],
+        "settings": {
+            "fail_fast": True,
+            "concurrency": 1,
+            "default_timeout_seconds": 30,
+        },
+    }
+    pinned_workflow = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "Pinned auth API",
+            "definition": pinned_definition,
+        },
+    )
+    assert pinned_workflow.status_code == 201, pinned_workflow.text
+    workflow_id = pinned_workflow.json()["id"]
+    published = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    pinned_plan = await asset_client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "Pinned auth plan",
+            "schedule_interval_seconds": 60,
+            "items": [
+                {
+                    "workflow_id": workflow_id,
+                    "workflow_version": 1,
+                    "environment_id": environment["id"],
+                }
+            ],
+        },
+    )
+    assert pinned_plan.status_code == 201, pinned_plan.text
+    pinned_definition["nodes"][1]["config"]["api_version"] = 3
+    updated_draft = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}",
+        headers=headers,
+        json={"expected_revision": 1, "definition": pinned_definition},
+    )
+    assert updated_draft.status_code == 200, updated_draft.text
+    auth_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{auth_id}/impact-preview",
+        headers=headers,
+    )
+    orders_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{order_id}/impact-preview",
+        headers=headers,
+    )
+    assert auth_impact.status_code == 200, auth_impact.text
+    assert orders_impact.status_code == 200, orders_impact.text
+    assert {item["id"] for item in auth_impact.json()["affected_apis"]} == {definition_id}
+    assert {item["id"] for item in auth_impact.json()["affected_workflows"]} == {workflow_id}
+    assert {item["id"] for item in auth_impact.json()["affected_test_plans"]} == {
+        pinned_plan.json()["id"]
+    }
+    assert {item["id"] for item in auth_impact.json()["affected_scheduled_runs"]} == {
+        pinned_plan.json()["id"]
+    }
+    assert {item["id"] for item in orders_impact.json()["affected_workflows"]} == {workflow_id}
+    assert orders_impact.json()["affected_test_plans"] == []
+    restored = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}",
+        headers=headers,
+        json={"service_id": auth_id},
+    )
+    assert restored.status_code == 200, restored.text
     preview = await asset_client.post(
         f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
         headers=headers,
@@ -603,14 +765,88 @@ async def test_service_endpoint_resolution_and_snapshot(
         },
     )
     assert legacy_api.status_code == 201, legacy_api.text
+    legacy_definition_id = legacy_api.json()["definition"]["id"]
     legacy_preview = await asset_client.post(
-        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
         headers=headers,
         json={"environment_id": environment["id"]},
     )
     assert legacy_preview.status_code == 200, legacy_preview.text
     assert legacy_preview.json()["target"]["service_key"] == "orders"
     assert legacy_preview.json()["url"] == "https://orders.example.com/health"
+    bound_legacy = await asset_client.patch(
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}",
+        headers=headers,
+        json={"service_id": auth_id},
+    )
+    assert bound_legacy.status_code == 200, bound_legacy.text
+    pinned_unassigned_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"], "version": 1},
+    )
+    assert pinned_unassigned_preview.status_code == 200, pinned_unassigned_preview.text
+    assert pinned_unassigned_preview.json()["target"]["service_key"] == "orders"
+    assert pinned_unassigned_preview.json()["url"] == "https://orders.example.com/health"
+    bound_preview = await asset_client.post(
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
+        headers=headers,
+        json={"environment_id": environment["id"]},
+    )
+    assert bound_preview.status_code == 200, bound_preview.text
+    assert bound_preview.json()["target"]["service_key"] == "auth"
+    assert bound_preview.json()["url"] == "https://auth.example.com/health"
+    pinned_definition["nodes"][1]["config"] = {
+        "api_definition_id": legacy_definition_id,
+        "api_version": 1,
+    }
+    unassigned_workflow = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "Pinned environment-default API",
+            "definition": pinned_definition,
+        },
+    )
+    assert unassigned_workflow.status_code == 201, unassigned_workflow.text
+    unassigned_workflow_id = unassigned_workflow.json()["id"]
+    unassigned_published = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{unassigned_workflow_id}/versions",
+        headers=headers,
+    )
+    assert unassigned_published.status_code == 200, unassigned_published.text
+    unassigned_plan = await asset_client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "Pinned environment-default plan",
+            "schedule_interval_seconds": 60,
+            "items": [
+                {
+                    "workflow_id": unassigned_workflow_id,
+                    "workflow_version": 1,
+                    "environment_id": environment["id"],
+                }
+            ],
+        },
+    )
+    assert unassigned_plan.status_code == 201, unassigned_plan.text
+    default_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{order_id}/impact-preview",
+        headers=headers,
+    )
+    assert default_impact.status_code == 200, default_impact.text
+    default_impact_payload = default_impact.json()
+    assert legacy_definition_id in {item["id"] for item in default_impact_payload["affected_apis"]}
+    assert unassigned_workflow_id in {
+        item["id"] for item in default_impact_payload["affected_workflows"]
+    }
+    assert unassigned_plan.json()["id"] in {
+        item["id"] for item in default_impact_payload["affected_test_plans"]
+    }
+    assert unassigned_plan.json()["id"] in {
+        item["id"] for item in default_impact_payload["affected_scheduled_runs"]
+    }
     assert default_service_id != order_id
 
 

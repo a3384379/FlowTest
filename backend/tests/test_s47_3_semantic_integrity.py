@@ -32,7 +32,11 @@ from app.domain.evidence import (
     SourceFileSnapshot,
     SourceSnapshot,
 )
-from app.domain.test_engineering import OperationContract, TestEngineeringEngine
+from app.domain.test_engineering import (
+    OperationContract,
+    TestEngineeringEngine,
+    fingerprint_contract,
+)
 from app.migrations_support.canonical_contract_v2 import clean_historical_contract
 from app.services.change_regression import (
     _active_waiver,
@@ -227,6 +231,24 @@ def test_materialization_binding_rejects_stale_version_and_fingerprint() -> None
             api_version=2,
             contract=contract,
         )
+
+
+def test_materialization_binding_accepts_legacy_null_service_fingerprint() -> None:
+    contract = OperationContract(
+        operation="orders.create",
+        service=None,
+        method="POST",
+        path="/orders",
+    )
+    frozen = _identity().model_copy(update={"contract_fingerprint": fingerprint_contract(contract)})
+    definition = SimpleNamespace(id=UUID(str(frozen.api_definition_id)))
+
+    _validate_change_regression_target(
+        frozen=frozen,
+        definition=definition,
+        api_version=frozen.api_version,
+        contract=contract,
+    )
 
 
 def test_python_ast_control_flow_contexts_are_conservative() -> None:

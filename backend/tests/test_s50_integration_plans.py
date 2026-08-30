@@ -59,6 +59,8 @@ from app.models.organizations import Organization
 from app.models.service_targets import Service
 from app.models.workflows import Workflow, WorkflowVersion
 from app.schemas.flow_spec import FlowSpecImportRequest
+from app.services.api_assets import APIAssetService
+from app.services.change_regression import ChangeRegressionService
 from app.services.flow_spec import FlowSpecImportProvenance, FlowSpecService
 from app.services.integration_plans import (
     ExistingAuthWorkflowSelection,
@@ -66,6 +68,7 @@ from app.services.integration_plans import (
     IntegrationPlanAssetService,
     OperationPlanSelection,
 )
+from app.services.test_engineering import TestEngineeringService
 
 
 @pytest.fixture
@@ -106,6 +109,172 @@ async def s50_session() -> AsyncIterator[tuple[AsyncSession, User, Project]]:
         await session.flush()
         yield session, actor, project
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_historical_api_contract_keeps_its_original_service_identity(
+    s50_session: tuple[AsyncSession, User, Project],
+) -> None:
+    session, actor, project = s50_session
+    old_service = Service(
+        project_id=project.id,
+        service_key="legacy-orders",
+        name="Legacy orders",
+        description="",
+        owner_team=None,
+        service_type="http",
+        enabled=True,
+        created_by_id=actor.id,
+    )
+    current_service = Service(
+        project_id=project.id,
+        service_key="orders",
+        name="Orders",
+        description="",
+        owner_team=None,
+        service_type="http",
+        enabled=True,
+        created_by_id=actor.id,
+    )
+    session.add_all([old_service, current_service])
+    await session.flush()
+    legacy_contract = OperationContract(
+        operation="orders.get",
+        method="GET",
+        path="/orders/{id}",
+        service=None,
+        responses={"200": ContractResponse(description="OK")},
+        source_ref="contract://legacy-orders/orders.get",
+        revision="1",
+    )
+    legacy_fingerprint = fingerprint_contract(legacy_contract)
+    definition = APIDefinition(
+        project_id=project.id,
+        folder_id=None,
+        service_id=old_service.id,
+        name="orders.get",
+        description="",
+        current_version=1,
+        is_active=True,
+        import_key="orders.get",
+        import_fingerprint=legacy_fingerprint,
+        import_source="s50-history-test",
+        import_source_key="orders.get",
+        created_by_id=actor.id,
+    )
+    session.add(definition)
+    await session.flush()
+    legacy_version = APIVersion(
+        api_definition_id=definition.id,
+        service_id=old_service.id,
+        version=1,
+        method=legacy_contract.method,
+        path=legacy_contract.path,
+        query_parameters=[],
+        headers={},
+        variables={},
+        body_kind="none",
+        body=None,
+        auth_kind="none",
+        auth_config={},
+        extraction_rules=[],
+        assertions=[],
+        canonical_contract=legacy_contract.model_dump(mode="json", by_alias=True),
+        contract_fingerprint=legacy_fingerprint,
+        contract_completeness="complete",
+        created_by_id=actor.id,
+    )
+    session.add(legacy_version)
+    await session.commit()
+
+    migrated_plan = await IntegrationPlanAssetService(session).build(
+        actor=actor,
+        project_id=project.id,
+        command=IntegrationPlanAssetCommand(
+            context_revision_id=UUID("00000000-0000-0000-0000-000000000050"),
+            context_fingerprint="5" * 64,
+            objective="Plan an API whose immutable contract predates service identity",
+            actors=(
+                PlanActor(
+                    id="operator",
+                    role="integration tester",
+                    evidence_refs=["context://s50/migrated-service-actor"],
+                ),
+            ),
+            preconditions=(),
+            target_environment=PlanTargetEnvironment(
+                key="test",
+                source_ref="environment://test",
+                evidence_refs=["environment://test/revision/1"],
+            ),
+            operations=(OperationPlanSelection(definition_id=definition.id),),
+        ),
+    )
+    assert migrated_plan.operations[0].service_ref == old_service.service_key
+    assert migrated_plan.operations[0].contract_fingerprint == legacy_fingerprint
+
+    await APIAssetService(session).update_definition(
+        actor=actor,
+        project_id=project.id,
+        definition_id=definition.id,
+        name=None,
+        description=None,
+        folder_id=None,
+        change_folder=False,
+        service_id=current_service.id,
+        change_service=True,
+    )
+
+    resolved_contract = await TestEngineeringService(session).contract_for_api(
+        project_id=project.id,
+        definition_id=definition.id,
+        version_number=1,
+    )
+    assert resolved_contract.service is None
+    assert fingerprint_contract(resolved_contract) == legacy_fingerprint
+    assert legacy_version.contract_fingerprint == legacy_fingerprint
+    assert legacy_version.canonical_contract["service"] is None
+
+    resolved_identity = await ChangeRegressionService(session)._operation_identity(
+        project_id=project.id,
+        definition_id=definition.id,
+        version_number=1,
+    )
+    assert resolved_identity is not None
+    identity, regression_contract = resolved_identity
+    assert regression_contract.service is None
+    assert identity.service_key == old_service.service_key
+    assert identity.contract_fingerprint == legacy_fingerprint
+
+    current_contract = await TestEngineeringService(session).contract_for_api(
+        project_id=project.id,
+        definition_id=definition.id,
+        version_number=2,
+    )
+    assert current_contract.service == current_service.service_key
+
+    portable = await FlowSpecService(session)._portable_spec(
+        definition=WorkflowDefinition.model_validate(_auth_workflow_definition(definition.id)),
+        project_id=project.id,
+        name="Pinned legacy service",
+        description="",
+        evidence=[],
+    )
+    portable_payload = portable.model_dump(mode="json")
+    assert portable_payload["services"][0]["ref"] == old_service.service_key
+    assert portable_payload["operations"][0]["service_ref"] == old_service.service_key
+    request_node = next(node for node in portable_payload["nodes"] if node["id"] == "login")
+    assert request_node["target"]["service_ref"] == old_service.service_key
+
+    operation_ref = portable_payload["operations"][0]["ref"]
+    mappings = await FlowSpecService(session)._resolve_mappings(
+        project_id=project.id,
+        spec=portable,
+        service_mappings={old_service.service_key: old_service.id},
+        operation_mappings={operation_ref: definition.id},
+        operation_version_mappings={operation_ref: 1},
+    )
+    assert mappings.operation_versions[operation_ref] == 1
 
 
 def test_golden_plan_compiles_to_executable_traceable_flowspec() -> None:
@@ -188,6 +357,21 @@ def test_plan_contract_is_strict_and_fingerprint_is_canonical() -> None:
     resealed = seal_integration_plan(reordered)
     assert integration_plan_fingerprint(resealed) == plan.plan_fingerprint
     assert normalize_integration_plan(resealed).plan_fingerprint == plan.plan_fingerprint
+
+
+def test_selected_operation_evidence_accepts_full_service_key_contract() -> None:
+    service_ref = "orders-" + ("a" * 153)
+    operation = _selected_operation(
+        ref="orders.create",
+        contract=_response_contract("orders.create", "/orders", "service-key"),
+        status=200,
+    )
+
+    validated = SelectedOperationEvidence.model_validate(
+        {**operation.model_dump(mode="json"), "service_ref": service_ref}
+    )
+
+    assert validated.service_ref == service_ref
 
 
 def test_multiple_binding_candidates_are_retained_without_guessing() -> None:
@@ -357,6 +541,24 @@ def test_untrusted_expressions_headers_and_secret_refs_fail_closed() -> None:
     assert {item.code for item in secret_result.diagnostics} >= {
         "SECRET_REFERENCE_RUNTIME_UNSUPPORTED"
     }
+
+    nested_secret_request = login.request.model_copy(
+        update={"body": {"users": [{"password": "plaintext"}]}}
+    )
+    nested_secret_plan = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    login.model_copy(update={"request": nested_secret_request}),
+                    *plan.operations[1:],
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+    nested_secret_result = compile_integration_plan(nested_secret_plan)
+    assert nested_secret_result.flow_spec is None
+    assert {item.code for item in nested_secret_result.diagnostics} >= {"SECRET_LITERAL_FORBIDDEN"}
 
 
 def test_runtime_data_recipe_compiles_without_unsupported_metadata() -> None:
@@ -1102,6 +1304,7 @@ async def test_compiled_plan_creates_reviewed_workflow_draft_and_frozen_snapshot
         session.add(
             APIVersion(
                 api_definition_id=definition.id,
+                service_id=service.id,
                 version=1,
                 method=operation.method,
                 path=operation.path,

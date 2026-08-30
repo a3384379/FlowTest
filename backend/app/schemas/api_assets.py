@@ -158,6 +158,7 @@ class APIVersionResponse(BaseModel):
 
     id: UUID
     api_definition_id: UUID
+    service_id: UUID | None
     version: int
     method: HttpMethod
     path: str

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.dependencies import get_workflow_coordinator
 from app.core.database import get_session
 from app.core.security import password_service, token_service
+from app.domain.test_contexts import first_sensitive_value
 from app.domain.test_engineering import ContractResponse, OperationContract, fingerprint_contract
 from app.main import app
 from app.mcp.client import MCPReadGatewayClient
@@ -24,6 +26,8 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
+from app.schemas.test_contexts import FlowSpecProposalRequest
+from app.services.mcp_flow_proposals import _contains_unsafe_jmespath_literal
 from app.services.service_accounts import ServiceAccountService
 
 
@@ -155,6 +159,7 @@ async def s51_context() -> AsyncIterator[dict[str, Any]]:
         session.add(
             APIVersion(
                 api_definition_id=definition.id,
+                service_id=service.id,
                 version=1,
                 method="GET",
                 path="/health",
@@ -293,6 +298,380 @@ async def test_mcp_plan_compile_dry_run_propose_and_inspect_are_draft_only(
         assert item is not None and item.review_status == "pending"
         assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 1
         assert await session.scalar(select(func.count()).select_from(WorkflowExecution)) == 0
+
+
+def test_jmespath_secret_literal_detection_preserves_dynamic_paths() -> None:
+    assert _contains_unsafe_jmespath_literal("'hunter2'")
+    assert _contains_unsafe_jmespath_literal('`"hunter2"`')
+    assert _contains_unsafe_jmespath_literal("to_string('hunter2')")
+    assert _contains_unsafe_jmespath_literal("items[?password == 'hunter2']")
+    assert not _contains_unsafe_jmespath_literal("steps.login.output.password")
+    assert not _contains_unsafe_jmespath_literal("'secret://runtime/password'")
+    assert not _contains_unsafe_jmespath_literal("to_string('secret://runtime/password')")
+
+
+@pytest.mark.asyncio
+async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
+    s51_context: dict[str, Any],
+) -> None:
+    context, plan, compilation = await _plan_chain(s51_context)
+    for index, (description, secret) in enumerate(
+        (
+            ("使用Bearer AbCdEf1234567890进行请求", "AbCdEf1234567890"),
+            ("Use Bearer abc", "abc"),
+            ("Use Basic abc", "abc"),
+            ("使用password=hunter2进行请求", "hunter2"),
+            ('使用password="my secret phrase"进行请求', "my secret phrase"),
+            ("使用client_secret=hunter2进行请求", "hunter2"),
+            ("使用db_password=hunter2进行请求", "hunter2"),
+            ('提案包含 {"password":"hunter2"}', "hunter2"),
+            ("使用password=abc进行请求", "abc"),
+            ("使用signing_key=abc进行请求", "abc"),
+            ("使用encryption_key=abc进行请求", "abc"),
+            ("使用hmac_key=abc进行请求", "abc"),
+            ('使用config["password"]="abc"进行请求', "abc"),
+            ("使用headers['token']='abc'进行请求", "abc"),
+        )
+    ):
+        payload = _proposal_payload(s51_context, context, plan, compilation)
+        payload["spec"]["description"] = description
+        response = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-proposal-{index}",
+            },
+            json={**payload, "dry_run": False},
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert secret not in response.json()["error"]["message"]
+
+    for index, parameter_name in enumerate(
+        (
+            "db_password",
+            "private_key",
+            "access_key",
+            "database_credential",
+            "client_secret_value",
+            "db_password_value",
+            "password1",
+            "access_key2",
+            "DBPassword",
+            "private_signing_key",
+            "signing_key",
+            "encryption_key",
+            "hmac_key",
+            "credentials",
+            "client_credentials",
+            "passwords",
+            "tokens",
+        )
+    ):
+        named_secret_payload = _proposal_payload(s51_context, context, plan, compilation)
+        named_secret_payload["spec"]["parameters"] = [
+            {"name": parameter_name, "source": "constant", "value": "hunter2"}
+        ]
+        named_secret = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-parameter-name-{index}",
+            },
+            json={**named_secret_payload, "dry_run": False},
+        )
+        assert named_secret.status_code == 422
+        assert named_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert "hunter2" not in named_secret.text
+
+    legacy_variable_payload = _proposal_payload(s51_context, context, plan, compilation)
+    legacy_variable_payload["spec"]["variables"] = {"access_key": "hunter2"}
+    legacy_variable = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-legacy-variable",
+        },
+        json={**legacy_variable_payload, "dry_run": False},
+    )
+    assert legacy_variable.status_code == 422
+    assert legacy_variable.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in legacy_variable.text
+
+    for index, (request_overrides, literal) in enumerate(
+        (
+            ({"headers": {"X-Access-Key": "abc"}}, "abc"),
+            ({"body": {"kind": "json", "value": {"password": "abc"}}}, "abc"),
+            (
+                {"body": {"kind": "json", "value": {"password": "hunter2 {{suffix}}"}}},
+                "hunter2",
+            ),
+            (
+                {
+                    "body": {
+                        "kind": "json",
+                        "value": {"password": "secret://golden/ref hunter2"},
+                    }
+                },
+                "hunter2",
+            ),
+            ({"body": {"kind": "json", "value": {"password": 1234}}}, "1234"),
+            ({"body": {"kind": "json", "value": {"password": True}}}, None),
+            (
+                {
+                    "body": {
+                        "kind": "json",
+                        "value": {"matrix": [[{"password": "abc"}]]},
+                    }
+                },
+                "abc",
+            ),
+            (
+                {"query_parameters": [{"name": "access_key", "value": "abc", "enabled": True}]},
+                "abc",
+            ),
+        )
+    ):
+        override_payload = _proposal_payload(s51_context, context, plan, compilation)
+        api_node = next(
+            node for node in override_payload["spec"]["nodes"] if node["kind"] == "http"
+        )
+        api_node["config"]["request_overrides"] = request_overrides
+        overridden = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-request-override-{index}",
+            },
+            json={**override_payload, "dry_run": False},
+        )
+        assert overridden.status_code == 422
+        assert overridden.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        if literal is not None:
+            assert literal not in overridden.text
+
+    capability_payload = _proposal_payload(s51_context, context, plan, compilation)
+    capability_payload["spec"]["nodes"].append(
+        {
+            "id": "credential-capability",
+            "kind": "capability",
+            "name": "Credential capability",
+            "position": {"x": 540, "y": 0},
+            "config": {},
+            "capability_id": "flowtest.credential-check",
+            "capability_version": "1.0.0",
+            "configuration": {"access_key": "abc"},
+            "depends_on": [],
+        }
+    )
+    capability_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-capability-configuration",
+        },
+        json={**capability_payload, "dry_run": False},
+    )
+    assert capability_secret.status_code == 422
+    assert capability_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "abc" not in capability_secret.text
+
+    correlated_payload = _proposal_payload(s51_context, context, plan, compilation)
+    correlated_payload["spec"]["nodes"].append(
+        {
+            "id": "correlated-credential-capability",
+            "kind": "capability",
+            "name": "Correlated credential capability",
+            "position": {"x": 720, "y": 0},
+            "config": {},
+            "capability_id": "flowtest.credential-check",
+            "capability_version": "1.0.0",
+            "configuration": {"entries": [{"key": "password", "value": "abc"}]},
+            "depends_on": [],
+        }
+    )
+    correlated_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-correlated-key-value",
+        },
+        json={**correlated_payload, "dry_run": False},
+    )
+    assert correlated_secret.status_code == 422
+    assert correlated_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "abc" not in correlated_secret.text
+
+    for node_kind in ("assert", "condition"):
+        assertion_payload = _proposal_payload(s51_context, context, plan, compilation)
+        assertion_payload["spec"]["nodes"].append(
+            {
+                "id": f"sensitive-{node_kind}",
+                "kind": node_kind,
+                "name": f"Sensitive {node_kind}",
+                "position": {"x": 810, "y": 0},
+                "config": {
+                    "source_node_id": "http-health",
+                    "expression": "body.password",
+                    "operator": "equals",
+                    "expected": "abc",
+                },
+                "depends_on": [],
+            }
+        )
+        assertion_secret = await s51_context["client"].post(
+            "/api/v1/mcp/flow/proposals",
+            headers={
+                **s51_context["mcp_headers"],
+                "Idempotency-Key": f"s51-sensitive-{node_kind}-expected",
+            },
+            json={**assertion_payload, "dry_run": False},
+        )
+        assert assertion_secret.status_code == 422
+        assert assertion_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+        assert "abc" not in assertion_secret.text
+
+    extract_payload = _proposal_payload(s51_context, context, plan, compilation)
+    extract_payload["spec"]["nodes"].append(
+        {
+            "id": "sensitive-extract",
+            "kind": "extract",
+            "name": "Sensitive extract",
+            "position": {"x": 900, "y": 0},
+            "config": {
+                "source_node_id": "http-health",
+                "expression": "to_string('hunter2')",
+                "variable": "password",
+                "required": True,
+            },
+            "depends_on": [],
+        }
+    )
+    extract_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-extract-expression",
+        },
+        json={**extract_payload, "dry_run": False},
+    )
+    assert extract_secret.status_code == 422
+    assert extract_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in extract_secret.text
+
+    binding_payload = _proposal_payload(s51_context, context, plan, compilation)
+    binding_payload["spec"]["nodes"].append(
+        {
+            "id": "grpc-sensitive-binding",
+            "kind": "capability",
+            "name": "gRPC sensitive binding",
+            "position": {"x": 900, "y": 0},
+            "config": {},
+            "capability_id": "grpc.call",
+            "capability_version": "3.0.0",
+            "configuration": {
+                "descriptor_id": "00000000-0000-0000-0000-000000000001",
+                "endpoint": "grpc.example.com:443",
+                "service": "flowtest.UserService",
+                "method": "GetUser",
+                "request": {"password": ""},
+                "call_type": "unary",
+            },
+            "bindings": [{"input": "request.password", "expression": "'hunter2'"}],
+            "depends_on": [],
+        }
+    )
+    binding_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-capability-binding",
+        },
+        json={**binding_payload, "dry_run": False},
+    )
+    assert binding_secret.status_code == 422
+    assert binding_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in binding_secret.text
+
+    edge_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
+    mapped_edge = edge_mapping_payload["spec"]["edges"][0]
+    mapped_edge["mappings"] = [
+        {
+            "source": {"node_id": mapped_edge["source"], "path": "$.credential"},
+            "transform": {"kind": "template", "template": "abc"},
+            "target": {
+                "node_id": mapped_edge["target"],
+                "location": "header",
+                "key": "password",
+            },
+        }
+    ]
+    edge_mapping_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-edge-mapping",
+        },
+        json={**edge_mapping_payload, "dry_run": False},
+    )
+    assert edge_mapping_secret.status_code == 422
+    assert edge_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "abc" not in edge_mapping_secret.json()["error"]["message"]
+
+    identity_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
+    identity_edge = identity_mapping_payload["spec"]["edges"][0]
+    identity_edge["mappings"] = [
+        {
+            "source": {"node_id": identity_edge["source"], "path": "'hunter2'"},
+            "transform": {"kind": "identity", "template": "{{value}}"},
+            "target": {
+                "node_id": identity_edge["target"],
+                "location": "header",
+                "key": "password",
+            },
+        }
+    ]
+    identity_mapping_secret = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-sensitive-identity-edge-mapping",
+        },
+        json={**identity_mapping_payload, "dry_run": False},
+    )
+    assert identity_mapping_secret.status_code == 422
+    assert identity_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
+    assert "hunter2" not in identity_mapping_secret.text
+
+    safe_payload = _proposal_payload(s51_context, context, plan, compilation)
+    safe_payload.pop("integration_plan")
+    safe_payload.pop("compilation")
+    safe_payload["spec"]["description"] = "Reviewed integration flow"
+    safe_payload["spec"]["parameters"] = [
+        {
+            "name": "orders_token",
+            "source": "secret_ref",
+            "secret_ref": "secret://golden/orders-token",
+        }
+    ]
+    safe_api_node = next(node for node in safe_payload["spec"]["nodes"] if node["kind"] == "http")
+    safe_api_node["config"]["request_overrides"] = {
+        "headers": {"X-Access-Key": "{{secret.orders_token}}"}
+    }
+    validated_safe_payload = FlowSpecProposalRequest.model_validate(safe_payload)
+    assert first_sensitive_value(validated_safe_payload.model_dump(mode="json")) is None
+    safe_response = await s51_context["client"].post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s51-safe-secret-reference",
+        },
+        json=safe_payload,
+    )
+    assert safe_response.status_code == 422
+    assert safe_response.json()["error"]["code"] == "FLOWSPEC_IMPORT_INVALID"
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 0
 
 
 @pytest.mark.asyncio
@@ -552,7 +931,7 @@ def _proposal_payload(
         "project_id": str(context["project_id"]),
         "context_id": test_context["id"],
         "context_revision_id": test_context["revision"]["id"],
-        "spec": compilation["flow_spec"],
+        "spec": deepcopy(compilation["flow_spec"]),
         "integration_plan": plan,
         "compilation": compilation,
         "service_mappings": {"orders": str(context["service_id"])},

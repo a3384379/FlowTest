@@ -76,6 +76,7 @@ INTEGRATION_PLAN_COMPILER_VERSION_V3 = "flowtest-integration-plan-compiler-s54-v
 
 _ZERO_FINGERPRINT = "0" * 64
 _IDENTIFIER = r"^[A-Za-z_][A-Za-z0-9_.:-]{0,119}$"
+_SERVICE_REF = r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$"
 _SECRET_REF = r"^secret://[A-Za-z0-9._:/-]{1,480}$"  # noqa: S105
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _DATABASE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -181,7 +182,7 @@ class PlanOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ref: str = Field(pattern=_IDENTIFIER)
-    service_ref: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
+    service_ref: str = Field(pattern=_SERVICE_REF)
     service_name: str = Field(min_length=1, max_length=200)
     name: str = Field(min_length=1, max_length=200)
     method: str = Field(pattern=r"^[A-Z]+$", min_length=3, max_length=16)
@@ -740,6 +741,7 @@ class SelectedOperationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation_ref: str = Field(pattern=_IDENTIFIER)
+    service_ref: str | None = Field(default=None, pattern=_SERVICE_REF)
     service_name: str = Field(min_length=1, max_length=200)
     source_version: int = Field(ge=1)
     contract: OperationContract
@@ -1253,7 +1255,7 @@ def _planned_operation(item: SelectedOperationEvidence) -> PlanOperation:
     )
     return PlanOperation(
         ref=item.operation_ref,
-        service_ref=contract.service or "default",
+        service_ref=item.service_ref or contract.service or "default",
         service_name=item.service_name,
         name=item.operation_ref,
         method=contract.method,
@@ -2633,6 +2635,12 @@ def _secret_literal_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
 
 
 def _body_secret_diagnostics(value: JsonValue, path: str) -> list[PlanDiagnostic]:
+    if isinstance(value, list):
+        return [
+            diagnostic
+            for index, item in enumerate(value)
+            for diagnostic in _body_secret_diagnostics(item, f"{path}[{index}]")
+        ]
     if not isinstance(value, dict):
         return []
     diagnostics: list[PlanDiagnostic] = []

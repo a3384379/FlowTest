@@ -937,15 +937,18 @@ def _validate_change_regression_target(
         )
     identity_service = None if frozen.service_key == "unassigned" else frozen.service_key
     identity_contract = contract.model_copy(update={"service": identity_service})
-    current_fingerprint = fingerprint_contract(identity_contract)
-    if current_fingerprint != frozen.contract_fingerprint:
+    compatible_fingerprints = {
+        fingerprint_contract(contract),
+        fingerprint_contract(identity_contract),
+    }
+    if frozen.contract_fingerprint not in compatible_fingerprints:
         raise AppError(
             code="CHANGE_REGRESSION_TARGET_STALE",
             message="目标 API Contract Fingerprint 已变化,必须重新审计变更",
             status_code=409,
         )
     actual = (
-        contract.service or "unassigned",
+        contract.service or frozen.service_key,
         contract.method,
         _semantic_operation_path(contract.path),
         contract.operation,

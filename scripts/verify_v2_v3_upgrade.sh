@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/upgrade/compose.yaml"
 v2_ref="${FLOWTEST_UPGRADE_V2_REF:-v2.0.0-rc.1}"
 expected_v2_commit="06699d54bceee091a2efac838e426cf7ef5c9c9e"
-current_head_revision="20260830_0050"
+current_head_revision="20260831_0051"
 actual_v2_commit="$(git -C "${repo_root}" rev-parse "${v2_ref}^{commit}")"
 
 if [[ "${actual_v2_commit}" != "${expected_v2_commit}" ]]; then
