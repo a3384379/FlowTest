@@ -65,6 +65,8 @@ def test_sensitive_scan_detects_authenticated_urls_embedded_in_prose(value: str)
         "使用password=abc进行请求",
         "使用credentials=abc进行请求",
         "使用private_signing_key=abc进行请求",
+        "使用_password=abc进行请求",
+        '提案包含 {"_password":"abc"}',
     ],
 )
 def test_sensitive_scan_detects_authorization_after_unicode_text(value: str) -> None:

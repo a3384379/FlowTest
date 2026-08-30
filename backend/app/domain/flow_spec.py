@@ -552,7 +552,7 @@ def _validate_node_semantics(spec: FlowSpec, known_services: set[str]) -> list[F
         operation = operations.get(node.operation_ref or "")
         issues.extend(_dependency_conflicts(node, index, dependency_edges))
         issues.extend(_operation_reference_issues(node, index, operation))
-        issues.extend(_target_reference_issues(node, index, operation, known_services))
+        issues.extend(_target_reference_issues(node, index, known_services))
     return issues
 
 
@@ -600,7 +600,6 @@ def _operation_reference_issues(
 def _target_reference_issues(
     node: FlowSpecNode,
     index: int,
-    operation: FlowSpecOperation | None,
     known_services: set[str],
 ) -> list[FlowSpecIssue]:
     if node.target is None or node.target.service_ref is None:
@@ -610,14 +609,6 @@ def _target_reference_issues(
             FlowSpecIssue(
                 code="UNKNOWN_SERVICE_REF",
                 message=f"节点引用了未知 Service {node.target.service_ref}",
-                path=f"$.nodes[{index}].target.service_ref",
-            )
-        ]
-    if operation is not None and operation.service_ref not in {None, node.target.service_ref}:
-        return [
-            FlowSpecIssue(
-                code="OPERATION_SERVICE_CONFLICT",
-                message="节点 Target Service 与 Operation Service 不一致",
                 path=f"$.nodes[{index}].target.service_ref",
             )
         ]

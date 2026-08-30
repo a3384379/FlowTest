@@ -1003,25 +1003,33 @@ class FlowSpecService:
             api_definition, api_version = await self._portable_api_asset(
                 project_id=project_id, config=config
             )
-            service = await self._portable_target_service(
+            operation_service = await self._portable_target_service(
+                project_id=project_id,
+                service_override=None,
+                version_service_id=api_version.service_id,
+            )
+            target_service = await self._portable_target_service(
                 project_id=project_id,
                 service_override=config.service_override,
                 version_service_id=api_version.service_id,
             )
-            service_ref = service.service_key if service is not None else None
+            operation_service_ref = (
+                operation_service.service_key if operation_service is not None else None
+            )
+            target_service_ref = target_service.service_key if target_service is not None else None
             operation_ref = _portable_operation_ref(
-                service_ref=service_ref,
+                service_ref=operation_service_ref,
                 definition=api_definition,
                 version=api_version,
             )
             operation_refs[node.id] = operation_ref
             targets[node.id] = FlowSpecNodeTarget(
-                service_ref=service_ref,
+                service_ref=target_service_ref,
                 endpoint_variant=config.endpoint_variant,
             )
             operations[operation_ref] = FlowSpecOperation(
                 ref=operation_ref,
-                service_ref=service_ref,
+                service_ref=operation_service_ref,
                 name=api_definition.name,
                 method=api_version.method,
                 path=api_version.path,
@@ -1029,12 +1037,13 @@ class FlowSpecService:
                 source_version=api_version.version,
                 contract_fingerprint=api_version.contract_fingerprint,
             )
-            if service is not None:
-                services[service.service_key] = PortableService(
-                    ref=service.service_key,
-                    name=service.name,
-                    service_type=service.service_type,
-                )
+            for service in (operation_service, target_service):
+                if service is not None:
+                    services[service.service_key] = PortableService(
+                        ref=service.service_key,
+                        name=service.name,
+                        service_type=service.service_type,
+                    )
         converter = (
             workflow_definition_to_flow_spec_v2
             if any(node.phase.value == "cleanup" for node in definition.nodes)

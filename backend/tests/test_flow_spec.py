@@ -519,6 +519,18 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     target_project, target_service, target_api = await _create_portable_assets(
         flow_spec_client, headers, "Target"
     )
+    source_override = await flow_spec_client.post(
+        f"/api/v1/projects/{source_project}/services",
+        headers=headers,
+        json={"service_key": "routing", "name": "Source routing"},
+    )
+    target_override = await flow_spec_client.post(
+        f"/api/v1/projects/{target_project}/services",
+        headers=headers,
+        json={"service_key": "routing", "name": "Target routing"},
+    )
+    assert source_override.status_code == 201, source_override.text
+    assert target_override.status_code == 201, target_override.text
     for project_id, api_id, versions in (
         (source_project, source_api, (2, 3)),
         (target_project, target_api, (2, 3, 4)),
@@ -559,7 +571,7 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
                         "config": {
                             "api_definition_id": source_api,
                             "api_version": 1,
-                            "service_override": "orders",
+                            "service_override": "routing",
                             "endpoint_variant": "canary",
                             "request_overrides": {
                                 "headers": {},
@@ -601,11 +613,11 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
     assert spec["operations"][0]["source_version"] == 1
     assert spec["operations"][0]["api_version"] is None
     assert len(spec["operations"][0]["contract_fingerprint"]) == 64
-    service_ref = spec["services"][0]["ref"]
     request_node = next(node for node in spec["nodes"] if node["id"] == "request")
     assert request_node["operation_ref"] == operation_ref
+    assert spec["operations"][0]["service_ref"] == "orders"
     assert request_node["target"] == {
-        "service_ref": "orders",
+        "service_ref": "routing",
         "endpoint_variant": "canary",
     }
     assert source_api not in str(spec)
@@ -615,7 +627,10 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         headers=headers,
         json={
             "spec": spec,
-            "service_mappings": {service_ref: source_service},
+            "service_mappings": {
+                "orders": source_service,
+                "routing": source_override.json()["id"],
+            },
             "operation_mappings": {operation_ref: source_api},
         },
     )
@@ -627,7 +642,10 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         headers=headers,
         json={
             "spec": spec,
-            "service_mappings": {service_ref: target_service},
+            "service_mappings": {
+                "orders": target_service,
+                "routing": target_override.json()["id"],
+            },
             "operation_mappings": {operation_ref: target_api},
         },
     )
@@ -652,7 +670,7 @@ async def test_flowspec_cross_project_mapping_preserves_target_variant(
         node for node in materialized.json()["draft_definition"]["nodes"] if node["id"] == "request"
     )["config"]
     assert config["api_definition_id"] == target_api
-    assert config["service_override"] == "orders"
+    assert config["service_override"] == "routing"
     assert config["endpoint_variant"] == "canary"
     assert config["api_version"] == 1
     assert config["request_overrides"]["auth_disabled"] is True

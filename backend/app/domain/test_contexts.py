@@ -43,7 +43,7 @@ _JWT = re.compile(
 )
 _AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")
 _NAMED_ASSIGNMENT = re.compile(
-    r"(?<![A-Za-z0-9_])(?P<quote>['\"]?)(?P<name>[A-Za-z][A-Za-z0-9_. -]{0,159}?)"
+    r"(?<![A-Za-z0-9_])(?P<quote>['\"]?)(?P<name>[A-Za-z_][A-Za-z0-9_. -]{0,159}?)"
     r"(?P=quote)"
     r"\s*[:=]\s*(?:'(?:\\.|[^'\\\r\n]){1,}'|\"(?:\\.|[^\"\\\r\n]){1,}\"|"
     r"[^\s,;'\"\r\n]{1,})",
