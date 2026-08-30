@@ -110,13 +110,17 @@ class RequestBudget:
     parent: "RequestBudget | None" = None
 
     def claim(self) -> bool:
-        if not self._can_claim():
+        if not self.can_claim():
             return False
         self._consume()
         return True
 
-    def _can_claim(self) -> bool:
-        return self.remaining > 0 and (self.parent is None or self.parent._can_claim())
+    def can_claim(self, amount: int = 1) -> bool:
+        return (
+            amount >= 0
+            and self.remaining >= amount
+            and (self.parent is None or self.parent.can_claim(amount))
+        )
 
     def _consume(self) -> None:
         self.remaining -= 1

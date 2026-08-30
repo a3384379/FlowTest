@@ -521,6 +521,10 @@ class WorkflowNodeExecutor:
         item: JsonValue,
     ) -> dict[str, JsonValue]:
         async with semaphore:
+            _require_preview_for_each_request_reservation(
+                prepared,
+                context.request_budget,
+            )
             variables = {
                 **context.resolved_variables(),
                 config.item_variable: item,
@@ -675,6 +679,20 @@ class WorkflowNodeExecutor:
                 message=f"节点 {node.name} 缺少固定 Credential 快照",
             )
         return prepared
+
+
+def _require_preview_for_each_request_reservation(
+    prepared: PreparedSubflow,
+    request_budget: RequestBudget | None,
+) -> None:
+    reservation = prepared.snapshot.get("preview_request_reservation")
+    if not isinstance(reservation, int) or reservation <= 0 or request_budget is None:
+        return
+    if not request_budget.can_claim(reservation):
+        raise NodeExecutionError(
+            code="PREVIEW_REQUEST_BUDGET_EXHAUSTED",
+            message="Sandbox Preview 剩余请求预算不足以安全执行下一次循环及其 Cleanup",
+        )
 
 
 def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:

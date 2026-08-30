@@ -2344,7 +2344,10 @@ def _bounded_preview_subflow(
         prepared,
         definition=definition,
         subflows=subflows,
-        snapshot=_preview_subflow_snapshot(prepared.snapshot, definition, subflows),
+        snapshot={
+            **_preview_subflow_snapshot(prepared.snapshot, definition, subflows),
+            "preview_request_reservation": main_requests + cleanup_requests,
+        },
     )
 
 

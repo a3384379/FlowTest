@@ -18,7 +18,7 @@ from app.core.encryption import secret_box
 from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import CleanupRunWhen, WorkflowDefinition
-from app.engine.scheduler import CancellationToken
+from app.engine.scheduler import CancellationToken, NodeExecutionError, RequestBudget
 from app.models.api_assets import Environment, Secret
 from app.models.durable_execution import ExecutionCommand
 from app.models.sandbox_preview import SandboxPreviewApproval
@@ -27,7 +27,10 @@ from app.models.workflows import WorkflowExecution
 from app.schemas.sandbox_preview import SandboxPreviewExecuteRequest
 from app.services.durable_execution import DurableExecutionService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
-from app.services.workflow_runtime import PreparedSubflow
+from app.services.workflow_runtime import (
+    PreparedSubflow,
+    _require_preview_for_each_request_reservation,
+)
 from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
 from app.services.workflows import (
     WorkflowBatchPlan,
@@ -186,6 +189,10 @@ def test_preview_recursively_requires_and_bounds_subflow_cleanup() -> None:
     assert leaf.definition.run_policy.cleanup_request_budget == 1
     snapshot_policy = leaf.snapshot["workflow"]["definition"]["run_policy"]
     assert snapshot_policy["max_runtime_seconds"] == 120
+    with pytest.raises(NodeExecutionError) as reservation_error:
+        _require_preview_for_each_request_reservation(parent, RequestBudget(2))
+    assert reservation_error.value.code == "PREVIEW_REQUEST_BUDGET_EXHAUSTED"
+    _require_preview_for_each_request_reservation(parent, RequestBudget(3))
 
 
 def test_preview_counts_nested_nodes_and_reserves_cleanup_requests() -> None:

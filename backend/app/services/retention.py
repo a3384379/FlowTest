@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.dml import Delete
 
@@ -16,6 +16,7 @@ from app.models.executions import APICallExecution
 from app.models.governance import IdempotencyRecord, OrganizationGovernance
 from app.models.imports import ImportRun
 from app.models.reporting import NotificationDelivery
+from app.models.sandbox_preview import SandboxPreviewApproval
 from app.models.tasking import TestPlanRun
 from app.models.test_contexts import TestContext
 from app.models.workflows import WorkflowExecution
@@ -137,12 +138,9 @@ class RetentionCleanupService:
                 TestPlanRun.completed_at < cutoff,
             )
         )
-        totals.workflow_executions_deleted += await self._delete(
-            delete(WorkflowExecution).where(
-                WorkflowExecution.project_id == project_id,
-                WorkflowExecution.completed_at.is_not(None),
-                WorkflowExecution.completed_at < cutoff,
-            )
+        totals.workflow_executions_deleted += await self._delete_workflow_executions(
+            project_id,
+            cutoff,
         )
         totals.api_executions_deleted += await self._delete(
             delete(APICallExecution).where(
@@ -155,6 +153,59 @@ class RetentionCleanupService:
     async def _delete(self, statement: Delete) -> int:
         result = await self._session.execute(statement)
         return int(getattr(result, "rowcount", 0) or 0)
+
+    async def _delete_workflow_executions(
+        self,
+        project_id: UUID,
+        cutoff: datetime,
+    ) -> int:
+        expired = (
+            WorkflowExecution.project_id == project_id,
+            WorkflowExecution.completed_at.is_not(None),
+            WorkflowExecution.completed_at < cutoff,
+        )
+        surviving_preview = exists(
+            select(WorkflowExecution.id).where(
+                WorkflowExecution.preview_approval_id == SandboxPreviewApproval.id,
+                or_(
+                    WorkflowExecution.completed_at.is_(None),
+                    WorkflowExecution.completed_at >= cutoff,
+                ),
+            )
+        )
+        approval_ids = list(
+            (
+                await self._session.scalars(
+                    select(SandboxPreviewApproval.id).where(
+                        SandboxPreviewApproval.project_id == project_id,
+                        SandboxPreviewApproval.execution_id.in_(
+                            select(WorkflowExecution.id).where(*expired)
+                        ),
+                        ~surviving_preview,
+                    )
+                )
+            ).all()
+        )
+        if approval_ids:
+            await self._session.execute(
+                update(SandboxPreviewApproval)
+                .where(SandboxPreviewApproval.id.in_(approval_ids))
+                .values(consumed_at=None, execution_id=None)
+            )
+        deleted = await self._delete(
+            delete(WorkflowExecution).where(
+                *expired,
+                or_(
+                    WorkflowExecution.run_purpose == "standard",
+                    WorkflowExecution.preview_approval_id.in_(approval_ids),
+                ),
+            )
+        )
+        if approval_ids:
+            await self._delete(
+                delete(SandboxPreviewApproval).where(SandboxPreviewApproval.id.in_(approval_ids))
+            )
+        return deleted
 
 
 @dataclass(slots=True)
