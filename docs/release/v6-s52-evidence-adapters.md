@@ -2,14 +2,14 @@
 
 ## 1. 阶段身份
 
-| 项目               | 当前值                                                                 |
-| ------------------ | ---------------------------------------------------------------------- |
-| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`                             |
-| 实现分支           | `codex/v6-s52-evidence-adapters`                                       |
-| MCP Server Version | `s52-evidence-adapter-v1`                                              |
-| Scope              | `mcp:evidence:write`                                                   |
-| 数据库变更         | `20260829_0047`；扩展 Evidence Provider 来源约束                       |
-| Release 状态       | PR #58 已普通 Squash Merge；精确 Main Push 门禁全绿                    |
+| 项目               | 当前值                                              |
+| ------------------ | --------------------------------------------------- |
+| 阶段基线 Main SHA  | `b6c281a832ec63e94433e0f322b30b6e342098c1`          |
+| 实现分支           | `codex/v6-s52-evidence-adapters`                    |
+| MCP Server Version | `s52-evidence-adapter-v1`                           |
+| Scope              | `mcp:evidence:write`                                |
+| 数据库变更         | `20260829_0047`；扩展 Evidence Provider 来源约束    |
+| Release 状态       | PR #58 已普通 Squash Merge；精确 Main Push 门禁全绿 |
 
 S52 从 S51 Evidence Closure 合并且精确 Main Push Required Gate 全绿后的 Main 创建。External Code MCP 与
 Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任意外部 MCP Server。
@@ -162,14 +162,14 @@ Database MCP 把强类型证据提交给 FlowTest；FlowTest 不主动连接任�
 
 ## 4. S52 Exit Criteria
 
-| 条件                         | 当前状态  | 证据                                                     |
-| ---------------------------- | --------- | -------------------------------------------------------- |
-| Java Evidence 可进入 Context | Pass      | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
-| DB Evidence 可进入 Context   | Pass      | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
-| Entity Candidate 可追溯      | Pass      | Candidate Evidence Ref 与稳定 Inspect 回归               |
-| Conflict 可见且不静默选择    | Pass      | Mapping Conflict + Context `conflicted` 端到端回归       |
-| 无 Secret / PII              | Pass      | 契约拒绝、标准错误 Envelope、安全扫描与 Compose 日志审计 |
-| RuoYi POC                    | Pass      | 固定 Revision/三个固定文件的静态 POC 回归                |
+| 条件                         | 当前状态 | 证据                                                     |
+| ---------------------------- | -------- | -------------------------------------------------------- |
+| Java Evidence 可进入 Context | Pass     | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
+| DB Evidence 可进入 Context   | Pass     | API/Service 回归、隔离 Compose Playwright 与远程 CI      |
+| Entity Candidate 可追溯      | Pass     | Candidate Evidence Ref 与稳定 Inspect 回归               |
+| Conflict 可见且不静默选择    | Pass     | Mapping Conflict + Context `conflicted` 端到端回归       |
+| 无 Secret / PII              | Pass     | 契约拒绝、标准错误 Envelope、安全扫描与 Compose 日志审计 |
+| RuoYi POC                    | Pass     | 固定 Revision/三个固定文件的静态 POC 回归                |
 
 ## 5. Intentionally Out of Scope / Blocked
 
@@ -379,3 +379,10 @@ e2e/s52-evidence-adapters.spec.ts`：Setup 与 S52 用例共 2 passed。真实�
   `33256061004`、Frontend `33256060972`、Compose `33256061325`、Security `33256061020`、Windows
   `33256061013`、Upgrade/Rollback `33256060984` 与 Required Gate `33256061010` 全部 Success。
 - 全过程未使用 Admin Merge、Force Push、Ruleset Bypass、跳过 Required Check 或直接推送 Main。
+
+## 8. Evidence Closure 终态
+
+- Evidence Closure PR #59 已普通 Squash Merge，合并后 Main Push Required Gate
+  `33258344270` 为 Success。
+- S52 实现、复审、定向验收、实现 PR/Main Push 与 Closure/Main Push 全部闭环；最终跨阶段
+  审计未留下 S52 的 P0/P1 阻塞项。

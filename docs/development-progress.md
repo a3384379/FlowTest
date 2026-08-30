@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-30（Asia/Shanghai）
+最后更新：2026-08-31（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S56、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
 已由 PR #67 普通 Squash Merge；GitHub Codex 最新复审 P0/P1 为 0，普通 PR CI、显式 RC 重门禁及合并后
@@ -11,9 +11,11 @@ P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53
 普通合并且 Main Push Required Gate 成功。S54 Cleanup / Compensation Runtime 已由 PR #62 普通 Squash Merge，
 最终 PR 与 Merge 后 Main Push 七项门禁全部成功。H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge，
 最终 P0/P1 为 0，PR 与 Merge 后 Main Push 七项门禁全部成功。S55 Sandbox Preview Beta 已由 PR #64
-普通 Squash Merge，合并后 Main 七项门禁全部成功。当前分支 Migration Head 为 `20260830_0050`；
-V6 RC 候选自动化证据已闭环，尚未创建正式 Tag/Release，连续 RC、公司实机、安全审批和人工签署等
-GA 外部门槛仍未满足，`GA_READY=NO`。
+普通 Squash Merge，合并后 Main 七项门禁全部成功。跨阶段最终审计 PR #69 已清除全部
+P0/P1，最终候选七项门禁全绿并普通 Squash Merge；合并后 Main 七项门禁也全部成功。当前分支
+Migration/Standalone 单 Head 为 `20260831_0051`。V6 RC 候选自动化证据已闭环，尚未创建正式
+Tag/Release，连续 RC、公司实机、安全审批和人工签署等 GA 外部门槛仍未满足，
+`GA_READY=NO`。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -23,6 +25,21 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 已完成实现并合并：V6 Core 跨阶段最终审计
+
+- PR #69 统一修正 FlowSpec 跨实例 Service/Operation Identity、历史 Fingerprint 兼容、
+  Change Regression Frozen Identity，并通过 `20260831_0051` 回填 API Version Service Identity。
+- MCP Flow Proposal 现在会在持久化前检查递归数组/对象、参数、字段映射、断言/条件、
+  Extract 目标与完整 JMESPath AST 中的 Secret/Credential/PII 字面量；动态路径与
+  `secret://` 引用保持允许。
+- 最新 GitHub `@codex review` 未发现重大问题，P0=`0`、P1=`0`。PR #38～#69 共 32 个 PR
+  的未解决 Review Thread 统一核对为 `0`；历史 P1 标注为由 #69 修复，P2 接受为
+  V6.1 技术债。
+- #69 最终 Backend、Frontend、Security、Compose、Windows、Upgrade 与 Required Gate 全部
+  Success，随后普通 Squash Merge；合并后 Main 的同类七项门禁也全部 Success。未使用
+  Admin/Bypass/Force Push/Direct Main Push。
+- 完整证据见 [V6 Core 最终验收报告](release/v6-core-final-acceptance.md)。
 
 ## 已完成实现与定向验收：V6 S56 Flagship Skill、Evaluation 与 RC Closure
 

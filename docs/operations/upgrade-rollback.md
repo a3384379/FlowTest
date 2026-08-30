@@ -130,10 +130,13 @@ PostgreSQL + MinIO 恢复点。
 - 每次迁移演练都必须执行 `upgrade → alembic check → downgrade -1 → upgrade → alembic check`，
   并清理明确命名的临时数据库、容器和卷；不得触碰开发环境现有 Compact 数据卷。
 
-## V6 S48–S56 / 0046–0050 特别说明
+## V6 S48–S56 与最终审计 / 0046–0051 特别说明
 
-- 数据库与 Standalone 单 Head 为 `20260830_0050`；升级、回滚、Backup/Restore 和
+- 数据库与 Standalone 当前单 Head 为 `20260831_0051`；升级、回滚、Backup/Restore 和
   Standalone→Compact Transfer 必须保持该 Revision 一致。
+- `0051` 为已有 API Version 回填可移植 Service Identity；downgrade 会移除该列与索引。
+  回滚前必须保留 API Definition/Version 与 Service 的一致备份，并在回滚后重跑历史 FlowSpec
+  Import/Export 与 Change Regression 兼容验证。
 - `flowtest-generate-integration-flow` Skill 没有数据库状态。升级时整体替换 Skill 目录并校验
   `manifest.yaml` 的 Version 与 Minimum MCP Version；回滚时恢复上一完整目录，不能混用入口与 References。
 - 普通 CI 不重复运行 Compact/容量 RC 重门禁；最新复审清除 P0/P1 后，以 Compose Workflow 的

@@ -2,14 +2,14 @@
 
 ## 1. 阶段身份
 
-| 项目 | 当前值 |
-| --- | --- |
-| 阶段基线 Main SHA | `8040882218bfa70df556c42482c69d2413190ec6` |
-| 实现分支 | `codex/s50-integration-plan-compiler` |
-| Schema | `flowtest-integration-plan-v1` |
-| Compiler | `flowtest-integration-plan-compiler-v1` |
-| 数据库变更 | 无；Plan 进入既有 AIChangeSet Source Snapshot |
-| Release 状态 | 未发布；不是 Alpha、Beta、RC 或 GA |
+| 项目              | 当前值                                        |
+| ----------------- | --------------------------------------------- |
+| 阶段基线 Main SHA | `8040882218bfa70df556c42482c69d2413190ec6`    |
+| 实现分支          | `codex/s50-integration-plan-compiler`         |
+| Schema            | `flowtest-integration-plan-v1`                |
+| Compiler          | `flowtest-integration-plan-compiler-v1`       |
+| 数据库变更        | 无；Plan 进入既有 AIChangeSet Source Snapshot |
+| Release 状态      | 未发布；不是 Alpha、Beta、RC 或 GA            |
 
 S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Main 创建。本阶段只实现 Plan、
 确定性 Planner/Compiler 与既有 Draft Review/Apply 链的证据接入，不提前注册 S51 MCP Tool 或 Proposal UI。
@@ -72,13 +72,13 @@ S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Mai
 
 ## 4. Exit Criteria
 
-| 条件 | 本地状态 | 证据 |
-| --- | --- | --- |
-| FlowSpec Validate = true | Pass | Golden 编译结果 `validate_flow_spec().valid=true` |
-| FlowSpec Importable = true | Pass | Compatibility 无 Blocker，未使用不可执行顶层字段 |
-| Workflow Draft 可创建 | Pass | 真实 SQLite 应用层 Review/Apply 集成测试与 Compose Playwright |
-| Fingerprint 稳定 | Pass | 静态 Plan/Compiled FlowSpec Golden Fingerprint |
-| Node/Edge Evidence 可追溯 | Pass | Compilation 与 ChangeSet Snapshot 双重断言 |
+| 条件                       | 本地状态 | 证据                                                          |
+| -------------------------- | -------- | ------------------------------------------------------------- |
+| FlowSpec Validate = true   | Pass     | Golden 编译结果 `validate_flow_spec().valid=true`             |
+| FlowSpec Importable = true | Pass     | Compatibility 无 Blocker，未使用不可执行顶层字段              |
+| Workflow Draft 可创建      | Pass     | 真实 SQLite 应用层 Review/Apply 集成测试与 Compose Playwright |
+| Fingerprint 稳定           | Pass     | 静态 Plan/Compiled FlowSpec Golden Fingerprint                |
+| Node/Edge Evidence 可追溯  | Pass     | Compilation 与 ChangeSet Snapshot 双重断言                    |
 
 ## 5. Intentionally Out of Scope / Blocked
 
@@ -97,20 +97,20 @@ S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Mai
 
 ### 本地 Required Checks
 
-| 范围 | 命令 | 结果 |
-| --- | --- | --- |
-| Backend Format | `uv run ruff format --check .` | Pass；458 files already formatted |
-| Backend Lint | `uv run ruff check .` | Pass |
-| Backend Types | `uv run mypy app` | Pass；334 source files |
-| Backend Tests | `uv run pytest` | Pass；659 passed、4 skipped、总覆盖率 90.32% |
-| Compiler Complexity | `uv run ruff check --select C90 app/domain/integration_plans.py app/services/integration_plans.py` | Pass |
-| Frontend Format | `pnpm format:check` | Pass |
-| Frontend Lint/Types | `pnpm lint` | Pass；ESLint 与 TypeScript |
-| Frontend Tests | `pnpm test:coverage` | Pass；56 files、215 tests；S/B/F/L = 86.15/80.11/85.27/88.37% |
-| Frontend Build | `pnpm build` | Pass |
-| Backend Security Lint | `uv run ruff check --select S app` | Pass |
-| Python Dependency Audit | `uv run pip-audit` | Pass；无已知漏洞，非 PyPI 的本项目包按工具约定跳过 |
-| Node Dependency Audit | `pnpm audit --audit-level high` | Pass；无已知漏洞 |
+| 范围                    | 命令                                                                                               | 结果                                                          |
+| ----------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Backend Format          | `uv run ruff format --check .`                                                                     | Pass；458 files already formatted                             |
+| Backend Lint            | `uv run ruff check .`                                                                              | Pass                                                          |
+| Backend Types           | `uv run mypy app`                                                                                  | Pass；334 source files                                        |
+| Backend Tests           | `uv run pytest`                                                                                    | Pass；659 passed、4 skipped、总覆盖率 90.32%                  |
+| Compiler Complexity     | `uv run ruff check --select C90 app/domain/integration_plans.py app/services/integration_plans.py` | Pass                                                          |
+| Frontend Format         | `pnpm format:check`                                                                                | Pass                                                          |
+| Frontend Lint/Types     | `pnpm lint`                                                                                        | Pass；ESLint 与 TypeScript                                    |
+| Frontend Tests          | `pnpm test:coverage`                                                                               | Pass；56 files、215 tests；S/B/F/L = 86.15/80.11/85.27/88.37% |
+| Frontend Build          | `pnpm build`                                                                                       | Pass                                                          |
+| Backend Security Lint   | `uv run ruff check --select S app`                                                                 | Pass                                                          |
+| Python Dependency Audit | `uv run pip-audit`                                                                                 | Pass；无已知漏洞，非 PyPI 的本项目包按工具约定跳过            |
+| Node Dependency Audit   | `pnpm audit --audit-level high`                                                                    | Pass；无已知漏洞                                              |
 
 ### Compose / Playwright
 
@@ -118,7 +118,7 @@ S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Mai
 - `FLOWTEST_E2E_BASE_URL=http://localhost:3305 pnpm exec playwright test --project=setup e2e/auth.setup.ts`：
   1 passed。
 - `FLOWTEST_E2E_BASE_URL=http://localhost:3305 pnpm exec playwright test --project=chromium
-  e2e/s50-integration-plan-compiler.spec.ts`：Setup 与 S50 用例共 2 passed。
+e2e/s50-integration-plan-compiler.spec.ts`：Setup 与 S50 用例共 2 passed。
 - 应用日志未发现 Password Field、JWT-like Value 或 Traceback；命中的 Authorization/Bearer 字样仅来自
   Redpanda 启动说明，不包含应用凭据。
 - 验收后仅删除 `flowtest-s50-local` 容器、网络、卷与临时 Override；用户既有 `flowtest-compact`、
@@ -140,14 +140,14 @@ S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Mai
 
 #### Implementation PR #53
 
-| 事实 | 精确证据 |
-| --- | --- |
-| Base | `8040882218bfa70df556c42482c69d2413190ec6` |
-| PR Head | `9193b7fe8bcdf012d275e15319bee65ca907fb4a` |
+| 事实        | 精确证据                                                                                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base        | `8040882218bfa70df556c42482c69d2413190ec6`                                                                                                                                                                                                                    |
+| PR Head     | `9193b7fe8bcdf012d275e15319bee65ca907fb4a`                                                                                                                                                                                                                    |
 | PR Workflow | Backend `33142324888`；Frontend `33142324905`；Compose `33142324889`；Security `33142324904`；Standalone Windows `33142324907`；Upgrade/Rollback `33142324903`；Draft Controller `33142324894`；Ready 后 Controller/Required Gate `33143796260`，全部 Success |
-| Review | Review `0`、Comment `0`、Review Thread `0`；Ready 后 CLEAN / MERGEABLE |
-| Merge | PR #53 普通 Squash Merge：`507aff999606ab6b3190810cf25717a55265eb88` |
-| Main Push | Backend `33143838057`；Frontend `33143837990`；Compose `33143838011`；Security `33143838022`；Standalone Windows `33143837984`；Upgrade/Rollback `33143837977`；Required Gate Controller `33143838004`，全部 Success |
+| Review      | Review `0`、Comment `0`、Review Thread `0`；Ready 后 CLEAN / MERGEABLE                                                                                                                                                                                        |
+| Merge       | PR #53 普通 Squash Merge：`507aff999606ab6b3190810cf25717a55265eb88`                                                                                                                                                                                          |
+| Main Push   | Backend `33143838057`；Frontend `33143837990`；Compose `33143838011`；Security `33143838022`；Standalone Windows `33143837984`；Upgrade/Rollback `33143837977`；Required Gate Controller `33143838004`，全部 Success                                          |
 
 - PR 与 Main Push 的全部 Workflow 都绑定各自记录的精确 Head/Merge SHA；没有把旧 Run 或其他分支结果记为
   本阶段证据。
@@ -162,3 +162,11 @@ S50 从 S49 Evidence Closure 合并且 Main Required Gate 全绿后的精确 Mai
   Strict Required Status Check 仅为 `Required Gate`。
 - S50 实现 Exit Criteria 与实现 PR/Main Push 远程证据已满足；本 Evidence Closure PR 合并且其 Main Push
   Required Gate 成功前，不进入 S51，也不把 S50 标为阶段闭环完成。
+
+## 7. Evidence Closure 与最终跨阶段审计
+
+- Evidence Closure PR #54 已普通 Squash Merge，合并后 Main Push Required Gate
+  `33146326391` 为 Success，S50 阶段于此闭环。
+- 最终跨阶段审计发现的递归数组敏感值 P1 已由 PR #69 修复；Body Mapping 与
+  Scenario Preservation 两项 P2 按发布策略接受并记录为 V6.1 技术债。
+- PR #53 的相关历史线程均已回复并关闭，最终阻塞级结果为 P0=`0`、P1=`0`。

@@ -3,8 +3,8 @@
 ## 1. 阶段状态
 
 H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge且主线七项门禁成功。S55 从最新 Main 创建独立分支
-`codex/v6-s55-sandbox-preview`；实现、定向测试与隔离 PostgreSQL 迁移往返已完成，待 GitHub Codex
-复审、最终一次完整门禁、普通合并及 Merge 后 Main 验证。
+`codex/v6-s55-sandbox-preview`。实现 PR #64 已完成 GitHub Codex 复审、最终一次完整门禁、
+普通 Squash Merge 及 Merge 后 Main 七项验证，S55 Beta Exit 已闭环。
 
 ## 2. 执行与安全边界
 
@@ -28,13 +28,13 @@ H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge且主线七项门禁成
 
 默认且不可扩大的上限：
 
-| 维度 | 上限 |
-| --- | ---: |
-| Nodes | 100 |
-| Requests | 50 |
-| Dataset Rows | 20 |
-| Parallelism | 5 |
-| Runtime Seconds | 600 |
+| 维度            | 上限 |
+| --------------- | ---: |
+| Nodes           |  100 |
+| Requests        |   50 |
+| Dataset Rows    |   20 |
+| Parallelism     |    5 |
+| Runtime Seconds |  600 |
 
 主阶段和 Cleanup 共享实际 Request Budget；恢复执行从已持久化 Checkpoint 扣除既有请求尝试。Preview
 Evidence 包含 Proposal/Context Fingerprint、Execution Snapshot、Binding Trace、Assert Result、Cleanup
@@ -64,15 +64,43 @@ Cleanup Report 与 Execution Snapshot 进入 Preview Evidence。
 
 ## 6. Beta Exit
 
-| 条件 | 当前状态 | 证据 |
-| --- | --- | --- |
-| Visual Review | Pass（本地） | Proposal Mode 7 项定向测试 |
-| Sandbox Preview | Pass（本地） | S55 真实执行链路 |
-| Cleanup | Pass（本地） | Required Cleanup 执行与 Evidence |
-| Production MCP Preview | 0（本地） | 独立 403 硬拒绝 |
-| Approval Replay | 0（本地） | 一次消费与幂等回放测试 |
-| PR Review P0/P1 | Pending | 待 GitHub Codex Review |
-| 最终完整门禁 | Pending | P0/P1 清零后仅执行一次 |
+| 条件                   | 当前状态     | 证据                                   |
+| ---------------------- | ------------ | -------------------------------------- |
+| Visual Review          | Pass（本地） | Proposal Mode 7 项定向测试             |
+| Sandbox Preview        | Pass（本地） | S55 真实执行链路                       |
+| Cleanup                | Pass（本地） | Required Cleanup 执行与 Evidence       |
+| Production MCP Preview | 0（本地）    | 独立 403 硬拒绝                        |
+| Approval Replay        | 0（本地）    | 一次消费与幂等回放测试                 |
+| PR Review P0/P1        | Pass         | PR #64 最终复审无阻塞项                |
+| 最终完整门禁           | Pass         | PR 精确 Head 与 Merge 后 Main 七项全绿 |
 
-最终 Beta Exit 只在 PR 精确 Head 与 Merge 后 Main 远程门禁成功后成立。H2 外部运行、长时 RC 与人工安全
-签署仍属于 GA 门槛，不由 S55 代替。
+Beta Exit 已成立。H2 外部运行、长时 RC 与人工安全签署仍属于 GA 门槛，不由 S55 代替。
+
+## 7. Remote Evidence
+
+### PR #64 精确 Head
+
+| Workflow                  |        Run ID | Conclusion |
+| ------------------------- | ------------: | ---------- |
+| Backend CI                | `33306781329` | success    |
+| Frontend CI               | `33306781355` | success    |
+| Security CI               | `33306781336` | success    |
+| Compose Smoke Test        | `33306781338` | success    |
+| Standalone Windows Bundle | `33306781348` | success    |
+| V2 to V3 Upgrade CI       | `33306781349` | success    |
+| Required Gate Controller  | `33306779840` | success    |
+
+### Merge 后 Main Push
+
+| Workflow                  |        Run ID | Conclusion |
+| ------------------------- | ------------: | ---------- |
+| Backend CI                | `33308150863` | success    |
+| Frontend CI               | `33308150850` | success    |
+| Security CI               | `33308150847` | success    |
+| Compose Smoke Test        | `33308150834` | success    |
+| Standalone Windows Bundle | `33308150815` | success    |
+| V2 to V3 Upgrade CI       | `33308150821` | success    |
+| Required Gate Controller  | `33308150818` | success    |
+
+PR #64 使用普通 Squash Merge，未使用 Admin Merge、Ruleset Bypass、Force Push 或直接推送
+Main。

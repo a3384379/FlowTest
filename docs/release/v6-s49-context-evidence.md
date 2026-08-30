@@ -2,15 +2,15 @@
 
 ## 1. 阶段身份
 
-| 项目 | 当前值 |
-| --- | --- |
-| 阶段基线 Main SHA | `a260272f9eb20c0a8de6c5d5e6c41d57db4b4edb` |
-| S49 实现 Main SHA | `14d4694762cd381e347b248da5e97ecb7452ab21` |
-| 实现分支 | `codex/s49-context-contracts-v2`、`codex/s49-context-evidence` |
-| 证据收口分支 | `codex/s49-evidence-closure` |
-| Alembic / Standalone Revision | `20260828_0046` |
-| Release 状态 | 未发布；不是 Alpha、Beta、RC 或 GA |
-| Remote CI | PR 精确 Head 与两次实现 Merge SHA 的 Main Push 全部 Success |
+| 项目                          | 当前值                                                         |
+| ----------------------------- | -------------------------------------------------------------- |
+| 阶段基线 Main SHA             | `a260272f9eb20c0a8de6c5d5e6c41d57db4b4edb`                     |
+| S49 实现 Main SHA             | `14d4694762cd381e347b248da5e97ecb7452ab21`                     |
+| 实现分支                      | `codex/s49-context-contracts-v2`、`codex/s49-context-evidence` |
+| 证据收口分支                  | `codex/s49-evidence-closure`                                   |
+| Alembic / Standalone Revision | `20260828_0046`                                                |
+| Release 状态                  | 未发布；不是 Alpha、Beta、RC 或 GA                             |
+| Remote CI                     | PR 精确 Head 与两次实现 Merge SHA 的 Main Push 全部 Success    |
 
 阶段从 S48 Evidence Closure 的全绿 Main 开始。CI Bootstrap、契约/持久化与应用层实现均经独立 PR、
 普通 Squash Merge 和合并后 Main Push 验证；下文只记录已达到终态的远程事实。
@@ -66,41 +66,41 @@
 
 ## 4. 四类 Review
 
-| Review | 本地结论 | 主要证据 |
-| --- | --- | --- |
-| Requirement Conformance | Pass | 三表边界、六状态、五个 MCP 工具、两个独立 Scope、Draft-only Adapter |
-| Correctness / Data Consistency / Concurrency | Pass | 不可变行、稳定 Fingerprint、PostgreSQL 行锁、幂等重放/冲突、迁移往返 |
-| Security / Tenant / Secret / SSRF | Pass | 严格 Envelope、跨租户拒绝、旧 Scope 拒绝、敏感输入/响应/日志回归 |
-| End-to-End User Flow | Pass（S49 范围） | Compose 上 begin → ingest → requirements → dry-run/persist → close Playwright |
+| Review                                       | 本地结论         | 主要证据                                                                      |
+| -------------------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| Requirement Conformance                      | Pass             | 三表边界、六状态、五个 MCP 工具、两个独立 Scope、Draft-only Adapter           |
+| Correctness / Data Consistency / Concurrency | Pass             | 不可变行、稳定 Fingerprint、PostgreSQL 行锁、幂等重放/冲突、迁移往返          |
+| Security / Tenant / Secret / SSRF            | Pass             | 严格 Envelope、跨租户拒绝、旧 Scope 拒绝、敏感输入/响应/日志回归              |
+| End-to-End User Flow                         | Pass（S49 范围） | Compose 上 begin → ingest → requirements → dry-run/persist → close Playwright |
 
 Domain 模块没有导入 FastAPI、Celery、SQLAlchemy Model 或具体基础设施客户端。PR #50 与 #51 均完成
 当前代码四维复核，未解决 Review Thread 为 0；线程状态不代替本地与远程代码/行为证据。
 
 ## 5. Local Validation
 
-| 门禁 | 结果 |
-| --- | --- |
-| Backend Ruff Format / Ruff / Mypy | Pass |
-| Backend Pytest / Coverage | `644 passed / 4 skipped`；`90.29%` |
-| Frontend Prettier / ESLint | Pass |
-| Frontend Vitest Coverage | `56 files / 215 passed`；S `86.15%` / B `80.11%` / F `85.27%` / L `88.37%` |
-| Frontend Build | Pass |
-| PostgreSQL Migration | Pass；0045/0046 往返与 Alembic Check 无 Drift |
-| Standalone Migration | Pass；0045 增量、索引、幂等初始化 |
-| Compose / Playwright | Pass；S49 `1 passed`，登录 Setup `1 passed` |
-| Secret Log Scan | Pass；测试 Secret 匹配 `0` |
+| 门禁                              | 结果                                                                       |
+| --------------------------------- | -------------------------------------------------------------------------- |
+| Backend Ruff Format / Ruff / Mypy | Pass                                                                       |
+| Backend Pytest / Coverage         | `644 passed / 4 skipped`；`90.29%`                                         |
+| Frontend Prettier / ESLint        | Pass                                                                       |
+| Frontend Vitest Coverage          | `56 files / 215 passed`；S `86.15%` / B `80.11%` / F `85.27%` / L `88.37%` |
+| Frontend Build                    | Pass                                                                       |
+| PostgreSQL Migration              | Pass；0045/0046 往返与 Alembic Check 无 Drift                              |
+| Standalone Migration              | Pass；0045 增量、索引、幂等初始化                                          |
+| Compose / Playwright              | Pass；S49 `1 passed`，登录 Setup `1 passed`                                |
+| Secret Log Scan                   | Pass；测试 Secret 匹配 `0`                                                 |
 
 ## 6. Exit Criteria
 
-| 条件 | 本地状态 | 说明 |
-| --- | --- | --- |
-| Context Revision Fingerprint 稳定 | Pass | 顺序归一化与输入差异回归 |
-| Expired Context 不能创建 Proposal | Pass | Preview 与 Persist 均重新校验当前 Revision |
-| Evidence Secret Leak = 0 | Pass | 输入拒绝、标准错误脱敏、响应摘要、Compose 日志扫描 |
-| Cross-Tenant = 0 | Pass | Context、Revision、Evidence 与 Source Ref 项目边界 |
-| Dry Run 不持久化 | Pass | AIChangeSet/Item/Idempotency 行数不变 |
-| Idempotency 正确 | Pass | 同键同请求重放；同键异请求冲突 |
-| Standalone / PostgreSQL 迁移 | Pass | 升级、回滚、再升级、无 Drift |
+| 条件                              | 本地状态 | 说明                                               |
+| --------------------------------- | -------- | -------------------------------------------------- |
+| Context Revision Fingerprint 稳定 | Pass     | 顺序归一化与输入差异回归                           |
+| Expired Context 不能创建 Proposal | Pass     | Preview 与 Persist 均重新校验当前 Revision         |
+| Evidence Secret Leak = 0          | Pass     | 输入拒绝、标准错误脱敏、响应摘要、Compose 日志扫描 |
+| Cross-Tenant = 0                  | Pass     | Context、Revision、Evidence 与 Source Ref 项目边界 |
+| Dry Run 不持久化                  | Pass     | AIChangeSet/Item/Idempotency 行数不变              |
+| Idempotency 正确                  | Pass     | 同键同请求重放；同键异请求冲突                     |
+| Standalone / PostgreSQL 迁移      | Pass     | 升级、回滚、再升级、无 Drift                       |
 
 ## 7. Partially Implemented / Intentionally Out of Scope / Blocked
 
@@ -140,23 +140,23 @@ Domain 模块没有导入 FastAPI、Celery、SQLAlchemy Model 或具体基础设
 
 ### 8.2 契约、持久化与 Migration PR #50
 
-| 事实 | 精确证据 |
-| --- | --- |
-| PR Head | `4bebb1cdcd99765234fe50896a2725b8457f27ff` |
+| 事实        | 精确证据                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR Head     | `4bebb1cdcd99765234fe50896a2725b8457f27ff`                                                                                                                                  |
 | PR Workflow | Backend `33129844681`；Compose `33129844698`；Security `33129844690`；Windows `33129844712`；Upgrade/Rollback `33129844700`；最终 Required Gate `33131697019`，全部 Success |
-| Review | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE |
-| Merge | PR #50 普通 Squash Merge：`e3a70894aadd3ee15cd18c980186015b40e96d06` |
-| Main Push | Backend `33131727118`；Compose `33131727068`；Security `33131727095`；Windows `33131727145`；Upgrade/Rollback `33131727064`；Required Gate `33131727083`，全部 Success |
+| Review      | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE                                                                                                                               |
+| Merge       | PR #50 普通 Squash Merge：`e3a70894aadd3ee15cd18c980186015b40e96d06`                                                                                                        |
+| Main Push   | Backend `33131727118`；Compose `33131727068`；Security `33131727095`；Windows `33131727145`；Upgrade/Rollback `33131727064`；Required Gate `33131727083`，全部 Success      |
 
 ### 8.3 Context/Evidence 与 Draft Proposal PR #51
 
-| 事实 | 精确证据 |
-| --- | --- |
-| PR Head | `fc17f784ed2bea50460aff5644e9942121a0e5f3` |
+| 事实        | 精确证据                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR Head     | `fc17f784ed2bea50460aff5644e9942121a0e5f3`                                                                                                                                                              |
 | PR Workflow | Backend `33134071069`；Frontend `33134071062`；Compose `33134071031`；Security `33134071103`；Windows `33134071078`；Upgrade/Rollback `33134071083`；Ready 后 Required Gate `33135732564`，全部 Success |
-| Review | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE |
-| Merge | PR #51 普通 Squash Merge：`14d4694762cd381e347b248da5e97ecb7452ab21` |
-| Main Push | Backend `33135774067`；Frontend `33135774088`；Compose `33135774200`；Security `33135774194`；Windows `33135774493`；Upgrade/Rollback `33135774185`；Required Gate `33135774070`，全部 Success |
+| Review      | 未解决 Thread `0`；Ready 后 CLEAN / MERGEABLE                                                                                                                                                           |
+| Merge       | PR #51 普通 Squash Merge：`14d4694762cd381e347b248da5e97ecb7452ab21`                                                                                                                                    |
+| Main Push   | Backend `33135774067`；Frontend `33135774088`；Compose `33135774200`；Security `33135774194`；Windows `33135774493`；Upgrade/Rollback `33135774185`；Required Gate `33135774070`，全部 Success          |
 
 ### 8.4 阶段结论
 
@@ -166,3 +166,12 @@ Domain 模块没有导入 FastAPI、Celery、SQLAlchemy Model 或具体基础设
   `bypass_actors=[]`，并强制解决 Review Thread。
 - S49 Exit Criteria 全部满足；本 Evidence Closure PR 合并且其 Main Push Required Gate 成功后，才允许从
   最新 Main 创建 S50 分支。
+
+## 9. Evidence Closure 与最终跨阶段审计
+
+- Evidence Closure PR #52 已普通 Squash Merge，合并后 Main Push Required Gate
+  `33138252316` 为 Success，S49 阶段于此闭环。
+- 最终跨阶段审计重新检查了 PR #50/#51 后续出现的历史线程：认证 URL/描述文本、
+  Phone/Card PII 与 FlowSpec 凭据字面量的 P1 均由 PR #69 统一修复。
+- PR #51 的幂等语义 P2 按发布策略接受并记录为 V6.1 技术债。上述线程均已回复并关闭，
+  最终阻塞级结果为 P0=`0`、P1=`0`。
