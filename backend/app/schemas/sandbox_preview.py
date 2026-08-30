@@ -24,6 +24,7 @@ class SandboxPreviewApprovalResponse(BaseModel):
     project_id: UUID
     change_set_id: UUID
     environment_id: UUID
+    environment_fingerprint: str
     executor_kind: str
     executor_id: UUID
     proposal_fingerprint: str

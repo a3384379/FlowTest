@@ -15,6 +15,7 @@ from app.core.errors import AppError
 from app.domain.sandbox_preview import PreviewBudget
 from app.engine.contracts import WorkflowDefinition
 from app.models.sandbox_preview import SandboxPreviewApproval
+from app.models.service_targets import ServiceEndpoint
 from app.models.workflows import WorkflowExecution
 from app.services.workflow_runtime import PreparedSubflow
 from app.services.workflow_snapshots import PreparedExecution, PreparedWorkflow
@@ -90,6 +91,53 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     )
     assert production.status_code == 403
     assert production.json()["error"]["code"] == "PRODUCTION_PREVIEW_FORBIDDEN"
+
+    target_bound = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
+        f"{change_set_id}/preview-approvals",
+        headers=s51_context["user_headers"],
+        json={
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "executor_service_account_id": str(s51_context["service_account_id"]),
+        },
+    )
+    assert target_bound.status_code == 201, target_bound.text
+    assert len(target_bound.json()["environment_fingerprint"]) == 64
+    async with s51_context["sessions"]() as session:
+        endpoint = await session.scalar(
+            select(ServiceEndpoint).where(
+                ServiceEndpoint.environment_id == s51_context["sandbox_environment_id"]
+            )
+        )
+        assert endpoint is not None
+        original_base_url = endpoint.base_url
+        endpoint.base_url = "https://changed-target.example.test"
+        await session.commit()
+    target_changed = await client.post(
+        f"/api/v1/mcp/flow/proposals/{change_set_id}/preview-executions",
+        headers={
+            **s51_context["mcp_headers"],
+            "Idempotency-Key": "s55-preview-changed-target",
+        },
+        json={
+            "project_id": str(s51_context["project_id"]),
+            "environment_id": str(s51_context["sandbox_environment_id"]),
+            "approval_id": target_bound.json()["id"],
+            "runtime_variables": {},
+            "runtime_headers": {},
+        },
+    )
+    assert target_changed.status_code == 409, target_changed.text
+    assert target_changed.json()["error"]["code"] == "PREVIEW_APPROVAL_TARGET_CHANGED"
+    async with s51_context["sessions"]() as session:
+        endpoint = await session.scalar(
+            select(ServiceEndpoint).where(
+                ServiceEndpoint.environment_id == s51_context["sandbox_environment_id"]
+            )
+        )
+        assert endpoint is not None
+        endpoint.base_url = original_base_url
+        await session.commit()
 
     approved = await client.post(
         f"/api/v1/projects/{s51_context['project_id']}/flow-specs/change-sets/"
@@ -196,6 +244,14 @@ async def test_accepted_proposal_requires_sandbox_and_consumes_approval_once(
     assert report.status_code == 200, report.text
     assert report.json()["summary"]["workflow_id"] is None
     assert report.json()["summary"]["workflow_name"] == "Sandbox Preview"
+
+    replayed_node = await client.post(
+        f"/api/v1/projects/{s51_context['project_id']}/workflow-executions/"
+        f"{execution['id']}/nodes/health-check/replay",
+        headers=s51_context["user_headers"],
+    )
+    assert replayed_node.status_code == 409, replayed_node.text
+    assert replayed_node.json()["error"]["code"] == "PREVIEW_REPLAY_FORBIDDEN"
 
     async with s51_context["sessions"]() as session:
         failed_preview = await session.get(WorkflowExecution, UUID(execution["id"]))

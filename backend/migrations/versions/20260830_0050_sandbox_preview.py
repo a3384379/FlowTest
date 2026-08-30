@@ -42,6 +42,7 @@ def _create_preview_approvals() -> None:
         sa.Column("project_id", sa.Uuid(), nullable=False),
         sa.Column("change_set_id", sa.Uuid(), nullable=False),
         sa.Column("environment_id", sa.Uuid(), nullable=False),
+        sa.Column("environment_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("executor_kind", sa.String(length=24), nullable=False),
         sa.Column("executor_id", sa.Uuid(), nullable=False),
         sa.Column("proposal_fingerprint", sa.String(length=64), nullable=False),

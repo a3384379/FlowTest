@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -17,6 +19,7 @@ from app.models.ai import AIChangeSet
 from app.models.api_assets import Environment
 from app.models.organizations import ServiceAccount
 from app.models.sandbox_preview import SandboxPreviewApproval
+from app.models.service_targets import ServiceEndpoint
 from app.models.test_contexts import TestContextRevision
 from app.models.workflows import Workflow, WorkflowExecution
 from app.schemas.sandbox_preview import SandboxPreviewApprovalCreate, SandboxPreviewExecuteRequest
@@ -69,7 +72,8 @@ class SandboxPreviewService:
             change_set_id=change_set_id,
             lock=False,
         )
-        await self._preview_environment(project_id, payload.environment_id)
+        environment = await self._preview_environment(project_id, payload.environment_id)
+        environment_fingerprint = await self._environment_fingerprint(environment)
         executor_kind, executor_id = await self._approval_executor(
             actor=actor,
             project_id=project_id,
@@ -81,6 +85,7 @@ class SandboxPreviewService:
             project_id=project_id,
             change_set_id=change_set_id,
             environment_id=payload.environment_id,
+            environment_fingerprint=environment_fingerprint,
             executor_kind=executor_kind,
             executor_id=executor_id,
             proposal_fingerprint=proposal.visual.view.pipeline.fingerprint,
@@ -126,7 +131,8 @@ class SandboxPreviewService:
             change_set_id=change_set_id,
             lock=True,
         )
-        await self._preview_environment(project_id, payload.environment_id)
+        environment = await self._preview_environment(project_id, payload.environment_id)
+        environment_fingerprint = await self._environment_fingerprint(environment)
         approval = await self._approval_for_update(
             project_id=project_id,
             change_set_id=change_set_id,
@@ -137,6 +143,7 @@ class SandboxPreviewService:
             approval=approval,
             proposal=proposal,
             environment_id=payload.environment_id,
+            environment_fingerprint=environment_fingerprint,
         )
         budget = PreviewBudget.model_validate(approval.budget)
         execution, plan = await self._workflows.prepare_preview_execution(
@@ -290,6 +297,22 @@ class SandboxPreviewService:
             )
         return approval
 
+    async def _environment_fingerprint(self, environment: Environment) -> str:
+        endpoints = list(
+            (
+                await self._session.scalars(
+                    select(ServiceEndpoint)
+                    .where(ServiceEndpoint.environment_id == environment.id)
+                    .order_by(
+                        ServiceEndpoint.service_id,
+                        ServiceEndpoint.variant,
+                        ServiceEndpoint.id,
+                    )
+                )
+            ).all()
+        )
+        return _environment_target_fingerprint(environment, endpoints)
+
     def _validate_approval(
         self,
         *,
@@ -297,6 +320,7 @@ class SandboxPreviewService:
         approval: SandboxPreviewApproval,
         proposal: PreviewableProposal,
         environment_id: UUID,
+        environment_fingerprint: str,
     ) -> None:
         if approval.consumed_at is not None or approval.execution_id is not None:
             raise AppError(
@@ -308,6 +332,12 @@ class SandboxPreviewService:
             raise AppError(
                 code="PREVIEW_APPROVAL_EXPIRED",
                 message="Sandbox Preview 一次性 Approval 已过期",
+                status_code=409,
+            )
+        if approval.environment_fingerprint != environment_fingerprint:
+            raise AppError(
+                code="PREVIEW_APPROVAL_TARGET_CHANGED",
+                message="Sandbox Preview 环境目标在审批后已变更, 请重新审批",
                 status_code=409,
             )
         executor_kind, executor_id = _current_executor(actor)
@@ -412,6 +442,48 @@ def _snapshot_uuid(visual: FlowSpecVisualProposal, key: str) -> UUID | None:
         return UUID(str(value)) if value is not None else None
     except ValueError:
         return None
+
+
+def _environment_target_fingerprint(
+    environment: Environment,
+    endpoints: list[ServiceEndpoint],
+) -> str:
+    payload = {
+        "environment": {
+            "id": str(environment.id),
+            "base_url": environment.base_url,
+            "classification": environment.classification,
+            "default_service_id": (
+                str(environment.default_service_id)
+                if environment.default_service_id is not None
+                else None
+            ),
+            "variables": environment.variables,
+            "headers": environment.headers,
+        },
+        "service_endpoints": [
+            {
+                "id": str(endpoint.id),
+                "service_id": str(endpoint.service_id),
+                "variant": endpoint.variant,
+                "base_url": endpoint.base_url,
+                "enabled": endpoint.enabled,
+                "connect_timeout_ms": endpoint.connect_timeout_ms,
+                "read_timeout_ms": endpoint.read_timeout_ms,
+                "tls_verify": endpoint.tls_verify,
+                "proxy_ref": endpoint.proxy_ref,
+                "headers": endpoint.headers,
+                "variables": endpoint.variables,
+                "secret_refs": sorted(endpoint.secret_refs),
+                "health_check_path": endpoint.health_check_path,
+                "health_expected_status": endpoint.health_expected_status,
+                "revision": endpoint.revision,
+            }
+            for endpoint in endpoints
+        ],
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _snapshot_string(visual: FlowSpecVisualProposal, key: str) -> str | None:

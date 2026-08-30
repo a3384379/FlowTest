@@ -419,6 +419,12 @@ class WorkflowService:
     ) -> WorkflowRunResult:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         execution = await self._get_execution(project_id, execution_id)
+        if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
+            raise AppError(
+                code="PREVIEW_REPLAY_FORBIDDEN",
+                message="Sandbox Preview 不支持节点重放, 请重新审批后发起新预览",
+                status_code=409,
+            )
         plan = await self.load_execution_plan(execution.id)
         if isinstance(plan, WorkflowBatchPlan):
             raise AppError(
