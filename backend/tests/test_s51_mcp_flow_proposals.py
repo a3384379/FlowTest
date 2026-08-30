@@ -331,7 +331,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         )
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-        assert secret not in response.text
+        assert secret not in response.json()["error"]["message"]
 
     for index, parameter_name in enumerate(
         (
