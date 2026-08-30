@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -145,6 +145,22 @@ class ServiceTargetService:
     ) -> dict[str, object]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         service = await self._get_service(project_id=project_id, service_id=service_id)
+        default_environment_ids = set(
+            (
+                await self._session.scalars(
+                    select(Environment.id).where(
+                        Environment.project_id == project_id,
+                        Environment.default_service_id == service_id,
+                    )
+                )
+            ).all()
+        )
+        affected_version_filter = APIVersion.service_id == service_id
+        if default_environment_ids:
+            affected_version_filter = or_(
+                affected_version_filter,
+                APIVersion.service_id.is_(None),
+            )
         apis = list(
             (
                 await self._session.scalars(
@@ -152,7 +168,7 @@ class ServiceTargetService:
                     .join(APIVersion, APIVersion.api_definition_id == APIDefinition.id)
                     .where(
                         APIDefinition.project_id == project_id,
-                        APIVersion.service_id == service_id,
+                        affected_version_filter,
                     )
                     .distinct()
                 )
@@ -165,7 +181,7 @@ class ServiceTargetService:
                     .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
                     .where(
                         APIDefinition.project_id == project_id,
-                        APIVersion.service_id == service_id,
+                        affected_version_filter,
                     )
                 )
             ).all()
@@ -177,9 +193,17 @@ class ServiceTargetService:
                 )
             ).all()
         )
-        version_refs = {
-            (str(version.api_definition_id), version.version) for version in affected_versions
+        explicit_version_refs = {
+            (str(version.api_definition_id), version.version)
+            for version in affected_versions
+            if version.service_id == service_id
         }
+        default_version_refs = {
+            (str(version.api_definition_id), version.version)
+            for version in affected_versions
+            if version.service_id is None
+        }
+        draft_version_refs = explicit_version_refs | default_version_refs
         current_versions = {str(api.id): api.current_version for api in apis}
         draft_affected_workflows = [
             workflow
@@ -187,13 +211,13 @@ class ServiceTargetService:
             if _workflow_uses_service(
                 workflow.draft_definition,
                 service.service_key,
-                version_refs,
+                draft_version_refs,
                 current_versions,
             )
         ]
         referenced_versions = (
             await self._session.execute(
-                select(TestPlanItem, WorkflowVersion)
+                select(TestPlanItem, WorkflowVersion, Environment.default_service_id)
                 .join(TestPlan, TestPlan.id == TestPlanItem.test_plan_id)
                 .join(
                     WorkflowVersion,
@@ -202,6 +226,7 @@ class ServiceTargetService:
                         WorkflowVersion.version == TestPlanItem.workflow_version,
                     ),
                 )
+                .join(Environment, Environment.id == TestPlanItem.environment_id)
                 .where(
                     TestPlan.project_id == project_id,
                     TestPlanItem.target_type == "workflow",
@@ -210,7 +235,10 @@ class ServiceTargetService:
         ).all()
         published_workflow_ids: set[UUID] = set()
         affected_plan_ids: set[UUID] = set()
-        for item, version in referenced_versions:
+        for item, version, environment_default_service_id in referenced_versions:
+            version_refs = explicit_version_refs
+            if environment_default_service_id == service_id:
+                version_refs = version_refs | default_version_refs
             if _workflow_uses_service(
                 version.definition,
                 service.service_key,

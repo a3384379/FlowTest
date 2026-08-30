@@ -765,8 +765,9 @@ async def test_service_endpoint_resolution_and_snapshot(
         },
     )
     assert legacy_api.status_code == 201, legacy_api.text
+    legacy_definition_id = legacy_api.json()["definition"]["id"]
     legacy_preview = await asset_client.post(
-        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
         headers=headers,
         json={"environment_id": environment["id"]},
     )
@@ -774,13 +775,13 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert legacy_preview.json()["target"]["service_key"] == "orders"
     assert legacy_preview.json()["url"] == "https://orders.example.com/health"
     bound_legacy = await asset_client.patch(
-        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}",
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}",
         headers=headers,
         json={"service_id": auth_id},
     )
     assert bound_legacy.status_code == 200, bound_legacy.text
     pinned_unassigned_preview = await asset_client.post(
-        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
         headers=headers,
         json={"environment_id": environment["id"], "version": 1},
     )
@@ -788,13 +789,64 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert pinned_unassigned_preview.json()["target"]["service_key"] == "orders"
     assert pinned_unassigned_preview.json()["url"] == "https://orders.example.com/health"
     bound_preview = await asset_client.post(
-        f"/api/v1/projects/{project_id}/apis/{legacy_api.json()['definition']['id']}/preview",
+        f"/api/v1/projects/{project_id}/apis/{legacy_definition_id}/preview",
         headers=headers,
         json={"environment_id": environment["id"]},
     )
     assert bound_preview.status_code == 200, bound_preview.text
     assert bound_preview.json()["target"]["service_key"] == "auth"
     assert bound_preview.json()["url"] == "https://auth.example.com/health"
+    pinned_definition["nodes"][1]["config"] = {
+        "api_definition_id": legacy_definition_id,
+        "api_version": 1,
+    }
+    unassigned_workflow = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "Pinned environment-default API",
+            "definition": pinned_definition,
+        },
+    )
+    assert unassigned_workflow.status_code == 201, unassigned_workflow.text
+    unassigned_workflow_id = unassigned_workflow.json()["id"]
+    unassigned_published = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{unassigned_workflow_id}/versions",
+        headers=headers,
+    )
+    assert unassigned_published.status_code == 200, unassigned_published.text
+    unassigned_plan = await asset_client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "Pinned environment-default plan",
+            "schedule_interval_seconds": 60,
+            "items": [
+                {
+                    "workflow_id": unassigned_workflow_id,
+                    "workflow_version": 1,
+                    "environment_id": environment["id"],
+                }
+            ],
+        },
+    )
+    assert unassigned_plan.status_code == 201, unassigned_plan.text
+    default_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{order_id}/impact-preview",
+        headers=headers,
+    )
+    assert default_impact.status_code == 200, default_impact.text
+    default_impact_payload = default_impact.json()
+    assert legacy_definition_id in {item["id"] for item in default_impact_payload["affected_apis"]}
+    assert unassigned_workflow_id in {
+        item["id"] for item in default_impact_payload["affected_workflows"]
+    }
+    assert unassigned_plan.json()["id"] in {
+        item["id"] for item in default_impact_payload["affected_test_plans"]
+    }
+    assert unassigned_plan.json()["id"] in {
+        item["id"] for item in default_impact_payload["affected_scheduled_runs"]
+    }
     assert default_service_id != order_id
 
 
