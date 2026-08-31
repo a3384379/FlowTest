@@ -2962,7 +2962,7 @@ interface OrdersApi {
 
 class CreateOrderRequest {
     @NotNull
-    String name;
+    public String name;
 }
 """,
                     },
@@ -3245,8 +3245,8 @@ class OrderController implements OrdersApi {
     }
 }
 
-class BaseOrderDto { private String summary; }
-class DetailedOrderDto extends BaseOrderDto { private String detail; }
+class BaseOrderDto { public String summary; }
+class DetailedOrderDto extends BaseOrderDto { public String detail; }
 """,
                     },
                 ],
@@ -3735,7 +3735,7 @@ class ConditionController {
                         "path": "src/main/java/example/OrderSummaryDto.java",
                         "content": """
 class OrderSummaryDto {
-    private String summary;
+    public String summary;
 }
 """,
                     },
@@ -3743,7 +3743,7 @@ class OrderSummaryDto {
                         "path": "src/main/java/example/OrderDetailDto.java",
                         "content": """
 class OrderDetailDto {
-    private String detail;
+    public String detail;
 }
 """,
                     },
@@ -4040,6 +4040,52 @@ class StaticMethodController {
     assert [claim.operation_ref for claim in calls] == ["operation://GET/orders"]
 
 
+def test_java_spring_poc_gates_plain_controller_response_dto_by_body_semantics() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://controller-response-body", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/PageController.java",
+                        "content": """
+@Controller
+class PageController {
+    @GetMapping("/view")
+    OrderDto view() { return orderService.load(); }
+
+    @ResponseBody
+    @GetMapping("/body")
+    OrderDto body() { return orderService.load(); }
+
+    @GetMapping("/entity")
+    ResponseEntity<OrderDto> entity() { return ResponseEntity.ok(orderService.load()); }
+}
+
+class OrderDto { public String id; }
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    routes = {
+        claim.handler: claim.operation_ref
+        for claim in evidence.claims
+        if claim.kind == "controller_route"
+    }
+    response_operations = {
+        claim.operation_ref
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    assert set(routes) == {"view", "body", "entity"}
+    assert response_operations == {routes["body"], routes["entity"]}
+
+
 def test_java_spring_poc_parses_formatted_generic_handler_return_types() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4052,7 +4098,7 @@ def test_java_spring_poc_parses_formatted_generic_handler_return_types() -> None
                         "path": "src/main/java/example/GenericController.java",
                         "content": """
 class OrderDto {
-    private String id;
+    public String id;
 }
 
 @RestController
@@ -4150,7 +4196,7 @@ class OrderController {
 }
 
 class Pair<T, U> {
-    private String pairValue;
+    public String pairValue;
 }
 
 class Foo {
@@ -4203,7 +4249,7 @@ class OrderController {
 
 class CreateOrderRequest {
     @NotNull
-    private OrderStatus status;
+    public OrderStatus status;
 }
 
 enum OrderStatus { ACTIVE, INACTIVE }
@@ -4346,8 +4392,8 @@ class OrderController {
     }
 }
 
-class User { private String tenantId; }
-class OrderFilter { private String status; }
+class User { public String tenantId; }
+class OrderFilter { public String status; }
 """,
                     }
                 ],
@@ -4453,7 +4499,7 @@ public class CreateOrderRequest {
 
     @NotBlank(message = "required")
     @Pattern(regexp = "^(foo|bar)$")
-    private String name = "NEW";
+    public String name = "NEW";
 
     static class NestedRequest {
         @NotBlank(message = "nested")
@@ -4511,9 +4557,9 @@ class OrderController {
 }
 
 class OrderDto {
-    private String visible;
+    public String visible;
 
-    @JsonIgnore(false)
+    @JsonProperty
     private String explicitlyVisible;
 
     @JsonIgnore
@@ -4544,6 +4590,61 @@ class OrderDto {
     }
 
 
+def test_java_spring_poc_keeps_json_ignored_members_in_jpa_structure() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://json-ignore-jpa", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @GetMapping("/orders")
+    OrderEntity order() { return orderService.load(); }
+}
+
+@Entity
+class OrderEntity {
+    @JsonIgnore
+    @Column(name = "secret_hash")
+    private String secretHash;
+
+    public String status;
+}
+
+@Entity
+record AuditEntity(
+    @JsonIgnore @Column(name = "actor_hash") String actorHash
+) {}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    columns = {
+        (claim.field_name, claim.column_name)
+        for claim in evidence.claims
+        if claim.kind == "table_column"
+    }
+    assert response_fields == {"status"}
+    assert columns == {
+        ("secretHash", "secret_hash"),
+        ("status", "status"),
+        ("actorHash", "actor_hash"),
+    }
+
+
 def test_java_spring_poc_honors_jackson_property_access_direction() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
@@ -4564,7 +4665,7 @@ class OrderController {
 }
 
 class OrderDto {
-    private String visible;
+    public String visible;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
@@ -4598,6 +4699,45 @@ class OrderDto {
     }
     assert request_fields == {"password", "visible"}
     assert response_fields == {"generatedId", "getterReadOnly", "visible"}
+
+
+@pytest.mark.parametrize("annotation", ["@JsonAutoDetect(fieldVisibility = ANY)", "@Data"])
+def test_java_spring_poc_requires_review_for_unresolved_json_visibility(
+    annotation: str,
+) -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://json-visibility", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/AccountController.java",
+                        "content": f"""
+@RestController
+class AccountController {{
+    @GetMapping("/accounts")
+    AccountDto account() {{ return accountService.load(); }}
+}}
+
+{annotation}
+class AccountDto {{ private String internalName; }}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert not [claim for claim in evidence.claims if claim.kind == "dto_field"]
+    assert evidence.deterministic is False
+    assert any(
+        warning.code == "JAVA_POC_INCOMPLETE_JSON_VISIBILITY"
+        and "AccountDto" in warning.message
+        and "人工复核" in warning.message
+        for warning in evidence.warnings
+    )
 
 
 def test_java_spring_poc_honors_explicit_jackson_property_names() -> None:
@@ -4784,7 +4924,7 @@ class AccountController {
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 class ClassDto {
-    private String userName;
+    public String userName;
 
     @JsonProperty("explicitName")
     private String displayName;
@@ -4797,7 +4937,7 @@ record RecordDto(String userName) {}
 
 class Container {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    static class Request { private String userName; }
+    static class Request { public String userName; }
 }
 """,
                     }
@@ -4876,11 +5016,11 @@ class OrderController {
                         "content": """
 class CreateOrderRequest {
     @jakarta.validation.constraints.NotNull
-    private String name;
+    public String name;
 
     @javax.validation.constraints.Pattern(regexp = "^[A-Z]+$")
     @javax.validation.constraints.Pattern(regexp = "^[A-Z0-9]+$")
-    private String code;
+    public String code;
 
     private Details details;
 
@@ -4928,7 +5068,7 @@ class LimitController {
 
 class LimitDto {
     @Max(9999999999L)
-    private long timestampLimit;
+    public long timestampLimit;
 }
 """,
                     }
@@ -4972,7 +5112,7 @@ class CreateOrderRequest {
     @Null
     @Past
     @PastOrPresent
-    private Object marker;
+    public Object marker;
 }
 """,
                     },
@@ -5015,8 +5155,8 @@ class OrderController {
                         "path": "src/main/java/example/CreateOrderRequest.java",
                         "content": """
 class CreateOrderRequest {
-    private String first, last;
-    private int minimum = 1, maximum = 2;
+    public String first, last;
+    public int minimum = 1, maximum = 2;
 }
 """,
                     },
@@ -5083,7 +5223,7 @@ public class OrderController {
                         "content": """
 public class OrderDto {
     private static final long serialVersionUID = 1L;
-    private String status;
+    public String status;
 }
 """,
                     },
@@ -5111,7 +5251,7 @@ public class OrderEntity {
     assert entity_fields == {"status"}
 
 
-def test_java_spring_poc_infers_all_instance_field_visibilities() -> None:
+def test_java_spring_poc_applies_default_jackson_field_visibility() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
             {
@@ -5166,12 +5306,7 @@ class OrderEntity {
         if claim.kind == "dto_field" and claim.direction == "response"
     }
     entity_fields = {claim.field_name for claim in evidence.claims if claim.kind == "table_column"}
-    assert response_fields == {
-        "publicStatus",
-        "protectedStatus",
-        "packageStatus",
-        "privateStatus",
-    }
+    assert response_fields == {"publicStatus"}
     assert entity_fields == {
         "publicColumn",
         "protectedColumn",
@@ -5204,7 +5339,7 @@ public class OrderController {
                         "path": "src/main/java/example/OrderDto.java",
                         "content": """
 public class OrderDto {
-    private Map<String, OrderDto> orders;
+    public Map<String, OrderDto> orders;
 }
 """,
                     },
@@ -5257,7 +5392,7 @@ public class OrderController {
                         "content": f"""
 public class CreateOrderRequest {{
     @Pattern(regexp = "{long_pattern}")
-    private String code;
+    public String code;
 }}
 """,
                     },
@@ -5692,7 +5827,7 @@ def test_java_spring_poc_removes_claims_for_truncated_routes() -> None:
 """
         for index in range(13)
     )
-    dtos = "\n".join(f"class Dto{index} {{ private String value{index}; }}" for index in range(13))
+    dtos = "\n".join(f"class Dto{index} {{ public String value{index}; }}" for index in range(13))
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(
             {
@@ -5988,7 +6123,7 @@ public class OrderController {
                         "content": """
 package example;
 public class OrderDto {
-    private String orderId;
+    public String orderId;
 }
 """,
                     },
@@ -6104,7 +6239,7 @@ class CreateOrderRequest {
                         "path": "src/main/java/example/OrderDto.java",
                         "content": """
 class OrderDto {
-    private ResponseStatus status;
+    public ResponseStatus status;
 }
 """,
                     },
