@@ -134,6 +134,7 @@
 | 契约中心 | OpenAPI/Pact、Provider 验证和兼容判断 | Contract Hub 已启用 |
 | Test Engineering | 从契约生成 Scenario、Oracle、Coverage 和待审核 Draft | API 契约 |
 | 影响分析 | 分析 Git/OpenAPI/GraphQL/Proto 变化并选择测试 | 可验证的变更输入和映射 |
+| 上下文检查器 | 只读查看当前 Context Revision、Evidence、冲突、State Knowledge 与关联 Flow Proposal | 项目 Read 权限；Context 已由 MCP/Provider 建立 |
 | 变更回归 | 串联 Change、Impact、选择、缺口审核、执行和 Gate | 影响分析和可执行资产 |
 | 质量中心 | CI Gate、Flaky 隔离、基线和 JUnit | 测试执行证据 |
 | 发布门禁 | 聚合质量、契约、风险、性能和 Runner 证据 | 对应证据均已生成 |
@@ -1000,11 +1001,16 @@ MCP 只读 Tool 的成功结果包含：
 4. 检查返回的结构化 Claim、静态分析 Warning、新 Context Revision、Entity Mapping 与
    `knowledge_snapshot`。State Knowledge 会展示 Route、DTO、Service、Repository/Entity、Table、State
    Candidate 等节点；`may_use_repository` / `may_map_entity` 表示静态命名关联，必须人工复核。
-5. 遇到 `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 或任何 `JAVA_POC_INCOMPLETE_*` Warning 时补充证据或人工复核，
+5. 在项目左侧进入“上下文检查器”，选择 Context 后只读检查当前 Revision、Completeness/Missing、Conflict、
+   Provider Finding、State Candidate、Knowledge Edge 和关联 Flow Proposal。点击 Proposal 会进入既有流程编排
+   审核界面；接受、拒绝和 Apply 仍遵循原有权限与安全检查。
+6. 遇到 `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 或任何 `JAVA_POC_INCOMPLETE_*` Warning 时补充证据或人工复核，
    不允许编译、执行目标代码或把不确定结果改成确定性结论。
 
 该入口要求 MCP Server `s57-java-spring-provider-v1`。FlowTest 不克隆 Git URL、不保存 Git Credential，
-也不持久化或返回提交的原始源码；调用方仍负责读取其有权访问且版本固定的仓库快照。
+也不持久化或返回提交的原始源码；调用方仍负责读取其有权访问且版本固定的仓库快照。浏览器中的“上下文检查器”
+使用普通项目 Read 权限，不要求也不会扩大 `mcp:evidence:write` 或 `mcp:flow:propose` Scope。Finding、Warning
+和 Reference 来自不可信外部证据，只作为文本阅读，不应复制为脚本、HTML 或可执行配置。
 
 ### 8.11 MCP 常见问题
 

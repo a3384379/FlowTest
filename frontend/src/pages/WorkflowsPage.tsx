@@ -24,6 +24,7 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
 import FlowSpecReviewDialog, {
@@ -35,6 +36,8 @@ import WorkflowDesigner from '../flow/WorkflowDesigner'
 import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
 
 export default function WorkflowsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialProposalId = searchParams.get('proposal') ?? undefined
   const [createOpen, setCreateOpen] = useState(false)
   const [flowSpecOpen, setFlowSpecOpen] = useState(false)
   const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
@@ -82,9 +85,17 @@ export default function WorkflowsPage() {
         state={state}
         flowSpecOpen={flowSpecOpen}
         flowSpecSeed={flowSpecSeed}
-        flowProposalOpen={flowProposalOpen}
+        flowProposalOpen={flowProposalOpen || Boolean(initialProposalId)}
+        initialProposalId={initialProposalId}
         onFlowSpecClose={() => setFlowSpecOpen(false)}
-        onFlowProposalClose={() => setFlowProposalOpen(false)}
+        onFlowProposalClose={() => {
+          setFlowProposalOpen(false)
+          if (searchParams.has('proposal')) {
+            const next = new URLSearchParams(searchParams)
+            next.delete('proposal')
+            setSearchParams(next, { replace: true })
+          }
+        }}
         onOpenRawMapping={(seed) => {
           setFlowProposalOpen(false)
           setFlowSpecSeed(seed)
@@ -102,6 +113,7 @@ function FlowDialogs({
   flowSpecOpen,
   flowSpecSeed,
   flowProposalOpen,
+  initialProposalId,
   onFlowSpecClose,
   onFlowProposalClose,
   onOpenRawMapping,
@@ -117,6 +129,7 @@ function FlowDialogs({
       <WorkflowProposalDialog
         state={state}
         open={flowProposalOpen}
+        initialProposalId={initialProposalId}
         onClose={onFlowProposalClose}
         onOpenRawMapping={onOpenRawMapping}
       />
@@ -129,6 +142,7 @@ type FlowDialogsProps = {
   flowSpecOpen: boolean
   flowSpecSeed: FlowSpecReviewSeed | undefined
   flowProposalOpen: boolean
+  initialProposalId: string | undefined
   onFlowSpecClose: () => void
   onFlowProposalClose: () => void
   onOpenRawMapping: (seed: FlowSpecReviewSeed) => void
@@ -179,19 +193,23 @@ function flowSpecDialogKey(
 function WorkflowProposalDialog({
   state,
   open,
+  initialProposalId,
   onClose,
   onOpenRawMapping,
 }: {
   state: WorkflowState
   open: boolean
+  initialProposalId: string | undefined
   onClose: () => void
   onOpenRawMapping: (seed: FlowSpecReviewSeed) => void
 }) {
   if (!state.projectId) return null
   return (
     <FlowProposalReviewDialog
+      key={initialProposalId ?? 'manually-opened-proposal'}
       open={open}
       projectId={state.projectId}
+      initialProposalId={initialProposalId}
       resources={workflowDesignerResources(state, state.workflowId ?? '')}
       onClose={onClose}
       onApplied={(workflowId) => {

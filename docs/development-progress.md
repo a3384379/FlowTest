@@ -23,8 +23,9 @@ P0=`0`、P1=`0`，Required Gate 全绿并普通 Squash Merge。原 12 项已接�
 S60 收口。当前后续顺序固定为 S57.0 → S57 → S58 → S59 → S60，不把 Change Maintenance 提前塞入
 S58。完整记录见 [S57.0 Foundation Correctness 验收](release/v6-s57-0-foundation-correctness.md)。
 S57 Built-in Java/Spring Provider 已由 PR #75 普通 Squash Merge；最终复审 P0=`0`、P1=`0`，1 项 MCP
-省略必填参数错误信封 P2 已按策略接受，Required Gate 全绿。State Knowledge 已进入实现与定向验收，
-Context Inspector 仍是 S57 退出项。
+省略必填参数错误信封 P2 已按策略接受，Required Gate 全绿。State Knowledge 已由 PR #76 普通 Squash
+Merge；最终复审 P0=`0`、P1=`0`，1 项 Java 全限定名 Token P2 已按策略接受，Required Gate 与 Compose
+Playwright 均全绿。Context Inspector 已进入实现和定向验收，仍是 S57 最后退出项。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -52,10 +53,12 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 后续阶段：S57 正式化 Built-in Java/Spring Provider、State Knowledge 与 Context Inspector；S58 才
   进入 Failure Diagnosis/Repair；S59 为 Change-aware Maintenance；S60 收口完整 Skills 与独立评测包。
 
-## 实现中：V6.1 S57 State Knowledge
+## 实现中：V6.1 S57 Context Inspector
 
 - PR #75 已交付固定身份 `flowtest-java-spring@1.0.0`、HTTP/MCP 源码快照入口、有界静态分析、授权前置、
   脱敏错误边界和不保存原始源码的 Evidence Ingest；完整本地门禁与远程 Required Gate 已通过。
+- PR #76 已交付 State Knowledge 的确定性重建、Evidence Reference、保守命名关联、State Candidate 与
+  RuoYi Golden；最终复审 P0=`0`、P1=`0`，普通合并后 Main Required Gate 全绿。
 - Context Revision 现在从已持久化 Java/Database Typed Evidence 派生 Operation、DTO/Field、Service/Feign、
   Repository、Entity、Table/Column、Validation、State Candidate、Exception 与 Event 节点。
 - 显式证据关系与 `may_use_repository` / `may_map_entity` 保守命名关联分离；Request/Response DTO 方向不混淆。
@@ -63,8 +66,13 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   与 50 Fact 上限保持 Fail Closed，不保存或执行目标代码。
 - 真实本地 RuoYi 固定 Revision 已验证
   `Route → DTO → Service → Mapper/Entity → Table`；CI 使用同结构强类型 Fixture。
-- 当前定向证据：Ruff、mypy 通过；S49 Context、S52 Evidence API 与 S57 State Knowledge 共 `38 passed`。
-  Context Inspector 与最终集中门禁尚未完成，S57 尚未宣告完成。
+- Context Inspector 使用项目用户 Read 授权展示当前 Revision、Completeness/Missing、Conflict、Provider
+  Finding、State Knowledge 与同 Revision Flow Proposal；不扩大 MCP Scope，不建立平行生命周期，过期状态
+  只读计算。
+- 当前集中门禁：后端 Format/Ruff/mypy 全绿，pytest `997 passed, 4 skipped`、覆盖率 `90.89%`；前端
+  Format/ESLint/TypeScript/Build 全绿，Vitest `227 passed`、Branch Coverage `80%`；Compose 中 Context →
+  Built-in Java Evidence → State Candidate → Flow Proposal 深链 Playwright `2 passed`。PR 复审与合并尚未
+  完成，S57 尚未宣告完成。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 
