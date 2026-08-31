@@ -2067,6 +2067,31 @@ Operation/Binding Precision 只报告 Golden Set 的精确分子与分母，不�
 
 ---
 
+## S57.0 — V6.1 Foundation Correctness 与 Accepted P2 Closure
+
+### 目标
+
+在扩展 Java Provider、State Knowledge 和 Repair 之前，关闭会被后续自动化复制或放大的基础正确性
+债务。
+
+### 已完成范围
+
+- Planner / Compiler / Data：对象型 JSON Body、Path/Cookie、变量唯一性、DB Read 来源、Plan v1
+  `setup_api` 兼容；
+- Java Evidence：Jackson 默认可见性、普通 `@Controller` Response Body 语义、JPA 结构字段独立性；
+- Governance / Evaluation / Skill：授权早于 Idempotency Claim、硬门禁使用未舍入比例、Preview 前
+  重新确认 Proposal 已接受且未 Apply。
+
+### 分阶段门槛
+
+- PR #71、#72、#73 均已普通 Squash Merge；
+- 最终复审 P0=`0`、P1=`0`；
+- Context Inspector UI 是 S57 退出条件；
+- Skill 自包含 Evaluation Assets 最迟在 S60 完成；
+- 复审新增 P2 独立记账，不重新计入原 12 项。
+
+---
+
 ## S57 — Built-in Java/Spring Provider 与 State Knowledge（V6.1）
 
 ### 目标
@@ -2094,6 +2119,9 @@ Route → DTO → Service → Mapper/Entity → Table
 ```
 
 可追溯、无代码执行。
+
+同时交付面向用户的 Context Inspector，展示 Revision、Evidence Summary、Missing Evidence、Conflict、
+State Candidate、Provider Finding 与关联 Flow Proposal。S57 不新建平行 Proposal 生命周期。
 
 ---
 
