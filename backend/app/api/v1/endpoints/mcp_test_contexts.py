@@ -32,10 +32,12 @@ from app.schemas.test_contexts import (
     IngestDatabaseEvidenceRequest,
     IngestExternalEvidenceRequest,
     IngestJavaEvidenceRequest,
+    IngestJavaSourceSnapshotRequest,
     IntegrationPlanCompileRequest,
     IntegrationPlanRequest,
     IntegrationPlanValidateRequest,
     IntegrationPlanValidationResponse,
+    JavaSourceSnapshotIngestionResponse,
     TestContextResponse,
 )
 from app.schemas.workflows import WorkflowExecutionResponse
@@ -112,6 +114,24 @@ async def ingest_java_evidence(
         actor=principal.actor,
         context_id=context_id,
         evidence=payload.evidence,
+    )
+
+
+@evidence_router.post(
+    "/{context_id}/java-source-snapshot",
+    response_model=JavaSourceSnapshotIngestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_java_source_snapshot(
+    context_id: UUID,
+    payload: IngestJavaSourceSnapshotRequest,
+    session: SessionDependency,
+    principal: MCPEvidenceCurrent,
+) -> JavaSourceSnapshotIngestionResponse:
+    return await EvidenceAdapterService(session).ingest_java_source_snapshot(
+        actor=principal.actor,
+        context_id=context_id,
+        source=payload.snapshot,
     )
 
 

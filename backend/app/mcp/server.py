@@ -10,10 +10,13 @@ from urllib.parse import unquote, urlsplit
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
+from pydantic import ValidationError
 
 from app.domain.evidence_adapters import (
+    MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION,
     DatabaseEvidenceSubmission,
     JavaEvidenceSubmission,
+    JavaSourceInput,
 )
 from app.domain.integration_plans import (
     IntegrationPlan,
@@ -24,7 +27,6 @@ from app.domain.integration_plans import (
     PlanTargetEnvironment,
 )
 from app.domain.mcp_read import MCP_SERVER_NAME
-from app.domain.sandbox_preview import MCP_SANDBOX_PREVIEW_SERVER_VERSION
 from app.domain.test_contexts import (
     ContextKnowledgeSnapshot,
     EvidenceProviderType,
@@ -39,7 +41,8 @@ from app.schemas.test_contexts import (
 
 MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
-    "版本化外部证据、强类型 Java/DB Evidence、确定性 Integration Plan 与"
+    "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
+    "确定性 Integration Plan 与"
     "只进入待审核状态的 Flow Draft，以及人工一次性批准后的 Sandbox Preview。"
     "FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、正式环境执行、删除、修改"
@@ -68,7 +71,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_SANDBOX_PREVIEW_SERVER_VERSION,
+        version=MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION,
         instructions=MCP_INSTRUCTIONS,
     )
 
@@ -109,6 +112,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_ingest_database_evidence_tool(server, client)
     _register_ingest_evidence_tool(server, client)
     _register_ingest_java_evidence_tool(server, client)
+    _register_ingest_java_source_snapshot_tool(server, client)
     _register_change_impact_tool(server, client)
     _register_context_requirements_tool(server, client)
 
@@ -563,6 +567,52 @@ def _register_ingest_java_evidence_tool(server: MCPServer, client: MCPReadGatewa
             client.ingest_java_evidence(
                 context_id,
                 evidence.model_dump(mode="json"),
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_ingest_java_source_snapshot_tool(
+    server: MCPServer, client: MCPReadGatewayClient
+) -> None:
+    @server.tool(
+        name="flowtest.ingest_java_source_snapshot",
+        description=(
+            "使用 FlowTest 内置 Java/Spring Provider 静态分析有界源码快照并写入 Context；"
+            "不编译或执行目标代码。"
+        ),
+        structured_output=True,
+    )
+    async def ingest_java_source_snapshot(
+        context_id: str,
+        source_ref: str,
+        source_revision: str,
+        subject_ref: str,
+        files: object,
+        execute_analyzed_code: bool = False,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        try:
+            snapshot = JavaSourceInput.model_validate(
+                {
+                    "source": {"ref": source_ref, "revision": source_revision},
+                    "subject_ref": subject_ref,
+                    "files": files,
+                    "execute_analyzed_code": execute_analyzed_code,
+                }
+            )
+        except ValidationError:
+            return _error_payload(
+                MCPGatewayError(
+                    code="MCP_JAVA_SOURCE_SNAPSHOT_INVALID",
+                    status_code=422,
+                    message="Java source snapshot validation failed",
+                )
+            )
+        return await _tool_payload(
+            client.ingest_java_source_snapshot(
+                context_id,
+                snapshot.model_dump(mode="json"),
                 token=_request_token(ctx, client),
             )
         )

@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -702,6 +703,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.ingest_database_evidence",
             "flowtest.ingest_external_evidence",
             "flowtest.ingest_java_evidence",
+            "flowtest.ingest_java_source_snapshot",
             "flowtest.inspect_change_impact",
             "flowtest.inspect_context_requirements",
             "flowtest.inspect_contract",
@@ -729,6 +731,10 @@ async def test_mcp_sdk_registration_and_transports() -> None:
         assert tools_by_name["flowtest.ingest_java_evidence"].description == (
             "写入严格的外部 Java/Spring 结构证据\uff0c不执行目标代码。"
         )
+        assert tools_by_name["flowtest.ingest_java_source_snapshot"].description == (
+            "使用 FlowTest 内置 Java/Spring Provider 静态分析有界源码快照并写入 Context\uff1b"
+            "不编译或执行目标代码。"
+        )
         assert tools_by_name["flowtest.inspect_entity_mapping"].description == (
             "查看测试上下文中可追溯的实体候选与尚未解决的歧义。"
         )
@@ -753,6 +759,97 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             },
         )
         assert write_result.is_error is False
+        java_source_result = await server.call_tool(
+            "flowtest.ingest_java_source_snapshot",
+            {
+                "context_id": "context-1",
+                "source_ref": "repository://orders",
+                "source_revision": "revision-v1",
+                "subject_ref": "flowtest://projects/project-1/operations/orders",
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": "@RestController class OrderController {}",
+                    }
+                ],
+                "execute_analyzed_code": False,
+            },
+        )
+        assert java_source_result.structured_content["data"]["error"]["code"] == (
+            "MCP_GATEWAY_INVALID_RESPONSE"
+        )
+        java_source_request = next(
+            request for request in requests if request.url.path.endswith("/java-source-snapshot")
+        )
+        java_source_payload = json.loads(java_source_request.content)
+        assert java_source_payload["snapshot"]["execute_analyzed_code"] is False
+        assert "provider" not in java_source_payload["snapshot"]
+        invalid_source_marker = "MCP_RAW_SOURCE_MUST_BE_REDACTED"
+        invalid_java_source_result = await server.call_tool(
+            "flowtest.ingest_java_source_snapshot",
+            {
+                "context_id": "context-1",
+                "source_ref": "repository://orders",
+                "source_revision": "revision-v1",
+                "subject_ref": "flowtest://projects/project-1/operations/orders",
+                "files": [
+                    {
+                        "path": "src/main/java/example/Duplicate.java",
+                        "content": invalid_source_marker,
+                    },
+                    {
+                        "path": "src/main/java/example/Duplicate.java",
+                        "content": invalid_source_marker,
+                    },
+                ],
+                "execute_analyzed_code": False,
+            },
+        )
+        invalid_source_payload = invalid_java_source_result.structured_content
+        assert invalid_source_payload["data"]["error"]["code"] == (
+            "MCP_JAVA_SOURCE_SNAPSHOT_INVALID"
+        )
+        assert invalid_source_payload["trace_id"] == "mcp-gateway"
+        assert invalid_source_marker not in json.dumps(invalid_source_payload)
+        invalid_files_container_result = await server.call_tool(
+            "flowtest.ingest_java_source_snapshot",
+            {
+                "context_id": "context-1",
+                "source_ref": "repository://orders",
+                "source_revision": "revision-v1",
+                "subject_ref": "flowtest://projects/project-1/operations/orders",
+                "files": {
+                    "path": "src/main/java/example/NotAList.java",
+                    "content": invalid_source_marker,
+                },
+                "execute_analyzed_code": False,
+            },
+        )
+        invalid_container_payload = invalid_files_container_result.structured_content
+        assert invalid_container_payload["data"]["error"]["code"] == (
+            "MCP_JAVA_SOURCE_SNAPSHOT_INVALID"
+        )
+        assert invalid_source_marker not in json.dumps(invalid_container_payload)
+        execution_source_result = await server.call_tool(
+            "flowtest.ingest_java_source_snapshot",
+            {
+                "context_id": "context-1",
+                "source_ref": "repository://orders",
+                "source_revision": "revision-v1",
+                "subject_ref": "flowtest://projects/project-1/operations/orders",
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": invalid_source_marker,
+                    }
+                ],
+                "execute_analyzed_code": True,
+            },
+        )
+        assert execution_source_result.structured_content["data"]["error"]["code"] == (
+            "MCP_JAVA_SOURCE_SNAPSHOT_INVALID"
+        )
+        assert invalid_source_marker not in json.dumps(execution_source_result.structured_content)
         for name, arguments in (
             ("flowtest.discover_services", {"project_id": "project-1", "environment_id": "env-1"}),
             (

@@ -991,6 +991,19 @@ MCP 只读 Tool 的成功结果包含：
 4. 明确确认后使用新的幂等键和 `dry_run=false` 创建 Draft。
 5. 在“AI 变更集”逐项 Review；高风险项先完成人工审批。
 
+#### 场景 E：使用内置 Java/Spring Provider 补充 Context Evidence
+
+1. 创建 Context，并在 Repository Revision 中固定当前源码版本。
+2. 只选择当前项目授权范围内的仓库相对 `.java` 文件；单次最多 50 个文件、总计 1 MiB。
+3. 使用 `flowtest.ingest_java_source_snapshot` 提交 `source_ref`、`source_revision`、`subject_ref` 和文件；
+   Provider 身份由 FlowTest 固定，调用方不能覆盖。
+4. 检查返回的结构化 Claim、静态分析 Warning、新 Context Revision 与 Entity Mapping。
+5. 遇到 `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 或任何 `JAVA_POC_INCOMPLETE_*` Warning 时补充证据或人工复核，
+   不允许编译、执行目标代码或把不确定结果改成确定性结论。
+
+该入口要求 MCP Server `s57-java-spring-provider-v1`。FlowTest 不克隆 Git URL、不保存 Git Credential，
+也不持久化或返回提交的原始源码；调用方仍负责读取其有权访问且版本固定的仓库快照。
+
 ### 8.11 MCP 常见问题
 
 | 错误/现象 | 原因 | 处理方式 |

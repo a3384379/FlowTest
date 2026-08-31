@@ -66,6 +66,9 @@ ENTITY_MAPPING_SCHEMA_VERSION: Final[Literal["flowtest-entity-mapping-v1"]] = (
     "flowtest-entity-mapping-v1"
 )
 MCP_EVIDENCE_ADAPTER_SERVER_VERSION: Final[str] = "s52-evidence-adapter-v1"
+MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION: Final[str] = "s57-java-spring-provider-v1"
+BUILT_IN_JAVA_SPRING_PROVIDER_NAME: Final[str] = "flowtest-java-spring"
+BUILT_IN_JAVA_SPRING_PROVIDER_VERSION: Final[str] = "1.0.0"
 MAX_ADAPTER_CLAIMS = 80
 MAX_JAVA_SOURCE_FILES = 50
 MAX_JAVA_SOURCE_BYTES = 1024 * 1024
@@ -839,23 +842,30 @@ class JavaSourceFileSnapshot(BaseModel):
         return self
 
 
-class JavaSourceSnapshot(BaseModel):
+class JavaSourceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: EvidenceAdapterProvider
     source: ExternalEvidenceSource
     subject_ref: str = Field(min_length=1, max_length=512, pattern=_REF)
     files: list[JavaSourceFileSnapshot] = Field(min_length=1, max_length=MAX_JAVA_SOURCE_FILES)
     execute_analyzed_code: Literal[False] = False
 
     @model_validator(mode="after")
-    def validate_budget(self) -> JavaSourceSnapshot:
+    def validate_budget(self) -> JavaSourceInput:
         if sum(len(file.content.encode()) for file in self.files) > MAX_JAVA_SOURCE_BYTES:
-            raise ValueError("Java POC source byte budget exceeded")
+            raise ValueError("Java source byte budget exceeded")
         identities = [file.path for file in self.files]
         if len(identities) != len(set(identities)):
-            raise ValueError("Java POC source paths must be unique")
+            raise ValueError("Java source paths must be unique")
         return self
+
+
+class JavaSourceSnapshot(JavaSourceInput):
+    provider: EvidenceAdapterProvider
+
+
+class JavaSourceAnalysisError(ValueError):
+    """Raised when bounded static analysis cannot produce ingestible evidence."""
 
 
 class JavaSpringPocProvider:
@@ -894,6 +904,7 @@ class JavaSpringPocProvider:
             structural_truncated = structural_truncated or file_truncated
             unresolved_jpa_tables.update(file_unresolved_tables)
         bounded_claims, claim_truncated = _bounded_java_claims(claims)
+        _require_java_analysis_claims(bounded_claims)
         truncated = structural_truncated or claim_truncated
         warnings = [
             ExternalEvidenceWarning(
@@ -1019,6 +1030,18 @@ class JavaSpringPocProvider:
             ),
             warnings=warnings,
         )
+
+
+class BuiltInJavaSpringProvider:
+    """Stable S57 entry point over the bounded, static Java/Spring analyzer."""
+
+    def analyze(self, snapshot: JavaSourceSnapshot) -> JavaEvidenceSubmission:
+        return JavaSpringPocProvider().analyze(snapshot)
+
+
+def _require_java_analysis_claims(claims: list[JavaEvidenceClaim]) -> None:
+    if not claims:
+        raise JavaSourceAnalysisError("Java source analysis produced no supported evidence")
 
 
 def _java_reference_warnings(

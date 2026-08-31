@@ -10,6 +10,7 @@ from app.domain.evidence_adapters import (
     DatabaseEvidenceSubmission,
     EntityMappingResult,
     JavaEvidenceSubmission,
+    JavaSourceInput,
 )
 from app.domain.flow_spec import FlowSpec
 from app.domain.flow_spec_v2 import FlowSpecV2
@@ -76,6 +77,12 @@ class IngestJavaEvidenceRequest(BaseModel):
     evidence: JavaEvidenceSubmission
 
 
+class IngestJavaSourceSnapshotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot: JavaSourceInput
+
+
 class IngestDatabaseEvidenceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -138,6 +145,10 @@ class EvidenceAdapterIngestionResponse(BaseModel):
 
     context: TestContextResponse
     entity_mapping: EntityMappingResult
+
+
+class JavaSourceSnapshotIngestionResponse(EvidenceAdapterIngestionResponse):
+    analysis: JavaEvidenceSubmission
 
 
 class ContextRequirementsResponse(BaseModel):
