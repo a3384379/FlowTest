@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -19,9 +21,11 @@ from app.core.database import get_session
 from app.core.security import password_service
 from app.domain.evidence import EvidenceBundle
 from app.domain.evidence_adapters import (
+    BuiltInJavaSpringProvider,
     DatabaseEvidenceSubmission,
     EntityMappingBudgetExceeded,
     JavaEvidenceSubmission,
+    JavaSourceSnapshot,
     MappingEvidenceInput,
     adapt_database_evidence,
     adapt_evidence_bundle,
@@ -2689,6 +2693,60 @@ async def test_built_in_java_provider_authorizes_context_before_static_analysis(
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "TEST_CONTEXT_NOT_FOUND"
     assert response.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_built_in_java_provider_runs_analysis_off_the_async_request_loop(
+    s52_context: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "S57 内置 Provider 异步边界",
+            "objective": "验证静态分析不阻塞 API 事件循环",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    started = threading.Event()
+    release = threading.Event()
+    analysis_thread_ids: list[int] = []
+    original_analyze = BuiltInJavaSpringProvider.analyze
+
+    def blocking_analysis(
+        provider: BuiltInJavaSpringProvider, snapshot: JavaSourceSnapshot
+    ) -> JavaEvidenceSubmission:
+        analysis_thread_ids.append(threading.get_ident())
+        started.set()
+        if not release.wait(timeout=5):
+            raise AssertionError("timed out waiting to release Java analysis")
+        return original_analyze(provider, snapshot)
+
+    monkeypatch.setattr(BuiltInJavaSpringProvider, "analyze", blocking_analysis)
+    request_task = asyncio.create_task(
+        client.post(
+            f"/api/v1/mcp/evidence/contexts/{context_id}/java-source-snapshot",
+            headers=headers,
+            json={"snapshot": _java_source_snapshot(project_id)},
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 2)
+    event_loop_thread_id = threading.get_ident()
+    await asyncio.sleep(0)
+    release.set()
+
+    response = await request_task
+
+    assert response.status_code == 201, response.text
+    assert analysis_thread_ids
+    assert analysis_thread_ids[0] != event_loop_thread_id
 
 
 def _headers(token: str) -> dict[str, str]:

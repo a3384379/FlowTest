@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from anyio import to_thread
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,7 +66,11 @@ class EvidenceAdapterService:
             ),
         )
         try:
-            analysis = BuiltInJavaSpringProvider().analyze(snapshot)
+            analysis = await to_thread.run_sync(
+                BuiltInJavaSpringProvider().analyze,
+                snapshot,
+                limiter=to_thread.current_default_thread_limiter(),
+            )
         except JavaSourceAnalysisError as exc:
             raise AppError(
                 code="JAVA_SOURCE_EVIDENCE_NOT_FOUND",
