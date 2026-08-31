@@ -134,6 +134,9 @@ _RESPONSE_MAP_CONTAINERS: Final = (
     "NavigableMap",
     "SortedMap",
 )
+_SPRING_BODY_RESPONSE_CONTAINERS: Final[frozenset[str]] = frozenset(
+    {"HttpEntity", "ResponseEntity"}
+)
 _TRANSPORT_ONLY_PARAMETER_ANNOTATIONS: Final = (
     "AuthenticationPrincipal",
     "CookieValue",
@@ -203,6 +206,12 @@ _CONTROLLER_ANNOTATION = re.compile(
     r"@(?:(?:org\.springframework\.web\.bind\.annotation\.)?RestController|"
     r"(?:org\.springframework\.stereotype\.)?Controller)\b"
 )
+_REST_CONTROLLER_ANNOTATION = re.compile(
+    r"@(?:(?:org\.springframework\.web\.bind\.annotation\.)?RestController)\b"
+)
+_RESPONSE_BODY_ANNOTATION = re.compile(
+    r"@(?:(?:org\.springframework\.web\.bind\.annotation\.)?ResponseBody)\b"
+)
 _JPA_ENTITY_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
 _JPA_ENTITY_ANNOTATION_MARKER = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Entity\b")
 _JPA_TABLE_ANNOTATION = re.compile(r"@(?:(?:jakarta|javax)\.persistence\.)?Table\b")
@@ -239,6 +248,10 @@ _JACKSON_VALUE_ANNOTATION = re.compile(
 _JACKSON_VALUE_ANNOTATION_MARKER = re.compile(
     r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonValue)\b"
 )
+_JACKSON_AUTO_DETECT_ANNOTATION = re.compile(
+    r"@(?:(?:com\.fasterxml\.jackson\.annotation\.)?JsonAutoDetect)\b"
+)
+_LOMBOK_ACCESSOR_ANNOTATION = re.compile(r"@(?:(?:lombok\.)?(?:Data|Getter|Setter|Value))\b")
 _TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>class|record|enum|interface)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -952,6 +965,18 @@ class JavaSpringPocProvider:
                     ),
                 )
             )
+        if type_analysis.unresolved_json_visibility_types:
+            warnings.append(
+                ExternalEvidenceWarning(
+                    code="JAVA_POC_INCOMPLETE_JSON_VISIBILITY",
+                    message=(
+                        "Java/Spring POC 无法静态确认 @JsonAutoDetect 或 Lombok "
+                        "生成的 Jackson 属性可见性，已停止生成对应 DTO 字段证据，"
+                        "需要人工复核："
+                        f"{_java_type_name_summary(type_analysis.unresolved_json_visibility_types)}。"
+                    ),
+                )
+            )
         warnings.extend(
             _java_reference_warnings(
                 interface_contracts.unresolved_interfaces,
@@ -990,6 +1015,7 @@ class JavaSpringPocProvider:
                 and not type_analysis.unresolved_enum_serialization_types
                 and not type_analysis.unresolved_json_naming_types
                 and not type_analysis.unresolved_json_property_types
+                and not type_analysis.unresolved_json_visibility_types
             ),
             warnings=warnings,
         )
@@ -2377,6 +2403,7 @@ class _JavaRoute(BaseModel):
     controller_ref: str
     handler: str
     return_type: str
+    response_body: bool
     parameters: str
     declared_exceptions: list[str]
     conditions: tuple[str, ...] = ()
@@ -2388,6 +2415,7 @@ class _JavaRoute(BaseModel):
 @dataclass(frozen=True, slots=True)
 class _JavaMethodImplementation:
     return_type: str
+    response_body: bool
     parameters: str
     declared_exceptions: tuple[str, ...]
     body: str
@@ -2460,6 +2488,7 @@ class _JavaEnumDefinition:
 @dataclass(frozen=True)
 class _JavaTypeAnalysis:
     fields: dict[str, list[JavaField]]
+    dto_fields: dict[str, list[JavaField]]
     enums: dict[str, _JavaEnumDefinition]
     ambiguous_types: tuple[str, ...]
     inherited_types: tuple[str, ...]
@@ -2468,6 +2497,7 @@ class _JavaTypeAnalysis:
     unresolved_enum_serialization_types: tuple[str, ...]
     unresolved_json_naming_types: tuple[str, ...]
     unresolved_json_property_types: tuple[str, ...]
+    unresolved_json_visibility_types: tuple[str, ...]
 
 
 def _java_type_analysis(
@@ -2478,6 +2508,7 @@ def _java_type_analysis(
         str,
         list[list[JavaField]],
     ] = defaultdict(list)
+    dto_definitions: dict[str, list[list[JavaField]]] = defaultdict(list)
     enum_definitions: dict[str, list[_JavaEnumDefinition]] = defaultdict(list)
     inherited_types: set[str] = set()
     property_access_types: set[str] = set()
@@ -2485,6 +2516,7 @@ def _java_type_analysis(
     unresolved_enum_serialization_types: set[str] = set()
     unresolved_json_naming_types: set[str] = set()
     unresolved_json_property_types: set[str] = set()
+    unresolved_json_visibility_types: set[str] = set()
     for file in files:
         masked_content = _mask_java_non_code(file.content)
         top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
@@ -2496,6 +2528,16 @@ def _java_type_analysis(
                 if declaration.group("kind") == "record"
                 else _class_fields(body, string_constants, name)
             )
+            dto_fields = (
+                fields
+                if declaration.group("kind") == "record"
+                else _class_fields(
+                    body,
+                    string_constants,
+                    name,
+                    json_visible_only=True,
+                )
+            )
             fields, unresolved_naming_types = _java_fields_with_json_naming(
                 file.content,
                 masked_content,
@@ -2504,10 +2546,26 @@ def _java_type_analysis(
                 fields,
                 name,
             )
+            dto_fields, _dto_unresolved_naming_types = _java_fields_with_json_naming(
+                file.content,
+                masked_content,
+                declaration,
+                top_level_prefixes,
+                dto_fields,
+                name,
+            )
             unresolved_json_naming_types.update(unresolved_naming_types)
-            if any(field[7] for field in fields):
+            if any(field[7] for field in dto_fields):
                 unresolved_json_property_types.add(name)
+            if _java_type_has_unresolved_json_visibility(
+                file.content,
+                masked_content,
+                declaration,
+                top_level_prefixes,
+            ):
+                unresolved_json_visibility_types.add(name)
             definitions[name].append(fields)
+            dto_definitions[name].append(dto_fields)
             if any(field[4] for field in fields):
                 unresolved_column_types.add(name)
             if _java_type_extends(masked_content, declaration):
@@ -2553,6 +2611,7 @@ def _java_type_analysis(
     ambiguous_types = tuple(sorted(name for name, items in definitions.items() if len(items) > 1))
     return _JavaTypeAnalysis(
         fields={name: items[0] for name, items in definitions.items() if len(items) == 1},
+        dto_fields={name: items[0] for name, items in dto_definitions.items() if len(items) == 1},
         enums={
             name: items[0]
             for name, items in enum_definitions.items()
@@ -2565,6 +2624,7 @@ def _java_type_analysis(
         unresolved_enum_serialization_types=tuple(sorted(unresolved_enum_serialization_types)),
         unresolved_json_naming_types=tuple(sorted(unresolved_json_naming_types)),
         unresolved_json_property_types=tuple(sorted(unresolved_json_property_types)),
+        unresolved_json_visibility_types=tuple(sorted(unresolved_json_visibility_types)),
     )
 
 
@@ -2589,6 +2649,36 @@ def _java_fields_with_json_naming(
     if naming_strategy == "snake_case":
         return [(*field[:6], field[6] or _snake_case(field[0]), field[7]) for field in fields], ()
     return fields, (type_name,) * naming_unresolved
+
+
+def _java_type_has_unresolved_json_visibility(
+    content: str,
+    masked_content: str,
+    declaration: re.Match[str],
+    top_level_prefixes: dict[int, int],
+) -> bool:
+    prefix_start = top_level_prefixes.get(
+        declaration.start(),
+        _java_nested_declaration_prefix_start(masked_content, declaration.start()),
+    )
+    declaration_prefix = masked_content[prefix_start : declaration.start()]
+    if _JACKSON_AUTO_DETECT_ANNOTATION.search(declaration_prefix) is not None:
+        return True
+    if _LOMBOK_ACCESSOR_ANNOTATION.search(declaration_prefix) is not None:
+        return True
+    opening = masked_content.find("{", declaration.end())
+    if opening < 0:
+        return False
+    closing = _matching_brace(content, opening)
+    member_mask = _mask_nested_java_blocks(masked_content[opening + 1 : closing])
+    declaration_mask = _mask_java_annotation_arguments(member_mask)
+    return any(
+        _LOMBOK_ACCESSOR_ANNOTATION.search(
+            member_mask[_java_member_prefix_start(member_mask, field.start()) : field.start()]
+        )
+        is not None
+        for field in _FIELD_DECLARATION.finditer(declaration_mask)
+    )
 
 
 def _java_nested_declaration_prefix_start(masked_content: str, declaration_start: int) -> int:
@@ -2776,11 +2866,20 @@ def _class_fields(
     body: str,
     string_constants: _JavaStringConstants,
     enclosing_type: str,
+    *,
+    json_visible_only: bool = False,
 ) -> list[JavaField]:
     fields: list[JavaField] = []
     code_body = _mask_java_non_code(body)
     masked_body = _mask_nested_java_blocks(code_body)
     declaration_body = _mask_java_annotation_arguments(masked_body)
+    accessor_fields = _java_accessor_fields(
+        body,
+        code_body,
+        string_constants,
+        enclosing_type,
+    )
+    accessor_field_names = {field[0] for field in accessor_fields}
     for match in _FIELD_DECLARATION.finditer(declaration_body):
         modifiers = set(match.group("modifiers").split())
         if modifiers.intersection({"static", "transient"}):
@@ -2811,6 +2910,14 @@ def _class_fields(
             string_constants,
             enclosing_type,
         )
+        explicitly_exposed = bool(
+            _active_java_annotation_matches(
+                annotation_content,
+                annotation_mask,
+                _JACKSON_PROPERTY_ANNOTATION_MARKER,
+                _JACKSON_PROPERTY_ANNOTATION,
+            )
+        )
         fields.extend(
             (
                 field_name,
@@ -2823,16 +2930,15 @@ def _class_fields(
                 serialized_name_unresolved,
             )
             for field_name, field_type in declarators
+            if not json_visible_only
+            or "public" in modifiers
+            or explicitly_exposed
+            or field_name in accessor_field_names
         )
     ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
     fields = [field for field in fields if field[0] not in ignored_getters]
     known = {field[0] for field in fields}
-    for accessor_field in _java_accessor_fields(
-        body,
-        code_body,
-        string_constants,
-        enclosing_type,
-    ):
+    for accessor_field in accessor_fields:
         if accessor_field[0] not in known and accessor_field[0] not in ignored_getters:
             fields.append(accessor_field)
             known.add(accessor_field[0])
@@ -3672,6 +3778,10 @@ def _java_controller_routes(
     if base_conditions is None:
         return []
     controller = declaration.group("name")
+    controller_response_body = _java_controller_has_response_body_by_default(
+        masked_content,
+        selected,
+    )
     call_target_types = (
         _java_call_target_types(file, masked_content, declaration)
         if declaration.group("kind") == "class"
@@ -3696,6 +3806,7 @@ def _java_controller_routes(
             base_conditions,
             controller,
             string_constants,
+            controller_response_body=controller_response_body,
             call_target_types=call_target_types,
             allow_abstract_methods=allow_abstract_methods,
         )
@@ -3711,6 +3822,10 @@ def _java_bound_interface_routes(
 ) -> list[_JavaRoute]:
     declaration, _prefix_start = selected
     controller = declaration.group("name")
+    controller_response_body = _java_controller_has_response_body_by_default(
+        masked_content,
+        selected,
+    )
     base_paths, base_methods, base_conditions = _java_type_mapping(
         file,
         masked_content,
@@ -3732,7 +3847,9 @@ def _java_bound_interface_routes(
                 declaration,
                 contract,
             )
-            implementation_update: dict[str, object] = {}
+            implementation_update: dict[str, object] = {
+                "response_body": controller_response_body or contract.response_body
+            }
             if implementation is None:
                 body = contract.body
                 source_line = file.content.count("\n", 0, declaration.start()) + 1
@@ -3741,6 +3858,11 @@ def _java_bound_interface_routes(
                 source_line = implementation.source_line
                 implementation_update = {
                     "return_type": implementation.return_type,
+                    "response_body": (
+                        controller_response_body
+                        or contract.response_body
+                        or implementation.response_body
+                    ),
                     "parameters": implementation.parameters,
                     "declared_exceptions": list(implementation.declared_exceptions),
                 }
@@ -3888,8 +4010,14 @@ def _java_controller_method_implementation(
             continue
         body_opening = method_start + signature.end()
         body_end = _matching_brace(file.content, body_opening - 1)
+        return_type = following[signature.start("return") : signature.end("return")]
         return _JavaMethodImplementation(
-            return_type=following[signature.start("return") : signature.end("return")],
+            return_type=return_type,
+            response_body=_java_method_has_response_body(
+                masked_following[: signature.start("return")],
+                return_type,
+                controller_default=False,
+            ),
             parameters=parameters,
             declared_exceptions=tuple(
                 _declared_java_exceptions(
@@ -3944,6 +4072,18 @@ def _java_controller_declarations(
         is not None
     ]
     return annotated
+
+
+def _java_controller_has_response_body_by_default(
+    masked_content: str,
+    selected: tuple[re.Match[str], int],
+) -> bool:
+    declaration, prefix_start = selected
+    declaration_prefix = masked_content[prefix_start : declaration.start()]
+    return (
+        _REST_CONTROLLER_ANNOTATION.search(declaration_prefix) is not None
+        or _RESPONSE_BODY_ANNOTATION.search(declaration_prefix) is not None
+    )
 
 
 def _java_class_is_abstract(
@@ -4060,6 +4200,19 @@ def _active_java_annotation_matches(
     return matches
 
 
+def _java_method_has_response_body(
+    annotation_prefix: str,
+    return_type: str,
+    *,
+    controller_default: bool,
+) -> bool:
+    return (
+        controller_default
+        or _RESPONSE_BODY_ANNOTATION.search(annotation_prefix) is not None
+        or _outer_java_type(return_type) in _SPRING_BODY_RESPONSE_CONTAINERS
+    )
+
+
 def _routes_after_mapping(
     file: JavaSourceFileSnapshot,
     mapping_start: int,
@@ -4070,6 +4223,7 @@ def _routes_after_mapping(
     controller: str,
     string_constants: _JavaStringConstants,
     *,
+    controller_response_body: bool,
     call_target_types: dict[str, str] | None = None,
     allow_abstract_methods: bool = False,
 ) -> list[_JavaRoute]:
@@ -4105,6 +4259,19 @@ def _routes_after_mapping(
         else body_start
     )
     handler = signature.group("handler")
+    return_type = following[signature.start("return") : signature.end("return")]
+    method_prefix_start = _java_nested_declaration_prefix_start(
+        _mask_java_non_code(file.content),
+        mapping_start,
+    )
+    annotation_prefix = _mask_java_non_code(
+        file.content[method_prefix_start:mapping_end] + following[: signature.start("return")]
+    )
+    response_body = _java_method_has_response_body(
+        annotation_prefix,
+        return_type,
+        controller_default=controller_response_body,
+    )
     return [
         _JavaRoute(
             method=method,
@@ -4112,7 +4279,8 @@ def _routes_after_mapping(
             operation_ref=_java_operation_ref(method, full_path, conditions),
             controller_ref=f"java://{controller}",
             handler=handler,
-            return_type=following[signature.start("return") : signature.end("return")],
+            return_type=return_type,
+            response_body=response_body,
             parameters=following[signature.start("params") : signature.end("params")],
             declared_exceptions=_declared_java_exceptions(
                 following[signature.start("throws") : signature.end("throws")]
@@ -4560,7 +4728,7 @@ def _route_dto_claims(
             )
         )
     return_type = _response_dto_type(route.return_type)
-    if return_type is not None:
+    if route.response_body and return_type is not None:
         claims.extend(
             _dto_field_claims(
                 source_path,
@@ -4583,6 +4751,7 @@ def _dto_field_claims(
     if dto_type in {
         *type_analysis.unresolved_json_naming_types,
         *type_analysis.unresolved_json_property_types,
+        *type_analysis.unresolved_json_visibility_types,
     }:
         return []
     claims: list[JavaEvidenceClaim] = []
@@ -4595,7 +4764,7 @@ def _dto_field_claims(
         json_access,
         serialized_name,
         _serialized_name_unresolved,
-    ) in type_analysis.fields.get(dto_type, []):
+    ) in type_analysis.dto_fields.get(dto_type, []):
         if not _jackson_access_allows(json_access, direction):
             continue
         evidence_name = serialized_name or field_name
