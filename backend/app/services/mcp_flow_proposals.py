@@ -41,6 +41,7 @@ class MCPFlowProposalService:
         idempotency_key: str | None,
     ) -> FlowSpecProposalResponse:
         service_account_id = self._require_scope()
+        context = await self._context(actor=actor, payload=payload)
         key = require_idempotency_key(idempotency_key)
         self._reject_sensitive(payload)
         if payload.dry_run:
@@ -48,6 +49,7 @@ class MCPFlowProposalService:
                 actor=actor,
                 payload=payload,
                 service_account_id=service_account_id,
+                context=context,
             )
         response = await IdempotencyService(self._session).run(
             key=key,
@@ -99,8 +101,8 @@ class MCPFlowProposalService:
         actor: User,
         payload: FlowSpecProposalRequest,
         service_account_id: UUID,
+        context: ProposableContext,
     ) -> FlowSpecProposalResponse:
-        context = await self._context(actor=actor, payload=payload)
         source_ref = _source_ref(payload)
         preview = await self._flow_specs.preview_import(
             actor=actor,

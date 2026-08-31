@@ -3,7 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -444,6 +444,27 @@ async def test_flow_proposal_adapter_is_draft_only_dry_run_and_idempotent(
         assert await session.scalar(select(func.count()).select_from(IdempotencyRecord)) == 0
 
     persisted_payload = {**payload, "dry_run": False}
+    missing_project_key = "s49-missing-project"
+    missing_project = await client.post(
+        "/api/v1/mcp/flow/proposals",
+        headers={
+            **_headers(s49_context["flow_token"]),
+            "Idempotency-Key": missing_project_key,
+        },
+        json={**persisted_payload, "project_id": str(uuid4())},
+    )
+    assert missing_project.status_code == 404
+    assert missing_project.json()["error"]["code"] == "TEST_CONTEXT_NOT_FOUND"
+    async with s49_context["sessions"]() as session:
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(IdempotencyRecord)
+                .where(IdempotencyRecord.idempotency_key == missing_project_key)
+            )
+            == 0
+        )
+
     proposal_headers = {
         **_headers(s49_context["flow_token"]),
         "Idempotency-Key": "s49-proposal-v1",

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
@@ -162,6 +162,18 @@ test('S49 Context、Evidence 与 Draft Proposal 受控闭环', async ({ page }) 
   expect(preview).toMatchObject({ dry_run: true, status: 'preview', change_set_id: null })
 
   const persistedPayload = { ...proposalPayload, dry_run: false }
+  const invalidProjectResponse = await page.request.post('/api/v1/mcp/flow/proposals', {
+    headers: {
+      ...bearerHeaders(combined.token),
+      'Idempotency-Key': `s49-invalid-project-${suffix}`,
+    },
+    data: { ...persistedPayload, project_id: randomUUID() },
+  })
+  expect(invalidProjectResponse.status()).toBe(404)
+  expect(await invalidProjectResponse.json()).toMatchObject({
+    error: { code: 'TEST_CONTEXT_NOT_FOUND' },
+  })
+
   const proposalHeaders = {
     ...bearerHeaders(combined.token),
     'Idempotency-Key': `s49-draft-${suffix}`,
