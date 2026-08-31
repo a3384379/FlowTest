@@ -997,7 +997,9 @@ MCP 只读 Tool 的成功结果包含：
 2. 只选择当前项目授权范围内的仓库相对 `.java` 文件；单次最多 50 个文件、总计 1 MiB。
 3. 使用 `flowtest.ingest_java_source_snapshot` 提交 `source_ref`、`source_revision`、`subject_ref` 和文件；
    Provider 身份由 FlowTest 固定，调用方不能覆盖。
-4. 检查返回的结构化 Claim、静态分析 Warning、新 Context Revision 与 Entity Mapping。
+4. 检查返回的结构化 Claim、静态分析 Warning、新 Context Revision、Entity Mapping 与
+   `knowledge_snapshot`。State Knowledge 会展示 Route、DTO、Service、Repository/Entity、Table、State
+   Candidate 等节点；`may_use_repository` / `may_map_entity` 表示静态命名关联，必须人工复核。
 5. 遇到 `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 或任何 `JAVA_POC_INCOMPLETE_*` Warning 时补充证据或人工复核，
    不允许编译、执行目标代码或把不确定结果改成确定性结论。
 

@@ -161,6 +161,22 @@ async def test_java_and_database_evidence_enter_context_and_expose_mapping(
         candidate["selection_status"] == "proposed" and candidate["evidence_refs"]
         for candidate in body["entity_mapping"]["candidates"]
     )
+    knowledge = body["context"]["revision"]["snapshot"]["knowledge_snapshot"]
+    assert {node["kind"] for node in knowledge["nodes"]} >= {
+        "operation",
+        "dto",
+        "entity",
+        "table",
+        "table_column",
+        "state_candidate",
+    }
+    assert all(
+        any(
+            fact == {"name": "origin", "value": "flowtest.state_knowledge"}
+            for fact in node["facts"]
+        )
+        for node in knowledge["nodes"]
+    )
 
     inspected = await client.get(
         f"/api/v1/mcp/evidence/contexts/{context_id}/entity-mapping",
@@ -168,6 +184,46 @@ async def test_java_and_database_evidence_enter_context_and_expose_mapping(
     )
     assert inspected.status_code == 200, inspected.text
     assert inspected.json() == body["entity_mapping"]
+
+
+@pytest.mark.asyncio
+async def test_state_knowledge_capacity_failure_keeps_context_revision_unchanged(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "State Knowledge 容量边界",
+            "objective": "验证派生图超限时 Revision 不发生变化",
+            "required_evidence": ["repository"],
+            "knowledge_snapshot": {
+                "nodes": [
+                    {"id": f"N{index}", "kind": "initial", "label": f"Node {index}"}
+                    for index in range(500)
+                ]
+            },
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+
+    rejected = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-evidence",
+        headers=headers,
+        json={"evidence": _java_evidence(project_id)},
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "TEST_CONTEXT_CAPACITY_EXCEEDED"
+    inspected = await client.get(f"/api/v1/mcp/evidence/contexts/{context_id}", headers=headers)
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json()["current_revision"] == 1
+    assert inspected.json()["evidence_items"] == []
 
 
 @pytest.mark.asyncio
@@ -2581,6 +2637,13 @@ async def test_built_in_java_provider_ingests_bounded_source_without_persisting_
     }
     assert body["analysis"]["warnings"][0]["code"] == "JAVA_POC_STATIC_ONLY"
     assert raw_marker not in ingested.text
+    knowledge = body["context"]["revision"]["snapshot"]["knowledge_snapshot"]
+    assert {node["kind"] for node in knowledge["nodes"]} >= {
+        "operation",
+        "dto",
+        "dto_field",
+        "service",
+    }
 
     engine = s52_context["engine"]
     async with engine.connect() as connection:
