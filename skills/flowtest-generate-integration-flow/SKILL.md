@@ -25,7 +25,7 @@ Follow these stages in order and preserve every returned context revision, evide
 5. Create and validate an Integration Plan, compile it deterministically, validate the resulting FlowSpec, and keep the operation/binding/cleanup provenance.
 6. Dry-run `flowtest.propose_flow_draft`, present diagnostics and unresolved items, then create the review-only proposal only when the requested scope remains unchanged.
 7. Direct the user to the existing Visual Review. Stop there: never accept, apply, publish, or execute the proposal on the user's behalf.
-8. Only when the user explicitly requests a sandbox preview, verify a non-production test environment and a fresh one-time approval before calling `flowtest.preview_flow_proposal`. Report cleanup failures as failures, never warnings.
+8. Only when the user explicitly requests a sandbox preview, call `flowtest.inspect_flow_proposal` again and require the current proposal and item to be accepted and the proposal to remain unapplied (`applied=false`). Stop if review is incomplete, the proposal is stale, or it was already applied. Then verify a non-production test environment and obtain a fresh one-time approval before calling `flowtest.preview_flow_proposal`. Report cleanup failures as failures, never warnings.
 
 ## Non-negotiable boundaries
 

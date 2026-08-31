@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from enum import StrEnum
+from fractions import Fraction
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -172,7 +173,8 @@ def summarize_evaluations(
                 gate_status=_gate_status(
                     policy=gate_policy,
                     threshold=gate_threshold,
-                    value=value,
+                    numerator=numerator,
+                    denominator=denominator,
                 ),
             )
         )
@@ -217,13 +219,20 @@ def _gate_status(
     *,
     policy: EvaluationGatePolicy,
     threshold: float | None,
-    value: float | None,
+    numerator: int,
+    denominator: int,
 ) -> EvaluationGateStatus:
-    if value is None:
+    if denominator == 0:
         return EvaluationGateStatus.INSUFFICIENT_EVIDENCE
     if policy is EvaluationGatePolicy.INFORMATIONAL:
         return EvaluationGateStatus.INFORMATIONAL
     if threshold is None:
         raise ValueError("release-gated evaluation metric must define a threshold")
-    passed = value >= threshold if policy is EvaluationGatePolicy.MINIMUM else value <= threshold
+    raw_value = Fraction(numerator, denominator)
+    gate_threshold = Fraction(str(threshold))
+    passed = (
+        raw_value >= gate_threshold
+        if policy is EvaluationGatePolicy.MINIMUM
+        else raw_value <= gate_threshold
+    )
     return EvaluationGateStatus.PASSED if passed else EvaluationGateStatus.FAILED

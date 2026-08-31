@@ -13,7 +13,7 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 | Compile | `compile_integration_flowspec`, `explain_compiler_diagnostics`, `validate_flowspec` | Traceable FlowSpec and compilation fingerprint; zero static errors |
 | Dry run | `propose_flow_draft` with dry-run enabled | Proposed change summary without persistent proposal side effects |
 | Propose | `propose_flow_draft`, `inspect_flow_proposal` | Review-only proposal in the existing Visual Review flow |
-| Preview, optional | `preview_flow_proposal` | Explicit test-environment approval, bounded execution, cleanup evidence |
+| Preview, optional | `inspect_flow_proposal`, then `preview_flow_proposal` | Current accepted and unapplied proposal, explicit test-environment approval, bounded execution, cleanup evidence |
 
 ## Evidence routing
 
@@ -28,7 +28,7 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 - If FlowTest reports a stale revision, re-read the Context and show the change; do not overwrite it.
 - Proposal creation is not Review, Apply, Publish, or Preview approval.
 - Visual Review and Apply remain user actions in FlowTest. End the normal workflow after opening or linking to Visual Review.
-- Preview is a separate optional branch. It requires the `mcp:preview:execute` scope, a fresh one-time approval bound to the service account and proposal, and a target explicitly classified as test.
+- Preview is a separate optional branch. Immediately before requesting approval or executing it, call `inspect_flow_proposal` again and require the proposal and item to be accepted, current, and unapplied (`applied=false`). Stop when review is incomplete, the proposal is stale, or it was already applied. Only then require the `mcp:preview:execute` scope, a fresh one-time approval bound to the service account and proposal, and a target explicitly classified as test.
 
 ## Failure reporting
 

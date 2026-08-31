@@ -46,6 +46,7 @@ from app.domain.v6_evaluation import (
     EvaluationGatePolicy,
     EvaluationGateStatus,
     EvaluationMetric,
+    _gate_status,
     summarize_evaluations,
 )
 from app.engine.contracts import WorkflowDefinition
@@ -380,3 +381,24 @@ def test_evaluation_annotation_and_statistics_contract_is_reproducible() -> None
 
     with pytest.raises(ValueError, match="must be unique"):
         summarize_evaluations([annotations[0], annotations[0]])
+
+
+def test_release_gates_compare_unrounded_ratios() -> None:
+    assert (
+        _gate_status(
+            policy=EvaluationGatePolicy.MINIMUM,
+            threshold=1.0,
+            numerator=2_000_000,
+            denominator=2_000_001,
+        )
+        is EvaluationGateStatus.FAILED
+    )
+    assert (
+        _gate_status(
+            policy=EvaluationGatePolicy.MAXIMUM,
+            threshold=0.0,
+            numerator=1,
+            denominator=2_000_001,
+        )
+        is EvaluationGateStatus.FAILED
+    )

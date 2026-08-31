@@ -78,6 +78,33 @@ def test_skill_contract_forbids_product_defect_auto_weakening() -> None:
     )
 
 
+def test_skill_reinspects_accepted_unapplied_proposal_before_preview() -> None:
+    manifest = IntegrationFlowSkillManifest.model_validate(_mapping(SKILL_ROOT / "manifest.yaml"))
+    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    workflow = (SKILL_ROOT / "references/workflow.md").read_text(encoding="utf-8")
+
+    skill_preview = skill[skill.index("8. Only") :]
+    inspect_index = skill_preview.index("inspect_flow_proposal")
+    preview_index = skill_preview.index("preview_flow_proposal")
+    assert inspect_index < preview_index
+    assert "accepted" in skill_preview[inspect_index:preview_index]
+    assert "applied=false" in skill_preview[inspect_index:preview_index]
+
+    workflow_preview = workflow[workflow.index("| Preview, optional") :]
+    assert "inspect_flow_proposal" in workflow_preview
+    assert "preview_flow_proposal" in workflow_preview
+    assert "accepted" in workflow_preview
+    assert "applied=false" in workflow_preview
+    assert any(
+        "not been accepted" in item and "already applied" in item
+        for item in manifest.stop_conditions
+    )
+    assert any(
+        "accepted review status" in item and "applied=false" in item
+        for item in manifest.security_rules
+    )
+
+
 def test_golden_evidence_references_resolve_to_real_tests() -> None:
     for annotation in _annotations():
         for reference in annotation.evidence_refs:
