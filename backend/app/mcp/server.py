@@ -5,17 +5,17 @@
 
 import json
 from collections.abc import Awaitable, Mapping
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
+from pydantic import ValidationError
 
 from app.domain.evidence_adapters import (
     MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION,
     DatabaseEvidenceSubmission,
     JavaEvidenceSubmission,
-    JavaSourceFileSnapshot,
     JavaSourceInput,
 )
 from app.domain.integration_plans import (
@@ -37,6 +37,7 @@ from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
+    JavaSourceFilePayload,
 )
 
 MCP_INSTRUCTIONS = (
@@ -588,18 +589,27 @@ def _register_ingest_java_source_snapshot_tool(
         source_ref: str,
         source_revision: str,
         subject_ref: str,
-        files: list[JavaSourceFileSnapshot],
-        execute_analyzed_code: Literal[False] = False,
+        files: list[JavaSourceFilePayload],
+        execute_analyzed_code: bool = False,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
-        snapshot = JavaSourceInput.model_validate(
-            {
-                "source": {"ref": source_ref, "revision": source_revision},
-                "subject_ref": subject_ref,
-                "files": [file.model_dump(mode="json") for file in files],
-                "execute_analyzed_code": execute_analyzed_code,
-            }
-        )
+        try:
+            snapshot = JavaSourceInput.model_validate(
+                {
+                    "source": {"ref": source_ref, "revision": source_revision},
+                    "subject_ref": subject_ref,
+                    "files": [file.model_dump(mode="json") for file in files],
+                    "execute_analyzed_code": execute_analyzed_code,
+                }
+            )
+        except ValidationError:
+            return _error_payload(
+                MCPGatewayError(
+                    code="MCP_JAVA_SOURCE_SNAPSHOT_INVALID",
+                    status_code=422,
+                    message="Java source snapshot validation failed",
+                )
+            )
         return await _tool_payload(
             client.ingest_java_source_snapshot(
                 context_id,
