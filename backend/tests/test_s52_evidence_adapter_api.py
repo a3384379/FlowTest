@@ -2621,6 +2621,11 @@ async def test_built_in_java_provider_fails_closed_for_execution_provider_spoof_
     spoofed["provider"] = {"name": "spoofed", "version": "9.9.9"}
     duplicated = json.loads(json.dumps(snapshot))
     duplicated["files"].append(dict(duplicated["files"][0]))
+    unsafe_evidence = json.loads(json.dumps(snapshot))
+    unsafe_evidence["files"][0]["content"] = unsafe_evidence["files"][0]["content"].replace(
+        'RequestMapping("/api")',
+        'RequestMapping("/api/admin@example.test")',
+    )
     unsupported = json.loads(json.dumps(snapshot))
     unsupported["files"] = [
         {
@@ -2634,6 +2639,9 @@ async def test_built_in_java_provider_fails_closed_for_execution_provider_spoof_
     duplicated_response = await client.post(
         endpoint, headers=headers, json={"snapshot": duplicated}
     )
+    unsafe_evidence_response = await client.post(
+        endpoint, headers=headers, json={"snapshot": unsafe_evidence}
+    )
     unsupported_response = await client.post(
         endpoint, headers=headers, json={"snapshot": unsupported}
     )
@@ -2644,9 +2652,13 @@ async def test_built_in_java_provider_fails_closed_for_execution_provider_spoof_
     assert spoofed_response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert duplicated_response.status_code == 422
     assert duplicated_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert unsafe_evidence_response.status_code == 422
+    assert unsafe_evidence_response.json()["error"]["code"] == ("JAVA_SOURCE_EVIDENCE_INVALID")
     assert raw_marker not in execution_response.text
     assert raw_marker not in spoofed_response.text
     assert raw_marker not in duplicated_response.text
+    assert raw_marker not in unsafe_evidence_response.text
+    assert "admin@example.test" not in unsafe_evidence_response.text
     assert unsupported_response.status_code == 422
     assert unsupported_response.json()["error"]["code"] == "JAVA_SOURCE_EVIDENCE_NOT_FOUND"
     assert unsupported_response.json()["error"]["trace_id"]

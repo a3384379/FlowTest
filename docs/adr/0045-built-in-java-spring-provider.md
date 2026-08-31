@@ -29,7 +29,8 @@ Revision。
 - 分析结果通过已有 `TestContextService.ingest_adapted()` 完成项目授权、Revision 锁、重复证据、容量、冲突、
   映射与审计处理，不建立第二套 Evidence 生命周期。
 - 如果源码没有产生任何受支持 Claim，返回带 Trace ID 的稳定
-  `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 422；不把“无结果”误报为成功。
+  `JAVA_SOURCE_EVIDENCE_NOT_FOUND` 422；派生 Claim 未通过敏感信息或结构校验时返回
+  `JAVA_SOURCE_EVIDENCE_INVALID` 422，不把验证内容或原始源码写入错误日志。
 - API 返回安全的结构化分析结果以及新 Context Revision 和 Entity Mapping，使调用方能够看到静态分析
   Warning。State Knowledge 派生与用户侧 Context Inspector 在 S57 后续独立 PR 完成。
 

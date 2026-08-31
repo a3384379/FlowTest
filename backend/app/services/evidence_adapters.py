@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -69,6 +70,12 @@ class EvidenceAdapterService:
             raise AppError(
                 code="JAVA_SOURCE_EVIDENCE_NOT_FOUND",
                 message="Java/Spring 源码中没有可安全提取的受支持证据",
+                status_code=422,
+            ) from exc
+        except ValidationError as exc:
+            raise AppError(
+                code="JAVA_SOURCE_EVIDENCE_INVALID",
+                message="Java/Spring 静态分析结果未通过安全证据校验",
                 status_code=422,
             ) from exc
         context, mapping = await self._contexts.ingest_adapted(
