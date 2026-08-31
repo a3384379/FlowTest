@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
@@ -17,6 +18,7 @@ from app.domain.failure_repair import (
     validate_repair_scope,
 )
 from app.domain.failure_triage import FailureSignal
+from app.domain.test_contexts import first_sensitive_value, is_sensitive_identifier
 from app.engine.results import NodeResult
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -32,6 +34,9 @@ from app.services.flow_spec import (
 )
 from app.services.projects import ProjectService
 from app.services.test_contexts import ProposableContext, TestContextService
+
+_SECRET_REFERENCE = re.compile(r"secret://[A-Za-z0-9._:/-]+")
+_SECRET_TEMPLATE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,10 +90,12 @@ class FailureRepairService:
         payload: RepairProposalCreate,
     ) -> PreparedRepairProposal:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        if contains_sensitive_contract_value(payload.rationale):
+        if contains_sensitive_contract_value(payload.rationale) or _contains_sensitive_spec_value(
+            payload.proposed_spec.model_dump(mode="json")
+        ):
             raise AppError(
                 code="REPAIR_SENSITIVE_INPUT_FORBIDDEN",
-                message="修复理由不能包含凭据、个人标识或其他敏感值",
+                message="修复提案不能包含凭据、个人标识或其他敏感值, 请使用 secret:// 引用",
                 status_code=422,
             )
         view = await self._diagnosis_view(project_id, execution_id)
@@ -322,6 +329,55 @@ def _node_result(value: dict[str, Any] | None) -> NodeResult | None:
         return NodeResult.model_validate(value)
     except ValueError:
         return None
+
+
+def _contains_sensitive_spec_value(value: object) -> bool:
+    return first_sensitive_value(value) is not None or _contains_sensitive_named_literal(value)
+
+
+def _contains_sensitive_named_literal(value: object) -> bool:
+    if isinstance(value, list):
+        return any(_contains_sensitive_named_literal(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    for identifier_field, literal_field in (
+        ("name", "value"),
+        ("key", "value"),
+        ("expression", "expected"),
+    ):
+        identifier = value.get(identifier_field)
+        if (
+            isinstance(identifier, str)
+            and is_sensitive_identifier(identifier)
+            and _contains_unsafe_sensitive_literal(value.get(literal_field))
+        ):
+            return True
+    return any(
+        (_is_sensitive_literal_key(str(key)) and _contains_unsafe_sensitive_literal(child))
+        or _contains_sensitive_named_literal(child)
+        for key, child in value.items()
+    )
+
+
+def _is_sensitive_literal_key(value: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    if normalized == "secret_refs_only" or normalized.endswith(("_ref", "_refs")):
+        return False
+    return is_sensitive_identifier(value)
+
+
+def _contains_unsafe_sensitive_literal(value: object) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, str):
+        return (
+            _SECRET_REFERENCE.fullmatch(value) is None and _SECRET_TEMPLATE.fullmatch(value) is None
+        )
+    if isinstance(value, dict):
+        return any(_contains_unsafe_sensitive_literal(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_unsafe_sensitive_literal(child) for child in value)
+    return True
 
 
 _CONTRACT_ASSERTION_NAMES = frozenset(

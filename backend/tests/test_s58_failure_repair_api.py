@@ -450,6 +450,42 @@ async def test_s58_rejects_sensitive_repair_rationale_before_persistence(
 
 
 @pytest.mark.asyncio
+async def test_s58_rejects_sensitive_flow_spec_literal_before_persistence(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    client: AsyncClient = failure_repair_api["client"]
+    project_id = failure_repair_api["project_id"]
+    execution_id = failure_repair_api["execution_id"]
+    workflow_id = failure_repair_api["workflow_id"]
+    headers = failure_repair_api["headers"]
+    exported = await client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/workflows/{workflow_id}/export",
+        headers=headers,
+    )
+    spec = exported.json()["spec"]
+    spec["parameters"] = [{"name": "db_password", "source": "constant", "value": "hunter2"}]
+
+    rejected = await client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/repair-proposals",
+        headers={**headers, "Idempotency-Key": "s58-sensitive-flow-spec"},
+        json={
+            "kind": "data",
+            "proposed_spec": spec,
+            "expected_target_revision": 1,
+            "context_revision_id": str(failure_repair_api["context_revision_id"]),
+            "rationale": "为失败执行补充测试参数",
+        },
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "REPAIR_SENSITIVE_INPUT_FORBIDDEN"
+    assert "hunter2" not in rejected.text
+    async with failure_repair_api["sessions"]() as session:
+        proposals = list((await session.scalars(select(AIChangeSet))).all())
+        assert proposals == []
+
+
+@pytest.mark.asyncio
 async def test_s58_rejects_pinned_version_and_contract_fingerprint_mismatch(
     failure_repair_api: dict[str, Any],
 ) -> None:
