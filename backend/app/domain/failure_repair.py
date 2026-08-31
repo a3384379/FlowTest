@@ -45,8 +45,8 @@ class RepairScopeError(ValueError):
 def diagnose_failure(signals: list[FailureSignal]) -> FailureDiagnosis:
     triage = triage_failures(signals)
     classification = triage.primary_classification
-    product_defect = classification == "PRODUCT_DEFECT" or (
-        "PRODUCT_DEFECT" in triage.secondary_candidates
+    product_defect = any(
+        triage_failures([signal]).primary_classification == "PRODUCT_DEFECT" for signal in signals
     )
     kinds = list(_ALLOWED_KINDS.get(classification, ()))
     if classification in _ALLOWED_KINDS and any(

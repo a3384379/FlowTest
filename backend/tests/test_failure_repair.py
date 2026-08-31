@@ -102,6 +102,43 @@ def test_product_defect_secondary_candidate_also_blocks_test_repair() -> None:
     assert diagnosis.repair_policy.allowed_kinds == ()
 
 
+def test_product_defect_guard_inspects_signals_hidden_by_secondary_limit() -> None:
+    error_codes = [
+        "RESPONSE_SCHEMA_MISMATCH",
+        "RESPONSE_SCHEMA_MISMATCH",
+        "SERVICE_ENDPOINT_NOT_FOUND",
+        "NETWORK_ERROR",
+        "WORKFLOW_ASSERTION_FAILED",
+    ]
+    signals = [
+        _signal(
+            evidence_ref=f"flowtest://runs/run-1/nodes/node-{index}",
+            error_code=error_code,
+        )
+        for index, error_code in enumerate(error_codes)
+    ]
+    signals.extend(
+        [
+            _signal(
+                evidence_ref="flowtest://runs/run-1/nodes/cancelled",
+                item_status="cancelled",
+            ),
+            _signal(
+                evidence_ref="flowtest://runs/run-1/nodes/auth",
+                http_status=401,
+            ),
+        ]
+    )
+
+    diagnosis = diagnose_failure(signals)
+
+    assert diagnosis.triage.primary_classification == "CONTRACT_DRIFT"
+    assert "PRODUCT_DEFECT" not in diagnosis.triage.secondary_candidates
+    assert diagnosis.repair_policy.product_defect_guard is True
+    assert diagnosis.repair_policy.proposal_allowed is False
+    assert diagnosis.repair_policy.allowed_kinds == ()
+
+
 def test_binding_repair_is_limited_to_binding_surfaces() -> None:
     diagnosis = diagnose_failure([_signal(error_code="MAPPING_INVALID")])
     before = _spec()
