@@ -48,3 +48,4 @@
 44. 组织数据密钥真实轮换
 45. 内置 Java/Spring Provider 的静态分析边界
 46. State Knowledge 的证据派生与保守关联
+47. Context Inspector 的项目只读视图边界

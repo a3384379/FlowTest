@@ -55,6 +55,7 @@ const PerformanceLabPage = lazy(() => import('./pages/PerformanceLabPage'))
 const EnvironmentLabPage = lazy(() => import('./pages/EnvironmentLabPage'))
 const ContractHubPage = lazy(() => import('./pages/ContractHubPage'))
 const TestEngineeringPage = lazy(() => import('./pages/TestEngineeringPage'))
+const ContextInspectorPage = lazy(() => import('./pages/ContextInspectorPage'))
 const ImpactAnalysisPage = lazy(() => import('./pages/ImpactAnalysisPage'))
 const ChangeRegressionPage = lazy(() => import('./pages/ChangeRegressionPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
@@ -87,6 +88,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   environments: '环境实验室',
   contracts: '契约中心',
   'test-engineering': '测试工程',
+  contexts: '上下文检查器',
   impact: '影响分析',
   'change-regression': '变更回归',
   quality: '质量中心',
@@ -152,6 +154,7 @@ function AuthenticatedShell() {
             navigationItem('environments', <CloudServerOutlined />, pathFor('environments')),
             navigationItem('contracts', <ShareAltOutlined />, pathFor('contracts')),
             navigationItem('test-engineering', <ExperimentOutlined />, pathFor('test-engineering')),
+            navigationItem('contexts', <FileSearchOutlined />, pathFor('contexts')),
             navigationItem('impact', <FileSearchOutlined />, pathFor('impact')),
             navigationItem('change-regression', <BranchesOutlined />, pathFor('change-regression')),
             navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
@@ -260,6 +263,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/environments" element={<EnvironmentLabPage />} />
       <Route path="/projects/:projectId/contracts" element={<ContractHubPage />} />
       <Route path="/projects/:projectId/test-engineering" element={<TestEngineeringPage />} />
+      <Route path="/projects/:projectId/contexts" element={<ContextInspectorPage />} />
       <Route path="/projects/:projectId/impact" element={<ImpactAnalysisPage />} />
       <Route path="/projects/:projectId/change-regression" element={<ChangeRegressionPage />} />
       <Route path="/projects/:projectId/quality" element={<QualityCenterPage />} />
@@ -286,6 +290,7 @@ function ApplicationRoutes() {
           'environments',
           'contracts',
           'test-engineering',
+          'contexts',
           'impact',
           'change-regression',
           'quality',

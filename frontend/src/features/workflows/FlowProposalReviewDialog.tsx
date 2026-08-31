@@ -57,6 +57,7 @@ type ProposalResources = {
 type FlowProposalReviewDialogProps = {
   open: boolean
   projectId: string
+  initialProposalId?: string
   resources: ProposalResources
   onClose: () => void
   onApplied: (workflowId: string) => void
@@ -105,7 +106,7 @@ function useSandboxPreview(
 export default function FlowProposalReviewDialog(props: FlowProposalReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [selectedId, setSelectedId] = useState<string>()
+  const [selectedId, setSelectedId] = useState<string | undefined>(props.initialProposalId)
   const [graphView, setGraphView] = useState<'existing' | 'proposed'>('proposed')
   const [busy, setBusy] = useState(false)
   const [visualOverride, setVisualOverride] = useState<VisualOverride>()
@@ -125,9 +126,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
       ),
     [proposals.data],
   )
-  const proposalId = candidates.some((item) => item.id === selectedId)
-    ? selectedId
-    : candidates.at(0)?.id
+  const proposalId = selectedId ?? candidates.at(0)?.id
 
   const visual = useQuery({
     queryKey: ['flow-proposal', props.projectId, proposalId],
