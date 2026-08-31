@@ -37,7 +37,6 @@ from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
-    JavaSourceFilePayload,
 )
 
 MCP_INSTRUCTIONS = (
@@ -589,7 +588,7 @@ def _register_ingest_java_source_snapshot_tool(
         source_ref: str,
         source_revision: str,
         subject_ref: str,
-        files: list[JavaSourceFilePayload],
+        files: object,
         execute_analyzed_code: bool = False,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
@@ -598,7 +597,7 @@ def _register_ingest_java_source_snapshot_tool(
                 {
                     "source": {"ref": source_ref, "revision": source_revision},
                     "subject_ref": subject_ref,
-                    "files": [file.model_dump(mode="json") for file in files],
+                    "files": files,
                     "execute_analyzed_code": execute_analyzed_code,
                 }
             )

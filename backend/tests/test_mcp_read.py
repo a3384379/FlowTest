@@ -811,6 +811,25 @@ async def test_mcp_sdk_registration_and_transports() -> None:
         )
         assert invalid_source_payload["trace_id"] == "mcp-gateway"
         assert invalid_source_marker not in json.dumps(invalid_source_payload)
+        invalid_files_container_result = await server.call_tool(
+            "flowtest.ingest_java_source_snapshot",
+            {
+                "context_id": "context-1",
+                "source_ref": "repository://orders",
+                "source_revision": "revision-v1",
+                "subject_ref": "flowtest://projects/project-1/operations/orders",
+                "files": {
+                    "path": "src/main/java/example/NotAList.java",
+                    "content": invalid_source_marker,
+                },
+                "execute_analyzed_code": False,
+            },
+        )
+        invalid_container_payload = invalid_files_container_result.structured_content
+        assert invalid_container_payload["data"]["error"]["code"] == (
+            "MCP_JAVA_SOURCE_SNAPSHOT_INVALID"
+        )
+        assert invalid_source_marker not in json.dumps(invalid_container_payload)
         execution_source_result = await server.call_tool(
             "flowtest.ingest_java_source_snapshot",
             {

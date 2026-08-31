@@ -77,15 +77,6 @@ class IngestJavaEvidenceRequest(BaseModel):
     evidence: JavaEvidenceSubmission
 
 
-class JavaSourceFilePayload(BaseModel):
-    """MCP transport shape; bounded source validation runs inside the redacted tool boundary."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    path: str
-    content: str
-
-
 class IngestJavaSourceSnapshotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
