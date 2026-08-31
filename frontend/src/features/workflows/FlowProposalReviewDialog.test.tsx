@@ -395,11 +395,47 @@ describe('FlowProposalReviewDialog', () => {
     expect(approvalEnvironment).toBe(environment.id)
     expect(executeCalls).toBe(1)
   })
+
+  it('opens a repair proposal directly even when it is not in the MCP proposal list', async () => {
+    const repair = visualProposal('pending')
+    repair.proposal = {
+      ...repair.proposal,
+      title: '失败执行数据修复',
+      source_ref: 'repair://workflow-executions/00000000-0000-4000-8000-000000005800',
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+        HttpResponse.json({ items: [], next_cursor: null, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+        () => HttpResponse.json(repair),
+      ),
+    )
+
+    renderDialog(
+      () => undefined,
+      () => undefined,
+      changeSetId,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Repair Proposal 可视化审核',
+    })
+    expect(
+      await within(dialog).findByText(
+        'Repair Proposal 不会自动修改测试；人工接受后需使用新的单次审批 Re-preview。',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText('失败执行数据修复 · 草稿 · 00000000')).toBeInTheDocument()
+    expect(within(dialog).queryByText('暂无流程提案')).not.toBeInTheDocument()
+  })
 })
 
 function renderDialog(
   onApplied: (workflowId: string) => void,
   onOpenRawMapping: (proposal: FlowSpecVisualProposal) => void = () => undefined,
+  initialProposalId?: string,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -410,6 +446,7 @@ function renderDialog(
         <FlowProposalReviewDialog
           open
           projectId={project.id}
+          initialProposalId={initialProposalId}
           resources={{
             environments: [
               { ...environment, classification: 'sandbox' },

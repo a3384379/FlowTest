@@ -17,6 +17,7 @@ from app.api.v1.endpoints.data_sources import router as data_sources_router
 from app.api.v1.endpoints.environment_lab import router as environment_lab_router
 from app.api.v1.endpoints.event_protocols import router as event_protocols_router
 from app.api.v1.endpoints.executions import router as executions_router
+from app.api.v1.endpoints.failure_repair import router as failure_repair_router
 from app.api.v1.endpoints.flow_spec import router as flow_spec_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.impact import router as impact_router
@@ -62,6 +63,7 @@ api_router.include_router(mock_dispatch_router, tags=["mock-dispatch"])
 api_router.include_router(workflows_router, tags=["workflows"])
 api_router.include_router(workflow_events_router, tags=["workflow-events"])
 api_router.include_router(executions_router, tags=["executions"])
+api_router.include_router(failure_repair_router, tags=["failure-repair"])
 api_router.include_router(event_protocols_router, tags=["event-protocols"])
 api_router.include_router(environment_lab_router, tags=["environment-lab"])
 api_router.include_router(imports_router, tags=["imports"])

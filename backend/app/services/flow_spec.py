@@ -128,6 +128,18 @@ class FlowSpecImportProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowSpecRepairProvenance:
+    execution_id: UUID
+    context_revision_id: UUID
+    context_fingerprint: str
+    expected_target_revision: int
+    patch_kind: str
+    rationale: str
+    diagnosis: Mapping[str, Any]
+    oracle_weakening: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class FlowSpecImportPreview:
     pipeline: FlowSpecPipeline
     target_workflow_id: UUID | None
@@ -265,13 +277,14 @@ class FlowSpecService:
         project_id: UUID,
         payload: FlowSpecImportRequest,
         provenance: FlowSpecImportProvenance | None = None,
+        repair_provenance: FlowSpecRepairProvenance | None = None,
     ) -> FlowSpecChangeSetView:
         prepared = await self._prepare_import(
             actor=actor,
             project_id=project_id,
             payload=payload,
         )
-        _validate_expected_target_revision(prepared, provenance)
+        _validate_expected_target_revision(prepared, provenance, repair_provenance)
         _validate_integration_plan_provenance(prepared.pipeline, provenance)
         snapshot = _source_snapshot(
             pipeline=prepared.pipeline,
@@ -281,6 +294,7 @@ class FlowSpecService:
             target_definition=prepared.target_definition,
             resource_mappings=prepared.mappings,
             provenance=provenance,
+            repair_provenance=repair_provenance,
         )
         change_set = AIChangeSet(
             project_id=project_id,
@@ -337,7 +351,17 @@ class FlowSpecService:
                 "operation_mapping_count": len(prepared.mappings.operation_ids),
                 "actor_type": change_set.actor_type,
                 "context_revision_id": (
-                    str(provenance.context_revision_id) if provenance is not None else None
+                    str(provenance.context_revision_id)
+                    if provenance is not None
+                    else str(repair_provenance.context_revision_id)
+                    if repair_provenance is not None
+                    else None
+                ),
+                "repair_execution_id": (
+                    str(repair_provenance.execution_id) if repair_provenance is not None else None
+                ),
+                "repair_patch_kind": (
+                    repair_provenance.patch_kind if repair_provenance is not None else None
                 ),
             },
         )
@@ -1131,6 +1155,7 @@ def _source_snapshot(
     target_definition: WorkflowDefinition | None,
     resource_mappings: ResolvedFlowSpecMappings,
     provenance: FlowSpecImportProvenance | None = None,
+    repair_provenance: FlowSpecRepairProvenance | None = None,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "flow_spec": _spec_json(pipeline.spec),
@@ -1177,6 +1202,22 @@ def _source_snapshot(
                     },
                 }
             )
+    if repair_provenance is not None:
+        snapshot.update(
+            {
+                "proposal_schema_version": "v6-repair-proposal-source-v1",
+                "context_revision_id": str(repair_provenance.context_revision_id),
+                "context_fingerprint": repair_provenance.context_fingerprint,
+                "repair": {
+                    "execution_id": str(repair_provenance.execution_id),
+                    "expected_target_revision": repair_provenance.expected_target_revision,
+                    "patch_kind": repair_provenance.patch_kind,
+                    "rationale": repair_provenance.rationale,
+                    "oracle_weakening": repair_provenance.oracle_weakening,
+                    "diagnosis": dict(repair_provenance.diagnosis),
+                },
+            }
+        )
     return snapshot
 
 
@@ -1213,10 +1254,19 @@ def _validate_integration_plan_provenance(
 def _validate_expected_target_revision(
     prepared: _PreparedFlowSpecImport,
     provenance: FlowSpecImportProvenance | None,
+    repair_provenance: FlowSpecRepairProvenance | None = None,
 ) -> None:
-    if provenance is None:
+    if provenance is None and repair_provenance is None:
         return
-    expected = provenance.expected_target_revision
+    if provenance is not None and repair_provenance is not None:
+        raise RuntimeError("FlowSpec import cannot combine MCP and Repair provenance")
+    expected = (
+        provenance.expected_target_revision
+        if provenance is not None
+        else repair_provenance.expected_target_revision
+        if repair_provenance is not None
+        else None
+    )
     actual = prepared.target_revision
     if prepared.target is None and expected is not None:
         raise AppError(

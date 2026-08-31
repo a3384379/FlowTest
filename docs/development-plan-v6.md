@@ -2131,7 +2131,8 @@ State Candidate、Provider Finding 与关联 Flow Proposal。S57 不新建平行
   关系与 `may_use_repository` / `may_map_entity` 保守关联；RuoYi Golden 固定链路不执行目标代码。
 - Context Inspector 作为 S57 最后退出项独立交付：使用项目用户只读授权展示当前 Revision、Evidence、
   Completeness、Conflict、Provider Finding、State Candidate 与同 Revision Flow Proposal；不扩大 MCP Scope，
-  不建立平行 Proposal 生命周期。实现、集中后端/前端门禁与 Compose Playwright 已完成，PR 复审和合并待执行。
+  不建立平行 Proposal 生命周期。PR #77 已通过集中后端/前端门禁、Compose Playwright 与 Required Gate，并
+  普通 Squash Merge；S57 已完成。
 
 ---
 
@@ -2154,6 +2155,17 @@ State Candidate、Provider Finding 与关联 Flow Proposal。S57 不新建平行
 ### 硬门槛
 
 Product Defect 不自动修改测试。
+
+### 当前实现边界
+
+- 终态失败执行通过脱敏 `NodeResult` 生成版本化、确定性的 Failure Diagnosis；Product Defect、环境、网络、
+  认证、超时和未知失败只给出诊断，不允许测试 Repair。
+- Binding、Data、Cleanup、Contract Drift 与 Oracle 使用不同 FlowSpec 字段白名单；跨 Schema、空 Patch 和
+  越界变更 Fail Closed，Oracle 变化必须显式确认弱化风险。
+- Repair 复用现有 FlowSpec `AIChangeSet`，绑定 Ready Context Revision 和目标草稿 Revision；项目授权、Context、
+  敏感输入与 Patch 校验全部发生在 Idempotency Claim 之前。
+- 人工 Accept 后复用一次性 Sandbox Preview Approval 执行 Re-preview；不新增 Repair 生命周期，不自动 Apply、
+  Publish 或生产执行。架构边界见 ADR 0048。
 
 ---
 

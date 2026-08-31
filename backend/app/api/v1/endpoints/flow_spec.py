@@ -121,7 +121,7 @@ async def import_flow_spec(
         project_id=project_id,
         payload=payload,
     )
-    return _detail(view)
+    return flow_spec_change_set_detail(view)
 
 
 @router.get("/change-sets", response_model=FlowSpecChangeSetListResponse)
@@ -201,7 +201,7 @@ async def get_flow_spec_change_set(
         project_id=project_id,
         change_set_id=change_set_id,
     )
-    return _detail(view)
+    return flow_spec_change_set_detail(view)
 
 
 @router.get(
@@ -220,7 +220,7 @@ async def get_visual_flow_proposal(
         change_set_id=change_set_id,
     )
     return FlowSpecVisualProposalResponse(
-        proposal=_detail(proposal.view),
+        proposal=flow_spec_change_set_detail(proposal.view),
         existing_definition=proposal.existing_definition,
         proposed_definition=proposal.proposed_definition,
         integration_plan=proposal.integration_plan,
@@ -249,7 +249,7 @@ async def review_flow_spec_change_set(
         accept=payload.accept,
         note=payload.note,
     )
-    return _detail(view)
+    return flow_spec_change_set_detail(view)
 
 
 @router.post(
@@ -399,7 +399,9 @@ def _summary(view: FlowSpecChangeSetView) -> FlowSpecChangeSetResponse:
     )
 
 
-def _detail(view: FlowSpecChangeSetView) -> FlowSpecChangeSetDetailResponse:
+def flow_spec_change_set_detail(
+    view: FlowSpecChangeSetView,
+) -> FlowSpecChangeSetDetailResponse:
     return FlowSpecChangeSetDetailResponse(
         **_summary(view).model_dump(),
         spec=view.pipeline.spec,

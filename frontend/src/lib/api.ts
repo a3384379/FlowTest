@@ -697,6 +697,61 @@ export type FlowSpecApplyResult = {
   applied_at: string
 }
 
+export type RepairKind = 'binding' | 'data' | 'cleanup' | 'contract_drift' | 'oracle'
+
+export type FailureClassification =
+  | 'PRODUCT_DEFECT'
+  | 'BAD_TEST'
+  | 'BAD_TEST_DATA'
+  | 'ENVIRONMENT_FAILURE'
+  | 'SERVICE_ENDPOINT_FAILURE'
+  | 'UPSTREAM_SERVICE_FAILURE'
+  | 'CONTRACT_DRIFT'
+  | 'AUTH_FAILURE'
+  | 'NETWORK_FAILURE'
+  | 'TIMEOUT'
+  | 'FLAKY'
+  | 'CANCELLED'
+  | 'UNKNOWN'
+
+export type FailureDiagnosis = {
+  schema_version: 'flowtest-failure-diagnosis-v1'
+  triage: {
+    algorithm_version: string
+    primary_classification: FailureClassification
+    secondary_candidates: FailureClassification[]
+    confidence: number
+    reason_codes: string[]
+    affected_service: string | null
+    endpoint_variant: string | null
+    affected_operation: string | null
+    evidence_refs: string[]
+    retry_signal: boolean
+    recommended_action: string
+    recommended_regression: string[]
+  }
+  repair_policy: {
+    proposal_allowed: boolean
+    allowed_kinds: RepairKind[]
+    requires_human_review: boolean
+    product_defect_guard: boolean
+    reason_codes: string[]
+  }
+}
+
+export type FailureDiagnosisResponse = {
+  execution_id: string
+  workflow_id: string | null
+  diagnosis: FailureDiagnosis
+}
+
+export type RepairProposalResponse = {
+  schema_version: 'flowtest-repair-proposal-v1'
+  execution_id: string
+  diagnosis: FailureDiagnosis
+  proposal: FlowSpecChangeSetDetail
+}
+
 export type PreviewBudget = {
   max_nodes: number
   max_requests: number

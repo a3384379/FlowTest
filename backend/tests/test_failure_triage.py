@@ -76,6 +76,14 @@ def test_failure_triage_keeps_product_and_bad_test_as_candidates() -> None:
     assert result.secondary_candidates == ["BAD_TEST"]
     assert result.evidence_refs == ["flowtest://runs/run-1/nodes/api-1"]
 
+    structured_assertion = triage_failures(
+        [_signal(error_code="WORKFLOW_ASSERTION_FAILED", assertion_failed=True)]
+    )
+    assert structured_assertion.primary_classification == "PRODUCT_DEFECT"
+
+    mapping = triage_failures([_signal(error_code="MAPPING_SOURCE_MISSING")])
+    assert mapping.primary_classification == "BAD_TEST"
+
     cancelled = triage_failures([_signal(item_status="cancelled")])
     assert cancelled.primary_classification == "CANCELLED"
 

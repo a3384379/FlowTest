@@ -39,6 +39,7 @@ class FailureSignal(BaseModel):
     response_received: bool = False
     assertion_failed: bool = False
     contract_assertion_failed: bool = False
+    phase: Literal["main", "cleanup"] = "main"
 
 
 class FailureTriageResult(BaseModel):
@@ -117,6 +118,8 @@ def _response_classification(
 
 
 def _code_classification(code: str) -> tuple[FailureClassification, str] | None:
+    if code in _PRODUCT_DEFECT_CODES:
+        return "PRODUCT_DEFECT", "STRUCTURED_PRODUCT_DEFECT_CODE"
     if code in _TIMEOUT_CODES:
         return "TIMEOUT", "STRUCTURED_TIMEOUT_CODE"
     if code in _NETWORK_CODES:
@@ -214,14 +217,31 @@ _CONTRACT_CODES = frozenset(
 )
 _AUTH_CODES = frozenset({"AUTHENTICATION_FAILED", "AUTHORIZATION_FAILED", "HTTP_401", "HTTP_403"})
 _DATA_CODES = frozenset(
-    {"DATASET_ROW_INVALID", "TEST_DATA_MISSING", "DATA_CONSTRAINT_VIOLATION", "UNRESOLVED_VARIABLE"}
+    {
+        "DATASET_ROW_INVALID",
+        "TEST_DATA_MISSING",
+        "DATA_CONSTRAINT_VIOLATION",
+        "UNRESOLVED_VARIABLE",
+        "DATA_NODE_VARIABLE_MISSING",
+        "EXTRACT_VALUE_MISSING",
+        "CAPABILITY_BINDING_SOURCE_MISSING",
+    }
 )
 _ENVIRONMENT_CODES = frozenset(
     {"CAPABILITY_RUNTIME_UNAVAILABLE", "RUNNER_LEASE_EXHAUSTED", "ENVIRONMENT_PROVISION_TIMEOUT"}
 )
 _BAD_TEST_CODES = frozenset(
-    {"INVALID_NODE_CONFIG", "WORKFLOW_VALIDATION_FAILED", "INVALID_EXPRESSION", "MAPPING_INVALID"}
+    {
+        "INVALID_NODE_CONFIG",
+        "WORKFLOW_VALIDATION_FAILED",
+        "INVALID_EXPRESSION",
+        "MAPPING_INVALID",
+        "INVALID_MAPPING_PATH",
+        "MAPPING_SOURCE_MISSING",
+        "MAPPING_TARGET_INVALID",
+    }
 )
+_PRODUCT_DEFECT_CODES = frozenset({"WORKFLOW_ASSERTION_FAILED"})
 _PRIORITY: dict[FailureClassification, int] = {
     "CANCELLED": 12,
     "AUTH_FAILURE": 11,
