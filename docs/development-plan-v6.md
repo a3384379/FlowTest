@@ -2123,6 +2123,14 @@ Route → DTO → Service → Mapper/Entity → Table
 同时交付面向用户的 Context Inspector，展示 Revision、Evidence Summary、Missing Evidence、Conflict、
 State Candidate、Provider Finding 与关联 Flow Proposal。S57 不新建平行 Proposal 生命周期。
 
+### 当前交付状态
+
+- PR #75 已正式化 Built-in Java/Spring Provider；最终复审 P0=`0`、P1=`0`，Required Gate 全绿并普通
+  Squash Merge。
+- State Knowledge 使用持久化 Typed Evidence 重建生成图，保留初始 Knowledge，并区分显式关系与
+  `may_use_repository` / `may_map_entity` 保守关联；RuoYi Golden 固定链路不执行目标代码。
+- Context Inspector 是 S57 剩余退出项，在 State Knowledge 合并后独立交付。
+
 ---
 
 ## S58 — Failure Diagnosis 与 Repair Proposal（V6.1）

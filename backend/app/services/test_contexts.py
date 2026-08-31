@@ -19,12 +19,14 @@ from app.domain.evidence_adapters import (
     derive_entity_mapping,
     with_mapping_conflict_findings,
 )
+from app.domain.state_knowledge import StateKnowledgeBudgetExceeded, derive_state_knowledge
 from app.domain.test_contexts import (
     MAX_CONTEXT_CONFLICTS,
     MAX_CONTEXT_EVIDENCE_ITEMS,
     MAX_CONTEXT_REVISION_REFERENCES,
     ContextConflict,
     ContextConflictSnapshot,
+    ContextKnowledgeSnapshot,
     ContextRevisionSnapshot,
     DatabaseExternalEvidenceStructuredData,
     EntityMappingExternalEvidenceStructuredData,
@@ -269,9 +271,17 @@ class TestContextService:
             evidence_count=len(existing) + len(additions),
             retired_conflict_fingerprints=retired_mapping_conflicts,
         )
+        try:
+            knowledge_snapshot = derive_state_knowledge(
+                current_snapshot.knowledge_snapshot,
+                _mapping_evidence_inputs([*existing, *additions]),
+            )
+        except StateKnowledgeBudgetExceeded as exc:
+            raise _context_capacity_exceeded() from exc
         snapshot = _next_snapshot(
             current=current_snapshot,
             envelope=envelope,
+            knowledge_snapshot=knowledge_snapshot,
             evidence_fingerprints=[item.fingerprint for item in existing]
             + [item.fingerprint for item in additions],
             retired_conflict_fingerprints=retired_mapping_conflicts,
@@ -724,6 +734,7 @@ def _next_snapshot(
     *,
     current: ContextRevisionSnapshot,
     envelope: ExternalEvidenceEnvelope,
+    knowledge_snapshot: ContextKnowledgeSnapshot,
     evidence_fingerprints: list[str],
     retired_conflict_fingerprints: set[str],
 ) -> ContextRevisionSnapshot:
@@ -762,7 +773,7 @@ def _next_snapshot(
             contract_revisions=contracts,
             data_profile_revisions=profiles,
             existing_test_revision=existing_test,
-            knowledge_snapshot=current.knowledge_snapshot,
+            knowledge_snapshot=knowledge_snapshot,
             conflict_snapshot=ContextConflictSnapshot(conflicts=conflicts),
             completeness=completeness,
             evidence_fingerprints=evidence_fingerprints,
