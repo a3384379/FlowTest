@@ -147,6 +147,47 @@ async def test_synthetic_recipe_materializes_a_new_value_for_each_run() -> None:
     assert start.config == {"synthetic_variables": {"order.external_id": "uuid"}}
 
 
+def test_duplicate_synthetic_variable_names_fail_closed() -> None:
+    plan = _golden_plan()
+    recipes = [
+        PlanDataRecipe(
+            id="synthetic-order-id",
+            kind="synthetic",
+            name="Synthetic order ID",
+            source_ref="context://s53/data/synthetic-order-id",
+            variable_name="order.external_id",
+            generator="uuid",
+            evidence_refs=["context://s53/data/synthetic-order-id"],
+        ),
+        PlanDataRecipe(
+            id="synthetic-order-key",
+            kind="synthetic",
+            name="Synthetic order key",
+            source_ref="context://s53/data/synthetic-order-key",
+            variable_name="order.external_id",
+            generator="unique_string",
+            evidence_refs=["context://s53/data/synthetic-order-key"],
+        ),
+    ]
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "schema_version": "flowtest-integration-plan-v2",
+                "fingerprint_version": "flowtest-integration-plan-fingerprint-v2",
+                "data_recipes": recipes,
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    validation = validate_integration_plan(changed)
+    compilation = compile_integration_plan(changed)
+
+    assert {item.code for item in validation.diagnostics} >= {"DUPLICATE_DATA_RECIPE_VARIABLE"}
+    assert compilation.importable is False
+    assert compilation.flow_spec is None
+
+
 def test_low_confidence_or_non_deterministic_oracle_requires_review() -> None:
     common = {
         "id": "query-create-id",
@@ -238,6 +279,100 @@ def test_side_effecting_setup_recipe_requires_cleanup_and_secret_is_reference_on
             source_ref="user-confirmed://safe-record/53",
             evidence_refs=["user-confirmed://safe-record/53"],
         )
+
+
+@pytest.mark.parametrize(
+    ("kind", "source_ref"),
+    [
+        ("constant", None),
+        ("existing_safe_record", "user-confirmed://safe-record/order-id"),
+    ],
+)
+def test_constant_recipe_names_are_available_to_database_reads(
+    kind: str,
+    source_ref: str | None,
+) -> None:
+    plan = _golden_plan()
+    recipe = PlanDataRecipe(
+        id=f"{kind}-order-id",
+        kind=kind,
+        name="safe-order-id",
+        value="order-53",
+        source_ref=source_ref,
+        evidence_refs=[source_ref or "context://s53/data/constant-order-id"],
+    )
+    database_read = _database_read()
+    database_read = database_read.model_copy(
+        update={
+            "predicates": [
+                database_read.predicates[0].model_copy(update={"variable_name": recipe.name})
+            ]
+        }
+    )
+    database_step = PlanStep(
+        id=database_read.id,
+        kind="db_read",
+        name=database_read.name,
+        db_read_ref=database_read.id,
+        evidence_refs=database_read.evidence_refs,
+    )
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "schema_version": "flowtest-integration-plan-v2",
+                "fingerprint_version": "flowtest-integration-plan-fingerprint-v2",
+                "steps": [*plan.steps, database_step],
+                "data_recipes": [recipe],
+                "database_reads": [database_read],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    compilation = compile_integration_plan(changed)
+
+    assert "DATABASE_READ_VARIABLE_MISSING" not in {item.code for item in compilation.diagnostics}
+    assert compilation.importable is True
+    assert compilation.flow_spec is not None
+    parameter = next(item for item in compilation.flow_spec.parameters if item.name == recipe.name)
+    assert parameter.value == "order-53"
+    database_node = next(
+        item for item in compilation.flow_spec.nodes if item.id == database_read.id
+    )
+    assert database_node.config["parameters"] == {"order_id": "{{safe-order-id}}"}
+
+
+def test_legacy_v1_setup_api_without_s53_source_fields_remains_readable() -> None:
+    payload = json.loads(_FIXTURE.read_text())
+    payload["data_recipes"] = [
+        {
+            "id": "legacy-setup",
+            "kind": "setup_api",
+            "name": "Legacy setup API",
+            "evidence_refs": ["context://s50/data/legacy-setup"],
+        }
+    ]
+
+    legacy = seal_integration_plan(IntegrationPlan.model_validate(payload))
+    legacy_codes = {item.code for item in validate_integration_plan(legacy).diagnostics}
+
+    assert "SETUP_API_SOURCE_REF_REQUIRED" not in legacy_codes
+    assert "SETUP_API_SOURCE_STEP_REQUIRED" not in legacy_codes
+
+    v2 = seal_integration_plan(
+        legacy.model_copy(
+            update={
+                "schema_version": "flowtest-integration-plan-v2",
+                "fingerprint_version": "flowtest-integration-plan-fingerprint-v2",
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+    v2_codes = {item.code for item in validate_integration_plan(v2).diagnostics}
+    assert v2_codes >= {
+        "SETUP_API_SOURCE_REF_REQUIRED",
+        "SETUP_API_SOURCE_STEP_REQUIRED",
+    }
 
 
 def test_structured_db_read_and_cross_system_oracles_compile_without_raw_sql_input() -> None:

@@ -472,6 +472,134 @@ def test_missing_evidence_and_unsupported_runtime_targets_block_compilation() ->
     assert {item.code for item in compilation.diagnostics} >= {"BINDING_TARGET_RUNTIME_UNSUPPORTED"}
 
 
+@pytest.mark.parametrize(
+    "request_template",
+    [
+        PlanRequestTemplate(),
+        PlanRequestTemplate(body_kind="json", body=[]),
+        PlanRequestTemplate(body_kind="raw", body="{}"),
+    ],
+)
+def test_body_mapping_requires_an_object_json_request_body(
+    request_template: PlanRequestTemplate,
+) -> None:
+    plan = _golden_plan()
+    query_binding = next(item for item in plan.bindings if item.target.step_id == "orders-query")
+    body_binding = query_binding.model_copy(
+        update={"target": query_binding.target.model_copy(update={"location": "body"})}
+    )
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    operation.model_copy(update={"request": request_template})
+                    if operation.ref == "orders.query"
+                    else operation
+                    for operation in plan.operations
+                ],
+                "bindings": [
+                    body_binding if item.id == query_binding.id else item for item in plan.bindings
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    compilation = compile_integration_plan(changed)
+
+    assert compilation.importable is False
+    assert {item.code for item in compilation.diagnostics} >= {"BODY_MAPPING_REQUIRES_JSON_OBJECT"}
+
+
+def test_body_mapping_accepts_an_object_json_request_body() -> None:
+    plan = _golden_plan()
+    query_binding = next(item for item in plan.bindings if item.target.step_id == "orders-query")
+    body_binding = query_binding.model_copy(
+        update={"target": query_binding.target.model_copy(update={"location": "body"})}
+    )
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    operation.model_copy(
+                        update={"request": PlanRequestTemplate(body_kind="json", body={})}
+                    )
+                    if operation.ref == "orders.query"
+                    else operation
+                    for operation in plan.operations
+                ],
+                "bindings": [
+                    body_binding if item.id == query_binding.id else item for item in plan.bindings
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    compilation = compile_integration_plan(changed)
+
+    assert compilation.importable is True
+    assert compilation.flow_spec is not None
+
+
+def test_selected_scenario_path_and_cookie_inputs_fail_closed_without_disappearing() -> None:
+    target = _selected_operation(
+        ref="orders.localized",
+        contract=OperationContract(
+            operation="orders.localized",
+            method="GET",
+            path="/tenants/{tenantId}/orders",
+            service="orders",
+            parameters=[
+                ContractParameter(
+                    name="tenantId",
+                    location="path",
+                    required=True,
+                    schema={"type": "string"},
+                    source_ref="contract://orders/localized/tenant-id",
+                ),
+                ContractParameter(
+                    name="locale",
+                    location="cookie",
+                    required=True,
+                    schema={"type": "string"},
+                    source_ref="contract://orders/localized/locale",
+                ),
+            ],
+            responses={"200": ContractResponse(description="OK")},
+            source_ref="contract://orders/localized",
+        ),
+        status=200,
+        scenario=ScenarioCandidate(
+            id="orders.localized.happy",
+            kind="happy_path",
+            title="Query localized orders",
+            request=ScenarioRequest(
+                path_parameters={"tenantId": "tenant-57"},
+                cookies={"locale": "zh-CN"},
+            ),
+            expected_category="success",
+            evidence_refs=["scenario://orders/localized/happy"],
+        ),
+    )
+
+    plan = build_integration_plan(_planner_request([target]))
+
+    unsupported = [
+        item
+        for item in plan.unresolved_items
+        if item.code == "SCENARIO_REQUEST_INPUT_RUNTIME_UNSUPPORTED"
+    ]
+    assert len(unsupported) == 2
+    assert {item.candidate_refs[0] for item in unsupported} == {
+        "cookie:locale",
+        "path:tenantId",
+    }
+    assert "BINDING_EVIDENCE_MISSING" not in {item.code for item in plan.unresolved_items}
+    assert validate_integration_plan(plan).valid is False
+    assert compile_integration_plan(plan).flow_spec is None
+
+
 def test_untrusted_expressions_headers_and_secret_refs_fail_closed() -> None:
     with pytest.raises(ValidationError):
         PlanRequestTemplate(
