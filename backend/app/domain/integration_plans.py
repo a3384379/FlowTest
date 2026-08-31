@@ -423,13 +423,14 @@ def _validate_recipe_source(recipe: PlanDataRecipe) -> None:
         "previous_step",
         "environment_variable",
         "secret_reference",
-        "setup_api",
         "existing_safe_record",
         "database_observation",
     }
     if recipe.kind in s53_kinds and recipe.source_ref is None:
         raise ValueError("S53 data recipes require a source_ref")
-    if (recipe.kind in {"previous_step", "setup_api"}) != (recipe.source_step_id is not None):
+    if recipe.kind == "previous_step" and recipe.source_step_id is None:
+        raise ValueError("recipe source step does not match its source kind")
+    if recipe.kind not in {"previous_step", "setup_api"} and recipe.source_step_id is not None:
         raise ValueError("recipe source step does not match its source kind")
     if (recipe.kind == "previous_step") != (recipe.expression is not None):
         raise ValueError("previous-step recipes require only a source expression")
@@ -450,6 +451,19 @@ def _validate_recipe_governance(recipe: PlanDataRecipe) -> None:
         not recipe.deterministic or recipe.confidence < _ORACLE_AUTO_CONFIDENCE
     ) and not recipe.requires_review:
         raise ValueError("low-confidence or non-deterministic recipes require_review")
+
+
+def _runtime_recipe_variable_name(recipe: PlanDataRecipe) -> str | None:
+    if recipe.kind not in {
+        "runtime",
+        "environment",
+        "constant",
+        "synthetic",
+        "environment_variable",
+        "existing_safe_record",
+    }:
+        return None
+    return recipe.variable_name or recipe.name
 
 
 class PlanOracleValueSource(BaseModel):
@@ -1366,6 +1380,7 @@ def _planned_bindings(
     step_by_ref = {step.operation_ref: step.id for step in steps if step.operation_ref is not None}
     for selected in request.selected_operations:
         target_step = step_by_ref[selected.operation_ref]
+        unresolved.extend(_unsupported_scenario_request_inputs(selected, target_step))
         for required in _required_inputs(selected):
             candidates = _binding_candidates(required, response_fields)
             binding, item = _binding_from_candidates(required, target_step, candidates)
@@ -1379,13 +1394,15 @@ def _planned_bindings(
 
 def _required_inputs(selected: SelectedOperationEvidence) -> list[_RequiredInput]:
     contract = selected.contract
-    supplied_query = {item.name for item in _scenario_request(selected.scenario).query_parameters}
-    supplied_headers = {item.name.lower() for item in _scenario_request(selected.scenario).headers}
-    supplied_body = (
-        set(cast(dict[str, JsonValue], _scenario_request(selected.scenario).body))
-        if isinstance(_scenario_request(selected.scenario).body, dict)
-        else set()
-    )
+    scenario_request = selected.scenario.request if selected.scenario is not None else None
+    planned_request = _scenario_request(selected.scenario)
+    supplied_by_location: dict[str, set[str]] = {
+        "path": set(scenario_request.path_parameters) if scenario_request is not None else set(),
+        "query": {item.name for item in planned_request.query_parameters},
+        "header": {item.name.lower() for item in planned_request.headers},
+        "cookie": set(scenario_request.cookies) if scenario_request is not None else set(),
+    }
+    supplied_body = set(planned_request.body) if isinstance(planned_request.body, dict) else set()
     required: list[_RequiredInput] = []
     if (
         contract.auth.required
@@ -1393,7 +1410,7 @@ def _required_inputs(selected: SelectedOperationEvidence) -> list[_RequiredInput
         and not selected.credential_refs
     ):
         name = contract.auth.name or ("Authorization" if contract.auth.kind == "bearer" else "auth")
-        if name.lower() not in supplied_headers:
+        if name.lower() not in supplied_by_location["header"]:
             required.append(
                 _RequiredInput(
                     name="token" if contract.auth.kind == "bearer" else name,
@@ -1405,7 +1422,9 @@ def _required_inputs(selected: SelectedOperationEvidence) -> list[_RequiredInput
                 )
             )
     for parameter in contract.parameters:
-        supplied = parameter.name in supplied_query or parameter.name.lower() in supplied_headers
+        supplied_names = supplied_by_location[parameter.location]
+        supplied_name = parameter.name.lower() if parameter.location == "header" else parameter.name
+        supplied = supplied_name in supplied_names
         if parameter.required and not supplied:
             required.append(
                 _RequiredInput(
@@ -1432,6 +1451,32 @@ def _required_inputs(selected: SelectedOperationEvidence) -> list[_RequiredInput
                 )
             )
     return required
+
+
+def _unsupported_scenario_request_inputs(
+    selected: SelectedOperationEvidence,
+    target_step: str,
+) -> list[PlanUnresolvedItem]:
+    if selected.scenario is None:
+        return []
+    request = selected.scenario.request
+    evidence_refs = selected.scenario.evidence_refs or selected.evidence_refs
+    unsupported = (
+        ("path", sorted(request.path_parameters)),
+        ("cookie", sorted(request.cookies)),
+    )
+    return [
+        PlanUnresolvedItem(
+            id=_slug_id(f"unsupported-{target_step}-{location}-{name}"),
+            code="SCENARIO_REQUEST_INPUT_RUNTIME_UNSUPPORTED",
+            severity="blocker",
+            message=f"当前 Runtime 无法无损执行 Scenario {location} 输入 {name}",
+            candidate_refs=[f"{location}:{name}"],
+            evidence_refs=evidence_refs,
+        )
+        for location, names in unsupported
+        for name in names
+    ]
 
 
 def _response_fields(selected: SelectedOperationEvidence, step_id: str) -> list[_ResponseField]:
@@ -1725,6 +1770,20 @@ def _identity_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
                 "$.data_recipes",
             )
         )
+    recipe_variables = [
+        name
+        for recipe in plan.data_recipes
+        if (name := _runtime_recipe_variable_name(recipe)) is not None
+    ]
+    if len(recipe_variables) != len(set(recipe_variables)):
+        diagnostics.append(
+            _diagnostic(
+                "DUPLICATE_DATA_RECIPE_VARIABLE",
+                "blocker",
+                "可执行 Data Recipe 的 Workflow Variable 名称必须唯一",
+                "$.data_recipes",
+            )
+        )
     return diagnostics
 
 
@@ -1852,6 +1911,27 @@ def _data_recipe_reference_diagnostics(
 ) -> list[PlanDiagnostic]:
     diagnostics: list[PlanDiagnostic] = []
     for index, recipe in enumerate(plan.data_recipes):
+        if plan.schema_version == INTEGRATION_PLAN_SCHEMA_VERSION_V2:
+            if recipe.kind == "setup_api" and recipe.source_ref is None:
+                diagnostics.append(
+                    _diagnostic(
+                        "SETUP_API_SOURCE_REF_REQUIRED",
+                        "blocker",
+                        "Integration Plan v2 Setup API Recipe 必须声明来源证据",
+                        f"$.data_recipes[{index}].source_ref",
+                        evidence_refs=recipe.evidence_refs,
+                    )
+                )
+            if recipe.kind == "setup_api" and recipe.source_step_id is None:
+                diagnostics.append(
+                    _diagnostic(
+                        "SETUP_API_SOURCE_STEP_REQUIRED",
+                        "blocker",
+                        "Integration Plan v2 Setup API Recipe 必须引用来源步骤",
+                        f"$.data_recipes[{index}].source_step_id",
+                        evidence_refs=recipe.evidence_refs,
+                    )
+                )
         diagnostics.extend(
             _unknown_ref(
                 "UNKNOWN_DATA_RECIPE_APPLIES_TO",
@@ -2018,9 +2098,9 @@ def _s53_reference_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     binding_variables = set(binding_captures)
     available_variables = set(binding_variables)
     available_variables.update(
-        item.variable_name
+        name
         for item in plan.data_recipes
-        if item.variable_name is not None and item.kind != "previous_step"
+        if (name := _runtime_recipe_variable_name(item)) is not None
     )
     return [
         *_s53_version_diagnostics(plan),
@@ -2706,6 +2786,12 @@ def _secret_reference_runtime_diagnostics(plan: IntegrationPlan) -> list[PlanDia
 
 def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
     diagnostics: list[PlanDiagnostic] = []
+    operations = {item.ref: item for item in plan.operations}
+    operation_by_step = {
+        step.id: operations[step.operation_ref]
+        for step in plan.steps
+        if step.operation_ref is not None and step.operation_ref in operations
+    }
     branch_targets = {
         step_id
         for branch in plan.branches
@@ -2717,6 +2803,25 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
         for step_id in (branch.true_step_id, branch.false_step_id)
     }
     for index, binding in enumerate(plan.bindings):
+        target_operation = operation_by_step.get(binding.target.step_id)
+        if (
+            binding.target.location == "body"
+            and target_operation is not None
+            and (
+                target_operation.request.body_kind != "json"
+                or not isinstance(target_operation.request.body, dict)
+            )
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "BODY_MAPPING_REQUIRES_JSON_OBJECT",
+                    "blocker",
+                    "Body Mapping 要求目标 Operation 使用对象型 JSON Request Body",
+                    f"$.bindings[{index}].target.location",
+                    stage="compile_edge_mapping",
+                    evidence_refs=binding.evidence_refs,
+                )
+            )
         if binding.target.location in {"path", "cookie"}:
             diagnostics.append(
                 _diagnostic(
@@ -3144,7 +3249,9 @@ def _compile_data_parameters(plan: IntegrationPlan) -> list[FlowSpecParameter]:
             "existing_safe_record",
         }:
             continue
-        name = recipe.variable_name or recipe.name
+        name = _runtime_recipe_variable_name(recipe)
+        if name is None:
+            continue
         parameters.append(
             FlowSpecParameter(
                 name=name,
