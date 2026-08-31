@@ -130,27 +130,30 @@ async def failure_repair_api() -> AsyncIterator[dict[str, Any]]:
         )
         session.add(api)
         await session.flush()
-        api_version = APIVersion(
-            api_definition_id=api.id,
-            service_id=service.id,
-            version=1,
-            method="DELETE",
-            path="/fixtures",
-            query_parameters=[],
-            headers={},
-            variables={},
-            body_kind="none",
-            body=None,
-            auth_kind="none",
-            auth_config={},
-            extraction_rules=[],
-            assertions=[],
-            canonical_contract={},
-            contract_fingerprint="c" * 64,
-            contract_completeness="complete",
-            created_by_id=actor.id,
-        )
-        session.add(api_version)
+        api_versions = [
+            APIVersion(
+                api_definition_id=api.id,
+                service_id=service.id,
+                version=version_number,
+                method="DELETE",
+                path="/fixtures",
+                query_parameters=[],
+                headers={},
+                variables={},
+                body_kind="none",
+                body=None,
+                auth_kind="none",
+                auth_config={},
+                extraction_rules=[],
+                assertions=[],
+                canonical_contract={},
+                contract_fingerprint=fingerprint,
+                contract_completeness="complete",
+                created_by_id=actor.id,
+            )
+            for version_number, fingerprint in ((1, "c" * 64), (2, "d" * 64))
+        ]
+        session.add_all(api_versions)
         definition = _definition(api.id)
         workflow = Workflow(
             project_id=project.id,
@@ -441,6 +444,61 @@ async def test_s58_rejects_sensitive_repair_rationale_before_persistence(
 
     assert rejected.status_code == 422, rejected.text
     assert rejected.json()["error"]["code"] == "REPAIR_SENSITIVE_INPUT_FORBIDDEN"
+    async with failure_repair_api["sessions"]() as session:
+        proposals = list((await session.scalars(select(AIChangeSet))).all())
+        assert proposals == []
+
+
+@pytest.mark.asyncio
+async def test_s58_rejects_pinned_version_and_contract_fingerprint_mismatch(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    client: AsyncClient = failure_repair_api["client"]
+    project_id = failure_repair_api["project_id"]
+    execution_id = failure_repair_api["execution_id"]
+    workflow_id = failure_repair_api["workflow_id"]
+    headers = failure_repair_api["headers"]
+
+    async with failure_repair_api["sessions"]() as session:
+        execution = await session.get(WorkflowExecution, execution_id)
+        assert execution is not None
+        execution.error_code = "RESPONSE_SCHEMA_MISMATCH"
+        execution.error_message = "响应契约与固定版本不一致"
+        failed_node = await session.scalar(
+            select(WorkflowNodeExecution).where(
+                WorkflowNodeExecution.workflow_execution_id == execution_id,
+                WorkflowNodeExecution.node_id == "start",
+            )
+        )
+        assert failed_node is not None
+        failed_node.error_code = "RESPONSE_SCHEMA_MISMATCH"
+        failed_node.error_message = "响应契约与固定版本不一致"
+        await session.commit()
+
+    exported = await client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/workflows/{workflow_id}/export",
+        headers=headers,
+    )
+    assert exported.status_code == 200, exported.text
+    spec = exported.json()["spec"]
+    assert spec["operations"][0]["source_version"] == 1
+    assert spec["operations"][0]["contract_fingerprint"] == "c" * 64
+    spec["operations"][0]["source_version"] = 2
+
+    rejected = await client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/repair-proposals",
+        headers={**headers, "Idempotency-Key": "s58-contract-version-mismatch"},
+        json={
+            "kind": "contract_drift",
+            "proposed_spec": spec,
+            "expected_target_revision": 1,
+            "context_revision_id": str(failure_repair_api["context_revision_id"]),
+            "rationale": "验证固定版本必须与契约指纹匹配",
+        },
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "FLOWSPEC_API_VERSION_INCOMPATIBLE"
     async with failure_repair_api["sessions"]() as session:
         proposals = list((await session.scalars(select(AIChangeSet))).all())
         assert proposals == []

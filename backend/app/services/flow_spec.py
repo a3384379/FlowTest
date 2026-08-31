@@ -876,8 +876,8 @@ class FlowSpecService:
                 path=f"$.operation_version_mappings.{operation.ref}",
             )
         version_number = requested_version
-        if version_number is None and operation.version_strategy == "current":
-            version_number = definition.current_version
+        if version_number is None:
+            version_number = _default_operation_version(definition, operation)
         version_query = select(APIVersion).where(APIVersion.api_definition_id == definition.id)
         if version_number is not None:
             version_query = version_query.where(APIVersion.version == version_number)
@@ -1428,6 +1428,17 @@ def _portable_contract_fingerprint(
         update={"service": service_ref}
     )
     return fingerprint_contract(contract)
+
+
+def _default_operation_version(
+    definition: APIDefinition,
+    operation: FlowSpecOperation,
+) -> int | None:
+    if operation.version_strategy == "current":
+        return definition.current_version
+    if operation.version_strategy == "pinned":
+        return operation.source_version
+    return None
 
 
 def _operation_contract_matches(version: APIVersion, operation: FlowSpecOperation) -> bool:
