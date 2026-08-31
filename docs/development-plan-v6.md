@@ -2166,6 +2166,9 @@ Product Defect 不自动修改测试。
   敏感输入与 Patch 校验全部发生在 Idempotency Claim 之前。
 - 人工 Accept 后复用一次性 Sandbox Preview Approval 执行 Re-preview；不新增 Repair 生命周期，不自动 Apply、
   Publish 或生产执行。架构边界见 ADR 0048。
+- PR #78 已通过最终复审和精确 Head 七项门禁后普通 Squash Merge，Merge 后 Main Push 七项门禁也全部
+  Success。最终阻塞级结果为 P0=`0`、P1=`0`；验收证据见
+  [S58 Failure Diagnosis 与 Repair Proposal](release/v6-s58-failure-repair.md)。
 
 ---
 
@@ -2184,6 +2187,16 @@ Product Defect 不自动修改测试。
 - Current TestPlan Gap；
 - CI Summary；
 - Release Gate Integration。
+
+### S59.0 前置收口
+
+S59 不新建第二套 Change Maintenance 状态机；正式功能接入既有 S45 Change Regression、Impact、Review、
+Execution、Evidence 与 Release Gate。在自动 Flow Patch 前先以两个小型 PR 完成：
+
+1. Patch Correctness：Cleanup 独立诊断、Capability Binding Repair 支持或明确拒绝、Contract Drift 锁定
+   `version_strategy`，并收口跨来源变量冲突、Body 嵌套路径预检和 Java 全限定引用 Token 解析。
+2. Unified Proposal Discovery：统一发现 `mcp://`、`repair://`、`maintenance://` 与 `flow-spec://`，返回
+   结构化 `proposal_origin`，继续复用同一 AIChangeSet Review/Apply/Preview 生命周期。
 
 ---
 

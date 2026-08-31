@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-08-31（Asia/Shanghai）
+最后更新：2026-09-01（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S56、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
 已由 PR #67 普通 Squash Merge；GitHub Codex 最新复审 P0/P1 为 0，普通 PR CI、显式 RC 重门禁及合并后
@@ -26,8 +26,10 @@ S57 Built-in Java/Spring Provider 已由 PR #75 普通 Squash Merge；最终复�
 省略必填参数错误信封 P2 已按策略接受，Required Gate 全绿。State Knowledge 已由 PR #76 普通 Squash
 Merge；最终复审 P0=`0`、P1=`0`，1 项 Java 全限定名 Token P2 已按策略接受，Required Gate 与 Compose
 Playwright 均全绿。Context Inspector 已由 PR #77 通过集中门禁、Compose Playwright 与 Required Gate 后普通
-Squash Merge，S57 已全部完成。S58 Failure Diagnosis 与 Repair Proposal 已完成实现及本地集中验收，当前待
-PR 复审、Required Gate 与普通合并。
+Squash Merge，S57 已全部完成。S58 Failure Diagnosis 与 Repair Proposal 已由 PR #78 普通 Squash Merge；
+最终复审 P0=`0`、P1=`0`，精确 Head 与 Merge 后 Main Push 七项门禁全部成功。S58 保留 3 项必须在
+S59 自动 Patch 前收口的 P2，完整证据见
+[S58 Failure Diagnosis 与 Repair Proposal 验收](release/v6-s58-failure-repair.md)。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -76,7 +78,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   Built-in Java Evidence → State Candidate → Flow Proposal 深链 Playwright `2 passed`。PR #77 与合并后
   Required Gate 均通过，S57 已完成。
 
-## 已完成实现与本地验收：V6.1 S58 Failure Diagnosis 与 Repair Proposal
+## 已完成实现并合并：V6.1 S58 Failure Diagnosis 与 Repair Proposal
 
 - 新增版本化 Failure Diagnosis，基于终态执行和脱敏节点证据确定性分类；Product Defect Guard 禁止创建任何
   测试 Repair，环境、网络、认证、超时和未知故障也不会因 Cleanup 失败获得测试修改权限。
@@ -89,7 +91,12 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - ADR 0048 已固定安全边界。集中门禁后端 Format/Ruff/mypy 全绿，pytest `1008 passed, 4 skipped`、覆盖率
   `90.94%`；前端 Format/ESLint/TypeScript/Build 全绿，Vitest `230 passed`、Branch Coverage `80.04%`。
 - 最新 Compose 镜像上的管理员初始化与“失败诊断 → 受限 Repair Proposal → 人工接受 → 单次审批
-  Re-preview”Playwright `2 passed`。当前只剩 PR 复审、Required Gate 与普通合并。
+  Re-preview”Playwright `2 passed`。
+- PR #78 最终复审 P0=`0`、P1=`0`，精确 Head 与 Merge 后 Main Push 的 Backend、Frontend、Security、
+  Compose、Windows、Upgrade 与 Required Gate 全部成功，随后普通 Squash Merge。
+- S58 已知 3 项 P2 为统一 Proposal Discovery、Capability Node Binding Repair 与 Cleanup Failure 独立分类；
+  `version_strategy` 锁定作为独立 S59.0 Hardening。它们不改变 S58 的合并结论，但必须在 S59 自动
+  Flow Patch 前完成。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 
