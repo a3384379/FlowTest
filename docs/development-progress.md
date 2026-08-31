@@ -16,6 +16,12 @@ P0/P1，最终候选七项门禁全绿并普通 Squash Merge；合并后 Main �
 Migration/Standalone 单 Head 为 `20260831_0051`。V6 RC 候选自动化证据已闭环，尚未创建正式
 Tag/Release，连续 RC、公司实机、安全审批和人工签署等 GA 外部门槛仍未满足，
 `GA_READY=NO`。
+V6.1 前置阶段 S57.0 已按三个独立 PR 完成：PR #71 收口 Planner/Compiler/Data 正确性，PR #72
+收口 Java Evidence 正确性，PR #73 收口 Governance/Evaluation/Skill Flow；三个 PR 最终复审均为
+P0=`0`、P1=`0`，Required Gate 全绿并普通 Squash Merge。原 12 项已接受 P2 中，10 项代码、契约与
+流程正确性问题已经关闭；Context Inspector UI 纳入 S57 产品化，Skill 自包含 Evaluation Assets 最迟在
+S60 收口。当前后续顺序固定为 S57.0 → S57 → S58 → S59 → S60，不把 Change Maintenance 提前塞入
+S58。完整记录见 [S57.0 Foundation Correctness 验收](release/v6-s57-0-foundation-correctness.md)。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -25,6 +31,23 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 已完成实现并合并：V6.1 S57.0 Foundation Correctness
+
+- PR #71 修复对象型 JSON Body Mapping、Scenario Path/Cookie 保留、Synthetic Variable 唯一性、
+  Constant/Existing-safe-record DB Read 来源和 Plan v1 `setup_api` 兼容。
+- PR #72 将 Java 结构字段与 DTO Wire 字段分离，按 Jackson 可见性处理私有成员，并正确区分
+  `@RestController`、普通 `@Controller`、`@ResponseBody` 与 `ResponseEntity`；JPA 结构字段不再被
+  JSON 过滤误删。
+- PR #73 将 Project/Context 授权与校验前移到 Idempotency Claim 之前；Evaluation 硬门禁使用精确未
+  舍入比例；Sandbox Preview 前必须重新确认 Proposal 已接受且 `applied=false`。
+- 三个 PR 均在最终复审清除 P0/P1 后普通合并。普通 PR 只运行一次集中门禁，Compact 与容量门禁保持
+  显式 RC 路径，不因 P2 继续触发修复—全门禁循环。
+- 新复审发现的 4 项 P2 与原 12 项分开记录：`previous_step` 跨来源变量冲突、Body 嵌套路径预检、
+  Lombok `@FieldDefaults`、异步响应 Wrapper。它们不改变“原 10 项正确性 P2 已关闭”的事实，也不
+  阻断 S57。
+- 后续阶段：S57 正式化 Built-in Java/Spring Provider、State Knowledge 与 Context Inspector；S58 才
+  进入 Failure Diagnosis/Repair；S59 为 Change-aware Maintenance；S60 收口完整 Skills 与独立评测包。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 
