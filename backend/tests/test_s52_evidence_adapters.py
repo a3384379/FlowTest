@@ -4590,6 +4590,61 @@ class OrderDto {
     }
 
 
+def test_java_spring_poc_keeps_json_ignored_members_in_jpa_structure() -> None:
+    evidence = JavaSpringPocProvider().analyze(
+        JavaSourceSnapshot.model_validate(
+            {
+                "provider": {"name": "java-spring-poc", "version": "0.1.0"},
+                "source": {"ref": "repository://json-ignore-jpa", "revision": "v1"},
+                "subject_ref": SUBJECT_REF,
+                "files": [
+                    {
+                        "path": "src/main/java/example/OrderController.java",
+                        "content": """
+@RestController
+class OrderController {
+    @GetMapping("/orders")
+    OrderEntity order() { return orderService.load(); }
+}
+
+@Entity
+class OrderEntity {
+    @JsonIgnore
+    @Column(name = "secret_hash")
+    private String secretHash;
+
+    public String status;
+}
+
+@Entity
+record AuditEntity(
+    @JsonIgnore @Column(name = "actor_hash") String actorHash
+) {}
+""",
+                    }
+                ],
+            }
+        )
+    )
+
+    response_fields = {
+        claim.field_name
+        for claim in evidence.claims
+        if claim.kind == "dto_field" and claim.direction == "response"
+    }
+    columns = {
+        (claim.field_name, claim.column_name)
+        for claim in evidence.claims
+        if claim.kind == "table_column"
+    }
+    assert response_fields == {"status"}
+    assert columns == {
+        ("secretHash", "secret_hash"),
+        ("status", "status"),
+        ("actorHash", "actor_hash"),
+    }
+
+
 def test_java_spring_poc_honors_jackson_property_access_direction() -> None:
     evidence = JavaSpringPocProvider().analyze(
         JavaSourceSnapshot.model_validate(

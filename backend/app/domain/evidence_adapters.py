@@ -2522,21 +2522,10 @@ def _java_type_analysis(
         top_level_prefixes = _top_level_declaration_prefixes(file.content, masked_content)
         for declaration in _TYPE_DECLARATION.finditer(masked_content):
             name = declaration.group("name")
-            body = _type_body(file.content, declaration.end())
-            fields = (
-                _record_fields(file.content, declaration, string_constants)
-                if declaration.group("kind") == "record"
-                else _class_fields(body, string_constants, name)
-            )
-            dto_fields = (
-                fields
-                if declaration.group("kind") == "record"
-                else _class_fields(
-                    body,
-                    string_constants,
-                    name,
-                    json_visible_only=True,
-                )
+            fields, dto_fields = _java_type_field_sets(
+                file.content,
+                declaration,
+                string_constants,
             )
             fields, unresolved_naming_types = _java_fields_with_json_naming(
                 file.content,
@@ -2591,7 +2580,7 @@ def _java_type_analysis(
                 property_access_types.add(name)
             if declaration.group("kind") == "enum":
                 values, truncated, serialization_unresolved = _enum_values(
-                    body,
+                    _type_body(file.content, declaration.end()),
                     string_constants,
                     name,
                 )
@@ -2625,6 +2614,39 @@ def _java_type_analysis(
         unresolved_json_naming_types=tuple(sorted(unresolved_json_naming_types)),
         unresolved_json_property_types=tuple(sorted(unresolved_json_property_types)),
         unresolved_json_visibility_types=tuple(sorted(unresolved_json_visibility_types)),
+    )
+
+
+def _java_type_field_sets(
+    content: str,
+    declaration: re.Match[str],
+    string_constants: _JavaStringConstants,
+) -> tuple[list[JavaField], list[JavaField]]:
+    name = declaration.group("name")
+    if declaration.group("kind") == "record":
+        return (
+            _record_fields(
+                content,
+                declaration,
+                string_constants,
+                apply_jackson_filters=False,
+            ),
+            _record_fields(content, declaration, string_constants),
+        )
+    body = _type_body(content, declaration.end())
+    return (
+        _class_fields(
+            body,
+            string_constants,
+            name,
+            apply_jackson_filters=False,
+        ),
+        _class_fields(
+            body,
+            string_constants,
+            name,
+            json_visible_only=True,
+        ),
     )
 
 
@@ -2775,6 +2797,8 @@ def _record_fields(
     content: str,
     declaration: re.Match[str],
     string_constants: _JavaStringConstants,
+    *,
+    apply_jackson_filters: bool = True,
 ) -> list[JavaField]:
     opening = content.find("(", declaration.end())
     if opening < 0:
@@ -2789,6 +2813,7 @@ def _record_fields(
                 component,
                 string_constants,
                 declaration.group("name"),
+                apply_jackson_filters=apply_jackson_filters,
             )
         )
         is not None
@@ -2822,10 +2847,12 @@ def _record_component_field(
     component: str,
     string_constants: _JavaStringConstants,
     enclosing_type: str,
+    *,
+    apply_jackson_filters: bool,
 ) -> JavaField | None:
     masked_component = _mask_java_non_code(component)
-    if _has_jpa_transient_annotation(component, masked_component) or _has_jackson_ignore_annotation(
-        component, masked_component
+    if _has_jpa_transient_annotation(component, masked_component) or (
+        apply_jackson_filters and _has_jackson_ignore_annotation(component, masked_component)
     ):
         return None
     annotations = _java_validation_annotations(component, masked_component)
@@ -2868,6 +2895,7 @@ def _class_fields(
     enclosing_type: str,
     *,
     json_visible_only: bool = False,
+    apply_jackson_filters: bool = True,
 ) -> list[JavaField]:
     fields: list[JavaField] = []
     code_body = _mask_java_non_code(body)
@@ -2893,9 +2921,10 @@ def _class_fields(
         )
         annotation_content = body[prefix_start : match.start()]
         annotation_mask = masked_body[prefix_start : match.start()]
-        if _has_jpa_transient_annotation(
-            annotation_content, annotation_mask
-        ) or _has_jackson_ignore_annotation(annotation_content, annotation_mask):
+        if _has_jpa_transient_annotation(annotation_content, annotation_mask) or (
+            apply_jackson_filters
+            and _has_jackson_ignore_annotation(annotation_content, annotation_mask)
+        ):
             continue
         annotations = _java_validation_annotations(annotation_content, annotation_mask)
         column_name, column_name_unresolved = _java_column_name(
@@ -2935,7 +2964,9 @@ def _class_fields(
             or explicitly_exposed
             or field_name in accessor_field_names
         )
-    ignored_getters = _jackson_ignored_getter_properties(body, masked_body)
+    ignored_getters = (
+        _jackson_ignored_getter_properties(body, masked_body) if apply_jackson_filters else set()
+    )
     fields = [field for field in fields if field[0] not in ignored_getters]
     known = {field[0] for field in fields}
     for accessor_field in accessor_fields:
