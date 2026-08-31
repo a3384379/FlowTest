@@ -96,6 +96,7 @@ _SENSITIVE_LOCATION_PARTS = frozenset(
         "evidence",
         "password",
         "secret",
+        "snapshot",
         "token",
     }
 )

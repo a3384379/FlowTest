@@ -104,6 +104,7 @@ async def test_mcp_red_team_surface_has_no_uncontrolled_mutation_tools() -> None
         "flowtest.ingest_database_evidence",
         "flowtest.ingest_external_evidence",
         "flowtest.ingest_java_evidence",
+        "flowtest.ingest_java_source_snapshot",
         "flowtest.inspect_change_impact",
         "flowtest.inspect_context_requirements",
         "flowtest.inspect_contract",

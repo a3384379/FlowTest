@@ -217,6 +217,13 @@ class TestContextService:
         evidence = await self._evidence_items(revision.id)
         return _derive_entity_mapping(_mapping_evidence_inputs(evidence))
 
+    async def require_accepting_evidence_target(self, *, actor: User, context_id: UUID) -> None:
+        """Authorize a bounded provider before it performs potentially expensive analysis."""
+
+        self._require_evidence_scope()
+        context = await self._load_context(actor=actor, context_id=context_id, editing=True)
+        await self._require_accepting_evidence(actor=actor, context=context)
+
     async def _ingest(
         self,
         *,

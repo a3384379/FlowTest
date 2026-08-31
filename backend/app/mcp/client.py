@@ -23,6 +23,7 @@ from app.schemas.test_contexts import (
     FlowSpecProposalInspectionResponse,
     FlowSpecProposalResponse,
     IntegrationPlanRequest,
+    JavaSourceSnapshotIngestionResponse,
     TestContextResponse,
 )
 from app.schemas.test_design import MCPControlledWriteEnvelope
@@ -338,6 +339,20 @@ class MCPReadGatewayClient:
             token=token,
         )
         return _validate_response(response, EvidenceAdapterIngestionResponse)
+
+    async def ingest_java_source_snapshot(
+        self,
+        context_id: UUID | str,
+        snapshot: Mapping[str, Any],
+        *,
+        token: str | None = None,
+    ) -> JavaSourceSnapshotIngestionResponse:
+        response = await self._request_post(
+            path=f"/api/v1/mcp/evidence/contexts/{context_id}/java-source-snapshot",
+            payload={"snapshot": dict(snapshot)},
+            token=token,
+        )
+        return _validate_response(response, JavaSourceSnapshotIngestionResponse)
 
     async def inspect_entity_mapping(
         self, context_id: UUID | str, *, token: str | None = None

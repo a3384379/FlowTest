@@ -1,6 +1,6 @@
 {
   "server_name": "flowtest",
-  "server_version": "s55-sandbox-preview-v1",
+  "server_version": "s57-java-spring-provider-v1",
   "read_schema_version": "flowtest-mcp-read-schema-v1",
   "tools": [
     "flowtest.analyze_test_coverage",
@@ -15,6 +15,7 @@
     "flowtest.ingest_database_evidence",
     "flowtest.ingest_external_evidence",
     "flowtest.ingest_java_evidence",
+    "flowtest.ingest_java_source_snapshot",
     "flowtest.inspect_change_impact",
     "flowtest.inspect_context_requirements",
     "flowtest.inspect_contract",

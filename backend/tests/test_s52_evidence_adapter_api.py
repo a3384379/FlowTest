@@ -2534,6 +2534,151 @@ async def test_database_state_sets_at_budget_remain_conflicted_without_truncatio
     assert set(conflict["candidate_ids"]) == {candidate["id"] for candidate in states}
 
 
+@pytest.mark.asyncio
+async def test_built_in_java_provider_ingests_bounded_source_without_persisting_raw_code(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "S57 内置 Java Provider 上下文",
+            "objective": "静态提取 Spring 路由与 DTO 证据",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    raw_marker = "RAW_SOURCE_MUST_NOT_BE_PERSISTED"
+    snapshot = _java_source_snapshot(project_id, raw_marker=raw_marker)
+
+    ingested = await client.post(
+        f"/api/v1/mcp/evidence/contexts/{context_id}/java-source-snapshot",
+        headers=headers,
+        json={"snapshot": snapshot},
+    )
+
+    assert ingested.status_code == 201, ingested.text
+    body = ingested.json()
+    assert body["context"]["status"] == "ready"
+    assert body["analysis"]["provider"] == {
+        "name": "flowtest-java-spring",
+        "version": "1.0.0",
+    }
+    assert body["analysis"]["source"] == snapshot["source"]
+    assert {claim["kind"] for claim in body["analysis"]["claims"]} >= {
+        "controller_route",
+        "dto_field",
+        "service_call",
+    }
+    assert body["analysis"]["warnings"][0]["code"] == "JAVA_POC_STATIC_ONLY"
+    assert raw_marker not in ingested.text
+
+    engine = s52_context["engine"]
+    async with engine.connect() as connection:
+        evidence_payloads = (
+            await connection.execute(text("SELECT finding_payload FROM context_evidence_items"))
+        ).scalars()
+        audit_payloads = (
+            await connection.execute(text("SELECT details FROM audit_logs"))
+        ).scalars()
+    persisted = json.dumps(
+        [*evidence_payloads, *audit_payloads], ensure_ascii=False, sort_keys=True
+    )
+    assert raw_marker not in persisted
+
+
+@pytest.mark.asyncio
+async def test_built_in_java_provider_fails_closed_for_execution_provider_spoof_and_no_evidence(
+    s52_context: dict[str, Any],
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+    begun = await client.post(
+        "/api/v1/mcp/evidence/contexts",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "name": "S57 内置 Provider 安全边界",
+            "objective": "拒绝执行、身份伪造与无证据输入",
+            "required_evidence": ["repository"],
+        },
+    )
+    assert begun.status_code == 201, begun.text
+    context_id = begun.json()["id"]
+    endpoint = f"/api/v1/mcp/evidence/contexts/{context_id}/java-source-snapshot"
+    raw_marker = "INVALID_SOURCE_MUST_BE_REDACTED"
+    snapshot = _java_source_snapshot(project_id, raw_marker=raw_marker)
+
+    execution = json.loads(json.dumps(snapshot))
+    execution["execute_analyzed_code"] = True
+    spoofed = json.loads(json.dumps(snapshot))
+    spoofed["provider"] = {"name": "spoofed", "version": "9.9.9"}
+    duplicated = json.loads(json.dumps(snapshot))
+    duplicated["files"].append(dict(duplicated["files"][0]))
+    unsupported = json.loads(json.dumps(snapshot))
+    unsupported["files"] = [
+        {
+            "path": "src/main/java/example/Marker.java",
+            "content": "package example; public final class Marker {}",
+        }
+    ]
+
+    execution_response = await client.post(endpoint, headers=headers, json={"snapshot": execution})
+    spoofed_response = await client.post(endpoint, headers=headers, json={"snapshot": spoofed})
+    duplicated_response = await client.post(
+        endpoint, headers=headers, json={"snapshot": duplicated}
+    )
+    unsupported_response = await client.post(
+        endpoint, headers=headers, json={"snapshot": unsupported}
+    )
+
+    assert execution_response.status_code == 422
+    assert execution_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert spoofed_response.status_code == 422
+    assert spoofed_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert duplicated_response.status_code == 422
+    assert duplicated_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert raw_marker not in execution_response.text
+    assert raw_marker not in spoofed_response.text
+    assert raw_marker not in duplicated_response.text
+    assert unsupported_response.status_code == 422
+    assert unsupported_response.json()["error"]["code"] == "JAVA_SOURCE_EVIDENCE_NOT_FOUND"
+    assert unsupported_response.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_built_in_java_provider_authorizes_context_before_static_analysis(
+    s52_context: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = s52_context["client"]
+    headers = _headers(s52_context["token"])
+    project_id = str(s52_context["project_id"])
+
+    def unexpected_analysis(_provider: object, _snapshot: object) -> None:
+        raise AssertionError("unauthorized context must not start Java analysis")
+
+    monkeypatch.setattr(
+        "app.services.evidence_adapters.BuiltInJavaSpringProvider.analyze",
+        unexpected_analysis,
+    )
+    response = await client.post(
+        "/api/v1/mcp/evidence/contexts/00000000-0000-0000-0000-000000000001/java-source-snapshot",
+        headers=headers,
+        json={"snapshot": _java_source_snapshot(project_id)},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "TEST_CONTEXT_NOT_FOUND"
+    assert response.json()["error"]["trace_id"]
+
+
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "X-MCP-Client-Version": "s52-test"}
 
@@ -2543,6 +2688,41 @@ def _set_payload_value(payload: dict[str, Any], path: tuple[str, ...], value: An
     for key in path[:-1]:
         target = target[key]
     target[path[-1]] = value
+
+
+def _java_source_snapshot(project_id: str, *, raw_marker: str = "") -> dict[str, Any]:
+    return {
+        "source": {"ref": "repository://orders-service", "revision": "source-revision-v1"},
+        "subject_ref": f"flowtest://projects/{project_id}/operations/orders",
+        "execute_analyzed_code": False,
+        "files": [
+            {
+                "path": "src/main/java/example/OrderController.java",
+                "content": f"""
+package example;
+// {raw_marker}
+@RestController
+@RequestMapping("/api")
+public class OrderController {{
+    private OrderService orderService;
+
+    @PostMapping("/orders")
+    public OrderDto create(@RequestBody CreateOrderRequest request) {{
+        return orderService.create(request);
+    }}
+}}
+""",
+            },
+            {
+                "path": "src/main/java/example/OrderDtos.java",
+                "content": """
+package example;
+class CreateOrderRequest { public String productId; }
+class OrderDto { public String id; }
+""",
+            },
+        ],
+    }
 
 
 def _java_evidence(project_id: str) -> dict[str, Any]:
