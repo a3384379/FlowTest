@@ -486,6 +486,63 @@ async def test_s58_rejects_sensitive_flow_spec_literal_before_persistence(
 
 
 @pytest.mark.asyncio
+async def test_s58_rejects_sensitive_expected_expression_before_persistence(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    client: AsyncClient = failure_repair_api["client"]
+    project_id = failure_repair_api["project_id"]
+    execution_id = failure_repair_api["execution_id"]
+    workflow_id = failure_repair_api["workflow_id"]
+    headers = failure_repair_api["headers"]
+    async with failure_repair_api["sessions"]() as session:
+        execution = await session.get(WorkflowExecution, execution_id)
+        assert execution is not None
+        execution.error_code = "MAPPING_INVALID"
+        failed_node = await session.scalar(
+            select(WorkflowNodeExecution).where(
+                WorkflowNodeExecution.workflow_execution_id == execution_id,
+                WorkflowNodeExecution.node_id == "start",
+            )
+        )
+        assert failed_node is not None
+        failed_node.error_code = "MAPPING_INVALID"
+        await session.commit()
+
+    exported = await client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/workflows/{workflow_id}/export",
+        headers=headers,
+    )
+    spec = exported.json()["spec"]
+    assertion = next(node for node in spec["nodes"] if node["id"] == "assert")
+    assertion["config"] = {
+        **assertion["config"],
+        "expected": None,
+        "expected_source_node_id": "api",
+        "expected_expression": "'hunter2'",
+    }
+
+    rejected = await client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/repair-proposals",
+        headers={**headers, "Idempotency-Key": "s58-sensitive-expected-expression"},
+        json={
+            "kind": "oracle",
+            "proposed_spec": spec,
+            "expected_target_revision": 1,
+            "context_revision_id": str(failure_repair_api["context_revision_id"]),
+            "rationale": "修正失败断言的动态预期来源",
+            "acknowledge_oracle_weakening": True,
+        },
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "REPAIR_SENSITIVE_INPUT_FORBIDDEN"
+    assert "hunter2" not in rejected.text
+    async with failure_repair_api["sessions"]() as session:
+        proposals = list((await session.scalars(select(AIChangeSet))).all())
+        assert proposals == []
+
+
+@pytest.mark.asyncio
 async def test_s58_rejects_pinned_version_and_contract_fingerprint_mismatch(
     failure_repair_api: dict[str, Any],
 ) -> None:
@@ -618,7 +675,19 @@ def _definition(api_id: UUID) -> WorkflowDefinition:
                 id="end",
                 type=NodeType.END,
                 name="End",
+                position=Position(x=300, y=0),
+            ),
+            WorkflowNode(
+                id="assert",
+                type=NodeType.ASSERT,
+                name="Verify fixture",
                 position=Position(x=200, y=0),
+                config={
+                    "source_node_id": "api",
+                    "expression": "body.id",
+                    "operator": "equals",
+                    "expected": "fixture-id",
+                },
             ),
             WorkflowNode(
                 id="cleanup",
@@ -634,6 +703,7 @@ def _definition(api_id: UUID) -> WorkflowDefinition:
         ],
         edges=[
             WorkflowEdge(id="start-api", source="start", target="api"),
-            WorkflowEdge(id="api-end", source="api", target="end"),
+            WorkflowEdge(id="api-assert", source="api", target="assert"),
+            WorkflowEdge(id="assert-end", source="assert", target="end"),
         ],
     )
