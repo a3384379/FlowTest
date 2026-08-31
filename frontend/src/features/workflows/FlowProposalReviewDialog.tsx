@@ -135,6 +135,8 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     placeholderData: (previous) => previous,
   })
   const displayedVisual = selectedVisual(proposalId, visual.data, visualOverride)
+  const isRepairProposal = isRepairFlowProposal(displayedVisual)
+  const proposalOptions = flowProposalOptions(candidates, displayedVisual)
   const previewState = useSandboxPreview(
     props.projectId,
     props.open,
@@ -220,7 +222,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
 
   return (
     <Modal
-      title="外部 LLM / MCP 可视化流程提案"
+      title={flowProposalDialogTitle(isRepairProposal)}
       open={props.open}
       width="min(1560px, 96vw)"
       footer={null}
@@ -231,19 +233,16 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
         <Alert
           showIcon
           type="info"
-          title="流程提案不会自动发布或应用；人工接受后只能使用一次性审批在 Test / Sandbox 环境预览。"
+          title={flowProposalSafetyTitle(isRepairProposal)}
           description="Production、Staging 与未分类环境永久不进入 Preview；预览复用正式执行引擎，并受固定请求、数据行、并发、运行时与 Cleanup 预算约束。"
         />
         <Select
           aria-label="流程提案"
           style={{ width: '100%' }}
           loading={proposals.isLoading}
-          placeholder="选择 MCP 流程提案"
+          placeholder="选择流程提案"
           value={proposalId}
-          options={candidates.map((item) => ({
-            value: item.id,
-            label: `${item.title} · ${changeSetStatusLabel(item.status)} · ${item.id.slice(0, 8)}`,
-          }))}
+          options={proposalOptions}
           onChange={(value) => {
             setSelectedId(value)
             setVisualOverride(undefined)
@@ -259,8 +258,8 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
             加载更多提案
           </Button>
         ) : null}
-        {!candidates.length && !proposals.isLoading ? (
-          <Empty description="暂无 MCP 流程提案" />
+        {!proposalOptions.length && !proposals.isLoading ? (
+          <Empty description="暂无流程提案" />
         ) : null}
         {displayedVisual ? (
           <ProposalWorkspace
@@ -774,4 +773,39 @@ function selectedVisual(
 ): FlowSpecVisualProposal | undefined {
   if (override && override.proposalId === proposalId) return override.visual
   return queried?.proposal.id === proposalId ? queried : undefined
+}
+
+function isRepairFlowProposal(value: FlowSpecVisualProposal | undefined): boolean {
+  return value?.proposal.source_ref?.startsWith('repair://') ?? false
+}
+
+function flowProposalOptions(
+  candidates: ReadonlyArray<{ id: string; title: string; status: string }>,
+  displayed: FlowSpecVisualProposal | undefined,
+): Array<{ value: string; label: string }> {
+  const options = candidates.map((item) => ({
+    value: item.id,
+    label: flowProposalOptionLabel(item),
+  }))
+  if (displayed && !options.some((option) => option.value === displayed.proposal.id)) {
+    options.unshift({
+      value: displayed.proposal.id,
+      label: flowProposalOptionLabel(displayed.proposal),
+    })
+  }
+  return options
+}
+
+function flowProposalOptionLabel(item: { id: string; title: string; status: string }): string {
+  return `${item.title} · ${changeSetStatusLabel(item.status)} · ${item.id.slice(0, 8)}`
+}
+
+function flowProposalDialogTitle(repair: boolean): string {
+  return repair ? 'Repair Proposal 可视化审核' : '外部 LLM / MCP 可视化流程提案'
+}
+
+function flowProposalSafetyTitle(repair: boolean): string {
+  return repair
+    ? 'Repair Proposal 不会自动修改测试；人工接受后需使用新的单次审批 Re-preview。'
+    : '流程提案不会自动发布或应用；人工接受后只能使用一次性审批在 Test / Sandbox 环境预览。'
 }

@@ -25,7 +25,9 @@ S58。完整记录见 [S57.0 Foundation Correctness 验收](release/v6-s57-0-fou
 S57 Built-in Java/Spring Provider 已由 PR #75 普通 Squash Merge；最终复审 P0=`0`、P1=`0`，1 项 MCP
 省略必填参数错误信封 P2 已按策略接受，Required Gate 全绿。State Knowledge 已由 PR #76 普通 Squash
 Merge；最终复审 P0=`0`、P1=`0`，1 项 Java 全限定名 Token P2 已按策略接受，Required Gate 与 Compose
-Playwright 均全绿。Context Inspector 已进入实现和定向验收，仍是 S57 最后退出项。
+Playwright 均全绿。Context Inspector 已由 PR #77 通过集中门禁、Compose Playwright 与 Required Gate 后普通
+Squash Merge，S57 已全部完成。S58 Failure Diagnosis 与 Repair Proposal 已完成实现及本地集中验收，当前待
+PR 复审、Required Gate 与普通合并。
 历史记录：V5 S47.1 已补齐 Canonical Contract、位置物化、Evidence Fusion、FlowSpec
 版本固定、测试语义覆盖、Evidence 脱敏、5xx 归因和 Migration truth；本轮完整门禁证据见专项记录。
 H1 Key Rotation 已完成代码与主线验收，但 H2 外部运行证据与人工签署仍未完成，因此仍不是 GA Ready；
@@ -53,7 +55,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 后续阶段：S57 正式化 Built-in Java/Spring Provider、State Knowledge 与 Context Inspector；S58 才
   进入 Failure Diagnosis/Repair；S59 为 Change-aware Maintenance；S60 收口完整 Skills 与独立评测包。
 
-## 实现中：V6.1 S57 Context Inspector
+## 已完成实现并合并：V6.1 S57
 
 - PR #75 已交付固定身份 `flowtest-java-spring@1.0.0`、HTTP/MCP 源码快照入口、有界静态分析、授权前置、
   脱敏错误边界和不保存原始源码的 Evidence Ingest；完整本地门禁与远程 Required Gate 已通过。
@@ -69,10 +71,25 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - Context Inspector 使用项目用户 Read 授权展示当前 Revision、Completeness/Missing、Conflict、Provider
   Finding、State Knowledge 与同 Revision Flow Proposal；不扩大 MCP Scope，不建立平行生命周期，过期状态
   只读计算。
-- 当前集中门禁：后端 Format/Ruff/mypy 全绿，pytest `997 passed, 4 skipped`、覆盖率 `90.89%`；前端
+- PR #77 集中门禁：后端 Format/Ruff/mypy 全绿，pytest `997 passed, 4 skipped`、覆盖率 `90.89%`；前端
   Format/ESLint/TypeScript/Build 全绿，Vitest `227 passed`、Branch Coverage `80%`；Compose 中 Context →
-  Built-in Java Evidence → State Candidate → Flow Proposal 深链 Playwright `2 passed`。PR 复审与合并尚未
-  完成，S57 尚未宣告完成。
+  Built-in Java Evidence → State Candidate → Flow Proposal 深链 Playwright `2 passed`。PR #77 与合并后
+  Required Gate 均通过，S57 已完成。
+
+## 已完成实现与本地验收：V6.1 S58 Failure Diagnosis 与 Repair Proposal
+
+- 新增版本化 Failure Diagnosis，基于终态执行和脱敏节点证据确定性分类；Product Defect Guard 禁止创建任何
+  测试 Repair，环境、网络、认证、超时和未知故障也不会因 Cleanup 失败获得测试修改权限。
+- Binding/Data/Cleanup/Contract Drift/Oracle 使用严格 FlowSpec 字段白名单；Schema 切换、空 Patch、跨类型修改
+  Fail Closed，Oracle 变化要求显式确认可能弱化断言。
+- Repair Proposal 复用现有 FlowSpec `AIChangeSet`，绑定目标草稿 Revision 与 Ready Context Revision；授权、
+  Context、敏感输入和 Patch Scope 校验在 Idempotency Claim 前完成，Source Snapshot 只保存结构化诊断与来源。
+- Web 已接入“执行历史 → 失败诊断 → 受限 Patch → Proposal Review”，创建后复用现有 Accepted + Fresh
+  One-time Sandbox Preview Approval 路径完成 Re-preview，不建立第二套审批或执行生命周期。
+- ADR 0048 已固定安全边界。集中门禁后端 Format/Ruff/mypy 全绿，pytest `1008 passed, 4 skipped`、覆盖率
+  `90.94%`；前端 Format/ESLint/TypeScript/Build 全绿，Vitest `230 passed`、Branch Coverage `80.04%`。
+- 最新 Compose 镜像上的管理员初始化与“失败诊断 → 受限 Repair Proposal → 人工接受 → 单次审批
+  Re-preview”Playwright `2 passed`。当前只剩 PR 复审、Required Gate 与普通合并。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 

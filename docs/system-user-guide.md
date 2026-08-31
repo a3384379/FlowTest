@@ -657,7 +657,34 @@ FlowSpec 不用于携带 Secret、Credential 或源实例内部 ID。跨项目�
 
 V5 新导出、验证、Diff、Review 和 Apply 一律使用 `flowtest-flow-spec-fingerprint-v3`。指纹包含 pinned/current API 版本、Operation Contract 和请求抑制语义，但不包含数据库 UUID、来源修订和 Warning。开发期 fingerprint v1/v2 文件不属于 V5 正式兼容范围。
 
-### 7.13 工作流常见问题
+### 7.13 失败诊断、Repair Proposal 与 Re-preview
+
+失败执行完成后，可在工作流的“执行历史”中点击“失败诊断”。FlowTest 会读取当次不可变 Snapshot 和已脱敏
+节点证据，显示主分类、置信度、建议与 Evidence 引用数量。
+
+处理规则：
+
+- `PRODUCT_DEFECT` 只显示 Product Defect Guard 和产品修复建议，不提供测试 Repair 表单；不要通过放宽断言
+  隐藏产品缺陷。
+- 环境、网络、认证、超时、上游服务、取消和未知失败应先恢复外部条件或补充证据，不创建测试 Patch。
+- Bad Test、Bad Test Data 或 Contract Drift 才会显示诊断允许的 Binding、Data、Cleanup、Contract Drift 或
+  Oracle 类型；Cleanup 只在可修复分类且 Cleanup 阶段失败时出现。
+
+创建 Repair Proposal：
+
+1. 选择诊断允许的 Patch 类型。
+2. 选择仍为 Ready、完整且未过期的 Context Revision。
+3. 填写不含 Token、Cookie、个人标识或其他敏感值的修复理由。
+4. 在 Proposed FlowSpec 中只修改该 Patch 类型允许的字段。不要切换 Schema 或夹带其他工作流改动。
+5. Oracle 或 Contract Drift 修改断言时，显式确认可能弱化 Oracle。
+6. 点击“创建 Repair Proposal”，进入现有 Flow Proposal Review，逐项检查 Diff 后由有权限的人 Accept。
+7. 确认 Proposal 尚未 Apply，在 test/sandbox 环境申请新的 One-time Preview Approval，再执行 Re-preview。
+8. 检查 Re-preview 的 Main、Cleanup、断言和脱敏证据；Approval 消费后如需再预览必须重新申请。
+
+Repair Proposal 不会自动 Accept、Apply、Publish 或运行生产环境。目标草稿 Revision、Context 或执行证据变化后，
+应关闭旧对话框并从最新失败执行重新诊断；不要复制旧 Approval 或绕过 Stale 检查。
+
+### 7.14 工作流常见问题
 
 | 现象/错误 | 原因 | 处理方式 |
 | --- | --- | --- |

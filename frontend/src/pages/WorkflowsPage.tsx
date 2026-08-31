@@ -27,6 +27,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
+import FailureRepairDialog from '../features/workflows/FailureRepairDialog'
 import FlowSpecReviewDialog, {
   type FlowSpecReviewSeed,
 } from '../features/workflows/FlowSpecReviewDialog'
@@ -42,6 +43,7 @@ export default function WorkflowsPage() {
   const [flowSpecOpen, setFlowSpecOpen] = useState(false)
   const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
   const [flowProposalOpen, setFlowProposalOpen] = useState(false)
+  const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
   const state = useWorkflows()
 
   async function create(input: Parameters<typeof state.addWorkflow>[0]) {
@@ -71,6 +73,7 @@ export default function WorkflowsPage() {
           selectedId={state.historyExecutionId}
           loading={state.historyLoading}
           onView={state.showHistory}
+          onRepair={setRepairExecution}
         />
       </Card>
       <VersionDiffDialog state={state} />
@@ -102,6 +105,21 @@ export default function WorkflowsPage() {
           setFlowSpecOpen(true)
         }}
       />
+      {state.projectId && repairExecution && (
+        <FailureRepairDialog
+          key={repairExecution.id}
+          open
+          projectId={state.projectId}
+          execution={repairExecution}
+          onClose={() => setRepairExecution(undefined)}
+          onCreated={(proposalId) => {
+            setRepairExecution(undefined)
+            const next = new URLSearchParams(searchParams)
+            next.set('proposal', proposalId)
+            setSearchParams(next, { replace: true })
+          }}
+        />
+      )}
     </>
   )
 }
@@ -710,11 +728,13 @@ function ExecutionTable({
   selectedId,
   loading,
   onView,
+  onRepair,
 }: {
   items: WorkflowExecution[]
   selectedId: string | null
   loading: boolean
   onView: (executionId: string) => void
+  onRepair: (execution: WorkflowExecution) => void
 }) {
   return (
     <Table
@@ -762,11 +782,28 @@ function ExecutionTable({
         },
         {
           title: '操作',
-          width: 120,
+          width: 220,
           render: (_value: unknown, item: WorkflowExecution) => (
-            <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => onView(item.id)}>
-              查看快照
-            </Button>
+            <Space size={0}>
+              <Button
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => onView(item.id)}
+              >
+                查看快照
+              </Button>
+              {item.status === 'failed' && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<BugOutlined />}
+                  onClick={() => onRepair(item)}
+                >
+                  失败诊断
+                </Button>
+              )}
+            </Space>
           ),
         },
       ]}

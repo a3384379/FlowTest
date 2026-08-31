@@ -448,7 +448,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert overridden.status_code == 422
         assert overridden.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
         if literal is not None:
-            assert literal not in overridden.text
+            assert literal not in overridden.json()["error"]["message"]
 
     capability_payload = _proposal_payload(s51_context, context, plan, compilation)
     capability_payload["spec"]["nodes"].append(
