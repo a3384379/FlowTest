@@ -172,6 +172,28 @@ def test_oracle_change_requires_explicit_weakening_acknowledgement() -> None:
     assert accepted.oracle_weakening is True
 
 
+def test_oracle_repair_cannot_replace_assertion_node_identity() -> None:
+    diagnosis = diagnose_failure([_signal(error_code="MAPPING_INVALID")])
+    before = _spec()
+    replaced_assert = before.nodes[1].model_copy(
+        update={
+            "kind": "http",
+            "name": "Run arbitrary request",
+            "config": {"method": "POST", "url": "https://example.invalid"},
+        }
+    )
+    after = before.model_copy(update={"nodes": [before.nodes[0], replaced_assert, before.nodes[2]]})
+
+    with pytest.raises(RepairScopeError, match="边界"):
+        validate_repair_scope(
+            before=before,
+            after=after,
+            diagnosis=diagnosis,
+            kind="oracle",
+            acknowledge_oracle_weakening=True,
+        )
+
+
 def test_cleanup_failure_adds_cleanup_repair_without_widening_other_failures() -> None:
     cleanup = diagnose_failure([_signal(error_code="MAPPING_INVALID", phase="cleanup")])
     main = diagnose_failure([_signal(error_code="MAPPING_INVALID", phase="main")])

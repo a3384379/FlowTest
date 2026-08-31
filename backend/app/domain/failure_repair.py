@@ -143,7 +143,7 @@ def _replace_assert_nodes(
         if replacement is None:
             result.append(node)
         elif node.kind in {"assert", "assertion", "assertion.evaluate"}:
-            result.append(replacement)
+            result.append(node.model_copy(update={"config": replacement.config}))
         else:
             result.append(node)
     return result
