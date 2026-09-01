@@ -635,7 +635,7 @@ def _java_component_ref(reference: str) -> str:
 
 
 def _domain_token(reference: str) -> str:
-    value = _reference_label(reference).split("/", 1)[0].split(".", 1)[0]
+    value = _reference_label(reference).split("/", 1)[0].rsplit(".", 1)[-1]
     if len(value) > 1 and value[0] == "I" and value[1].isupper():
         value = value[1:]
     for suffix in (

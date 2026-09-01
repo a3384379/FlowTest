@@ -49,18 +49,25 @@ def diagnose_failure(signals: list[FailureSignal]) -> FailureDiagnosis:
         triage_failures([signal]).primary_classification == "PRODUCT_DEFECT" for signal in signals
     )
     kinds = list(_ALLOWED_KINDS.get(classification, ()))
-    if classification in _ALLOWED_KINDS and any(
-        signal.phase == "cleanup" and signal.item_status == "failed" for signal in signals
-    ):
+    cleanup_signals = [
+        signal for signal in signals if signal.phase == "cleanup" and signal.item_status == "failed"
+    ]
+    cleanup_classification = (
+        triage_failures(cleanup_signals).primary_classification if cleanup_signals else None
+    )
+    cleanup_repair_allowed = cleanup_classification in _CLEANUP_REPAIR_CLASSIFICATIONS
+    if classification in _ALLOWED_KINDS and cleanup_repair_allowed:
         kinds.append("cleanup")
     allowed = tuple(dict.fromkeys(kinds))
-    reason_codes = (
-        ("PRODUCT_DEFECT_TEST_MUTATION_FORBIDDEN",)
-        if product_defect
-        else ("NO_SAFE_REPAIR_KIND",)
-        if not allowed
-        else ("TYPED_REPAIR_PROPOSAL_REQUIRES_REVIEW",)
-    )
+    reason_codes: tuple[str, ...]
+    if product_defect:
+        reason_codes = ("PRODUCT_DEFECT_TEST_MUTATION_FORBIDDEN",)
+    elif not allowed:
+        reason_codes = ("NO_SAFE_REPAIR_KIND",)
+    else:
+        reason_codes = ("TYPED_REPAIR_PROPOSAL_REQUIRES_REVIEW",)
+        if cleanup_signals and not cleanup_repair_allowed:
+            reason_codes = (*reason_codes, "CLEANUP_REPAIR_CLASSIFICATION_UNSUPPORTED")
     return FailureDiagnosis(
         triage=triage,
         repair_policy=RepairPolicy(
@@ -104,7 +111,13 @@ def _scoped_candidate(
     kind: RepairKind,
 ) -> tuple[FlowSpec | FlowSpecV2, bool]:
     if kind == "binding":
-        return before.model_copy(update={"edges": after.edges, "bindings": after.bindings}), False
+        return before.model_copy(
+            update={
+                "edges": after.edges,
+                "bindings": after.bindings,
+                "nodes": _replace_capability_bindings(before, after),
+            }
+        ), False
     if kind == "data":
         return before.model_copy(
             update={"variables": after.variables, "parameters": after.parameters}
@@ -149,6 +162,20 @@ def _replace_assert_nodes(
     return result
 
 
+def _replace_capability_bindings(
+    before: FlowSpec | FlowSpecV2,
+    after: FlowSpec | FlowSpecV2,
+) -> list[FlowSpecNode]:
+    after_by_id = {node.id: node for node in after.nodes}
+    return [
+        node.model_copy(update={"bindings": replacement.bindings})
+        if (replacement := after_by_id.get(node.id)) is not None
+        and (node.kind == "capability" or node.capability_id is not None)
+        else node
+        for node in before.nodes
+    ]
+
+
 def _oracle_changed(before: FlowSpec | FlowSpecV2, after: FlowSpec | FlowSpecV2) -> bool:
     if before.assertions != after.assertions:
         return True
@@ -171,7 +198,7 @@ def _require_contract_operation_identity(
     after_by_ref = {item.ref: item for item in after.operations}
     if before_by_ref.keys() != after_by_ref.keys():
         raise RepairScopeError("Contract Drift Repair 不能改变 Operation Identity")
-    stable_fields = ("service_ref", "name", "method", "path")
+    stable_fields = ("service_ref", "name", "method", "path", "version_strategy")
     for ref, original in before_by_ref.items():
         updated = after_by_ref[ref]
         if any(getattr(original, field) != getattr(updated, field) for field in stable_fields):
@@ -183,3 +210,5 @@ _ALLOWED_KINDS: dict[str, tuple[RepairKind, ...]] = {
     "BAD_TEST_DATA": ("data", "binding"),
     "CONTRACT_DRIFT": ("contract_drift", "oracle"),
 }
+
+_CLEANUP_REPAIR_CLASSIFICATIONS = frozenset({"BAD_TEST", "BAD_TEST_DATA", "CONTRACT_DRIFT"})

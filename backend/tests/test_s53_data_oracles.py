@@ -698,6 +698,47 @@ def test_previous_step_recipe_must_match_the_captured_source() -> None:
     assert "PREVIOUS_STEP_RECIPE_SOURCE_MISMATCH" not in corrected_codes
 
 
+def test_previous_step_recipe_conflicts_with_other_runtime_variable_sources() -> None:
+    plan = _golden_plan()
+    recipes = [
+        PlanDataRecipe(
+            id="constant-order-id",
+            kind="constant",
+            name="orders-create-id",
+            value="fixed-order-id",
+            evidence_refs=["user-confirmed://s59/constants/order-id"],
+        ),
+        PlanDataRecipe(
+            id="captured-order-id",
+            kind="previous_step",
+            name="Captured order ID",
+            source_ref="context://s59/data/captured-order-id",
+            source_step_id="orders-create",
+            expression="body.id",
+            variable_name="orders-create-id",
+            applies_to=["orders-query"],
+            evidence_refs=["context://s59/data/captured-order-id"],
+        ),
+    ]
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "schema_version": "flowtest-integration-plan-v2",
+                "fingerprint_version": "flowtest-integration-plan-fingerprint-v2",
+                "data_recipes": recipes,
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    validation = validate_integration_plan(changed)
+    compilation = compile_integration_plan(changed)
+
+    assert {item.code for item in validation.diagnostics} >= {"DUPLICATE_DATA_RECIPE_VARIABLE"}
+    assert compilation.importable is False
+    assert compilation.flow_spec is None
+
+
 def _golden_plan() -> IntegrationPlan:
     return IntegrationPlan.model_validate(json.loads(_FIXTURE.read_text()))
 
