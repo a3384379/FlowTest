@@ -39,6 +39,10 @@ S59.0 Patch Correctness 从 S58 Evidence Closure 全绿 Main 基线
 - 后端全量 Pytest `1019 passed, 4 skipped`，Coverage `90.94%`。
 - 本阶段无前端变更；Compose、Security、Windows 与 Required Gate 由单次 PR CI 集中验证，不在每个修改后
   重复运行本地重门禁。
+- PR #80 最终复审 P0=`0`、P1=`0`，精确 Head Required Gate 全绿并普通 Squash Merge。
+- 合并后 Backend CI 发现测试将随机 `trace_id` 中偶然出现的短字符串误判为 Secret 泄漏；Hotfix PR #81
+  排除且仅排除 `trace_id`，继续扫描完整错误 Envelope。该 PR 的复审 P0=`0`、P1=`0`，精确 Head
+  Required Gate 全绿并普通合并。
 
 ## 5. Exit Criteria
 
@@ -51,8 +55,7 @@ S59.0 Patch Correctness 从 S58 Evidence Closure 全绿 Main 基线
 | Body Mapping 完整路径可执行               | Pass     | 初始 Body 与父子 Mapping 回归    |
 | 全限定 Java 引用不产生包名误关联          | Pass     | State Knowledge FQN 回归         |
 | 本地集中后端门禁                          | Pass     | Ruff/Mypy/Pytest/Coverage        |
-| PR 最终复审 P0/P1 为 0                    | Pending  | PR 阶段完成                      |
-| Required Gate 与普通合并                  | Pending  | PR 阶段完成                      |
+| PR 最终复审 P0/P1 为 0                    | Pass     | PR #80、PR #81                  |
+| Required Gate 与普通合并                  | Pass     | PR #80、PR #81                  |
 
-S59.0 Unified Proposal Discovery 只能在本 PR 普通合并且合并后 Main Required Gate 成功后，从最新 Main
-创建独立分支。
+S59.0 Patch Correctness 已完成；Unified Proposal Discovery 已从后续 Main 创建独立分支。

@@ -36,8 +36,8 @@ import {
   applyFlowSpec,
   createSandboxPreviewApproval,
   executeSandboxPreview,
+  getFlowProposalPage,
   getVisualFlowProposal,
-  getMcpFlowProposalPage,
   getSandboxPreviewExecution,
   listSandboxPreviewCheckpoints,
   reviewFlowSpec,
@@ -114,16 +114,13 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
   const [previewEnvironmentSelection, setPreviewEnvironmentSelection] = useState<string>()
   const proposals = useInfiniteQuery({
     queryKey: ['flow-proposals', props.projectId],
-    queryFn: ({ pageParam }) => getMcpFlowProposalPage(props.projectId, pageParam),
+    queryFn: ({ pageParam }) => getFlowProposalPage(props.projectId, pageParam),
     initialPageParam: null as FlowSpecChangeSetCursor | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: props.open,
   })
   const candidates = useMemo(
-    () =>
-      (proposals.data?.pages.flatMap((page) => page.items) ?? []).filter((item) =>
-        item.source_ref?.startsWith('mcp://'),
-      ),
+    () => proposals.data?.pages.flatMap((page) => page.items) ?? [],
     [proposals.data],
   )
   const proposalId = selectedId ?? candidates.at(0)?.id
@@ -801,7 +798,7 @@ function flowProposalOptionLabel(item: { id: string; title: string; status: stri
 }
 
 function flowProposalDialogTitle(repair: boolean): string {
-  return repair ? 'Repair Proposal 可视化审核' : '外部 LLM / MCP 可视化流程提案'
+  return repair ? 'Repair Proposal 可视化审核' : 'Flow Proposal 可视化审核'
 }
 
 function flowProposalSafetyTitle(repair: boolean): string {

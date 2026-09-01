@@ -14,6 +14,8 @@ from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
 from app.engine.contracts import WorkflowDefinition
 
+FlowSpecProposalOrigin = Literal["mcp", "repair", "maintenance", "import"]
+
 
 class FlowSpecValidateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -142,6 +144,18 @@ class FlowSpecChangeSetCursorResponse(BaseModel):
 
     created_at: datetime
     id: UUID
+
+
+class FlowSpecProposalResponse(FlowSpecChangeSetResponse):
+    proposal_origin: FlowSpecProposalOrigin
+
+
+class FlowSpecProposalListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FlowSpecProposalResponse]
+    next_cursor: FlowSpecChangeSetCursorResponse | None
+    page_size: int
 
 
 class FlowSpecMcpProposalListResponse(BaseModel):

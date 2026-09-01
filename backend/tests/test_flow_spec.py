@@ -426,7 +426,7 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
     )
     project_id = project.json()["id"]
 
-    async def create_proposal(index: int, *, mcp: bool = True) -> str:
+    async def create_proposal(index: int, *, source_ref: str | None = None) -> str:
         response = await flow_spec_client.post(
             f"/api/v1/projects/{project_id}/flow-specs/imports",
             headers=headers,
@@ -439,17 +439,13 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
                     ],
                     "edges": [{"id": "start-end", "source": "start", "target": "end"}],
                 },
-                "source_ref": (
-                    f"mcp://tests/stable-cursor/{index}"
-                    if mcp
-                    else f"import://tests/manual/{index}"
-                ),
+                "source_ref": source_ref or f"mcp://tests/stable-cursor/{index}",
             },
         )
         assert response.status_code == 201, response.text
         return str(response.json()["id"])
 
-    await create_proposal(0, mcp=False)
+    manual_id = await create_proposal(0, source_ref="import://tests/manual/0")
     original_ids = {await create_proposal(index) for index in range(1, 4)}
     first = await flow_spec_client.get(
         f"/api/v1/projects/{project_id}/flow-specs/change-sets/mcp-proposals",
@@ -462,7 +458,7 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
     assert all(item["source_ref"].startswith("mcp://") for item in first_body["items"])
     assert first_body["next_cursor"] is not None
 
-    await create_proposal(4)
+    late_mcp_id = await create_proposal(4)
     second = await flow_spec_client.get(
         f"/api/v1/projects/{project_id}/flow-specs/change-sets/mcp-proposals",
         headers=headers,
@@ -477,6 +473,49 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
     second_ids = {item["id"] for item in second.json()["items"]}
     assert first_ids.isdisjoint(second_ids)
     assert original_ids <= first_ids | second_ids
+    assert late_mcp_id not in first_ids | second_ids
+
+    repair_id = await create_proposal(5, source_ref="repair://workflow-executions/5")
+    maintenance_id = await create_proposal(6, source_ref="maintenance://changes/6")
+    portable_id = await create_proposal(7, source_ref="flow-spec://imports/7")
+    unified_original_ids = {
+        manual_id,
+        *original_ids,
+        late_mcp_id,
+        repair_id,
+        maintenance_id,
+        portable_id,
+    }
+    unified_first = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/change-sets/proposals",
+        headers=headers,
+        params={"page_size": 4},
+    )
+    assert unified_first.status_code == 200, unified_first.text
+    unified_first_body = unified_first.json()
+    assert unified_first_body["next_cursor"] is not None
+
+    late_maintenance_id = await create_proposal(8, source_ref="maintenance://changes/late")
+    unified_second = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/change-sets/proposals",
+        headers=headers,
+        params={
+            "page_size": 4,
+            "cursor_created_at": unified_first_body["next_cursor"]["created_at"],
+            "cursor_id": unified_first_body["next_cursor"]["id"],
+        },
+    )
+    assert unified_second.status_code == 200, unified_second.text
+    unified_items = unified_first_body["items"] + unified_second.json()["items"]
+    unified_ids = {item["id"] for item in unified_items}
+    assert unified_ids == unified_original_ids
+    assert late_maintenance_id not in unified_ids
+    origins = {item["id"]: item["proposal_origin"] for item in unified_items}
+    assert origins[manual_id] == "import"
+    assert origins[repair_id] == "repair"
+    assert origins[maintenance_id] == "maintenance"
+    assert origins[portable_id] == "import"
+    assert all(origins[item_id] == "mcp" for item_id in original_ids | {late_mcp_id})
 
 
 @pytest.mark.asyncio
