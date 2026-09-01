@@ -542,6 +542,85 @@ def test_body_mapping_accepts_an_object_json_request_body() -> None:
     assert compilation.flow_spec is not None
 
 
+def test_body_mapping_rejects_nested_path_below_an_existing_scalar() -> None:
+    plan = _golden_plan()
+    query_binding = next(item for item in plan.bindings if item.target.step_id == "orders-query")
+    body_binding = query_binding.model_copy(
+        update={
+            "target": query_binding.target.model_copy(update={"location": "body", "key": "user.id"})
+        }
+    )
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    operation.model_copy(
+                        update={
+                            "request": PlanRequestTemplate(body_kind="json", body={"user": "fixed"})
+                        }
+                    )
+                    if operation.ref == "orders.query"
+                    else operation
+                    for operation in plan.operations
+                ],
+                "bindings": [
+                    body_binding if item.id == query_binding.id else item for item in plan.bindings
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    compilation = compile_integration_plan(changed)
+
+    assert compilation.importable is False
+    assert {item.code for item in compilation.diagnostics} >= {"BODY_MAPPING_TARGET_PATH_CONFLICT"}
+
+
+def test_body_mapping_rejects_parent_and_child_targets_on_the_same_operation() -> None:
+    plan = _golden_plan()
+    query_binding = next(item for item in plan.bindings if item.target.step_id == "orders-query")
+    parent = query_binding.model_copy(
+        update={
+            "id": "orders-query-user",
+            "target": query_binding.target.model_copy(update={"location": "body", "key": "user"}),
+        }
+    )
+    child = query_binding.model_copy(
+        update={
+            "id": "orders-query-user-id",
+            "target": query_binding.target.model_copy(
+                update={"location": "body", "key": "user.id"}
+            ),
+        }
+    )
+    changed = seal_integration_plan(
+        plan.model_copy(
+            update={
+                "operations": [
+                    operation.model_copy(
+                        update={"request": PlanRequestTemplate(body_kind="json", body={})}
+                    )
+                    if operation.ref == "orders.query"
+                    else operation
+                    for operation in plan.operations
+                ],
+                "bindings": [
+                    parent,
+                    child,
+                    *[item for item in plan.bindings if item.id != query_binding.id],
+                ],
+                "plan_fingerprint": "0" * 64,
+            }
+        )
+    )
+
+    compilation = compile_integration_plan(changed)
+
+    assert compilation.importable is False
+    assert {item.code for item in compilation.diagnostics} >= {"BODY_MAPPING_TARGET_PATH_CONFLICT"}
+
+
 def test_selected_scenario_path_and_cookie_inputs_fail_closed_without_disappearing() -> None:
     target = _selected_operation(
         ref="orders.localized",

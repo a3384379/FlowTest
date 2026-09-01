@@ -97,6 +97,19 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - S58 已知 3 项 P2 为统一 Proposal Discovery、Capability Node Binding Repair 与 Cleanup Failure 独立分类；
   `version_strategy` 锁定作为独立 S59.0 Hardening。它们不改变 S58 的合并结论，但必须在 S59 自动
   Flow Patch 前完成。
+- S58 Evidence Closure PR #79 已普通 Squash Merge，Closure PR 与合并后 Main 的路径选择门禁均成功；
+  S59.0 正式基线为 `989711c360ffaec19dc155b86fbeeebb0cf1c0f8`。
+
+## 已完成实现与本地集中验收：V6.2 S59.0 Patch Correctness
+
+- Cleanup Failure 使用独立分类开放 Repair；Capability Binding 纳入严格 Node Binding 白名单；Contract Drift
+  锁定 `version_strategy`。
+- `previous_step` 跨来源变量冲突、Body Mapping 完整嵌套路径和 Java 全限定引用 Token 已收口。
+- 新增 7 个原缺陷触发回归，四个相关测试文件 `62 passed`；后端全仓 Ruff/Mypy 通过，全量 Pytest
+  `1019 passed, 4 skipped`，Coverage `90.94%`。
+- 当前只剩本 Patch Correctness PR 的阻塞级复审、单次 Required Gate 与普通合并；完成后再创建
+  Unified Proposal Discovery 独立分支。完整记录见
+  [S59.0 Patch Correctness](release/v6-s59-0-patch-correctness.md)。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 

@@ -9,6 +9,7 @@ from app.domain.failure_triage import FailureSignal
 from app.domain.flow_spec import FlowSpec, FlowSpecEdge, FlowSpecNode, FlowSpecOperation
 from app.domain.flow_spec_v2 import FlowSpecCleanupV2, FlowSpecRunPolicy, FlowSpecV2
 from app.engine.contracts import (
+    CapabilityBinding,
     FieldMapping,
     MappingSource,
     MappingTarget,
@@ -177,6 +178,55 @@ def test_binding_repair_is_limited_to_binding_surfaces() -> None:
         )
 
 
+def test_binding_repair_allows_only_existing_capability_node_bindings() -> None:
+    diagnosis = diagnose_failure([_signal(error_code="CAPABILITY_BINDING_SOURCE_MISSING")])
+    before = _spec()
+    capability = FlowSpecNode(
+        id="lookup",
+        kind="capability",
+        name="Lookup fixture",
+        position=Position(x=50, y=100),
+        capability_id="data.lookup",
+        capability_version="1.0.0",
+        configuration={"limit": 1},
+        bindings=[CapabilityBinding(input="customer_id", expression="variables.customer_id")],
+    )
+    before = before.model_copy(update={"nodes": [before.nodes[0], capability, *before.nodes[1:]]})
+    updated = capability.model_copy(
+        update={
+            "bindings": [CapabilityBinding(input="customer_id", expression="variables.fixture_id")]
+        }
+    )
+    after = before.model_copy(update={"nodes": [before.nodes[0], updated, *before.nodes[2:]]})
+
+    accepted = validate_repair_scope(
+        before=before,
+        after=after,
+        diagnosis=diagnosis,
+        kind="binding",
+        acknowledge_oracle_weakening=False,
+    )
+
+    assert accepted.kind == "binding"
+    changed_configuration = after.model_copy(
+        update={
+            "nodes": [
+                before.nodes[0],
+                updated.model_copy(update={"configuration": {"limit": 2}}),
+                *before.nodes[2:],
+            ]
+        }
+    )
+    with pytest.raises(RepairScopeError, match="边界"):
+        validate_repair_scope(
+            before=before,
+            after=changed_configuration,
+            diagnosis=diagnosis,
+            kind="binding",
+            acknowledge_oracle_weakening=False,
+        )
+
+
 def test_oracle_change_requires_explicit_weakening_acknowledgement() -> None:
     diagnosis = diagnose_failure([_signal(error_code="MAPPING_INVALID")])
     before = _spec()
@@ -247,6 +297,28 @@ def test_environment_cleanup_failure_does_not_allow_test_repair() -> None:
     assert diagnosis.triage.primary_classification == "ENVIRONMENT_FAILURE"
     assert diagnosis.repair_policy.proposal_allowed is False
     assert diagnosis.repair_policy.allowed_kinds == ()
+
+
+def test_non_repairable_cleanup_classification_does_not_inherit_main_repair_policy() -> None:
+    diagnosis = diagnose_failure(
+        [
+            _signal(error_code="MAPPING_INVALID", phase="main"),
+            _signal(
+                evidence_ref="flowtest://runs/run-1/nodes/main-2",
+                error_code="MAPPING_INVALID",
+                phase="main",
+            ),
+            _signal(
+                evidence_ref="flowtest://runs/run-1/nodes/cleanup",
+                error_code="NETWORK_ERROR",
+                phase="cleanup",
+            ),
+        ]
+    )
+
+    assert diagnosis.triage.primary_classification == "BAD_TEST"
+    assert diagnosis.repair_policy.allowed_kinds == ("binding", "oracle")
+    assert "cleanup" not in diagnosis.repair_policy.allowed_kinds
 
 
 def test_cleanup_repair_is_limited_to_v2_cleanup_and_run_policy() -> None:
@@ -331,6 +403,24 @@ def test_contract_drift_repair_preserves_operation_identity() -> None:
         validate_repair_scope(
             before=before,
             after=changed_identity,
+            diagnosis=diagnosis,
+            kind="contract_drift",
+            acknowledge_oracle_weakening=False,
+        )
+
+    changed_strategy = after.model_copy(
+        update={
+            "operations": [
+                after.operations[0].model_copy(
+                    update={"version_strategy": "current", "source_version": None}
+                )
+            ]
+        }
+    )
+    with pytest.raises(RepairScopeError, match="版本和契约指纹"):
+        validate_repair_scope(
+            before=before,
+            after=changed_strategy,
             diagnosis=diagnosis,
             kind="contract_drift",
             acknowledge_oracle_weakening=False,

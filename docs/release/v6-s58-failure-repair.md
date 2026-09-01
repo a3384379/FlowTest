@@ -118,3 +118,13 @@ S58_SECURITY_BOUNDARY = ACCEPTABLE
 S59_DESIGN_AND_FIXTURES = GO
 S59_FULL_AUTOMATIC_PATCHING_BEFORE_S59_0 = NO-GO
 ```
+
+## 8. Evidence Closure 终态
+
+- Evidence Closure PR [#79](https://github.com/a3384379/FlowTest/pull/79) 已普通 Squash Merge。
+- Closure PR 只触发 Security 与 Required Gate，均为 Success；合并后 Main 路径选择的 Security、
+  Standalone Windows 与 Required Gate Controller 也全部成功，其中 Main Required Gate Run ID 为
+  `33452241536`。
+- S58 实现、复审、PR Head、Merge 后 Main、Evidence Closure 与 Closure Main Acceptance 已全部闭环。
+- S59.0 正式基线固定为 Closure Merge 后的 Main：
+  `989711c360ffaec19dc155b86fbeeebb0cf1c0f8`。

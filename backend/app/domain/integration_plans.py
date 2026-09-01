@@ -460,6 +460,7 @@ def _runtime_recipe_variable_name(recipe: PlanDataRecipe) -> str | None:
         "constant",
         "synthetic",
         "environment_variable",
+        "previous_step",
         "existing_safe_record",
     }:
         return None
@@ -2802,26 +2803,17 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
         for branch in plan.branches
         for step_id in (branch.true_step_id, branch.false_step_id)
     }
+    body_mapping_paths: dict[str, list[tuple[str, ...]]] = {}
     for index, binding in enumerate(plan.bindings):
         target_operation = operation_by_step.get(binding.target.step_id)
-        if (
-            binding.target.location == "body"
-            and target_operation is not None
-            and (
-                target_operation.request.body_kind != "json"
-                or not isinstance(target_operation.request.body, dict)
-            )
-        ):
-            diagnostics.append(
-                _diagnostic(
-                    "BODY_MAPPING_REQUIRES_JSON_OBJECT",
-                    "blocker",
-                    "Body Mapping 要求目标 Operation 使用对象型 JSON Request Body",
-                    f"$.bindings[{index}].target.location",
-                    stage="compile_edge_mapping",
-                    evidence_refs=binding.evidence_refs,
-                )
-            )
+        body_diagnostic = _body_mapping_compatibility_diagnostic(
+            binding,
+            index=index,
+            target_operation=target_operation,
+            paths_by_step=body_mapping_paths,
+        )
+        if body_diagnostic is not None:
+            diagnostics.append(body_diagnostic)
         if binding.target.location in {"path", "cookie"}:
             diagnostics.append(
                 _diagnostic(
@@ -2908,6 +2900,67 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
     )
     diagnostics.extend(_secret_reference_runtime_diagnostics(plan))
     return diagnostics
+
+
+def _body_mapping_compatibility_diagnostic(
+    binding: PlanBinding,
+    *,
+    index: int,
+    target_operation: PlanOperation | None,
+    paths_by_step: dict[str, list[tuple[str, ...]]],
+) -> PlanDiagnostic | None:
+    if binding.target.location != "body" or target_operation is None:
+        return None
+    body = target_operation.request.body
+    if target_operation.request.body_kind != "json" or not isinstance(body, dict):
+        return _diagnostic(
+            "BODY_MAPPING_REQUIRES_JSON_OBJECT",
+            "blocker",
+            "Body Mapping 要求目标 Operation 使用对象型 JSON Request Body",
+            f"$.bindings[{index}].target.location",
+            stage="compile_edge_mapping",
+            evidence_refs=binding.evidence_refs,
+        )
+    target_paths = paths_by_step.setdefault(binding.target.step_id, [])
+    target_path = tuple(binding.target.key.split("."))
+    conflict = _body_mapping_target_path_conflicts(body, target_path, target_paths)
+    target_paths.append(target_path)
+    if not conflict:
+        return None
+    return _diagnostic(
+        "BODY_MAPPING_TARGET_PATH_CONFLICT",
+        "blocker",
+        "Body Mapping 目标路径与现有 Body 或同目标 Mapping 冲突",
+        f"$.bindings[{index}].target.key",
+        stage="compile_edge_mapping",
+        evidence_refs=binding.evidence_refs,
+    )
+
+
+def _body_mapping_target_path_conflicts(
+    body: dict[str, JsonValue],
+    target_path: tuple[str, ...],
+    existing_paths: list[tuple[str, ...]],
+) -> bool:
+    if not target_path or any(not part for part in target_path):
+        return True
+    current = body
+    for part in target_path[:-1]:
+        nested = current.get(part)
+        if nested is None:
+            current = {}
+        elif isinstance(nested, dict):
+            current = nested
+        else:
+            return True
+    return any(
+        _path_is_prefix(target_path, existing) or _path_is_prefix(existing, target_path)
+        for existing in existing_paths
+    )
+
+
+def _path_is_prefix(prefix: tuple[str, ...], value: tuple[str, ...]) -> bool:
+    return len(prefix) <= len(value) and value[: len(prefix)] == prefix
 
 
 def _compile_step_nodes(

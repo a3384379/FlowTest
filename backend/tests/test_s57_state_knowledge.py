@@ -104,6 +104,27 @@ def test_state_knowledge_does_not_infer_repository_when_service_name_is_ambiguou
     assert all(edge.relation != "may_use_repository" for edge in knowledge.edges)
 
 
+def test_state_knowledge_tokenizes_fully_qualified_java_refs_by_terminal_class() -> None:
+    payload = _ruoyi_style_submission().model_dump(mode="json")
+    for claim in payload["claims"]:
+        if claim["kind"] == "service_call":
+            claim["callee_ref"] = "java://com.acme.CustomerService.create"
+        elif claim["kind"] == "mapper_repository":
+            claim["repository_ref"] = "java://com.acme.OrderMapper"
+        elif claim["kind"] == "entity":
+            claim["entity_ref"] = "entity://com.acme.Payment"
+            claim["class_name"] = "com.acme.Payment"
+
+    knowledge = derive_state_knowledge(
+        ContextKnowledgeSnapshot(),
+        _mapping_inputs(JavaEvidenceSubmission.model_validate(payload)),
+    )
+
+    assert all(
+        edge.relation not in {"may_use_repository", "may_map_entity"} for edge in knowledge.edges
+    )
+
+
 def test_state_knowledge_marks_conflicting_node_facts_for_review() -> None:
     payload = _ruoyi_style_submission().model_dump(mode="json")
     payload["claims"].append(
