@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -310,6 +311,14 @@ def test_jmespath_secret_literal_detection_preserves_dynamic_paths() -> None:
     assert not _contains_unsafe_jmespath_literal("to_string('secret://runtime/password')")
 
 
+def _assert_secret_not_exposed(response: Response, secret: str) -> None:
+    envelope = deepcopy(response.json())
+    error = envelope.get("error")
+    assert isinstance(error, dict)
+    error.pop("trace_id", None)
+    assert secret not in json.dumps(envelope, ensure_ascii=False, sort_keys=True)
+
+
 @pytest.mark.asyncio
 async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     s51_context: dict[str, Any],
@@ -345,7 +354,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         )
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-        assert secret not in response.json()["error"]["message"]
+        _assert_secret_not_exposed(response, secret)
 
     for index, parameter_name in enumerate(
         (
@@ -382,7 +391,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         )
         assert named_secret.status_code == 422
         assert named_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-        assert "hunter2" not in named_secret.text
+        _assert_secret_not_exposed(named_secret, "hunter2")
 
     legacy_variable_payload = _proposal_payload(s51_context, context, plan, compilation)
     legacy_variable_payload["spec"]["variables"] = {"access_key": "hunter2"}
@@ -396,7 +405,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert legacy_variable.status_code == 422
     assert legacy_variable.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "hunter2" not in legacy_variable.text
+    _assert_secret_not_exposed(legacy_variable, "hunter2")
 
     for index, (request_overrides, literal) in enumerate(
         (
@@ -448,7 +457,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         assert overridden.status_code == 422
         assert overridden.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
         if literal is not None:
-            assert literal not in overridden.json()["error"]["message"]
+            _assert_secret_not_exposed(overridden, literal)
 
     capability_payload = _proposal_payload(s51_context, context, plan, compilation)
     capability_payload["spec"]["nodes"].append(
@@ -474,7 +483,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert capability_secret.status_code == 422
     assert capability_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "abc" not in capability_secret.text
+    _assert_secret_not_exposed(capability_secret, "abc")
 
     correlated_payload = _proposal_payload(s51_context, context, plan, compilation)
     correlated_payload["spec"]["nodes"].append(
@@ -500,7 +509,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert correlated_secret.status_code == 422
     assert correlated_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "abc" not in correlated_secret.text
+    _assert_secret_not_exposed(correlated_secret, "abc")
 
     for node_kind in ("assert", "condition"):
         assertion_payload = _proposal_payload(s51_context, context, plan, compilation)
@@ -529,7 +538,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
         )
         assert assertion_secret.status_code == 422
         assert assertion_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-        assert "abc" not in assertion_secret.text
+        _assert_secret_not_exposed(assertion_secret, "abc")
 
     extract_payload = _proposal_payload(s51_context, context, plan, compilation)
     extract_payload["spec"]["nodes"].append(
@@ -557,7 +566,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert extract_secret.status_code == 422
     assert extract_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "hunter2" not in extract_secret.text
+    _assert_secret_not_exposed(extract_secret, "hunter2")
 
     binding_payload = _proposal_payload(s51_context, context, plan, compilation)
     binding_payload["spec"]["nodes"].append(
@@ -591,7 +600,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert binding_secret.status_code == 422
     assert binding_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "hunter2" not in binding_secret.text
+    _assert_secret_not_exposed(binding_secret, "hunter2")
 
     edge_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
     mapped_edge = edge_mapping_payload["spec"]["edges"][0]
@@ -616,7 +625,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert edge_mapping_secret.status_code == 422
     assert edge_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "abc" not in edge_mapping_secret.json()["error"]["message"]
+    _assert_secret_not_exposed(edge_mapping_secret, "abc")
 
     identity_mapping_payload = _proposal_payload(s51_context, context, plan, compilation)
     identity_edge = identity_mapping_payload["spec"]["edges"][0]
@@ -641,7 +650,7 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     )
     assert identity_mapping_secret.status_code == 422
     assert identity_mapping_secret.json()["error"]["code"] == "MCP_SENSITIVE_INPUT"
-    assert "hunter2" not in identity_mapping_secret.text
+    _assert_secret_not_exposed(identity_mapping_secret, "hunter2")
 
     safe_payload = _proposal_payload(s51_context, context, plan, compilation)
     safe_payload.pop("integration_plan")
