@@ -8,6 +8,7 @@ import {
   type FlowSpecDiff,
   type FlowSpecExport,
   type FlowSpecMcpProposalPage,
+  type FlowSpecProposalPage,
   type FlowSpecValidationResult,
   type FlowSpecVisualProposal,
   type ExecutionCheckpoint,
@@ -106,6 +107,23 @@ export async function getMcpFlowProposalPage(
 ): Promise<FlowSpecMcpProposalPage> {
   const response = await apiClient.get<FlowSpecMcpProposalPage>(
     `/projects/${projectId}/flow-specs/change-sets/mcp-proposals`,
+    {
+      params: {
+        page_size: 100,
+        cursor_created_at: cursor?.created_at,
+        cursor_id: cursor?.id,
+      },
+    },
+  )
+  return response.data
+}
+
+export async function getFlowProposalPage(
+  projectId: string,
+  cursor: FlowSpecChangeSetCursor | null,
+): Promise<FlowSpecProposalPage> {
+  const response = await apiClient.get<FlowSpecProposalPage>(
+    `/projects/${projectId}/flow-specs/change-sets/proposals`,
     {
       params: {
         page_size: 100,

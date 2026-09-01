@@ -888,6 +888,18 @@ export type FlowSpecMcpProposalPage = {
   page_size: number
 }
 
+export type FlowSpecProposalOrigin = 'mcp' | 'repair' | 'maintenance' | 'import'
+
+export type FlowSpecProposal = FlowSpecChangeSet & {
+  proposal_origin: FlowSpecProposalOrigin
+}
+
+export type FlowSpecProposalPage = {
+  items: FlowSpecProposal[]
+  next_cursor: FlowSpecChangeSetCursor | null
+  page_size: number
+}
+
 export type Workflow = {
   id: string
   project_id: string

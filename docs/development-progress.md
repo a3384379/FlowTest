@@ -100,16 +100,29 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - S58 Evidence Closure PR #79 已普通 Squash Merge，Closure PR 与合并后 Main 的路径选择门禁均成功；
   S59.0 正式基线为 `989711c360ffaec19dc155b86fbeeebb0cf1c0f8`。
 
-## 已完成实现与本地集中验收：V6.2 S59.0 Patch Correctness
+## 已完成实现并合并：V6.2 S59.0 Patch Correctness
 
 - Cleanup Failure 使用独立分类开放 Repair；Capability Binding 纳入严格 Node Binding 白名单；Contract Drift
   锁定 `version_strategy`。
 - `previous_step` 跨来源变量冲突、Body Mapping 完整嵌套路径和 Java 全限定引用 Token 已收口。
 - 新增 7 个原缺陷触发回归，四个相关测试文件 `62 passed`；后端全仓 Ruff/Mypy 通过，全量 Pytest
   `1019 passed, 4 skipped`，Coverage `90.94%`。
-- 当前只剩本 Patch Correctness PR 的阻塞级复审、单次 Required Gate 与普通合并；完成后再创建
-  Unified Proposal Discovery 独立分支。完整记录见
+- PR #80 最终复审 P0=`0`、P1=`0`，精确 Head Required Gate 全绿并普通 Squash Merge。合并后 Backend
+  CI 暴露测试把随机 `trace_id` 中偶然出现的 `abc` 误判为 Secret 泄漏；Hotfix PR #81 仅排除
+  `trace_id` 后继续扫描完整错误 Envelope，复审 P0=`0`、P1=`0` 且精确 Head 全绿后普通合并。
+- Patch Correctness 已闭环，后续 Unified Proposal Discovery 从合并后的 Main 创建独立分支。完整记录见
   [S59.0 Patch Correctness](release/v6-s59-0-patch-correctness.md)。
+
+## 已完成实现与本地集中验收：V6.2 S59.0 Unified Proposal Discovery
+
+- 新增统一 Proposal 游标接口，结构化返回 `mcp`、`repair`、`maintenance`、`import` 来源；旧 MCP
+  接口继续只返回 `mcp://`，保持兼容。
+- Flow Proposal Review Dialog 不再过滤为 MCP-only，Repair Proposal 关闭后可从同一列表重新发现；
+  后续 Maintenance Proposal 复用同一 AIChangeSet、Review、Apply 与 Preview 生命周期。
+- 后端 Format/Ruff/mypy 全绿，Pytest `1019 passed, 4 skipped`、Coverage `90.94%`；前端
+  Format/ESLint/Build 全绿，Vitest `230 passed`、Branch Coverage `80.01%`。
+- 当前仅待单次远程复审、Required Gate 与普通合并；完整设计见
+  [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 

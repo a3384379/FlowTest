@@ -194,7 +194,7 @@ async function reviewAndApplyInUI(page: Page, projectId: string): Promise<void> 
   await page.goto(`/projects/${projectId}/workflows`)
   await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
   await page.getByRole('button', { name: 'MCP 流程提案' }).click()
-  const dialog = page.getByRole('dialog', { name: '外部 LLM / MCP 可视化流程提案' })
+  const dialog = page.getByRole('dialog', { name: 'Flow Proposal 可视化审核' })
   await expect(dialog.getByText('提案模式')).toBeVisible()
   await expect(dialog.getByText('证据 / 置信度')).toBeVisible()
   await expect(dialog.getByText('映射差异 / 人工检查')).toBeVisible()

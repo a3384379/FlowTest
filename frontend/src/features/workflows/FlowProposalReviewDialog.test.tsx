@@ -60,7 +60,7 @@ describe('FlowProposalReviewDialog', () => {
     let reviewStatus: 'pending' | 'accepted' = 'pending'
     let applyCalls = 0
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({ items: [summary(reviewStatus)], next_cursor: null, page_size: 100 }),
       ),
       http.get(
@@ -122,7 +122,7 @@ describe('FlowProposalReviewDialog', () => {
 
   it('shows the captured existing graph and keeps raw mapping on the established path', async () => {
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
@@ -147,38 +147,35 @@ describe('FlowProposalReviewDialog', () => {
     expect(rawProposal?.proposal.spec.name).toBe('MCP 用户查询提案')
   })
 
-  it('loads stable MCP proposal cursor pages only when requested', async () => {
+  it('loads stable unified proposal cursor pages only when requested', async () => {
     const requestedCursors: Array<string | null> = []
     const cursorId = '00000000-0000-4000-8000-000000005100'
     server.use(
-      http.get(
-        `/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`,
-        ({ request }) => {
-          const cursor = new URL(request.url).searchParams.get('cursor_id')
-          requestedCursors.push(cursor)
-          if (cursor === null) {
-            return HttpResponse.json({
-              items: [
-                {
-                  ...summary('pending'),
-                  id: cursorId,
-                  title: '首页 MCP 提案',
-                },
-              ],
-              next_cursor: {
-                created_at: '2026-08-28T00:00:00Z',
-                id: cursorId,
-              },
-              page_size: 100,
-            })
-          }
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor_id')
+        requestedCursors.push(cursor)
+        if (cursor === null) {
           return HttpResponse.json({
-            items: [summary('pending')],
-            next_cursor: null,
+            items: [
+              {
+                ...summary('pending'),
+                id: cursorId,
+                title: '首页 MCP 提案',
+              },
+            ],
+            next_cursor: {
+              created_at: '2026-08-28T00:00:00Z',
+              id: cursorId,
+            },
             page_size: 100,
           })
-        },
-      ),
+        }
+        return HttpResponse.json({
+          items: [summary('pending')],
+          next_cursor: null,
+          page_size: 100,
+        })
+      }),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/:proposalId/visual-proposal`,
         ({ params }) => {
@@ -221,7 +218,7 @@ describe('FlowProposalReviewDialog', () => {
       ),
     }
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
@@ -242,7 +239,7 @@ describe('FlowProposalReviewDialog', () => {
     const proposal = visualProposal('pending')
     proposal.proposal.diff = []
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
@@ -277,7 +274,7 @@ describe('FlowProposalReviewDialog', () => {
       ),
     }
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({
           items: [first.proposal, second.proposal],
           next_cursor: null,
@@ -330,7 +327,7 @@ describe('FlowProposalReviewDialog', () => {
     let approvalEnvironment = ''
     let executeCalls = 0
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
         HttpResponse.json({ items: [summary('accepted')], next_cursor: null, page_size: 100 }),
       ),
       http.get(
@@ -396,7 +393,7 @@ describe('FlowProposalReviewDialog', () => {
     expect(executeCalls).toBe(1)
   })
 
-  it('opens a repair proposal directly even when it is not in the MCP proposal list', async () => {
+  it('discovers a repair proposal from the unified proposal list after reopening', async () => {
     const repair = visualProposal('pending')
     repair.proposal = {
       ...repair.proposal,
@@ -404,8 +401,19 @@ describe('FlowProposalReviewDialog', () => {
       source_ref: 'repair://workflow-executions/00000000-0000-4000-8000-000000005800',
     }
     server.use(
-      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/mcp-proposals`, () =>
-        HttpResponse.json({ items: [], next_cursor: null, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...summary('pending'),
+              title: repair.proposal.title,
+              source_ref: repair.proposal.source_ref,
+              proposal_origin: 'repair',
+            },
+          ],
+          next_cursor: null,
+          page_size: 100,
+        }),
       ),
       http.get(
         `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
@@ -413,11 +421,7 @@ describe('FlowProposalReviewDialog', () => {
       ),
     )
 
-    renderDialog(
-      () => undefined,
-      () => undefined,
-      changeSetId,
-    )
+    renderDialog(() => undefined)
 
     const dialog = await screen.findByRole('dialog', {
       name: 'Repair Proposal 可视化审核',
@@ -531,7 +535,7 @@ function visualProposal(reviewStatus: 'pending' | 'accepted'): FlowSpecVisualPro
 }
 
 function summary(reviewStatus: 'pending' | 'accepted') {
-  return changeSet(reviewStatus)
+  return { ...changeSet(reviewStatus), proposal_origin: 'mcp' as const }
 }
 
 function changeSet(reviewStatus: 'pending' | 'accepted') {

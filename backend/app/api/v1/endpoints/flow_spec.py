@@ -19,6 +19,9 @@ from app.schemas.flow_spec import (
     FlowSpecExportResponse,
     FlowSpecImportRequest,
     FlowSpecMcpProposalListResponse,
+    FlowSpecProposalListResponse,
+    FlowSpecProposalOrigin,
+    FlowSpecProposalResponse,
     FlowSpecReviewRequest,
     FlowSpecValidateRequest,
     FlowSpecValidationResponse,
@@ -174,6 +177,46 @@ async def list_mcp_flow_proposals(
     )
     return FlowSpecMcpProposalListResponse(
         items=[_summary(view) for view in result.views],
+        next_cursor=(
+            FlowSpecChangeSetCursorResponse(
+                created_at=result.next_cursor.created_at,
+                id=result.next_cursor.id,
+            )
+            if result.next_cursor is not None
+            else None
+        ),
+        page_size=page_size,
+    )
+
+
+@router.get("/change-sets/proposals", response_model=FlowSpecProposalListResponse)
+async def list_flow_proposals(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page_size: int = Query(default=100, ge=1, le=100),
+    cursor_created_at: datetime | None = None,
+    cursor_id: UUID | None = None,
+) -> FlowSpecProposalListResponse:
+    if (cursor_created_at is None) != (cursor_id is None):
+        raise AppError(
+            code="FLOWSPEC_CURSOR_INVALID",
+            message="FlowSpec 分页游标不完整",
+            status_code=422,
+        )
+    cursor = (
+        FlowSpecChangeSetCursor(created_at=cursor_created_at, id=cursor_id)
+        if cursor_created_at is not None and cursor_id is not None
+        else None
+    )
+    result = await FlowSpecService(session).list_proposals(
+        actor=current_user,
+        project_id=project_id,
+        page_size=page_size,
+        cursor=cursor,
+    )
+    return FlowSpecProposalListResponse(
+        items=[_proposal_summary(view) for view in result.views],
         next_cursor=(
             FlowSpecChangeSetCursorResponse(
                 created_at=result.next_cursor.created_at,
@@ -396,6 +439,19 @@ def _summary(view: FlowSpecChangeSetView) -> FlowSpecChangeSetResponse:
         created_by_id=view.change_set.created_by_id,
         created_at=view.change_set.created_at,
         updated_at=view.change_set.updated_at,
+    )
+
+
+def _proposal_summary(view: FlowSpecChangeSetView) -> FlowSpecProposalResponse:
+    source_ref = view.change_set.source_ref
+    scheme = source_ref.partition("://")[0] if source_ref else ""
+    origin = cast(
+        FlowSpecProposalOrigin,
+        scheme if scheme in {"mcp", "repair", "maintenance"} else "import",
+    )
+    return FlowSpecProposalResponse(
+        **_summary(view).model_dump(),
+        proposal_origin=origin,
     )
 
 
