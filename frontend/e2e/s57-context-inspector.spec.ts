@@ -103,7 +103,7 @@ test('S57 Context Inspector 展示当前证据并深链到既有 Flow Proposal',
   await expect(page).toHaveURL(
     new RegExp(`/projects/${project.id}/workflows\\?proposal=${proposalId}`),
   )
-  const dialog = page.getByRole('dialog', { name: '外部 LLM / MCP 可视化流程提案' })
+  const dialog = page.getByRole('dialog', { name: 'Flow Proposal 可视化审核' })
   await expect(dialog).toBeVisible()
   await expect(
     dialog.getByText(`S57 订单流程提案 · 草稿 · ${proposalId.slice(0, 8)}`),
