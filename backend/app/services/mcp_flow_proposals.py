@@ -153,6 +153,7 @@ class MCPFlowProposalService:
                 source_ref=source_ref,
                 service_account_id=service_account_id,
             ),
+            commit=False,
         )
         if view.change_set.status != "draft" or view.item.review_status != "pending":
             raise RuntimeError("FlowSpec proposal adapter created a non-draft change set")

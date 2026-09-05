@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -178,8 +179,14 @@ def _requires_review(node: ContextKnowledgeNode) -> bool:
     return any(value.lower() != "false" for value in _facts(node).get("requires_review", set()))
 
 
+@dataclass(frozen=True)
+class _KnowledgeChanges:
+    nodes: frozenset[str]
+    edges: frozenset[tuple[str, str, str]]
+
+
 def _reachable_changes(
-    operation_id: str, graph: ContextKnowledgeSnapshot, changed: set[str]
+    operation_id: str, graph: ContextKnowledgeSnapshot, changed: _KnowledgeChanges
 ) -> tuple[set[str], set[str]]:
     nodes = {node.id: node for node in graph.nodes}
     edges: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -194,17 +201,20 @@ def _reachable_changes(
         if (node_id, heuristic) in visited:
             continue
         visited.add((node_id, heuristic))
-        if node_id in changed:
+        if node_id in changed.nodes:
             hits[heuristic].add(node_id)
-        pending.extend(
-            (target, heuristic or relation not in _EXPLICIT_RELATIONS)
-            for target, relation in edges.get(node_id, [])
-        )
+        for target, relation in edges.get(node_id, []):
+            uncertain = (
+                heuristic or relation not in _EXPLICIT_RELATIONS or _requires_review(nodes[target])
+            )
+            if (node_id, target, relation) in changed.edges:
+                hits[uncertain].update((node_id, target))
+            pending.append((target, uncertain))
     return hits[False], hits[True] - hits[False]
 
 
 def _graph_impacts(
-    graph: ContextKnowledgeSnapshot, changed: set[str], side: Literal["before", "after"]
+    graph: ContextKnowledgeSnapshot, changed: _KnowledgeChanges, side: Literal["before", "after"]
 ) -> KnowledgeImpactResult:
     impacts: list[KnowledgeOperationImpact] = []
     ambiguous: list[str] = []
@@ -235,9 +245,13 @@ def affected_knowledge_operations(
 ) -> KnowledgeImpactResult:
     """Walk each immutable graph separately; never splice edges across revisions."""
     difference = diff_state_knowledge(before, after)
-    changed = {node.node_id for node in difference.nodes}
-    for edge in (*difference.edges.added, *difference.edges.removed):
-        changed.update((edge.source, edge.target))
+    changed = _KnowledgeChanges(
+        nodes=frozenset(node.node_id for node in difference.nodes),
+        edges=frozenset(
+            (edge.source, edge.target, edge.relation)
+            for edge in (*difference.edges.added, *difference.edges.removed)
+        ),
+    )
     previous = _graph_impacts(before, changed, "before")
     current = _graph_impacts(after, changed, "after")
     return KnowledgeImpactResult(

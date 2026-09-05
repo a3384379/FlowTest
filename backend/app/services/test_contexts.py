@@ -364,10 +364,11 @@ class TestContextService:
         actor: User,
         project_id: UUID,
         context_id: UUID,
-        revision_id: UUID,
+        revision_id: UUID | None = None,
+        revision_number: int | None = None,
     ) -> ProposableContext:
         context = await self._load_context(
-            actor=actor, context_id=context_id, editing=True, for_update=True
+            actor=actor, context_id=context_id, editing=True, for_update=True, project_id=project_id
         )
         if context.project_id != project_id:
             raise AppError(
@@ -386,7 +387,14 @@ class TestContextService:
                 details={"status": context.status},
             )
         revision = await self._current_revision(context, for_update=True)
-        if revision.id != revision_id:
+        if not (
+            (revision_id is not None and revision.id == revision_id and revision_number is None)
+            or (
+                revision_number is not None
+                and revision.revision == revision_number
+                and revision_id is None
+            )
+        ):
             raise AppError(
                 code="TEST_CONTEXT_REVISION_STALE",
                 message="测试上下文 Revision 已不是当前版本",
@@ -406,6 +414,7 @@ class TestContextService:
         context_id: UUID,
         editing: bool = False,
         for_update: bool = False,
+        project_id: UUID | None = None,
     ) -> TestContext:
         tenant = get_tenant_context()
         if tenant is None:
@@ -418,6 +427,8 @@ class TestContextService:
             TestContext.id == context_id,
             TestContext.organization_id == tenant.organization_id,
         )
+        if project_id is not None:
+            query = query.where(TestContext.project_id == project_id)
         if for_update:
             query = query.with_for_update()
         context = (await self._session.execute(query)).scalar_one_or_none()

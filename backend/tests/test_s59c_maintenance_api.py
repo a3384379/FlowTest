@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from test_s58_failure_repair_api import failure_repair_api as failure_repair_api
 
 from app.core.context import reset_tenant_context, set_tenant_context
@@ -20,10 +21,13 @@ from app.models.test_contexts import TestContext as ContextModel
 from app.models.test_contexts import TestContextRevision as RevisionModel
 from app.models.workflows import Workflow
 from app.schemas.maintenance_proposals import MaintenanceProposalCreate
+from app.services.flow_spec import FlowSpecService
 from app.services.maintenance_proposals import MaintenanceProposalService
 
 
-async def _request(fixture: dict[str, Any], *, heuristic: bool = False) -> dict[str, Any]:
+async def _request(
+    fixture: dict[str, Any], *, heuristic: bool = False, edge_only: bool = False
+) -> dict[str, Any]:
     async with fixture["sessions"]() as session:
         original = await session.get(RevisionModel, fixture["context_revision_id"])
         context = await session.get(ContextModel, original.context_id)
@@ -53,7 +57,7 @@ async def _request(fixture: dict[str, Any], *, heuristic: bool = False) -> dict[
                         "id": "event",
                         "kind": "event",
                         "label": "Private event",
-                        "facts": [{"name": "revision", "value": state}],
+                        "facts": [{"name": "revision", "value": "same" if edge_only else state}],
                     },
                 ],
                 "edges": [
@@ -64,6 +68,8 @@ async def _request(fixture: dict[str, Any], *, heuristic: bool = False) -> dict[
                     }
                 ],
             }
+            if edge_only and number == 2:
+                graph["edges"] = []
             snapshot = ContextRevisionSnapshot.model_validate({**base, "knowledge_snapshot": graph})
             session.add(
                 RevisionModel(
@@ -110,6 +116,131 @@ async def _counts(fixture: dict[str, Any]) -> tuple[int, int]:
             await session.scalar(select(func.count()).select_from(AIChangeSet)),
             await session.scalar(select(func.count()).select_from(IdempotencyRecord)),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("origin", ["maintenance", "repair"])
+async def test_proposal_and_completed_claim_commit_atomically(
+    failure_repair_api: dict[str, Any], monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    fixture = failure_repair_api
+    payload = await _request(fixture)
+    url = _url(fixture)
+    if origin == "repair":
+        async with fixture["sessions"]() as session:
+            revision = await session.scalar(
+                select(RevisionModel).where(RevisionModel.revision == 3)
+            )
+        payload = {
+            "kind": "data",
+            "proposed_spec": payload["proposed_spec"],
+            "expected_target_revision": 1,
+            "context_revision_id": str(revision.id),
+            "rationale": "补齐可重复测试数据",
+        }
+        url = (
+            f"/api/v1/projects/{fixture['project_id']}/workflow-executions/"
+            f"{fixture['execution_id']}/repair-proposals"
+        )
+    original = AsyncSession.commit
+    unsafe_commits: list[tuple[int, int]] = []
+
+    async def commit(session: AsyncSession) -> None:
+        proposals = await session.scalar(select(func.count()).select_from(AIChangeSet))
+        pending = await session.scalar(
+            select(func.count())
+            .select_from(IdempotencyRecord)
+            .where(IdempotencyRecord.status == "pending")
+        )
+        if proposals and pending:
+            unsafe_commits.append((proposals, pending))
+        await original(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+    response = await fixture["client"].post(
+        url,
+        headers={**fixture["headers"], "Idempotency-Key": "s59c-atomic"},
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    assert unsafe_commits == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["after_action", "completion_commit"])
+async def test_failed_maintenance_action_rolls_back_and_can_retry(
+    failure_repair_api: dict[str, Any], monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    fixture = failure_repair_api
+    payload = await _request(fixture)
+    original_create, original_commit = FlowSpecService.create_import, AsyncSession.commit
+
+    async def create(service: FlowSpecService, **kwargs: Any) -> None:
+        await original_create(service, **kwargs)
+        raise RuntimeError("injected after action")
+
+    async def commit(session: AsyncSession) -> None:
+        completed = await session.scalar(
+            select(IdempotencyRecord).where(IdempotencyRecord.status == "completed")
+        )
+        if completed is not None:
+            raise RuntimeError("injected completion commit")
+        await original_commit(session)
+
+    headers = {**fixture["headers"], "Idempotency-Key": "s59c-rollback-retry"}
+    with monkeypatch.context() as patch:
+        if failure == "after_action":
+            patch.setattr(FlowSpecService, "create_import", create)
+        else:
+            patch.setattr(AsyncSession, "commit", commit)
+        failed = await fixture["client"].post(_url(fixture), headers=headers, json=payload)
+        assert failed.status_code == 500
+    assert await _counts(fixture) == (0, 0)
+    retried = await fixture["client"].post(_url(fixture), headers=headers, json=payload)
+    assert retried.status_code == 201, retried.text
+    assert await _counts(fixture) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_foreign_context_hides_revision_existence(failure_repair_api: dict[str, Any]) -> None:
+    fixture = failure_repair_api
+    payload = await _request(fixture)
+    async with fixture["sessions"]() as session:
+        context = await session.get(ContextModel, UUID(payload["context_id"]))
+        project = Project(
+            organization_id=context.organization_id,
+            name="Other context scope",
+            created_by_id=context.created_by_id,
+        )
+        session.add(project)
+        await session.flush()
+        context.project_id = project.id
+        await session.commit()
+    for revision in (3, 999):
+        response = await fixture["client"].post(
+            _url(fixture),
+            headers={**fixture["headers"], "Idempotency-Key": "s59c-context-scope"},
+            json={**payload, "after_revision": revision},
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "TEST_CONTEXT_NOT_FOUND"
+    assert await _counts(fixture) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_heuristic_edge_only_change_cannot_authorize_maintenance(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    fixture = failure_repair_api
+    payload = await _request(fixture, heuristic=True, edge_only=True)
+    response = await fixture["client"].post(
+        _url(fixture),
+        headers={**fixture["headers"], "Idempotency-Key": "s59c-heuristic-edge"},
+        json=payload,
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "MAINTENANCE_EXPLICIT_EVIDENCE_REQUIRED"
+    assert await _counts(fixture) == (0, 0)
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from app.domain.failure_triage import FailureSignal, FailureTriageResult, triage_failures
-from app.domain.flow_spec import FlowSpec, FlowSpecNode
+from app.domain.flow_spec import FlowSpec, FlowSpecEdge, FlowSpecNode
 from app.domain.flow_spec_v2 import FlowSpecV2
 
 RepairKind = Literal["binding", "data", "cleanup", "contract_drift", "oracle"]
@@ -129,7 +129,7 @@ def _scoped_candidate(
     if kind == "binding":
         return before.model_copy(
             update={
-                "edges": after.edges,
+                "edges": _replace_edge_mappings(before, after),
                 "bindings": after.bindings,
                 "nodes": _replace_capability_bindings(before, after),
             }
@@ -159,6 +159,18 @@ def _scoped_candidate(
             "nodes": _replace_assert_nodes(before, after),
         }
     ), True
+
+
+def _replace_edge_mappings(
+    before: FlowSpec | FlowSpecV2, after: FlowSpec | FlowSpecV2
+) -> list[FlowSpecEdge]:
+    after_by_id = {edge.id: edge for edge in after.edges}
+    return [
+        edge.model_copy(update={"mappings": replacement.mappings})
+        if (replacement := after_by_id.get(edge.id)) is not None
+        else edge
+        for edge in before.edges
+    ]
 
 
 def _replace_assert_nodes(

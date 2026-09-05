@@ -287,6 +287,7 @@ class FlowSpecService:
         provenance: FlowSpecImportProvenance | None = None,
         repair_provenance: FlowSpecRepairProvenance | None = None,
         maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
+        commit: bool = True,
     ) -> FlowSpecChangeSetView:
         prepared = await self._prepare_import(
             actor=actor,
@@ -375,7 +376,10 @@ class FlowSpecService:
                 else None,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         await self._session.refresh(change_set)
         await self._session.refresh(item)
         return self._view(change_set, item, before=prepared.before)

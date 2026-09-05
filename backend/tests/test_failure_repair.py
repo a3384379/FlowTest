@@ -3,6 +3,7 @@ import pytest
 from app.domain.failure_repair import (
     RepairScopeError,
     diagnose_failure,
+    validate_flow_patch_scope,
     validate_repair_scope,
 )
 from app.domain.failure_triage import FailureSignal
@@ -79,6 +80,26 @@ def test_failure_diagnosis_product_defect_guard_is_fail_closed() -> None:
             after=_spec().model_copy(update={"variables": {"customer_id": "42"}}),
             diagnosis=diagnosis,
             kind="data",
+            acknowledge_oracle_weakening=False,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["source", "target", "condition", "add", "remove"])
+def test_binding_patch_cannot_change_edge_topology(mutation: str) -> None:
+    before = _spec()
+    edges = list(before.edges)
+    if mutation == "add":
+        edges.append(FlowSpecEdge(id="bypass", source="start", target="end"))
+    elif mutation == "remove":
+        edges.pop()
+    else:
+        values = {"source": "assert", "target": "end", "condition": "false"}
+        edges[0] = edges[0].model_copy(update={mutation: values[mutation]})
+    with pytest.raises(RepairScopeError):
+        validate_flow_patch_scope(
+            before=before,
+            after=before.model_copy(update={"edges": edges}),
+            kind="binding",
             acknowledge_oracle_weakening=False,
         )
 

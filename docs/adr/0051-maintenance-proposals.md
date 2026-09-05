@@ -11,6 +11,11 @@
 - 顺序为 Project Edit → 敏感值及项目约束 → 当前目标草稿 → 当前 Ready Context → 目标影响分析
   → FlowSpec 校验 → Patch 白名单 → Idempotency Claim → 再校验及持久化。锁定目标与 Context，
   幂等事务提交后重新读取权威状态，避免前置校验与实际写入脱节。
+- 创建维护 AIChangeSet 时只 Flush，不在 Action 内 Commit；提案、审计和 completed Claim 由幂等包装器
+  原子提交。Action 或完成提交失败时先 Rollback，再释放 pending Claim，避免残留提案和重复重试写入。
+  同样由幂等包装器调用的 MCP/Repair 创建路径使用相同的 non-committing 导入；普通 Import 保留自提交兼容。
+- 边的新增/删除保留原关系强度，仅在其所属 Revision 遍历；启发式边的 Operation 端点不自动成为精确变化。
+  Binding Patch 固定边 ID 集合、source/target/condition，只替换 mappings。
 - 精确实例或完整 Portable Operation 证据才允许创建；路由、启发式和单独的显式资产选择不能授权。
   目标解析失败、预算耗尽和截断拒绝创建。全局 `CONTEXT_CHANGE_UNMAPPED` 保留为人工复核诊断，
   不否定已确定的单目标匹配，也不声称所有 Context 变化都已覆盖。

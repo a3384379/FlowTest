@@ -24,6 +24,7 @@ from app.models import Base
 from app.models.access import Project, User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion, Environment
+from app.models.governance import IdempotencyRecord
 from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
@@ -236,7 +237,21 @@ class RecordingWorkflowCoordinator:
 @pytest.mark.asyncio
 async def test_mcp_plan_compile_dry_run_propose_and_inspect_are_draft_only(
     s51_context: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    original_commit = AsyncSession.commit
+
+    async def commit(session: AsyncSession) -> None:
+        proposals = await session.scalar(select(func.count()).select_from(AIChangeSet))
+        pending = await session.scalar(
+            select(func.count())
+            .select_from(IdempotencyRecord)
+            .where(IdempotencyRecord.status == "pending")
+        )
+        assert not (proposals and pending), "MCP proposal committed before completed claim"
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit)
     context, plan, compilation = await _plan_chain(s51_context)
     client = s51_context["client"]
     payload = _proposal_payload(s51_context, context, plan, compilation)

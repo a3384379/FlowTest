@@ -147,6 +147,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   格式、Lint、类型和构建全绿。隔离 Compose 浏览器验证人工接受后的实际 Preview 与 Cleanup 均 passed。
   当前待 PR 复审、远程门禁和普通合并，不提前标记完成。详见
   [S59C Maintenance Proposal](release/v6-s59c-maintenance-proposals.md)。
+- PR #85 首次复审的 3 项 P1 与 1 项 P2 已集中修复：边差异保留启发式强度、Binding 固定拓扑、
+  提案/幂等原子提交、Context 范围授权前置。修复后后端 1113 passed / 4 skipped；额外 MCP/Repair 原子
+  提交兼容回归 34 项通过。等待新候选复审和 Required Gate，不以本地通过替代合并条件。
 - S59D 后续才将 Diff、Affected Flow、维护提案接入现有 Change Regression Snapshot v4 和页面。
 
 ## 已合并并完成 main 门禁：V6.2 S59B Affected Flow

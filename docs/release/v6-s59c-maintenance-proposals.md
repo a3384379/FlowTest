@@ -24,4 +24,20 @@
   Fixture、当前后端源码与本次前端构建，不修改既有业务数据，不运行实机或容量门禁。
 - PR、独立复审、远程 Required Gate、普通合并与合并后 main 门禁尚未完成。
 
+## PR #85 首次复审修复
+
+首次复审针对 `a0e5b6c` 提出 3 项 P1 与 1 项 P2，均新增回归并在同一修复批次处理：
+
+- P1：启发式边新增/删除不再将 Operation 端点提升为精确变化；按所属 Revision 和边关系强度匹配。
+- P1：Binding 仅替换既有边 mappings，固定边集合及拓扑字段，不能增删边或变更 source/target/condition。
+- P1：维护提案与 completed 幂等记录原子提交；Action 或提交异常先回滚，释放 pending Claim 后可安全重试。
+- P2：先按 Tenant/Project 授权 Context，再验证其当前 Revision，范围外 Context 不泄露版本存在性。
+- 修复前新增用例失败；修复后关联领域/API/Repair/FlowSpec 定向回归 104 项通过。后端集中门禁
+  1113 passed / 4 skipped，覆盖率 91.01%，格式、Ruff 和 mypy 通过。
+- 随后对 MCP/Repair 两个幂等入口统一 non-committing 导入，并补充维护/Repair/MCP 原子提交断言；
+  受影响三入口定向回归 34 项通过，Ruff/mypy 通过。前端未变更，不重复全量验收。
+- 等待最新候选复审；未提前认定远程门禁或合并完成。
+- 审计修复后再次创建新隔离提案，真实 Worker Preview 的 Main/Cleanup 均 passed，Apply 到草稿成功。
+  截图：`output/playwright/s59c-review-fixed-preview-passed.png`。
+
 实机测试（含公司 Windows）不要求；自动化 Windows CI、Compose 和既有非实机验收策略保留。

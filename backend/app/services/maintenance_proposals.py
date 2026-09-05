@@ -12,7 +12,6 @@ from app.domain.failure_repair import RepairScopeError, validate_flow_patch_scop
 from app.domain.flow_spec_security import contains_sensitive_flow_spec_value
 from app.domain.maintenance_proposals import FlowSpecMaintenanceProvenance
 from app.models.access import User
-from app.models.test_contexts import TestContextRevision
 from app.models.workflows import Workflow
 from app.schemas.affected_flows import AffectedFlowsResponse
 from app.schemas.flow_spec import FlowSpecImportRequest
@@ -121,6 +120,7 @@ class MaintenanceProposalService:
             project_id=refreshed.project_id,
             payload=refreshed.import_request,
             maintenance_provenance=refreshed.provenance,
+            commit=False,
         )
         return view, refreshed.provenance
 
@@ -147,23 +147,11 @@ class MaintenanceProposalService:
     async def _require_context(
         self, actor: User, project_id: UUID, payload: MaintenanceProposalCreate
     ) -> None:
-        revision = await self._session.scalar(
-            select(TestContextRevision).where(
-                TestContextRevision.context_id == payload.context_id,
-                TestContextRevision.revision == payload.after_revision,
-            )
-        )
-        if revision is None:
-            raise AppError(
-                code="TEST_CONTEXT_REVISION_NOT_FOUND",
-                message="目标上下文版本不存在",
-                status_code=404,
-            )
         await self._contexts.require_proposable(
             actor=actor,
             project_id=project_id,
             context_id=payload.context_id,
-            revision_id=revision.id,
+            revision_number=payload.after_revision,
         )
 
 
