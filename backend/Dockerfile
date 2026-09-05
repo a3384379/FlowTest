@@ -89,17 +89,36 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
     go version -m bin/containerd-shim-runc-v2 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'
 
-FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon
+FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon-base
+# Alpine 3.24's x86_64 repository has not backported util-linux 2.42.3 yet.
+# Install only the two signed, fixed-version library APKs when needed; keep
+# stable repositories and normal signature/dependency validation unchanged.
+RUN set -eux; \
+    apk upgrade --no-cache; \
+    for patch_package in libblkid libuuid; do \
+        if ! apk info --exists "${patch_package}>=2.42.3-r0"; then \
+            wget -T 30 -O "/tmp/${patch_package}-2.42.3-r0.apk" \
+                "https://dl-cdn.alpinelinux.org/alpine/edge/main/$(apk --print-arch)/${patch_package}-2.42.3-r0.apk"; \
+            apk add --no-cache "/tmp/${patch_package}-2.42.3-r0.apk"; \
+            rm "/tmp/${patch_package}-2.42.3-r0.apk"; \
+        fi; \
+        apk info --exists "${patch_package}>=2.42.3-r0"; \
+    done; \
+    ldd /usr/lib/libblkid.so.1; \
+    ldd /usr/lib/libuuid.so.1; \
+    mkfs.ext4 -V; \
+    btrfs version; \
+    rm -f \
+        /usr/local/libexec/docker/cli-plugins/docker-buildx \
+        /usr/local/libexec/docker/cli-plugins/docker-compose
+
+FROM environment-daemon-base AS environment-daemon
 COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
 COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/dockerd
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
 COPY --from=containerd-builder /src/containerd/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
 RUN set -eux; \
-    apk upgrade --no-cache; \
-    rm -f \
-        /usr/local/libexec/docker/cli-plugins/docker-buildx \
-        /usr/local/libexec/docker/cli-plugins/docker-compose; \
     containerd --version; \
     ctr --version
 

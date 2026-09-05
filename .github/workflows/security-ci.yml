@@ -54,6 +54,7 @@ jobs:
               scripts/verify_v2_v3_upgrade.sh deploy/compact/*.sh
       - name: Build release images
         run: |
+          docker build --target environment-daemon-base -t flowtest-environment-daemon-base:ci backend
           docker build -t flowtest-backend:ci backend
           docker build --target performance-runtime -t flowtest-performance:ci backend
           docker build --target environment-runtime -t flowtest-environment:ci backend

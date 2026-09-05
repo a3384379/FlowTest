@@ -64,3 +64,36 @@ environment/runner 五个镜像扫描通过。daemon 扫描继续发现基础镜
 为避免逐包遗漏，现将固定 Alpine 发行版内的 `apk upgrade` 改为覆盖全部已安装包，不切换发行版。
 临时容器完整升级成功，libblkid/libuuid 均达到 2.42.3-r0，libexpat/OpenSSH 补丁也保持有效。
 本地对固定 environment fixture 的提前扫描因漏洞库下载 EOF 未完成；其结论仍由远程扫描提供。
+
+### 最新候选的阻塞定位（2026-09-05）
+
+完整 `apk upgrade` 候选的 Backend、Standalone Windows、Upgrade CI 已通过，但 Security CI
+`33952696164` 仍在 daemon 扫描失败：x86_64 镜像的 libblkid/libuuid 保持 2.42.1-r0。构建日志
+确认升级命令成功，其他 11 个包已更新，这两个包未进入升级事务；不是扫描旧镜像或构建失败。
+
+[Alpine 3.24 x86_64 官方目录](https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/)
+仍列出 libblkid 2.42.1-r0；此前本地 aarch64 升级结果不能代表 CI 架构的补丁可用性。
+[util-linux 2.42.3 发布说明](https://www.kernel.org/pub/linux/utils/util-linux/v2.42/v2.42.3-ReleaseNotes)
+将四项高危 CVE 定位于 mount/libmount（76642、78409、78410）及 nsenter/unshare（78408），
+而本轮高危匹配对象只有 libblkid/libuuid。存在来源包级误报的可能，不能直接据此关闭发现。
+
+本地原始诊断镜像的 mount 为 BusyBox 链接，未安装 libmount/mount/util-linux 包；但 x86_64
+诊断镜像下载遇到 TLS EOF，跨架构索引查询又因签名不匹配失败，均未绕过校验。若选择精确误报
+例外，必须先获确认，并在实际 CI 镜像中断言受影响组件不存在，严格限定 CVE、包名与版本；
+当前没有新增忽略项、没有降低门禁，也没有重新触发完整 CI。PR #83 尚未合并。
+
+### 无扫描豁免的补丁候选
+
+后续查到 [Alpine 官方 edge x86_64 目录](https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/)
+已提供 libblkid/libuuid 2.42.3-r0。采用有界补丁安装：先执行稳定源升级；仅当单个库未达到
+2.42.3-r0 时，下载并用 APK 正常签名与依赖校验安装该库的固定版本官方包。不添加 edge 软件源、
+不切换发行版、不使用 `--allow-untrusted`，也不增加 Grype 忽略项。
+
+独立 `environment-daemon-base` 构建阶段包含每个库的最低版本断言、动态库加载检查及 ext4/btrfs
+工具启动检查。Security CI 先构建该阶段，避免补丁不可用时先完成全套 Go 编译。
+本地原始镜像已验证版本断言能拒绝旧版本、接受既有版本，库检查和工具命令均正常；补丁包下载
+仍遇到 TLS EOF，不能记为补丁安装通过。x86_64 补丁安装、Compose 和完整 Security 结果待远程验证。
+
+amd64 基础镜像已成功下载；定向构建在稳定源 APKINDEX 的 TLS 连接处失败，尚未进入补丁安装。
+Dockerfile 静态检查无警告，改动的 Workflow 与文档 Prettier 检查通过。不重复运行 Python/前端
+业务测试，现有候选的 Backend/Windows/Upgrade/Compose 均已通过；新候选仍须通过远程 Required Gate。
