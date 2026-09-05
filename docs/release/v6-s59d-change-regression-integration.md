@@ -69,3 +69,14 @@ Preview、仅 Apply 草稿、仅声称计划 passed 均不算覆盖。
 - 新增失败回归覆盖入口缺失、更新与证据提交原子性、参数保留，以及前端独立表单字段 ID。
 - 修复后后端集中门禁全绿：1132 passed / 4 skipped，覆盖率 91.06%；前端 238 项通过，
   分支覆盖率 80.30%，格式、Lint、类型和 Build 全绿。S59D 定向 16 项及相关旧链路/Tasking API 验证通过。
+
+## 最终验收闭环（随 S60A 回填）
+
+- PR #86 最终候选 `bd9f7cd696d1be9f28fb753d10e5755e718ff52a` 正常 squash 合并；
+  main 为 `ac96f139ea2d1b75c202e2cab112fc4e94ec8eac`。
+- 最终 PR 候选及 main 的 Backend、Frontend、Security、Compose、Standalone Windows、Upgrade 和
+  Required Gate Controller 七项工作流均 Success，提交上的受信 Required Gate 为 success。
+- Main Controller：[33973942413](https://github.com/a3384379/FlowTest/actions/runs/33973942413)。
+- 真实 Compose 正向 Release 通过，原未映射 Git 负向 Release 保持阻断；专用测试栈已停止。
+- 复审 P0=0、P1=0；保留 1 项已接受、未修复的审核记录事务顺序 P2，以 PR 原复审为准。
+  不把线程结束视为代码修复。S59D 已完成开发及验收，可以从全绿 main 启动 S60。

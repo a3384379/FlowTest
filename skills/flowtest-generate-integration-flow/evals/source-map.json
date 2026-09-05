@@ -1,0 +1,31 @@
+{
+  "schema_version": "flowtest-skill-evaluation-source-map-v1",
+  "evaluation_scope": "committed_annotations_only",
+  "executes_backend_tests": false,
+  "files": {
+    "annotations.json": "backend/tests/fixtures/v6_golden/evaluation-annotations.json",
+    "baseline.json": "backend/tests/fixtures/v6_golden/evaluation-baseline.json",
+    "fixtures/affected-flows.json": "backend/tests/fixtures/v6_golden/affected-flows.json",
+    "fixtures/ai-change-set.json": "backend/tests/fixtures/v6_golden/ai-change-set.json",
+    "fixtures/context-diff.json": "backend/tests/fixtures/v6_golden/context-diff.json",
+    "fixtures/db-profile.json": "backend/tests/fixtures/v6_golden/db-profile.json",
+    "fixtures/execution-snapshot.json": "backend/tests/fixtures/v6_golden/execution-snapshot.json",
+    "fixtures/fingerprints.json": "backend/tests/fixtures/v6_golden/fingerprints.json",
+    "fixtures/http-contract.json": "backend/tests/fixtures/v6_golden/http-contract.json",
+    "fixtures/login-create-query.compiled.flowspec-v1.json": "backend/tests/fixtures/v6_golden/login-create-query.compiled.flowspec-v1.json",
+    "fixtures/login-create-query.flowspec-v1.json": "backend/tests/fixtures/v6_golden/login-create-query.flowspec-v1.json",
+    "fixtures/login-create-query.flowspec-v2.json": "backend/tests/fixtures/v6_golden/login-create-query.flowspec-v2.json",
+    "fixtures/login-create-query.integration-plan-v1.json": "backend/tests/fixtures/v6_golden/login-create-query.integration-plan-v1.json",
+    "fixtures/mcp-contract.json": "backend/tests/fixtures/v6_golden/mcp-contract.json",
+    "fixtures/operation-identity.json": "backend/tests/fixtures/v6_golden/operation-identity.json",
+    "fixtures/ruoyi-target.json": "backend/tests/fixtures/v6_golden/ruoyi-target.json",
+    "fixtures/small-spring/manifest.json": "backend/tests/fixtures/v6_golden/small-spring/manifest.json",
+    "fixtures/small-spring/schema.sql": "backend/tests/fixtures/v6_golden/small-spring/schema.sql",
+    "fixtures/small-spring/src/main/java/com/flowtest/golden/OrderController.java": "backend/tests/fixtures/v6_golden/small-spring/src/main/java/com/flowtest/golden/OrderController.java",
+    "fixtures/small-spring/src/main/java/com/flowtest/golden/OrderService.java": "backend/tests/fixtures/v6_golden/small-spring/src/main/java/com/flowtest/golden/OrderService.java",
+    "fixtures/standalone-transfer-manifest.json": "backend/tests/fixtures/v6_golden/standalone-transfer-manifest.json",
+    "fixtures/test-design.json": "backend/tests/fixtures/v6_golden/test-design.json",
+    "fixtures/workflow-definition.json": "backend/tests/fixtures/v6_golden/workflow-definition.json",
+    "v6_evaluation.py": "backend/app/domain/v6_evaluation.py"
+  }
+}

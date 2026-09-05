@@ -1,0 +1,23 @@
+{
+  "before": {
+    "repository_revisions": [{"source_ref": "repository://sample", "revision": "v1"}],
+    "evidence_fingerprints": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "completeness": {"required": ["repository"], "present": [], "missing": ["repository"], "complete": false},
+    "knowledge_snapshot": {
+      "nodes": [{"id": "state.order", "kind": "state_candidate", "label": "PRIVATE_FIXTURE_VALUE", "facts": [{"name": "state", "value": "new"}, {"name": "origin", "value": "flowtest.state_knowledge"}]}]
+    },
+    "conflict_snapshot": {"conflicts": [{"subject_ref": "entity://Order", "finding_fingerprints": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "summary": "PRIVATE_CONFLICT_SUMMARY"}]}
+  },
+  "after": {
+    "repository_revisions": [{"source_ref": "repository://sample", "revision": "v2"}],
+    "evidence_fingerprints": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    "completeness": {"required": ["repository"], "present": ["repository"], "missing": [], "complete": true},
+    "knowledge_snapshot": {
+      "nodes": [
+        {"id": "state.order", "kind": "state_candidate", "label": "PRIVATE_FIXTURE_VALUE", "facts": [{"name": "state", "value": "accepted"}, {"name": "origin", "value": "flowtest.state_knowledge"}]},
+        {"id": "table.order", "kind": "table", "label": "Orders", "facts": []}
+      ],
+      "edges": [{"source": "state.order", "target": "table.order", "relation": "may_map_entity"}]
+    }
+  }
+}
