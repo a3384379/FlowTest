@@ -29,6 +29,9 @@
   代表项目无影响。草稿超过 200 节点在解析前拒绝分析，单流程理由超过 100 项显式报告截断。
 - 无效配置、缺失 API、Subflow/ForEach、SQL/Redis、未支持 Capability 都报告未覆盖；本阶段不递归
   展开其他流程，也不声称完成 GraphQL/gRPC 语义选择。
+- S59C 补充请求级上限：500 个节点、100 个唯一 API/版本身份解析、100,000 次候选比较；耗尽时返回
+  `ANALYSIS_BUDGET_EXCEEDED`，停止继续扫描，并记录实际已扫描流程。显式关系包含 Kafka `consumes`。
+  内部目标工作流分析返回 `analysis_scope=workflow` 和目标 ID，不将单目标结果误称为全项目扫描。
 - Context 发生变化时保守报告 `CONTEXT_CHANGE_UNMAPPED`：结构关联不能证明所有 Evidence/Provider
   改动都已覆盖。该诊断不否定已返回的匹配；后续 S59D 结合 Current TestPlan Gap 解释剩余缺口。
   `analysis_complete` 只表示该请求已完整扫描且无未覆盖诊断，不代表可自动 Patch 或 Release Gate 通过。

@@ -46,6 +46,12 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
+from app.domain.maintenance_proposals import FlowSpecMaintenanceProvenance
+from app.domain.proposal_provenance import (
+    MAINTENANCE_PROPOSAL_SCHEMA,
+    MCP_PROPOSAL_SCHEMA,
+    REPAIR_PROPOSAL_SCHEMA,
+)
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
@@ -59,6 +65,7 @@ from app.repositories.workflows import WorkflowRepository
 from app.schemas.flow_spec import FlowSpecImportRequest
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.test_contexts import TestContextService
 from app.services.workflows import WorkflowService
 
 
@@ -114,6 +121,7 @@ class FlowSpecVisualProposal:
     service_mappings: Mapping[str, UUID]
     operation_mappings: Mapping[str, UUID]
     operation_version_mappings: Mapping[str, int]
+    maintenance_provenance: FlowSpecMaintenanceProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,13 +286,17 @@ class FlowSpecService:
         payload: FlowSpecImportRequest,
         provenance: FlowSpecImportProvenance | None = None,
         repair_provenance: FlowSpecRepairProvenance | None = None,
+        maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
+        commit: bool = True,
     ) -> FlowSpecChangeSetView:
         prepared = await self._prepare_import(
             actor=actor,
             project_id=project_id,
             payload=payload,
         )
-        _validate_expected_target_revision(prepared, provenance, repair_provenance)
+        _validate_expected_target_revision(
+            prepared, provenance, repair_provenance, maintenance_provenance
+        )
         _validate_integration_plan_provenance(prepared.pipeline, provenance)
         snapshot = _source_snapshot(
             pipeline=prepared.pipeline,
@@ -295,10 +307,12 @@ class FlowSpecService:
             resource_mappings=prepared.mappings,
             provenance=provenance,
             repair_provenance=repair_provenance,
+            maintenance_provenance=maintenance_provenance,
         )
+        context_source = provenance or repair_provenance or maintenance_provenance
         change_set = AIChangeSet(
             project_id=project_id,
-            impact_run_id=None,
+            impact_run_id=maintenance_provenance.impact_run_id if maintenance_provenance else None,
             release_risk_id=None,
             ai_job_id=None,
             title=prepared.pipeline.spec.name,
@@ -306,10 +320,8 @@ class FlowSpecService:
             source_snapshot=snapshot,
             source_fingerprint=prepared.pipeline.fingerprint,
             source_type="flow_spec",
-            source_ref=(
-                provenance.source_ref
-                if provenance is not None
-                else payload.source_ref or f"flow-spec://{prepared.pipeline.fingerprint}"
+            source_ref=_proposal_source_ref(
+                payload, prepared.pipeline.fingerprint, provenance, maintenance_provenance
             ),
             actor_type="service_account" if provenance is not None else "user",
             actor_id=actor.id,
@@ -351,11 +363,7 @@ class FlowSpecService:
                 "operation_mapping_count": len(prepared.mappings.operation_ids),
                 "actor_type": change_set.actor_type,
                 "context_revision_id": (
-                    str(provenance.context_revision_id)
-                    if provenance is not None
-                    else str(repair_provenance.context_revision_id)
-                    if repair_provenance is not None
-                    else None
+                    str(context_source.context_revision_id) if context_source is not None else None
                 ),
                 "repair_execution_id": (
                     str(repair_provenance.execution_id) if repair_provenance is not None else None
@@ -363,12 +371,52 @@ class FlowSpecService:
                 "repair_patch_kind": (
                     repair_provenance.patch_kind if repair_provenance is not None else None
                 ),
+                "maintenance_patch_kind": maintenance_provenance.patch_kind
+                if maintenance_provenance
+                else None,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         await self._session.refresh(change_set)
         await self._session.refresh(item)
         return self._view(change_set, item, before=prepared.before)
+
+    async def _validate_maintenance_context(
+        self,
+        actor: User,
+        project_id: UUID,
+        change_set: AIChangeSet,
+        workflow_id: UUID,
+    ) -> None:
+        snapshot = change_set.source_snapshot
+        if snapshot.get("proposal_schema_version") != MAINTENANCE_PROPOSAL_SCHEMA:
+            return
+        try:
+            provenance = FlowSpecMaintenanceProvenance.model_validate(snapshot.get("maintenance"))
+        except ValidationError as error:
+            raise AppError(
+                code="MAINTENANCE_PROVENANCE_INVALID",
+                message="维护提案来源快照无效",
+                status_code=409,
+            ) from error
+        context = await TestContextService(self._session).require_proposable(
+            actor=actor,
+            project_id=project_id,
+            context_id=provenance.context_id,
+            revision_id=provenance.context_revision_id,
+        )
+        if (
+            provenance.workflow_id != workflow_id
+            or provenance.context_fingerprint != context.revision.fingerprint
+        ):
+            raise AppError(
+                code="MAINTENANCE_PROVENANCE_INVALID",
+                message="维护提案来源与目标不一致",
+                status_code=409,
+            )
 
     async def _prepare_import(
         self,
@@ -454,7 +502,10 @@ class FlowSpecService:
             AIChangeSet.source_type == "flow_spec"
         )
         if origin == "mcp":
-            condition &= AIChangeSet.source_ref.startswith("mcp://")
+            condition &= (
+                AIChangeSet.source_snapshot["proposal_schema_version"].as_string()
+                == MCP_PROPOSAL_SCHEMA
+            )
         if cursor is not None:
             condition &= or_(
                 AIChangeSet.created_at < cursor.created_at,
@@ -531,6 +582,18 @@ class FlowSpecService:
             snapshot=snapshot,
         )
         plan = _integration_plan_from_snapshot(snapshot)
+        maintenance = None
+        if snapshot.get("proposal_schema_version") == MAINTENANCE_PROPOSAL_SCHEMA:
+            try:
+                maintenance = FlowSpecMaintenanceProvenance.model_validate(
+                    snapshot.get("maintenance")
+                )
+            except ValidationError as error:
+                raise AppError(
+                    code="MAINTENANCE_PROVENANCE_INVALID",
+                    message="维护提案来源快照无效",
+                    status_code=409,
+                ) from error
         compilation = compile_integration_plan(plan) if plan is not None else None
         if plan is not None and compilation is not None:
             provenance = FlowSpecImportProvenance(
@@ -543,6 +606,7 @@ class FlowSpecService:
             )
             _validate_integration_plan_provenance(view.pipeline, provenance)
         return FlowSpecVisualProposal(
+            maintenance_provenance=maintenance,
             view=view,
             existing_definition=_target_definition_from_snapshot(snapshot),
             proposed_definition=_document_to_workflow_definition(
@@ -654,6 +718,9 @@ class FlowSpecService:
                 raise AppError(
                     code="WORKFLOW_NOT_FOUND", message="目标工作流不存在", status_code=404
                 )
+            await self._validate_maintenance_context(
+                actor, project_id, change_set, target_workflow.id
+            )
             expected_snapshot = item.target_snapshot_sha256
             if expected_snapshot is None:
                 raise AppError(
@@ -1173,6 +1240,7 @@ def _source_snapshot(
     resource_mappings: ResolvedFlowSpecMappings,
     provenance: FlowSpecImportProvenance | None = None,
     repair_provenance: FlowSpecRepairProvenance | None = None,
+    maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "flow_spec": _spec_json(pipeline.spec),
@@ -1189,7 +1257,7 @@ def _source_snapshot(
     if provenance is not None:
         snapshot.update(
             {
-                "proposal_schema_version": "v6-flow-proposal-source-v1",
+                "proposal_schema_version": MCP_PROPOSAL_SCHEMA,
                 "context_revision_id": str(provenance.context_revision_id),
                 "context_fingerprint": provenance.context_fingerprint,
                 "service_account_id": str(provenance.service_account_id),
@@ -1222,7 +1290,7 @@ def _source_snapshot(
     if repair_provenance is not None:
         snapshot.update(
             {
-                "proposal_schema_version": "v6-repair-proposal-source-v1",
+                "proposal_schema_version": REPAIR_PROPOSAL_SCHEMA,
                 "context_revision_id": str(repair_provenance.context_revision_id),
                 "context_fingerprint": repair_provenance.context_fingerprint,
                 "repair": {
@@ -1235,7 +1303,29 @@ def _source_snapshot(
                 },
             }
         )
+    if maintenance_provenance is not None:
+        snapshot.update(
+            {
+                "proposal_schema_version": MAINTENANCE_PROPOSAL_SCHEMA,
+                "context_revision_id": str(maintenance_provenance.context_revision_id),
+                "context_fingerprint": maintenance_provenance.context_fingerprint,
+                "maintenance": maintenance_provenance.model_dump(mode="json"),
+            }
+        )
     return snapshot
+
+
+def _proposal_source_ref(
+    payload: FlowSpecImportRequest,
+    fingerprint: str,
+    provenance: FlowSpecImportProvenance | None,
+    maintenance: FlowSpecMaintenanceProvenance | None,
+) -> str:
+    if maintenance is not None:
+        return f"maintenance://contexts/{maintenance.context_id}/revisions/{maintenance.context_revision_id}/workflows/{maintenance.workflow_id}"
+    if provenance is not None:
+        return provenance.source_ref
+    return payload.source_ref or f"flow-spec://{fingerprint}"
 
 
 def _validate_integration_plan_provenance(
@@ -1272,18 +1362,24 @@ def _validate_expected_target_revision(
     prepared: _PreparedFlowSpecImport,
     provenance: FlowSpecImportProvenance | None,
     repair_provenance: FlowSpecRepairProvenance | None = None,
+    maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
 ) -> None:
-    if provenance is None and repair_provenance is None:
+    sources = [
+        value
+        for value in (provenance, repair_provenance, maintenance_provenance)
+        if value is not None
+    ]
+    if not sources:
         return
-    if provenance is not None and repair_provenance is not None:
-        raise RuntimeError("FlowSpec import cannot combine MCP and Repair provenance")
-    expected = (
-        provenance.expected_target_revision
-        if provenance is not None
-        else repair_provenance.expected_target_revision
-        if repair_provenance is not None
-        else None
-    )
+    if len(sources) != 1:
+        raise RuntimeError("FlowSpec import cannot combine proposal provenance")
+    expected = sources[0].expected_target_revision
+    if maintenance_provenance is not None and (
+        prepared.target is None or prepared.target.id != maintenance_provenance.workflow_id
+    ):
+        raise AppError(
+            code="MAINTENANCE_TARGET_MISMATCH", message="维护提案目标不匹配", status_code=422
+        )
     actual = prepared.target_revision
     if prepared.target is None and expected is not None:
         raise AppError(

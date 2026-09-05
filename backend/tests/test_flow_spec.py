@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 from copy import deepcopy
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -27,6 +27,7 @@ from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.ai import AIChangeSet
 from app.models.api_assets import APIVersion
 from app.services.flow_spec import _operation_contract_matches
 
@@ -443,9 +444,22 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
             },
         )
         assert response.status_code == 201, response.text
+        if source_ref is None:
+            # Simulate a historical, application-written MCP source snapshot.
+            dependency = app.dependency_overrides[get_session]()
+            session = await anext(dependency)
+            try:
+                change_set = await session.get(AIChangeSet, UUID(response.json()["id"]))
+                change_set.source_snapshot = {
+                    **change_set.source_snapshot,
+                    "proposal_schema_version": "v6-flow-proposal-source-v1",
+                }
+                await session.commit()
+            finally:
+                await dependency.aclose()
         return str(response.json()["id"])
 
-    manual_id = await create_proposal(0, source_ref="import://tests/manual/0")
+    manual_id = await create_proposal(0, source_ref="mcp://tests/spoofed-origin/0")
     original_ids = {await create_proposal(index) for index in range(1, 4)}
     first = await flow_spec_client.get(
         f"/api/v1/projects/{project_id}/flow-specs/change-sets/mcp-proposals",
@@ -512,8 +526,8 @@ async def test_mcp_proposal_cursor_does_not_drop_existing_items_after_insert(
     assert late_maintenance_id not in unified_ids
     origins = {item["id"]: item["proposal_origin"] for item in unified_items}
     assert origins[manual_id] == "import"
-    assert origins[repair_id] == "repair"
-    assert origins[maintenance_id] == "maintenance"
+    assert origins[repair_id] == "import"
+    assert origins[maintenance_id] == "import"
     assert origins[portable_id] == "import"
     assert all(origins[item_id] == "mcp" for item_id in original_ids | {late_mcp_id})
 

@@ -12,9 +12,9 @@ from app.domain.flow_spec import (
 )
 from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.domain.maintenance_proposals import FlowSpecMaintenanceProvenance
+from app.domain.proposal_provenance import FlowSpecProposalOrigin as FlowSpecProposalOrigin
 from app.engine.contracts import WorkflowDefinition
-
-FlowSpecProposalOrigin = Literal["mcp", "repair", "maintenance", "import"]
 
 
 class FlowSpecValidateRequest(BaseModel):
@@ -111,6 +111,7 @@ class FlowSpecVisualProposalResponse(BaseModel):
     service_mappings: dict[str, UUID]
     operation_mappings: dict[str, UUID]
     operation_version_mappings: dict[str, int]
+    maintenance_provenance: FlowSpecMaintenanceProvenance | None = None
 
 
 class FlowSpecReviewRequest(BaseModel):

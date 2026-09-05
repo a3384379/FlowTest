@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -56,6 +56,60 @@ const proposedDefinition = {
 }
 
 describe('FlowProposalReviewDialog', () => {
+  it.each([false, true])(
+    'shows trusted maintenance evidence (complete=%s) without enabling automatic apply',
+    async (complete) => {
+      const visual = visualProposal('pending')
+      visual.integration_plan = null
+      visual.maintenance_provenance = {
+        schema_version: 'flowtest-maintenance-provenance-v1',
+        context_id: 'context-maintenance',
+        before_context_revision_id: 'context-before',
+        before_context_fingerprint: 'a'.repeat(64),
+        context_revision_id: 'context-after',
+        context_fingerprint: 'b'.repeat(64),
+        workflow_id: workflow.id,
+        expected_target_revision: 3,
+        impact_run_id: null,
+        patch_kind: 'data',
+        rationale: '根据已确认的事件变更维护数据',
+        evidence_refs: ['knowledge://after/operation'],
+        analysis_complete: complete,
+        diagnostic_codes: ['CONTEXT_CHANGE_UNMAPPED'],
+        oracle_weakening: !complete,
+        requires_human_review: true,
+        automatic_apply_allowed: false,
+      }
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/flow-specs/change-sets/proposals`, () =>
+          HttpResponse.json({ items: [summary('pending')], next_cursor: null, page_size: 100 }),
+        ),
+        http.get(
+          `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
+          () => HttpResponse.json(visual),
+        ),
+      )
+      renderDialog(() => undefined)
+      await waitFor(() => expect(screen.getByText('维护提案来源与影响证据')).toBeVisible())
+      expect(screen.getByText('根据已确认的事件变更维护数据')).toBeVisible()
+      expect(screen.getByText('context-before')).toBeVisible()
+      expect(screen.getByText('context-after')).toBeVisible()
+      expect(screen.getByText('CONTEXT_CHANGE_UNMAPPED')).toBeVisible()
+      expect(screen.getByText('knowledge://after/operation')).toBeVisible()
+      if (complete) {
+        expect(screen.getByText('完整')).toBeVisible()
+        expect(
+          screen.queryByText('此次变更包含已显式确认的断言调整，请复核是否弱化测试'),
+        ).not.toBeInTheDocument()
+      } else {
+        expect(
+          screen.getByText('此次变更包含已显式确认的断言调整，请复核是否弱化测试'),
+        ).toBeVisible()
+      }
+      expect(screen.getByRole('button', { name: /应用/ })).toBeDisabled()
+    },
+  )
+
   it('reuses proposal mode for evidence review and gates apply behind human acceptance', async () => {
     let reviewStatus: 'pending' | 'accepted' = 'pending'
     let applyCalls = 0
@@ -445,36 +499,38 @@ function renderDialog(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <FlowProposalReviewDialog
-          open
-          projectId={project.id}
-          initialProposalId={initialProposalId}
-          resources={{
-            environments: [
-              { ...environment, classification: 'sandbox' },
-              {
-                ...environment,
-                id: '00000000-0000-4000-8000-000000005599',
-                name: '生产环境',
-                classification: 'production',
-              },
-            ],
-            apis: [apiDefinition],
-            artifacts: [],
-            workflows: [workflow],
-            credentials: [],
-            graphqlSchemas: [],
-            grpcDescriptors: [],
-            eventSources: [],
-          }}
-          onClose={() => undefined}
-          onApplied={onApplied}
-          onOpenRawMapping={onOpenRawMapping}
-        />
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <FlowProposalReviewDialog
+            open
+            projectId={project.id}
+            initialProposalId={initialProposalId}
+            resources={{
+              environments: [
+                { ...environment, classification: 'sandbox' },
+                {
+                  ...environment,
+                  id: '00000000-0000-4000-8000-000000005599',
+                  name: '生产环境',
+                  classification: 'production',
+                },
+              ],
+              apis: [apiDefinition],
+              artifacts: [],
+              workflows: [workflow],
+              credentials: [],
+              graphqlSchemas: [],
+              grpcDescriptors: [],
+              eventSources: [],
+            }}
+            onClose={() => undefined}
+            onApplied={onApplied}
+            onOpenRawMapping={onOpenRawMapping}
+          />
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }
 

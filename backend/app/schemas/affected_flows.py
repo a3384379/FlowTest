@@ -42,6 +42,7 @@ class AffectedFlowDiagnostic(BaseModel):
         "IMPACT_CHANGE_UNMAPPED",
         "CONTEXT_CHANGE_UNMAPPED",
         "KNOWLEDGE_IDENTITY_AMBIGUOUS",
+        "ANALYSIS_BUDGET_EXCEEDED",
     ]
     workflow_id: UUID | None = None
     node_id: str | None = None
@@ -52,6 +53,8 @@ class AffectedFlowsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flowtest-affected-flows-v1"] = "flowtest-affected-flows-v1"
+    analysis_scope: Literal["project", "workflow"] = "project"
+    target_workflow_id: UUID | None = None
     project_id: UUID
     context_id: UUID
     before_revision_id: UUID

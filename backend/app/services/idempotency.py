@@ -47,6 +47,7 @@ class IdempotencyService:
         operation: str,
         request_payload: object,
         action: Callable[[], Awaitable[BaseModel]],
+        atomic_action: bool = False,
     ) -> dict[str, Any]:
         if key is None:
             return (await action()).model_dump(mode="json")
@@ -61,15 +62,20 @@ class IdempotencyService:
         )
         if cached is not None:
             return cached
+        record_id = record.id
         try:
             response = (await action()).model_dump(mode="json")
+            record.status = "completed"
+            record.response_status = 200
+            record.response_body = response
+            await self._session.commit()
         except Exception:
-            await self._abandon(record.id)
+            await self._session.rollback()
+            # Legacy actions can commit or send requests before failing. Their outcome
+            # is uncertain, so retaining the claim prevents automatic effect replay.
+            if atomic_action:
+                await self._abandon(record_id)
             raise
-        record.status = "completed"
-        record.response_status = 200
-        record.response_body = response
-        await self._session.commit()
         return response
 
     async def _claim(
@@ -157,7 +163,7 @@ class IdempotencyService:
 
     async def _abandon(self, record_id: UUID) -> None:
         record = await self._session.get(IdempotencyRecord, record_id)
-        if record is not None:
+        if record is not None and record.status == "pending":
             await self._session.delete(record)
             await self._session.commit()
 

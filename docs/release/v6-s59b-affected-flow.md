@@ -19,6 +19,11 @@
 - Backend：Ruff Format / Ruff Check / Mypy 全部通过；1071 passed / 4 skipped，覆盖率 91.01%。
 - 新增领域与 API 回归连同 Context Inspector / Change Regression 定向回归：49 项全部通过。
 - Frontend：Format / Lint / Build 全部通过；230 项测试通过，分支覆盖率 80.01%。
-- PR、远程门禁、Compose Playwright 与合并尚未完成，不提前标记成功。
+- PR #84 已普通 Squash 合并；最终 PR Head 的 Backend、Standalone Windows、Upgrade、Security、
+  Compose 与 Required Gate 均成功。合并后 main 同六项工作流全部成功，Controller 为 `33960652153`。
+- 最终复审 P0=0、P1=0，接受 2 项 P2：明确 Kafka `consumes` 关系缺失、请求级总分析预算缺失。
+  接受和关闭线程不代表修复；两项在 S59C 分支收口并增加回归。
+- PR 最终 Head：`bd986ba9e3a9ac92b76e733099f328364613ce5d`；Merge / S59C 基线：
+  `6264bb83fe6701fdc4599192215280d2ed1a50b0`。合并后证据见 PR #84 评论 `5551278331`。
 
 实机测试（含公司 Windows）按用户要求不再要求；Windows 自动化 Bundle、CI 和 Compose 保留。

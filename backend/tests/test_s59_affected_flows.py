@@ -143,6 +143,7 @@ def test_fingerprint_contract_is_validated_and_deduplicated() -> None:
         ("contains", False),
         ("uses_repository", False),
         ("maps_entity", False),
+        ("consumes", False),
         ("may_use_repository", True),
         ("may_map_entity", True),
         ("custom_link", True),
@@ -170,6 +171,18 @@ def test_removed_edges_and_nodes_remain_impact_evidence() -> None:
         item.revision_side == "before" and "entity" in item.changed_node_ids
         for item in result.impacts
     )
+
+
+@pytest.mark.parametrize("relation", ["may_consume", "unknown_link", "consumes"])
+@pytest.mark.parametrize("removed", [False, True])
+def test_edge_only_changes_preserve_relation_strength(relation: str, removed: bool) -> None:
+    nodes = [_operation(), _node("event")]
+    empty, linked = _graph(nodes, []), _graph(nodes, [("op", "event", relation)])
+    before, after = (linked, empty) if removed else (empty, linked)
+    impacts = affected_knowledge_operations(before, after).impacts
+    assert impacts
+    assert all(item.heuristic == (relation != "consumes") for item in impacts)
+    assert all(item.revision_side == ("before" if removed else "after") for item in impacts)
 
 
 def test_paths_are_not_spliced_across_revisions() -> None:

@@ -858,6 +858,26 @@ export type IntegrationPlanCompilation = {
   diff: Array<{ path: string; before: unknown; after: unknown }>
 }
 
+export type FlowSpecMaintenanceProvenance = {
+  schema_version: 'flowtest-maintenance-provenance-v1'
+  context_id: string
+  before_context_revision_id: string
+  before_context_fingerprint: string
+  context_revision_id: string
+  context_fingerprint: string
+  workflow_id: string
+  expected_target_revision: number
+  impact_run_id: string | null
+  patch_kind: 'binding' | 'data' | 'cleanup' | 'contract_drift' | 'oracle'
+  rationale: string
+  evidence_refs: string[]
+  analysis_complete: boolean
+  diagnostic_codes: string[]
+  oracle_weakening: boolean
+  requires_human_review: true
+  automatic_apply_allowed: false
+}
+
 export type FlowSpecVisualProposal = {
   schema_version: 'flowtest-visual-flow-proposal-v1'
   proposal: FlowSpecChangeSetDetail
@@ -868,6 +888,7 @@ export type FlowSpecVisualProposal = {
   service_mappings: Record<string, string>
   operation_mappings: Record<string, string>
   operation_version_mappings: Record<string, number>
+  maintenance_provenance?: FlowSpecMaintenanceProvenance | null
 }
 
 export type FlowSpecChangeSetPage = {

@@ -171,6 +171,7 @@ class FailureRepairService:
             project_id=prepared.project_id,
             payload=prepared.import_request,
             repair_provenance=prepared.provenance,
+            commit=False,
         )
 
     async def _execution(self, project_id: UUID, execution_id: UUID) -> WorkflowExecution:

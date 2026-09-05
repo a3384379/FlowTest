@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from app.domain.failure_triage import FailureSignal, FailureTriageResult, triage_failures
-from app.domain.flow_spec import FlowSpec, FlowSpecNode
+from app.domain.flow_spec import FlowSpec, FlowSpecEdge, FlowSpecNode
 from app.domain.flow_spec_v2 import FlowSpecV2
 
 RepairKind = Literal["binding", "data", "cleanup", "contract_drift", "oracle"]
@@ -92,6 +92,22 @@ def validate_repair_scope(
         raise RepairScopeError("Product Defect 不允许生成测试修复 Proposal")
     if not policy.proposal_allowed or kind not in policy.allowed_kinds:
         raise RepairScopeError("失败分类不允许该类型的修复 Proposal")
+    return validate_flow_patch_scope(
+        before=before,
+        after=after,
+        kind=kind,
+        acknowledge_oracle_weakening=acknowledge_oracle_weakening,
+    )
+
+
+def validate_flow_patch_scope(
+    *,
+    before: FlowSpec | FlowSpecV2,
+    after: FlowSpec | FlowSpecV2,
+    kind: RepairKind,
+    acknowledge_oracle_weakening: bool,
+) -> RepairScopeResult:
+    """Apply the same field whitelist after the caller's independent policy checks."""
     if type(before) is not type(after):
         raise RepairScopeError("修复不能改变 FlowSpec Schema Version")
     if before == after:
@@ -113,7 +129,7 @@ def _scoped_candidate(
     if kind == "binding":
         return before.model_copy(
             update={
-                "edges": after.edges,
+                "edges": _replace_edge_mappings(before, after),
                 "bindings": after.bindings,
                 "nodes": _replace_capability_bindings(before, after),
             }
@@ -143,6 +159,18 @@ def _scoped_candidate(
             "nodes": _replace_assert_nodes(before, after),
         }
     ), True
+
+
+def _replace_edge_mappings(
+    before: FlowSpec | FlowSpecV2, after: FlowSpec | FlowSpecV2
+) -> list[FlowSpecEdge]:
+    after_by_id = {edge.id: edge for edge in after.edges}
+    return [
+        edge.model_copy(update={"mappings": replacement.mappings})
+        if (replacement := after_by_id.get(edge.id)) is not None
+        else edge
+        for edge in before.edges
+    ]
 
 
 def _replace_assert_nodes(
