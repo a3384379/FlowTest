@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.context_diff import ProviderRevision, diff_context_revisions
 from app.domain.test_contexts import (
     ContextRevisionSnapshot,
     EvidenceProviderType,
@@ -29,6 +30,7 @@ from app.schemas.context_inspector import (
     ContextInspectorProposalSummary,
     ContextInspectorProviderSummary,
     ContextInspectorSummary,
+    ContextRevisionDiffResponse,
 )
 from app.services.projects import ProjectService
 
@@ -37,6 +39,54 @@ class ContextInspectorService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._projects = ProjectService(session)
+
+    async def compare_revisions(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        context_id: UUID,
+        before_revision: int,
+        after_revision: int,
+    ) -> ContextRevisionDiffResponse:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        revisions = (
+            await self._session.scalars(
+                select(TestContextRevision)
+                .join(TestContext, TestContext.id == TestContextRevision.context_id)
+                .where(
+                    TestContext.project_id == project_id,
+                    TestContext.id == context_id,
+                    TestContextRevision.revision.in_([before_revision, after_revision]),
+                )
+            )
+        ).all()
+        by_number = {revision.revision: revision for revision in revisions}
+        if before_revision not in by_number or after_revision not in by_number:
+            raise AppError(
+                code="TEST_CONTEXT_REVISION_NOT_FOUND",
+                message="测试上下文版本不存在",
+                status_code=404,
+            )
+        before, after = by_number[before_revision], by_number[after_revision]
+        before_evidence = await self._evidence_items(before.id)
+        after_evidence = (
+            before_evidence if before.id == after.id else await self._evidence_items(after.id)
+        )
+        return ContextRevisionDiffResponse(
+            project_id=project_id,
+            context_id=context_id,
+            before_revision=before_revision,
+            after_revision=after_revision,
+            before_revision_id=before.id,
+            after_revision_id=after.id,
+            difference=diff_context_revisions(
+                _revision_snapshot(before),
+                _revision_snapshot(after),
+                before_providers=_provider_revisions(before_evidence),
+                after_providers=_provider_revisions(after_evidence),
+            ),
+        )
 
     async def list_contexts(
         self,
@@ -309,6 +359,19 @@ def _revision_snapshot(revision: TestContextRevision) -> ContextRevisionSnapshot
             "evidence_fingerprints": revision.evidence_fingerprints,
         }
     )
+
+
+def _provider_revisions(evidence: list[ContextEvidenceItem]) -> list[ProviderRevision]:
+    return [
+        ProviderRevision(
+            source_type=EvidenceProviderType(item.source_type),
+            provider_name=item.provider_name,
+            provider_version=item.provider_version,
+            source_ref=item.source_ref,
+            source_revision=item.source_revision,
+        )
+        for item in evidence
+    ]
 
 
 def _provider_summaries(

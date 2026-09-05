@@ -6,10 +6,32 @@ from fastapi import APIRouter, Query
 
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.schemas.common import Page
-from app.schemas.context_inspector import ContextInspectorDetail, ContextInspectorSummary
+from app.schemas.context_inspector import (
+    ContextInspectorDetail,
+    ContextInspectorSummary,
+    ContextRevisionDiffResponse,
+)
 from app.services.context_inspector import ContextInspectorService
 
 router = APIRouter(prefix="/projects/{project_id}/contexts")
+
+
+@router.get("/{context_id}/diff", response_model=ContextRevisionDiffResponse)
+async def compare_context_revisions(
+    project_id: UUID,
+    context_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    before_revision: int = Query(ge=1),
+    after_revision: int = Query(ge=1),
+) -> ContextRevisionDiffResponse:
+    return await ContextInspectorService(session).compare_revisions(
+        actor=current_user,
+        project_id=project_id,
+        context_id=context_id,
+        before_revision=before_revision,
+        after_revision=after_revision,
+    )
 
 
 @router.get("", response_model=Page[ContextInspectorSummary])

@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-09-01（Asia/Shanghai）
+最后更新：2026-09-05（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S56、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
 已由 PR #67 普通 Squash Merge；GitHub Codex 最新复审 P0/P1 为 0，普通 PR CI、显式 RC 重门禁及合并后
@@ -113,7 +113,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - Patch Correctness 已闭环，后续 Unified Proposal Discovery 从合并后的 Main 创建独立分支。完整记录见
   [S59.0 Patch Correctness](release/v6-s59-0-patch-correctness.md)。
 
-## 已完成实现与本地集中验收：V6.2 S59.0 Unified Proposal Discovery
+## 已完成实现并合并：V6.2 S59.0 Unified Proposal Discovery
 
 - 新增统一 Proposal 游标接口，结构化返回 `mcp`、`repair`、`maintenance`、`import` 来源；旧 MCP
   接口继续只返回 `mcp://`，保持兼容。
@@ -121,8 +121,19 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   后续 Maintenance Proposal 复用同一 AIChangeSet、Review、Apply 与 Preview 生命周期。
 - 后端 Format/Ruff/mypy 全绿，Pytest `1019 passed, 4 skipped`、Coverage `90.94%`；前端
   Format/ESLint/Build 全绿，Vitest `230 passed`、Branch Coverage `80.01%`。
-- 当前仅待单次远程复审、Required Gate 与普通合并；完整设计见
+- PR #82 已普通合并，PR 最终门禁与合并后 main 七项工作流均成功。复审 P0=0、P1=0，接受一项
+  来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
+
+## 已完成实现与本地验收：V6.2 S59A Context / Knowledge Diff
+
+- 从 S59.0 全绿 main 创建独立分支，已实现版本化纯领域差异与 Context Inspector 历史版本只读接口。
+- 覆盖 Evidence、Provider/来源版本、Completeness、Conflict、State Knowledge Node/Edge/State Candidate；
+  Diff 只报告结构化差异，不复制源码、原始行或节点值，也不授予自动 Patch 权限。
+- 顺序为 S59A Diff → S59B Affected Flow → S59C Maintenance Proposal → S59D 既有 Change Regression
+  集成。阶段证据见 [S59A Context / Knowledge Diff](release/v6-s59a-context-knowledge-diff.md)。
+- 本地后端格式、Lint、类型检查通过；全量测试 1032 passed / 4 skipped，覆盖率 90.95%。
+  当前待 PR 复审与远程门禁，不代表整个 S59 已完成。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 
