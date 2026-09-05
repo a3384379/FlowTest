@@ -30,6 +30,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cp vendor.sum go.sum; \
     go get google.golang.org/grpc@v1.83.1; \
     go mod vendor; \
+    grep -Fx '# google.golang.org/grpc v1.83.1' vendor/modules.txt; \
     mv go.mod vendor.mod; \
     mv go.sum vendor.sum; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
@@ -40,7 +41,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         ./scripts/build/binary; \
     install -D build/docker /out/docker; \
     go version -m /out/docker | grep -F 'go1.26.6'; \
-    go version -m /out/docker | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
     /out/docker --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS dockerd-builder

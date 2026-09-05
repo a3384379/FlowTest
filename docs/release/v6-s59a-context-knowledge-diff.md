@@ -35,6 +35,14 @@ S59A 首轮自动复审完成且无行内发现。Security CI 在 performance �
 
 - 保留 k6 2.2.0、Docker/Moby 29.7.2、containerd 2.3.3 及 Go 1.26.6 基线。
 - 在相关 Go 构建阶段统一选取 gRPC 1.83.1；Docker CLI 保持其 vendor.mod/vendor.sum 布局。
-- 增加 k6、docker、dockerd、containerd、ctr 二进制内嵌模块版本检查；不新增漏洞忽略项、不降低扫描级别。
+- 增加 k6、dockerd、containerd、ctr 二进制内嵌模块版本检查；Docker CLI 采用 GOPATH 构建，
+  校验实际参与编译的 `vendor/modules.txt` 中精确 gRPC 版本。不新增漏洞忽略项、不降低扫描级别。
 - 本地定向构建在 GitHub/Go 模块下载或校验阶段遇到 TLS EOF，不能记为编译通过；远程构建和扫描仍待验证。
 - Python/前端业务代码未因此修改，不重复运行已通过的本地全量测试。
+
+增量复审已完成且无发现。第二轮远程构建证明 Docker CLI 已成功编译，但原先对其执行的
+`go version -m` 模块断言不适用于 GOPATH 构建，导致 Security/Compose 失败；已改为上述 Vendor
+精确版本断言，Dockerfile 静态检查通过。本地构建仍在 GitHub 下载阶段遭遇 TLS EOF。
+
+同轮 Backend CI 的既有 `test_running_workflow_can_be_cancelled` 出现 SQLite `database is locked`；
+本地连续三次定向测试均通过，未修改取消流程或放宽断言。后续候选仍须通过远程后端门禁。
