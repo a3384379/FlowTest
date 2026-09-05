@@ -16,6 +16,7 @@ from app.models.access import ProjectMember, User
 from app.models.ai import AIChangeSet
 from app.models.change_regression import ChangeRegressionRun
 from app.models.governance import IdempotencyRecord
+from app.models.tasking import TestPlanItem as PlanItem
 from app.models.tasking import TestPlanRun as PlanRun
 from app.models.tasking import TestPlanRunItem as PlanRunItem
 from app.models.test_contexts import TestContext as ContextModel
@@ -279,6 +280,78 @@ async def test_release_requires_real_pinned_execution_and_preserves_frozen_histo
     assert repeated.status_code == 200
     assert repeated.json()["evidence"] == released.json()["evidence"]
     assert repeated.json()["release_decision_id"] == released.json()["release_decision_id"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_plan_version_update_completes_apply_publish_review_path(
+    failure_repair_api: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "feature_impact_engine_enabled", True)
+    fixture = failure_repair_api
+    root, _, run_data = await _bound(fixture)
+    async with fixture["sessions"]() as session:
+        workflow = await session.get(Workflow, fixture["workflow_id"])
+        workflow.draft_definition = {**workflow.draft_definition, "variables": {"revision": "new"}}
+        workflow.draft_revision += 1
+        item = await session.scalar(
+            select(PlanItem).where(PlanItem.test_plan_id == UUID(run_data["test_plan_id"]))
+        )
+        item.runtime_variables = {"retained": "test-value"}
+        item.max_retries = 2
+        await session.commit()
+    published = await fixture["client"].post(
+        f"/api/v1/projects/{fixture['project_id']}/workflows/{fixture['workflow_id']}/versions",
+        headers=fixture["headers"],
+    )
+    assert published.status_code == 200, published.text
+    from app.services.regression_maintenance import RegressionMaintenanceService
+
+    async def fail_save(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("injected plan evidence failure")
+
+    request = {
+        "workflow_id": str(fixture["workflow_id"]),
+        "workflow_version": published.json()["version"],
+        "environment_id": str(fixture["environment_id"]),
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(RegressionMaintenanceService, "_save", fail_save)
+        failed = await fixture["client"].post(
+            f"{root}/context-maintenance/plan-workflows", headers=fixture["headers"], json=request
+        )
+    assert failed.status_code == 500
+    async with fixture["sessions"]() as session:
+        item = await session.scalar(
+            select(PlanItem).where(PlanItem.test_plan_id == UUID(run_data["test_plan_id"]))
+        )
+        assert item.workflow_version == 1
+    updated = await fixture["client"].post(
+        f"{root}/context-maintenance/plan-workflows",
+        headers=fixture["headers"],
+        json={
+            "workflow_id": str(fixture["workflow_id"]),
+            "workflow_version": published.json()["version"],
+            "environment_id": str(fixture["environment_id"]),
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    async with fixture["sessions"]() as session:
+        item = await session.scalar(
+            select(PlanItem).where(PlanItem.test_plan_id == UUID(run_data["test_plan_id"]))
+        )
+        assert item.runtime_variables == {"retained": "test-value"}
+        assert item.max_retries == 2
+    reviewed = await fixture["client"].post(
+        f"{root}/context-maintenance/review",
+        headers=fixture["headers"],
+        json={"note": "已人工检查全部差异和流程证据", "acknowledge_incomplete_analysis": True},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert (
+        reviewed.json()["context_maintenance"]["required_workflows"][0]["workflow_version"]
+        == published.json()["version"]
+    )
 
 
 @pytest.mark.asyncio

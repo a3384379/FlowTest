@@ -80,6 +80,16 @@ function root(projectId: string, runId: string) {
   return `/projects/${projectId}/change-regressions/${runId}/context-maintenance`
 }
 
+export async function updateRegressionPlanWorkflow(
+  projectId: string,
+  runId: string,
+  input: { workflow_id: string; workflow_version: number; environment_id: string },
+) {
+  return (
+    await apiClient.post<ChangeRegressionRun>(`${root(projectId, runId)}/plan-workflows`, input)
+  ).data
+}
+
 export async function bindRegressionContext(
   projectId: string,
   runId: string,

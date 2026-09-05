@@ -145,6 +145,10 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   发布并进入固定版本 TestPlan。Sandbox Preview 不计正式执行覆盖，Release 只使用固定版本真实成功执行。
 - 当前已完成首批实现和定向回归；尚待集中门禁、Compose、PR 复审与 Required Gate，不标记完成。
   设计与退出条件见 [S59D 集成](release/v6-s59d-change-regression-integration.md)。
+- PR #86 已建立。Compose 发现的固定计划版本更新入口已补齐，复用原 TestPlan Service 且原子记录证据；
+  最终本地集中验收：后端 1132 passed / 4 skipped、覆盖率 91.06%；前端 238 项、分支覆盖率 80.30%。
+  真实 Preview Main/Cleanup 和正式 TestPlan v2 均 passed；未映射 Git 变更仍被旧 Release Gate 阻断，
+  不以维护审核豁免原门禁。等待最终候选复审和远程 Required Gate。
 
 ## 已合并并完成 main 门禁：V6.2 S59C Maintenance Proposal
 

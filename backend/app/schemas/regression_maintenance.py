@@ -30,6 +30,14 @@ class RegressionProposalLink(BaseModel):
     change_set_id: UUID
 
 
+class RegressionPlanWorkflow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: UUID
+    workflow_version: int = Field(ge=1)
+    environment_id: UUID
+
+
 class RegressionMaintenanceReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

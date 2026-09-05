@@ -22,6 +22,9 @@ Context-only 创建不在本阶段：仍需真实 Git / Schema 来源，不伪�
 - `POST .../context-maintenance/proposals`：显式关联已存在提案，独立用户动作。校验服务端来源标识、项目、
   Impact、Context 前后 ID/指纹与受影响 Workflow；不通过 URI 猜测身份。重复关联不新增 Stage。
 - `POST .../context-maintenance/review`：人工说明和未覆盖项显式确认；不自动 Accept / Apply / Publish。
+- `POST .../context-maintenance/plan-workflows`：显式加入/更新已发布的受影响 Workflow 固定版本；
+  校验目标属于本次影响证据且版本匹配当前草稿，复用 TestPlan Service，保留已有运行参数与重试配置。
+  计划更新、维护审核失效、Stage 与 Audit 一次提交，失败全部回滚。不发布或执行任何流程。
 
 前端扩展原 Change Regression 页面。精确非启发式证据可进入人工 Patch 表单，后端仍执行完整复核。
 审核链接打开原 Flow Proposal 窗口，不复制 Review/Preview/Apply 生命周期。前端不提交任何 CI 成功标志。
@@ -58,3 +61,11 @@ Preview、仅 Apply 草稿、仅声称计划 passed 均不算覆盖。
 - 前端集中门禁：Format / ESLint / TypeScript / Build 通过，237 项通过，分支覆盖率 80.28%。
 - 随后仅新增 Viewer 授权和 v3/v4 操作选择契约断言；15 项 S59D 定向回归通过，生产代码未变化。
 - Compose 真实浏览器验收进行中；PR 复审与远程 Required Gate 尚未完成。
+
+## Compose 发现的用户路径修复
+
+- 真实浏览器确认：仅 Apply 草稿会被审核门禁正确阻断。但旧系统没有通用的计划版本更新入口，
+  因此补充上述显式 plan-workflows 操作，复用已有 TestPlan 校验和持久化逻辑，不放宽门禁。
+- 新增失败回归覆盖入口缺失、更新与证据提交原子性、参数保留，以及前端独立表单字段 ID。
+- 修复后后端集中门禁全绿：1132 passed / 4 skipped，覆盖率 91.06%；前端 238 项通过，
+  分支覆盖率 80.30%，格式、Lint、类型和 Build 全绿。S59D 定向 16 项及相关旧链路/Tasking API 验证通过。

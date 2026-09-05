@@ -95,6 +95,37 @@ function mount(maintenance: RegressionMaintenance | null = snapshot, status = 'r
 }
 
 describe('S59D existing regression integration', () => {
+  it('explicitly updates a published workflow version in the existing plan without executing it', async () => {
+    const user = userEvent.setup()
+    let updated: unknown
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([{ id: 'environment', name: '隔离测试环境' }]),
+      ),
+      http.post(`${root}/plan-workflows`, async ({ request }) => {
+        updated = await request.json()
+        return HttpResponse.json({})
+      }),
+    )
+    mount()
+    await user.click(screen.getByRole('button', { name: '更新受影响流程的固定计划版本' }))
+    await user.click(screen.getByLabelText('加入计划的受影响流程'))
+    await user.click(screen.getByText('flow', { selector: '.ant-select-item-option-content' }))
+    await user.type(screen.getByLabelText('已发布 Workflow 版本'), '2')
+    await user.click(screen.getByLabelText('正式 TestPlan 运行环境'))
+    await user.click(
+      await screen.findByText('隔离测试环境', { selector: '.ant-select-item-option-content' }),
+    )
+    await user.click(screen.getByRole('button', { name: '显式加入 / 更新固定版本' }))
+    await waitFor(() =>
+      expect(updated).toEqual({
+        workflow_id: 'flow',
+        workflow_version: 2,
+        environment_id: 'environment',
+      }),
+    )
+  })
+
   it('binds immutable revisions without rewriting a historical run automatically', async () => {
     const user = userEvent.setup()
     let bound: unknown

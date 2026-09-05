@@ -17,6 +17,7 @@ from app.domain.proposal_provenance import proposal_origin
 from app.models.access import User
 from app.models.ai import AIChangeSet
 from app.models.change_regression import ChangeRegressionRun, ChangeRegressionStage
+from app.models.tasking import TestPlan, TestPlanItem
 from app.repositories.change_regression import ChangeRegressionBundle, ChangeRegressionRepository
 from app.schemas.maintenance_proposals import MaintenanceProposalCreate
 from app.schemas.regression_maintenance import (
@@ -24,13 +25,16 @@ from app.schemas.regression_maintenance import (
     RegressionMaintenanceReview,
     RegressionMaintenanceReviewEvidence,
     RegressionMaintenanceSnapshot,
+    RegressionPlanWorkflow,
     RegressionProposalEvidence,
     maintenance_snapshot,
 )
+from app.schemas.tasking import TestPlanItemInput
 from app.services.audit import AuditService
 from app.services.context_inspector import ContextInspectorService
 from app.services.projects import ProjectService
 from app.services.regression_maintenance_coverage import RegressionMaintenanceCoverage
+from app.services.tasking import TestPlanService
 from app.services.test_contexts import TestContextService
 
 if TYPE_CHECKING:
@@ -41,6 +45,47 @@ class RegressionMaintenanceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repository = ChangeRegressionRepository(session)
+
+    async def update_plan_workflow(
+        self, *, actor: User, project_id: UUID, run_id: UUID, payload: RegressionPlanWorkflow
+    ) -> ChangeRegressionBundle:
+        run = await self._editable(actor, project_id, run_id)
+        snapshot = _required_snapshot(run)
+        if payload.workflow_id not in {
+            item.workflow_id for item in snapshot.affected.affected_workflows
+        }:
+            raise _error("TARGET_MISMATCH", "只能加入当前证据中受影响的流程")
+        plan = await self._session.scalar(
+            select(TestPlan)
+            .where(TestPlan.id == run.test_plan_id, TestPlan.project_id == project_id)
+            .with_for_update()
+        )
+        if plan is None:
+            raise _error("PLAN_MISSING", "回归计划不存在")
+        await RegressionMaintenanceCoverage(self._session)._published_target(
+            project_id, payload.workflow_id, {(payload.workflow_id, payload.workflow_version)}
+        )
+        existing = await self._session.scalar(
+            select(TestPlanItem).where(
+                TestPlanItem.test_plan_id == plan.id,
+                TestPlanItem.target_type == "workflow",
+                TestPlanItem.target_id == payload.workflow_id,
+            )
+        )
+        item = TestPlanItemInput(
+            workflow_id=payload.workflow_id,
+            workflow_version=payload.workflow_version,
+            environment_id=payload.environment_id,
+            max_retries=existing.max_retries if existing else 0,
+            runtime_variables=existing.runtime_variables if existing else {},
+            runtime_headers=existing.runtime_headers if existing else {},
+        )
+        service = TestPlanService(self._session)
+        action = service.replace_item_version if existing else service.add_item
+        await action(actor=actor, project_id=project_id, plan_id=plan.id, item=item, commit=False)
+        snapshot.review = None
+        snapshot.required_workflows = []
+        return await self._save(run, actor, snapshot, "plan_workflow_updated")
 
     async def prepare_proposal(
         self,

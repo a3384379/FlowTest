@@ -17,6 +17,7 @@ import { apiErrorMessage } from '../../lib/api'
 import type { ChangeRegressionRun } from './change-regression-service'
 import { listContexts } from '../context-inspector/context-inspector-service'
 import { exportFlowSpec } from '../workflows/flow-spec-service'
+import RegressionPlanWorkflowForm from './RegressionPlanWorkflowForm'
 import {
   bindRegressionContext,
   createRegressionMaintenance,
@@ -72,6 +73,7 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
         )}
         {bindingOpen && (
           <Form<ContextBinding>
+            name="maintenance-context"
             layout="vertical"
             onFinish={(input) =>
               perform(() => bindRegressionContext(run.project_id, run.id, input))
@@ -107,7 +109,14 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
             {editable && (
               <>
                 <MaintenancePatch run={run} snapshot={snapshot} busy={busy} perform={perform} />
+                <RegressionPlanWorkflowForm
+                  run={run}
+                  snapshot={snapshot}
+                  busy={busy}
+                  perform={perform}
+                />
                 <Form<{ change_set_id: string }>
+                  name="maintenance-link"
                   layout="inline"
                   onFinish={(input) =>
                     perform(() =>
@@ -127,6 +136,7 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
                   </Button>
                 </Form>
                 <Form<{ note: string; acknowledge_incomplete_analysis: boolean }>
+                  name="maintenance-review"
                   layout="vertical"
                   initialValues={{ acknowledge_incomplete_analysis: false }}
                   onFinish={(input) =>
@@ -294,6 +304,7 @@ function MaintenancePatch({
   return (
     <Card size="small" title="创建受限维护提案（人工 Patch）">
       <Form
+        name="maintenance-patch"
         form={form}
         layout="vertical"
         initialValues={{ kind: 'data', acknowledge_oracle_weakening: false }}

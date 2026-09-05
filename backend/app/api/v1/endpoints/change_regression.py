@@ -25,6 +25,7 @@ from app.schemas.maintenance_proposals import MaintenanceProposalCreate
 from app.schemas.regression_maintenance import (
     RegressionContextBinding,
     RegressionMaintenanceReview,
+    RegressionPlanWorkflow,
     RegressionProposalLink,
     maintenance_snapshot,
 )
@@ -34,6 +35,24 @@ from app.services.regression_maintenance import RegressionMaintenanceService
 from app.services.tasking import ServiceTokenService
 
 router = APIRouter()
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance/plan-workflows",
+    response_model=ChangeRegressionRunResponse,
+)
+async def update_regression_maintenance_plan(
+    project_id: UUID,
+    run_id: UUID,
+    payload: RegressionPlanWorkflow,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    return _response(
+        await RegressionMaintenanceService(session).update_plan_workflow(
+            actor=current_user, project_id=project_id, run_id=run_id, payload=payload
+        )
+    )
 
 
 @router.post(
