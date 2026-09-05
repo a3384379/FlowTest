@@ -59,3 +59,8 @@ environment/runner 五个镜像扫描通过。daemon 扫描继续发现基础镜
   仅扩大现有 `apk upgrade` 的相关补丁包名单，不启动业务容器或修改持久卷。
 
 后续仍须以修复候选 Security/Compose/Required Gate 结果完成验收，不将已定位或已修改记为已通过。
+
+后续 daemon 扫描确认 Go 组件问题消失，但系统包 libblkid/libuuid 仍缺少 2.42.3-r0 补丁。
+为避免逐包遗漏，现将固定 Alpine 发行版内的 `apk upgrade` 改为覆盖全部已安装包，不切换发行版。
+临时容器完整升级成功，libblkid/libuuid 均达到 2.42.3-r0，libexpat/OpenSSH 补丁也保持有效。
+本地对固定 environment fixture 的提前扫描因漏洞库下载 EOF 未完成；其结论仍由远程扫描提供。

@@ -96,7 +96,7 @@ COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/con
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
 COPY --from=containerd-builder /src/containerd/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
 RUN set -eux; \
-    apk upgrade --no-cache libcrypto3 libssl3 openssl libexpat openssh-client-common openssh-client-default openssh-keygen; \
+    apk upgrade --no-cache; \
     rm -f \
         /usr/local/libexec/docker/cli-plugins/docker-buildx \
         /usr/local/libexec/docker/cli-plugins/docker-compose; \
