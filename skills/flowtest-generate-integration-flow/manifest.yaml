@@ -1,6 +1,6 @@
 schema_version: "flowtest-skill-manifest-v1"
 name: "flowtest-generate-integration-flow"
-version: "1.0.0-rc.1"
+version: "1.0.0-rc.2"
 minimum_mcp_version: "s55-sandbox-preview-v1"
 required_tools:
   - "flowtest.list_projects"
@@ -79,6 +79,13 @@ security_rules:
   - "never accept, apply, publish, or execute from this skill"
 evaluation:
   schema_version: "flowtest-v6-evaluation-v1"
-  annotations: "backend/tests/fixtures/v6_golden/evaluation-annotations.json"
-  baseline: "backend/tests/fixtures/v6_golden/evaluation-baseline.json"
+  annotations: "evals/annotations.json"
+  baseline: "evals/baseline.json"
   guide: "references/golden-evaluation.md"
+  runtime:
+    python: ">=3.13,<3.14"
+    entrypoint: "evals/evaluate.py"
+    requirements: "evals/requirements.txt"
+    source_map: "evals/source-map.json"
+    scope: "committed_annotations_only"
+    executes_backend_tests: false

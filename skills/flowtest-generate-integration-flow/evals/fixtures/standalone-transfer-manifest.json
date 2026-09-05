@@ -1,0 +1,9 @@
+{
+  "schema_version": "standalone-compact-transfer-v1",
+  "source_profile": "standalone",
+  "target_profile": "compact",
+  "source_schema_revision": "20260831_0051",
+  "target_schema_revision": "20260831_0051",
+  "data_classification": "tenant_business_data_with_encrypted_secrets",
+  "contract_note": "Golden shape only; row hashes and artifact inventory are produced per export."
+}

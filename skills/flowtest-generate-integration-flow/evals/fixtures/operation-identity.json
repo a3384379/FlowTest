@@ -1,0 +1,9 @@
+{
+  "api_definition_id": "00000000-0000-0000-0000-000000000021",
+  "api_version": 1,
+  "portable_operation_ref": "orders.create",
+  "service_key": "orders",
+  "method": "POST",
+  "normalized_path": "/api/orders",
+  "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+}

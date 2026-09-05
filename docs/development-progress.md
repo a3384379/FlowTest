@@ -134,7 +134,19 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
-## 开发中：V6.2 S59D Change Regression 集成
+## 开发中：V6.2 S60A 自包含 Skill Evaluation
+
+- 基线为 S59D PR #86 合并后全绿 main；分支 `codex/v6-s60a-self-contained-evaluation`。
+- S60 分为自包含评测包、实际工具适配、四个新 Skill 与行为验收；本 PR 仅处理评测包，不宣称四个
+  Skill 已完成，也不虚构 Repair/Maintenance MCP 工具。
+- 旗舰 Skill rc.2 内置标注、Baseline、Fixtures、评分模型、来源清单和 CLI；独立安装只依赖声明的
+  Python / Pydantic，不安装 FlowTest 后端。评分模型从唯一源生成，内容一致性测试防止漂移。
+- 明确标注聚合不等于真实环境重跑。S59D 仍有 1 项已接受未修复 P2，不在本 PR 混入业务修复。
+- 阶段设计与验收见 [S60A 自包含评测](release/v6-s60a-self-contained-evaluation.md)。
+- 本地集中验收全绿：后端 1154 passed / 4 skipped、覆盖率 91.07%；前端 238 passed、
+  分支覆盖率 80.30%。无后端安装的独立环境验证通过；待 PR 复审与远程 Required Gate。
+
+## 已合并并完成 main 门禁：V6.2 S59D Change Regression 集成
 
 - 基线为 S59C PR #85 合并后全绿 main；分支 `codex/v6-s59d-change-regression-integration`。
 - 复用现有 Run 的 JSON、Stage、Audit、TestPlan 和 Release Gate；增加强类型 v4 Context 维护子快照，
@@ -143,12 +155,13 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   已有提案按可信 Provenance、项目、Impact、Context 修订/指纹与 Workflow 显式关联。
 - 人工确认不改变分析完整性、不豁免语义缺口；维护提案必须已拒绝或已接受并 Apply 草稿，受影响流程还需
   发布并进入固定版本 TestPlan。Sandbox Preview 不计正式执行覆盖，Release 只使用固定版本真实成功执行。
-- 当前已完成首批实现和定向回归；尚待集中门禁、Compose、PR 复审与 Required Gate，不标记完成。
-  设计与退出条件见 [S59D 集成](release/v6-s59d-change-regression-integration.md)。
+- 设计与退出条件见 [S59D 集成](release/v6-s59d-change-regression-integration.md)。
 - PR #86 已建立。Compose 发现的固定计划版本更新入口已补齐，复用原 TestPlan Service 且原子记录证据；
   最终本地集中验收：后端 1132 passed / 4 skipped、覆盖率 91.06%；前端 238 项、分支覆盖率 80.30%。
   真实 Preview Main/Cleanup 和正式 TestPlan v2 均 passed；未映射 Git 变更仍被旧 Release Gate 阻断，
-  不以维护审核豁免原门禁。等待最终候选复审和远程 Required Gate。
+  不以维护审核豁免原门禁。
+- PR #86 已普通合并；最终 PR 候选与合并后 main 七项 CI 全绿，Required Gate 成功。
+  复审 P0=0、P1=0；1 项审核记录事务顺序 P2 已接受但未修复，不等同于清零。
 
 ## 已合并并完成 main 门禁：V6.2 S59C Maintenance Proposal
 

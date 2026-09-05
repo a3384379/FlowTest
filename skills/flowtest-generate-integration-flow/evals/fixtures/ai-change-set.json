@@ -1,0 +1,39 @@
+{
+  "id": "00000000-0000-0000-0000-000000000014",
+  "project_id": "00000000-0000-0000-0000-000000000010",
+  "impact_run_id": "00000000-0000-0000-0000-000000000011",
+  "release_risk_id": "00000000-0000-0000-0000-000000000012",
+  "ai_job_id": "00000000-0000-0000-0000-000000000013",
+  "title": "Golden workflow proposal",
+  "status": "draft",
+  "source_fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+  "created_by_id": "00000000-0000-0000-0000-000000000016",
+  "created_at": "2026-08-28T00:00:00Z",
+  "updated_at": "2026-08-28T00:00:00Z",
+  "source_snapshot": {
+    "schema_version": "v6-flow-proposal-source-v1",
+    "context_fingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+    "plan_fingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
+    "compiler_version": "6.0-dev"
+  },
+  "items": [
+    {
+      "id": "00000000-0000-0000-0000-000000000015",
+      "position": 0,
+      "item_type": "workflow",
+      "action": "create",
+      "title": "Login Create Query",
+      "target_resource_id": null,
+      "target_snapshot_sha256": null,
+      "proposed_content": {"name": "Login Create Query"},
+      "review_status": "pending",
+      "review_note": "",
+      "reviewed_by_id": null,
+      "reviewed_at": null,
+      "materialized_resource_type": null,
+      "materialized_resource_id": null,
+      "created_at": "2026-08-28T00:00:00Z",
+      "updated_at": "2026-08-28T00:00:00Z"
+    }
+  ]
+}

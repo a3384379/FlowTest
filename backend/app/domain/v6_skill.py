@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SKILL_NAME = "flowtest-generate-integration-flow"
 SKILL_MANIFEST_SCHEMA_VERSION = "flowtest-skill-manifest-v1"
-SKILL_VERSION = "1.0.0-rc.1"
+SKILL_VERSION = "1.0.0-rc.2"
 SKILL_MINIMUM_MCP_VERSION = "s55-sandbox-preview-v1"
 
 SKILL_REQUIRED_TOOLS = (
@@ -71,6 +72,29 @@ class SkillHumanApproval(BaseModel):
     never_implied_by: list[str] = Field(min_length=1)
 
 
+class SkillEvaluationRuntime(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    python: Literal[">=3.13,<3.14"]
+    entrypoint: str = Field(min_length=1)
+    requirements: str = Field(min_length=1)
+    source_map: str = Field(min_length=1)
+    scope: Literal["committed_annotations_only"]
+    executes_backend_tests: Literal[False]
+
+
+def _is_package_path(value: str) -> bool:
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and ".." not in path.parts
+        and ":" not in value
+        and "\\" not in value
+        and str(path) == value
+        and value != "."
+    )
+
+
 class SkillEvaluationReference(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -78,6 +102,18 @@ class SkillEvaluationReference(BaseModel):
     annotations: str = Field(min_length=1)
     baseline: str = Field(min_length=1)
     guide: str = Field(min_length=1)
+    runtime: SkillEvaluationRuntime | None = None
+
+    @model_validator(mode="after")
+    def validate_package_paths(self) -> SkillEvaluationReference:
+        paths = [self.annotations, self.baseline, self.guide]
+        if self.runtime is not None:
+            paths.extend(
+                [self.runtime.entrypoint, self.runtime.requirements, self.runtime.source_map]
+            )
+        if not all(_is_package_path(path) for path in paths):
+            raise ValueError("evaluation references must be normalized package-relative paths")
+        return self
 
 
 class IntegrationFlowSkillManifest(BaseModel):
@@ -85,7 +121,7 @@ class IntegrationFlowSkillManifest(BaseModel):
 
     schema_version: Literal["flowtest-skill-manifest-v1"]
     name: Literal["flowtest-generate-integration-flow"]
-    version: Literal["1.0.0-rc.1"]
+    version: Literal["1.0.0-rc.1", "1.0.0-rc.2"]
     minimum_mcp_version: Literal["s55-sandbox-preview-v1"]
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]
