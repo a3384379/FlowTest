@@ -27,6 +27,7 @@ import type {
   SemanticCoverageScope,
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
+import RegressionMaintenancePanel from '../features/change-regression/RegressionMaintenancePanel'
 
 const { TextArea } = Input
 
@@ -69,7 +70,7 @@ export default function ChangeRegressionPage() {
               串成一条可追溯链路。
             </Typography.Paragraph>
           </div>
-          <Tag color="blue">S45</Tag>
+          <Tag color="blue">S45 · S59D</Tag>
         </div>
         <Alert
           type="info"
@@ -208,6 +209,7 @@ function RunDetail({
           {run.release_decision_id ?? '尚未评估'}
         </Descriptions.Item>
       </Descriptions>
+      <RegressionMaintenancePanel key={run.id} run={run} />
       <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />

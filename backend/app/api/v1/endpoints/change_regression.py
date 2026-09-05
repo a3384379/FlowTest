@@ -21,11 +21,133 @@ from app.schemas.change_regression import (
     SemanticGapWaiverResponse,
 )
 from app.schemas.common import Page
+from app.schemas.maintenance_proposals import MaintenanceProposalCreate
+from app.schemas.regression_maintenance import (
+    RegressionContextBinding,
+    RegressionMaintenanceReview,
+    RegressionPlanWorkflow,
+    RegressionProposalLink,
+    maintenance_snapshot,
+)
 from app.services.change_regression import ChangeRegressionService
 from app.services.idempotency import IdempotencyService
+from app.services.regression_maintenance import RegressionMaintenanceService
 from app.services.tasking import ServiceTokenService
 
 router = APIRouter()
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance/plan-workflows",
+    response_model=ChangeRegressionRunResponse,
+)
+async def update_regression_maintenance_plan(
+    project_id: UUID,
+    run_id: UUID,
+    payload: RegressionPlanWorkflow,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    return _response(
+        await RegressionMaintenanceService(session).update_plan_workflow(
+            actor=current_user, project_id=project_id, run_id=run_id, payload=payload
+        )
+    )
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance/workflows/{workflow_id}/proposals",
+    response_model=ChangeRegressionRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_regression_maintenance_proposal(
+    project_id: UUID,
+    run_id: UUID,
+    workflow_id: UUID,
+    payload: MaintenanceProposalCreate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)],
+) -> ChangeRegressionRunResponse:
+    service = RegressionMaintenanceService(session)
+    prepared = await service.prepare_proposal(
+        actor=current_user,
+        project_id=project_id,
+        run_id=run_id,
+        workflow_id=workflow_id,
+        payload=payload,
+    )
+
+    async def persist() -> ChangeRegressionRunResponse:
+        return _response(await service.persist_proposal(run_id, prepared))
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"regression.maintenance:{run_id}:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=persist,
+        atomic_action=True,
+    )
+    return ChangeRegressionRunResponse.model_validate(response)
+
+
+@router.put(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance",
+    response_model=ChangeRegressionRunResponse,
+)
+async def bind_regression_context(
+    project_id: UUID,
+    run_id: UUID,
+    payload: RegressionContextBinding,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    return _response(
+        await RegressionMaintenanceService(session).bind(
+            actor=current_user, project_id=project_id, run_id=run_id, payload=payload
+        )
+    )
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance/proposals",
+    response_model=ChangeRegressionRunResponse,
+)
+async def link_regression_maintenance_proposal(
+    project_id: UUID,
+    run_id: UUID,
+    payload: RegressionProposalLink,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    return _response(
+        await RegressionMaintenanceService(session).link(
+            actor=current_user,
+            project_id=project_id,
+            run_id=run_id,
+            change_set_id=payload.change_set_id,
+        )
+    )
+
+
+@router.post(
+    "/projects/{project_id}/change-regressions/{run_id}/context-maintenance/review",
+    response_model=ChangeRegressionRunResponse,
+)
+async def review_regression_maintenance(
+    project_id: UUID,
+    run_id: UUID,
+    payload: RegressionMaintenanceReview,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ChangeRegressionRunResponse:
+    return _response(
+        await RegressionMaintenanceService(session).review(
+            actor=current_user, project_id=project_id, run_id=run_id, payload=payload
+        )
+    )
 
 
 @router.post(
@@ -351,6 +473,7 @@ def _response(bundle: ChangeRegressionBundle) -> ChangeRegressionRunResponse:
         release_decision_id=run.release_decision_id,
         selected_assets=cast(list[dict[str, object]], run.selected_assets),
         selection_summary=cast(dict[str, object], run.selection_summary),
+        context_maintenance=maintenance_snapshot(run.selection_summary),
         missing_tests=[
             ChangeRegressionMissingTestResponse(
                 item_id=item.id,

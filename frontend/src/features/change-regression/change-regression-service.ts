@@ -1,5 +1,6 @@
 import { apiClient, type Page, type TestPlan } from '../../lib/api'
 import type { ReleasePolicy } from '../release-gate/release-gate-service'
+import type { RegressionMaintenance } from './regression-maintenance-service'
 
 export type ChangeRegressionStatus =
   | 'review_required'
@@ -217,6 +218,7 @@ export type ChangeRegressionRun = Omit<
   ChangeRegressionSummary,
   'selected_asset_count' | 'missing_test_count'
 > & {
+  context_maintenance?: RegressionMaintenance | null
   release_risk_id: string | null
   deployment_check_id: string | null
   selected_assets: Array<Record<string, unknown>>

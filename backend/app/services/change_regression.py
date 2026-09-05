@@ -88,6 +88,8 @@ from app.schemas.release_gate import ReleaseDecisionCreate
 from app.services.audit import AuditService
 from app.services.impact import ImpactService
 from app.services.projects import ProjectService
+from app.services.regression_maintenance import RegressionMaintenanceService
+from app.services.regression_maintenance_coverage import RegressionMaintenanceCoverage
 from app.services.release_gate import ReleaseGateService
 from app.services.tasking import TestPlanService
 from app.services.test_engineering import TestEngineeringService
@@ -1336,6 +1338,7 @@ class ChangeRegressionService:
             )
         await self._require_resolved_plan_gaps(run)
         if run.change_set_id is not None:
+            # V4 does not replace Missing Test or Current TestPlan approval.
             approval = await self._session.scalar(
                 select(ChangeSetApproval).where(
                     ChangeSetApproval.change_set_id == run.change_set_id
@@ -1351,6 +1354,12 @@ class ChangeRegressionService:
                         approved_at=datetime.now(UTC),
                     )
                 )
+        await RegressionMaintenanceService(self._session).require_review(run, actor)
+        if "context_maintenance" in run.selection_summary:
+            run.evidence = {
+                **run.evidence,
+                "context_maintenance": run.selection_summary["context_maintenance"],
+            }
         _transition(run, "approved")
         run.approved_by_id = actor.id
         run.approved_at = datetime.now(UTC)
@@ -1403,6 +1412,7 @@ class ChangeRegressionService:
             )
         await self._require_resolved_plan_gaps(run)
         plan = await self._project_plan(project_id, run.test_plan_id)
+        await RegressionMaintenanceCoverage(self._session).require_plan(run)
         queued = await TestPlanService(self._session).queue_external_run(
             plan=plan,
             requested_by_id=actor.id,
@@ -1529,6 +1539,7 @@ class ChangeRegressionService:
             )
             await self._session.commit()
             return await self._required_bundle(run.id)
+        await RegressionMaintenanceCoverage(self._session).require_execution(run)
         decision = await ReleaseGateService(self._session).create_decision(
             actor=actor,
             project_id=project_id,
@@ -1549,6 +1560,7 @@ class ChangeRegressionService:
         _transition(run, "evidence_ready")
         run.evidence = {
             **cast(dict[str, Any], decision.evidence_snapshot),
+            **_maintenance_release_evidence(run, test_plan_run, decision.id),
             "semantic_plan_gate": cast(dict[str, Any], plan_gate),
             "semantic_gap_waivers": active_waiver_evidence,
         }
@@ -2749,13 +2761,36 @@ def _update_operation_selection_snapshot(
     )
     snapshot.update(
         {
-            "schema_version": "s47.4-change-regression-v3",
+            "schema_version": (
+                "s47.4-change-regression-v4"
+                if snapshot.get("schema_version") == "s47.4-change-regression-v4"
+                else "s47.4-change-regression-v3"
+            ),
             "frozen_operations": cast(JsonValue, frozen),
             "item_bindings": cast(JsonValue, bindings),
         }
     )
     change_set.source_snapshot = snapshot
     change_set.source_fingerprint = _snapshot_fingerprint(snapshot)
+
+
+def _maintenance_release_evidence(
+    run: ChangeRegressionRun, test_plan_run: TestPlanRun, decision_id: UUID
+) -> dict[str, Any]:
+    from app.schemas.regression_maintenance import maintenance_snapshot
+
+    snapshot = maintenance_snapshot(run.selection_summary)
+    if snapshot is None:
+        return {}
+    return {
+        "context_maintenance": snapshot.model_dump(mode="json"),
+        "maintenance_execution_evidence": {
+            "test_plan_run_id": str(test_plan_run.id),
+            "execution_status": test_plan_run.status,
+            "release_decision_id": str(decision_id),
+            "preview_counts_as_execution": False,
+        },
+    }
 
 
 def _snapshot_fingerprint(snapshot: dict[str, Any]) -> str:

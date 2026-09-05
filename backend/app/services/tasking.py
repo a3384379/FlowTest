@@ -176,6 +176,7 @@ class TestPlanService:
         project_id: UUID,
         plan_id: UUID,
         item: TestPlanItemInput,
+        commit: bool = True,
     ) -> TestPlanDetail:
         """Explicitly append one validated, pinned asset to an existing plan."""
 
@@ -222,7 +223,10 @@ class TestPlanService:
                 "target_version": model.target_version,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         return TestPlanDetail(plan, [*existing, model])
 
     async def replace_item_version(
@@ -232,6 +236,7 @@ class TestPlanService:
         project_id: UUID,
         plan_id: UUID,
         item: TestPlanItemInput,
+        commit: bool = True,
     ) -> TestPlanDetail:
         """Explicitly replace one plan target with another validated immutable version."""
 
@@ -278,7 +283,10 @@ class TestPlanService:
                 "workflow_version": current.workflow_version,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         return TestPlanDetail(plan, existing)
 
     async def update(
