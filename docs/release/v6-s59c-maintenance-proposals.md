@@ -51,3 +51,12 @@
   不重复运行未改动的前端或容量验收。最新候选仍需复审与 Required Gate。
 
 实机测试（含公司 Windows）不要求；自动化 Windows CI、Compose 和既有非实机验收策略保留。
+
+## 最终闭环（随 S59D 更新）
+
+- PR #85 最终候选 `3725f44e2e71d1730a833444e2948fa33528b6e6` 的复审未发现重大问题，P0=0、P1=0。
+- PR 七项工作流及 Required Gate 通过后普通 squash 合并；main 为
+  `e00c8e86c1292091789314781139d2e169a6787f`。
+- 合并后 main 七项工作流全部 success，Required Gate success；Controller `33967085625`。
+- [最终合并与 main 门禁证据](https://github.com/a3384379/FlowTest/pull/85#issuecomment-5552057083)。
+  前文“等待”文字保留为历史候选记录，不代表当前仍未完成。S59D 从此全绿基线继续。

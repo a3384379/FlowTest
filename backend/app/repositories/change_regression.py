@@ -73,6 +73,7 @@ class ChangeRegressionRepository:
             await self._session.execute(
                 select(ChangeRegressionRun)
                 .where(ChangeRegressionRun.id == run_id)
+                .execution_options(populate_existing=True)
                 .with_for_update()
             )
         ).scalar_one_or_none()

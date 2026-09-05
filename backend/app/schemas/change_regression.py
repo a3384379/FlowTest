@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.schemas.impact import OpenApiDiffReference, SchemaDiffReference
+from app.schemas.regression_maintenance import RegressionMaintenanceSnapshot
 from app.schemas.tasking import TestPlanItemInput
 
 ChangeRegressionStatus = Literal[
@@ -158,6 +159,7 @@ class ChangeRegressionRunSummaryResponse(BaseModel):
 
 
 class ChangeRegressionRunResponse(BaseModel):
+    context_maintenance: RegressionMaintenanceSnapshot | None = None
     id: UUID
     project_id: UUID
     title: str
