@@ -5,22 +5,34 @@ RUN apk add --no-cache git make
 ENV GOTOOLCHAIN=local
 
 FROM go-toolchain AS k6-builder
+WORKDIR /src/k6-build
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
-    GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2@v2.2.0; \
+    go mod init flowtest.local/k6-build; \
+    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.1; \
+    GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2; \
     go version -m /out/k6 | grep -F 'go1.26.6'; \
+    go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
     /out/k6 version | grep -F 'k6 v2.2.0'
 
 FROM go-toolchain AS docker-cli-builder
 WORKDIR /go/src/github.com/docker/cli
-RUN --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
     git init; \
     git remote add origin https://github.com/docker/cli.git; \
     git fetch --depth 1 origin a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
+    cp vendor.mod go.mod; \
+    cp vendor.sum go.sum; \
+    go get google.golang.org/grpc@v1.83.1; \
+    go mod vendor; \
+    grep -Fx '# google.golang.org/grpc v1.83.1' vendor/modules.txt; \
+    mv go.mod vendor.mod; \
+    mv go.sum vendor.sum; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
         GITCOMMIT=a7dcaa6fdb6ed04aacbfdc76357fdae01605609e \
@@ -34,13 +46,16 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM go-toolchain AS dockerd-builder
 RUN apk add --no-cache bash build-base libseccomp-dev libseccomp-static linux-headers pkgconf
 WORKDIR /src/moby
-RUN --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
     git init; \
     git remote add origin https://github.com/moby/moby.git; \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
+    go get google.golang.org/grpc@v1.83.1 golang.org/x/crypto@v0.56.0; \
+    go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
         DOCKER_GITCOMMIT=6a43e3d5afddf4111da0f864bbc7cae5d7e95001 \
@@ -49,6 +64,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         PREFIX=/out \
         ./hack/make.sh binary-daemon; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.6'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.56.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS containerd-builder
@@ -62,23 +79,46 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
     git tag v2.3.3; \
-    go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1; \
+    go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.83.1; \
     go mod vendor; \
     make \
         VERSION=v2.3.3 \
         REVISION=aad11006b869517fcd3009450b6f82da282e1a9b \
-        bin/containerd bin/ctr
+        bin/containerd bin/ctr bin/containerd-shim-runc-v2; \
+    go version -m bin/containerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m bin/containerd-shim-runc-v2 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'
 
-FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon
+FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon-base
+# Alpine 3.24's x86_64 repository has not backported util-linux 2.42.3 yet.
+# Install only the two signed, fixed-version library APKs when needed; keep
+# stable repositories and normal signature/dependency validation unchanged.
+RUN set -eux; \
+    apk upgrade --no-cache; \
+    for patch_package in libblkid libuuid; do \
+        if ! apk info --exists "${patch_package}>=2.42.3-r0"; then \
+            wget -T 30 -O "/tmp/${patch_package}-2.42.3-r0.apk" \
+                "https://dl-cdn.alpinelinux.org/alpine/edge/main/$(apk --print-arch)/${patch_package}-2.42.3-r0.apk"; \
+            apk add --no-cache "/tmp/${patch_package}-2.42.3-r0.apk"; \
+            rm "/tmp/${patch_package}-2.42.3-r0.apk"; \
+        fi; \
+        apk info --exists "${patch_package}>=2.42.3-r0"; \
+    done; \
+    ldd /usr/lib/libblkid.so.1; \
+    ldd /usr/lib/libuuid.so.1; \
+    mkfs.ext4 -V; \
+    btrfs version; \
+    rm -f \
+        /usr/local/libexec/docker/cli-plugins/docker-buildx \
+        /usr/local/libexec/docker/cli-plugins/docker-compose
+
+FROM environment-daemon-base AS environment-daemon
 COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
 COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/dockerd
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
+COPY --from=containerd-builder /src/containerd/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
 RUN set -eux; \
-    apk upgrade --no-cache libcrypto3 libssl3 openssl; \
-    rm -f \
-        /usr/local/libexec/docker/cli-plugins/docker-buildx \
-        /usr/local/libexec/docker/cli-plugins/docker-compose; \
     containerd --version; \
     ctr --version
 

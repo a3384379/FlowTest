@@ -22,6 +22,7 @@ from app.domain.test_contexts import (
     ContextKnowledgeSnapshot,
     ContextRevisionSnapshot,
     ExternalEvidenceFinding,
+    context_revision_fingerprint,
 )
 from app.main import app
 from app.models import Base
@@ -234,6 +235,97 @@ async def context_inspector() -> AsyncIterator[dict[str, Any]]:
         }
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_context_diff_reads_historical_revisions_without_mutation(
+    context_inspector: dict[str, Any],
+) -> None:
+    from sqlalchemy import select
+
+    async with context_inspector["sessions"]() as session:
+        original = await session.scalar(
+            select(ContextRevisionModel).where(
+                ContextRevisionModel.context_id == context_inspector["context_id"]
+            )
+        )
+        snapshot = _snapshot()
+        snapshot.knowledge_snapshot = ContextKnowledgeSnapshot()
+        snapshot.evidence_fingerprints = []
+        revision = ContextRevisionModel(
+            context_id=original.context_id,
+            revision=2,
+            repository_revisions=original.repository_revisions,
+            contract_revisions=[],
+            data_profile_revisions=[],
+            existing_test_revision=None,
+            knowledge_snapshot=snapshot.knowledge_snapshot.model_dump(mode="json"),
+            completeness=snapshot.completeness.model_dump(mode="json"),
+            conflict_snapshot=snapshot.conflict_snapshot.model_dump(mode="json"),
+            evidence_fingerprints=[],
+            fingerprint=context_revision_fingerprint(snapshot),
+            created_by_type=original.created_by_type,
+            created_by_id=original.created_by_id,
+        )
+        session.add(revision)
+        await session.commit()
+
+    project_id = context_inspector["project_id"]
+    context_id = context_inspector["context_id"]
+    url = f"/api/v1/projects/{project_id}/contexts/{context_id}/diff"
+    response = await context_inspector["client"].get(
+        url,
+        headers=context_inspector["headers"],
+        params={"before_revision": 1, "after_revision": 2},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["before_revision_id"] != result["after_revision_id"]
+    difference = result["difference"]
+    assert difference["schema_version"] == "flowtest-context-diff-v1"
+    assert difference["evidence"]["removed"] == ["b" * 64]
+    assert difference["providers"]["removed"][0]["provider_name"] == "flowtest-java-spring"
+    assert difference["knowledge"]["nodes"]
+    assert not difference["automatic_patch_allowed"]
+    repeated = await context_inspector["client"].get(
+        url,
+        headers=context_inspector["headers"],
+        params={"before_revision": 1, "after_revision": 2},
+    )
+    assert repeated.json() == result
+    async with context_inspector["sessions"]() as session:
+        context = await session.get(ContextModel, context_inspector["context_id"])
+        assert context.current_revision == 1
+
+
+@pytest.mark.asyncio
+async def test_context_diff_rejects_foreign_missing_invalid_and_unauthenticated_requests(
+    context_inspector: dict[str, Any],
+) -> None:
+    client = context_inspector["client"]
+    context_id = context_inspector["context_id"]
+    project_id = context_inspector["project_id"]
+    url = f"/api/v1/projects/{project_id}/contexts/{context_id}/diff"
+    headers = context_inspector["headers"]
+    same = await client.get(
+        url, headers=headers, params={"before_revision": 1, "after_revision": 1}
+    )
+    assert same.status_code == 200
+    assert not same.json()["difference"]["changed"]
+    for target_project, before, after, status in [
+        (context_inspector["other_project_id"], 1, 1, 404),
+        (project_id, 1, 999, 404),
+        (project_id, 0, 1, 422),
+    ]:
+        response = await client.get(
+            f"/api/v1/projects/{target_project}/contexts/{context_id}/diff",
+            headers=headers,
+            params={"before_revision": before, "after_revision": after},
+        )
+        assert response.status_code == status, response.text
+        assert response.json()["error"]["trace_id"]
+    anonymous = await client.get(url, params={"before_revision": 1, "after_revision": 1})
+    assert anonymous.status_code == 401
 
 
 @pytest.mark.asyncio

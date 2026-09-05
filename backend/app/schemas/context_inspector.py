@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.context_diff import ContextDiff
 from app.domain.test_contexts import (
     ContextCompletenessSnapshot,
     ContextRevisionSnapshot,
@@ -95,3 +96,15 @@ class ContextInspectorDetail(ContextInspectorSummary):
     providers: list[ContextInspectorProviderSummary]
     evidence_items: list[ContextInspectorEvidenceItem]
     proposals: list[ContextInspectorProposalSummary]
+
+
+class ContextRevisionDiffResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    context_id: UUID
+    before_revision: int
+    after_revision: int
+    before_revision_id: UUID
+    after_revision_id: UUID
+    difference: ContextDiff
