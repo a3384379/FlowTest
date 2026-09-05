@@ -40,6 +40,11 @@ class ContextInspectorService:
         self._session = session
         self._projects = ProjectService(session)
 
+    @staticmethod
+    def revision_snapshot(revision: TestContextRevision) -> ContextRevisionSnapshot:
+        """Convert an already authorized immutable revision using Inspector semantics."""
+        return _revision_snapshot(revision)
+
     async def compare_revisions(
         self,
         *,

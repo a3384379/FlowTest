@@ -5,15 +5,41 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.schemas.affected_flows import AffectedFlowsResponse
 from app.schemas.common import Page
 from app.schemas.context_inspector import (
     ContextInspectorDetail,
     ContextInspectorSummary,
     ContextRevisionDiffResponse,
 )
+from app.services.affected_flows import AffectedFlowService
 from app.services.context_inspector import ContextInspectorService
 
 router = APIRouter(prefix="/projects/{project_id}/contexts")
+
+
+@router.get("/{context_id}/affected-flows", response_model=AffectedFlowsResponse)
+async def affected_context_flows(
+    project_id: UUID,
+    context_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    before_revision: int = Query(ge=1),
+    after_revision: int = Query(ge=1),
+    impact_run_id: UUID | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+) -> AffectedFlowsResponse:
+    return await AffectedFlowService(session).analyze(
+        actor=current_user,
+        project_id=project_id,
+        context_id=context_id,
+        before_revision=before_revision,
+        after_revision=after_revision,
+        impact_run_id=impact_run_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/{context_id}/diff", response_model=ContextRevisionDiffResponse)
