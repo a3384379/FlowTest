@@ -495,11 +495,58 @@ function ChangeTags({ title, color, values }: { title: string; color: string; va
 function ProposalEvidence({ proposal }: { proposal: FlowSpecVisualProposal }) {
   return (
     <div className="flow-proposal-review-grid">
+      <MaintenanceEvidenceCard provenance={proposal.maintenance_provenance} />
       <MappingDiffCard proposal={proposal} />
       <AssertDiffCard proposal={proposal} />
       <EvidenceConfidenceCard plan={proposal.integration_plan} />
       <UnresolvedCard plan={proposal.integration_plan} />
     </div>
+  )
+}
+
+function MaintenanceEvidenceCard({
+  provenance,
+}: {
+  provenance: FlowSpecVisualProposal['maintenance_provenance']
+}) {
+  if (!provenance) return null
+  return (
+    <Card title="维护提案来源与影响证据" size="small">
+      <Space orientation="vertical" style={{ width: '100%' }}>
+        <Alert type="info" showIcon title="维护提案仍需人工审核，不会自动应用或发布" />
+        <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="修改类型">{provenance.patch_kind}</Descriptions.Item>
+          <Descriptions.Item label="修改理由">{provenance.rationale}</Descriptions.Item>
+          <Descriptions.Item label="Context 前版本">
+            {provenance.before_context_revision_id}
+          </Descriptions.Item>
+          <Descriptions.Item label="Context 后版本">
+            {provenance.context_revision_id}
+          </Descriptions.Item>
+          <Descriptions.Item label="目标草稿版本">
+            {provenance.expected_target_revision}
+          </Descriptions.Item>
+          <Descriptions.Item label="影响分析">
+            {provenance.analysis_complete ? '完整' : '存在未覆盖项，需人工确认'}
+          </Descriptions.Item>
+        </Descriptions>
+        {provenance.oracle_weakening && (
+          <Alert
+            type="warning"
+            showIcon
+            title="此次变更包含已显式确认的断言调整，请复核是否弱化测试"
+          />
+        )}
+        {provenance.diagnostic_codes.map((code) => (
+          <Tag key={code}>{code}</Tag>
+        ))}
+        {provenance.evidence_refs.map((ref) => (
+          <Typography.Text code key={ref}>
+            {ref}
+          </Typography.Text>
+        ))}
+      </Space>
+    </Card>
   )
 }
 

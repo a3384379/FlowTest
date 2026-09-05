@@ -53,6 +53,8 @@ class AffectedFlowsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flowtest-affected-flows-v1"] = "flowtest-affected-flows-v1"
+    analysis_scope: Literal["project", "workflow"] = "project"
+    target_workflow_id: UUID | None = None
     project_id: UUID
     context_id: UUID
     before_revision_id: UUID

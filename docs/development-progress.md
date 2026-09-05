@@ -134,14 +134,31 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
-## 开发中：V6.2 S59B Affected Flow
+## 开发中：V6.2 S59C Maintenance Proposal
+
+- 从 S59B 合并后全绿 main 开始，分支 `codex/v6-s59c-maintenance-proposals`；复用既有
+  AIChangeSet、人工 Review、Sandbox Preview 和 Apply Draft，不新建维护状态机。
+- 同一 PR 先收口 PR #82 来源标签可信性、PR #84 显式 Kafka `consumes` 和请求级分析预算三项 P2。
+  来源依据服务端 Provenance 分类，不信任调用方 `source_ref`；分析增加总节点、身份解析和比较预算。
+- 维护请求先校验项目编辑权限、敏感值、当前 Context、目标草稿、精确影响证据与 Patch 白名单，再创建
+  幂等记录；持久化时重新校验，Apply 继续验证来源 Context。启发式不授予 Patch 权限。
+- 现有审核窗口增加维护来源、前后 Context、影响引用和未覆盖诊断；不自动接受、应用、发布或生产执行。
+- 集中验收：后端 1097 passed / 4 skipped、覆盖率 91.04%；前端 232 项通过、分支覆盖率 80.17%；
+  格式、Lint、类型和构建全绿。隔离 Compose 浏览器验证人工接受后的实际 Preview 与 Cleanup 均 passed。
+  当前待 PR 复审、远程门禁和普通合并，不提前标记完成。详见
+  [S59C Maintenance Proposal](release/v6-s59c-maintenance-proposals.md)。
+- S59D 后续才将 Diff、Affected Flow、维护提案接入现有 Change Regression Snapshot v4 和页面。
+
+## 已合并并完成 main 门禁：V6.2 S59B Affected Flow
 
 - S59A PR #83 已普通合并，合并后 main Required Gate 成功；从该全绿基线继续 S59B。
 - 新增授权只读 Affected Flow 接口，复用现有 Impact 选择、Context 历史比较与 Change Regression
   Operation Identity 解析；不新增表、页面或维护状态机。
 - 区分精确实例、Portable 与候选匹配；固定版本缺失不回退 current，启发式关系不授予 Patch 权限。
 - 本地集中验收通过：后端 1071 passed / 4 skipped、覆盖率 91.01%；前端 230 项通过、分支覆盖率
-  80.01%；格式、Lint、类型与构建检查成功。当前待 PR 复审、远程门禁与普通合并。
+  80.01%；格式、Lint、类型与构建检查成功。PR #84 已普通 Squash 合并，最终 PR 与合并后 main 的
+  Backend、Windows、Upgrade、Security、Compose、Required Gate 均成功。
+  最终复审 P0=0、P1=0，显式 `consumes` 与请求级预算两项 P2 在合并时接受，修复纳入 S59C。
   后续为 S59C Maintenance Proposal、S59D 集成。
   设计与边界见 [S59B Affected Flow](release/v6-s59b-affected-flow.md)。
 

@@ -263,6 +263,7 @@ async def get_visual_flow_proposal(
         change_set_id=change_set_id,
     )
     return FlowSpecVisualProposalResponse(
+        maintenance_provenance=proposal.maintenance_provenance,
         proposal=flow_spec_change_set_detail(proposal.view),
         existing_definition=proposal.existing_definition,
         proposed_definition=proposal.proposed_definition,

@@ -71,6 +71,7 @@ class AffectedFlowService:
         impact_run_id: UUID | None,
         page: int,
         page_size: int,
+        workflow_id: UUID | None = None,
     ) -> AffectedFlowsResponse:
         comparison = await self._inspector.compare_revisions(
             actor=actor,
@@ -114,11 +115,14 @@ class AffectedFlowService:
         if comparison.difference.changed:
             # Structural links do not prove that every evidence/provider change is mapped.
             scan.diagnostics.append(AffectedFlowDiagnostic(code="CONTEXT_CHANGE_UNMAPPED"))
+        condition = Workflow.project_id == project_id
+        if workflow_id is not None:
+            condition &= Workflow.id == workflow_id
         workflows = list(
             (
                 await self._session.scalars(
                     select(Workflow)
-                    .where(Workflow.project_id == project_id)
+                    .where(condition)
                     .order_by(Workflow.id)
                     .offset((page - 1) * page_size)
                     .limit(page_size)
@@ -126,9 +130,7 @@ class AffectedFlowService:
             ).all()
         )
         total = int(
-            await self._session.scalar(
-                select(func.count()).select_from(Workflow).where(Workflow.project_id == project_id)
-            )
+            await self._session.scalar(select(func.count()).select_from(Workflow).where(condition))
             or 0
         )
         affected: list[AffectedWorkflow] = []
@@ -147,6 +149,8 @@ class AffectedFlowService:
             if scan.exhausted:
                 break
         return AffectedFlowsResponse(
+            analysis_scope="workflow" if workflow_id is not None else "project",
+            target_workflow_id=workflow_id,
             project_id=project_id,
             context_id=context_id,
             before_revision_id=comparison.before_revision_id,

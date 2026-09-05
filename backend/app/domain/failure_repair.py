@@ -92,6 +92,22 @@ def validate_repair_scope(
         raise RepairScopeError("Product Defect 不允许生成测试修复 Proposal")
     if not policy.proposal_allowed or kind not in policy.allowed_kinds:
         raise RepairScopeError("失败分类不允许该类型的修复 Proposal")
+    return validate_flow_patch_scope(
+        before=before,
+        after=after,
+        kind=kind,
+        acknowledge_oracle_weakening=acknowledge_oracle_weakening,
+    )
+
+
+def validate_flow_patch_scope(
+    *,
+    before: FlowSpec | FlowSpecV2,
+    after: FlowSpec | FlowSpecV2,
+    kind: RepairKind,
+    acknowledge_oracle_weakening: bool,
+) -> RepairScopeResult:
+    """Apply the same field whitelist after the caller's independent policy checks."""
     if type(before) is not type(after):
         raise RepairScopeError("修复不能改变 FlowSpec Schema Version")
     if before == after:
