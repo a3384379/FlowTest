@@ -142,7 +142,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 顺序为 S59A Diff → S59B Affected Flow → S59C Maintenance Proposal → S59D 既有 Change Regression
   集成。阶段证据见 [S59A Context / Knowledge Diff](release/v6-s59a-context-knowledge-diff.md)。
 - 本地后端格式、Lint、类型检查通过；全量测试 1032 passed / 4 skipped，覆盖率 90.95%。
-  当前待 PR 复审与远程门禁，不代表整个 S59 已完成。
+  PR #83 已复审且无未解决行内线程；依赖修复候选的 Backend/Windows/Upgrade/Security/Compose
+  全部成功。Required Gate 因新增 CI 提前构建命令触及治理文件而拒绝，已撤回该工作流改动，
+  保留 Docker 补丁修复；待修正候选门禁与普通合并，不代表整个 S59 已完成。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 

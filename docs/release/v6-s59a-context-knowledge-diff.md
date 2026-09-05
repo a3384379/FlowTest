@@ -90,10 +90,21 @@ environment/runner 五个镜像扫描通过。daemon 扫描继续发现基础镜
 不切换发行版、不使用 `--allow-untrusted`，也不增加 Grype 忽略项。
 
 独立 `environment-daemon-base` 构建阶段包含每个库的最低版本断言、动态库加载检查及 ext4/btrfs
-工具启动检查。Security CI 先构建该阶段，避免补丁不可用时先完成全套 Go 编译。
+工具启动检查，可用于本地或显式定向构建。CI 保持原工作流，不调整受保护的治理文件。
 本地原始镜像已验证版本断言能拒绝旧版本、接受既有版本，库检查和工具命令均正常；补丁包下载
 仍遇到 TLS EOF，不能记为补丁安装通过。x86_64 补丁安装、Compose 和完整 Security 结果待远程验证。
 
 amd64 基础镜像已成功下载；定向构建在稳定源 APKINDEX 的 TLS 连接处失败，尚未进入补丁安装。
 Dockerfile 静态检查无警告，改动的 Workflow 与文档 Prettier 检查通过。不重复运行 Python/前端
 业务测试，现有候选的 Backend/Windows/Upgrade/Compose 均已通过；新候选仍须通过远程 Required Gate。
+
+### 补丁验证结果与治理修正
+
+候选 `6e49be7` 的 Backend、Windows、Upgrade、Security、Compose 五项工作流均成功。
+Security 日志确认 x86_64 的 libblkid/libuuid 均通过正常 APK 校验，从 2.42.1-r0 升级到
+2.42.3-r0，两个库各自的安装事务均只升级一个包；所有发布镜像扫描通过，没有扫描豁免。
+
+但 Required Gate Controller `33954803223` 拒绝普通 PR 修改 `.github/workflows/security-ci.yml`。
+此前增加的提前构建命令违反了现有治理约束，现已撤回该行，工作流恢复为基线内容；保留已验证
+的 Dockerfile 修复与定向基础层。不得绕过 Required Gate，也不得把五项子工作流成功称为可合并。
+修正候选仍需正常通过 Required Gate 后合并。
