@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get google.golang.org/grpc@v1.83.1; \
+    go get google.golang.org/grpc@v1.83.1 golang.org/x/crypto@v0.56.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -65,6 +65,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         ./hack/make.sh binary-daemon; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.6'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.56.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS containerd-builder
@@ -83,17 +84,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     make \
         VERSION=v2.3.3 \
         REVISION=aad11006b869517fcd3009450b6f82da282e1a9b \
-        bin/containerd bin/ctr; \
+        bin/containerd bin/ctr bin/containerd-shim-runc-v2; \
     go version -m bin/containerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
-    go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'
+    go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m bin/containerd-shim-runc-v2 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'
 
 FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon
 COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
 COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/dockerd
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
+COPY --from=containerd-builder /src/containerd/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
 RUN set -eux; \
-    apk upgrade --no-cache libcrypto3 libssl3 openssl; \
+    apk upgrade --no-cache libcrypto3 libssl3 openssl libexpat openssh-client-common openssh-client-default openssh-keygen; \
     rm -f \
         /usr/local/libexec/docker/cli-plugins/docker-buildx \
         /usr/local/libexec/docker/cli-plugins/docker-compose; \

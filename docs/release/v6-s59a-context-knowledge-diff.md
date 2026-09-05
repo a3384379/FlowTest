@@ -46,3 +46,16 @@ S59A 首轮自动复审完成且无行内发现。Security CI 在 performance �
 
 同轮 Backend CI 的既有 `test_running_workflow_can_be_cancelled` 出现 SQLite `database is locked`；
 本地连续三次定向测试均通过，未修改取消流程或放宽断言。后续候选仍须通过远程后端门禁。
+
+第三轮远程 Backend/Windows/Upgrade 已通过，所有发布镜像构建成功，backend/frontend/performance/
+environment/runner 五个镜像扫描通过。daemon 扫描继续发现基础镜像遗留组件：
+
+- 固定基础镜像中的 `containerd-shim-runc-v2` 内嵌 gRPC 1.80.0：本地读取二进制元数据确认，
+  将同一 containerd 源码构建的修复后 shim 一并替换，而不只替换 containerd/ctr。
+- dockerd 内嵌 x/crypto 0.54.0：更新为 0.56.0，覆盖
+  [GO-2026-6354](https://pkg.go.dev/vuln/GO-2026-6354) 和
+  [GO-2026-6355](https://pkg.go.dev/vuln/GO-2026-6355)。
+- Alpine 的 libexpat 与 OpenSSH：临时容器实际升级验证分别达到 2.8.4-r0 和 10.3_p1-r1；
+  仅扩大现有 `apk upgrade` 的相关补丁包名单，不启动业务容器或修改持久卷。
+
+后续仍须以修复候选 Security/Compose/Required Gate 结果完成验收，不将已定位或已修改记为已通过。
