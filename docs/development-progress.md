@@ -14,7 +14,7 @@ P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53
 普通 Squash Merge，合并后 Main 七项门禁全部成功。跨阶段最终审计 PR #69 已清除全部
 P0/P1，最终候选七项门禁全绿并普通 Squash Merge；合并后 Main 七项门禁也全部成功。当前分支
 Migration/Standalone 单 Head 为 `20260831_0051`。V6 RC 候选自动化证据已闭环，尚未创建正式
-Tag/Release，连续 RC、公司实机、安全审批和人工签署等 GA 外部门槛仍未满足，
+Tag/Release，连续 RC、安全审批和人工签署等 GA 外部门槛仍未满足，
 `GA_READY=NO`。
 V6.1 前置阶段 S57.0 已按三个独立 PR 完成：PR #71 收口 Planner/Compiler/Data 正确性，PR #72
 收口 Java Evidence 正确性，PR #73 收口 Governance/Evaluation/Skill Flow；三个 PR 最终复审均为
@@ -39,6 +39,15 @@ MinIO 哈希验证及 PR #35 远程 Upgrade/Security CI；S31 页面产品化的
 项目导航和全局搜索深链小阶段已完成本地及 PR #36 远程验收，质量指挥中心小阶段已完成本地及
 PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化、离线分发、资源/兼容基线、隐私安全诊断、回滚证明和事务式升级已完成本地真实验收，PR #38 的六项远程 CI 亦全部通过。Standalone PR #39 的 Windows Bundle、Backend、Compose Smoke、Security、Upgrade 六类共七项远程检查也已在 `bed1047` 全部通过。72 小时公司试点和人工签署待执行。
 `v2.0.0`、`v3.0.0` 正式标签仍分别受真实部署与连续 14 天 RC 观察门槛约束。
+
+## 当前验收策略：实机测试不再作为门槛（2026-09-05）
+
+- 按用户最新决定，当前及后续版本均不要求实机测试，包括公司 Windows 实机长时测试；不以缺少
+  这类证据阻止后续开发或验收，也不再安排这类测试。
+- 该项状态为“不要求”，不是“已执行通过”。历史阶段记录保留当时事实，本节覆盖其中已过时的
+  实机测试前置要求。
+- Windows 自动打包与 CI、后端/前端自动化测试、Compose Playwright 继续保留；连续 RC 观察、
+  外部恢复演练、安全审批、生产发布授权及人工签署不因本次决定自动豁免或视为完成。
 
 ## 已完成实现并合并：V6.1 S57.0 Foundation Correctness
 
