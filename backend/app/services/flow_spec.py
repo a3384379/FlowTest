@@ -46,6 +46,7 @@ from app.domain.integration_plans import (
     integration_plan_fingerprint,
     normalize_integration_plan,
 )
+from app.domain.proposal_provenance import MCP_PROPOSAL_SCHEMA, REPAIR_PROPOSAL_SCHEMA
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.engine.contracts import ApiNodeConfig, NodeType, WorkflowDefinition, WorkflowRunPolicy
 from app.models.access import User
@@ -454,7 +455,10 @@ class FlowSpecService:
             AIChangeSet.source_type == "flow_spec"
         )
         if origin == "mcp":
-            condition &= AIChangeSet.source_ref.startswith("mcp://")
+            condition &= (
+                AIChangeSet.source_snapshot["proposal_schema_version"].as_string()
+                == MCP_PROPOSAL_SCHEMA
+            )
         if cursor is not None:
             condition &= or_(
                 AIChangeSet.created_at < cursor.created_at,
@@ -1189,7 +1193,7 @@ def _source_snapshot(
     if provenance is not None:
         snapshot.update(
             {
-                "proposal_schema_version": "v6-flow-proposal-source-v1",
+                "proposal_schema_version": MCP_PROPOSAL_SCHEMA,
                 "context_revision_id": str(provenance.context_revision_id),
                 "context_fingerprint": provenance.context_fingerprint,
                 "service_account_id": str(provenance.service_account_id),
@@ -1222,7 +1226,7 @@ def _source_snapshot(
     if repair_provenance is not None:
         snapshot.update(
             {
-                "proposal_schema_version": "v6-repair-proposal-source-v1",
+                "proposal_schema_version": REPAIR_PROPOSAL_SCHEMA,
                 "context_revision_id": str(repair_provenance.context_revision_id),
                 "context_fingerprint": repair_provenance.context_fingerprint,
                 "repair": {

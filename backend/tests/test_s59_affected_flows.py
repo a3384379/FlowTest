@@ -143,6 +143,7 @@ def test_fingerprint_contract_is_validated_and_deduplicated() -> None:
         ("contains", False),
         ("uses_repository", False),
         ("maps_entity", False),
+        ("consumes", False),
         ("may_use_repository", True),
         ("may_map_entity", True),
         ("custom_link", True),

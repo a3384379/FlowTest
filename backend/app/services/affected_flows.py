@@ -49,6 +49,9 @@ class _Scan:
     identities: dict[tuple[UUID, int | None], OperationIdentity | None] = field(
         default_factory=dict
     )
+    remaining_nodes: int = 500
+    remaining_comparisons: int = 100_000
+    exhausted: bool = False
 
 
 class AffectedFlowService:
@@ -129,7 +132,9 @@ class AffectedFlowService:
             or 0
         )
         affected: list[AffectedWorkflow] = []
+        scanned: list[UUID] = []
         for workflow in workflows:
+            scanned.append(workflow.id)
             reasons = await self._workflow_reasons(scan, workflow, project_id)
             if reasons:
                 affected.append(
@@ -139,6 +144,8 @@ class AffectedFlowService:
                         reasons=reasons,
                     )
                 )
+            if scan.exhausted:
+                break
         return AffectedFlowsResponse(
             project_id=project_id,
             context_id=context_id,
@@ -149,10 +156,10 @@ class AffectedFlowService:
             page=page,
             page_size=page_size,
             total_workflows=total,
-            scanned_workflow_ids=[item.id for item in workflows],
+            scanned_workflow_ids=scanned,
             affected_workflows=affected,
             diagnostics=scan.diagnostics,
-            analysis_complete=page == 1 and len(workflows) == total and not scan.diagnostics,
+            analysis_complete=page == 1 and len(scanned) == total and not scan.diagnostics,
         )
 
     async def _impact_changes(
@@ -189,28 +196,19 @@ class AffectedFlowService:
                 )
             )
             return reasons[:100]
-        raw_nodes = workflow.draft_definition.get("nodes", [])
-        if isinstance(raw_nodes, list) and len(raw_nodes) > 200:
-            scan.diagnostics.append(
-                AffectedFlowDiagnostic(
-                    code="WORKFLOW_NODE_BUDGET_EXCEEDED",
-                    workflow_id=workflow.id,
-                )
-            )
-            return reasons
-        try:
-            definition = WorkflowDefinition.model_validate(workflow.draft_definition)
-        except ValidationError:
-            scan.diagnostics.append(
-                AffectedFlowDiagnostic(
-                    code="WORKFLOW_INVALID",
-                    workflow_id=workflow.id,
-                )
-            )
+        definition = _workflow_definition(scan, workflow)
+        if definition is None:
             return reasons
         for node in sorted(definition.nodes, key=lambda item: item.id):
             identity = await self._node_identity(scan, workflow.id, node, project_id)
+            if scan.exhausted:
+                return reasons
             if identity is not None:
+                comparison_count = len(scan.changes) + len(scan.knowledge)
+                if comparison_count > scan.remaining_comparisons:
+                    _exhaust_budget(scan, workflow.id, node.id)
+                    return reasons
+                scan.remaining_comparisons -= comparison_count
                 reasons.extend(_matching_reasons(node.id, identity, scan))
             if len(reasons) > 100:
                 scan.diagnostics.append(
@@ -254,6 +252,9 @@ class AffectedFlowService:
             return None
         key = (config.api_definition_id, config.api_version)
         if key not in scan.identities:
+            if len(scan.identities) >= 100:
+                _exhaust_budget(scan, workflow_id, node.id)
+                return None
             try:
                 scan.identities[key] = await self._identities.resolve_operation_identity(
                     project_id=project_id,
@@ -272,6 +273,41 @@ class AffectedFlowService:
                 )
             )
         return identity
+
+
+def _exhaust_budget(scan: _Scan, workflow_id: UUID, node_id: str | None = None) -> None:
+    scan.exhausted = True
+    scan.diagnostics.append(
+        AffectedFlowDiagnostic(
+            code="ANALYSIS_BUDGET_EXCEEDED",
+            workflow_id=workflow_id,
+            node_id=node_id,
+        )
+    )
+
+
+def _workflow_definition(scan: _Scan, workflow: Workflow) -> WorkflowDefinition | None:
+    raw_nodes = workflow.draft_definition.get("nodes", [])
+    if isinstance(raw_nodes, list):
+        if len(raw_nodes) > 200:
+            scan.diagnostics.append(
+                AffectedFlowDiagnostic(
+                    code="WORKFLOW_NODE_BUDGET_EXCEEDED",
+                    workflow_id=workflow.id,
+                )
+            )
+            return None
+        if len(raw_nodes) > scan.remaining_nodes:
+            _exhaust_budget(scan, workflow.id)
+            return None
+        scan.remaining_nodes -= len(raw_nodes)
+    try:
+        return WorkflowDefinition.model_validate(workflow.draft_definition)
+    except ValidationError:
+        scan.diagnostics.append(
+            AffectedFlowDiagnostic(code="WORKFLOW_INVALID", workflow_id=workflow.id)
+        )
+        return None
 
 
 def _change_selector(change: dict[str, Any]) -> OperationSelector | None:

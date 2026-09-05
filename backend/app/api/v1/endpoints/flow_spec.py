@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, Query, status
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.composition import build_workflow_service
 from app.core.errors import AppError
+from app.domain.proposal_provenance import proposal_origin
 from app.schemas.flow_spec import (
     FlowSpecApplyResponse,
     FlowSpecChangeSetCursorResponse,
@@ -20,7 +21,6 @@ from app.schemas.flow_spec import (
     FlowSpecImportRequest,
     FlowSpecMcpProposalListResponse,
     FlowSpecProposalListResponse,
-    FlowSpecProposalOrigin,
     FlowSpecProposalResponse,
     FlowSpecReviewRequest,
     FlowSpecValidateRequest,
@@ -443,15 +443,9 @@ def _summary(view: FlowSpecChangeSetView) -> FlowSpecChangeSetResponse:
 
 
 def _proposal_summary(view: FlowSpecChangeSetView) -> FlowSpecProposalResponse:
-    source_ref = view.change_set.source_ref
-    scheme = source_ref.partition("://")[0] if source_ref else ""
-    origin = cast(
-        FlowSpecProposalOrigin,
-        scheme if scheme in {"mcp", "repair", "maintenance"} else "import",
-    )
     return FlowSpecProposalResponse(
         **_summary(view).model_dump(),
-        proposal_origin=origin,
+        proposal_origin=proposal_origin(view.change_set.source_snapshot),
     )
 
 

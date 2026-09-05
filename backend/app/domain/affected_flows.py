@@ -35,6 +35,7 @@ _EXPLICIT_RELATIONS: Final = frozenset(
         "has_column",
         "handled_by",
         "produces",
+        "consumes",
         "maps_entity",
         "constrained_by",
         "allows_state",

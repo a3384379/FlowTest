@@ -12,9 +12,8 @@ from app.domain.flow_spec import (
 )
 from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.domain.proposal_provenance import FlowSpecProposalOrigin as FlowSpecProposalOrigin
 from app.engine.contracts import WorkflowDefinition
-
-FlowSpecProposalOrigin = Literal["mcp", "repair", "maintenance", "import"]
 
 
 class FlowSpecValidateRequest(BaseModel):

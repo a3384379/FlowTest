@@ -42,6 +42,7 @@ class AffectedFlowDiagnostic(BaseModel):
         "IMPACT_CHANGE_UNMAPPED",
         "CONTEXT_CHANGE_UNMAPPED",
         "KNOWLEDGE_IDENTITY_AMBIGUOUS",
+        "ANALYSIS_BUDGET_EXCEEDED",
     ]
     workflow_id: UUID | None = None
     node_id: str | None = None
