@@ -74,5 +74,6 @@ async def create_repair_proposal(
         operation=f"failure_repair.propose:{execution_id}",
         request_payload=payload.model_dump(mode="json"),
         action=persist,
+        atomic_action=True,
     )
     return RepairProposalResponse.model_validate(response)

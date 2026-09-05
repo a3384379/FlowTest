@@ -14,6 +14,8 @@
 - 创建维护 AIChangeSet 时只 Flush，不在 Action 内 Commit；提案、审计和 completed Claim 由幂等包装器
   原子提交。Action 或完成提交失败时先 Rollback，再释放 pending Claim，避免残留提案和重复重试写入。
   同样由幂等包装器调用的 MCP/Repair 创建路径使用相同的 non-committing 导入；普通 Import 保留自提交兼容。
+- 幂等包装器默认不假设 Action 可回滚。旧自提交/外部请求 Action 出错时保留 pending Claim，禁止同键
+  自动重放不确定的副作用；仅上述三个明确 `atomic_action=true` 的事务内提案入口可在回滚后释放 Claim。
 - 边的新增/删除保留原关系强度，仅在其所属 Revision 遍历；启发式边的 Operation 端点不自动成为精确变化。
   Binding Patch 固定边 ID 集合、source/target/condition，只替换 mappings。
 - 精确实例或完整 Portable Operation 证据才允许创建；路由、启发式和单独的显式资产选择不能授权。

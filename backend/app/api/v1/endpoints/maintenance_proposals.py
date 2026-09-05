@@ -43,5 +43,6 @@ async def create_maintenance_proposal(
         operation=f"maintenance.propose:{workflow_id}",
         request_payload=payload.model_dump(mode="json"),
         action=persist,
+        atomic_action=True,
     )
     return MaintenanceProposalResponse.model_validate(response)

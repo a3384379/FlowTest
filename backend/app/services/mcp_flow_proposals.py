@@ -62,6 +62,7 @@ class MCPFlowProposalService:
             actor_key=f"service-account:{service_account_id}",
             operation="propose_flow_draft",
             request_payload=payload.model_dump(mode="json"),
+            atomic_action=True,
             action=lambda: self._persist(
                 actor=actor,
                 payload=payload,

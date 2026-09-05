@@ -150,6 +150,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - PR #85 首次复审的 3 项 P1 与 1 项 P2 已集中修复：边差异保留启发式强度、Binding 固定拓扑、
   提案/幂等原子提交、Context 范围授权前置。修复后后端 1113 passed / 4 skipped；额外 MCP/Repair 原子
   提交兼容回归 34 项通过。等待新候选复审和 Required Gate，不以本地通过替代合并条件。
+- 第二次复审的旧自提交 Action P1 已修复：默认保留不确定结果的 Claim，仅三个原子提案入口可回滚后释放。
+  最终后端集中门禁 1116 passed / 4 skipped、覆盖率 91.05%；等待该最终修复的复审与远程门禁。
 - S59D 后续才将 Diff、Affected Flow、维护提案接入现有 Change Regression Snapshot v4 和页面。
 
 ## 已合并并完成 main 门禁：V6.2 S59B Affected Flow

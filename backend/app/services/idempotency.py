@@ -47,6 +47,7 @@ class IdempotencyService:
         operation: str,
         request_payload: object,
         action: Callable[[], Awaitable[BaseModel]],
+        atomic_action: bool = False,
     ) -> dict[str, Any]:
         if key is None:
             return (await action()).model_dump(mode="json")
@@ -70,7 +71,10 @@ class IdempotencyService:
             await self._session.commit()
         except Exception:
             await self._session.rollback()
-            await self._abandon(record_id)
+            # Legacy actions can commit or send requests before failing. Their outcome
+            # is uncertain, so retaining the claim prevents automatic effect replay.
+            if atomic_action:
+                await self._abandon(record_id)
             raise
         return response
 

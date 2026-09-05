@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from test_s58_failure_repair_api import failure_repair_api as failure_repair_api
@@ -22,6 +23,7 @@ from app.models.test_contexts import TestContextRevision as RevisionModel
 from app.models.workflows import Workflow
 from app.schemas.maintenance_proposals import MaintenanceProposalCreate
 from app.services.flow_spec import FlowSpecService
+from app.services.idempotency import IdempotencyService
 from app.services.maintenance_proposals import MaintenanceProposalService
 
 
@@ -115,6 +117,77 @@ async def _counts(fixture: dict[str, Any]) -> tuple[int, int]:
         return (
             await session.scalar(select(func.count()).select_from(AIChangeSet)),
             await session.scalar(select(func.count()).select_from(IdempotencyRecord)),
+        )
+
+
+class _CommittedEffect(BaseModel):
+    created: bool = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["action", "completion"])
+async def test_legacy_committed_effect_retains_claim_after_error(
+    failure_repair_api: dict[str, Any], monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    fixture = failure_repair_api
+    calls = 0
+    original_commit = AsyncSession.commit
+    async with fixture["sessions"]() as session:
+        actor_id = (await session.scalar(select(User))).id
+
+        async def action() -> _CommittedEffect:
+            nonlocal calls
+            calls += 1
+            session.add(
+                Project(
+                    organization_id=fixture["organization_id"],
+                    name="committed-effect",
+                    created_by_id=actor_id,
+                )
+            )
+            await session.commit()
+            if failure == "action":
+                raise RuntimeError("injected legacy action")
+            return _CommittedEffect()
+
+        async def commit(active: AsyncSession) -> None:
+            completed = await active.scalar(
+                select(IdempotencyRecord).where(IdempotencyRecord.status == "completed")
+            )
+            if completed is not None:
+                raise RuntimeError("injected completion")
+            await original_commit(active)
+
+        service = IdempotencyService(session)
+        with monkeypatch.context() as patch:
+            if failure == "completion":
+                patch.setattr(AsyncSession, "commit", commit)
+            with pytest.raises(RuntimeError, match="injected"):
+                await service.run(
+                    key="legacy-effect",
+                    project_id=fixture["project_id"],
+                    actor_key=str(actor_id),
+                    operation="legacy",
+                    request_payload={},
+                    action=action,
+                )
+        record = await session.scalar(select(IdempotencyRecord))
+        assert record is not None and record.status == "pending"
+        with pytest.raises(AppError, match="相同操作正在处理中"):
+            await service.run(
+                key="legacy-effect",
+                project_id=fixture["project_id"],
+                actor_key=str(actor_id),
+                operation="legacy",
+                request_payload={},
+                action=action,
+            )
+        assert calls == 1
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(Project).where(Project.name == "committed-effect")
+            )
+            == 1
         )
 
 

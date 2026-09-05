@@ -40,4 +40,14 @@
 - 审计修复后再次创建新隔离提案，真实 Worker Preview 的 Main/Cleanup 均 passed，Apply 到草稿成功。
   截图：`output/playwright/s59c-review-fixed-preview-passed.png`。
 
+## 第二次复审：旧自提交入口保护
+
+- 针对 `90e612b` 的复审指出：旧 Action 已自行提交副作用后，幂等完成失败不能释放 Claim，否则同键重试
+  可能再次发送外部 API 请求。本项 P1 已新增 Action 抛错 / 完成 Commit 抛错两个失败用例。
+- 包装器新增显式 `atomic_action`，默认 false；不确定的旧入口结果保留 pending Claim，拒绝自动重放。
+  仅 Maintenance/MCP/Repair 三个 non-committing 提案入口声明 true，回滚后允许安全释放与重试。
+- 36 项关联回归通过；最终后端 Format/Ruff/mypy 通过，1116 passed / 4 skipped，覆盖率 91.05%。
+  该改动不改变 Preview 成功链路，
+  不重复运行未改动的前端或容量验收。最新候选仍需复审与 Required Gate。
+
 实机测试（含公司 Windows）不要求；自动化 Windows CI、Compose 和既有非实机验收策略保留。
