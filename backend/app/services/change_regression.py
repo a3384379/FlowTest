@@ -2448,6 +2448,15 @@ class ChangeRegressionService:
         )
         return identity, contract
 
+    async def resolve_operation_identity(
+        self, *, project_id: UUID, definition_id: UUID, version_number: int | None
+    ) -> OperationIdentity | None:
+        """Read identity for a caller that already authorized project access."""
+        resolved = await self._operation_identity(
+            project_id=project_id, definition_id=definition_id, version_number=version_number
+        )
+        return resolved[0] if resolved is not None else None
+
     async def _current_path(self, definition: APIDefinition) -> str:
         version = await self._session.scalar(
             select(APIVersion).where(

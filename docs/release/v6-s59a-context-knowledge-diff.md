@@ -22,7 +22,9 @@ Provenance 分类。审查线程关闭表示接受技术债，不表示该缺陷
 
 - 本地集中后端验收：Ruff Format / Ruff Check / Mypy 全部通过。
 - 全量 Pytest：1032 passed / 4 skipped；覆盖率 90.95%，达到 90% 门槛。
-- 远程 CI、Compose Playwright 与 PR 复审尚待完成，以 PR 实际结果为准。
+- PR #83 最终候选复审无未解决行内线程，远程子工作流与 Required Gate 全部成功，已普通 Squash 合并。
+- 合并后 main 的 Backend、Windows Bundle、Upgrade、Security、Compose 与 Required Gate 均成功。
+  Required Gate Controller：`33957102399`；Compose：`33957102389`。
 
 S59B 在本阶段合并后继续；当前不能将整个 S59 标记为完成。
 
@@ -107,4 +109,13 @@ Security 日志确认 x86_64 的 libblkid/libuuid 均通过正常 APK 校验，�
 但 Required Gate Controller `33954803223` 拒绝普通 PR 修改 `.github/workflows/security-ci.yml`。
 此前增加的提前构建命令违反了现有治理约束，现已撤回该行，工作流恢复为基线内容；保留已验证
 的 Dockerfile 修复与定向基础层。不得绕过 Required Gate，也不得把五项子工作流成功称为可合并。
-修正候选仍需正常通过 Required Gate 后合并。
+修正候选随后正常通过 Required Gate 并完成合并；以下最终证据覆盖前述中间态。
+
+### 最终闭环
+
+- PR：[a3384379/FlowTest#83](https://github.com/a3384379/FlowTest/pull/83)。
+- 最终候选：`024f880f3e92452cb682da6f7c67a8600e619324`。
+- 合并提交：`05d265777fb750d60beb3949c34d573e50954c20`。
+- PR 与合并后 main 门禁均成功；没有工作流豁免、漏洞忽略或管理员绕过。
+- 按用户要求，当前及后续实机测试（含公司 Windows 实机）不再要求；保留 Windows 自动化与 Compose。
+  不将“不再要求”记为“测试通过”，其他 GA 审批也不因此自动完成。

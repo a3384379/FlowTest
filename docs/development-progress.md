@@ -134,7 +134,18 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
-## 已完成实现与本地验收：V6.2 S59A Context / Knowledge Diff
+## 开发中：V6.2 S59B Affected Flow
+
+- S59A PR #83 已普通合并，合并后 main Required Gate 成功；从该全绿基线继续 S59B。
+- 新增授权只读 Affected Flow 接口，复用现有 Impact 选择、Context 历史比较与 Change Regression
+  Operation Identity 解析；不新增表、页面或维护状态机。
+- 区分精确实例、Portable 与候选匹配；固定版本缺失不回退 current，启发式关系不授予 Patch 权限。
+- 本地集中验收通过：后端 1071 passed / 4 skipped、覆盖率 91.01%；前端 230 项通过、分支覆盖率
+  80.01%；格式、Lint、类型与构建检查成功。当前待 PR 复审、远程门禁与普通合并。
+  后续为 S59C Maintenance Proposal、S59D 集成。
+  设计与边界见 [S59B Affected Flow](release/v6-s59b-affected-flow.md)。
+
+## 已合并并完成 main 门禁：V6.2 S59A Context / Knowledge Diff
 
 - 从 S59.0 全绿 main 创建独立分支，已实现版本化纯领域差异与 Context Inspector 历史版本只读接口。
 - 覆盖 Evidence、Provider/来源版本、Completeness、Conflict、State Knowledge Node/Edge/State Candidate；
@@ -142,9 +153,9 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 顺序为 S59A Diff → S59B Affected Flow → S59C Maintenance Proposal → S59D 既有 Change Regression
   集成。阶段证据见 [S59A Context / Knowledge Diff](release/v6-s59a-context-knowledge-diff.md)。
 - 本地后端格式、Lint、类型检查通过；全量测试 1032 passed / 4 skipped，覆盖率 90.95%。
-  PR #83 已复审且无未解决行内线程；依赖修复候选的 Backend/Windows/Upgrade/Security/Compose
-  全部成功。Required Gate 因新增 CI 提前构建命令触及治理文件而拒绝，已撤回该工作流改动，
-  保留 Docker 补丁修复；待修正候选门禁与普通合并，不代表整个 S59 已完成。
+  PR #83 最终候选复审无未解决行内线程，子工作流与 Required Gate 均成功后普通 Squash 合并。
+  合并后 main 的 Backend/Windows/Upgrade/Security/Compose 与 Required Gate 全部成功，
+  Required Gate Controller 为 `33957102399`。未绕过门禁；S59A 完成不代表整个 S59 已完成。
 
 ## 已完成实现并合并：V6 Core 跨阶段最终审计
 
