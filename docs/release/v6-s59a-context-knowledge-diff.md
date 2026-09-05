@@ -25,3 +25,16 @@ Provenance 分类。审查线程关闭表示接受技术债，不表示该缺陷
 - 远程 CI、Compose Playwright 与 PR 复审尚待完成，以 PR 实际结果为准。
 
 S59B 在本阶段合并后继续；当前不能将整个 S59 标记为完成。
+
+## PR #83 依赖门禁修复
+
+S59A 首轮自动复审完成且无行内发现。Security CI 在 performance 镜像发现
+`GHSA-vp52-pcj8-j9qc`：嵌入的 `google.golang.org/grpc v1.83.0` 受影响。
+[gRPC 上游公告](https://github.com/grpc/grpc-go/security/advisories/GHSA-vp52-pcj8-j9qc)
+确认修复版本为 `1.83.1`。
+
+- 保留 k6 2.2.0、Docker/Moby 29.7.2、containerd 2.3.3 及 Go 1.26.6 基线。
+- 在相关 Go 构建阶段统一选取 gRPC 1.83.1；Docker CLI 保持其 vendor.mod/vendor.sum 布局。
+- 增加 k6、docker、dockerd、containerd、ctr 二进制内嵌模块版本检查；不新增漏洞忽略项、不降低扫描级别。
+- 本地定向构建在 GitHub/Go 模块下载或校验阶段遇到 TLS EOF，不能记为编译通过；远程构建和扫描仍待验证。
+- Python/前端业务代码未因此修改，不重复运行已通过的本地全量测试。
