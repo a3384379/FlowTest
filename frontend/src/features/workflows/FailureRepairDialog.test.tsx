@@ -100,8 +100,13 @@ describe('FailureRepairDialog', () => {
           },
         }),
       ),
-      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
-        HttpResponse.json({ items: [context], total: 1, page: 1, page_size: 100 }),
+      http.get(`/api/v1/projects/${project.id}/contexts`, ({ request }) =>
+        HttpResponse.json({
+          items: [context],
+          total: 101,
+          page: Number(new URL(request.url).searchParams.get('page')),
+          page_size: 20,
+        }),
       ),
       http.post(
         `/api/v1/projects/${project.id}/workflow-executions/${execution.id}/repair-proposals`,
@@ -161,6 +166,13 @@ describe('FailureRepairDialog', () => {
     fireEvent.change(within(dialog).getByLabelText('Proposed FlowSpec Patch'), {
       target: { value: JSON.stringify(changed, null, 2) },
     })
+    await userEvent.click(within(dialog).getByTitle('6'))
+    await waitFor(() =>
+      expect(within(dialog).getByTitle('6')).toHaveClass('ant-pagination-item-active'),
+    )
+    expect(within(dialog).getByLabelText('Proposed FlowSpec Patch')).toHaveValue(
+      JSON.stringify(changed, null, 2),
+    )
     await userEvent.click(within(dialog).getByRole('button', { name: '创建 Repair Proposal' }))
 
     await waitFor(() => expect(proposalId).toBe('00000000-0000-4000-8000-000000005803'))

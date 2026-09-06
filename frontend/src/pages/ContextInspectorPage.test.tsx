@@ -148,6 +148,32 @@ const detail: ContextDetail = {
 }
 
 describe('ContextInspectorPage', () => {
+  it('reaches older contexts beyond the first one hundred without fetching all pages', async () => {
+    const pages: number[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, ({ request }) => {
+        const url = new URL(request.url)
+        const page = Number(url.searchParams.get('page'))
+        pages.push(page)
+        expect(url.searchParams.get('page_size')).toBe('20')
+        return HttpResponse.json({
+          items: [{ ...summary, name: page === 6 ? '第一百零一个上下文' : summary.name }],
+          total: 101,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () =>
+        HttpResponse.json(detail),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByRole('button', { name: /RuoYi 订单上下文/ })).toBeVisible()
+    await userEvent.click(screen.getByTitle('6'))
+    expect(await screen.findByRole('button', { name: /第一百零一个上下文/ })).toBeVisible()
+    expect(pages).toEqual([1, 6])
+  })
+
   it('shows revision evidence, state knowledge and a proposal deep-link', async () => {
     server.use(
       http.get(`/api/v1/projects/${project.id}/contexts`, () =>

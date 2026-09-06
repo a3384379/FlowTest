@@ -98,6 +98,17 @@ class MCPContinuousService(MCPReadService):
         self, *, actor: User, payload: MCPRepairRequest, idempotency_key: str | None
     ) -> MCPContinuousProposalResponse:
         account_id = require_mcp_flow_propose_scope()
+        await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        if not payload.dry_run:
+            cached = await IdempotencyService(self._session).completed_response(
+                key=require_idempotency_key(idempotency_key),
+                project_id=payload.project_id,
+                actor_key=f"service-account:{account_id}",
+                operation=f"mcp.repair:{payload.execution_id}",
+                request_payload=payload.model_dump(mode="json"),
+            )
+            if cached is not None:
+                return MCPContinuousProposalResponse.model_validate(cached)
         service = FailureRepairService(self._session)
         prepared = await service.prepare_repair_proposal(
             actor=actor,
@@ -147,6 +158,17 @@ class MCPContinuousService(MCPReadService):
         self, *, actor: User, payload: MCPMaintenanceRequest, idempotency_key: str | None
     ) -> MCPContinuousProposalResponse:
         account_id = require_mcp_flow_propose_scope()
+        await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        if not payload.dry_run:
+            cached = await IdempotencyService(self._session).completed_response(
+                key=require_idempotency_key(idempotency_key),
+                project_id=payload.project_id,
+                actor_key=f"service-account:{account_id}",
+                operation=f"mcp.maintenance:{payload.run_id}:{payload.workflow_id}",
+                request_payload=payload.model_dump(mode="json"),
+            )
+            if cached is not None:
+                return MCPContinuousProposalResponse.model_validate(cached)
         service = RegressionMaintenanceService(self._session)
         prepared = await service.prepare_proposal(
             actor=actor,

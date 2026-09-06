@@ -13,7 +13,9 @@ import {
   Tag,
 } from 'antd'
 
-import { listContexts, type ContextSummary } from '../context-inspector/context-inspector-service'
+import type { ContextSummary } from '../context-inspector/context-inspector-service'
+import ContextPageControls from '../context-inspector/ContextPageControls'
+import { useContextPage } from '../context-inspector/use-context-page'
 import {
   apiErrorMessage,
   type FailureDiagnosisResponse,
@@ -44,11 +46,7 @@ export default function FailureRepairDialog(props: Props) {
     queryFn: () => exportFlowSpec(props.projectId, required(workflowId)),
     enabled: props.open && Boolean(workflowId),
   })
-  const contexts = useQuery({
-    queryKey: ['contexts', props.projectId],
-    queryFn: () => listContexts(props.projectId),
-    enabled: props.open,
-  })
+  const { contexts, page, total, setPage } = useContextPage(props.projectId, props.open)
   const error = diagnosis.error ?? exported.error ?? contexts.error
   return (
     <Modal
@@ -61,6 +59,7 @@ export default function FailureRepairDialog(props: Props) {
     >
       {error && <Alert type="error" showIcon title={apiErrorMessage(error)} />}
       {diagnosis.data && <DiagnosisSummary value={diagnosis.data} />}
+      <ContextPageControls page={page} total={total} onChange={setPage} />
       {diagnosis.data && exported.data && contexts.data && (
         <RepairForm
           key={props.execution.id}

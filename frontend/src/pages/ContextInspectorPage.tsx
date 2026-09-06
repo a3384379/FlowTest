@@ -25,6 +25,7 @@ import type {
   KnowledgeNode,
 } from '../features/context-inspector/context-inspector-service'
 import { useContextInspector } from '../features/context-inspector/use-context-inspector'
+import ContextPageControls from '../features/context-inspector/ContextPageControls'
 import { projectPath } from '../features/projects/project-routing'
 import { apiErrorMessage } from '../lib/api'
 
@@ -106,6 +107,11 @@ function ContextList({ state }: { state: InspectorState }) {
           ))}
         </Flex>
       )}
+      <ContextPageControls
+        page={state.page}
+        total={state.contexts.data?.total ?? 0}
+        onChange={state.setPage}
+      />
     </Card>
   )
 }
