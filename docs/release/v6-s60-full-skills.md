@@ -82,11 +82,29 @@ Product Defect Guard、独立 Cleanup 分类、启发式不授予 Patch 权限�
 - 新增 48 项测试包含四个 Skill 的真实 MCP/HTTP 链路、默认 Dry Run、幂等与事务回滚、租户隔离、
   无自动审核/应用、人工接受后一次性 Preview、独立包运行和冻结工具契约。
 
-PR/main CI 与复审待最终候选提交后完成，当前不预填 PASS。
+### 最终合并与主线证据（2026-09-06 补录）
+
+[PR #88](https://github.com/a3384379/FlowTest/pull/88) 已于 2026-09-06 01:07:49 UTC 普通合并。
+最终 Head `19ec13d69d7b60e796dd62603c6eba8287df8236`；合并提交
+`6440e305cd2987ccec2f635b0e3ca0ca28933dc4`。最终复审没有新增 P0/P1，PR Required Gate 成功。
+合并后实际触发的六个工作流均为 completed/success：
+
+| 工作流 | Run ID |
+| --- | --- |
+| Backend CI | 34003088905 |
+| Standalone Windows Bundle | 34003088895 |
+| Upgrade / Rollback | 34003088907 |
+| Security CI | 34003088897 |
+| Compose Smoke | 34003088898 |
+| Required Gate Controller | 34003088902 |
+
+最终远程后端验收为 1201 passed / 6 skipped、Coverage 91.12%；与上面的本地首轮记录分开保留。
+此次主线没有单独触发 Frontend CI，不写成“七项全绿”；跳过的 Compact/容量门禁不算执行通过。
+[最终验收评论](https://github.com/a3384379/FlowTest/pull/88#issuecomment-5556111129) 汇总 Review 与 CI。
 
 PR #88 首轮复审：工具中文说明 P1 已修复并增加契约回归。另有 1 项 P2 按用户策略接受为后续
 技术债，当前未修复；详细内容保留在原复审记录，不在此重复披露。线程解决不代表代码已修复。
-本轮仅修改说明及其回归，不重跑已经通过的全部本地门禁；最终候选仍需远程 Required Gate。
+上述为合并时的债务状态；后续修复状态统一见 [V6.2 收尾](v6-2-consolidation.md)。
 回滚为普通 revert 本批代码和新增包，无数据库迁移；原工具、原 Skill 与原业务生命周期保持可用。
 
 ## 后续评估，不属于本次交付

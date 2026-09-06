@@ -1,6 +1,22 @@
 # FlowTest 开发进度
 
 最后更新：2026-09-06（Asia/Shanghai）
+
+## 最新结论：S60 已合并，V6.2 收尾进行中
+
+S48～S60 的阶段性交付均已合并。S60 PR #88 的最终 Review、PR Required Gate 与合并后实际触发的
+六个主线工作流均成功，详见 [S60 最终证据](release/v6-s60-full-skills.md)。这不是生产 GA 授权，
+也不是已证明真实 LLM 的业务效果。以下历史记录中“待验收”和未来时态以本节及专项最终证据为准。
+
+本轮 `codex/v6-2-consolidation` 收口操作回执恢复、三个 Context 使用入口的分页、历史债务与验收口径。
+本轮本地修改不冒充已合并；最终检查结果见 [V6.2 收尾](release/v6-2-consolidation.md)。
+
+**历史口径更正：原 12 项不能全部写成完整修复。** 其中 Path/Cookie 静态值目前仍以显式诊断阻止
+不支持的编译，未完整物化到 Plan/FlowSpec；PR #74 已记录此区别。其余 11 项已在后续阶段交付，
+其中 Context Inspector 为 S57、独立 Evaluation Assets 为 S60。禁止以线程关闭替代功能修复。
+
+## 历史阶段记录
+
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S56、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
 已由 PR #67 普通 Squash Merge；GitHub Codex 最新复审 P0/P1 为 0，普通 PR CI、显式 RC 重门禁及合并后
@@ -134,13 +150,13 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
-## 已完成本地开发，待 PR 验收：V6.2 S60 Full Skills 与 Continuous QA
+## 已合并并完成 main 门禁：V6.2 S60 Full Skills 与 Continuous QA
 
 - 基于 S60A PR #87 全绿 main，以 `codex/v6-s60-full-skills` 一个批次完成全部剩余 S60；不按小阶段运行 CI。
 - 四个新 Skill 已具备实际工具契约和自包含评测包；新增 6 个 MCP 分析/提案工具，复用 S58/S59 服务、
   AIChangeSet、人工 Review、一次性 Preview 与原 Change Regression，不自动接受、Apply、发布或正式执行。
 - S59D 审核记录事务顺序和 S60A 旧 Fixture 残留两项 P2 已在本地实际修复，均有失败前/修复后回归证据。
-- 完整范围、证据边界与后续评估见 [S60 Full Skills](release/v6-s60-full-skills.md)。待统一门禁、PR 复审和合并。
+- 完整范围、证据边界与最终 PR #88 合并后六项成功门禁见 [S60 Full Skills](release/v6-s60-full-skills.md)。
 - 集中本地验收：后端 1201 passed / 4 skipped / 1 个旧用例超时（原样定向复核通过），覆盖率 91.12%；
   静态/类型/架构检查通过。前端 238 tests、Branch Coverage 80.30%、Build 通过；Compose Playwright 2 passed。
   四包独立环境评测通过，不将静态标注汇总当作 LLM 实测。

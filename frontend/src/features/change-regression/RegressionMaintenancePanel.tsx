@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   Button,
@@ -15,7 +15,8 @@ import {
 import { useRef, useState } from 'react'
 import { apiErrorMessage } from '../../lib/api'
 import type { ChangeRegressionRun } from './change-regression-service'
-import { listContexts } from '../context-inspector/context-inspector-service'
+import ContextPageControls from '../context-inspector/ContextPageControls'
+import { useContextPage } from '../context-inspector/use-context-page'
 import { exportFlowSpec } from '../workflows/flow-spec-service'
 import RegressionPlanWorkflowForm from './RegressionPlanWorkflowForm'
 import {
@@ -35,11 +36,7 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
   const [bindingOpen, setBindingOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const contexts = useQuery({
-    queryKey: ['regression-contexts', run.project_id],
-    queryFn: () => listContexts(run.project_id),
-    enabled: bindingOpen,
-  })
+  const { contexts, page, total, setPage } = useContextPage(run.project_id, bindingOpen)
 
   async function perform(action: () => Promise<unknown>) {
     setBusy(true)
@@ -79,6 +76,12 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
               perform(() => bindRegressionContext(run.project_id, run.id, input))
             }
           >
+            <ContextPageControls
+              page={page}
+              total={total}
+              onChange={setPage}
+              error={contexts.error}
+            />
             <Form.Item name="context_id" label="Context" rules={[{ required: true }]}>
               <Select
                 loading={contexts.isLoading}

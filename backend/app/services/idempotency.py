@@ -38,6 +38,25 @@ class IdempotencyService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def completed_response(
+        self,
+        *,
+        key: str,
+        project_id: UUID,
+        actor_key: str,
+        operation: str,
+        request_payload: object,
+    ) -> dict[str, Any] | None:
+        """Read a receipt without claiming; callers must authorize access first."""
+        require_idempotency_key(key)
+        record = await self._find(
+            project_id=project_id, actor_key=actor_key, operation=operation, key=key
+        )
+        if record is None:
+            return None
+        _, response = await self._existing(record, _request_hash(request_payload))
+        return response
+
     async def run(
         self,
         *,

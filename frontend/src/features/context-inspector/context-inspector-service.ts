@@ -139,10 +139,14 @@ export type ContextDetail = ContextSummary & {
   proposals: ContextProposal[]
 }
 
-export async function listContexts(projectId: string): Promise<Page<ContextSummary>> {
+export async function listContexts(
+  projectId: string,
+  page = 1,
+  pageSize = 20,
+): Promise<Page<ContextSummary>> {
   return (
     await apiClient.get<Page<ContextSummary>>(`/projects/${projectId}/contexts`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
