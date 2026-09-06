@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "variables": {},
+  "nodes": [
+    {"id": "start", "type": "start", "name": "Start", "position": {"x": 0, "y": 0}, "config": {}},
+    {"id": "end", "type": "end", "name": "End", "position": {"x": 200, "y": 0}, "config": {}}
+  ],
+  "edges": [{"id": "start-end", "source": "start", "target": "end", "condition": null, "mappings": []}],
+  "settings": {"fail_fast": true, "concurrency": 20, "default_timeout_seconds": 30}
+}

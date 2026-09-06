@@ -1,0 +1,72 @@
+{
+  "schema_version": "flowtest-affected-flows-golden-v1",
+  "identity": {
+    "api_definition_id": "orders-api",
+    "api_version": 2,
+    "portable_operation_ref": "orders.read",
+    "service_key": "orders",
+    "method": "GET",
+    "normalized_path": "/orders/{}",
+    "contract_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "cases": [
+    {
+      "name": "exact-instance",
+      "selector": { "api_definition_id": "orders-api", "api_version": 2 },
+      "expected": "instance"
+    },
+    {
+      "name": "route-only",
+      "selector": { "method": "GET", "normalized_path": "/orders/{id}" },
+      "expected": "candidate"
+    },
+    {
+      "name": "different-service",
+      "selector": {
+        "service_key": "inventory",
+        "method": "GET",
+        "normalized_path": "/orders/{}"
+      },
+      "expected": null
+    },
+    {
+      "name": "different-instance",
+      "selector": {
+        "api_definition_id": "inventory-api",
+        "method": "GET",
+        "normalized_path": "/orders/{}"
+      },
+      "expected": null
+    },
+    {
+      "name": "different-version",
+      "selector": {
+        "api_definition_id": "orders-api",
+        "api_version": 1,
+        "method": "GET",
+        "normalized_path": "/orders/{}"
+      },
+      "expected": null
+    },
+    { "name": "no-evidence", "selector": {}, "expected": null },
+    {
+      "name": "id-without-version",
+      "selector": { "api_definition_id": "orders-api" },
+      "expected": null
+    },
+    {
+      "name": "portable-baseline",
+      "selector": {
+        "service_key": "orders",
+        "portable_operation_ref": "orders.read",
+        "method": "GET",
+        "normalized_path": "/orders/{}",
+        "contract_fingerprints": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      },
+      "expected": "portable"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "operation": "orders.create",
+  "method": "POST",
+  "path": "/api/orders",
+  "service": "orders",
+  "auth": {
+    "required": true,
+    "kind": "bearer",
+    "location": "header",
+    "name": "Authorization",
+    "source_ref": "secret://golden/orders-token"
+  },
+  "parameters": [
+    {
+      "name": "Idempotency-Key",
+      "location": "header",
+      "required": true,
+      "schema": {"type": "string", "minLength": 8, "maxLength": 64},
+      "style": "simple",
+      "explode": false,
+      "source_ref": "contract://orders/create/idempotency-key"
+    }
+  ],
+  "request_body": {
+    "required": true,
+    "content_type": "application/json",
+    "schema": {
+      "type": "object",
+      "required": ["product_id", "quantity"],
+      "properties": {
+        "product_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 10}
+      },
+      "additionalProperties": false
+    }
+  },
+  "request": {},
+  "responses": {
+    "201": {
+      "description": "Created",
+      "content_type": "application/json",
+      "schema": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"type": "string", "enum": ["created"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "400": {
+      "description": "Invalid request",
+      "content_type": "application/json",
+      "schema": {"type": "object"}
+    }
+  },
+  "source_ref": "contract://golden/orders/create",
+  "revision": "golden-v1",
+  "completeness": "complete",
+  "warnings": []
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": "flowtest-flow-spec-v1",
+  "fingerprint_version": "flowtest-flow-spec-fingerprint-v3",
+  "project_id": null,
+  "name": "Login Create Query",
+  "description": "V6 Core golden integration flow",
+  "source_evidence": ["contract://golden/auth", "contract://golden/orders"],
+  "services": [
+    {"ref": "auth", "name": "Authentication", "service_type": "http"},
+    {"ref": "orders", "name": "Orders", "service_type": "http"}
+  ],
+  "operations": [
+    {
+      "ref": "auth.login",
+      "service_ref": "auth",
+      "name": "Login",
+      "method": "POST",
+      "path": "/api/login",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "api_version": null,
+      "contract_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "ref": "orders.create",
+      "service_ref": "orders",
+      "name": "Create order",
+      "method": "POST",
+      "path": "/api/orders",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "api_version": null,
+      "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "ref": "orders.query",
+      "service_ref": "orders",
+      "name": "Query order",
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "api_version": null,
+      "contract_fingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "nodes": [
+    {"id": "start", "kind": "start", "name": "Start", "position": {"x": 0, "y": 0}, "config": {}, "depends_on": []},
+    {"id": "login", "kind": "http", "name": "Login", "position": {"x": 160, "y": 0}, "config": {}, "depends_on": [], "operation_ref": "auth.login", "target": {"service_ref": "auth", "endpoint_variant": "default"}},
+    {"id": "create", "kind": "http", "name": "Create", "position": {"x": 320, "y": 0}, "config": {}, "depends_on": [], "operation_ref": "orders.create", "target": {"service_ref": "orders", "endpoint_variant": "default"}},
+    {"id": "query", "kind": "http", "name": "Query", "position": {"x": 480, "y": 0}, "config": {}, "depends_on": [], "operation_ref": "orders.query", "target": {"service_ref": "orders", "endpoint_variant": "default"}},
+    {"id": "end", "kind": "end", "name": "End", "position": {"x": 640, "y": 0}, "config": {}, "depends_on": []}
+  ],
+  "edges": [
+    {"id": "start-login", "source": "start", "target": "login", "condition": null, "mappings": []},
+    {"id": "login-create", "source": "login", "target": "create", "condition": null, "mappings": []},
+    {"id": "create-query", "source": "create", "target": "query", "condition": null, "mappings": []},
+    {"id": "query-end", "source": "query", "target": "end", "condition": null, "mappings": []}
+  ],
+  "variables": {},
+  "settings": {"fail_fast": true, "concurrency": 5, "default_timeout_seconds": 30},
+  "bindings": [],
+  "parameters": [],
+  "assertions": [],
+  "cleanup": [],
+  "security_policy": {"secret_refs_only": true, "max_requests": 20, "allow_private_network": false},
+  "confidence": {"overall": 1.0, "unresolved": []}
+}

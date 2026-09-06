@@ -1,0 +1,11 @@
+{
+  "source_ref": "database-profile://golden/orders",
+  "revision": "schema-v1",
+  "entity": "orders",
+  "row_count_estimate": 1000,
+  "columns": [
+    {"name": "id", "data_type": "uuid", "nullable": false, "primary_key": true, "unique": true, "masked_example": "***0001"},
+    {"name": "status", "data_type": "varchar", "nullable": false, "enum_candidates": ["created", "cancelled"], "max_length": 32, "masked_example": "***ated"},
+    {"name": "customer_id", "data_type": "uuid", "nullable": false, "foreign_key": "customers.id", "masked_example": "***1001"}
+  ]
+}

@@ -13,7 +13,6 @@ from mcp.server.mcpserver import Context
 from pydantic import ValidationError
 
 from app.domain.evidence_adapters import (
-    MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION,
     DatabaseEvidenceSubmission,
     JavaEvidenceSubmission,
     JavaSourceInput,
@@ -34,6 +33,15 @@ from app.domain.test_contexts import (
     RevisionReference,
 )
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
+from app.schemas.mcp_continuous import (
+    MCP_CONTINUOUS_QA_VERSION,
+    MCPAffectedFlowsRequest,
+    MCPContextComparisonRequest,
+    MCPFailureRequest,
+    MCPMaintenanceRequest,
+    MCPRegressionRequest,
+    MCPRepairRequest,
+)
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
@@ -43,7 +51,8 @@ MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
     "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
     "确定性 Integration Plan 与"
-    "只进入待审核状态的 Flow Draft，以及人工一次性批准后的 Sandbox Preview。"
+    "只进入待审核状态的 Flow Draft、Repair 与关联现有 Change Regression 的 Maintenance。"
+    "Context Diff、Affected Flow 和失败诊断只读；Sandbox Preview 需要人工一次性批准。"
     "FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、正式环境执行、删除、修改"
     "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
@@ -71,7 +80,7 @@ def create_mcp_server(
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_JAVA_SPRING_PROVIDER_SERVER_VERSION,
+        version=MCP_CONTINUOUS_QA_VERSION,
         instructions=MCP_INSTRUCTIONS,
     )
 
@@ -81,11 +90,105 @@ def create_mcp_server(
     return server
 
 
+def _register_context_diff_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_context_diff",
+        description="读取固定版本的 Context/Knowledge 差异, 不授予 Patch 权限。",
+        structured_output=True,
+    )
+    async def inspect_context_diff(
+        request: MCPContextComparisonRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_context_diff(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_affected_flows_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_affected_flows",
+        description="读取有界的受影响流程、原因和分析不完整诊断。",
+        structured_output=True,
+    )
+    async def inspect_affected_flows(
+        request: MCPAffectedFlowsRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_affected_flows(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_diagnose_failure_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.diagnose_failure",
+        description="诊断实际失败并保留产品缺陷保护, 不自动重试。",
+        structured_output=True,
+    )
+    async def diagnose_failure(request: MCPFailureRequest, ctx: Context = None) -> dict[str, Any]:  # type: ignore[assignment]
+        return await _tool_payload(
+            client.diagnose_failure(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_change_regression_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_change_regression",
+        description="读取现有 Change Regression 证据, Preview 不算正式执行。",
+        structured_output=True,
+    )
+    async def inspect_change_regression(
+        request: MCPRegressionRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_change_regression(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_propose_repair_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_repair",
+        description="默认预检修复; 持久化需要幂等键, 提案仍须人工审核。",
+        structured_output=True,
+    )
+    async def propose_repair(
+        request: MCPRepairRequest,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_repair(
+                request, idempotency_key=idempotency_key, token=_request_token(ctx, client)
+            )
+        )
+
+
+def _register_propose_maintenance_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_maintenance",
+        description="默认预检维护, 或原子创建待审核提案并关联现有 Run。",
+        structured_output=True,
+    )
+    async def propose_maintenance(
+        request: MCPMaintenanceRequest,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_maintenance(
+                request, idempotency_key=idempotency_key, token=_request_token(ctx, client)
+            )
+        )
+
+
 def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_coverage_tool(server, client)
     _register_begin_context_tool(server, client)
     _register_close_context_tool(server, client)
     _register_compile_integration_tool(server, client)
+    _register_diagnose_failure_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
 
     @server.tool(
@@ -113,7 +216,10 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_ingest_evidence_tool(server, client)
     _register_ingest_java_evidence_tool(server, client)
     _register_ingest_java_source_snapshot_tool(server, client)
+    _register_affected_flows_tool(server, client)
     _register_change_impact_tool(server, client)
+    _register_change_regression_tool(server, client)
+    _register_context_diff_tool(server, client)
     _register_context_requirements_tool(server, client)
 
     @server.tool(
@@ -203,6 +309,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_plan_integration_tool(server, client)
     _register_preview_flow_proposal_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
+    _register_propose_maintenance_tool(server, client)
+    _register_propose_repair_tool(server, client)
 
     @server.tool(
         name="flowtest.propose_test_design",

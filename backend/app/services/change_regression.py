@@ -469,6 +469,12 @@ class ChangeRegressionService:
             limit=page_size,
         )
 
+    async def inspect(
+        self, *, actor: User, project_id: UUID, run_id: UUID
+    ) -> ChangeRegressionBundle:
+        """Read fixed evidence without synchronizing or advancing execution state."""
+        return await self._get_authorized_bundle(actor=actor, project_id=project_id, run_id=run_id)
+
     async def get(self, *, actor: User, project_id: UUID, run_id: UUID) -> ChangeRegressionBundle:
         bundle = await self._get_authorized_bundle(
             actor=actor, project_id=project_id, run_id=run_id
@@ -1337,6 +1343,8 @@ class ChangeRegressionService:
                 details={"pending_count": len(pending)},
             )
         await self._require_resolved_plan_gaps(run)
+        # Context expiry can commit its own state. Validate before staging any approval row.
+        await RegressionMaintenanceService(self._session).require_review(run, actor)
         if run.change_set_id is not None:
             # V4 does not replace Missing Test or Current TestPlan approval.
             approval = await self._session.scalar(
@@ -1354,7 +1362,6 @@ class ChangeRegressionService:
                         approved_at=datetime.now(UTC),
                     )
                 )
-        await RegressionMaintenanceService(self._session).require_review(run, actor)
         if "context_maintenance" in run.selection_summary:
             run.evidence = {
                 **run.evidence,

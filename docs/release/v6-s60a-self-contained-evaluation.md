@@ -45,6 +45,9 @@ Manifest 路径必须是规范包内相对路径，拒绝绝对路径、URL 和�
 
 当前尚未完成 PR 复审与远程门禁，不能标记 S60 或 S60A 已全部闭环。
 
+以上为提交时状态。后续 PR #87 已普通合并，最终 PR 与合并后 main 路径选定门禁、Required Gate
+均通过，S60A 已闭环；完整 S60 后续交付见 [S60 Full Skills](v6-s60-full-skills.md)。
+
 ## 本地集中验收
 
 - Backend：Format / Ruff / mypy 全绿；1154 passed / 4 skipped，覆盖率 91.07%。
