@@ -1,0 +1,444 @@
+{
+  "schema_version": "flowtest-integration-plan-v1",
+  "fingerprint_version": "flowtest-integration-plan-fingerprint-v1",
+  "plan_fingerprint": "7bd623c2832118dd070d707b91b5be87c714bdea6035bbfa66bd3c2155ccd85a",
+  "context_revision_id": "00000000-0000-0000-0000-000000000050",
+  "context_fingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+  "objective": "Login Create Query",
+  "actors": [
+    {
+      "id": "operator",
+      "role": "integration tester",
+      "evidence_refs": [
+        "context://golden/actor/operator"
+      ]
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "target-ready",
+      "description": "Golden target is available",
+      "required": true,
+      "evidence_refs": [
+        "environment://golden/ready"
+      ]
+    }
+  ],
+  "target_environment": {
+    "key": "golden",
+    "source_ref": "environment://golden",
+    "evidence_refs": [
+      "environment://golden/revision/1"
+    ]
+  },
+  "operations": [
+    {
+      "ref": "auth.login",
+      "service_ref": "orders",
+      "service_name": "Orders",
+      "name": "auth.login",
+      "method": "POST",
+      "path": "/api/login",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "contract_fingerprint": "1b65f36634a7d8fae4aba7111f9d0d9ba0afec0904cba49273d89ede001bdfda",
+      "selected_by_user": true,
+      "expected_statuses": [
+        200
+      ],
+      "request": {
+        "query_parameters": [],
+        "headers": [],
+        "body": null,
+        "body_kind": "none",
+        "auth_mode": "inherit"
+      },
+      "credential_refs": [],
+      "evidence_refs": [
+        "contract://auth/login"
+      ]
+    },
+    {
+      "ref": "orders.create",
+      "service_ref": "orders",
+      "service_name": "Orders",
+      "name": "orders.create",
+      "method": "POST",
+      "path": "/api/orders",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "contract_fingerprint": "0e9756e3d59ff06beb81fabc5e00edf4b7e4667f6c906cd96c1cd9837f624bc5",
+      "selected_by_user": true,
+      "expected_statuses": [
+        201
+      ],
+      "request": {
+        "query_parameters": [],
+        "headers": [],
+        "body": {
+          "product_id": "sku-golden",
+          "quantity": 1
+        },
+        "body_kind": "json",
+        "auth_mode": "inherit"
+      },
+      "credential_refs": [],
+      "evidence_refs": [
+        "contract://orders/create"
+      ]
+    },
+    {
+      "ref": "orders.query",
+      "service_ref": "orders",
+      "service_name": "Orders",
+      "name": "orders.query",
+      "method": "GET",
+      "path": "/api/orders",
+      "version_strategy": "pinned",
+      "source_version": 1,
+      "contract_fingerprint": "441a64ad40306e37e32808c8c52b6971f03b0b974d9d6e076c0d0cbbd2e3b27d",
+      "selected_by_user": true,
+      "expected_statuses": [
+        200
+      ],
+      "request": {
+        "query_parameters": [],
+        "headers": [],
+        "body": null,
+        "body_kind": "none",
+        "auth_mode": "inherit"
+      },
+      "credential_refs": [],
+      "evidence_refs": [
+        "contract://orders/query"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "auth-login",
+      "kind": "operation",
+      "name": "auth.login",
+      "operation_ref": "auth.login",
+      "workflow_id": null,
+      "workflow_version": null,
+      "data_recipe_ref": null,
+      "evidence_refs": [
+        "contract://auth/login"
+      ]
+    },
+    {
+      "id": "orders-create",
+      "kind": "operation",
+      "name": "orders.create",
+      "operation_ref": "orders.create",
+      "workflow_id": null,
+      "workflow_version": null,
+      "data_recipe_ref": null,
+      "evidence_refs": [
+        "contract://orders/create"
+      ]
+    },
+    {
+      "id": "orders-query",
+      "kind": "operation",
+      "name": "orders.query",
+      "operation_ref": "orders.query",
+      "workflow_id": null,
+      "workflow_version": null,
+      "data_recipe_ref": null,
+      "evidence_refs": [
+        "contract://orders/query"
+      ]
+    }
+  ],
+  "branches": [],
+  "bindings": [
+    {
+      "id": "bind-orders-create-header-Authorization",
+      "candidates": [
+        {
+          "id": "candidate-auth-login-token-string-header",
+          "source_kind": "previous_response",
+          "source_step_id": "auth-login",
+          "source_recipe_id": null,
+          "variable_name": null,
+          "secret_ref": null,
+          "path": "body.token",
+          "value_type": "string",
+          "transform": "template",
+          "template": "Bearer {{value}}",
+          "confidence": 1.0,
+          "evidence_refs": [
+            "contract://auth/login",
+            "contract://orders/create/auth"
+          ]
+        }
+      ],
+      "selected_candidate_id": "candidate-auth-login-token-string-header",
+      "target": {
+        "step_id": "orders-create",
+        "location": "header",
+        "key": "Authorization",
+        "value_type": "string"
+      },
+      "capture_variable": null,
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://auth/login",
+        "contract://orders/create/auth"
+      ]
+    },
+    {
+      "id": "bind-orders-query-query-id",
+      "candidates": [
+        {
+          "id": "candidate-orders-create-id-string-query",
+          "source_kind": "previous_response",
+          "source_step_id": "orders-create",
+          "source_recipe_id": null,
+          "variable_name": null,
+          "secret_ref": null,
+          "path": "body.id",
+          "value_type": "string",
+          "transform": "identity",
+          "template": null,
+          "confidence": 1.0,
+          "evidence_refs": [
+            "contract://orders/create",
+            "contract://orders/query/id"
+          ]
+        }
+      ],
+      "selected_candidate_id": "candidate-orders-create-id-string-query",
+      "target": {
+        "step_id": "orders-query",
+        "location": "query",
+        "key": "id",
+        "value_type": "string"
+      },
+      "capture_variable": "orders-create-id",
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://orders/create",
+        "contract://orders/query/id"
+      ]
+    }
+  ],
+  "data_recipes": [],
+  "oracles": [
+    {
+      "id": "auth-login-auth.login.status",
+      "step_id": "auth-login",
+      "kind": "status",
+      "expression": "status_code",
+      "operator": "equals",
+      "expected": 200,
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://auth/login"
+      ]
+    },
+    {
+      "id": "orders-create-orders.create.status",
+      "step_id": "orders-create",
+      "kind": "status",
+      "expression": "status_code",
+      "operator": "equals",
+      "expected": 201,
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://orders/create"
+      ]
+    },
+    {
+      "id": "orders-query-orders.query.status",
+      "step_id": "orders-query",
+      "kind": "status",
+      "expression": "status_code",
+      "operator": "equals",
+      "expected": 200,
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://orders/query"
+      ]
+    },
+    {
+      "id": "orders-query-query.id.exists",
+      "step_id": "orders-query",
+      "kind": "field",
+      "expression": "body.id",
+      "operator": "exists",
+      "expected": null,
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://orders/query/response-id"
+      ]
+    },
+    {
+      "id": "orders-query-query.schema",
+      "step_id": "orders-query",
+      "kind": "schema",
+      "expression": "body",
+      "operator": "equals",
+      "expected": {
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "confidence": 1.0,
+      "requires_review": false,
+      "evidence_refs": [
+        "contract://orders/query/response-schema"
+      ]
+    }
+  ],
+  "cleanup_requirements": [],
+  "coverage_targets": [
+    {
+      "id": "coverage-binding-bind-orders-create-header-Authorization",
+      "dimension": "binding",
+      "target_ref": "bind-orders-create-header-Authorization",
+      "covered_by": [
+        "bind-orders-create-header-Authorization"
+      ],
+      "evidence_refs": [
+        "contract://auth/login",
+        "contract://orders/create/auth"
+      ]
+    },
+    {
+      "id": "coverage-binding-bind-orders-query-query-id",
+      "dimension": "binding",
+      "target_ref": "bind-orders-query-query-id",
+      "covered_by": [
+        "bind-orders-query-query-id"
+      ],
+      "evidence_refs": [
+        "contract://orders/create",
+        "contract://orders/query/id"
+      ]
+    },
+    {
+      "id": "coverage-operation-auth-login",
+      "dimension": "operation",
+      "target_ref": "auth.login",
+      "covered_by": [
+        "auth-login"
+      ],
+      "evidence_refs": [
+        "contract://auth/login"
+      ]
+    },
+    {
+      "id": "coverage-operation-orders-create",
+      "dimension": "operation",
+      "target_ref": "orders.create",
+      "covered_by": [
+        "orders-create"
+      ],
+      "evidence_refs": [
+        "contract://orders/create"
+      ]
+    },
+    {
+      "id": "coverage-operation-orders-query",
+      "dimension": "operation",
+      "target_ref": "orders.query",
+      "covered_by": [
+        "orders-query"
+      ],
+      "evidence_refs": [
+        "contract://orders/query"
+      ]
+    },
+    {
+      "id": "coverage-oracle-auth-login-auth.login.status",
+      "dimension": "status",
+      "target_ref": "auth-login-auth.login.status",
+      "covered_by": [
+        "auth-login-auth.login.status"
+      ],
+      "evidence_refs": [
+        "contract://auth/login"
+      ]
+    },
+    {
+      "id": "coverage-oracle-orders-create-orders.create.status",
+      "dimension": "status",
+      "target_ref": "orders-create-orders.create.status",
+      "covered_by": [
+        "orders-create-orders.create.status"
+      ],
+      "evidence_refs": [
+        "contract://orders/create"
+      ]
+    },
+    {
+      "id": "coverage-oracle-orders-query-orders.query.status",
+      "dimension": "status",
+      "target_ref": "orders-query-orders.query.status",
+      "covered_by": [
+        "orders-query-orders.query.status"
+      ],
+      "evidence_refs": [
+        "contract://orders/query"
+      ]
+    },
+    {
+      "id": "coverage-oracle-orders-query-query.id.exists",
+      "dimension": "field",
+      "target_ref": "orders-query-query.id.exists",
+      "covered_by": [
+        "orders-query-query.id.exists"
+      ],
+      "evidence_refs": [
+        "contract://orders/query/response-id"
+      ]
+    },
+    {
+      "id": "coverage-oracle-orders-query-query.schema",
+      "dimension": "schema",
+      "target_ref": "orders-query-query.schema",
+      "covered_by": [
+        "orders-query-query.schema"
+      ],
+      "evidence_refs": [
+        "contract://orders/query/response-schema"
+      ]
+    }
+  ],
+  "unresolved_items": [],
+  "review_requirements": [],
+  "confidence": {
+    "overall": 1.0,
+    "evidence_coverage": 1.0,
+    "deterministic": true
+  },
+  "diagnostics": [],
+  "evidence_refs": [
+    "context://golden/actor/operator",
+    "contract://auth/login",
+    "contract://orders/create",
+    "contract://orders/query",
+    "environment://golden",
+    "environment://golden/ready",
+    "environment://golden/revision/1"
+  ]
+}

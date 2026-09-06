@@ -1,0 +1,4 @@
+interface:
+  display_name: "FlowTest 变更回归"
+  short_description: "关联上下文变化和受影响流程，在既有变更回归中提出待审核维护建议"
+  default_prompt: "使用 $flowtest-change-aware-regression 为指定变更回归生成受控维护提案。"

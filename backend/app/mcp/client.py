@@ -15,6 +15,15 @@ from app.domain.integration_plans import (
     PlanValidationResult,
 )
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.mcp_continuous import (
+    MCPAffectedFlowsRequest,
+    MCPContextComparisonRequest,
+    MCPContinuousProposalResponse,
+    MCPFailureRequest,
+    MCPMaintenanceRequest,
+    MCPRegressionRequest,
+    MCPRepairRequest,
+)
 from app.schemas.sandbox_preview import SandboxPreviewExecutionResponse
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
@@ -482,6 +491,72 @@ class MCPReadGatewayClient:
             token=token,
         )
         return _validate_response(response, CompilerDiagnosticsResponse)
+
+    async def inspect_context_diff(
+        self, request: MCPContextComparisonRequest, *, token: str | None = None
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            "/api/v1/mcp/continuous/context-diff",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+
+    async def inspect_affected_flows(
+        self, request: MCPAffectedFlowsRequest, *, token: str | None = None
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            "/api/v1/mcp/continuous/affected-flows",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+
+    async def diagnose_failure(
+        self, request: MCPFailureRequest, *, token: str | None = None
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            "/api/v1/mcp/continuous/failure-diagnosis",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+
+    async def inspect_change_regression(
+        self, request: MCPRegressionRequest, *, token: str | None = None
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            "/api/v1/mcp/continuous/change-regression",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+
+    async def propose_repair(
+        self,
+        request: MCPRepairRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPContinuousProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/continuous/repair-proposals",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key} if idempotency_key else None,
+        )
+        return _validate_response(response, MCPContinuousProposalResponse)
+
+    async def propose_maintenance(
+        self,
+        request: MCPMaintenanceRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPContinuousProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/continuous/maintenance-proposals",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key} if idempotency_key else None,
+        )
+        return _validate_response(response, MCPContinuousProposalResponse)
 
     async def _get(
         self,

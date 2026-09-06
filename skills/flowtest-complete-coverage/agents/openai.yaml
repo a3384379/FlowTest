@@ -1,0 +1,4 @@
+interface:
+  display_name: "FlowTest 覆盖补全"
+  short_description: "依据契约与现有测试识别覆盖缺口，生成等待人工审核的测试设计"
+  default_prompt: "使用 $flowtest-complete-coverage 分析指定契约的测试缺口并提出待审核设计。"

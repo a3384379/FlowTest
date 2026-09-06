@@ -1,0 +1,13 @@
+{
+  "fixture_id": "small-spring-v1",
+  "language": "java",
+  "framework": "spring",
+  "execute_analyzed_code": false,
+  "files": {
+    "src/main/java/com/flowtest/golden/OrderController.java": "f454586b36bee5aec14f2a1c93652d9669ded98934f81ecf5f8dcec225e9fe7d",
+    "src/main/java/com/flowtest/golden/OrderService.java": "da01100694586bfc838b1a3fadbc33a10efcded660543c07c198fcec84309c8c",
+    "schema.sql": "e73a412f64c8f01e84d283059d348066c60efc62d59f588124e0798f127a6f96"
+  },
+  "expected_operations": ["POST /api/orders", "GET /api/orders/{id}"],
+  "expected_entity": "orders"
+}

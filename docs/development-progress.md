@@ -1,6 +1,6 @@
 # FlowTest 开发进度
 
-最后更新：2026-09-05（Asia/Shanghai）
+最后更新：2026-09-06（Asia/Shanghai）
 状态：V5 功能主线与 Post-Merge H0 Hotfix 已合并；Main Ruleset 与 Required Gate 已生效。V6.0 Core
 已完成 S48～S56、H1 实现及主线验收，S56 Flagship Skill、Evaluation、Compatibility 与 RC Evidence
 已由 PR #67 普通 Squash Merge；GitHub Codex 最新复审 P0/P1 为 0，普通 PR CI、显式 RC 重门禁及合并后
@@ -134,7 +134,18 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   来源标签可信性 P2：需在 S59C 依据可信 Provenance 分类，线程关闭不表示代码已修复。完整设计见
   [S59.0 Unified Proposal Discovery](release/v6-s59-0-unified-proposal-discovery.md)。
 
-## 开发中：V6.2 S60A 自包含 Skill Evaluation
+## 已完成本地开发，待 PR 验收：V6.2 S60 Full Skills 与 Continuous QA
+
+- 基于 S60A PR #87 全绿 main，以 `codex/v6-s60-full-skills` 一个批次完成全部剩余 S60；不按小阶段运行 CI。
+- 四个新 Skill 已具备实际工具契约和自包含评测包；新增 6 个 MCP 分析/提案工具，复用 S58/S59 服务、
+  AIChangeSet、人工 Review、一次性 Preview 与原 Change Regression，不自动接受、Apply、发布或正式执行。
+- S59D 审核记录事务顺序和 S60A 旧 Fixture 残留两项 P2 已在本地实际修复，均有失败前/修复后回归证据。
+- 完整范围、证据边界与后续评估见 [S60 Full Skills](release/v6-s60-full-skills.md)。待统一门禁、PR 复审和合并。
+- 集中本地验收：后端 1201 passed / 4 skipped / 1 个旧用例超时（原样定向复核通过），覆盖率 91.12%；
+  静态/类型/架构检查通过。前端 238 tests、Branch Coverage 80.30%、Build 通过；Compose Playwright 2 passed。
+  四包独立环境评测通过，不将静态标注汇总当作 LLM 实测。
+
+## 已合并并完成 main 门禁：V6.2 S60A 自包含 Skill Evaluation
 
 - 基线为 S59D PR #86 合并后全绿 main；分支 `codex/v6-s60a-self-contained-evaluation`。
 - S60 分为自包含评测包、实际工具适配、四个新 Skill 与行为验收；本 PR 仅处理评测包，不宣称四个
@@ -145,6 +156,8 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 阶段设计与验收见 [S60A 自包含评测](release/v6-s60a-self-contained-evaluation.md)。
 - 本地集中验收全绿：后端 1154 passed / 4 skipped、覆盖率 91.07%；前端 238 passed、
   分支覆盖率 80.30%。无后端安装的独立环境验证通过；待 PR 复审与远程 Required Gate。
+- 上述“待复审”为当时记录；PR #87 已普通合并，最终 PR 与 main 路径选定门禁及 Required Gate 均成功。
+  独立评测包已交付；其复审接受的旧 Fixture 残留 P2 在本次 S60 剩余批次中修复。
 
 ## 已合并并完成 main 门禁：V6.2 S59D Change Regression 集成
 

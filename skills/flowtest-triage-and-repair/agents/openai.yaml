@@ -1,0 +1,4 @@
+interface:
+  display_name: "FlowTest 失败诊断与修复"
+  short_description: "依据真实失败证据诊断原因，在保护产品缺陷边界内提出待审核修复"
+  default_prompt: "使用 $flowtest-triage-and-repair 诊断指定失败执行并生成可审核的修复提案。"
