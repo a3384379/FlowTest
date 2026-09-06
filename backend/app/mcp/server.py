@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlsplit
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
+from mcp.types import ToolAnnotations
 from pydantic import ValidationError
 
 from app.domain.evidence_adapters import (
@@ -33,8 +34,9 @@ from app.domain.test_contexts import (
     RevisionReference,
 )
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
+from app.mcp.connection_diagnostics import connection_diagnostic
+from app.schemas.mcp_connection import MCP_CONNECTION_VERSION, MCPConnectionRequest
 from app.schemas.mcp_continuous import (
-    MCP_CONTINUOUS_QA_VERSION,
     MCPAffectedFlowsRequest,
     MCPContextComparisonRequest,
     MCPFailureRequest,
@@ -66,6 +68,7 @@ def create_mcp_server(
     client: MCPReadGatewayClient | None = None,
     api_base_url: str | None = None,
     service_account_token: str | None = None,
+    allow_process_token: bool = True,
 ) -> MCPServer:
     """Create a server with stable, sorted tools/resources/prompts."""
 
@@ -74,13 +77,19 @@ def create_mcp_server(
 
         client = MCPReadGatewayClient(
             base_url=api_base_url or settings.mcp_api_base_url,
-            token=service_account_token or settings.mcp_service_account_token or None,
+            token=(
+                service_account_token
+                if service_account_token is not None
+                else settings.mcp_service_account_token or None
+            )
+            if allow_process_token
+            else None,
             timeout=settings.mcp_request_timeout_seconds,
             client_version=settings.mcp_client_version,
         )
     server = MCPServer(
         name=MCP_SERVER_NAME,
-        version=MCP_CONTINUOUS_QA_VERSION,
+        version=MCP_CONNECTION_VERSION,
         instructions=MCP_INSTRUCTIONS,
     )
 
@@ -144,6 +153,24 @@ def _register_change_regression_tool(server: MCPServer, client: MCPReadGatewayCl
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.inspect_change_regression(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_connection_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.inspect_connection",
+        description="检查当前机器身份、组织、权限和版本; 不需要项目 ID, 不签发或读取令牌。",
+        structured_output=True,
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
+    )
+    async def inspect_connection(
+        request: MCPConnectionRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_connection(request, token=_request_token(ctx, client))
         )
 
 
@@ -219,6 +246,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_affected_flows_tool(server, client)
     _register_change_impact_tool(server, client)
     _register_change_regression_tool(server, client)
+    _register_connection_tool(server, client)
     _register_context_diff_tool(server, client)
     _register_context_requirements_tool(server, client)
 
@@ -1106,28 +1134,35 @@ async def _resource_payload(client_call: Any) -> str:
 
 
 def _request_token(ctx: Context | None, client: MCPReadGatewayClient) -> str | None:
-    if ctx is not None:
-        try:
-            request = ctx.request_context.request
-            headers = getattr(request, "headers", None)
-            if isinstance(headers, Mapping):
-                authorization = headers.get("authorization", "")
-                if isinstance(authorization, str):
-                    scheme, _, token = authorization.partition(" ")
-                    if scheme.lower() == "bearer" and token.strip():
-                        return token.strip()
-        except (AttributeError, RuntimeError, ValueError):
-            pass
-    return getattr(client, "_token", None)
+    if ctx is None:
+        return getattr(client, "_token", None)
+    try:
+        request_context = ctx.request_context
+    except ValueError:
+        # The SDK raises this only for direct in-process calls outside a request.
+        return getattr(client, "_token", None)
+    request = request_context.request
+    if request is None:
+        return getattr(client, "_token", None)
+    headers = getattr(request, "headers", None)
+    authorization = headers.get("authorization", "") if isinstance(headers, Mapping) else ""
+    if isinstance(authorization, str):
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token.strip():
+            return token.strip()
+    return ""
 
 
 def _error_payload(error: MCPGatewayError) -> dict[str, Any]:
     return {
-        "data": {"error": {"code": error.code}},
+        "data": {
+            "error": {"code": error.code},
+            "connection_diagnostic": connection_diagnostic(error).model_dump(mode="json"),
+        },
         "evidence_refs": [],
         "confidence": 0.0,
         "redactions": ["gateway_error_details"],
-        "trace_id": "mcp-gateway",
+        "trace_id": error.trace_id,
         "warnings": ["MCP 应用网关未返回业务数据。"],
     }
 

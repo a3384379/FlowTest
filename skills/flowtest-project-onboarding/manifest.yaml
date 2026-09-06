@@ -12,6 +12,7 @@ required_tools:
 - flowtest.ingest_external_evidence
 - flowtest.inspect_test_context
 optional_tools:
+- flowtest.inspect_connection
 - flowtest.ingest_java_source_snapshot
 - flowtest.ingest_database_evidence
 - flowtest.inspect_entity_mapping

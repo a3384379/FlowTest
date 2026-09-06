@@ -2,7 +2,17 @@
 
 最后更新：2026-09-06（Asia/Shanghai）
 
-## 最新结论：S60 已合并，V6.2 收尾进行中
+## 最新结论：V6.2 已合并，S61A 连接契约开发中
+
+V6.2 收尾 PR #89 已合并，2026-09-06 启动查询确认合并后 main 七项门禁全部成功。
+现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；当前 S61A 本地实现完成，待 PR 复审/CI 和合并，
+不将方案或定向回归算作后续阶段完成。阶段范围见 [能力审计](mcp-capability-audit.md) 和
+[ADR 0052](adr/0052-mcp-onboarding-connection-and-scope.md)。
+
+本轮保留启动时 `deploy/ruoyi/compose.yaml` 的用户改动；不执行真实若依业务操作，不读取
+本机凭据补权限。真实宿主尚未暴露 FlowTest MCP，实际模型闭环暂未验收，隔离测试与此分开记录。
+
+### S60/V6.2 历史收尾记录
 
 S48～S60 的阶段性交付均已合并。S60 PR #88 的最终 Review、PR Required Gate 与合并后实际触发的
 六个主线工作流均成功，详见 [S60 最终证据](release/v6-s60-full-skills.md)。这不是生产 GA 授权，

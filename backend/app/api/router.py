@@ -24,6 +24,7 @@ from app.api.v1.endpoints.impact import router as impact_router
 from app.api.v1.endpoints.imports import router as imports_router
 from app.api.v1.endpoints.maintenance import router as maintenance_router
 from app.api.v1.endpoints.maintenance_proposals import router as maintenance_proposals_router
+from app.api.v1.endpoints.mcp_connection import router as mcp_connection_router
 from app.api.v1.endpoints.mcp_continuous import router as mcp_continuous_router
 from app.api.v1.endpoints.mcp_controlled_write import router as mcp_controlled_write_router
 from app.api.v1.endpoints.mcp_read import router as mcp_read_router
@@ -74,6 +75,7 @@ api_router.include_router(impact_router, tags=["impact"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
 api_router.include_router(mcp_read_router, tags=["mcp-read"])
 api_router.include_router(mcp_continuous_router, tags=["mcp-continuous"])
+api_router.include_router(mcp_connection_router, tags=["mcp-connection"])
 api_router.include_router(mcp_controlled_write_router, tags=["mcp-controlled-write"])
 api_router.include_router(mcp_evidence_router, tags=["mcp-evidence"])
 api_router.include_router(mcp_flow_router, tags=["mcp-flow-proposals"])

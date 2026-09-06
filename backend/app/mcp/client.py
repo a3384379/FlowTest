@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -15,6 +15,7 @@ from app.domain.integration_plans import (
     PlanValidationResult,
 )
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.mcp_connection import MCPConnectionRequest, MCPConnectionResponse
 from app.schemas.mcp_continuous import (
     MCPAffectedFlowsRequest,
     MCPContextComparisonRequest,
@@ -46,6 +47,7 @@ class MCPGatewayError(Exception):
         self.code = code
         self.status_code = status_code
         self.message = message
+        self.trace_id = uuid4().hex
 
 
 class MCPReadGatewayClient:
@@ -92,6 +94,14 @@ class MCPReadGatewayClient:
             token=token,
             resource_uri=resource_uri,
         )
+
+    async def inspect_connection(
+        self, request: MCPConnectionRequest, *, token: str | None = None
+    ) -> MCPConnectionResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/connection", payload=request.model_dump(mode="json"), token=token
+        )
+        return _validate_response(response, MCPConnectionResponse)
 
     async def get_project(
         self,
@@ -635,8 +645,17 @@ class MCPReadGatewayClient:
 
     def _headers(self, *, token: str | None) -> dict[str, str]:
         headers = {"X-MCP-Client-Version": self._client_version}
-        effective_token = token or self._token
+        # An explicit empty token means an unauthenticated HTTP caller, not stdio fallback.
+        effective_token = self._token if token is None else token
         if effective_token:
+            if len(effective_token) > 4096 or any(
+                ord(character) < 33 or ord(character) > 126 for character in effective_token
+            ):
+                raise MCPGatewayError(
+                    code="INVALID_SERVICE_ACCOUNT_TOKEN",
+                    status_code=401,
+                    message="机器账号配置格式无效, 请通过安全配置重新设置",
+                )
             headers["Authorization"] = f"Bearer {effective_token}"
         return headers
 
@@ -681,7 +700,12 @@ def _gateway_error(response: httpx.Response) -> MCPGatewayError:
         message = "MCP 服务账号没有所需权限"
     elif response.status_code == 404:
         message = "MCP 资源不存在"
-    return MCPGatewayError(code=code, status_code=response.status_code, message=message)
+    result = MCPGatewayError(code=code, status_code=response.status_code, message=message)
+    try:
+        result.trace_id = UUID(response.headers.get("X-Trace-ID", "")).hex
+    except ValueError:
+        return result  # Preserve the local ID when the gateway has no valid UUID.
+    return result
 
 
 def _validate_response[ResponseModelT: BaseModel](
