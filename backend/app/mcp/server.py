@@ -93,7 +93,7 @@ def create_mcp_server(
 def _register_context_diff_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_context_diff",
-        description="Read pinned Context/Knowledge differences; no patch permission.",
+        description="读取固定版本的 Context/Knowledge 差异, 不授予 Patch 权限。",
         structured_output=True,
     )
     async def inspect_context_diff(
@@ -108,7 +108,7 @@ def _register_context_diff_tool(server: MCPServer, client: MCPReadGatewayClient)
 def _register_affected_flows_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_affected_flows",
-        description="Read bounded affected flows, reasons and incomplete-analysis diagnostics.",
+        description="读取有界的受影响流程、原因和分析不完整诊断。",
         structured_output=True,
     )
     async def inspect_affected_flows(
@@ -123,7 +123,7 @@ def _register_affected_flows_tool(server: MCPServer, client: MCPReadGatewayClien
 def _register_diagnose_failure_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.diagnose_failure",
-        description="Diagnose actual failures with product-defect guards; never retry.",
+        description="诊断实际失败并保留产品缺陷保护, 不自动重试。",
         structured_output=True,
     )
     async def diagnose_failure(request: MCPFailureRequest, ctx: Context = None) -> dict[str, Any]:  # type: ignore[assignment]
@@ -135,7 +135,7 @@ def _register_diagnose_failure_tool(server: MCPServer, client: MCPReadGatewayCli
 def _register_change_regression_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.inspect_change_regression",
-        description="Read existing Change Regression evidence; preview is not formal execution.",
+        description="读取现有 Change Regression 证据, Preview 不算正式执行。",
         structured_output=True,
     )
     async def inspect_change_regression(
@@ -150,7 +150,7 @@ def _register_change_regression_tool(server: MCPServer, client: MCPReadGatewayCl
 def _register_propose_repair_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.propose_repair",
-        description="Dry-run a repair; persistence requires an idempotency key and human review.",
+        description="默认预检修复; 持久化需要幂等键, 提案仍须人工审核。",
         structured_output=True,
     )
     async def propose_repair(
@@ -168,7 +168,7 @@ def _register_propose_repair_tool(server: MCPServer, client: MCPReadGatewayClien
 def _register_propose_maintenance_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.propose_maintenance",
-        description="Dry-run maintenance, or atomically propose and link to an existing Run.",
+        description="默认预检维护, 或原子创建待审核提案并关联现有 Run。",
         structured_output=True,
     )
     async def propose_maintenance(

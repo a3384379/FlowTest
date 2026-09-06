@@ -88,3 +88,18 @@ def test_continuous_manifests_are_reproducible() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_new_tool_descriptions_are_chinese_product_text() -> None:
+    names = {
+        "flowtest.inspect_context_diff",
+        "flowtest.inspect_affected_flows",
+        "flowtest.diagnose_failure",
+        "flowtest.inspect_change_regression",
+        "flowtest.propose_repair",
+        "flowtest.propose_maintenance",
+    }
+    tools = {tool.name: tool for tool in await create_mcp_server().list_tools()}
+    for name in names:
+        assert any("\u4e00" <= char <= "\u9fff" for char in tools[name].description)
