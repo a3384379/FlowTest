@@ -126,10 +126,17 @@ def _validate_setup_endpoint(value: str, option: str) -> str:
         validated = _validate_base_url(value)
     except ValueError as error:
         raise ValueError(f"invalid {option}") from error
-    path = unquote(urlsplit(validated).path)
-    if SERVICE_ACCOUNT_PREFIX in path or re.search(
-        r"(?i)(?:token|password|secret|api[-_]?key)[=/:_-][A-Za-z0-9._~%-]{8,}",
-        path,
+    parsed = urlsplit(validated)
+    path = unquote(parsed.path)
+    hostname = unquote(parsed.hostname or "")
+    sensitive_pattern = re.compile(
+        r"(?i)(?:token|password|secret|api[-_]?key)[=/:_-][A-Za-z0-9._~%-]{8,}"
+    )
+    if (
+        SERVICE_ACCOUNT_PREFIX in path
+        or SERVICE_ACCOUNT_PREFIX in hostname
+        or sensitive_pattern.search(path) is not None
+        or sensitive_pattern.search(hostname) is not None
     ):
         raise ValueError(f"sensitive value is not allowed in {option}")
     return validated

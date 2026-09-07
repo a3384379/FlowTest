@@ -12,7 +12,7 @@ from app.main import app
 from app.mcp import cli, setup
 from app.mcp.client import MCPReadGatewayClient
 from app.mcp.server import _request_token, create_mcp_server
-from app.models.access import User
+from app.models.access import Project, User
 from app.models.organizations import Organization, ServiceAccount
 from app.schemas.mcp_connection import MCP_CONNECTION_VERSION
 
@@ -209,6 +209,7 @@ def test_setup_missing_identity_emits_only_safe_template(
         ["--token", "ftsa_accidental_secret"],
         ["setup", "--token-env-var", "ftsa_accidental_secret"],
         ["setup", "--api-base-url", "https://ftsa_accidental_secret@example.test"],
+        ["setup", "--api-base-url", "https://ftsa_accidental_secret.example.test"],
     ],
 )
 def test_cli_rejects_secret_arguments_without_echoing(
@@ -362,6 +363,29 @@ def test_setup_rejects_secret_in_url_path_without_echoing(
         cli.main(["setup", "--mcp-url", "https://host/ftsa_accidental_secret"])
     capture = capsys.readouterr()
     assert "ftsa_accidental_secret" not in capture.out + capture.err
+
+
+@pytest.mark.asyncio
+async def test_machine_account_cannot_access_organizationless_project(
+    mcp_context: dict[str, Any],
+) -> None:
+    async with mcp_context["sessions"]() as session:
+        account = await session.get(ServiceAccount, mcp_context["account_id"])
+        project = Project(
+            organization_id=None,
+            name="legacy-unbound",
+            description="",
+            created_by_id=account.created_by_id,
+        )
+        session.add(project)
+        await session.commit()
+        project_id = project.id
+    response = await mcp_context["client"].get(
+        f"/api/v1/mcp/read/projects/{project_id}",
+        headers={"Authorization": f"Bearer {mcp_context['token']}"},
+    )
+    assert response.status_code == 404
+    assert str(project_id) not in response.text
 
 
 @pytest.mark.asyncio

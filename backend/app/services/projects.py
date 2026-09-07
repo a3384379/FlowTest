@@ -458,6 +458,11 @@ class ProjectService:
         ):
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
         if context is not None and context.service_account_id is not None:
+            # Legacy projects without an organization boundary cannot be safely
+            # addressed by a machine principal. Keep their existing user/member
+            # authorization path until an explicit account grant exists.
+            if project.organization_id is None:
+                raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
             if not _service_account_can_access_project(
                 context.scopes, editing=editing, capability=capability
             ):
