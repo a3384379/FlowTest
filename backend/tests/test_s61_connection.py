@@ -12,6 +12,7 @@ from app.main import app
 from app.mcp import cli, setup
 from app.mcp.client import MCPReadGatewayClient
 from app.mcp.server import _request_token, create_mcp_server
+from app.models.access import User
 from app.models.organizations import Organization, ServiceAccount
 from app.schemas.mcp_connection import MCP_CONNECTION_VERSION
 
@@ -330,6 +331,37 @@ async def test_connection_does_not_reflect_client_secret_or_inherit_creator_scop
     assert result["client_contract_version"] == "unknown"
     assert result["effective_scopes"] == ["mcp:flow:propose", "mcp:preview:execute"]
     assert "ftsa_untrusted_secret" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_machine_account_project_access_does_not_use_creator_admin(
+    mcp_context: dict[str, Any],
+) -> None:
+    async with mcp_context["sessions"]() as session:
+        account = await session.get(ServiceAccount, mcp_context["account_id"])
+        actor = await session.get(User, account.created_by_id)
+        actor.is_system_admin = False
+        await session.commit()
+
+    response = await mcp_context["client"].get(
+        f"/api/v1/mcp/read/projects/{mcp_context['project_id']}",
+        headers={"Authorization": f"Bearer {mcp_context['token']}"},
+    )
+    assert response.status_code == 200, response.text
+    cross_tenant = await mcp_context["client"].get(
+        f"/api/v1/mcp/read/projects/{mcp_context['other_project_id']}",
+        headers={"Authorization": f"Bearer {mcp_context['token']}"},
+    )
+    assert cross_tenant.status_code == 404
+
+
+def test_setup_rejects_secret_in_url_path_without_echoing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["setup", "--mcp-url", "https://host/ftsa_accidental_secret"])
+    capture = capsys.readouterr()
+    assert "ftsa_accidental_secret" not in capture.out + capture.err
 
 
 @pytest.mark.asyncio

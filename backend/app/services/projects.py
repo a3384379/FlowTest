@@ -43,6 +43,19 @@ class ProjectService:
     async def list_projects(
         self, *, actor: User, page: int, page_size: int
     ) -> tuple[list[ProjectAccess], int]:
+        context = get_tenant_context()
+        if context is not None and context.service_account_id is not None:
+            if "mcp:read" not in context.scopes:
+                raise AppError(
+                    code="MCP_SCOPE_REQUIRED", message="MCP 需要只读权限范围", status_code=403
+                )
+            projects, total = await self._projects.list_for_organization(
+                organization_id=context.organization_id,
+                offset=(page - 1) * page_size,
+                limit=page_size,
+            )
+            role = _service_account_project_role(context.scopes)
+            return [ProjectAccess(project=project, role=role) for project in projects], total
         rows, total = await self._projects.list_for_user(
             user_id=actor.id,
             system_admin=actor.is_system_admin,
@@ -444,6 +457,19 @@ class ProjectService:
             and project.organization_id != context.organization_id
         ):
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        if context is not None and context.service_account_id is not None:
+            if not _service_account_can_access_project(
+                context.scopes, editing=editing, capability=capability
+            ):
+                raise AppError(
+                    code="MCP_SCOPE_REQUIRED",
+                    message="服务账号缺少该项目操作所需的 MCP 权限范围",
+                    status_code=403,
+                )
+            return ProjectAccess(
+                project=project,
+                role=_service_account_project_role(context.scopes),
+            )
         if actor.is_system_admin:
             return ProjectAccess(project=project, role=None)
         role = await self._projects.get_role(project_id=project_id, user_id=actor.id)
@@ -548,3 +574,32 @@ def _project_network_policy(project: Project) -> OutboundNetworkPolicy:
 def _current_organization_id() -> UUID | None:
     context = get_tenant_context()
     return context.organization_id if context is not None else None
+
+
+def _service_account_can_access_project(
+    scopes: frozenset[str], *, editing: bool, capability: ProjectCapability | None = None
+) -> bool:
+    if capability not in {None, ProjectCapability.READ, ProjectCapability.EDIT}:
+        return False
+    editing = editing or capability is ProjectCapability.EDIT
+    if editing:
+        return bool(
+            scopes
+            & frozenset(
+                {
+                    "mcp:write",
+                    "mcp:evidence:write",
+                    "mcp:flow:propose",
+                    "mcp:preview:execute",
+                }
+            )
+        )
+    return "mcp:read" in scopes or _service_account_can_access_project(scopes, editing=True)
+
+
+def _service_account_project_role(scopes: frozenset[str]) -> ProjectRole:
+    return (
+        ProjectRole.EDITOR
+        if _service_account_can_access_project(scopes, editing=True)
+        else ProjectRole.VIEWER
+    )

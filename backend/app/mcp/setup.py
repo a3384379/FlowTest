@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Sequence
 from typing import Literal, Never
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -18,6 +19,7 @@ from app.schemas.mcp_connection import (
     MCPConnectionRequest,
     MCPConnectionResponse,
 )
+from app.services.service_accounts import SERVICE_ACCOUNT_PREFIX
 
 DEFAULT_TOKEN_ENV = "FLOWTEST_MCP_SERVICE_ACCOUNT_TOKEN"  # noqa: S105 - variable name, not a secret
 
@@ -62,8 +64,8 @@ def setup_main(argv: Sequence[str]) -> None:
     parser.add_argument("--token-env-var", type=token_environment_name, default=DEFAULT_TOKEN_ENV)
     args = parser.parse_args(argv)
     try:
-        api_url = _validate_base_url(args.api_base_url)
-        mcp_url = _validate_base_url(args.mcp_url)
+        api_url = _validate_setup_endpoint(args.api_base_url, "api-base-url")
+        mcp_url = _validate_setup_endpoint(args.mcp_url, "mcp-url")
     except ValueError:
         parser.error("invalid endpoint")
     result = SetupResult(
@@ -117,3 +119,17 @@ def _configuration(transport: str, api_url: str, mcp_url: str, token_env: str) -
         '[mcp_servers.flowtest]\ncommand = "flowtest-mcp"\n'
         f"args = {quote(arguments)}\nenv_vars = [{quote(token_env)}]\n"
     )
+
+
+def _validate_setup_endpoint(value: str, option: str) -> str:
+    try:
+        validated = _validate_base_url(value)
+    except ValueError as error:
+        raise ValueError(f"invalid {option}") from error
+    path = unquote(urlsplit(validated).path)
+    if SERVICE_ACCOUNT_PREFIX in path or re.search(
+        r"(?i)(?:token|password|secret|api[-_]?key)[=/:_-][A-Za-z0-9._~%-]{8,}",
+        path,
+    ):
+        raise ValueError(f"sensitive value is not allowed in {option}")
+    return validated

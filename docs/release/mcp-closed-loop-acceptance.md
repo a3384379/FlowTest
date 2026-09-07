@@ -1,6 +1,7 @@
 # MCP Closed Loop S61/S62 验收账本
 
-状态：S61A 本地实现完成，待 PR 复审/Required Gate；S61B～S62B 未开始。不标记整体完成或 GA。
+状态：S61A 本地实现完成，PR 复审提出的两项 P1 已在本地修复，待更新候选复审/Required Gate；
+S61B～S62B 未开始。不标记整体完成或 GA。
 
 ## 基线与交付范围
 
@@ -22,6 +23,10 @@ Scope/工具契约冻结及 Onboarding 的兼容提示。工具数 38 → 39；�
   结果冒充修改后重新运行的全量结果。Ruff Format/Check、mypy、架构依赖检查均执行；最终 CI 待出。
 - 前端集中检查：format、lint/TypeScript、build 通过；61 个文件、240 项测试通过，branch 80.34%。
 - Onboarding Skill quick_validate、四个 Skill Manifest 契约检查、五包 Evaluation 资产同步检查通过。
+- PR 复审 P1 修复：项目资产授权现在以 `service_account_id`、固定组织和 MCP scope 为边界，
+  不读取创建者的 `is_system_admin` 或项目成员角色；setup 校验并拒绝敏感 URL path，避免把令牌
+  写入 config_template/stdout。相关回归覆盖同组织无成员访问、跨组织 404、越权能力拒绝和
+  URL 错误不回显。
 - 真实 SDK Streamable HTTP 的 ASGI 传输测试通过，保持默认 Host 安全校验。进程内调用与 HTTP
   身份分别验证；这不是实际宿主或真实模型验收。Compose Playwright 由本次路径门禁 CI 执行，当前待出。
 

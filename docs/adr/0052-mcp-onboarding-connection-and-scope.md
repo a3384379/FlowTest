@@ -39,7 +39,11 @@ connection_diagnostic 区分认证、过期、Scope、网络、版本和 Feature
 
 已有 mcp:read/write/evidence:write/flow:propose/preview:execute 不静默扩权。新 Scope 不映射为
 通用管理员或全局 create_project，也不修改 Viewer 拒绝创建项目的 H0 规则。组织由账号固定，
-禁止传入其他组织来选择身份。新项目 Owner 规则和来源审计在 S61B 以显式授权主体实现。
+禁止传入其他组织来选择身份。已有项目的 MCP 资产授权走服务账号专用分支：以
+`service_account_id`、账号固定组织和对应 MCP scope 判定，不读取账号创建者的 `is_system_admin`、
+项目成员或团队角色；跨组织项目统一返回不可枚举的 404。当前 S61A 的账号授权粒度是组织内、
+按账号 scope 的明确机器授权，不代表获得组织管理员或项目成员身份；S61B 再补充首个项目创建及
+更细项目范围的显式 grant/幂等设计。新项目 Owner 规则和来源审计在 S61B 以显式授权主体实现。
 
 ## 组织级初始化的存储前置约束
 
