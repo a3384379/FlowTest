@@ -844,7 +844,9 @@ http://127.0.0.1:8765/mcp
 
 ### 8.6 Tools
 
-当前共 21 个 Tool。
+本节保留基础 Tools 示例；当前 MCP 契约共 39 个 Tool（含 S61A 的
+`flowtest.inspect_connection`）。实际可用工具仍以宿主 `tools/list` 和服务账号 Scope 为准，
+未实现的 S61B/S62 工具不会因方案文档而提前出现。
 
 #### 8.6.1 项目、服务、契约和运行证据
 
