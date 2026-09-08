@@ -121,18 +121,14 @@ async def _verify() -> None:
         version = result.one_or_none()
         if version is None:
             raise RuntimeError("S47.2 migration fixture is missing")
-        encoded = json.dumps(
-            version.canonical_contract, ensure_ascii=False, sort_keys=True
-        )
+        encoded = json.dumps(version.canonical_contract, ensure_ascii=False, sort_keys=True)
         if any(value in encoded for value in _SENSITIVE_VALUES):
             raise RuntimeError("S47.2 migration retained a sensitive canonical value")
         if version.contract_completeness != "redacted_partial":
             raise RuntimeError("S47.2 migration did not mark redacted_partial")
         expected = semantic_contract_fingerprint(version.canonical_contract)
         if version.contract_fingerprint != expected or expected == "0" * 64:
-            raise RuntimeError(
-                "S47.2 migration did not recalculate the semantic fingerprint"
-            )
+            raise RuntimeError("S47.2 migration did not recalculate the semantic fingerprint")
     await engine.dispose()
     print(json.dumps({"status": "verified", "sensitive_values_present": False}))
 
