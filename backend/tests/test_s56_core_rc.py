@@ -83,7 +83,7 @@ def test_skill_reinspects_accepted_unapplied_proposal_before_preview() -> None:
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     workflow = (SKILL_ROOT / "references/workflow.md").read_text(encoding="utf-8")
 
-    skill_preview = skill[skill.index("8. Only") :]
+    skill_preview = skill[skill.index("9. Only") :]
     inspect_index = skill_preview.index("inspect_flow_proposal")
     preview_index = skill_preview.index("preview_flow_proposal")
     assert inspect_index < preview_index

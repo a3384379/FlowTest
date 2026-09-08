@@ -69,6 +69,14 @@ class ImportSourceIdentity:
     document_url: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ImportPreviewSummary:
+    source: ImportSourceIdentity
+    source_type: ImportSourceType
+    source_sha256: str
+    results: tuple[ImportItemResult, ...]
+
+
 class ImportService:
     def __init__(
         self,
@@ -183,6 +191,25 @@ class ImportService:
             content=content,
         )
 
+    async def preview_document_dry_run(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        source_name: str,
+        source_type: ImportSourceType,
+        content: bytes,
+    ) -> ImportPreviewSummary:
+        """Preview an import without creating an ImportRun or changing assets."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        return await self._preview_content_summary(
+            project_id=project_id,
+            source=_file_source(source_name),
+            source_type=source_type,
+            content=content,
+        )
+
     async def preview_url(
         self,
         *,
@@ -205,6 +232,42 @@ class ImportService:
         )
         return await self._preview_content(
             actor=actor,
+            project_id=project_id,
+            source=_url_source(
+                requested_url=url,
+                source_page_url=fetched.source_page_url,
+                resolved_url=fetched.resolved_url,
+                source_name=fetched.source_name,
+                document_id=fetched.document_id,
+                discovered_from_page=fetched.discovered_from_page,
+            ),
+            source_type=source_type,
+            content=fetched.content,
+        )
+
+    async def preview_url_dry_run(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        url: str,
+        source_type: ImportSourceType,
+        maximum_bytes: int,
+        document_id: str | None = None,
+    ) -> ImportPreviewSummary:
+        """Fetch and inspect a URL without persisting an ImportRun."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        if self._document_fetcher is None:
+            raise RuntimeError("URL import document fetcher is not configured")
+        policy = await self._projects.load_runtime_security_policy(project_id)
+        fetched = await self._document_fetcher.fetch(
+            url=url,
+            network_policy=policy,
+            maximum_bytes=maximum_bytes,
+            document_id=document_id,
+        )
+        return await self._preview_content_summary(
             project_id=project_id,
             source=_url_source(
                 requested_url=url,
@@ -245,18 +308,14 @@ class ImportService:
         source_type: ImportSourceType,
         content: bytes,
     ) -> ImportRun:
-        try:
-            detected_type, operations = parse_import_document(content, source_type)
-        except CanonicalSchemaValidationError as error:
-            raise _canonical_contract_error(error) from error
-        except ImportDocumentError as error:
-            raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
-        _ensure_unique_operations(operations)
-        results = await self._preview_operations(
+        summary = await self._preview_content_summary(
             project_id=project_id,
             source=source,
-            operations=operations,
+            source_type=source_type,
+            content=content,
         )
+        detected_type = summary.source_type
+        results = list(summary.results)
         counts = Counter(item.change for item in results)
         run_id = uuid4()
         encrypted = self._secrets.encrypt(
@@ -306,6 +365,33 @@ class ImportService:
         await self._session.refresh(run)
         return run
 
+    async def _preview_content_summary(
+        self,
+        *,
+        project_id: UUID,
+        source: ImportSourceIdentity,
+        source_type: ImportSourceType,
+        content: bytes,
+    ) -> ImportPreviewSummary:
+        try:
+            detected_type, operations = parse_import_document(content, source_type)
+        except CanonicalSchemaValidationError as error:
+            raise _canonical_contract_error(error) from error
+        except ImportDocumentError as error:
+            raise AppError(code="IMPORT_INVALID", message=str(error), status_code=422) from error
+        _ensure_unique_operations(operations)
+        results = await self._preview_operations(
+            project_id=project_id,
+            source=source,
+            operations=operations,
+        )
+        return ImportPreviewSummary(
+            source=source,
+            source_type=detected_type,
+            source_sha256=hashlib.sha256(content).hexdigest(),
+            results=tuple(results),
+        )
+
     async def merge_preview(
         self,
         *,
@@ -316,11 +402,20 @@ class ImportService:
         service_id: UUID | None = None,
         environment_id: UUID | None = None,
         endpoint_variant: str = "default",
+        expected_source_sha256: str | None = None,
+        expected_current_versions: dict[str, int] | None = None,
+        confirm_existing_changes: bool | None = None,
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         run = await self._imports.get(run_id)
         if run is None or run.project_id != project_id:
             raise AppError(code="IMPORT_NOT_FOUND", message="导入预览不存在", status_code=404)
+        if expected_source_sha256 is not None and run.source_sha256 != expected_source_sha256:
+            raise AppError(
+                code="IMPORT_PREVIEW_STALE",
+                message="导入预览摘要与服务器记录不一致, 请重新生成预览",
+                status_code=409,
+            )
         if run.status != "preview":
             if set(run.applied_keys) == selected_keys:
                 return run
@@ -356,6 +451,12 @@ class ImportService:
                 message="合并选择包含无效或未变化的接口",
                 status_code=422,
             )
+        self._validate_merge_requirements(
+            current=current,
+            selected_keys=selected_keys,
+            expected_current_versions=expected_current_versions,
+            confirm_existing_changes=confirm_existing_changes,
+        )
         selected_operations = tuple(
             operation for operation in operations if operation.import_key in selected_keys
         )
@@ -366,6 +467,7 @@ class ImportService:
             environment_id=environment_id,
             operations=selected_operations,
             endpoint_variant=endpoint_variant,
+            allow_existing_change=confirm_existing_changes,
         )
         await self._apply_operations(
             actor=actor,
@@ -399,6 +501,45 @@ class ImportService:
         await self._session.commit()
         await self._session.refresh(run)
         return run
+
+    @staticmethod
+    def _validate_merge_requirements(
+        *,
+        current: list[ImportItemResult],
+        selected_keys: set[str],
+        expected_current_versions: dict[str, int] | None,
+        confirm_existing_changes: bool | None,
+    ) -> None:
+        existing_changes = {
+            item.import_key
+            for item in current
+            if item.import_key in selected_keys
+            and item.change in {ImportChange.CHANGED, ImportChange.DELETED}
+        }
+        if existing_changes and confirm_existing_changes is False:
+            raise AppError(
+                code="IMPORT_REVIEW_REQUIRED",
+                message="更新或删除已有接口必须明确确认并核对精确 Diff",
+                status_code=409,
+                details={"operation_keys": sorted(existing_changes)},
+            )
+        if expected_current_versions is None:
+            return
+        for item in current:
+            if item.import_key not in existing_changes:
+                continue
+            expected = expected_current_versions.get(item.import_key)
+            if expected is None or expected != item.version:
+                raise AppError(
+                    code="IMPORT_TARGET_VERSION_CONFLICT",
+                    message="接口当前版本已变化, 请重新读取并确认目标版本",
+                    status_code=409,
+                    details={
+                        "operation_key": item.import_key,
+                        "expected_version": expected,
+                        "current_version": item.version,
+                    },
+                )
 
     async def list_runs(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
@@ -504,6 +645,7 @@ class ImportService:
         environment_id: UUID | None,
         operations: tuple[ImportedOperation, ...],
         endpoint_variant: str,
+        allow_existing_change: bool | None = None,
     ) -> None:
         if service_id is None:
             if environment_id is not None:
@@ -532,7 +674,27 @@ class ImportService:
                 message="OpenAPI 文档包含多个 Server, 无法自动映射为单一 Endpoint",
                 status_code=422,
             )
-        server_url = next(iter(server_urls), None)
+        await self._ensure_import_endpoint(
+            actor_id=actor_id,
+            project_id=project_id,
+            service_id=service_id,
+            environment_id=environment_id,
+            endpoint_variant=endpoint_variant,
+            server_url=next(iter(server_urls), None),
+            allow_existing_change=allow_existing_change,
+        )
+
+    async def _ensure_import_endpoint(
+        self,
+        *,
+        actor_id: UUID,
+        project_id: UUID,
+        service_id: UUID,
+        environment_id: UUID,
+        endpoint_variant: str,
+        server_url: str | None,
+        allow_existing_change: bool | None,
+    ) -> None:
         if server_url is None:
             return
         _validate_server_url(server_url)
@@ -553,6 +715,13 @@ class ImportService:
                 )
             )
         elif endpoint.base_url != server_url.rstrip("/"):
+            if allow_existing_change is False:
+                raise AppError(
+                    code="IMPORT_REVIEW_REQUIRED",
+                    message="Endpoint 地址变化必须明确确认并核对精确 Diff",
+                    status_code=409,
+                    details={"endpoint_id": str(endpoint.id)},
+                )
             endpoint.base_url = server_url.rstrip("/")
             endpoint.revision += 1
         await self._session.flush()

@@ -33,6 +33,12 @@ from app.schemas.mcp_continuous import (
     MCPRegressionRequest,
     MCPRepairRequest,
 )
+from app.schemas.mcp_contract_import import (
+    MCPCommitContractImportRequest,
+    MCPCommitContractImportResponse,
+    MCPPreviewContractImportRequest,
+    MCPPreviewContractImportResponse,
+)
 from app.schemas.sandbox_preview import SandboxPreviewExecutionResponse
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
@@ -196,16 +202,60 @@ class MCPReadGatewayClient:
         project_id: UUID | str,
         *,
         api_definition_id: UUID | str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+        method: str | None = None,
+        path: str | None = None,
+        service_id: UUID | str | None = None,
+        version: int | None = None,
         token: str | None = None,
         resource_uri: str | None = None,
     ) -> MCPReadEnvelope:
-        params = {"api_definition_id": str(api_definition_id)} if api_definition_id else None
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if api_definition_id:
+            params["api_definition_id"] = str(api_definition_id)
+        if method:
+            params["method"] = method
+        if path:
+            params["path"] = path
+        if service_id:
+            params["service_id"] = str(service_id)
+        if version is not None:
+            params["version"] = version
         return await self._get(
             f"/api/v1/mcp/read/projects/{project_id}/contracts",
             params=params,
             token=token,
             resource_uri=resource_uri,
         )
+
+    async def preview_contract_import(
+        self,
+        request: MCPPreviewContractImportRequest,
+        *,
+        token: str | None = None,
+    ) -> MCPPreviewContractImportResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/contracts/preview",
+            payload=request.model_dump(mode="json", by_alias=True),
+            token=token,
+        )
+        return _validate_response(response, MCPPreviewContractImportResponse)
+
+    async def commit_contract_import(
+        self,
+        request: MCPCommitContractImportRequest,
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> MCPCommitContractImportResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/contracts/commit",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, MCPCommitContractImportResponse)
 
     async def inspect_change_impact(
         self,

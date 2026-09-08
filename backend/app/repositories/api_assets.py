@@ -113,6 +113,8 @@ class APIAssetRepository:
         limit: int,
         search: str | None = None,
         method: str | None = None,
+        path: str | None = None,
+        service_id: UUID | None = None,
         include_inactive: bool = False,
     ) -> tuple[list[APIDefinition], int]:
         filters = [APIDefinition.project_id == project_id]
@@ -144,6 +146,18 @@ class APIAssetRepository:
                     )
                 )
             )
+        if path:
+            filters.append(
+                exists(
+                    select(APIVersion.id).where(
+                        APIVersion.api_definition_id == APIDefinition.id,
+                        APIVersion.version == APIDefinition.current_version,
+                        APIVersion.path == path,
+                    )
+                )
+            )
+        if service_id is not None:
+            filters.append(APIDefinition.service_id == service_id)
         definitions = list(
             (
                 await self._session.scalars(

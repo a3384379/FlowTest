@@ -844,9 +844,9 @@ http://127.0.0.1:8765/mcp
 
 ### 8.6 Tools
 
-本节保留基础 Tools 示例；当前 MCP 契约共 39 个 Tool（含 S61A 的
-`flowtest.inspect_connection`）。实际可用工具仍以宿主 `tools/list` 和服务账号 Scope 为准，
-未实现的 S61B/S62 工具不会因方案文档而提前出现。
+本节保留基础 Tools 示例；当前 MCP 契约共 44 个 Tool（含 S61A 的
+`flowtest.inspect_connection`、S61B 初始化和 S61C 契约导入工具）。实际可用工具仍以宿主
+`tools/list` 和服务账号 Scope 为准，未实现的 S61D/S62 工具不会因方案文档而提前出现。
 
 #### 8.6.1 项目、服务、契约和运行证据
 
@@ -856,6 +856,8 @@ http://127.0.0.1:8765/mcp
 | `flowtest.inspect_project` | `project_id` | 读取安全的项目元数据 |
 | `flowtest.discover_services` | `project_id`、可选 `environment_id` | 读取项目 Service 和可用 Endpoint Variant，不返回 Credential |
 | `flowtest.inspect_contract` | `project_id`、可选 `api_definition_id` | 读取已净化的当前 API 契约结构；不返回 Example、PII、Token 或 Secret Enum 原值 |
+| `flowtest.preview_contract_import` | URL、有界文档或强类型 Operation；`persist` | 复用既有 Importer 生成冻结预览；`persist=false` 不落库，`persist=true` 创建 ImportRun |
+| `flowtest.commit_contract_import` | `preview_id`、`source_sha256`、`selected_operations`、幂等键 | 只提交冻结预览；更新/删除/Endpoint 变化需确认和期望版本，不重新抓取 URL |
 | `flowtest.inspect_flow` | `workflow_id` | 读取工作流草稿拓扑、安全操作引用和草稿指纹 |
 | `flowtest.inspect_run_evidence` | `execution_id` | 读取执行状态证据，不返回原始请求/响应 Body |
 

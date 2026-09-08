@@ -34,6 +34,8 @@ SKILL_REQUIRED_TOOLS = (
 SKILL_OPTIONAL_TOOLS = (
     "flowtest.inspect_entity_mapping",
     "flowtest.inspect_data_profile",
+    "flowtest.preview_contract_import",
+    "flowtest.commit_contract_import",
     "flowtest.preview_flow_proposal",
 )
 SKILL_REQUIRED_SCOPES = (
@@ -41,7 +43,7 @@ SKILL_REQUIRED_SCOPES = (
     "mcp:evidence:write",
     "mcp:flow:propose",
 )
-SKILL_OPTIONAL_SCOPES = ("mcp:preview:execute",)
+SKILL_OPTIONAL_SCOPES = ("mcp:preview:execute", "mcp:contract:import")
 SKILL_STAGES = (
     "select_project",
     "create_context",

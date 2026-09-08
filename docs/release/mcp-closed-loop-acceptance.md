@@ -1,19 +1,22 @@
 # MCP Closed Loop S61/S62 验收账本
 
-状态：S61A 已由 PR #90 合并并完成合并后主线门禁；S61B 本地实现与定向回归完成，待 PR
-复审/Required Gate。S61C～S62B 未开始。不标记整体完成或 GA。
+状态：S61A 已由 PR #90 合并，S61B 已由 PR #91 合并并完成合并后主线门禁；S61C 核心实现与
+定向回归完成，待本阶段集中门禁/PR。S61D～S62B 未开始。不标记整体完成或 GA。
 
 ## 基线与交付范围
 
-2026-09-08 从 PR #90 合并后的全绿 main 开始，基线见 [能力审计](../mcp-capability-audit.md)。
-当前分支 `codex/v6-s61b-onboarding-initialization`，从 S61A 合并后全绿 main 创建。本轮交付
-组织级幂等的 `ensure_project`、受限 test/sandbox 环境和 Service Target 初始化，同时更新连接
-action、MCP Client/Server、MCP Golden、Standalone `20260908_0052` 基线及 Onboarding Skill。
-工具数 39 → 42；新写入 Scope 仅开放 `mcp:project:bootstrap`，其他 S61C/S62 Scope 不提前开放。
+2026-09-08 从 PR #91 合并后的主干开始，基线见 [能力审计](../mcp-capability-audit.md)。
+当前分支 `codex/v6-s61c-contract-import`，从 S61B 合并后主干创建。本轮交付
+有界契约预览/提交与 inspect_contract 分页，同时更新 MCP Client/Server、MCP Golden、Onboarding/
+Integration Skill。S61B 的组织级幂等初始化已在 PR #91 闭环；工具数 42 → 44，新增 Scope 为
+`mcp:contract:import`。
 详见 [ADR 0052](../adr/0052-mcp-onboarding-connection-and-scope.md) 和
 [ADR 0053](../adr/0053-mcp-bootstrap-initialization.md)、[连接指南](../operations/mcp-connection-setup.md)。
 
 ## S61B 验证记录
+
+- PR #91 已合并，Backend、Integration、Bundle、升级回滚、源码/镜像、Compose Smoke 和 Required
+  Gate 全部成功；复审无 P0/P1，两个 P2 作为后续技术债记录并完成线程收口。
 
 - 空组织 Dry Run 不创建项目或组织级幂等回执；真实初始化要求固定组织、
   `mcp:project:bootstrap` 和 `Idempotency-Key`。同键同请求返回历史回执并标记 replay，
@@ -24,7 +27,21 @@ action、MCP Client/Server、MCP Golden、Standalone `20260908_0052` 基线及 O
   Service 类型、Endpoint Variant、TLS 和现有出站网络策略。URL 凭据、查询/片段、明文 Header
   或 Token 均被拒绝，所有新资源写入审计。
 - 定向 API 测试 `3 passed`，MCP Golden/连接 action、Skill Manifest/评测副本与 Standalone 基线
-  回归通过；这些是隔离确定性证据，不替代真实宿主 MCP 或真实 LLM 验收。集中 PR 门禁尚未执行。
+  回归通过；这些是隔离确定性证据，不替代真实宿主 MCP 或真实 LLM 验收。PR #91 集中门禁与合并后
+  Required Gate 全部成功。
+
+## S61C 验证记录（开发完成，待 PR）
+
+- 新增 `flowtest.preview_contract_import` 与 `flowtest.commit_contract_import`，专用 Scope 为
+  `mcp:contract:import`；支持批准 URL、有界 UTF-8 文档和代码证据生成的强类型 HTTP Operation。
+- `persist=false` 只运行现有 Importer/Canonical Contract 预览，不创建 ImportRun；持久化预览保存加密的
+  冻结内容和源摘要。Commit 只接受 `preview_id`、`source_sha256`、精确选择及期望版本，绝不重新抓取 URL。
+- 纯新增接口可在明确范围内提交；已有接口更新/删除、Endpoint 地址变化要求人工确认和版本匹配。重复提交
+  回到已完成回执，敏感参数、示例值、URL 凭据和超大/重复输入均 fail-closed。
+- `inspect_contract` 增加真实 total、page/page_size、has_more/next_cursor/truncated、方法/路径/Service
+  过滤与指定版本读取，并返回有界参数位置/required/type 和响应结构摘要。
+- 定向回归覆盖 schema 严格校验、source-derived OpenAPI 转换、dry-run/冻结摘要边界、ImportService 旧
+  合并兼容和 MCP 工具注册；集中 PR 门禁待本阶段完成后执行。
 
 ## S61A 验证记录
 
@@ -53,8 +70,8 @@ action、MCP Client/Server、MCP Golden、Standalone `20260908_0052` 基线及 O
 | 阶段 | 开发 | 合并/主线门禁 |
 | --- | --- | --- |
 | S61A 连接、权限契约 | 已完成 | PR #90 已合并，主线门禁全绿 |
-| S61B 项目/环境/服务初始化 | 本地完成 | 待复审和 CI |
-| S61C 有界契约导入 | 未开始 | 未开始 |
+| S61B 项目/环境/服务初始化 | 已完成 | PR #91 已合并，合并后门禁全绿 |
+| S61C 有界契约导入 | 核心实现与定向回归完成 | 待本阶段集中门禁/PR |
 | S61D 读取/查找/Readiness/目标诊断 | 未开始 | 未开始 |
 | S61E 零接入与生成 Skill | 未开始 | 未开始 |
 | S62A 回归准备与 TestPlan 建议 | 未开始 | 未开始 |

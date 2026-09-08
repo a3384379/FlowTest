@@ -73,12 +73,24 @@ async def inspect_contract(
     session: SessionDependency,
     principal: MCPCurrent,
     api_definition_id: UUID | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=100),
+    method: str | None = Query(default=None, min_length=3, max_length=16),
+    path: str | None = Query(default=None, min_length=1, max_length=2048),
+    service_id: UUID | None = None,
+    version: int | None = Query(default=None, ge=1),
 ) -> MCPReadResponse:
     result = await MCPReadService(session).inspect_contract(
         actor=principal.actor,
         project_id=project_id,
         call=_call(request, "inspect_contract", f"flowtest://projects/{project_id}/contract"),
         api_definition_id=api_definition_id,
+        page=page,
+        page_size=page_size,
+        method=method,
+        path=path,
+        service_id=service_id,
+        version=version,
     )
     return _response(result)
 

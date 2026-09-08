@@ -46,9 +46,11 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.ingest_java_source_snapshot",
             "flowtest.ingest_database_evidence",
             "flowtest.inspect_entity_mapping",
+            "flowtest.preview_contract_import",
+            "flowtest.commit_contract_import",
         ),
         ("mcp:read", "mcp:evidence:write"),
-        ("mcp:project:bootstrap",),
+        ("mcp:project:bootstrap", "mcp:contract:import"),
         (
             "bootstrap_assets",
             "select_project",

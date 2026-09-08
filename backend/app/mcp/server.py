@@ -49,6 +49,10 @@ from app.schemas.mcp_continuous import (
     MCPRegressionRequest,
     MCPRepairRequest,
 )
+from app.schemas.mcp_contract_import import (
+    MCPCommitContractImportRequest,
+    MCPPreviewContractImportRequest,
+)
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
@@ -59,6 +63,8 @@ MCP_INSTRUCTIONS = (
     "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
     "确定性 Integration Plan 与"
     "只进入待审核状态的 Flow Draft、Repair 与关联现有 Change Regression 的 Maintenance。"
+    "Contract Import 只能从批准的 URL、有界文档或强类型 Operation 进入 Preview；"
+    "Commit 使用冻结预览摘要，绝不重新抓取 URL。"
     "Context Diff、Affected Flow 和失败诊断只读；Sandbox Preview 需要人工一次性批准。"
     "FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、正式环境执行、删除、修改"
@@ -116,6 +122,50 @@ def _register_context_diff_tool(server: MCPServer, client: MCPReadGatewayClient)
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.inspect_context_diff(request, token=_request_token(ctx, client))
+        )
+
+
+def _register_preview_contract_import_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.preview_contract_import",
+        description=(
+            "Preview an API contract from an approved URL, bounded document, or strongly typed "
+            "operations. persist=false is a pure dry-run; persist=true creates an ImportRun."
+        ),
+        structured_output=True,
+    )
+    async def preview_contract_import(
+        request: MCPPreviewContractImportRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.preview_contract_import(
+                request,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_commit_contract_import_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.commit_contract_import",
+        description=(
+            "Commit only a frozen contract preview by preview_id and source digest. The server "
+            "never refetches a URL; updates, deletes, and endpoint changes require confirmation."
+        ),
+        structured_output=True,
+    )
+    async def commit_contract_import(
+        request: MCPCommitContractImportRequest,
+        idempotency_key: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.commit_contract_import(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
         )
 
 
@@ -359,6 +409,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_coverage_tool(server, client)
     _register_begin_context_tool(server, client)
     _register_close_context_tool(server, client)
+    _register_commit_contract_import_tool(server, client)
     _register_compile_integration_tool(server, client)
     _register_diagnose_failure_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
@@ -404,12 +455,24 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     async def inspect_contract(
         project_id: str,
         api_definition_id: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+        method: str | None = None,
+        path: str | None = None,
+        service_id: str | None = None,
+        version: int | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.inspect_contract(
                 project_id,
                 api_definition_id=api_definition_id,
+                page=page,
+                page_size=page_size,
+                method=method,
+                path=path,
+                service_id=service_id,
+                version=version,
                 token=_request_token(ctx, client),
             )
         )
@@ -481,6 +544,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
         )
 
     _register_plan_integration_tool(server, client)
+    _register_preview_contract_import_tool(server, client)
     _register_preview_flow_proposal_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
     _register_propose_maintenance_tool(server, client)

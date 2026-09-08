@@ -29,7 +29,11 @@ HTTP/SQL 或 Docker/.env 凭据补权限；只报告配置状态，不索取或�
 2. 用 `flowtest.list_projects` 和 `flowtest.inspect_project` 选择一个明确授权项目；确认目标业务流、仓库
    范围及测试环境。无权限、缺契约或范围不明确时停止相应写入，不自动扩大权限。
 3. 用 `flowtest.discover_services`、`flowtest.inspect_contract` 盘点服务和契约，保留实例 ID、版本和
-   Portable Ref。只把实际返回的证据纳入上下文，不将名称相似当作已确认映射。
+   Portable Ref。若提供了 `mcp:contract:import` 及对应工具，可按任务选择批准的 URL、有界文档或强类型
+   Operation 调用 `flowtest.preview_contract_import`；仅在新增接口范围明确时提交 `persist=true` 预览，
+   再以返回的 `preview_id`、`source_sha256` 和精确 `selected_operations` 调用
+   `flowtest.commit_contract_import`。更新、删除或 Endpoint 变化必须带人工确认和期望版本；不要重新抓取 URL。
+   纯 dry-run 不创建 ImportRun。只把实际返回的证据纳入上下文，不将名称相似当作已确认映射。
 4. 用 `flowtest.begin_test_context` 建立固定修订 Context，再调用 `flowtest.inspect_context_requirements`。
    列出缺失的规范性证据；已有 Context 可由用户提供并先调用 `flowtest.inspect_test_context`。
 5. 仅从另行授权的只读来源或用户提供的有界材料收集缺口，使用强类型 Evidence 提交。普通 Evidence 用

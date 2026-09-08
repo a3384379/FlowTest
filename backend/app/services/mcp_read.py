@@ -182,15 +182,26 @@ class MCPReadService:
         project_id: UUID,
         call: MCPReadCall,
         api_definition_id: UUID | None,
+        page: int = 1,
+        page_size: int = MAX_CONTRACTS,
+        method: str | None = None,
+        path: str | None = None,
+        service_id: UUID | None = None,
+        version: int | None = None,
     ) -> MCPReadEnvelope:
         self._require_scope()
+        if page < 1 or page_size < 1 or page_size > MAX_CONTRACTS:
+            raise AppError(code="INVALID_PAGE", message="分页参数无效", status_code=422)
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         definitions: list[APIDefinition]
         if api_definition_id is None:
-            definitions, _ = await self._assets.list_definitions(
+            definitions, total = await self._assets.list_definitions(
                 project_id=project_id,
-                offset=0,
-                limit=MAX_CONTRACTS,
+                offset=(page - 1) * page_size,
+                limit=page_size,
+                method=method.upper() if method else None,
+                path=path,
+                service_id=service_id,
             )
         else:
             definition = await self._assets.get_definition(api_definition_id)
@@ -199,19 +210,28 @@ class MCPReadService:
                     code="API_DEFINITION_NOT_FOUND", message="API 定义不存在", status_code=404
                 )
             definitions = [definition]
+            total = 1
         entries: list[JsonValue] = []
         for definition in definitions:
-            version = await self._assets.get_version(
+            current_version = await self._assets.get_version(
                 definition_id=definition.id,
-                version=definition.current_version,
+                version=version or definition.current_version,
             )
-            if version is not None:
-                entries.append(_contract_summary(definition, version))
+            if current_version is not None:
+                entries.append(_contract_summary(definition, current_version))
         return await self._envelope(
             actor=actor,
             call=call,
             project_id=project_id,
-            data={"items": entries, "total": len(entries)},
+            data={
+                "items": entries,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_more": page * page_size < total,
+                "next_cursor": str(page + 1) if page * page_size < total else None,
+                "truncated": page * page_size < total,
+            },
             evidence_refs=[
                 EvidenceRef(
                     uri=f"flowtest://projects/{project_id}/contract",
@@ -678,6 +698,9 @@ def _endpoint_summary(
 
 
 def _contract_summary(definition: APIDefinition, version: APIVersion) -> dict[str, JsonValue]:
+    canonical = version.canonical_contract if isinstance(version.canonical_contract, dict) else {}
+    parameters = canonical.get("parameters", [])
+    responses = canonical.get("responses", {})
     return {
         "id": str(definition.id),
         "name": definition.name,
@@ -690,9 +713,61 @@ def _contract_summary(definition: APIDefinition, version: APIVersion) -> dict[st
         "query_parameter_names": _names(version.query_parameters),
         "body_kind": version.body_kind,
         "auth_kind": version.auth_kind,
+        "parameters": _contract_parameters_summary(parameters),
+        "responses": _contract_responses_summary(responses),
         "assertion_kinds": _string_values(version.assertions, "kind"),
         "extraction_names": _string_values(version.extraction_rules, "name"),
     }
+
+
+def _contract_parameters_summary(value: object) -> list[JsonValue]:
+    if not isinstance(value, list):
+        return []
+    result: list[JsonValue] = []
+    for item in value[:100]:
+        if not isinstance(item, dict):
+            continue
+        location = item.get("in", item.get("location"))
+        name = item.get("name")
+        if not isinstance(location, str) or not isinstance(name, str):
+            continue
+        result.append(
+            {
+                "name": name[:160],
+                "location": location[:32],
+                "required": bool(item.get("required")),
+                "type": _schema_type(item.get("schema")),
+            }
+        )
+    return result
+
+
+def _contract_responses_summary(value: object) -> list[JsonValue]:
+    if not isinstance(value, dict):
+        return []
+    result: list[JsonValue] = []
+    for status, raw in list(value.items())[:100]:
+        if not isinstance(status, str) or not isinstance(raw, dict):
+            continue
+        schema = raw.get("schema")
+        result.append(
+            {
+                "status": status[:16],
+                "description": str(raw.get("description", ""))[:2000],
+                "content_type": raw.get("content_type")
+                if isinstance(raw.get("content_type"), str)
+                else None,
+                "type": _schema_type(schema),
+            }
+        )
+    return result
+
+
+def _schema_type(value: object) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    schema_type = value.get("type")
+    return schema_type if isinstance(schema_type, str) else None
 
 
 def _workflow_summary(workflow: Workflow) -> dict[str, JsonValue]:

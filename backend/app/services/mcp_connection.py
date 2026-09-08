@@ -74,6 +74,8 @@ def _available_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
         actions.append("read_authorized_assets")
     if "mcp:project:bootstrap" in scopes:
         actions.append("bootstrap_project_assets")
+    if "mcp:contract:import" in scopes:
+        actions.append("import_contract")
     if (
         "mcp:write" in scopes
         and settings.feature_ai_enabled
