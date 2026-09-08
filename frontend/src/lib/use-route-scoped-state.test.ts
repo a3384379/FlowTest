@@ -17,6 +17,9 @@ describe('route-scoped state', () => {
     rendered.rerender({ projectId: 'project-1', routeId: 'route-b' })
     expect(rendered.result.current[0]).toBe('route-b')
 
+    rendered.rerender({ projectId: 'project-1', routeId: 'route-a' })
+    expect(rendered.result.current[0]).toBe('route-a')
+
     rendered.rerender({ projectId: 'project-2', routeId: null })
     expect(rendered.result.current[0]).toBeNull()
   })
@@ -31,6 +34,9 @@ describe('route-scoped state', () => {
     expect(rendered.result.current[0]).toBe('local-proposal')
 
     rendered.rerender({ projectId: 'project-2' })
+    expect(rendered.result.current[0]).toBeNull()
+
+    rendered.rerender({ projectId: 'project-1' })
     expect(rendered.result.current[0]).toBeNull()
   })
 })

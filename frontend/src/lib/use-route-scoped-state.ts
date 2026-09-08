@@ -16,8 +16,11 @@ export function useRouteScopedState<T>(
     routeKey,
     value: initialValue,
   })
-  const value =
-    state.projectId === projectId && state.routeKey === routeKey ? state.value : initialValue
+  const isCurrentScope = state.projectId === projectId && state.routeKey === routeKey
+  if (!isCurrentScope) {
+    setState({ projectId, routeKey, value: initialValue })
+  }
+  const value = isCurrentScope ? state.value : initialValue
   return [value, (nextValue: T) => setState({ projectId, routeKey, value: nextValue })] as const
 }
 
