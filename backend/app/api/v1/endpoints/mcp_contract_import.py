@@ -43,9 +43,10 @@ async def commit_contract_import(
     principal: MCPContractImportCurrent,
     idempotency_key: IdempotencyHeader = None,
 ) -> MCPCommitContractImportResponse:
-    require_idempotency_key(idempotency_key)
+    key = require_idempotency_key(idempotency_key)
     return await MCPContractImportService(session).commit(
         actor=principal.actor,
         account=principal.account,
         payload=payload,
+        idempotency_key=key,
     )

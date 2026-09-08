@@ -17,6 +17,7 @@ from app.core.errors import AppError
 from app.importers.contracts import ImportChange, ImportSourceType, is_sensitive_import_name
 from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
+from app.models.imports import ImportRun
 from app.models.organizations import ServiceAccount
 from app.schemas.mcp_contract_import import (
     MCP_CONTRACT_IMPORT_SCOPE,
@@ -27,10 +28,19 @@ from app.schemas.mcp_contract_import import (
     MCPPreviewContractImportRequest,
     MCPPreviewContractImportResponse,
 )
-from app.services.imports import ImportItemResult, ImportPreviewSummary, ImportService
+from app.services.idempotency import IdempotencyService
+from app.services.imports import (
+    ImportItemResult,
+    ImportPreviewSummary,
+    ImportPreviewTarget,
+    ImportService,
+)
+from app.services.projects import ProjectService
 
 MAX_OPERATIONS = 100
+MAX_RESPONSE_ITEMS = 200
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+_COMMIT_OPERATION = "mcp.commit_contract_import"
 
 
 class MCPContractImportService:
@@ -52,6 +62,15 @@ class MCPContractImportService:
     ) -> MCPPreviewContractImportResponse:
         organization_id = _require_scope(account)
         importer = ImportService(self._session, document_fetcher=self._fetcher)
+        target = (
+            ImportPreviewTarget(
+                service_id=payload.service_id,
+                environment_id=payload.environment_id,
+                endpoint_variant=payload.endpoint_variant,
+            )
+            if payload.persist
+            else None
+        )
         if payload.source_kind == "url":
             if payload.source_url is None:
                 raise AppError(code="IMPORT_INVALID", message="契约地址不能为空", status_code=422)
@@ -65,6 +84,8 @@ class MCPContractImportService:
                         source_type=payload.source_type,
                         maximum_bytes=min(settings.artifact_limit_bytes, MAX_DOCUMENT_BYTES),
                         document_id=payload.document_id,
+                        target=target,
+                        max_results=MAX_RESPONSE_ITEMS,
                     )
                     if payload.persist
                     else await importer.preview_url_dry_run(
@@ -74,6 +95,7 @@ class MCPContractImportService:
                         source_type=payload.source_type,
                         maximum_bytes=min(settings.artifact_limit_bytes, MAX_DOCUMENT_BYTES),
                         document_id=payload.document_id,
+                        max_results=MAX_RESPONSE_ITEMS,
                     )
                 )
             except AppError as error:
@@ -104,6 +126,8 @@ class MCPContractImportService:
                     source_name=source_name,
                     source_type=payload.source_type,
                     content=content,
+                    target=target,
+                    max_results=MAX_RESPONSE_ITEMS,
                 )
                 if payload.persist
                 else await importer.preview_document_dry_run(
@@ -112,6 +136,7 @@ class MCPContractImportService:
                     source_name=source_name,
                     source_type=payload.source_type,
                     content=content,
+                    max_results=MAX_RESPONSE_ITEMS,
                 )
             )
             return _preview_response(
@@ -132,6 +157,8 @@ class MCPContractImportService:
                 source_name="source-derived/inferred.json",
                 source_type=ImportSourceType.OPENAPI3,
                 content=content,
+                target=target,
+                max_results=MAX_RESPONSE_ITEMS,
             )
             if payload.persist
             else await importer.preview_document_dry_run(
@@ -140,6 +167,7 @@ class MCPContractImportService:
                 source_name="source-derived/inferred.json",
                 source_type=ImportSourceType.OPENAPI3,
                 content=content,
+                max_results=MAX_RESPONSE_ITEMS,
             )
         )
         return _preview_response(
@@ -158,46 +186,43 @@ class MCPContractImportService:
         actor: User,
         account: ServiceAccount,
         payload: MCPCommitContractImportRequest,
+        idempotency_key: str,
     ) -> MCPCommitContractImportResponse:
         organization_id = _require_scope(account)
-        run = await ImportService(self._session).merge_preview(
+        await ProjectService(self._session).authorize(
             actor=actor,
             project_id=payload.project_id,
-            run_id=payload.preview_id,
-            selected_keys=set(payload.selected_operations),
-            service_id=payload.service_id,
-            environment_id=payload.environment_id,
-            endpoint_variant=payload.endpoint_variant,
-            expected_source_sha256=payload.preview_sha256.lower(),
-            expected_current_versions=payload.expected_current_versions,
-            confirm_existing_changes=payload.confirm_existing_changes,
+            editing=True,
         )
-        items = [_item_from_json(item) for item in run.results]
-        return MCPCommitContractImportResponse(
-            organization_id=organization_id,
-            project_id=run.project_id,
-            import_run_id=run.id,
-            status="applied",
-            applied_keys=list(run.applied_keys),
-            created_definition_ids=[
-                item.definition_id
-                for item in items
-                if item.definition_id is not None and item.change == ImportChange.ADDED.value
-            ],
-            changed_definition_ids=[
-                item.definition_id
-                for item in items
-                if item.definition_id is not None and item.change == ImportChange.CHANGED.value
-            ],
-            deleted_definition_ids=[
-                item.definition_id
-                for item in items
-                if item.definition_id is not None and item.change == ImportChange.DELETED.value
-            ],
-            source_sha256=run.source_sha256,
-            results=items,
-            trace_id=get_trace_id(),
+        request_payload = payload.model_dump(mode="json")
+
+        async def action() -> MCPCommitContractImportResponse:
+            run = await ImportService(self._session).merge_preview(
+                actor=actor,
+                project_id=payload.project_id,
+                run_id=payload.preview_id,
+                selected_keys=set(payload.selected_operations),
+                service_id=payload.service_id,
+                environment_id=payload.environment_id,
+                endpoint_variant=payload.endpoint_variant,
+                expected_source_sha256=payload.preview_sha256.lower(),
+                expected_current_versions=payload.expected_current_versions,
+                confirm_existing_changes=payload.confirm_existing_changes,
+            )
+            return _commit_response(
+                organization_id=organization_id,
+                run=run,
+            )
+
+        result = await IdempotencyService(self._session).run(
+            key=idempotency_key,
+            project_id=payload.project_id,
+            actor_key=f"service-account:{account.id}",
+            operation=_COMMIT_OPERATION,
+            request_payload=request_payload,
+            action=action,
         )
+        return MCPCommitContractImportResponse.model_validate(result)
 
 
 def _require_scope(account: ServiceAccount) -> UUID:
@@ -294,6 +319,39 @@ def _item_from_result(item: ImportItemResult) -> MCPContractImportItem:
 
 def _item_from_json(value: dict[str, Any]) -> MCPContractImportItem:
     return MCPContractImportItem.model_validate(value)
+
+
+def _commit_response(
+    *,
+    organization_id: UUID,
+    run: ImportRun,
+) -> MCPCommitContractImportResponse:
+    items = [_item_from_json(item) for item in run.results]
+    return MCPCommitContractImportResponse(
+        organization_id=organization_id,
+        project_id=run.project_id,
+        import_run_id=run.id,
+        status="applied",
+        applied_keys=list(run.applied_keys),
+        created_definition_ids=[
+            item.definition_id
+            for item in items
+            if item.definition_id is not None and item.change == ImportChange.ADDED.value
+        ],
+        changed_definition_ids=[
+            item.definition_id
+            for item in items
+            if item.definition_id is not None and item.change == ImportChange.CHANGED.value
+        ],
+        deleted_definition_ids=[
+            item.definition_id
+            for item in items
+            if item.definition_id is not None and item.change == ImportChange.DELETED.value
+        ],
+        source_sha256=run.source_sha256,
+        results=items,
+        trace_id=get_trace_id(),
+    )
 
 
 def _change_value(value: ImportChange | str) -> str:

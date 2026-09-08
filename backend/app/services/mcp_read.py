@@ -202,6 +202,7 @@ class MCPReadService:
                 method=method.upper() if method else None,
                 path=path,
                 service_id=service_id,
+                version=version,
             )
         else:
             definition = await self._assets.get_definition(api_definition_id)
