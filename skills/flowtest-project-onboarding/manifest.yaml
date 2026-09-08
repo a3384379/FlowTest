@@ -19,11 +19,14 @@ optional_tools:
 - flowtest.ingest_java_source_snapshot
 - flowtest.ingest_database_evidence
 - flowtest.inspect_entity_mapping
+- flowtest.preview_contract_import
+- flowtest.commit_contract_import
 required_scopes:
 - mcp:read
 - mcp:evidence:write
 optional_scopes:
 - mcp:project:bootstrap
+- mcp:contract:import
 stages:
 - bootstrap_assets
 - select_project

@@ -113,9 +113,13 @@ class APIAssetRepository:
         limit: int,
         search: str | None = None,
         method: str | None = None,
+        path: str | None = None,
+        service_id: UUID | None = None,
+        version: int | None = None,
         include_inactive: bool = False,
     ) -> tuple[list[APIDefinition], int]:
         filters = [APIDefinition.project_id == project_id]
+        selected_version = version if version is not None else APIDefinition.current_version
         if not include_inactive:
             filters.append(APIDefinition.is_active.is_(True))
         normalized_search = search.strip().lower() if search else ""
@@ -128,7 +132,7 @@ class APIAssetRepository:
                     exists(
                         select(APIVersion.id).where(
                             APIVersion.api_definition_id == APIDefinition.id,
-                            APIVersion.version == APIDefinition.current_version,
+                            APIVersion.version == selected_version,
                             func.lower(APIVersion.path).like(pattern),
                         )
                     ),
@@ -139,11 +143,32 @@ class APIAssetRepository:
                 exists(
                     select(APIVersion.id).where(
                         APIVersion.api_definition_id == APIDefinition.id,
-                        APIVersion.version == APIDefinition.current_version,
+                        APIVersion.version == selected_version,
                         APIVersion.method == method,
                     )
                 )
             )
+        if path:
+            filters.append(
+                exists(
+                    select(APIVersion.id).where(
+                        APIVersion.api_definition_id == APIDefinition.id,
+                        APIVersion.version == selected_version,
+                        APIVersion.path == path,
+                    )
+                )
+            )
+        if version is not None:
+            filters.append(
+                exists(
+                    select(APIVersion.id).where(
+                        APIVersion.api_definition_id == APIDefinition.id,
+                        APIVersion.version == version,
+                    )
+                )
+            )
+        if service_id is not None:
+            filters.append(APIDefinition.service_id == service_id)
         definitions = list(
             (
                 await self._session.scalars(

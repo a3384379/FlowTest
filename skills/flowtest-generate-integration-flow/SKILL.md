@@ -19,13 +19,14 @@ Generate one evidence-bearing FlowTest proposal that a human can inspect in the 
 Follow these stages in order and preserve every returned context revision, evidence reference, plan fingerprint, compilation fingerprint, proposal ID, warning, and unresolved item:
 
 1. Select exactly one visible project and confirm the requested business flow and test environment.
-2. Create a version-pinned Test Context, then inspect its missing-evidence requirements.
-3. Obtain missing evidence from separately authorized read-only Code/Database MCP tools or from a bounded user-supplied artifact. Ingest only typed, redacted evidence envelopes into FlowTest.
-4. Re-inspect the Context. Stop on unresolved conflicts, stale revisions, missing normative evidence, secret-bearing values, or a request to weaken a product defect.
-5. Create and validate an Integration Plan, compile it deterministically, validate the resulting FlowSpec, and keep the operation/binding/cleanup provenance.
-6. Dry-run `flowtest.propose_flow_draft`, present diagnostics and unresolved items, then create the review-only proposal only when the requested scope remains unchanged.
-7. Direct the user to the existing Visual Review. Stop there: never accept, apply, publish, or execute the proposal on the user's behalf.
-8. Only when the user explicitly requests a sandbox preview, call `flowtest.inspect_flow_proposal` again and require the current proposal and item to be accepted and the proposal to remain unapplied (`applied=false`). Stop if review is incomplete, the proposal is stale, or it was already applied. Then verify a non-production test environment and obtain a fresh one-time approval before calling `flowtest.preview_flow_proposal`. Report cleanup failures as failures, never warnings.
+2. If the contract-import tools and `mcp:contract:import` are available, inspect existing contracts and optionally call `flowtest.preview_contract_import` for an approved URL, bounded document, or code-derived strongly typed operations. Commit only a frozen preview with the returned digest and explicit operation selection; never refetch a URL. Existing changes, deletes, endpoint changes, or security changes require human confirmation and expected versions. A dry-run has no ImportRun side effect.
+3. Create a version-pinned Test Context, then inspect its missing-evidence requirements.
+4. Obtain missing evidence from separately authorized read-only Code/Database MCP tools or from a bounded user-supplied artifact. Ingest only typed, redacted evidence envelopes into FlowTest.
+5. Re-inspect the Context. Stop on unresolved conflicts, stale revisions, missing normative evidence, secret-bearing values, or a request to weaken a product defect.
+6. Create and validate an Integration Plan, compile it deterministically, validate the resulting FlowSpec, and keep the operation/binding/cleanup provenance.
+7. Dry-run `flowtest.propose_flow_draft`, present diagnostics and unresolved items, then create the review-only proposal only when the requested scope remains unchanged.
+8. Direct the user to the existing Visual Review. Stop there: never accept, apply, publish, or execute the proposal on the user's behalf.
+9. Only when the user explicitly requests a sandbox preview, call `flowtest.inspect_flow_proposal` again and require the current proposal and item to be accepted and the proposal to remain unapplied (`applied=false`). Stop if review is incomplete, the proposal is stale, or it was already applied. Then verify a non-production test environment and obtain a fresh one-time approval before calling `flowtest.preview_flow_proposal`. Report cleanup failures as failures, never warnings.
 
 ## Non-negotiable boundaries
 

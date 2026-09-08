@@ -17,6 +17,7 @@ ConnectionAction = Literal[
     "propose_flow",
     "request_approved_sandbox_preview",
     "bootstrap_project_assets",
+    "import_contract",
 ]
 
 

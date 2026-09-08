@@ -2,11 +2,12 @@
 
 最后更新：2026-09-08（Asia/Shanghai）
 
-## 最新结论：V6.2 已合并，S61B 初始化契约已完成本地实现
+## 最新结论：V6.2 已合并，S61B 已合并，S61C 契约导入核心实现完成
 
 V6.2 收尾 PR #89 已合并，2026-09-06 启动查询确认合并后 main 七项门禁全部成功。
-现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；S61A 已由 PR #90 合并，当前 S61B
-项目/环境/Service Target 受控初始化已完成本地实现与定向回归，待 PR 复审/CI 和合并；
+现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；S61A 已由 PR #90 合并，S61B 项目/环境/
+Service Target 受控初始化已由 PR #91 合并并完成合并后门禁；当前 S61C 契约导入与 inspect_contract
+分页核心实现及定向回归完成，待本阶段集中 PR 门禁；
 不将方案或定向回归算作后续阶段完成。阶段范围见 [能力审计](mcp-capability-audit.md) 和
 [ADR 0052](adr/0052-mcp-onboarding-connection-and-scope.md)。
 
@@ -77,7 +78,7 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - Windows 自动打包与 CI、后端/前端自动化测试、Compose Playwright 继续保留；连续 RC 观察、
   外部恢复演练、安全审批、生产发布授权及人工签署不因本次决定自动豁免或视为完成。
 
-## S61B 项目、环境与 Service Target 初始化（本地实现）
+## S61B 项目、环境与 Service Target 初始化（已合并）
 
 - 新增 `flowtest.ensure_project`、`flowtest.ensure_test_environment` 和
   `flowtest.ensure_service_target` 三个严格 MCP 工具；默认 Dry Run，写入必须具备
@@ -88,10 +89,21 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 环境只允许 `test`/`sandbox`，Service Target 只绑定这两类环境；TLS 默认且只能保持开启，
   URL 凭据、查询参数、片段、敏感 Header/变量和未获批准的网络目标均拒绝，已有配置冲突不覆盖。
 - 新增 Alembic `20260908_0052` 与 Standalone 同步基线，更新 MCP Golden、连接 action、
-  Onboarding Skill 和自包含评测副本。定向 API/契约/Manifest/Standalone 测试已通过；尚未
-  将本地实现写成已合并或主线 CI 证据。
+  Onboarding Skill 和自包含评测副本。PR #91 的 Backend、Integration、Bundle、升级回滚、源码/镜像、
+  Compose Smoke、Required Gate 均成功；复审无 P0/P1，2 个 P2 作为技术债记录。
 
-S61B 完成后按顺序进入 S61C 有界契约导入；S61D/S61E 与 S62A/S62B 仍未开始。
+## S61C 有界契约导入与契约发现分页（开发完成，待 PR）
+
+- 新增 `mcp:contract:import` 专用权限、严格 Preview/Commit Schema 和 MCP Client/Server/HTTP 路由；
+  复用 ImportService、既有 Importer、Canonical Contract 和出站网络策略，不读取服务器本地路径。
+- 支持 URL、上传文档和强类型 source-derived Operation；dry-run 不落库，持久化预览冻结加密内容与摘要，
+  Commit 只使用冻结 `preview_id`/digest/selected_operations/expected versions，不重新抓取 URL。
+- `inspect_contract` 支持真实 total、分页游标、方法/路径/Service 过滤、指定版本及有界参数/响应结构摘要；
+  更新/删除/Endpoint 变化必须人工确认，重复提交不复制 APIDefinition。
+- 定向测试、旧 Import API 回归、MCP 工具注册、Ruff/mypy 已通过；S61C 完成后统一执行本阶段 PR 门禁，
+  不重复触发容量/Compact 重门禁。
+
+S61C 完成后按顺序进入 S61D 资源发现、Readiness 与有限目标诊断；S61E 与 S62A/S62B 仍未开始。
 
 ## 已完成实现并合并：V6.1 S57.0 Foundation Correctness
 

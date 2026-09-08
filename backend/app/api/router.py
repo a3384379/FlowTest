@@ -27,6 +27,7 @@ from app.api.v1.endpoints.maintenance_proposals import router as maintenance_pro
 from app.api.v1.endpoints.mcp_bootstrap import router as mcp_bootstrap_router
 from app.api.v1.endpoints.mcp_connection import router as mcp_connection_router
 from app.api.v1.endpoints.mcp_continuous import router as mcp_continuous_router
+from app.api.v1.endpoints.mcp_contract_import import router as mcp_contract_import_router
 from app.api.v1.endpoints.mcp_controlled_write import router as mcp_controlled_write_router
 from app.api.v1.endpoints.mcp_read import router as mcp_read_router
 from app.api.v1.endpoints.mcp_test_contexts import evidence_router as mcp_evidence_router
@@ -78,6 +79,7 @@ api_router.include_router(mcp_read_router, tags=["mcp-read"])
 api_router.include_router(mcp_continuous_router, tags=["mcp-continuous"])
 api_router.include_router(mcp_connection_router, tags=["mcp-connection"])
 api_router.include_router(mcp_bootstrap_router, tags=["mcp-bootstrap"])
+api_router.include_router(mcp_contract_import_router, tags=["mcp-contract-import"])
 api_router.include_router(mcp_controlled_write_router, tags=["mcp-controlled-write"])
 api_router.include_router(mcp_evidence_router, tags=["mcp-evidence"])
 api_router.include_router(mcp_flow_router, tags=["mcp-flow-proposals"])

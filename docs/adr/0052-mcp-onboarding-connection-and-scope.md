@@ -1,6 +1,6 @@
 # ADR 0052：MCP 零接入的连接、身份与权限契约
 
-状态：S61A/S61B 实现；后续写入契约冻结，按阶段开放。
+状态：S61A/S61B/S61C 实现；后续写入契约冻结，按阶段开放。
 
 ## 决策
 
@@ -23,15 +23,15 @@ connection_diagnostic 区分认证、过期、Scope、网络、版本和 Feature
 
 ## 冻结工具与 Scope 映射
 
-下表是实施契约，不是当前 tools/list。S61A 新增 inspect_connection（总数 39），S61B
-已上线三个初始化工具（总数 42）；其余写 Scope 仍随对应实现和测试上线才加入签发 allowlist，
+下表是实施契约。S61A 新增 inspect_connection（总数 39），S61B 已上线三个初始化工具（总数 42），
+S61C 已上线两个契约导入工具（总数 44）；其余写 Scope 仍随对应实现和测试上线才加入签发 allowlist，
 避免提前授予无定义的权限。
 
 | 阶段 | 工具（统一 `flowtest.` 前缀） | Scope / 应用能力与限制 |
 | --- | --- | --- |
 | S61A | inspect_connection | 有效 ServiceAccount；仅检查自身，无项目资产读取权 |
 | S61B | ensure_project、ensure_test_environment、ensure_service_target | mcp:project:bootstrap；组织内空测试项目/新增 test 或 sandbox 元数据；已有资源仍执行项目访问/编辑授权 |
-| S61C | preview_contract_import、commit_contract_import | mcp:contract:import；受限预览及选定新增接口；更新/覆盖/删除需精确 Diff 与人类批准 |
+| S61C | preview_contract_import、commit_contract_import | mcp:contract:import；批准 URL/有界文档/强类型 Operation；预览冻结 ImportRun，Commit 校验 digest/版本且不重新抓取 URL；更新/覆盖/删除需精确 Diff 与人类批准 |
 | S61D | inspect_project_readiness、find_assets | mcp:read；强类型有界读取，不暗中创建 Context 或扫描网络 |
 | S61D | check_service_target | mcp:project:bootstrap；已登记测试 Endpoint 的有限连通性，不授权任意出站目标 |
 | S62A | prepare_change_regression | mcp:regression:prepare；既有 ChangeRegression 分析准备，不能 approve/execute |

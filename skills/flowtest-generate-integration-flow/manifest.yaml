@@ -23,6 +23,8 @@ required_tools:
 optional_tools:
   - "flowtest.inspect_entity_mapping"
   - "flowtest.inspect_data_profile"
+  - "flowtest.preview_contract_import"
+  - "flowtest.commit_contract_import"
   - "flowtest.preview_flow_proposal"
 required_scopes:
   - "mcp:read"
@@ -30,6 +32,7 @@ required_scopes:
   - "mcp:flow:propose"
 optional_scopes:
   - "mcp:preview:execute"
+  - "mcp:contract:import"
 external_dependencies:
   - kind: "code_mcp"
     access: "read_only"

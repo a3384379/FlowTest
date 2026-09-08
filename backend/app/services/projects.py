@@ -682,6 +682,7 @@ def _service_account_can_access_project(
                     "mcp:evidence:write",
                     "mcp:flow:propose",
                     "mcp:preview:execute",
+                    "mcp:contract:import",
                 }
             )
         )
