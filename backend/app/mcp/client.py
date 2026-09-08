@@ -224,9 +224,22 @@ class MCPReadGatewayClient:
         *,
         token: str | None = None,
         resource_uri: str | None = None,
+        environment_id: UUID | str | None = None,
+        proposal_id: UUID | str | None = None,
+        context_revision_id: UUID | str | None = None,
     ) -> MCPReadEnvelope:
+        params = {
+            key: str(value)
+            for key, value in {
+                "environment_id": environment_id,
+                "proposal_id": proposal_id,
+                "context_revision_id": context_revision_id,
+            }.items()
+            if value is not None
+        }
         return await self._get(
             f"/api/v1/mcp/read/projects/{project_id}/readiness",
+            params=params or None,
             token=token,
             resource_uri=resource_uri,
         )

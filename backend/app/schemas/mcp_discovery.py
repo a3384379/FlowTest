@@ -87,7 +87,14 @@ class MCPFindAssetsResponse(BaseModel):
     next_page: int | None = Field(default=None, ge=1)
 
 
-ReadinessState = Literal["ready", "missing", "degraded", "not_configured", "not_authorized"]
+ReadinessState = Literal[
+    "ready",
+    "missing",
+    "degraded",
+    "not_configured",
+    "not_authorized",
+    "not_verified",
+]
 
 
 class MCPReadinessCheck(BaseModel):

@@ -1,6 +1,7 @@
 """Focused S61D contracts for bounded discovery and readiness."""
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 from sqlalchemy import select
@@ -9,7 +10,11 @@ from test_mcp_read import mcp_context as mcp_context
 from app.mcp.server import create_mcp_server
 from app.models.api_assets import APIDefinition, APIVersion
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
-from app.services.mcp_discovery import _has_credential_reference
+from app.services.mcp_discovery import (
+    _has_credential_reference,
+    _proposal_endpoint_bindings,
+    _secret_reference_names,
+)
 
 
 @pytest.mark.asyncio
@@ -134,6 +139,31 @@ def test_runtime_credential_evidence_requires_explicit_secret_reference() -> Non
     assert not _has_credential_reference({"kind": "runtime_observation"})
     assert not _has_credential_reference({"credential_refs": ["payments-token"]})
     assert _has_credential_reference({"credential_refs": ["secret://payments/token"]})
+
+
+def test_readiness_normalizes_runtime_secret_reference_forms() -> None:
+    assert _secret_reference_names(["payments-token"], allow_raw=True) == {"payments-token"}
+    assert _secret_reference_names({"token": "{{secret.PAYMENTS_TOKEN}}"}) == {"PAYMENTS_TOKEN"}
+    assert _secret_reference_names({"token": "secret://payments/token"}) == {"payments/token"}
+    assert _secret_reference_names({"token": "literal-value"}) == set()
+
+
+def test_readiness_matches_proposal_service_and_endpoint_variant() -> None:
+    service_id = "00000000-0000-4000-8000-000000005701"
+    bindings = _proposal_endpoint_bindings(
+        snapshot={
+            "resource_mappings": {"services": {"payments": service_id}},
+        },
+        proposed_content={
+            "flow_spec": {
+                "operations": [{"ref": "charge", "service_ref": "payments"}],
+                "nodes": [{"operation_ref": "charge", "target": {"endpoint_variant": "sandbox"}}],
+            }
+        },
+    )
+    assert bindings == {
+        (UUID(service_id), "sandbox"),
+    }
 
 
 def test_s61d_server_registers_discovery_tools() -> None:

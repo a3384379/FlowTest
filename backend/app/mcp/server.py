@@ -159,7 +159,8 @@ def _register_commit_contract_import_tool(server: MCPServer, client: MCPReadGate
         name="flowtest.commit_contract_import",
         description=(
             "Commit only a frozen contract preview by preview_id and source digest. The server "
-            "never refetches a URL; updates, deletes, and endpoint changes require confirmation."
+            "never refetches a URL; MCP commits pure additions only. Updates, deletes, and "
+            "endpoint changes are returned as review_required for the human review path."
         ),
         structured_output=True,
     )
@@ -449,12 +450,18 @@ def _register_discovery_tools(server: MCPServer, client: MCPReadGatewayClient) -
     )
     async def inspect_project_readiness(
         project_id: str,
+        environment_id: str | None = None,
+        proposal_id: str | None = None,
+        context_revision_id: str | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.inspect_project_readiness(
                 project_id,
                 token=_request_token(ctx, client),
+                environment_id=environment_id,
+                proposal_id=proposal_id,
+                context_revision_id=context_revision_id,
             )
         )
 

@@ -300,12 +300,18 @@ async def inspect_project_readiness(
     request: Request,
     session: SessionDependency,
     principal: MCPCurrent,
+    environment_id: UUID | None = None,
+    proposal_id: UUID | None = None,
+    context_revision_id: UUID | None = None,
 ) -> MCPReadResponse:
     from app.services.mcp_discovery import MCPDiscoveryService
 
     result = await MCPDiscoveryService(session).inspect_project_readiness(
         actor=principal.actor,
         project_id=project_id,
+        environment_id=environment_id,
+        proposal_id=proposal_id,
+        context_revision_id=context_revision_id,
         call=_call(
             request, "inspect_project_readiness", f"flowtest://projects/{project_id}/readiness"
         ),
