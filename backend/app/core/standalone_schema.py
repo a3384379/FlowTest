@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260831_0051"
+BASELINE_REVISION = "20260908_0052"
 
 
 async def initialize_standalone_database() -> None:
@@ -128,6 +128,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_default_organization(connection)
     await _ensure_default_targets(connection)
     await _ensure_api_version_service_identity(connection)
+    await _ensure_s61b_schema(connection)
     await connection.execute(
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
@@ -136,7 +137,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049', '20260830_0050')"
+            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -148,7 +149,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049', '20260830_0050')"
+            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -272,6 +273,30 @@ async def _ensure_s55_schema(connection: AsyncConnection) -> None:
     elif not checkpoint_columns:
         await connection.execute(CreateTable(checkpoint_table))
         await _ensure_table_indexes(connection, checkpoint_table)
+
+
+async def _ensure_s61b_schema(connection: AsyncConnection) -> None:
+    """Create S61B bootstrap identity/receipt structures for offline SQLite installs."""
+
+    from app.models.governance import OrganizationIdempotencyRecord
+
+    await _add_column_if_missing(
+        connection,
+        table="projects",
+        column="external_key",
+        definition="VARCHAR(160)",
+    )
+    # SQLite's UNIQUE constraint treats NULL values as distinct, which is the
+    # intended compatibility behavior for legacy projects without an external key.
+    await connection.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_projects_organization_external_key "
+            "ON projects (organization_id, external_key)"
+        )
+    )
+    receipt_table = cast(Table, OrganizationIdempotencyRecord.__table__)
+    await connection.execute(CreateTable(receipt_table, if_not_exists=True))
+    await _ensure_table_indexes(connection, receipt_table)
 
 
 async def _table_column_contract(

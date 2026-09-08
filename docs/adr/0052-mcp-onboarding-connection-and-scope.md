@@ -1,6 +1,6 @@
 # ADR 0052：MCP 零接入的连接、身份与权限契约
 
-状态：S61A 实现；后续写入契约冻结，尚未开放。
+状态：S61A/S61B 实现；后续写入契约冻结，按阶段开放。
 
 ## 决策
 
@@ -23,8 +23,9 @@ connection_diagnostic 区分认证、过期、Scope、网络、版本和 Feature
 
 ## 冻结工具与 Scope 映射
 
-下表是实施契约，不是当前 tools/list。S61A 仅新增 inspect_connection（总数 39）；写 Scope
-随对应实现和测试上线才加入签发 allowlist，避免提前授予无定义的权限。
+下表是实施契约，不是当前 tools/list。S61A 新增 inspect_connection（总数 39），S61B
+已上线三个初始化工具（总数 42）；其余写 Scope 仍随对应实现和测试上线才加入签发 allowlist，
+避免提前授予无定义的权限。
 
 | 阶段 | 工具（统一 `flowtest.` 前缀） | Scope / 应用能力与限制 |
 | --- | --- | --- |
@@ -51,7 +52,7 @@ connection_diagnostic 区分认证、过期、Scope、网络、版本和 Feature
 最小组织级初始化幂等记录和稳定项目身份唯一约束；先授权、校验、配额，再幂等 Claim 和事务写入。
 事务中复核配额；唯一约束处理同键、不同幂等键的并发创建，失败必须回滚；冲突不泄露不可见项目。
 该迁移必须含 PostgreSQL/Standalone Upgrade、Downgrade/恢复和 Transfer 测试。S61A 无数据库
-变更，不提前创建空表；详细字段及迁移评审在 S61B 提交前补入本 ADR。
+变更，不提前创建空表；S61B 的具体字段、边界和恢复语义见 [ADR 0053](0053-mcp-bootstrap-initialization.md)。
 
 ## 兼容与验证
 

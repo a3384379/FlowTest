@@ -27,11 +27,13 @@ async def _prepare() -> None:
     engine = create_async_engine(settings.database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
-        project = await session.scalar(
-            select(Project)
-            .join(APIDefinition, APIDefinition.project_id == Project.id)
-            .where(APIDefinition.import_key == _IMPORT_KEY)
-        )
+        project = (
+            await session.execute(
+                select(Project.__table__.c.id, Project.__table__.c.created_by_id)
+                .join(APIDefinition, APIDefinition.project_id == Project.id)
+                .where(APIDefinition.import_key == _IMPORT_KEY)
+            )
+        ).one_or_none()
         if project is None:
             raise RuntimeError("prepare the S47.2 migration fixture before S47.4")
         impact = ImpactRun(

@@ -23,7 +23,7 @@ def manifest(profile: ContinuousSkillProfile) -> ContinuousQASkillManifest:
     return ContinuousQASkillManifest(
         schema_version="flowtest-skill-manifest-v1",
         name=profile.name,
-        version="1.0.0-rc.1",
+        version="1.1.0-rc.1",
         minimum_mcp_version="s60-continuous-qa-v1",
         required_tools=list(profile.required_tools),
         optional_tools=list(profile.optional_tools),

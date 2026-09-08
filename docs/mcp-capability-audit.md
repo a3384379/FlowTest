@@ -1,18 +1,19 @@
 # S61/S62 MCP 能力审计与实施账本
 
-审计日期：2026-09-06。启动基线为 PR #89 的 main `b12a5fe7e26795f48a73c9bca22744e9b5f013d5`。
-启动查询中 Backend、Frontend、Security、Compose、Standalone Windows、Upgrade、Required Gate
-七项主线工作流均成功，无其他开放 S61/S62 PR。此处为一次基线证据，不做循环 SHA 计算。
+审计日期：2026-09-08。S61A 已由 PR #90 合并，当前分支从其合并后全绿 main 开始；本页为
+一次阶段证据，不做循环 SHA 计算。
 
 ## 实际能力，不以工具名猜测实现
 
 基线 38 个工具由 `backend/app/mcp/server.py` 注册，契约清单在
-`backend/tests/fixtures/v6_golden/mcp-contract.json`。S61A 新增连接诊断后为 39 个。
+`backend/tests/fixtures/v6_golden/mcp-contract.json`。S61A 新增连接诊断后为 39 个；S61B
+新增三个受控初始化工具后为 42 个。
 工具经 MCP Adapter 到应用网关，再复用领域/服务；模型不得绕过 MCP 自行调用网关 REST。
 
 | 现有工具（省略 flowtest.） | 实际服务/能力 | 边界与缺口 |
 | --- | --- | --- |
 | list_projects、inspect_project、discover_services、inspect_contract | MCPReadService；项目/服务/当前契约 | 已有项目才可读取；契约最多 100 条，无真实翻页，S61D 修复 |
+| ensure_project、ensure_test_environment、ensure_service_target | MCPBootstrapService；组织级幂等初始化项目、Test/Sandbox 环境和 Service Endpoint | 仅 `mcp:project:bootstrap`；默认 Dry Run；不改成员、凭据、TLS 或出站策略；S61C 复用其资源 |
 | inspect_flow、export_flowspec、validate_flowspec、diff_flowspec | 工作流读取和既有 FlowSpec 校验/导出/差异 | 非任意内部节点编辑；复杂旧图保真在 S61D 定向验收 |
 | inspect_run_evidence、inspect_test_evidence | MCPReadService 脱敏执行/测试证据 | 不直接读取原始响应/DB 行；S62B 增强安全结果摘要 |
 | inspect_source_evidence、inspect_entity_mapping、inspect_data_profile | Context/Evidence Adapter 视图 | 有界结构证据，不主动连接外部 Code/DB 服务 |
@@ -32,8 +33,8 @@ ChangeRegression、WorkflowCancel/Preview 能力，不新增同义系统。S61/S
 
 | 阶段 | 缺口与实现目标 | 当前状态 |
 | --- | --- | --- |
-| S61A | 无项目连接诊断、显式配置模板、HTTP 每调用者身份、冻结 Scope | 本地实现完成；待 PR 复审/CI，未合并 |
-| S61B | 首个项目的组织授权/幂等、test/sandbox 环境和 Service Target | 待 S61A 主线门禁后实施 |
+| S61A | 无项目连接诊断、显式配置模板、HTTP 每调用者身份、冻结 Scope | PR #90 已合并，合并后主线门禁全绿 |
+| S61B | 首个项目的组织授权/幂等、test/sandbox 环境和 Service Target | 本地实现与定向回归完成，待 PR/CI |
 | S61C | ImportRun 冻结预览与选定纯新增提交 | 待实施，复用 ImportService，不另建解析器 |
 | S61D | Readiness、Find Assets、真实契约分页/版本、旧图保真、有限目标诊断 | 待实施 |
 | S61E | 零资产到提案 Skill、真实宿主/模型闭环与有界 A/B 编排 | 待实施，不能用 Fixture 代替真实模型证据 |
@@ -58,5 +59,6 @@ H0 Viewer 拒绝创建规则必须保留。现有 Scope 不静默映射到通用
 不操作用户若依真实业务数据，保留本次启动已有的 `deploy/ruoyi/compose.yaml` 改动。
 无实机测试要求，保留 Windows CI；容量/Compact 重门禁仅按显式 RC 策略，不逐函数重跑。
 
-S61A 阶段定向回归后集中验证，PR 精确 Head 无 P0/P1 且 Required Gate 成功才能普通合并；依赖阶段
-从全绿 main 开始。S61/S62 整体未完成，最终证据落入 `docs/release/mcp-closed-loop-acceptance.md`。
+S61A 已按集中门禁合并；S61B 先定向回归，PR 精确 Head 无 P0/P1 且 Required Gate 成功才能普通
+合并，依赖阶段从全绿 main 开始。S61/S62 整体未完成，最终证据落入
+`docs/release/mcp-closed-loop-acceptance.md`。

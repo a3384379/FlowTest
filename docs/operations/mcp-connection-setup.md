@@ -1,11 +1,12 @@
-# MCP 首次连接与故障恢复（S61A）
+# MCP 首次连接与故障恢复（S61A/S61B）
 
 ## 首次人类授权
 
 由有权限的用户在现有组织服务账号管理入口签发机器账号，明确组织、Scope、有效期与授权任务范围。
 令牌只在签发/轮换时交付一次，存入用户控制的安全环境变量或凭据管理工具；不要粘贴到模型对话、
 URL、命令参数、日志或仓库。轮换、撤销和过期继续使用现有 ServiceAccountService。
-连接命令不自动签发、读取浏览器会话或修改权限。S61A 不代表零项目初始化工具已全部可用。
+连接命令不自动签发、读取浏览器会话或修改权限。零项目初始化仅在账号被明确授予
+`mcp:project:bootstrap` 时可用，连接诊断不会静默授予该 Scope。
 
 ## 显式生成配置
 
@@ -24,7 +25,9 @@ HTTPS 和正常网络控制，不因连接失败关闭 TLS/SSRF 校验。删除�
 setup 验证的是 **应用网关机器认证**，不测试模板地址的 MCP 握手；输出始终明确
 `transport_verified=false`，不能据此报告真实 LLM/Skill 已通过。随后在宿主发现实际工具，调用
 `flowtest.inspect_connection`，传 `{"request":{}}`，再调用已有授权读取工具确认宿主连接。
-setup 成功不授予新 Scope，不批准 Review/Apply/Publish/Preview。
+setup 成功不授予新 Scope，不批准 Review/Apply/Publish/Preview。初始化工具默认 Dry Run；
+真实创建项目、Test/Sandbox 环境或 Service Target 需要固定组织、该 Scope 和幂等键，且不会
+修改已有成员、凭据、TLS 或出站策略。
 
 | 诊断 | 处理 |
 | --- | --- |

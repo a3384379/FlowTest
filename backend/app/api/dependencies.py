@@ -26,6 +26,7 @@ from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
 from app.models.organizations import ServiceAccount
 from app.repositories.access import UserRepository
+from app.services.mcp_bootstrap import MCP_PROJECT_BOOTSTRAP_SCOPE
 from app.services.mcp_controlled_write import MCP_WRITE_SCOPE
 from app.services.mcp_flow_proposals import MCP_FLOW_PROPOSE_SCOPE
 from app.services.oidc import OIDCConfiguration, OIDCProvider
@@ -221,6 +222,22 @@ async def get_mcp_preview_principal(
         reset_tenant_context(context_token)
 
 
+async def get_mcp_bootstrap_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_PROJECT_BOOTSTRAP_SCOPE,
+        missing_scope_message="服务账号缺少项目初始化权限范围",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
 async def _authenticate_mcp_principal(
     *,
     session: AsyncSession,
@@ -294,6 +311,11 @@ MCPFlowProposalCurrent = Annotated[
 MCPPreviewCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_preview_principal),
+]
+
+MCPBootstrapCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_bootstrap_principal),
 ]
 
 

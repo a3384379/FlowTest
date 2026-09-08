@@ -35,6 +35,11 @@ from app.domain.test_contexts import (
 )
 from app.mcp.client import MCPGatewayError, MCPReadGatewayClient
 from app.mcp.connection_diagnostics import connection_diagnostic
+from app.schemas.mcp_bootstrap import (
+    MCPEnsureEnvironmentRequest,
+    MCPEnsureProjectRequest,
+    MCPEnsureServiceTargetRequest,
+)
 from app.schemas.mcp_connection import MCP_CONNECTION_VERSION, MCPConnectionRequest
 from app.schemas.mcp_continuous import (
     MCPAffectedFlowsRequest,
@@ -174,6 +179,146 @@ def _register_connection_tool(server: MCPServer, client: MCPReadGatewayClient) -
         )
 
 
+def _register_bootstrap_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    """Register the opt-in, idempotent organization bootstrap tools."""
+
+    annotations = ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    @server.tool(
+        name="flowtest.ensure_project",
+        description=(
+            "在当前授权组织中幂等创建或复用项目; 默认 Dry Run, 不修改已有配置、权限或名称。"
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def ensure_project(
+        name: str,
+        project_id: str | None = None,
+        external_key: str | None = None,
+        description: str = "",
+        dry_run: bool = True,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        try:
+            request = MCPEnsureProjectRequest(
+                project_id=project_id,
+                external_key=external_key,
+                name=name,
+                description=description,
+                dry_run=dry_run,
+            )
+        except ValidationError:
+            return _error_payload(
+                MCPGatewayError(
+                    code="MCP_BOOTSTRAP_PROJECT_INVALID",
+                    status_code=422,
+                    message="项目初始化参数无效",
+                )
+            )
+        return await _tool_payload(
+            client.ensure_project(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+    @server.tool(
+        name="flowtest.ensure_service_target",
+        description=(
+            "在测试或 Sandbox 环境中幂等创建或复用 Service Endpoint; 保留 TLS 和出站网络策略。"
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def ensure_service_target(
+        project_id: str,
+        environment_id: str,
+        service_key: str,
+        name: str,
+        base_url: str,
+        service_type: str = "http",
+        variant: str = "default",
+        dry_run: bool = True,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        try:
+            request = MCPEnsureServiceTargetRequest(
+                project_id=project_id,
+                environment_id=environment_id,
+                service_key=service_key,
+                name=name,
+                base_url=base_url,
+                service_type=service_type,
+                variant=variant,
+                dry_run=dry_run,
+            )
+        except ValidationError:
+            return _error_payload(
+                MCPGatewayError(
+                    code="MCP_BOOTSTRAP_SERVICE_TARGET_INVALID",
+                    status_code=422,
+                    message="Service Target 初始化参数无效",
+                )
+            )
+        return await _tool_payload(
+            client.ensure_service_target(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+    @server.tool(
+        name="flowtest.ensure_test_environment",
+        description=(
+            "在指定项目中幂等创建或复用 Test/Sandbox 环境; 禁止生产、未分类和敏感明文配置。"
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def ensure_test_environment(
+        project_id: str,
+        name: str,
+        base_url: str,
+        classification: str,
+        dry_run: bool = True,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        try:
+            request = MCPEnsureEnvironmentRequest(
+                project_id=project_id,
+                name=name,
+                base_url=base_url,
+                classification=classification,
+                dry_run=dry_run,
+            )
+        except ValidationError:
+            return _error_payload(
+                MCPGatewayError(
+                    code="MCP_BOOTSTRAP_ENVIRONMENT_INVALID",
+                    status_code=422,
+                    message="测试环境初始化参数无效",
+                )
+            )
+        return await _tool_payload(
+            client.ensure_test_environment(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
 def _register_propose_repair_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.propose_repair",
@@ -236,6 +381,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
             )
         )
 
+    _register_bootstrap_tools(server, client)
     _register_explain_compiler_tool(server, client)
     _register_flow_spec_export_tool(server, client)
     _register_generate_tool(server, client)

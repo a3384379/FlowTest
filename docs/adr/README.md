@@ -54,3 +54,4 @@
 50. Affected Flow Selection
 51. Maintenance Proposal
 52. MCP 零接入连接、身份与 Scope 契约
+53. MCP 组织级项目初始化与测试目标边界

@@ -44,6 +44,39 @@ class IdempotencyRecord(UuidPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class OrganizationIdempotencyRecord(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    """Idempotency receipt for organization-scoped bootstrap operations.
+
+    Project-scoped receipts cannot protect the first project creation because no
+    project id exists yet.  Keeping this table separate makes that boundary
+    explicit and avoids a nullable foreign key or a synthetic project sentinel.
+    """
+
+    __tablename__ = "organization_idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "actor_key",
+            "operation",
+            "idempotency_key",
+            name="uq_org_idempotency_operation_key",
+        ),
+        CheckConstraint("status IN ('pending', 'completed')", name="org_idempotency_status"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    actor_key: Mapped[str] = mapped_column(String(160))
+    operation: Mapped[str] = mapped_column(String(100))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    response_status: Mapped[int | None]
+    response_body: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class OrganizationGovernance(TimestampMixin, Base):
     __tablename__ = "organization_governance"
     __table_args__ = (

@@ -74,6 +74,11 @@ class RefreshSession(UuidPrimaryKeyMixin, TimestampMixin, Base):
 class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "projects"
     __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "external_key",
+            name="uq_projects_organization_external_key",
+        ),
         CheckConstraint("retention_days BETWEEN 1 AND 3650", name="retention_days"),
         CheckConstraint(
             "execution_concurrency_limit BETWEEN 1 AND 500",
@@ -88,6 +93,10 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL"), index=True
     )
+    # Stable, caller-owned identity used by MCP bootstrap.  It is deliberately
+    # nullable so existing projects and the legacy user-created API remain
+    # backward compatible; uniqueness is scoped to an organization.
+    external_key: Mapped[str | None] = mapped_column(String(160), index=True)
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default="{}")

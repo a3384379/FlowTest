@@ -1,15 +1,30 @@
 # MCP Closed Loop S61/S62 验收账本
 
-状态：S61A 本地实现完成，PR 复审提出的两项 P1 已在本地修复，待更新候选复审/Required Gate；
-S61B～S62B 未开始。不标记整体完成或 GA。
+状态：S61A 已由 PR #90 合并并完成合并后主线门禁；S61B 本地实现与定向回归完成，待 PR
+复审/Required Gate。S61C～S62B 未开始。不标记整体完成或 GA。
 
 ## 基线与交付范围
 
-2026-09-06 从 PR #89 合并后的全绿 main 开始，基线见 [能力审计](../mcp-capability-audit.md)。
-当前分支 `codex/v6-s61a-connection-contract`。本次仅交付连接诊断、显式安全 setup、HTTP 身份隔离、
-Scope/工具契约冻结及 Onboarding 的兼容提示。工具数 38 → 39；新写入 Scope 尚未提前开放。
+2026-09-08 从 PR #90 合并后的全绿 main 开始，基线见 [能力审计](../mcp-capability-audit.md)。
+当前分支 `codex/v6-s61b-onboarding-initialization`，从 S61A 合并后全绿 main 创建。本轮交付
+组织级幂等的 `ensure_project`、受限 test/sandbox 环境和 Service Target 初始化，同时更新连接
+action、MCP Client/Server、MCP Golden、Standalone `20260908_0052` 基线及 Onboarding Skill。
+工具数 39 → 42；新写入 Scope 仅开放 `mcp:project:bootstrap`，其他 S61C/S62 Scope 不提前开放。
 详见 [ADR 0052](../adr/0052-mcp-onboarding-connection-and-scope.md) 和
-[连接指南](../operations/mcp-connection-setup.md)。
+[ADR 0053](../adr/0053-mcp-bootstrap-initialization.md)、[连接指南](../operations/mcp-connection-setup.md)。
+
+## S61B 验证记录
+
+- 空组织 Dry Run 不创建项目或组织级幂等回执；真实初始化要求固定组织、
+  `mcp:project:bootstrap` 和 `Idempotency-Key`。同键同请求返回历史回执并标记 replay，
+  同键不同请求返回冲突，不同键按组织内 `external_key` 复用项目。
+- 新增 `external_key` 组织唯一约束和 `20260908_0052` Alembic/Standalone 基线；唯一约束处理
+  不同键并发创建，失败的原子操作释放未完成回执，跨步骤不自动删除已创建资源。
+- 环境只接受 `test`/`sandbox`，同名地址或分类冲突不覆盖；Service Target 校验项目/环境归属、
+  Service 类型、Endpoint Variant、TLS 和现有出站网络策略。URL 凭据、查询/片段、明文 Header
+  或 Token 均被拒绝，所有新资源写入审计。
+- 定向 API 测试 `3 passed`，MCP Golden/连接 action、Skill Manifest/评测副本与 Standalone 基线
+  回归通过；这些是隔离确定性证据，不替代真实宿主 MCP 或真实 LLM 验收。集中 PR 门禁尚未执行。
 
 ## S61A 验证记录
 
@@ -37,8 +52,8 @@ Scope/工具契约冻结及 Onboarding 的兼容提示。工具数 38 → 39；�
 
 | 阶段 | 开发 | 合并/主线门禁 |
 | --- | --- | --- |
-| S61A 连接、权限契约 | 本地完成 | 待复审和 CI |
-| S61B 项目/环境/服务初始化 | 未开始 | 未开始 |
+| S61A 连接、权限契约 | 已完成 | PR #90 已合并，主线门禁全绿 |
+| S61B 项目/环境/服务初始化 | 本地完成 | 待复审和 CI |
 | S61C 有界契约导入 | 未开始 | 未开始 |
 | S61D 读取/查找/Readiness/目标诊断 | 未开始 | 未开始 |
 | S61E 零接入与生成 Skill | 未开始 | 未开始 |
@@ -62,4 +77,5 @@ Scope/工具契约冻结及 Onboarding 的兼容提示。工具数 38 → 39；�
 不要创建凭据、自动审核、Apply、Publish 或执行测试。
 ```
 
-该例仅展示 S61A 已实现能力，不伪装为尚未完成的零项目初始化示例。最终 S61/S62 示例在交付后更新。
+该例仍只展示连接与读取；S61B 的零项目初始化必须由具备明确 Scope 的 MCP 工具执行，不能由
+用户手工复制 UUID 代替。最终 S61/S62 示例在交付后更新。
