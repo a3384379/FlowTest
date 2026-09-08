@@ -8,8 +8,9 @@ import asyncio
 import json
 from hashlib import sha256
 from typing import Final, cast
+from uuid import uuid4
 
-from sqlalchemy import Table, insert, select
+from sqlalchemy import Table, delete, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -31,14 +32,19 @@ async def _prepare() -> None:
     engine = create_async_engine(settings.database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
+        project_table = cast(Table, Project.__table__)
         existing = await session.scalar(
             select(APIDefinition).where(APIDefinition.import_key == _IMPORT_KEY)
         )
         if existing is not None:
-            project = await session.get(Project, existing.project_id)
-            if project is not None:
-                await session.delete(project)
-                await session.flush()
+            # This verifier intentionally runs at revision 0042, before the
+            # S61B ``projects.external_key`` column exists.  Use a Core delete
+            # so the current ORM mapping does not select/flush that future
+            # column against the historical schema.
+            await session.execute(
+                delete(project_table).where(project_table.c.id == existing.project_id)
+            )
+            await session.flush()
         user = await session.scalar(select(User).where(User.email == _USER_EMAIL))
         if user is None:
             user = User(
@@ -51,15 +57,18 @@ async def _prepare() -> None:
             )
             session.add(user)
             await session.flush()
-        project = Project(
-            name="S47.2 migration verifier",
-            description="Ephemeral migration acceptance fixture",
-            created_by_id=user.id,
+        project_id = uuid4()
+        await session.execute(
+            project_table.insert().values(
+                id=project_id,
+                name="S47.2 migration verifier",
+                description="Ephemeral migration acceptance fixture",
+                created_by_id=user.id,
+            )
         )
-        session.add(project)
         await session.flush()
         definition = APIDefinition(
-            project_id=project.id,
+            project_id=project_id,
             name="S47.2 sensitive contract fixture",
             description="",
             current_version=1,
@@ -112,14 +121,18 @@ async def _verify() -> None:
         version = result.one_or_none()
         if version is None:
             raise RuntimeError("S47.2 migration fixture is missing")
-        encoded = json.dumps(version.canonical_contract, ensure_ascii=False, sort_keys=True)
+        encoded = json.dumps(
+            version.canonical_contract, ensure_ascii=False, sort_keys=True
+        )
         if any(value in encoded for value in _SENSITIVE_VALUES):
             raise RuntimeError("S47.2 migration retained a sensitive canonical value")
         if version.contract_completeness != "redacted_partial":
             raise RuntimeError("S47.2 migration did not mark redacted_partial")
         expected = semantic_contract_fingerprint(version.canonical_contract)
         if version.contract_fingerprint != expected or expected == "0" * 64:
-            raise RuntimeError("S47.2 migration did not recalculate the semantic fingerprint")
+            raise RuntimeError(
+                "S47.2 migration did not recalculate the semantic fingerprint"
+            )
     await engine.dispose()
     print(json.dumps({"status": "verified", "sensitive_values_present": False}))
 
@@ -148,7 +161,10 @@ def _unsafe_contract_fixture() -> dict[str, object]:
                     "password": {"type": "string", "example": _SENSITIVE_VALUES[0]},
                     "token": {"type": "string", "default": _SENSITIVE_VALUES[1]},
                     "card": {"type": "string", "const": _SENSITIVE_VALUES[3]},
-                    "mode": {"type": "string", "enum": ["NORMAL", _SENSITIVE_VALUES[4]]},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["NORMAL", _SENSITIVE_VALUES[4]],
+                    },
                 },
             },
         },
