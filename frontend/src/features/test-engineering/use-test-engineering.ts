@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   applyTestDesignProposal,
@@ -18,7 +18,11 @@ import {
 export function useTestEngineering(initialProposalId: string | null = null) {
   const { message } = App.useApp()
   const { projectId } = useProjectContext()
-  const [proposal, setProposal] = useState<TestEngineeringProposal | null>(null)
+  const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null>(
+    projectId,
+    initialProposalId,
+    null,
+  )
   const enabled = Boolean(projectId)
   const apis = useQuery({
     queryKey: ['test-engineering-apis', projectId],

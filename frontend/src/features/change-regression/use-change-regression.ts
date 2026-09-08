@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   addProjectKnownTestToCurrentPlan,
@@ -24,7 +24,7 @@ export function useChangeRegression(initialRunId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId ?? null)
+  const [selectedRunId, setSelectedRunId] = useRouteScopedSelection(projectId, initialRunId ?? null)
   const enabled = Boolean(projectId)
   const runs = useQuery({
     queryKey: ['change-regressions', projectId],

@@ -17,13 +17,14 @@ from app.domain.test_contexts import (
 from app.mcp.server import create_mcp_server
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
-from app.models.api_assets import APIDefinition, APIVersion, Environment
+from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.test_contexts import TestContext as ContextModel
 from app.models.test_contexts import TestContextRevision as ContextRevisionModel
 from app.repositories.mcp_assets import _proposal_kind
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.services.mcp_discovery import (
+    _api_version_secret_reference_names,
     _deep_link,
     _has_credential_reference,
     _proposal_endpoint_bindings,
@@ -164,6 +165,38 @@ def test_readiness_normalizes_runtime_secret_reference_forms() -> None:
     assert _secret_reference_names({"token": "literal-value"}) == set()
 
 
+def test_readiness_scans_every_api_field_used_by_request_target_resolution() -> None:
+    version = APIVersion(
+        api_definition_id=uuid4(),
+        service_id=uuid4(),
+        version=1,
+        method="POST",
+        path="/{{secret.PATH_SECRET}}",
+        query_parameters=[{"value": "{{secret.QUERY_SECRET}}"}],
+        headers={"X-Token": "{{secret.HEADER_SECRET}}"},
+        variables={"token": "{{secret.VARIABLE_SECRET}}"},
+        body_kind="json",
+        body={"token": "{{secret.BODY_SECRET}}"},
+        auth_kind="none",
+        auth_config={"unused": "{{secret.AUTH_SECRET}}"},
+        extraction_rules=[],
+        assertions=[],
+        canonical_contract={},
+        contract_fingerprint=None,
+        contract_completeness="legacy_partial",
+        created_by_id=uuid4(),
+    )
+
+    assert _api_version_secret_reference_names(version) == {
+        "AUTH_SECRET",
+        "BODY_SECRET",
+        "HEADER_SECRET",
+        "PATH_SECRET",
+        "QUERY_SECRET",
+        "VARIABLE_SECRET",
+    }
+
+
 def test_readiness_matches_proposal_service_and_endpoint_variant() -> None:
     service_id = "00000000-0000-4000-8000-000000005701"
     bindings = _proposal_endpoint_bindings(
@@ -251,6 +284,7 @@ async def test_readiness_requires_every_service_variant_and_pinned_api_version(
         assert first_v1 is not None
         first_v1.auth_kind = "none"
         first_v1.auth_config = {}
+        first_v1.headers = {"X-Runtime-Token": "{{secret.RUNTIME_HEADER_TOKEN}}"}
         first_endpoint = await session.scalar(
             select(ServiceEndpoint).where(
                 ServiceEndpoint.environment_id == environment.id,
@@ -497,6 +531,33 @@ async def test_readiness_requires_every_service_variant_and_pinned_api_version(
         )
         assert default_endpoint is not None
         default_endpoint.enabled = True
+        await session.commit()
+    missing_secret = await mcp_context["client"].get(url, headers=headers, params=params)
+    assert missing_secret.status_code == 200, missing_secret.text
+    missing_secret_data = missing_secret.json()["data"]
+    assert missing_secret_data["can_request_preview"] is False
+    assert (
+        next(
+            check
+            for check in missing_secret_data["checks"]
+            if check["name"] == "business_test_credentials"
+        )["state"]
+        == "not_verified"
+    )
+
+    async with mcp_context["sessions"]() as session:
+        actor_id = await session.scalar(select(User.id).where(User.is_system_admin.is_(True)))
+        assert actor_id is not None
+        session.add(
+            Secret(
+                project_id=mcp_context["project_id"],
+                environment_id=mcp_context["environment_id"],
+                name="RUNTIME_HEADER_TOKEN",
+                ciphertext=b"readiness-placeholder",
+                nonce=b"0" * 12,
+                created_by_id=actor_id,
+            )
+        )
         await session.commit()
     ready = await mcp_context["client"].get(url, headers=headers, params=params)
     assert ready.status_code == 200, ready.text

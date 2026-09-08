@@ -9,6 +9,7 @@ import {
   type ImportRun,
 } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import {
   createApi,
   createApiVersion,
@@ -42,7 +43,7 @@ export function useApiConsole(initialApiId?: string) {
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
-  const [apiSelection, setApiSelection] = useState<string | null>(initialApiId ?? null)
+  const [apiSelection, setApiSelection] = useRouteScopedSelection(projectId, initialApiId ?? null)
   const [apiSearchInput, setApiSearchInput] = useState('')
   const [apiSearch, setApiSearch] = useState('')
   const [apiMethod, setApiMethod] = useState<HttpMethod | null>(null)

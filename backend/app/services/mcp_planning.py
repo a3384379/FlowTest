@@ -784,12 +784,18 @@ async def materialize_test_plan_update(
     declared_actions = {
         (action.target_type, action.target_id): action for action in proposal.target_actions
     }
+    legacy_add_only = not proposal.target_actions
     for target in proposal.targets:
         matches = [
             item
             for item in existing
             if item.target_type == target.target_type and item.target_id == target.target_id
         ]
+        # Proposals persisted before target_actions were introduced were add-only. Preserve
+        # that reviewed meaning instead of interpreting absent stale-state evidence as consent
+        # to replace an existing plan item.
+        if legacy_add_only and matches:
+            continue
         action = _plan_target_action(
             target=target,
             existing=matches,

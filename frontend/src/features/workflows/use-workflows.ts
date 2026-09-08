@@ -22,6 +22,7 @@ import {
   listGrpcDescriptors,
 } from '../protocols/protocol-service'
 import { useExecutionEvents } from './use-execution-events'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import {
   createWorkflow,
   debugWorkflow,
@@ -48,7 +49,8 @@ export function useWorkflows(initialWorkflowId?: string) {
   const token = useAuthStore((store) => store.token)
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
-  const [workflowSelection, setWorkflowSelection] = useState<string | null>(
+  const [workflowSelection, setWorkflowSelection] = useRouteScopedSelection(
+    projectId,
     initialWorkflowId ?? null,
   )
   const [draftEdit, setDraftEdit] = useState<{

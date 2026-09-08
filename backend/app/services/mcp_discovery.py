@@ -83,7 +83,7 @@ class _ReadinessInventory:
     database_evidence_count: int
     preview_environment_count: int
     accepted_proposal_count: int
-    authenticated_versions: tuple[APIVersion, ...]
+    selected_api_versions: tuple[APIVersion, ...]
     resolved_api_versions: frozenset[tuple[UUID, int]]
     resolved_endpoint_bindings: frozenset[tuple[UUID, str]]
 
@@ -189,7 +189,7 @@ class MCPDiscoveryService(MCPReadService):
         credentials = await self._credential_readiness(
             project_id=project_id,
             target=target,
-            authenticated_versions=inventory.authenticated_versions,
+            selected_api_versions=inventory.selected_api_versions,
         )
         api_count = inventory.api_count
         endpoint_count = inventory.endpoint_count
@@ -198,7 +198,9 @@ class MCPDiscoveryService(MCPReadService):
         database_evidence_count = inventory.database_evidence_count
         preview_environment_count = inventory.preview_environment_count
         accepted_proposal_count = inventory.accepted_proposal_count
-        auth_reference_count = len(inventory.authenticated_versions)
+        auth_reference_count = sum(
+            version.auth_kind != "none" for version in inventory.selected_api_versions
+        )
         credentials_required = credentials.required
         credentials_verified = credentials.verified
         credential_reference_count = credentials.reference_count
@@ -674,21 +676,20 @@ class MCPDiscoveryService(MCPReadService):
             )
         ready_context_count = await self._count(ready_query)
 
-        authenticated_conditions = [
+        selected_version_conditions = [
             APIDefinition.project_id == project_id,
             APIDefinition.is_active.is_(True),
-            APIVersion.auth_kind != "none",
         ]
         if target.api_versions is not None:
-            authenticated_conditions.append(_api_version_conditions(target.api_versions))
+            selected_version_conditions.append(_api_version_conditions(target.api_versions))
         else:
-            authenticated_conditions.append(APIVersion.version == APIDefinition.current_version)
-        authenticated_versions = tuple(
+            selected_version_conditions.append(APIVersion.version == APIDefinition.current_version)
+        selected_api_versions = tuple(
             (
                 await self._session.scalars(
                     select(APIVersion)
                     .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
-                    .where(*authenticated_conditions)
+                    .where(*selected_version_conditions)
                 )
             ).all()
         )
@@ -739,7 +740,7 @@ class MCPDiscoveryService(MCPReadService):
             database_evidence_count=database_evidence_count,
             preview_environment_count=preview_environment_count,
             accepted_proposal_count=accepted_proposal_count,
-            authenticated_versions=authenticated_versions,
+            selected_api_versions=selected_api_versions,
             resolved_api_versions=resolved_api_versions,
             resolved_endpoint_bindings=resolved_endpoint_bindings,
         )
@@ -749,7 +750,7 @@ class MCPDiscoveryService(MCPReadService):
         *,
         project_id: UUID,
         target: _ReadinessTarget,
-        authenticated_versions: tuple[APIVersion, ...],
+        selected_api_versions: tuple[APIVersion, ...],
     ) -> _CredentialReadiness:
         endpoint_conditions = _endpoint_conditions(project_id=project_id, target=target)
         endpoints = list(
@@ -758,8 +759,8 @@ class MCPDiscoveryService(MCPReadService):
         declared_names = set(target.proposal_secret_names)
         declared_names.update(
             name
-            for version in authenticated_versions
-            for name in _secret_reference_names(version.auth_config)
+            for version in selected_api_versions
+            for name in _api_version_secret_reference_names(version)
         )
         declared_names.update(
             name
@@ -781,7 +782,9 @@ class MCPDiscoveryService(MCPReadService):
             )
             available_names = {secret.name for secret in secrets}
         resolved_names = {name for name in declared_names if name in available_names}
-        required = bool(authenticated_versions or declared_names)
+        required = bool(
+            declared_names or any(version.auth_kind != "none" for version in selected_api_versions)
+        )
         verified = bool(
             not required
             or (
@@ -1199,6 +1202,21 @@ def _secret_reference_names(value: object, *, allow_raw: bool = False, _depth: i
             )
         return references
     return set()
+
+
+def _api_version_secret_reference_names(version: APIVersion) -> set[str]:
+    """Mirror every persisted API field inspected by RequestTargetResolver."""
+
+    return _secret_reference_names(
+        (
+            version.path,
+            version.query_parameters,
+            version.headers,
+            version.variables,
+            version.body,
+            version.auth_config,
+        )
+    )
 
 
 def _has_credential_reference(value: object, *, _depth: int = 0) -> bool:

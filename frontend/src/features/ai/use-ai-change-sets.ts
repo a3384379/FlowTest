@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { listImpactRuns } from '../impact/impact-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { listReleaseRisks } from '../quality/quality-service'
@@ -18,7 +18,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [selection, setSelection] = useState({ projectId, id: initialChangeSetId })
+  const [selection, setSelection] = useRouteScopedSelection(projectId, initialChangeSetId)
   const changeSets = useQuery({
     queryKey: ['ai-change-sets', projectId],
     queryFn: () => listAIChangeSets(required(projectId)),
@@ -27,7 +27,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
       query.state.data?.items.some((item) => item.status === 'generating') ? 1_000 : false,
   })
   const currentItems = changeSets.data?.items.filter((item) => item.project_id === projectId) ?? []
-  const activeId = activeChangeSetId(selection, projectId, currentItems)
+  const activeId = selection ?? currentItems.at(0)?.id ?? null
   const detail = useQuery({
     queryKey: ['ai-change-set', projectId, activeId],
     queryFn: () => getAIChangeSet(required(activeId)),
@@ -62,7 +62,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   async function addChangeSet(input: Omit<AIChangeSetInput, 'project_id'>) {
     try {
       const created = await create.mutateAsync({ ...input, project_id: required(projectId) })
-      setSelection({ projectId, id: created.id })
+      setSelection(created.id)
       await queryClient.invalidateQueries({ queryKey: ['ai-change-sets', projectId] })
       void message.success('AI Draft Change Set 已提交生成')
       return true
@@ -99,7 +99,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
     impacts,
     risks,
     activeId,
-    select: (id: string | null) => setSelection({ projectId, id }),
+    select: setSelection,
     addChangeSet,
     reviewItem,
     creating: create.isPending,
@@ -110,13 +110,4 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
 function required(value: string | null): string {
   if (!value) throw new Error('请选择项目')
   return value
-}
-
-function activeChangeSetId(
-  selection: { projectId: string | null; id: string | null },
-  projectId: string | null,
-  items: Array<{ id: string }>,
-): string | null {
-  if (selection.projectId !== projectId) return items.at(0)?.id ?? null
-  return selection.id ?? items.at(0)?.id ?? null
 }

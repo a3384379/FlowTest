@@ -3,6 +3,7 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   createNotificationWebhook,
@@ -21,7 +22,8 @@ export function useReports(initialExecutionId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
+  const [selectedExecutionId, setSelectedExecutionId] = useRouteScopedSelection(
+    projectId,
     initialExecutionId ?? null,
   )
   const [webhookOpen, setWebhookOpen] = useState(false)

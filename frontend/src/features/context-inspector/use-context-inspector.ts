@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
 
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import { getContext } from './context-inspector-service'
 import { useContextPage } from './use-context-page'
 
 export function useContextInspector(initialContextId?: string) {
   const { projectId } = useProjectContext()
-  const [selectedId, setSelectedId] = useState<string | null>(initialContextId ?? null)
+  const [selectedId, setSelectedId] = useRouteScopedSelection(projectId, initialContextId ?? null)
   const { contexts, page, setPage } = useContextPage(projectId)
   const items = contexts.data?.items ?? []
   const activeId = selectedId ?? items.at(0)?.id ?? null
