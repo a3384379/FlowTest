@@ -20,7 +20,7 @@ from app.core.errors import AppError
 from app.domain.mcp_read import EvidenceRef, MCPReadCall, MCPReadEnvelope
 from app.domain.test_contexts import first_sensitive_value
 from app.models.access import User
-from app.models.ai import AIChangeSet
+from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.service_targets import ServiceEndpoint
 from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
@@ -216,15 +216,9 @@ class MCPDiscoveryService(MCPReadService):
                 Environment.classification.in_(["test", "sandbox"]),
             )
         )
-        accepted_proposal_count = await self._count(
-            select(func.count())
-            .select_from(AIChangeSet)
-            .where(
-                AIChangeSet.project_id == project_id,
-                AIChangeSet.status == "accepted",
-                AIChangeSet.applied_at.is_(None),
-                AIChangeSet.source_type.in_(["flow_spec", "mcp", "change_regression"]),
-            )
+        accepted_proposal_count = await self._count_previewable_proposals(
+            project_id=project_id,
+            now=now,
         )
 
         checks: list[MCPReadinessCheck] = [
@@ -507,6 +501,57 @@ class MCPDiscoveryService(MCPReadService):
         value = await self._session.scalar(statement)
         return int(value or 0)
 
+    async def _count_previewable_proposals(self, *, project_id: UUID, now: datetime) -> int:
+        """Count only accepted FlowSpec proposals that Preview can resolve.
+
+        Change Regression and Test Plan ChangeSets have different lifecycles and must
+        never make readiness claim that a FlowSpec Preview is available.  The bounded
+        context checks mirror the first immutable checks in
+        ``SandboxPreviewService._previewable`` without loading or exposing proposal data.
+        """
+
+        candidates = (
+            await self._session.execute(
+                select(AIChangeSet, AIChangeItem)
+                .join(AIChangeItem, AIChangeItem.change_set_id == AIChangeSet.id)
+                .where(
+                    AIChangeSet.project_id == project_id,
+                    AIChangeSet.status == "accepted",
+                    AIChangeSet.applied_at.is_(None),
+                    AIChangeSet.source_type == "flow_spec",
+                    AIChangeItem.item_type == "workflow",
+                    AIChangeItem.review_status == "accepted",
+                )
+                .order_by(AIChangeSet.updated_at.desc())
+                .limit(2000)
+            )
+        ).all()
+        count = 0
+        for change_set, item in candidates:
+            snapshot = change_set.source_snapshot
+            if not isinstance(snapshot, dict) or not isinstance(item.proposed_content, dict):
+                continue
+            if not isinstance(item.proposed_content.get("flow_spec"), dict):
+                continue
+            revision_id = _uuid_value(snapshot.get("context_revision_id"))
+            context_fingerprint = snapshot.get("context_fingerprint")
+            if revision_id is None or not isinstance(context_fingerprint, str):
+                continue
+            revision = await self._session.get(TestContextRevision, revision_id)
+            if revision is None or revision.fingerprint != context_fingerprint:
+                continue
+            context = await self._session.get(TestContext, revision.context_id)
+            if (
+                context is None
+                or context.project_id != project_id
+                or context.status != "ready"
+                or context.current_revision != revision.revision
+                or _as_utc(context.expires_at) <= now
+            ):
+                continue
+            count += 1
+        return count
+
     @staticmethod
     def _asset_summary(row: MCPAssetRow) -> MCPAssetSummary:
         resource_type = row.resource_type
@@ -655,6 +700,19 @@ def _safe_source_ref(value: str | None) -> str | None:
     ):
         return None
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"[:512]
+
+
+def _uuid_value(value: object) -> UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _deep_link(project_id: UUID, resource_type: str, resource_id: UUID) -> str:
