@@ -19,6 +19,25 @@ MCPAssetType = Literal[
     "execution",
     "change_regression_run",
 ]
+MCPProposalKind = Literal[
+    "flow_spec",
+    "repair",
+    "maintenance",
+    "test_design",
+    "test_plan_update",
+    "mcp_controlled_write",
+    "ai",
+    "change_regression",
+    "generic",
+]
+MCPProposalSourceType = Literal["ai", "flow_spec", "mcp", "rest", "cli", "change_regression"]
+MCPProposalItemType = Literal[
+    "test_case",
+    "workflow",
+    "assertion",
+    "test_design",
+    "test_plan_update",
+]
 
 
 class MCPFindAssetsRequest(BaseModel):
@@ -70,6 +89,9 @@ class MCPAssetSummary(BaseModel):
     version: int | None = Field(default=None, ge=1)
     status: str = Field(min_length=1, max_length=32)
     source_ref: str | None = Field(default=None, max_length=512)
+    source_type: MCPProposalSourceType | None = None
+    item_type: MCPProposalItemType | None = None
+    proposal_kind: MCPProposalKind | None = None
     updated_at: datetime
     deep_link: str = Field(min_length=1, max_length=1024)
 
@@ -106,6 +128,20 @@ class MCPReadinessCheck(BaseModel):
     action: str | None = Field(default=None, max_length=400)
 
 
+class MCPRequiredServiceEndpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    service_id: UUID
+    variant: str = Field(min_length=1, max_length=80)
+
+
+class MCPRequiredAPIVersion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    api_definition_id: UUID
+    version: int = Field(ge=1)
+
+
 class MCPProjectReadinessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -115,6 +151,22 @@ class MCPProjectReadinessResponse(BaseModel):
     project_id: UUID
     can_generate_proposal: bool
     can_request_preview: bool
+    required_service_endpoints: list[MCPRequiredServiceEndpoint] = Field(
+        default_factory=list, max_length=1000
+    )
+    resolved_service_endpoints: list[MCPRequiredServiceEndpoint] = Field(
+        default_factory=list, max_length=1000
+    )
+    missing_service_endpoints: list[MCPRequiredServiceEndpoint] = Field(
+        default_factory=list, max_length=1000
+    )
+    required_api_versions: list[MCPRequiredAPIVersion] = Field(
+        default_factory=list, max_length=1000
+    )
+    resolved_api_versions: list[MCPRequiredAPIVersion] = Field(
+        default_factory=list, max_length=1000
+    )
+    missing_api_versions: list[MCPRequiredAPIVersion] = Field(default_factory=list, max_length=1000)
     checks: list[MCPReadinessCheck] = Field(max_length=30)
     human_actions_required: list[str] = Field(default_factory=list, max_length=30)
     review_url: str | None = Field(default=None, max_length=1024)

@@ -15,6 +15,7 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import type {
   AIChangeItem,
@@ -24,7 +25,8 @@ import type {
 import { useAIChangeSets } from '../features/ai/use-ai-change-sets'
 
 export default function AIChangeSetsPage() {
-  const state = useAIChangeSets()
+  const [searchParams] = useSearchParams()
+  const state = useAIChangeSets(searchParams.get('focus'))
   const [createOpen, setCreateOpen] = useState(false)
   const [review, setReview] = useState<{
     item: AIChangeItem

@@ -167,6 +167,17 @@ export async function proposeTestDesign(
   ).data
 }
 
+export async function getTestEngineeringProposal(
+  projectId: string,
+  changeSetId: string,
+): Promise<TestEngineeringProposal> {
+  return (
+    await apiClient.get<TestEngineeringProposal>(
+      `/projects/${projectId}/test-engineering/proposals/${changeSetId}`,
+    )
+  ).data
+}
+
 export async function reviewTestDesignProposal(
   projectId: string,
   changeSetId: string,

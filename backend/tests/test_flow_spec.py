@@ -896,6 +896,12 @@ async def test_test_engineering_proposal_materializes_existing_assets(
     proposal = proposed.json()
     assert proposal["status"] == "draft"
     assert len(proposal["scenario_ids"]) == 1
+    fetched = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/test-engineering/proposals/{proposal['change_set_id']}",
+        headers=headers,
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json() == proposal
     blocked = await flow_spec_client.post(
         f"/api/v1/projects/{project_id}/test-engineering/proposals/{proposal['change_set_id']}/apply",
         headers=headers,

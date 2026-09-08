@@ -223,6 +223,7 @@ class MCPContractImportService:
                 confirm_existing_changes=payload.confirm_existing_changes,
                 allowed_environment_classifications=frozenset({"test", "sandbox"}),
                 enforce_review_only=True,
+                commit=False,
             )
             return _commit_response(
                 organization_id=organization_id,

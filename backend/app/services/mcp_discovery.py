@@ -32,6 +32,8 @@ from app.schemas.mcp_discovery import (
     MCPFindAssetsResponse,
     MCPProjectReadinessResponse,
     MCPReadinessCheck,
+    MCPRequiredAPIVersion,
+    MCPRequiredServiceEndpoint,
     MCPServiceTargetCheckResponse,
 )
 from app.schemas.service_targets import ServiceEndpointConnectivityResponse
@@ -67,8 +69,9 @@ class _ReadinessTarget:
     context_revision_id: UUID | None
     context_id: UUID | None
     api_definition_ids: frozenset[UUID] | None = None
+    api_versions: frozenset[tuple[UUID, int]] | None = None
     proposal_secret_names: frozenset[str] = frozenset()
-    endpoint_bindings: frozenset[tuple[UUID, str | None]] | None = None
+    endpoint_bindings: frozenset[tuple[UUID, str]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +84,15 @@ class _ReadinessInventory:
     preview_environment_count: int
     accepted_proposal_count: int
     authenticated_versions: tuple[APIVersion, ...]
+    resolved_api_versions: frozenset[tuple[UUID, int]]
+    resolved_endpoint_bindings: frozenset[tuple[UUID, str]]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProposalReadinessMetadata:
+    api_definition_ids: frozenset[UUID]
+    api_versions: frozenset[tuple[UUID, int]]
+    secret_names: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +202,22 @@ class MCPDiscoveryService(MCPReadService):
         credentials_required = credentials.required
         credentials_verified = credentials.verified
         credential_reference_count = credentials.reference_count
+        required_api_versions = target.api_versions or frozenset()
+        resolved_api_versions = inventory.resolved_api_versions
+        missing_api_versions = required_api_versions - resolved_api_versions
+        required_endpoints = target.endpoint_bindings or frozenset()
+        resolved_endpoints = inventory.resolved_endpoint_bindings
+        missing_endpoints = required_endpoints - resolved_endpoints
+        contracts_ready = bool(
+            api_count
+            and (
+                target.api_versions is None or (required_api_versions and not missing_api_versions)
+            )
+        )
+        endpoints_ready = bool(
+            endpoint_count
+            and (target.endpoint_bindings is None or (required_endpoints and not missing_endpoints))
+        )
         credentials_state = (
             "ready"
             if credentials_verified
@@ -214,15 +242,29 @@ class MCPDiscoveryService(MCPReadService):
             ),
             MCPReadinessCheck(
                 name="contract",
-                state="ready" if api_count else "missing",
-                detail=f"已发现 {api_count} 个启用的 API 定义",
-                action=None if api_count else "请导入或提交至少一个 API Contract",
+                state="ready" if contracts_ready else "missing",
+                detail=(
+                    f"已解析全部 {len(required_api_versions)} 个固定 API 版本"
+                    if target.api_versions is not None and contracts_ready
+                    else f"缺少 {len(missing_api_versions)} 个固定 API 版本"
+                    if target.api_versions is not None
+                    else f"已发现 {api_count} 个启用的 API 定义"
+                ),
+                action=None if contracts_ready else "请导入或恢复 Proposal 固定的 API 版本",
             ),
             MCPReadinessCheck(
                 name="service_endpoint",
-                state="ready" if endpoint_count else "missing",
-                detail=f"已登记 {endpoint_count} 个启用的 Service Endpoint",
-                action=None if endpoint_count else "请登记测试或 Sandbox Service Endpoint",
+                state="ready" if endpoints_ready else "missing",
+                detail=(
+                    f"已解析全部 {len(required_endpoints)} 个 Service Endpoint"
+                    if target.endpoint_bindings is not None and endpoints_ready
+                    else f"缺少 {len(missing_endpoints)} 个 Service/Variant 目标"
+                    if target.endpoint_bindings is not None
+                    else f"已登记 {endpoint_count} 个启用的 Service Endpoint"
+                ),
+                action=None
+                if endpoints_ready
+                else "请为每个必需 Service 登记启用的目标 Endpoint Variant",
             ),
             MCPReadinessCheck(
                 name="test_context",
@@ -284,7 +326,7 @@ class MCPDiscoveryService(MCPReadService):
         ]
         can_generate = bool(
             _feature_enabled()
-            and api_count
+            and contracts_ready
             and ready_context_count
             and "mcp:flow:propose" in scopes
         )
@@ -293,7 +335,7 @@ class MCPDiscoveryService(MCPReadService):
             can_generate
             and "mcp:preview:execute" in scopes
             and preview_environment_count
-            and endpoint_count
+            and endpoints_ready
             and accepted_proposal_count
             and credentials_verified
             and target_bound
@@ -301,8 +343,8 @@ class MCPDiscoveryService(MCPReadService):
         actions = _readiness_actions(
             scopes=scopes,
             feature_enabled=_feature_enabled(),
-            api_count=api_count,
-            endpoint_count=endpoint_count,
+            api_count=api_count if contracts_ready else 0,
+            endpoint_count=endpoint_count if endpoints_ready else 0,
             ready_context_count=ready_context_count,
             auth_reference_count=auth_reference_count,
             credential_evidence_count=credential_reference_count,
@@ -320,6 +362,20 @@ class MCPDiscoveryService(MCPReadService):
             project_id=project_id,
             can_generate_proposal=can_generate,
             can_request_preview=can_preview,
+            required_service_endpoints=_service_endpoint_requirements(required_endpoints),
+            resolved_service_endpoints=_service_endpoint_requirements(
+                required_endpoints & resolved_endpoints
+                if target.endpoint_bindings is not None
+                else frozenset()
+            ),
+            missing_service_endpoints=_service_endpoint_requirements(missing_endpoints),
+            required_api_versions=_api_version_requirements(required_api_versions),
+            resolved_api_versions=_api_version_requirements(
+                required_api_versions & resolved_api_versions
+                if target.api_versions is not None
+                else frozenset()
+            ),
+            missing_api_versions=_api_version_requirements(missing_api_versions),
             checks=checks,
             human_actions_required=actions,
             review_url=f"/projects/{project_id}/workflows",
@@ -497,8 +553,9 @@ class MCPDiscoveryService(MCPReadService):
     ) -> _ReadinessTarget:
         context_id: UUID | None = None
         api_definition_ids: frozenset[UUID] | None = None
+        api_versions: frozenset[tuple[UUID, int]] | None = None
         proposal_secret_names: frozenset[str] = frozenset()
-        endpoint_bindings: frozenset[tuple[UUID, str | None]] | None = None
+        endpoint_bindings: frozenset[tuple[UUID, str]] | None = None
         if environment_id is not None:
             environment = await self._session.get(Environment, environment_id)
             if environment is None or environment.project_id != project_id:
@@ -533,10 +590,13 @@ class MCPDiscoveryService(MCPReadService):
                     AIChangeItem.item_type == "workflow",
                 )
             )
-            api_definition_ids, proposal_secret_names = _proposal_readiness_metadata(
+            metadata = _proposal_readiness_metadata(
                 snapshot=proposal.source_snapshot,
                 proposed_content=item.proposed_content if item is not None else None,
             )
+            api_definition_ids = metadata.api_definition_ids
+            api_versions = metadata.api_versions
+            proposal_secret_names = metadata.secret_names
             endpoint_bindings = _proposal_endpoint_bindings(
                 snapshot=proposal.source_snapshot,
                 proposed_content=item.proposed_content if item is not None else None,
@@ -547,6 +607,7 @@ class MCPDiscoveryService(MCPReadService):
             context_revision_id=context_revision_id,
             context_id=context_id,
             api_definition_ids=api_definition_ids,
+            api_versions=api_versions,
             proposal_secret_names=proposal_secret_names,
             endpoint_bindings=endpoint_bindings,
         )
@@ -562,14 +623,31 @@ class MCPDiscoveryService(MCPReadService):
             APIDefinition.project_id == project_id,
             APIDefinition.is_active.is_(True),
         ]
-        if target.api_definition_ids is not None:
-            api_conditions.append(APIDefinition.id.in_(target.api_definition_ids))
-        api_count = await self._count(
-            select(func.count()).select_from(APIDefinition).where(*api_conditions)
-        )
+        resolved_api_versions: frozenset[tuple[UUID, int]] = frozenset()
+        if target.api_versions is not None:
+            exact_version_conditions = _api_version_conditions(target.api_versions)
+            version_rows = (
+                await self._session.execute(
+                    select(APIVersion.api_definition_id, APIVersion.version)
+                    .join(APIDefinition, APIDefinition.id == APIVersion.api_definition_id)
+                    .where(*api_conditions, exact_version_conditions)
+                )
+            ).all()
+            resolved_api_versions = frozenset(
+                (definition_id, version) for definition_id, version in version_rows
+            )
+            api_count = len(resolved_api_versions)
+        else:
+            api_count = await self._count(
+                select(func.count()).select_from(APIDefinition).where(*api_conditions)
+            )
         endpoint_conditions = _endpoint_conditions(project_id=project_id, target=target)
-        endpoint_count = await self._count(
-            select(func.count()).select_from(ServiceEndpoint).where(*endpoint_conditions)
+        endpoints = list(
+            (await self._session.scalars(select(ServiceEndpoint).where(*endpoint_conditions))).all()
+        )
+        endpoint_count = len(endpoints)
+        resolved_endpoint_bindings = frozenset(
+            (endpoint.service_id, endpoint.variant) for endpoint in endpoints
         )
 
         context_conditions = [TestContext.project_id == project_id]
@@ -600,10 +678,11 @@ class MCPDiscoveryService(MCPReadService):
             APIDefinition.project_id == project_id,
             APIDefinition.is_active.is_(True),
             APIVersion.auth_kind != "none",
-            APIVersion.version == APIDefinition.current_version,
         ]
-        if target.api_definition_ids is not None:
-            authenticated_conditions.append(APIDefinition.id.in_(target.api_definition_ids))
+        if target.api_versions is not None:
+            authenticated_conditions.append(_api_version_conditions(target.api_versions))
+        else:
+            authenticated_conditions.append(APIVersion.version == APIDefinition.current_version)
         authenticated_versions = tuple(
             (
                 await self._session.scalars(
@@ -661,6 +740,8 @@ class MCPDiscoveryService(MCPReadService):
             preview_environment_count=preview_environment_count,
             accepted_proposal_count=accepted_proposal_count,
             authenticated_versions=authenticated_versions,
+            resolved_api_versions=resolved_api_versions,
+            resolved_endpoint_bindings=resolved_endpoint_bindings,
         )
 
     async def _credential_readiness(
@@ -794,8 +875,16 @@ class MCPDiscoveryService(MCPReadService):
             version=row.version,
             status=_safe_text(row.status, "unknown")[:32],
             source_ref=source_ref,
+            source_type=cast(Any, row.source_type),
+            item_type=cast(Any, row.item_type),
+            proposal_kind=cast(Any, row.proposal_kind),
             updated_at=updated_at,
-            deep_link=_deep_link(row.project_id, resource_type, row.resource_id),
+            deep_link=_deep_link(
+                row.project_id,
+                resource_type,
+                row.resource_id,
+                proposal_kind=row.proposal_kind,
+            ),
         )
 
     def _require_bootstrap_scope(self) -> None:
@@ -871,30 +960,45 @@ def _proposal_readiness_metadata(
     *,
     snapshot: dict[str, Any],
     proposed_content: dict[str, Any] | None,
-) -> tuple[frozenset[UUID], frozenset[str]]:
+) -> _ProposalReadinessMetadata:
     mappings = snapshot.get("resource_mappings")
     operation_mappings = mappings.get("operations") if isinstance(mappings, dict) else None
+    version_mappings = mappings.get("operation_versions") if isinstance(mappings, dict) else None
     api_definition_ids: set[UUID] = set()
-    if isinstance(operation_mappings, dict):
-        api_definition_ids = {
-            parsed
-            for value in operation_mappings.values()
-            if (parsed := _uuid_value(value)) is not None
-        }
     flow_spec = (
         proposed_content.get("flow_spec")
         if isinstance(proposed_content, dict)
         else snapshot.get("flow_spec")
     )
+    operation_source_versions = _operation_source_versions(flow_spec)
+    api_versions: set[tuple[UUID, int]] = set()
+    if isinstance(operation_mappings, dict):
+        for reference, value in operation_mappings.items():
+            definition_id = _uuid_value(value)
+            if definition_id is None:
+                continue
+            api_definition_ids.add(definition_id)
+            raw_version = (
+                version_mappings.get(reference, operation_source_versions.get(str(reference)))
+                if isinstance(version_mappings, dict)
+                else operation_source_versions.get(str(reference))
+            )
+            version = _positive_int(raw_version)
+            if version is not None:
+                api_versions.add((definition_id, version))
     secret_names = _secret_reference_names(flow_spec)
-    return frozenset(api_definition_ids), frozenset(secret_names)
+    return _ProposalReadinessMetadata(
+        api_definition_ids=frozenset(api_definition_ids),
+        api_versions=frozenset(api_versions),
+        secret_names=frozenset(secret_names),
+    )
 
 
 def _proposal_endpoint_bindings(
     *,
     snapshot: dict[str, Any],
     proposed_content: dict[str, Any] | None,
-) -> frozenset[tuple[UUID, str | None]]:
+) -> frozenset[tuple[UUID, str]]:
     mappings = snapshot.get("resource_mappings")
     service_mappings = mappings.get("services") if isinstance(mappings, dict) else None
     if not isinstance(service_mappings, dict):
@@ -911,38 +1015,128 @@ def _proposal_endpoint_bindings(
     )
     if not isinstance(flow_spec, dict):
         return frozenset()
-    operation_values = flow_spec.get("operations")
-    operations = (
-        {
-            operation["ref"]: operation
-            for operation in operation_values
-            if isinstance(operation, dict) and isinstance(operation.get("ref"), str)
-        }
-        if isinstance(operation_values, list)
-        else {}
-    )
-    bindings: set[tuple[UUID, str | None]] = set()
+    operations = _flow_operations(flow_spec)
     node_values = flow_spec.get("nodes")
-    if not isinstance(node_values, list):
-        return frozenset()
-    for node in node_values:
-        if not isinstance(node, dict):
+    node_bindings = (
+        {
+            binding
+            for node in node_values
+            if isinstance(node, dict)
+            and (binding := _node_endpoint_binding(node, operations, services)) is not None
+        }
+        if isinstance(node_values, list)
+        else set()
+    )
+    return frozenset(node_bindings | _cleanup_endpoint_bindings(flow_spec, operations, services))
+
+
+def _flow_operations(flow_spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    values = flow_spec.get("operations")
+    if not isinstance(values, list):
+        return {}
+    return {
+        operation["ref"]: operation
+        for operation in values
+        if isinstance(operation, dict) and isinstance(operation.get("ref"), str)
+    }
+
+
+def _node_endpoint_binding(
+    node: dict[str, Any],
+    operations: dict[str, dict[str, Any]],
+    services: dict[str, UUID],
+) -> tuple[UUID, str] | None:
+    target_value = node.get("target")
+    target = target_value if isinstance(target_value, dict) else {}
+    service_ref = target.get("service_ref")
+    if not isinstance(service_ref, str):
+        operation_ref = node.get("operation_ref")
+        operation = operations.get(operation_ref) if isinstance(operation_ref, str) else None
+        service_ref = operation.get("service_ref") if operation is not None else None
+    service_id = services.get(service_ref) if isinstance(service_ref, str) else None
+    if service_id is None:
+        return None
+    variant = target.get("endpoint_variant")
+    return service_id, variant if isinstance(variant, str) else "default"
+
+
+def _cleanup_endpoint_bindings(
+    flow_spec: dict[str, Any],
+    operations: dict[str, dict[str, Any]],
+    services: dict[str, UUID],
+) -> set[tuple[UUID, str]]:
+    values = flow_spec.get("cleanup")
+    if not isinstance(values, list):
+        return set()
+    bindings: set[tuple[UUID, str]] = set()
+    for cleanup in values:
+        operation_ref = cleanup.get("operation_ref") if isinstance(cleanup, dict) else None
+        operation = operations.get(operation_ref) if isinstance(operation_ref, str) else None
+        service_ref = operation.get("service_ref") if operation is not None else None
+        service_id = services.get(service_ref) if isinstance(service_ref, str) else None
+        if service_id is not None:
+            bindings.add((service_id, "default"))
+    return bindings
+
+
+def _operation_source_versions(flow_spec: object) -> dict[str, int]:
+    if not isinstance(flow_spec, dict):
+        return {}
+    operations = flow_spec.get("operations")
+    if not isinstance(operations, list):
+        return {}
+    result: dict[str, int] = {}
+    for operation in operations:
+        if not isinstance(operation, dict) or not isinstance(operation.get("ref"), str):
             continue
-        target = node.get("target")
-        target = target if isinstance(target, dict) else {}
-        service_ref = target.get("service_ref")
-        if not isinstance(service_ref, str):
-            operation_ref = node.get("operation_ref")
-            operation = operations.get(operation_ref) if isinstance(operation_ref, str) else None
-            service_ref = operation.get("service_ref") if operation is not None else None
-        if not isinstance(service_ref, str):
-            continue
-        service_id = services.get(service_ref)
-        if service_id is None:
-            continue
-        variant = target.get("endpoint_variant")
-        bindings.add((service_id, variant if isinstance(variant, str) else None))
-    return frozenset(bindings)
+        version = _positive_int(operation.get("source_version") or operation.get("api_version"))
+        if version is not None:
+            result[operation["ref"]] = version
+    return result
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 1 else None
+
+
+def _api_version_conditions(api_versions: frozenset[tuple[UUID, int]]) -> Any:
+    if not api_versions:
+        return false()
+    return or_(
+        *(
+            and_(
+                APIVersion.api_definition_id == definition_id,
+                APIVersion.version == version,
+            )
+            for definition_id, version in sorted(
+                api_versions, key=lambda item: (str(item[0]), item[1])
+            )
+        )
+    )
+
+
+def _service_endpoint_requirements(
+    values: frozenset[tuple[UUID, str]],
+) -> list[MCPRequiredServiceEndpoint]:
+    return [
+        MCPRequiredServiceEndpoint(service_id=service_id, variant=variant)
+        for service_id, variant in sorted(values, key=lambda item: (str(item[0]), item[1]))
+    ]
+
+
+def _api_version_requirements(
+    values: frozenset[tuple[UUID, int]],
+) -> list[MCPRequiredAPIVersion]:
+    return [
+        MCPRequiredAPIVersion(api_definition_id=definition_id, version=version)
+        for definition_id, version in sorted(values, key=lambda item: (str(item[0]), item[1]))
+    ]
 
 
 def _endpoint_conditions(*, project_id: UUID, target: _ReadinessTarget) -> list[Any]:
@@ -965,12 +1159,14 @@ def _endpoint_conditions(*, project_id: UUID, target: _ReadinessTarget) -> list[
         return conditions
     binding_conditions = []
     for service_id, variant in sorted(
-        target.endpoint_bindings, key=lambda item: (str(item[0]), item[1] or "")
+        target.endpoint_bindings, key=lambda item: (str(item[0]), item[1])
     ):
-        binding = ServiceEndpoint.service_id == service_id
-        if variant is not None:
-            binding = and_(binding, ServiceEndpoint.variant == variant)
-        binding_conditions.append(binding)
+        binding_conditions.append(
+            and_(
+                ServiceEndpoint.service_id == service_id,
+                ServiceEndpoint.variant == variant,
+            )
+        )
     conditions.append(or_(*binding_conditions))
     return conditions
 
@@ -1080,14 +1276,30 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _deep_link(project_id: UUID, resource_type: str, resource_id: UUID) -> str:
+def _deep_link(
+    project_id: UUID,
+    resource_type: str,
+    resource_id: UUID,
+    *,
+    proposal_kind: str | None = None,
+) -> str:
     project = f"/projects/{project_id}"
     resource = str(resource_id)
+    if resource_type == "proposal":
+        proposal_routes = {
+            "flow_spec": f"{project}/workflows?proposal={resource}",
+            "repair": f"{project}/workflows?proposal={resource}",
+            "maintenance": f"{project}/workflows?proposal={resource}",
+            "test_design": f"{project}/test-engineering?proposal={resource}",
+            "test_plan_update": f"{project}/mcp-changes?focus={resource}",
+            "mcp_controlled_write": f"{project}/mcp-changes?focus={resource}",
+            "ai": f"{project}/ai-changes?focus={resource}",
+        }
+        return proposal_routes.get(proposal_kind or "", f"{project}/assets?focus={resource}")
     routes = {
         "api": f"{project}/apis?focus={resource}",
         "workflow": f"{project}/workflows?focus={resource}",
         "context": f"{project}/contexts?focus={resource}",
-        "proposal": f"{project}/workflows?proposal={resource}",
         "test_case": f"{project}/assets?type=case&focus={resource}",
         "test_suite": f"{project}/assets?type=suite&focus={resource}",
         "test_plan": f"{project}/tasks?focus={resource}",

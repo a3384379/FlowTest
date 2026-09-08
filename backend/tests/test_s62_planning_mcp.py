@@ -18,10 +18,12 @@ from app.models.test_contexts import (
 from app.models.test_contexts import (
     TestContextRevision as ContextRevisionModel,
 )
+from app.models.workflows import Workflow
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
     MCPPrepareChangeRegressionRequest,
     MCPTestPlanUpdateRequest,
+    MCPTestPlanUpdateTarget,
 )
 from app.services.mcp_planning import MCPPlanningService
 
@@ -215,6 +217,53 @@ async def test_test_plan_update_creates_pending_changeset_without_mutating_plan(
     assert replayed.status_code == 202, replayed.text
     assert replayed.json()["change_set_id"] == str(change_set_id)
     assert replayed.json()["idempotency_replayed"] is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_target_reports_every_unpublished_version_state(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    fixture = failure_repair_api
+    async with fixture["sessions"]() as session:
+        workflow = await session.get(Workflow, fixture["workflow_id"])
+        assert workflow is not None
+        service = MCPPlanningService(session)
+        environments = {workflow.id: fixture["environment_id"]}
+
+        workflow.current_version = None
+        _, missing_current = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert missing_current == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 99
+        _, nonexistent = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert nonexistent == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 1
+        workflow.draft_revision = 2
+        _, unpublished = await service._resolve_workflow_target(
+            fixture["project_id"],
+            workflow.id,
+            environments,
+            MCPTestPlanUpdateTarget(
+                target_type="workflow",
+                target_id=workflow.id,
+                target_version=2,
+                workflow_version=2,
+                environment_id=fixture["environment_id"],
+            ),
+        )
+        assert unpublished == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 1
+        resolved, published = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert published == []
+        assert resolved.target_version == 1
 
 
 def test_s62_request_contracts_are_strict_and_safe() -> None:

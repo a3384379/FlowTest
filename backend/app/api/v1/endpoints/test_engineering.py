@@ -63,6 +63,21 @@ async def propose_test_design(
     return _proposal_response(view)
 
 
+@router.get("/proposals/{change_set_id}", response_model=TestEngineeringProposalResponse)
+async def get_test_design_proposal(
+    project_id: UUID,
+    change_set_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> TestEngineeringProposalResponse:
+    view = await TestEngineeringProposalService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        change_set_id=change_set_id,
+    )
+    return _proposal_response(view)
+
+
 @router.post("/proposals/{change_set_id}/review", response_model=TestEngineeringProposalResponse)
 async def review_test_design_proposal(
     project_id: UUID,

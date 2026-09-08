@@ -564,6 +564,7 @@ class ImportService:
         confirm_existing_changes: bool | None = None,
         allowed_environment_classifications: frozenset[str] | None = None,
         enforce_review_only: bool = False,
+        commit: bool = True,
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         run = await self._imports.get(run_id)
@@ -677,8 +678,11 @@ class ImportService:
             resource_id=run.id,
             details={"applied_keys": run.applied_keys},
         )
-        await self._session.commit()
-        await self._session.refresh(run)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(run)
+        else:
+            await self._session.flush()
         return run
 
     @staticmethod

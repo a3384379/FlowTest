@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import String, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ai import AIChangeSet
+from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, APIVersion
 from app.models.change_regression import ChangeRegressionRun
 from app.models.imports import ImportRun
@@ -30,6 +30,9 @@ class MCPAssetRow:
     version: int | None
     status: str
     source_ref: str | None
+    source_type: str | None
+    item_type: str | None
+    proposal_kind: str | None
     updated_at: object
 
 
@@ -106,6 +109,17 @@ class MCPAssetRepository:
                 version=_parse_version(row["version"]),
                 status=str(row["status"] or "unknown"),
                 source_ref=str(row["source_ref"]) if row["source_ref"] else None,
+                source_type=str(row["source_type"]) if row["source_type"] else None,
+                item_type=str(row["item_type"]) if row["item_type"] else None,
+                proposal_kind=(
+                    _proposal_kind(
+                        source_type=str(row["source_type"]) if row["source_type"] else None,
+                        source_ref=str(row["source_ref"]) if row["source_ref"] else None,
+                        item_type=str(row["item_type"]) if row["item_type"] else None,
+                    )
+                    if row["resource_type"] == "proposal"
+                    else None
+                ),
                 updated_at=row["updated_at"],
             )
             for row in rows
@@ -123,6 +137,8 @@ class MCPAssetRepository:
         status: object,
         source_ref: object,
         updated_at: Any,
+        source_type: object = None,
+        item_type: object = None,
     ) -> tuple[Any, ...]:
         return (
             literal(resource_type, type_=String(32)).label("resource_type"),
@@ -133,6 +149,12 @@ class MCPAssetRepository:
             cast(version, String(24)).label("version"),
             cast(status, String(32)).label("status"),
             cast(source_ref, String(512)).label("source_ref"),
+            cast(literal(source_type) if source_type is None else source_type, String(24)).label(
+                "source_type"
+            ),
+            cast(literal(item_type) if item_type is None else item_type, String(32)).label(
+                "item_type"
+            ),
             updated_at.label("updated_at"),
         )
 
@@ -249,6 +271,13 @@ class MCPAssetRepository:
         )
 
     def _proposal_select(self, **kwargs: Any) -> Any:
+        item_type = (
+            select(AIChangeItem.item_type)
+            .where(AIChangeItem.change_set_id == AIChangeSet.id)
+            .order_by(AIChangeItem.position, AIChangeItem.id)
+            .limit(1)
+            .scalar_subquery()
+        )
         return select(
             *self._columns(
                 "proposal",
@@ -260,6 +289,8 @@ class MCPAssetRepository:
                 AIChangeSet.status,
                 AIChangeSet.source_ref,
                 AIChangeSet.updated_at,
+                AIChangeSet.source_type,
+                item_type,
             )
         ).where(
             *self._conditions(
@@ -422,3 +453,25 @@ def _parse_version(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed is not None and parsed >= 1 else None
+
+
+def _proposal_kind(
+    *, source_type: str | None, source_ref: str | None, item_type: str | None
+) -> str:
+    if source_type == "flow_spec":
+        if source_ref and source_ref.startswith("repair://"):
+            return "repair"
+        if source_ref and source_ref.startswith("maintenance://"):
+            return "maintenance"
+        return "flow_spec"
+    if source_type == "rest" and item_type == "test_design":
+        return "test_design"
+    if source_type == "mcp" and item_type == "test_plan_update":
+        return "test_plan_update"
+    if source_type == "mcp":
+        return "mcp_controlled_write"
+    if source_type == "ai":
+        return "ai"
+    if source_type == "change_regression":
+        return "change_regression"
+    return "generic"

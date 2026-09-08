@@ -350,16 +350,50 @@ describe('TestEngineeringPage', () => {
       screen.queryByRole('button', { name: '物化为 Workflow / TestCase' }),
     ).not.toBeInTheDocument()
   })
+
+  it('loads the exact proposal from a proposal deep link', async () => {
+    const proposal: TestEngineeringProposal = {
+      change_set_id: '00000000-0000-4000-8000-000000007099',
+      status: 'draft',
+      review_status: 'pending',
+      fingerprint: 'deep-link-fingerprint',
+      design,
+      scenario_ids: ['scenario_happy_path'],
+      applied: false,
+      contract_completeness: 'complete',
+      contract_fingerprint: 'd'.repeat(64),
+      contract: operationContract,
+    }
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([environment]),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/test-engineering/proposals/${proposal.change_set_id}`,
+        () => HttpResponse.json(proposal),
+      ),
+    )
+    renderPage(`/projects/${project.id}/test-engineering?proposal=${proposal.change_set_id}`)
+
+    expect(await screen.findByText('验证 POST /orders 的契约边界')).toBeVisible()
+    expect(screen.getByRole('button', { name: '接受 Draft' })).toBeVisible()
+  })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="test-engineering">
+        <ProjectTestProvider section="test-engineering" initialEntry={initialEntry}>
           <TestEngineeringPage />
         </ProjectTestProvider>
       </QueryClientProvider>

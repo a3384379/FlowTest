@@ -528,16 +528,17 @@ class MCPPlanningService:
             requested.workflow_version if requested is not None else None
         )
         version = requested_version or workflow.current_version
-        version_published = version is not None and await self._session.scalar(
-            select(WorkflowVersion.id).where(
-                WorkflowVersion.workflow_id == workflow.id,
-                WorkflowVersion.version == version,
-                WorkflowVersion.published_at.is_not(None),
+        version_published = bool(
+            version is not None
+            and await self._session.scalar(
+                select(WorkflowVersion.id).where(
+                    WorkflowVersion.workflow_id == workflow.id,
+                    WorkflowVersion.version == version,
+                    WorkflowVersion.published_at.is_not(None),
+                )
             )
         )
-        dependencies = (
-            [] if version_published is not None else [f"workflow:{workflow.id}:published_version"]
-        )
+        dependencies = [] if version_published else [f"workflow:{workflow.id}:published_version"]
         environment_id = (
             requested.environment_id
             if requested is not None and requested.environment_id is not None
@@ -763,7 +764,9 @@ async def materialize_test_plan_update(
             message="测试计划建议内容无效",
             status_code=422,
         ) from error
-    plan = await session.get(TestPlan, proposal.test_plan_id)
+    plan = await session.scalar(
+        select(TestPlan).where(TestPlan.id == proposal.test_plan_id).with_for_update()
+    )
     if plan is None or plan.project_id != change_set.project_id:
         raise AppError(code="TEST_PLAN_NOT_FOUND", message="测试计划不存在", status_code=404)
     if proposal.unpublished_dependencies:
