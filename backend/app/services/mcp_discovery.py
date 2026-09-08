@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -37,6 +38,24 @@ from app.services.mcp_bootstrap import MCP_PROJECT_BOOTSTRAP_SCOPE
 from app.services.mcp_read import MCPReadService, _safe_origin
 from app.services.projects import ProjectService
 from app.services.service_targets import ServiceTargetService
+
+_CREDENTIAL_REFERENCE_KEYS = frozenset(
+    {
+        "auth_binding",
+        "auth_bindings",
+        "auth_ref",
+        "auth_refs",
+        "credential_binding",
+        "credential_bindings",
+        "credential_ref",
+        "credential_refs",
+        "secret_ref",
+        "secret_refs",
+        "token_ref",
+        "token_refs",
+    }
+)
+_SECRET_REFERENCE = re.compile(r"^secret://[A-Za-z0-9._:/-]{1,480}$")
 
 
 class MCPDiscoveryService(MCPReadService):
@@ -147,20 +166,34 @@ class MCPDiscoveryService(MCPReadService):
             .where(
                 APIDefinition.project_id == project_id,
                 APIVersion.auth_kind != "none",
+                APIVersion.version == APIDefinition.current_version,
             )
         )
-        runtime_evidence_count = await self._count(
-            select(func.count())
-            .select_from(ContextEvidenceItem)
-            .join(
-                TestContextRevision,
-                TestContextRevision.id == ContextEvidenceItem.context_revision_id,
-            )
-            .join(TestContext, TestContext.id == TestContextRevision.context_id)
-            .where(
-                TestContext.project_id == project_id,
-                ContextEvidenceItem.source_type == "runtime",
-            )
+        current_runtime_evidence = list(
+            (
+                await self._session.scalars(
+                    select(ContextEvidenceItem)
+                    .join(
+                        TestContextRevision,
+                        TestContextRevision.id == ContextEvidenceItem.context_revision_id,
+                    )
+                    .join(TestContext, TestContext.id == TestContextRevision.context_id)
+                    .where(
+                        TestContext.project_id == project_id,
+                        TestContext.status == "ready",
+                        TestContext.expires_at > now,
+                        TestContextRevision.revision == TestContext.current_revision,
+                        ContextEvidenceItem.source_type == "runtime",
+                        ContextEvidenceItem.expires_at > now,
+                    )
+                    .limit(2000)
+                )
+            ).all()
+        )
+        credential_evidence_count = sum(
+            1
+            for item in current_runtime_evidence
+            if _has_credential_reference(item.finding_payload)
         )
         database_evidence_count = await self._count(
             select(func.count())
@@ -243,16 +276,16 @@ class MCPDiscoveryService(MCPReadService):
             MCPReadinessCheck(
                 name="business_test_credentials",
                 state="ready"
-                if (not auth_reference_count or runtime_evidence_count)
+                if (not auth_reference_count or credential_evidence_count)
                 else "missing",
                 detail=(
                     "已记录认证引用元数据；凭据值不会通过 MCP 返回"
-                    if (not auth_reference_count or runtime_evidence_count)
+                    if (not auth_reference_count or credential_evidence_count)
                     else "Contract 需要认证，但尚未发现运行期凭据引用"
                 ),
                 action=(
                     None
-                    if (not auth_reference_count or runtime_evidence_count)
+                    if (not auth_reference_count or credential_evidence_count)
                     else "请在授权凭据入口绑定若依等业务测试凭据"
                 ),
             ),
@@ -282,7 +315,7 @@ class MCPDiscoveryService(MCPReadService):
             and ready_context_count
             and "mcp:flow:propose" in scopes
         )
-        credentials_ready = not auth_reference_count or bool(runtime_evidence_count)
+        credentials_ready = not auth_reference_count or bool(credential_evidence_count)
         can_preview = bool(
             can_generate
             and "mcp:preview:execute" in scopes
@@ -297,7 +330,7 @@ class MCPDiscoveryService(MCPReadService):
             endpoint_count=endpoint_count,
             ready_context_count=ready_context_count,
             auth_reference_count=auth_reference_count,
-            runtime_evidence_count=runtime_evidence_count,
+            credential_evidence_count=credential_evidence_count,
             preview_environment_count=preview_environment_count,
             accepted_proposal_count=accepted_proposal_count,
             can_generate=can_generate,
@@ -518,7 +551,7 @@ def _readiness_actions(
     endpoint_count: int,
     ready_context_count: int,
     auth_reference_count: int,
-    runtime_evidence_count: int,
+    credential_evidence_count: int,
     preview_environment_count: int,
     accepted_proposal_count: int,
     can_generate: bool,
@@ -527,7 +560,7 @@ def _readiness_actions(
     actions: list[str] = []
     actions.extend(_feature_and_scope_actions(feature_enabled, scopes))
     actions.extend(_asset_readiness_actions(api_count, endpoint_count, ready_context_count))
-    if auth_reference_count and not runtime_evidence_count:
+    if auth_reference_count and not credential_evidence_count:
         actions.append("请在授权凭据入口绑定业务测试凭据引用")
     if not preview_environment_count:
         actions.append("请登记 test 或 sandbox Preview 环境")
@@ -560,6 +593,42 @@ def _asset_readiness_actions(
     if not ready_context_count:
         actions.append("请建立或补齐未过期 Ready Test Context")
     return actions
+
+
+def _has_credential_reference(value: object, *, _depth: int = 0) -> bool:
+    """Return true only for explicit secret references in credential fields.
+
+    Runtime evidence is intentionally not considered credential evidence merely because
+    it has ``source_type=runtime``.  Values are never returned by the readiness API.
+    """
+
+    if _depth > 8:
+        return False
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).strip().lower().replace("-", "_")
+            if normalized in _CREDENTIAL_REFERENCE_KEYS and _credential_reference_value(
+                child, depth=_depth + 1
+            ):
+                return True
+            if _has_credential_reference(child, _depth=_depth + 1):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_has_credential_reference(item, _depth=_depth + 1) for item in value)
+    return False
+
+
+def _credential_reference_value(value: object, *, depth: int) -> bool:
+    if depth > 8:
+        return False
+    if isinstance(value, str):
+        return _SECRET_REFERENCE.fullmatch(value.strip()) is not None
+    if isinstance(value, list):
+        return any(_credential_reference_value(item, depth=depth + 1) for item in value)
+    if isinstance(value, dict):
+        return any(_credential_reference_value(item, depth=depth + 1) for item in value.values())
+    return False
 
 
 def _safe_text(value: str, fallback: str) -> str:

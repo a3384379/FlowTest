@@ -23,6 +23,7 @@ from app.schemas.mcp_planning import (
     MCPPrepareChangeRegressionRequest,
     MCPTestPlanUpdateRequest,
 )
+from app.services.mcp_planning import MCPPlanningService
 
 
 async def _create_plan_and_policy(fixture: dict[str, Any]) -> tuple[str, str]:
@@ -142,7 +143,7 @@ async def test_prepare_change_regression_is_analysis_only_and_idempotent(
 
 @pytest.mark.asyncio
 async def test_test_plan_update_creates_pending_changeset_without_mutating_plan(
-    failure_repair_api: dict[str, Any],
+    failure_repair_api: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fixture = failure_repair_api
     plan_id, _ = await _create_plan_and_policy(fixture)
@@ -201,6 +202,20 @@ async def test_test_plan_update_creates_pending_changeset_without_mutating_plan(
         assert item is not None and item.item_type == "test_plan_update"
     assert after_create == before
 
+    # A completed receipt must be replayable without resolving mutable targets again.
+    async def fail_target_resolution(*_: object, **__: object) -> object:
+        raise AssertionError("completed idempotency receipts must bypass target resolution")
+
+    monkeypatch.setattr(MCPPlanningService, "_resolve_plan_targets", fail_target_resolution)
+    replayed = await client.post(
+        "/api/v1/mcp/continuous/test-plan/proposals",
+        headers={**headers, "Idempotency-Key": "s62-plan-v1"},
+        json={**payload, "dry_run": False},
+    )
+    assert replayed.status_code == 202, replayed.text
+    assert replayed.json()["change_set_id"] == str(change_set_id)
+    assert replayed.json()["idempotency_replayed"] is True
+
 
 def test_s62_request_contracts_are_strict_and_safe() -> None:
     with pytest.raises(ValueError):
@@ -209,6 +224,13 @@ def test_s62_request_contracts_are_strict_and_safe() -> None:
             test_plan_id="00000000-0000-0000-0000-000000000002",
             workflow_ids=["00000000-0000-0000-0000-000000000003"],
             test_case_ids=["00000000-0000-0000-0000-000000000003"],
+        )
+    with pytest.raises(ValueError, match="不能超过 100"):
+        MCPTestPlanUpdateRequest(
+            project_id="00000000-0000-0000-0000-000000000001",
+            test_plan_id="00000000-0000-0000-0000-000000000002",
+            workflow_ids=[UUID(int=index + 1) for index in range(100)],
+            test_case_ids=[UUID(int=101)],
         )
     with pytest.raises(ValueError):
         MCPPrepareChangeRegressionRequest(

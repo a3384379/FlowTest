@@ -176,7 +176,10 @@ class MCPAssetRepository:
             source_columns=(APIDefinition.import_source, APIDefinition.import_source_key),
         )
         if method or path:
-            version_conditions: list[Any] = [APIVersion.api_definition_id == APIDefinition.id]
+            version_conditions: list[Any] = [
+                APIVersion.api_definition_id == APIDefinition.id,
+                APIVersion.version == APIDefinition.current_version,
+            ]
             if method:
                 version_conditions.append(APIVersion.method == method)
             if path:

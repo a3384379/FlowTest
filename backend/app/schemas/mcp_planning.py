@@ -2,7 +2,7 @@
 
 # Chinese product copy intentionally uses full-width punctuation.
 
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.impact import OpenApiDiffReference, SchemaDiffReference
 
 MCP_PLANNING_SCHEMA_VERSION: Literal["flowtest-mcp-planning-v1"] = "flowtest-mcp-planning-v1"
+MCP_TEST_PLAN_TARGET_LIMIT: Final[int] = 100
 
 
 class MCPTestPlanUpdateTarget(BaseModel):
@@ -32,7 +33,9 @@ class MCPTestPlanUpdateContent(BaseModel):
 
     schema_version: Literal["s62-test-plan-update-v1"] = "s62-test-plan-update-v1"
     test_plan_id: UUID
-    targets: list[MCPTestPlanUpdateTarget] = Field(min_length=1, max_length=100)
+    targets: list[MCPTestPlanUpdateTarget] = Field(
+        min_length=1, max_length=MCP_TEST_PLAN_TARGET_LIMIT
+    )
     unpublished_dependencies: list[str] = Field(default_factory=list, max_length=100)
     rationale: str = Field(default="", max_length=2000)
 
@@ -103,9 +106,9 @@ class MCPTestPlanUpdateRequest(BaseModel):
     project_id: UUID
     test_plan_id: UUID
     run_id: UUID | None = None
-    workflow_ids: list[UUID] = Field(default_factory=list, max_length=100)
-    test_case_ids: list[UUID] = Field(default_factory=list, max_length=100)
-    test_suite_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    workflow_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
+    test_case_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
+    test_suite_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
     title: str = Field(default="Test Plan 更新建议", min_length=1, max_length=200)
     rationale: str = Field(default="", max_length=2000)
     dry_run: bool = True
@@ -115,6 +118,8 @@ class MCPTestPlanUpdateRequest(BaseModel):
         targets = [*self.workflow_ids, *self.test_case_ids, *self.test_suite_ids]
         if not targets:
             raise ValueError("至少指定一个已有 Workflow、Test Case 或 Test Suite")
+        if len(targets) > MCP_TEST_PLAN_TARGET_LIMIT:
+            raise ValueError("测试计划建议的资产总数不能超过 100")
         if len(set(targets)) != len(targets):
             raise ValueError("测试计划建议中的资产不能重复")
         return self
@@ -127,7 +132,7 @@ class MCPTestPlanUpdateResponse(BaseModel):
     project_id: UUID
     test_plan_id: UUID
     change_set_id: UUID | None = None
-    proposed_item_count: int = Field(ge=1, le=300)
+    proposed_item_count: int = Field(ge=1, le=MCP_TEST_PLAN_TARGET_LIMIT)
     unpublished_dependencies: list[str] = Field(default_factory=list, max_length=100)
     dry_run: bool
     requires_human_review: Literal[True] = True

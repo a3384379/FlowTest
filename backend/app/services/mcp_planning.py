@@ -198,15 +198,15 @@ class MCPPlanningService:
     ) -> MCPTestPlanUpdateResponse:
         self._require_scope(MCP_TEST_PLAN_PROPOSE_SCOPE, "服务账号缺少 Test Plan 建议权限")
         await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
-        plan = await self._project_plan(payload.project_id, payload.test_plan_id)
         if first_sensitive_value(payload.model_dump(mode="json")) is not None:
             raise AppError(
                 code="MCP_SENSITIVE_INPUT",
                 message="测试计划建议说明不能包含 Secret 或 PII",
                 status_code=422,
             )
-        targets, unpublished = await self._resolve_plan_targets(payload, plan)
         if payload.dry_run:
+            plan = await self._project_plan(payload.project_id, payload.test_plan_id)
+            targets, unpublished = await self._resolve_plan_targets(payload, plan)
             return MCPTestPlanUpdateResponse(
                 project_id=payload.project_id,
                 test_plan_id=plan.id,
@@ -219,7 +219,7 @@ class MCPPlanningService:
 
         key = require_idempotency_key(idempotency_key)
         actor_key = f"service-account:{account_id}"
-        operation = f"mcp.propose_test_plan_update:{plan.id}"
+        operation = f"mcp.propose_test_plan_update:{payload.test_plan_id}"
         request_payload = payload.model_dump(mode="json")
         cached = await IdempotencyService(self._session).completed_response(
             key=key,
