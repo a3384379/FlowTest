@@ -276,6 +276,7 @@ class FlowSpecProposalResponse(BaseModel):
     target_workflow_id: UUID | None
     target_revision: int | None
     warnings: list[str] = Field(default_factory=list, max_length=100)
+    idempotency_replayed: bool = False
 
 
 class FlowSpecProposalInspectionResponse(BaseModel):

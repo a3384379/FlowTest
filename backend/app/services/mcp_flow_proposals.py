@@ -22,6 +22,7 @@ from app.schemas.test_contexts import (
 )
 from app.services.flow_spec import FlowSpecImportProvenance, FlowSpecService
 from app.services.idempotency import IdempotencyService, require_idempotency_key
+from app.services.projects import ProjectService
 from app.services.test_contexts import ProposableContext, TestContextService
 
 MCP_FLOW_PROPOSE_SCOPE = "mcp:flow:propose"
@@ -38,6 +39,7 @@ class MCPFlowProposalService:
         self._session = session
         self._contexts = TestContextService(session)
         self._flow_specs = FlowSpecService(session)
+        self._projects = ProjectService(session)
 
     async def propose(
         self,
@@ -47,22 +49,48 @@ class MCPFlowProposalService:
         idempotency_key: str | None,
     ) -> FlowSpecProposalResponse:
         service_account_id = self._require_scope()
-        context = await self._context(actor=actor, payload=payload)
+        try:
+            await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        except AppError as error:
+            # Keep the historical generic 404 for an unknown or inaccessible project.
+            # Authorization still runs before the receipt lookup; this mapping only
+            # preserves the non-disclosing error contract for callers.
+            if error.code != "PROJECT_NOT_FOUND":
+                raise
+            raise AppError(
+                code="TEST_CONTEXT_NOT_FOUND",
+                message="Test Context 不存在",
+                status_code=404,
+            ) from error
         key = require_idempotency_key(idempotency_key)
         self._reject_sensitive(payload)
+        request_payload = payload.model_dump(mode="json")
+        actor_key = f"service-account:{service_account_id}"
+        idempotency = IdempotencyService(self._session)
+        cached = await idempotency.completed_response(
+            key=key,
+            project_id=payload.project_id,
+            actor_key=actor_key,
+            operation="propose_flow_draft",
+            request_payload=request_payload,
+        )
+        if cached is not None:
+            cached["idempotency_replayed"] = True
+            return FlowSpecProposalResponse.model_validate(cached)
         if payload.dry_run:
+            context = await self._context(actor=actor, payload=payload)
             return await self._preview(
                 actor=actor,
                 payload=payload,
                 service_account_id=service_account_id,
                 context=context,
             )
-        response = await IdempotencyService(self._session).run(
+        response = await idempotency.run(
             key=key,
             project_id=payload.project_id,
-            actor_key=f"service-account:{service_account_id}",
+            actor_key=actor_key,
             operation="propose_flow_draft",
-            request_payload=payload.model_dump(mode="json"),
+            request_payload=request_payload,
             atomic_action=True,
             action=lambda: self._persist(
                 actor=actor,
@@ -104,9 +132,9 @@ class MCPFlowProposalService:
                 review_status=proposal.view.item.review_status,
                 applied=proposal.view.change_set.applied_at is not None,
             ),
-            review_url=_ui_link(f"/projects/{project_id}/flow-spec/proposals/{change_set_id}"),
+            review_url=_ui_link(f"/projects/{project_id}/workflows?proposal={change_set_id}"),
             approval_url=(
-                _ui_link(f"/projects/{project_id}/flow-spec/proposals/{change_set_id}/preview")
+                _ui_link(f"/projects/{project_id}/workflows?proposal={change_set_id}")
                 if proposal.view.item.review_status == "accepted"
                 and proposal.view.change_set.applied_at is None
                 else None

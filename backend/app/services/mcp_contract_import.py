@@ -67,6 +67,7 @@ class MCPContractImportService:
                 service_id=payload.service_id,
                 environment_id=payload.environment_id,
                 endpoint_variant=payload.endpoint_variant,
+                allowed_environment_classifications=frozenset({"test", "sandbox"}),
             )
             if payload.persist
             else None
@@ -195,6 +196,18 @@ class MCPContractImportService:
             editing=True,
         )
         request_payload = payload.model_dump(mode="json")
+        actor_key = f"service-account:{account.id}"
+        idempotency = IdempotencyService(self._session)
+        cached = await idempotency.completed_response(
+            key=idempotency_key,
+            project_id=payload.project_id,
+            actor_key=actor_key,
+            operation=_COMMIT_OPERATION,
+            request_payload=request_payload,
+        )
+        if cached is not None:
+            cached["idempotency_replayed"] = True
+            return MCPCommitContractImportResponse.model_validate(cached)
 
         async def action() -> MCPCommitContractImportResponse:
             run = await ImportService(self._session).merge_preview(
@@ -208,19 +221,22 @@ class MCPContractImportService:
                 expected_source_sha256=payload.preview_sha256.lower(),
                 expected_current_versions=payload.expected_current_versions,
                 confirm_existing_changes=payload.confirm_existing_changes,
+                allowed_environment_classifications=frozenset({"test", "sandbox"}),
+                enforce_review_only=True,
             )
             return _commit_response(
                 organization_id=organization_id,
                 run=run,
             )
 
-        result = await IdempotencyService(self._session).run(
+        result = await idempotency.run(
             key=idempotency_key,
             project_id=payload.project_id,
-            actor_key=f"service-account:{account.id}",
+            actor_key=actor_key,
             operation=_COMMIT_OPERATION,
             request_payload=request_payload,
             action=action,
+            atomic_action=True,
         )
         return MCPCommitContractImportResponse.model_validate(result)
 
@@ -272,6 +288,17 @@ def _preview_response(
         change: sum(_change_value(item.change) == change.value for item in results)
         for change in ImportChange
     }
+    requires_review = bool(counts[ImportChange.CHANGED] or counts[ImportChange.DELETED])
+    warnings = (
+        ["MCP 仅自动提交纯新增接口；更新或删除已有接口必须转人工审核，不接受客户端布尔确认。"]
+        if requires_review
+        else []
+    )
+    warnings.append(
+        "持久化预览会创建 ImportRun；提交时必须使用同一 preview_id 和 source_sha256."
+        if persisted
+        else "这是纯 dry-run，未创建 ImportRun，也未修改接口资产。"
+    )
     return MCPPreviewContractImportResponse(
         organization_id=organization_id,
         project_id=project_id,
@@ -294,13 +321,19 @@ def _preview_response(
         target_service_id=target_service_id,
         target_environment_id=target_environment_id,
         target_fingerprint=_target_fingerprint(results),
-        warnings=["持久化预览会创建 ImportRun；提交时必须使用同一 preview_id 和 source_sha256。"]
-        if persisted
-        else ["这是纯 dry-run，未创建 ImportRun，也未修改接口资产。"],
+        warnings=warnings,
         trace_id=get_trace_id(),
-        next_action="commit"
-        if any(_change_value(item.change) != ImportChange.UNCHANGED.value for item in results)
-        else "none",
+        next_action=(
+            "review_required"
+            if any(
+                _change_value(item.change)
+                in {ImportChange.CHANGED.value, ImportChange.DELETED.value}
+                for item in results
+            )
+            else "commit"
+            if any(_change_value(item.change) == ImportChange.ADDED.value for item in results)
+            else "none"
+        ),
     )
 
 

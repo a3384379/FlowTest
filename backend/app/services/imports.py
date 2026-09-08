@@ -85,6 +85,7 @@ class ImportPreviewTarget:
     service_id: UUID | None
     environment_id: UUID | None
     endpoint_variant: str
+    allowed_environment_classifications: frozenset[str] | None = None
 
 
 class ImportService:
@@ -450,6 +451,7 @@ class ImportService:
             project_id=project_id,
             service_id=target.service_id,
             environment_id=target.environment_id,
+            allowed_environment_classifications=target.allowed_environment_classifications,
         )
         endpoint = None
         if target.service_id is not None and target.environment_id is not None:
@@ -458,6 +460,16 @@ class ImportService:
                 service_id=target.service_id,
                 variant=target.endpoint_variant,
             )
+            if (
+                endpoint is not None
+                and target.allowed_environment_classifications is not None
+                and not endpoint.enabled
+            ):
+                raise AppError(
+                    code="ENDPOINT_DISABLED",
+                    message="目标 Endpoint 已停用, 不能用于 MCP 契约导入",
+                    status_code=409,
+                )
         server_urls = sorted({item.server_url for item in results if item.server_url is not None})
         if len(server_urls) > 1:
             raise AppError(
@@ -503,6 +515,7 @@ class ImportService:
         project_id: UUID,
         service_id: UUID | None,
         environment_id: UUID | None,
+        allowed_environment_classifications: frozenset[str] | None = None,
     ) -> None:
         if service_id is None:
             if environment_id is not None:
@@ -515,11 +528,26 @@ class ImportService:
         service = await self._targets.get_service(service_id)
         if service is None or service.project_id != project_id:
             raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        if allowed_environment_classifications is not None and not service.enabled:
+            raise AppError(
+                code="SERVICE_DISABLED",
+                message="目标 Service 已停用, 不能用于 MCP 契约导入",
+                status_code=409,
+            )
         if environment_id is None:
             return
         environment = await self._session.get(Environment, environment_id)
         if environment is None or environment.project_id != project_id:
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        if (
+            allowed_environment_classifications is not None
+            and environment.classification not in allowed_environment_classifications
+        ):
+            raise AppError(
+                code="ENVIRONMENT_NOT_ALLOWED",
+                message="MCP 契约导入只能绑定 test 或 sandbox 环境",
+                status_code=422,
+            )
 
     async def merge_preview(
         self,
@@ -534,6 +562,8 @@ class ImportService:
         expected_source_sha256: str | None = None,
         expected_current_versions: dict[str, int] | None = None,
         confirm_existing_changes: bool | None = None,
+        allowed_environment_classifications: frozenset[str] | None = None,
+        enforce_review_only: bool = False,
     ) -> ImportRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         run = await self._imports.get(run_id)
@@ -546,6 +576,11 @@ class ImportService:
                 status_code=409,
             )
         if run.status != "preview":
+            if enforce_review_only:
+                self._reject_mcp_replay_of_existing_changes(
+                    results=run.results,
+                    selected_keys=selected_keys,
+                )
             if set(run.applied_keys) == selected_keys:
                 return run
             raise AppError(
@@ -577,6 +612,7 @@ class ImportService:
                 service_id=service_id,
                 environment_id=environment_id,
                 endpoint_variant=endpoint_variant,
+                allowed_environment_classifications=allowed_environment_classifications,
             ),
             frozen_target=frozen_target,
             results=current,
@@ -595,6 +631,7 @@ class ImportService:
             selected_keys=selected_keys,
             expected_current_versions=expected_current_versions,
             confirm_existing_changes=confirm_existing_changes,
+            allow_existing_changes=not enforce_review_only,
         )
         selected_operations = tuple(
             operation for operation in operations if operation.import_key in selected_keys
@@ -606,7 +643,8 @@ class ImportService:
             environment_id=environment_id,
             operations=selected_operations,
             endpoint_variant=endpoint_variant,
-            allow_existing_change=confirm_existing_changes,
+            allow_existing_change=(False if enforce_review_only else confirm_existing_changes),
+            allowed_environment_classifications=allowed_environment_classifications,
         )
         applied_results = await self._apply_operations(
             actor=actor,
@@ -650,6 +688,7 @@ class ImportService:
         selected_keys: set[str],
         expected_current_versions: dict[str, int] | None,
         confirm_existing_changes: bool | None,
+        allow_existing_changes: bool,
     ) -> None:
         existing_changes = {
             item.import_key
@@ -657,7 +696,7 @@ class ImportService:
             if item.import_key in selected_keys
             and item.change in {ImportChange.CHANGED, ImportChange.DELETED}
         }
-        if existing_changes and confirm_existing_changes is False:
+        if existing_changes and (not allow_existing_changes or confirm_existing_changes is False):
             raise AppError(
                 code="IMPORT_REVIEW_REQUIRED",
                 message="更新或删除已有接口必须明确确认并核对精确 Diff",
@@ -681,6 +720,24 @@ class ImportService:
                         "current_version": item.version,
                     },
                 )
+
+    @staticmethod
+    def _reject_mcp_replay_of_existing_changes(
+        *, results: list[dict[str, object]], selected_keys: set[str]
+    ) -> None:
+        existing_changes = sorted(
+            str(item["import_key"])
+            for item in results
+            if item.get("import_key") in selected_keys
+            and item.get("change") in {ImportChange.CHANGED.value, ImportChange.DELETED.value}
+        )
+        if existing_changes:
+            raise AppError(
+                code="IMPORT_REVIEW_REQUIRED",
+                message="已有接口变更不能通过 MCP 重放, 必须转人工审核",
+                status_code=409,
+                details={"operation_keys": existing_changes},
+            )
 
     async def list_runs(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
@@ -787,6 +844,7 @@ class ImportService:
         operations: tuple[ImportedOperation, ...],
         endpoint_variant: str,
         allow_existing_change: bool | None = None,
+        allowed_environment_classifications: frozenset[str] | None = None,
     ) -> None:
         if service_id is None:
             if environment_id is not None:
@@ -796,13 +854,16 @@ class ImportService:
                     status_code=422,
                 )
             return
-        service = await self._targets.get_service(service_id)
-        if service is None or service.project_id != project_id:
-            raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
+        await self._validate_target_identity(
+            project_id=project_id,
+            service_id=service_id,
+            environment_id=environment_id,
+            allowed_environment_classifications=allowed_environment_classifications,
+        )
         if environment_id is None:
             return
         environment = await self._session.get(Environment, environment_id)
-        if environment is None or environment.project_id != project_id:
+        if environment is None:
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         server_urls = {
             operation.target_base_url
@@ -823,6 +884,7 @@ class ImportService:
             endpoint_variant=endpoint_variant,
             server_url=next(iter(server_urls), None),
             allow_existing_change=allow_existing_change,
+            allowed_environment_classifications=allowed_environment_classifications,
         )
 
     async def _ensure_import_endpoint(
@@ -835,6 +897,7 @@ class ImportService:
         endpoint_variant: str,
         server_url: str | None,
         allow_existing_change: bool | None,
+        allowed_environment_classifications: frozenset[str] | None = None,
     ) -> None:
         if server_url is None:
             return
@@ -844,6 +907,16 @@ class ImportService:
             service_id=service_id,
             variant=endpoint_variant,
         )
+        if (
+            endpoint is not None
+            and allowed_environment_classifications is not None
+            and not endpoint.enabled
+        ):
+            raise AppError(
+                code="ENDPOINT_DISABLED",
+                message="目标 Endpoint 已停用, 不能用于 MCP 契约导入",
+                status_code=409,
+            )
         if endpoint is None:
             self._targets.add(
                 ServiceEndpoint(
