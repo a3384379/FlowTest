@@ -64,7 +64,7 @@ class AIChangeItemResponse(BaseModel):
 
     id: UUID
     position: int
-    item_type: Literal["test_case", "workflow", "assertion"]
+    item_type: Literal["test_case", "workflow", "assertion", "test_design", "test_plan_update"]
     action: Literal["create", "update"]
     title: str
     target_resource_id: UUID | None

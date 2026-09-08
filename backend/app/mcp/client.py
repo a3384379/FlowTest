@@ -39,6 +39,15 @@ from app.schemas.mcp_contract_import import (
     MCPPreviewContractImportRequest,
     MCPPreviewContractImportResponse,
 )
+from app.schemas.mcp_discovery import MCPFindAssetsRequest
+from app.schemas.mcp_planning import (
+    MCPCancelPreviewRequest,
+    MCPCancelPreviewResponse,
+    MCPPrepareChangeRegressionRequest,
+    MCPPrepareChangeRegressionResponse,
+    MCPTestPlanUpdateRequest,
+    MCPTestPlanUpdateResponse,
+)
 from app.schemas.sandbox_preview import SandboxPreviewExecutionResponse
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
@@ -195,6 +204,44 @@ class MCPReadGatewayClient:
             params=params,
             token=token,
             resource_uri=resource_uri,
+        )
+
+    async def find_assets(
+        self,
+        request: MCPFindAssetsRequest,
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{request.project_id}/assets/find",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+
+    async def inspect_project_readiness(
+        self,
+        project_id: UUID | str,
+        *,
+        token: str | None = None,
+        resource_uri: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._get(
+            f"/api/v1/mcp/read/projects/{project_id}/readiness",
+            token=token,
+            resource_uri=resource_uri,
+        )
+
+    async def check_service_target(
+        self,
+        project_id: UUID | str,
+        endpoint_id: UUID | str,
+        *,
+        token: str | None = None,
+    ) -> MCPReadEnvelope:
+        return await self._post_read(
+            f"/api/v1/mcp/read/projects/{project_id}/service-targets/{endpoint_id}/check",
+            payload={},
+            token=token,
         )
 
     async def inspect_contract(
@@ -676,6 +723,49 @@ class MCPReadGatewayClient:
             additional_headers={"Idempotency-Key": idempotency_key} if idempotency_key else None,
         )
         return _validate_response(response, MCPContinuousProposalResponse)
+
+    async def prepare_change_regression(
+        self,
+        request: MCPPrepareChangeRegressionRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPPrepareChangeRegressionResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/continuous/change-regression/prepare",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key} if idempotency_key else None,
+        )
+        return _validate_response(response, MCPPrepareChangeRegressionResponse)
+
+    async def propose_test_plan_update(
+        self,
+        request: MCPTestPlanUpdateRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPTestPlanUpdateResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/continuous/test-plan/proposals",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key} if idempotency_key else None,
+        )
+        return _validate_response(response, MCPTestPlanUpdateResponse)
+
+    async def cancel_preview(
+        self,
+        request: MCPCancelPreviewRequest,
+        *,
+        token: str | None = None,
+    ) -> MCPCancelPreviewResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/preview/cancel",
+            payload=request.model_dump(mode="json"),
+            token=token,
+        )
+        return _validate_response(response, MCPCancelPreviewResponse)
 
     async def _get(
         self,

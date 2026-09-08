@@ -29,6 +29,10 @@ from app.api.v1.endpoints.mcp_connection import router as mcp_connection_router
 from app.api.v1.endpoints.mcp_continuous import router as mcp_continuous_router
 from app.api.v1.endpoints.mcp_contract_import import router as mcp_contract_import_router
 from app.api.v1.endpoints.mcp_controlled_write import router as mcp_controlled_write_router
+from app.api.v1.endpoints.mcp_planning import (
+    continuous_router as mcp_planning_continuous_router,
+)
+from app.api.v1.endpoints.mcp_planning import preview_router as mcp_preview_router
 from app.api.v1.endpoints.mcp_read import router as mcp_read_router
 from app.api.v1.endpoints.mcp_test_contexts import evidence_router as mcp_evidence_router
 from app.api.v1.endpoints.mcp_test_contexts import flow_router as mcp_flow_router
@@ -77,6 +81,8 @@ api_router.include_router(impact_router, tags=["impact"])
 api_router.include_router(maintenance_router, tags=["maintenance"])
 api_router.include_router(mcp_read_router, tags=["mcp-read"])
 api_router.include_router(mcp_continuous_router, tags=["mcp-continuous"])
+api_router.include_router(mcp_planning_continuous_router, tags=["mcp-continuous"])
+api_router.include_router(mcp_preview_router, tags=["mcp-preview"])
 api_router.include_router(mcp_connection_router, tags=["mcp-connection"])
 api_router.include_router(mcp_bootstrap_router, tags=["mcp-bootstrap"])
 api_router.include_router(mcp_contract_import_router, tags=["mcp-contract-import"])

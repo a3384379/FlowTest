@@ -183,7 +183,12 @@ class ImpactService:
         return ImpactCatalogView(tuple(targets), tuple(schemas))
 
     async def create_run(
-        self, *, actor: User, project_id: UUID, payload: ImpactRunCreate
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        payload: ImpactRunCreate,
+        commit: bool = True,
     ) -> ImpactRunBundle:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
@@ -252,7 +257,10 @@ class ImpactService:
                 "source_kinds": sorted({item.source_kind.value for item in changes}),
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         bundle = await self._repository.get_run_bundle(run.id)
         if bundle is None:
             raise AppError(

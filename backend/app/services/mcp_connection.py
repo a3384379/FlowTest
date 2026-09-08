@@ -70,23 +70,51 @@ class MCPConnectionService:
 def _available_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
     # These are action groups, not claims that every future tool is already installed.
     actions: list[ConnectionAction] = ["inspect_connection"]
+    actions.extend(_read_and_import_actions(scopes))
+    actions.extend(_design_actions(scopes))
+    actions.extend(_integration_actions(scopes))
+    actions.extend(_planning_actions(scopes))
+    return actions
+
+
+def _read_and_import_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
+    actions: list[ConnectionAction] = []
     if "mcp:read" in scopes:
         actions.append("read_authorized_assets")
     if "mcp:project:bootstrap" in scopes:
         actions.append("bootstrap_project_assets")
     if "mcp:contract:import" in scopes:
         actions.append("import_contract")
+    return actions
+
+
+def _design_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
     if (
         "mcp:write" in scopes
         and settings.feature_ai_enabled
         and settings.feature_quality_intelligence_enabled
     ):
-        actions.append("propose_test_design")
-    if settings.feature_integration_flow_enabled:
-        if "mcp:evidence:write" in scopes:
-            actions.append("write_context_evidence")
-        if "mcp:flow:propose" in scopes:
-            actions.append("propose_flow")
-        if "mcp:preview:execute" in scopes:
-            actions.append("request_approved_sandbox_preview")
+        return ["propose_test_design"]
+    return []
+
+
+def _integration_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
+    if not settings.feature_integration_flow_enabled:
+        return []
+    actions: list[ConnectionAction] = []
+    if "mcp:evidence:write" in scopes:
+        actions.append("write_context_evidence")
+    if "mcp:flow:propose" in scopes:
+        actions.append("propose_flow")
+    if "mcp:preview:execute" in scopes:
+        actions.extend(["request_approved_sandbox_preview", "cancel_sandbox_preview"])
+    return actions
+
+
+def _planning_actions(scopes: frozenset[str]) -> list[ConnectionAction]:
+    actions: list[ConnectionAction] = []
+    if "mcp:regression:prepare" in scopes:
+        actions.append("prepare_change_regression")
+    if "mcp:test-plan:propose" in scopes:
+        actions.append("propose_test_plan_update")
     return actions

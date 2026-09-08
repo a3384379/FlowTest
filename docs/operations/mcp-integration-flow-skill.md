@@ -1,7 +1,7 @@
-# FlowTest 集成流程生成 Skill
+# FlowTest 集成流程生成 Skill（S61E）
 
 `flowtest-generate-integration-flow` 是 V6.0 Core 唯一旗舰 Skill。它让支持 Skills 与 MCP 的外部 Agent
-按照固定顺序汇集授权证据，生成 FlowTest 的待审核集成流程提案，并把最终决定留在既有 Visual Review。
+按照固定顺序汇集授权证据，生成一个或用户明确要求的最多两个 FlowTest 待审核集成流程提案，并把最终决定留在既有 Visual Review。
 它不替代 FlowTest 权限、审核、Apply、Publish 或执行边界。
 
 ## 安装
@@ -19,8 +19,10 @@ Skill 的 `manifest.yaml` 是机器可读契约；`SKILL.md` 是 Agent 入口；
 
 ## 前置条件
 
-- FlowTest MCP Server 至少为 `s55-sandbox-preview-v1`；stdio 与 Streamable HTTP 均支持。
+- FlowTest MCP Server 至少为 `s61-mcp-connection-v1`；stdio 与 Streamable HTTP 均支持。
 - Service Account 至少具备 `mcp:read`、`mcp:evidence:write`、`mcp:flow:propose`。
+- 零项目初始化另需 `mcp:project:bootstrap`；契约导入另需 `mcp:contract:import`。这些 Scope
+  不会扩大 Review、Apply、Publish 或正式执行权限。
 - 可选 Sandbox Preview 另需 `mcp:preview:execute` 和由 Owner 签发、绑定当前 Service Account 与 Proposal
   的一次性 Approval。
 - 用户必须明确选择一个有权访问的项目、业务流范围和非生产测试环境。
@@ -41,13 +43,14 @@ Skill 的 `manifest.yaml` 是机器可读契约；`SKILL.md` 是 Agent 入口；
 → Compile
 → Validate FlowSpec
 → Dry Run
-→ Propose Draft
+→ Propose Draft（单条或有界 A/B 双提案）
 → Visual Review
 → 可选 Sandbox Preview
 ```
 
 每个阶段必须携带上一步返回的 Context Revision、Evidence Ref、Plan/Compilation Fingerprint 和 Proposal
-ID。发现 Revision 过期时重新读取并展示差异，不能覆盖；发现证据冲突时保留双方来源并停止，不能猜测。
+ID。双提案使用独立幂等键和共享任务引用；第二条失败时准确报告部分完成并可续接，不复制第一条或声称原子提交。
+发现 Revision 过期时重新读取并展示差异，不能覆盖；发现证据冲突时保留双方来源并停止，不能猜测。
 
 ## Visual Review 与 Preview
 

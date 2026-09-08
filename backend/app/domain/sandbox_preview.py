@@ -31,7 +31,10 @@ class PreviewBudget(BaseModel):
 
 
 MCP_PREVIEW_EXECUTE_SCOPE = "mcp:preview:execute"
-MCP_SANDBOX_PREVIEW_SERVER_VERSION = "s55-sandbox-preview-v1"
+# The MCP connection contract now covers Preview as well.  Keep the symbol for
+# callers that imported the older name, while advertising the current minimum
+# contract to installable Skills.
+MCP_SANDBOX_PREVIEW_SERVER_VERSION = "s61-mcp-connection-v1"
 
 _PREVIEW_ROUTING_HEADERS = frozenset(
     {

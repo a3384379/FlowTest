@@ -1,15 +1,18 @@
 # MCP Closed Loop S61/S62 验收账本
 
-状态：S61A 已由 PR #90 合并，S61B 已由 PR #91 合并并完成合并后主线门禁；S61C 核心实现与
-定向回归完成，待本阶段集中门禁/PR。S61D～S62B 未开始。不标记整体完成或 GA。
+状态：S61A 已由 PR #90 合并，S61B 已由 PR #91 合并并完成合并后主线门禁；S61C～S62B 的
+实现、契约和隔离定向回归已完成，待本阶段一次集中门禁、PR 复审和主线验证。不标记真实宿主/LLM
+业务闭环或 GA 已完成。
 
 ## 基线与交付范围
 
 2026-09-08 从 PR #91 合并后的主干开始，基线见 [能力审计](../mcp-capability-audit.md)。
-当前分支 `codex/v6-s61c-contract-import`，从 S61B 合并后主干创建。本轮交付
-有界契约预览/提交与 inspect_contract 分页，同时更新 MCP Client/Server、MCP Golden、Onboarding/
-Integration Skill。S61B 的组织级幂等初始化已在 PR #91 闭环；工具数 42 → 44，新增 Scope 为
-`mcp:contract:import`。
+当前开发分支为 `codex/v6-s61d-resource-discovery`，从 S61B 合并后主干创建。本轮交付
+有界契约预览/提交、inspect_contract 分页、资源发现/Readiness、有限 Service Target 诊断、零接入
+Skill 整合、Change Regression 分析准备、Test Plan 更新建议和 Preview Graceful Cancel，同时更新
+MCP Client/Server、MCP Golden、五个 Skill、Standalone 基线与文档。工具数 42 → 50；新增 Scope 为
+`mcp:contract:import`、`mcp:regression:prepare`、`mcp:test-plan:propose`，bootstrap/read 复用既有
+Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
 详见 [ADR 0052](../adr/0052-mcp-onboarding-connection-and-scope.md) 和
 [ADR 0053](../adr/0053-mcp-bootstrap-initialization.md)、[连接指南](../operations/mcp-connection-setup.md)。
 
@@ -43,6 +46,27 @@ Integration Skill。S61B 的组织级幂等初始化已在 PR #91 闭环；工�
 - 定向回归覆盖 schema 严格校验、source-derived OpenAPI 转换、dry-run/冻结摘要边界、ImportService 旧
   合并兼容和 MCP 工具注册；集中 PR 门禁待本阶段完成后执行。
 
+## S61D/S61E/S62 验证记录（实现完成，待集中门禁）
+
+- `flowtest.find_assets` 使用项目范围内的显式 `union_all` 查询，支持 API、Workflow、Context、Proposal、
+  测试资产、ImportRun、Execution 和 Change Regression；返回真实 total、稳定分页、安全摘要、版本、来源和深链。
+  `inspect_project_readiness` 汇总 Contract/Endpoint/Context、业务凭据引用、只读数据库证据、Preview 环境和
+  人工动作；`check_service_target` 只调用已登记 Endpoint 的现有 connectivity，并明确这是 FlowTest API Host
+  检查，`worker_network_verified=false`。
+- `inspect_flow_proposal`、`inspect_run_evidence` 补充 `human_actions_required`、可信 UI/执行链接、状态和
+  Main/Cleanup 安全摘要；不返回 Token、请求/响应 Body、数据库行或错误明文。
+- Onboarding、Integration Flow、Complete Coverage、Change-aware Regression、Triage/Repair 五个 Skill
+  已接入实际 tools/list、版本/Scope 检查、零项目初始化、资源续接、Test Plan 建议、Graceful Cancel 和有界
+  A/B 双提案交接；工具缺失只返回 `TOOL_UNAVAILABLE`/`SERVER_VERSION_UNSUPPORTED`，不回退浏览器、JWT、SQL 或 Docker。
+- `flowtest.prepare_change_regression` 在固定 Context 前后版本上以既有 ChangeRegression/Impact/Maintenance
+  服务创建分析 Run，Dry Run 不落库，正式请求使用幂等键且不执行/放行 Release；`flowtest.propose_test_plan_update`
+  只创建共享 AIChangeSet 的 typed `test_plan_update` Draft，未发布依赖显式返回，人工接受后才通过
+  `TestPlanService` 物化。迁移 `20260908_0053` 与 Standalone/Transfer 基线同步。
+- `flowtest.cancel_preview` 仅接受当前项目的 Preview Execution，复用 `WorkflowService.request_cancel(force=false)`；
+  终态和重复请求幂等，不扩大到生产或强制取消，Cleanup 状态如实返回。
+- 当前定向回归：S56/S60 Skill 契约、S61D 资源发现、S62 规划、MCP SDK 注册、Golden、Standalone Runtime/Transfer
+  均通过；Skill 自包含评测检查通过。该证据不替代真实 LLM Host、真实业务目标或人工 Review/Preview。
+
 ## S61A 验证记录
 
 - 修改前的 4 个特征测试失败，确认旧 HTTP 缺失/非 Bearer 请求回落到进程账号，以及缺少连接端点。
@@ -71,11 +95,11 @@ Integration Skill。S61B 的组织级幂等初始化已在 PR #91 闭环；工�
 | --- | --- | --- |
 | S61A 连接、权限契约 | 已完成 | PR #90 已合并，主线门禁全绿 |
 | S61B 项目/环境/服务初始化 | 已完成 | PR #91 已合并，合并后门禁全绿 |
-| S61C 有界契约导入 | 核心实现与定向回归完成 | 待本阶段集中门禁/PR |
-| S61D 读取/查找/Readiness/目标诊断 | 未开始 | 未开始 |
-| S61E 零接入与生成 Skill | 未开始 | 未开始 |
-| S62A 回归准备与 TestPlan 建议 | 未开始 | 未开始 |
-| S62B 取消、结果续接与总验收 | 未开始 | 未开始 |
+| S61C 有界契约导入 | 实现与定向回归完成 | 待本阶段集中门禁/PR |
+| S61D 读取/查找/Readiness/目标诊断 | 已完成 | 待本阶段集中门禁/PR |
+| S61E 零接入与生成 Skill | 已完成（真实宿主/模型未验证） | 待本阶段集中门禁/PR |
+| S62A 回归准备与 TestPlan 建议 | 已完成 | 待本阶段集中门禁/PR |
+| S62B 取消、结果续接与总验收 | 已完成 | 待本阶段集中门禁/PR |
 
 ## 真实模型验收单独记录
 
@@ -95,4 +119,4 @@ Integration Skill。S61B 的组织级幂等初始化已在 PR #91 闭环；工�
 ```
 
 该例仍只展示连接与读取；S61B 的零项目初始化必须由具备明确 Scope 的 MCP 工具执行，不能由
-用户手工复制 UUID 代替。最终 S61/S62 示例在交付后更新。
+用户手工复制 UUID 代替。S61/S62 的开发实现已完成，最终远程门禁和真实宿主/模型验收仍按上文单独记录。

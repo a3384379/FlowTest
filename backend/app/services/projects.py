@@ -683,6 +683,9 @@ def _service_account_can_access_project(
                     "mcp:flow:propose",
                     "mcp:preview:execute",
                     "mcp:contract:import",
+                    "mcp:project:bootstrap",
+                    "mcp:regression:prepare",
+                    "mcp:test-plan:propose",
                 }
             )
         )

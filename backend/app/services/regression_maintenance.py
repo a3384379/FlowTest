@@ -138,7 +138,13 @@ class RegressionMaintenanceService:
         return await self._save(run, prepared.actor, snapshot, "proposal_created", commit=False)
 
     async def bind(
-        self, *, actor: User, project_id: UUID, run_id: UUID, payload: RegressionContextBinding
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        run_id: UUID,
+        payload: RegressionContextBinding,
+        commit: bool = True,
     ) -> ChangeRegressionBundle:
         # AffectedFlowService uses S45 operation resolution; keep the dependency local.
         from app.services.affected_flows import AffectedFlowService
@@ -172,7 +178,7 @@ class RegressionMaintenanceService:
             comparison=comparison,
             affected=affected,
         )
-        return await self._save(run, actor, snapshot, "context_bound")
+        return await self._save(run, actor, snapshot, "context_bound", commit=commit)
 
     async def link(
         self, *, actor: User, project_id: UUID, run_id: UUID, change_set_id: UUID

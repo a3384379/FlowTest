@@ -24,7 +24,7 @@ from app.migrations_support.canonical_contract_v2 import clean_historical_contra
 from app.models import Base
 from app.models.ai import AIChangeItem, AIChangeSet
 
-BASELINE_REVISION = "20260908_0052"
+BASELINE_REVISION = "20260908_0053"
 
 
 async def initialize_standalone_database() -> None:
@@ -64,6 +64,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_test_context_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
     await _ensure_s42_controlled_write_tables(connection)
+    await _ensure_s62_test_plan_update_constraint(connection)
     await _ensure_s47_test_design_columns(connection)
     await _ensure_change_regression_tables(connection)
     await _ensure_semantic_gap_waiver_revision_schema(connection)
@@ -137,7 +138,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051')"
+            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051', "
+            "'20260908_0052')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -149,7 +151,8 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
             "'20260822_0036', '20260822_0037', '20260822_0038', '20260822_0039', "
             "'20260823_0040', '20260823_0041', '20260823_0042', '20260823_0043', "
             "'20260823_0044', '20260823_0045', '20260828_0046', '20260829_0047', "
-            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051')"
+            "'20260830_0048', '20260830_0049', '20260830_0050', '20260831_0051', "
+            "'20260908_0052')"
         ),
         {"revision": BASELINE_REVISION},
     )
@@ -734,6 +737,45 @@ async def _rebuild_s42_change_item_table_if_needed(connection: AsyncConnection) 
         )
     )
     await connection.execute(text("DROP TABLE ai_change_items_s42_legacy"))
+    for index in change_item_table.indexes:
+        await connection.execute(CreateIndex(index))
+
+
+async def _ensure_s62_test_plan_update_constraint(connection: AsyncConnection) -> None:
+    """Upgrade a S42/S52 standalone database to the S62 item-type contract.
+
+    ``create_all`` updates fresh installs, but SQLite cannot alter a CHECK
+    constraint in place. Existing standalone installations therefore need a
+    small table rebuild that preserves every existing change item while using
+    the current SQLAlchemy metadata (including ``test_plan_update``).
+    """
+
+    result = await connection.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_change_items'")
+    )
+    row = result.first()
+    table_sql = str(row[0]) if row and row[0] else ""
+    if not table_sql or "test_plan_update" in table_sql:
+        return
+    change_item_table = cast(Table, AIChangeItem.__table__)
+    await _drop_table_indexes(connection, "ai_change_items")
+    await connection.execute(
+        text("ALTER TABLE ai_change_items RENAME TO ai_change_items_s62_legacy")
+    )
+    await connection.execute(CreateTable(change_item_table))
+    await connection.execute(
+        text(
+            "INSERT INTO ai_change_items ("
+            "change_set_id, suggestion_id, position, item_type, action, title, target_resource_id, "
+            "target_snapshot_sha256, proposed_content, review_status, review_note, reviewed_by_id, "
+            "reviewed_at, materialized_resource_type, materialized_resource_id, id, created_at, "
+            "updated_at) SELECT change_set_id, suggestion_id, position, item_type, action, title, "
+            "target_resource_id, target_snapshot_sha256, proposed_content, review_status, "
+            "review_note, reviewed_by_id, reviewed_at, materialized_resource_type, "
+            "materialized_resource_id, id, created_at, updated_at FROM ai_change_items_s62_legacy"
+        )
+    )
+    await connection.execute(text("DROP TABLE ai_change_items_s62_legacy"))
     for index in change_item_table.indexes:
         await connection.execute(CreateIndex(index))
 

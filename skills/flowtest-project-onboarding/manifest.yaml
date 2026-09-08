@@ -1,7 +1,7 @@
 schema_version: flowtest-skill-manifest-v1
 name: flowtest-project-onboarding
-version: 1.1.0-rc.1
-minimum_mcp_version: s60-continuous-qa-v1
+version: 1.2.0-rc.1
+minimum_mcp_version: s61-mcp-connection-v1
 required_tools:
 - flowtest.list_projects
 - flowtest.inspect_project
@@ -11,11 +11,14 @@ required_tools:
 - flowtest.inspect_context_requirements
 - flowtest.ingest_external_evidence
 - flowtest.inspect_test_context
+- flowtest.find_assets
+- flowtest.inspect_project_readiness
 optional_tools:
 - flowtest.inspect_connection
 - flowtest.ensure_project
 - flowtest.ensure_service_target
 - flowtest.ensure_test_environment
+- flowtest.check_service_target
 - flowtest.ingest_java_source_snapshot
 - flowtest.ingest_database_evidence
 - flowtest.inspect_entity_mapping
@@ -46,6 +49,7 @@ human_approval:
   - Sandbox Preview 成功
 stop_conditions:
 - 工具、范围、项目授权或 feature 不可用
+- 工具发现失败、返回 TOOL_UNAVAILABLE 或服务端版本不兼容（SERVER_VERSION_UNSUPPORTED）
 - Evidence、Context 或目标草稿版本过期或冲突
 - 输出包含敏感值、原始请求响应或数据库行
 - 要求自动接受、应用、发布、正式执行或弱化 Product Defect

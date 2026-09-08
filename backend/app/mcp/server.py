@@ -53,6 +53,12 @@ from app.schemas.mcp_contract_import import (
     MCPCommitContractImportRequest,
     MCPPreviewContractImportRequest,
 )
+from app.schemas.mcp_discovery import MCPFindAssetsRequest
+from app.schemas.mcp_planning import (
+    MCPCancelPreviewRequest,
+    MCPPrepareChangeRegressionRequest,
+    MCPTestPlanUpdateRequest,
+)
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
@@ -62,11 +68,13 @@ MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
     "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
     "确定性 Integration Plan 与"
-    "只进入待审核状态的 Flow Draft、Repair 与关联现有 Change Regression 的 Maintenance。"
+    "只进入待审核状态的 Flow Draft、Repair、关联现有 Change Regression 的 Maintenance，"
+    "以及固定 Context 的 Change Regression 准备和 Test Plan 更新建议。"
     "Contract Import 只能从批准的 URL、有界文档或强类型 Operation 进入 Preview；"
     "Commit 使用冻结预览摘要，绝不重新抓取 URL。"
-    "Context Diff、Affected Flow 和失败诊断只读；Sandbox Preview 需要人工一次性批准。"
-    "FlowTest 不会主动连接任意外部 MCP Server。"
+    "Context Diff、Affected Flow、资源发现、项目就绪和失败诊断只读；"
+    "Service Target 检查只允许已登记目标；Sandbox Preview 需要人工一次性批准。"
+    "Preview 可由有权主体请求 Graceful Cancel，但 FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、正式环境执行、删除、修改"
     "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
     "检查并显式接受后才能应用。输出中的请求值、认证信息、"
@@ -405,6 +413,152 @@ def _register_propose_maintenance_tool(server: MCPServer, client: MCPReadGateway
         )
 
 
+def _register_discovery_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    """Register bounded discovery and readiness checks without exposing raw storage."""
+
+    annotations = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    @server.tool(
+        name="flowtest.find_assets",
+        description=(
+            "Find bounded, tenant-scoped project assets by typed resource kind and query; "
+            "returns safe summaries, stable pagination and review links only."
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def find_assets(
+        request: MCPFindAssetsRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(client.find_assets(request, token=_request_token(ctx, client)))
+
+    @server.tool(
+        name="flowtest.inspect_project_readiness",
+        description=(
+            "Inspect project Contract, Endpoint, Context, credential-reference metadata, "
+            "scopes and Preview prerequisites without returning secret values."
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def inspect_project_readiness(
+        project_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.inspect_project_readiness(
+                project_id,
+                token=_request_token(ctx, client),
+            )
+        )
+
+    @server.tool(
+        name="flowtest.check_service_target",
+        description=(
+            "Check connectivity for one authorized, registered Service Endpoint with a bounded "
+            "health request; never scans arbitrary URLs or ports."
+        ),
+        structured_output=True,
+        annotations=annotations,
+    )
+    async def check_service_target(
+        project_id: str,
+        endpoint_id: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.check_service_target(
+                project_id,
+                endpoint_id,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_planning_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    """Register review-only S62 planning and explicit graceful Preview cancellation."""
+
+    proposal_annotations = ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    @server.tool(
+        name="flowtest.prepare_change_regression",
+        description=(
+            "Prepare or preview one Change Regression analysis bound to fixed Context revisions; "
+            "never approves, schedules, executes, or waives a release gate."
+        ),
+        structured_output=True,
+        annotations=proposal_annotations,
+    )
+    async def prepare_change_regression(
+        request: MCPPrepareChangeRegressionRequest,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.prepare_change_regression(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+    @server.tool(
+        name="flowtest.propose_test_plan_update",
+        description=(
+            "Create a typed, pending Test Plan membership suggestion using existing versioned "
+            "assets; "
+            "never edits a published plan or starts execution."
+        ),
+        structured_output=True,
+        annotations=proposal_annotations,
+    )
+    async def propose_test_plan_update(
+        request: MCPTestPlanUpdateRequest,
+        idempotency_key: str | None = None,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_test_plan_update(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+    @server.tool(
+        name="flowtest.cancel_preview",
+        description=(
+            "Cancel one authorized Preview Execution gracefully and preserve Cleanup; "
+            "does not force-cancel production or arbitrary runs."
+        ),
+        structured_output=True,
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def cancel_preview(
+        request: MCPCancelPreviewRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.cancel_preview(request, token=_request_token(ctx, client))
+        )
+
+
 def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_coverage_tool(server, client)
     _register_begin_context_tool(server, client)
@@ -446,6 +600,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_connection_tool(server, client)
     _register_context_diff_tool(server, client)
     _register_context_requirements_tool(server, client)
+    _register_discovery_tools(server, client)
+    _register_planning_tools(server, client)
 
     @server.tool(
         name="flowtest.inspect_contract",
@@ -585,6 +741,9 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
 
     _register_flow_spec_validate_tool(server, client)
     _register_validate_integration_plan_tool(server, client)
+    # The SDK preserves insertion order in list_tools.  Keep the public catalog stable even
+    # when a capability group is implemented in one registration helper.
+    server._tool_manager._tools = dict(sorted(server._tool_manager._tools.items()))
 
 
 def _register_plan_integration_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:

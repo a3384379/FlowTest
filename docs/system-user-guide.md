@@ -1072,7 +1072,9 @@ V6.0 Core 提供一个正式 Skill，位于仓库 `skills/flowtest-generate-inte
 
 使用时必须注意：
 
-- FlowTest MCP 至少为 `s55-sandbox-preview-v1`；
+- FlowTest MCP 至少为 `s61-mcp-connection-v1`；
+- 零项目初始化另需 `mcp:project:bootstrap`，契约导入另需 `mcp:contract:import`；Change Regression
+  分析准备与 Test Plan 建议分别需要 `mcp:regression:prepare`、`mcp:test-plan:propose`；
 - Code/DB MCP 由 Agent 直接连接，FlowTest Server 不连接第三方 MCP；
 - 所有外部结果先变成 Typed Evidence，Conflict、Missing Evidence 或 Stale Revision 必须停止；
 - Skill 只创建待审核 Proposal，不 Accept、Apply、Publish 或生产执行；

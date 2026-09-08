@@ -23,8 +23,8 @@ def manifest(profile: ContinuousSkillProfile) -> ContinuousQASkillManifest:
     return ContinuousQASkillManifest(
         schema_version="flowtest-skill-manifest-v1",
         name=profile.name,
-        version="1.1.0-rc.1",
-        minimum_mcp_version="s60-continuous-qa-v1",
+        version="1.2.0-rc.1",
+        minimum_mcp_version="s61-mcp-connection-v1",
         required_tools=list(profile.required_tools),
         optional_tools=list(profile.optional_tools),
         required_scopes=list(profile.required_scopes),
@@ -40,6 +40,7 @@ def manifest(profile: ContinuousSkillProfile) -> ContinuousQASkillManifest:
         ),
         stop_conditions=[
             "工具、范围、项目授权或 feature 不可用",
+            "工具发现失败、返回 TOOL_UNAVAILABLE 或服务端版本不兼容（SERVER_VERSION_UNSUPPORTED）",
             "Evidence、Context 或目标草稿版本过期或冲突",
             "输出包含敏感值、原始请求响应或数据库行",
             "要求自动接受、应用、发布、正式执行或弱化 Product Defect",

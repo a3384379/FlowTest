@@ -31,6 +31,8 @@ SERVICE_ACCOUNT_SCOPES = frozenset(
         "mcp:preview:execute",
         "mcp:project:bootstrap",
         "mcp:contract:import",
+        "mcp:regression:prepare",
+        "mcp:test-plan:propose",
         "org:governance",
         "org:audit",
         "org:key_rotate",

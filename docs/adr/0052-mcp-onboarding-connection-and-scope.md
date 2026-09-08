@@ -1,6 +1,6 @@
 # ADR 0052：MCP 零接入的连接、身份与权限契约
 
-状态：S61A/S61B/S61C 实现；后续写入契约冻结，按阶段开放。
+状态：S61A/S61B 已合并；S61C～S62B 的契约与实现已在当前开发分支完成，集中门禁与 PR 复审待本轮收口。
 
 ## 决策
 
@@ -24,8 +24,9 @@ connection_diagnostic 区分认证、过期、Scope、网络、版本和 Feature
 ## 冻结工具与 Scope 映射
 
 下表是实施契约。S61A 新增 inspect_connection（总数 39），S61B 已上线三个初始化工具（总数 42），
-S61C 已上线两个契约导入工具（总数 44）；其余写 Scope 仍随对应实现和测试上线才加入签发 allowlist，
-避免提前授予无定义的权限。
+S61C 已上线两个契约导入工具（总数 44）；本轮再加入 S61D 的三个发现/诊断工具和 S62A/S62B 的三个
+受控规划/取消工具，当前注册总数为 50。写 Scope 已与实现同步加入签发 allowlist，仍不会因为工具注册
+自动获得管理员、审核、发布或执行权限。
 
 | 阶段 | 工具（统一 `flowtest.` 前缀） | Scope / 应用能力与限制 |
 | --- | --- | --- |
@@ -56,7 +57,11 @@ S61C 已上线两个契约导入工具（总数 44）；其余写 Scope 仍随�
 
 ## 兼容与验证
 
-旧 38 个工具和各领域 Schema 保留，连接协议为 `s61-mcp-connection-v1`，tools/list 精确排序。
+旧 38 个工具和各领域 Schema 保留，连接协议为 `s61-mcp-connection-v1`，tools/list 精确排序；当前
+兼容清单为 50 个工具。S62 的 Test Plan 更新建议使用共享 AIChangeSet/AIChangeItem 生命周期，新增
+`test_plan_update` 类型由迁移 `20260908_0053` 约束；建议只在人工审核后物化到草稿计划，未发布依赖会
+被显式标记并 fail closed。Change Regression 准备不执行测试、不生成 Release 放行结果；Preview 取消
+只请求已有 WorkflowService 的 Graceful Cancel，并保留 Cleanup 状态。
 新只读工具如实声明 readOnlyHint/idempotentHint，注解不替代服务端授权。
 覆盖机器账号有效/过期/撤销/禁用、组织禁用、用户 JWT 拒绝、Scope 恢复指引、真实 SDK HTTP
 逐请求身份隔离、stdio 进程身份、配置无令牌与错误脱敏。HTTP Cookie 失效不影响合法机器账号。

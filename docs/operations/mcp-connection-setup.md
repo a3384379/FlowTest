@@ -1,4 +1,4 @@
-# MCP 首次连接与故障恢复（S61A～S61C）
+# MCP 首次连接与故障恢复（S61A～S62B）
 
 ## 首次人类授权
 
@@ -9,6 +9,8 @@ URL、命令参数、日志或仓库。轮换、撤销和过期继续使用现�
 `mcp:project:bootstrap` 时可用，连接诊断不会静默授予该 Scope。
 契约导入另需显式 `mcp:contract:import`；该 Scope 只允许受控 Contract Preview/Commit，不等于
 Workflow Review、Apply、Publish 或执行权限。
+Change Regression 纯分析准备和 Test Plan 更新建议分别使用 `mcp:regression:prepare`、
+`mcp:test-plan:propose`；Preview Graceful Cancel 复用 `mcp:preview:execute`，不提供强制取消。
 
 ## 显式生成配置
 
