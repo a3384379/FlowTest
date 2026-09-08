@@ -25,6 +25,37 @@ class MCPTestPlanUpdateTarget(BaseModel):
     runtime_variables: dict[str, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_workflow_version(self) -> "MCPTestPlanUpdateTarget":
+        if self.target_type == "workflow":
+            if (
+                self.target_version is not None
+                and self.workflow_version is not None
+                and self.target_version != self.workflow_version
+            ):
+                raise ValueError("Workflow 的 target_version 与 workflow_version 必须一致")
+        else:
+            if self.workflow_version is not None:
+                raise ValueError("只有 Workflow 目标可以指定 workflow_version")
+            if self.environment_id is not None:
+                raise ValueError("只有 Workflow 目标可以指定 environment_id")
+        return self
+
+
+class MCPTestPlanUpdateAction(BaseModel):
+    """The deterministic plan operation that a reviewer is being asked to approve."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_type: Literal["workflow", "case", "suite"]
+    target_id: UUID
+    action: Literal["add", "update", "noop", "conflict"]
+    current_version: int | None = Field(default=None, ge=1)
+    requested_version: int | None = Field(default=None, ge=1)
+    current_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    requested_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(default="", max_length=500)
+
 
 class MCPTestPlanUpdateContent(BaseModel):
     """Reviewable content stored in an AIChangeItem, never a second proposal table."""
@@ -36,8 +67,23 @@ class MCPTestPlanUpdateContent(BaseModel):
     targets: list[MCPTestPlanUpdateTarget] = Field(
         min_length=1, max_length=MCP_TEST_PLAN_TARGET_LIMIT
     )
+    target_actions: list[MCPTestPlanUpdateAction] = Field(
+        default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT
+    )
     unpublished_dependencies: list[str] = Field(default_factory=list, max_length=100)
     rationale: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_target_keys(self) -> "MCPTestPlanUpdateContent":
+        target_keys = [(target.target_type, target.target_id) for target in self.targets]
+        action_keys = [(action.target_type, action.target_id) for action in self.target_actions]
+        if len(set(target_keys)) != len(target_keys):
+            raise ValueError("测试计划建议内容中的目标不能重复")
+        if len(set(action_keys)) != len(action_keys):
+            raise ValueError("测试计划建议内容中的目标操作不能重复")
+        if self.target_actions and set(action_keys) != set(target_keys):
+            raise ValueError("测试计划建议中的目标操作必须覆盖全部目标")
+        return self
 
 
 class MCPPrepareChangeRegressionRequest(BaseModel):
@@ -106,6 +152,9 @@ class MCPTestPlanUpdateRequest(BaseModel):
     project_id: UUID
     test_plan_id: UUID
     run_id: UUID | None = None
+    targets: list[MCPTestPlanUpdateTarget] = Field(
+        default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT
+    )
     workflow_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
     test_case_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
     test_suite_ids: list[UUID] = Field(default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT)
@@ -115,12 +164,19 @@ class MCPTestPlanUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_targets_and_unique_ids(self) -> "MCPTestPlanUpdateRequest":
-        targets = [*self.workflow_ids, *self.test_case_ids, *self.test_suite_ids]
-        if not targets:
+        legacy_targets = [*self.workflow_ids, *self.test_case_ids, *self.test_suite_ids]
+        if self.targets and legacy_targets:
+            raise ValueError("typed targets 不能与旧版 *_ids 字段同时提供")
+        if self.targets:
+            target_keys = [(target.target_type, target.target_id) for target in self.targets]
+            if len(set(target_keys)) != len(target_keys):
+                raise ValueError("测试计划建议中的 typed target 不能重复")
+            return self
+        if not legacy_targets:
             raise ValueError("至少指定一个已有 Workflow、Test Case 或 Test Suite")
-        if len(targets) > MCP_TEST_PLAN_TARGET_LIMIT:
+        if len(legacy_targets) > MCP_TEST_PLAN_TARGET_LIMIT:
             raise ValueError("测试计划建议的资产总数不能超过 100")
-        if len(set(targets)) != len(targets):
+        if len(set(legacy_targets)) != len(legacy_targets):
             raise ValueError("测试计划建议中的资产不能重复")
         return self
 
@@ -133,6 +189,9 @@ class MCPTestPlanUpdateResponse(BaseModel):
     test_plan_id: UUID
     change_set_id: UUID | None = None
     proposed_item_count: int = Field(ge=1, le=MCP_TEST_PLAN_TARGET_LIMIT)
+    target_actions: list[MCPTestPlanUpdateAction] = Field(
+        default_factory=list, max_length=MCP_TEST_PLAN_TARGET_LIMIT
+    )
     unpublished_dependencies: list[str] = Field(default_factory=list, max_length=100)
     dry_run: bool
     requires_human_review: Literal[True] = True

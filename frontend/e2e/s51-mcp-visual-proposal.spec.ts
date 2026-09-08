@@ -146,16 +146,18 @@ test('S51 MCP Draft 可视化审阅后只应用到 Workflow Draft', async ({ pag
   const draft = (await draftResponse.json()) as FlowProposal
   expect(draft).toMatchObject({ dry_run: false, status: 'draft' })
   expect(draft.change_set_id).not.toBeNull()
+  if (!draft.change_set_id) throw new Error('MCP Flow Proposal 缺少 change_set_id')
+  const changeSetId = draft.change_set_id
   const repeatedResponse = await page.request.post('/api/v1/mcp/flow/proposals', {
     headers: draftHeaders,
     data: { ...proposalPayload, dry_run: false },
   })
-  expect(((await repeatedResponse.json()) as FlowProposal).change_set_id).toBe(draft.change_set_id)
+  expect(((await repeatedResponse.json()) as FlowProposal).change_set_id).toBe(changeSetId)
 
-  const inspectionResponse = await page.request.get(
-    `/api/v1/mcp/flow/proposals/${draft.change_set_id}`,
-    { headers: mcpHeaders, params: { project_id: project.id } },
-  )
+  const inspectionResponse = await page.request.get(`/api/v1/mcp/flow/proposals/${changeSetId}`, {
+    headers: mcpHeaders,
+    params: { project_id: project.id },
+  })
   expect(inspectionResponse.ok()).toBeTruthy()
   expect((await inspectionResponse.json()) as ProposalInspection).toMatchObject({
     status: 'draft',
@@ -164,13 +166,13 @@ test('S51 MCP Draft 可视化审阅后只应用到 Workflow Draft', async ({ pag
     integration_plan: { plan_fingerprint: plan.plan_fingerprint },
   })
   const visualResponse = await page.request.get(
-    `/api/v1/projects/${project.id}/flow-specs/change-sets/${draft.change_set_id}/visual-proposal`,
+    `/api/v1/projects/${project.id}/flow-specs/change-sets/${changeSetId}/visual-proposal`,
     { headers: userHeaders },
   )
   expect(visualResponse.ok()).toBeTruthy()
   const visual = (await visualResponse.json()) as VisualProposal
 
-  await reviewAndApplyInUI(page, project.id)
+  await reviewAndApplyInUI(page, project.id, changeSetId)
 
   const workflowsResponse = await page.request.get(`/api/v1/projects/${project.id}/workflows`, {
     headers: userHeaders,
@@ -190,10 +192,13 @@ test('S51 MCP Draft 可视化审阅后只应用到 Workflow Draft', async ({ pag
   expect(((await executionsResponse.json()) as PageResponse<unknown>).total).toBe(0)
 })
 
-async function reviewAndApplyInUI(page: Page, projectId: string): Promise<void> {
-  await page.goto(`/projects/${projectId}/workflows`)
+async function reviewAndApplyInUI(
+  page: Page,
+  projectId: string,
+  changeSetId: string,
+): Promise<void> {
+  await page.goto(`/projects/${projectId}/workflows?proposal=${encodeURIComponent(changeSetId)}`)
   await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
-  await page.getByRole('button', { name: 'MCP 流程提案' }).click()
   const dialog = page.getByRole('dialog', { name: 'Flow Proposal 可视化审核' })
   await expect(dialog.getByText('提案模式')).toBeVisible()
   await expect(dialog.getByText('证据 / 置信度')).toBeVisible()

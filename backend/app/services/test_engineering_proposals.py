@@ -66,6 +66,13 @@ class TestEngineeringProposalService:
         self._assets = APIAssetRepository(session)
         self._audit = AuditService(session)
 
+    async def get(
+        self, *, actor: User, project_id: UUID, change_set_id: UUID
+    ) -> TestEngineeringProposalView:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        change_set, item = await self._proposal(change_set_id, project_id, for_update=False)
+        return _view(change_set, item)
+
     async def propose(
         self,
         *,

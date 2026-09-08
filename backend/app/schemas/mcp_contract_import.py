@@ -286,5 +286,6 @@ class MCPCommitContractImportResponse(BaseModel):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     results: list[MCPContractImportItem] = Field(default_factory=list, max_length=200)
     warnings: list[str] = Field(default_factory=list, max_length=50)
+    idempotency_replayed: bool = False
     trace_id: str = Field(min_length=1, max_length=128)
     next_action: Literal["inspect_contract", "none"] = "inspect_contract"

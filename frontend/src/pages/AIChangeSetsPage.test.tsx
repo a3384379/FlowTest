@@ -187,6 +187,22 @@ describe('AIChangeSetsPage', () => {
     expect(await screen.findByText('已接受')).toBeVisible()
     expect(screen.queryByRole('button', { name: '审核并接受' })).not.toBeInTheDocument()
   })
+
+  it('loads the exact focused change set even when it is absent from the first page', async () => {
+    const focusedId = '00000000-0000-4000-8000-000000000299'
+    const focused = {
+      ...detail,
+      id: focusedId,
+      title: '深链 AI 变更集',
+      items: [{ ...item, id: '00000000-0000-4000-8000-000000000298', title: '精确深链变更项' }],
+    }
+    handlers(detail)
+    server.use(http.get(`/api/v1/ai/change-sets/${focusedId}`, () => HttpResponse.json(focused)))
+    renderPage(`/projects/${project.id}/ai-changes?focus=${focusedId}`)
+
+    expect(await screen.findByText('精确深链变更项')).toBeVisible()
+    expect(screen.getByRole('button', { name: '审核并接受' })).toBeVisible()
+  })
 })
 
 function handlers(value: AIChangeSetDetail) {
@@ -243,7 +259,7 @@ function handlers(value: AIChangeSetDetail) {
   )
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   server.use(
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -256,7 +272,7 @@ function renderPage() {
     <ConfigProvider theme={{ token: { motion: false } }}>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
-          <ProjectTestProvider section="ai-changes">
+          <ProjectTestProvider section="ai-changes" initialEntry={initialEntry}>
             <AIChangeSetsPage />
           </ProjectTestProvider>
         </QueryClientProvider>

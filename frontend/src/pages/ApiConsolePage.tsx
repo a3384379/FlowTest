@@ -20,6 +20,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
@@ -39,10 +40,11 @@ import type { ApiDefinition, Execution, ExecutionDetail } from '../lib/api'
 type DialogState = 'project' | 'environment' | 'api' | null
 
 export default function ApiConsolePage() {
+  const [searchParams] = useSearchParams()
   const [dialog, setDialog] = useState<DialogState>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
-  const consoleState = useApiConsole()
+  const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
   const currentDefinition = selectedApiDefinition(consoleState)
   const artifacts = artifactItems(consoleState)
   const apis = apiItems(consoleState)

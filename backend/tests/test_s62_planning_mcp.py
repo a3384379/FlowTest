@@ -9,6 +9,7 @@ from test_s58_failure_repair_api import failure_repair_api as failure_repair_api
 from test_s60_continuous_mcp import _account
 
 from app.core.config import settings
+from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.change_regression import ChangeRegressionRun
 from app.models.tasking import TestPlanItem as PlanItemModel
@@ -18,12 +19,14 @@ from app.models.test_contexts import (
 from app.models.test_contexts import (
     TestContextRevision as ContextRevisionModel,
 )
+from app.models.workflows import Workflow
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
     MCPPrepareChangeRegressionRequest,
     MCPTestPlanUpdateRequest,
+    MCPTestPlanUpdateTarget,
 )
-from app.services.mcp_planning import MCPPlanningService
+from app.services.mcp_planning import MCPPlanningService, materialize_test_plan_update
 
 
 async def _create_plan_and_policy(fixture: dict[str, Any]) -> tuple[str, str]:
@@ -215,6 +218,122 @@ async def test_test_plan_update_creates_pending_changeset_without_mutating_plan(
     assert replayed.status_code == 202, replayed.text
     assert replayed.json()["change_set_id"] == str(change_set_id)
     assert replayed.json()["idempotency_replayed"] is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_test_plan_proposal_keeps_existing_target_add_only(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    fixture = failure_repair_api
+    plan_id, _ = await _create_plan_and_policy(fixture)
+    async with fixture["sessions"]() as session:
+        actor = await session.scalar(select(User).where(User.is_system_admin.is_(True)))
+        existing = await session.scalar(
+            select(PlanItemModel).where(PlanItemModel.test_plan_id == UUID(plan_id))
+        )
+        assert actor is not None and existing is not None
+        existing.max_retries = 1
+        existing.runtime_headers = {"X-Legacy": "preserve"}
+        existing_id = existing.id
+        change_set = AIChangeSet(
+            project_id=fixture["project_id"],
+            impact_run_id=None,
+            release_risk_id=None,
+            ai_job_id=None,
+            title="Legacy add-only proposal",
+            status="accepted",
+            source_snapshot={},
+            source_fingerprint="f" * 64,
+            source_type="mcp",
+            source_ref="mcp://test-plan-updates/legacy",
+            actor_type="user",
+            actor_id=actor.id,
+            created_by_id=actor.id,
+        )
+
+        result = await materialize_test_plan_update(
+            session=session,
+            actor=actor,
+            change_set=change_set,
+            content={
+                "schema_version": "s62-test-plan-update-v1",
+                "test_plan_id": plan_id,
+                "targets": [
+                    {
+                        "target_type": "workflow",
+                        "target_id": str(fixture["workflow_id"]),
+                        "target_version": 1,
+                        "workflow_version": 1,
+                        "environment_id": str(fixture["environment_id"]),
+                        "max_retries": 3,
+                        "runtime_headers": {"X-Legacy": "overwrite"},
+                    }
+                ],
+                "unpublished_dependencies": [],
+                "rationale": "Persisted before target_actions existed",
+            },
+        )
+        await session.flush()
+        items = list(
+            (
+                await session.scalars(
+                    select(PlanItemModel).where(PlanItemModel.test_plan_id == UUID(plan_id))
+                )
+            ).all()
+        )
+
+        assert result == ("test_plan", UUID(plan_id))
+        assert len(items) == 1
+        assert items[0].id == existing_id
+        assert items[0].max_retries == 1
+        assert items[0].runtime_headers == {"X-Legacy": "preserve"}
+
+
+@pytest.mark.asyncio
+async def test_workflow_target_reports_every_unpublished_version_state(
+    failure_repair_api: dict[str, Any],
+) -> None:
+    fixture = failure_repair_api
+    async with fixture["sessions"]() as session:
+        workflow = await session.get(Workflow, fixture["workflow_id"])
+        assert workflow is not None
+        service = MCPPlanningService(session)
+        environments = {workflow.id: fixture["environment_id"]}
+
+        workflow.current_version = None
+        _, missing_current = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert missing_current == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 99
+        _, nonexistent = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert nonexistent == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 1
+        workflow.draft_revision = 2
+        _, unpublished = await service._resolve_workflow_target(
+            fixture["project_id"],
+            workflow.id,
+            environments,
+            MCPTestPlanUpdateTarget(
+                target_type="workflow",
+                target_id=workflow.id,
+                target_version=2,
+                workflow_version=2,
+                environment_id=fixture["environment_id"],
+            ),
+        )
+        assert unpublished == [f"workflow:{workflow.id}:published_version"]
+
+        workflow.current_version = 1
+        resolved, published = await service._resolve_workflow_target(
+            fixture["project_id"], workflow.id, environments
+        )
+        assert published == []
+        assert resolved.target_version == 1
 
 
 def test_s62_request_contracts_are_strict_and_safe() -> None:

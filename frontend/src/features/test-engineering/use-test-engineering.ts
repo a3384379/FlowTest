@@ -1,12 +1,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   applyTestDesignProposal,
   generateTestDesign,
+  getTestEngineeringProposal,
   listTestEngineeringApis,
   listTestEngineeringEnvironments,
   proposeTestDesign,
@@ -14,10 +15,14 @@ import {
   type TestEngineeringProposal,
 } from './test-engineering-service'
 
-export function useTestEngineering() {
+export function useTestEngineering(initialProposalId: string | null = null) {
   const { message } = App.useApp()
   const { projectId } = useProjectContext()
-  const [proposal, setProposal] = useState<TestEngineeringProposal | null>(null)
+  const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null>(
+    projectId,
+    initialProposalId,
+    null,
+  )
   const enabled = Boolean(projectId)
   const apis = useQuery({
     queryKey: ['test-engineering-apis', projectId],
@@ -28,6 +33,11 @@ export function useTestEngineering() {
     queryKey: ['test-engineering-environments', projectId],
     queryFn: () => listTestEngineeringEnvironments(required(projectId)),
     enabled,
+  })
+  const linkedProposal = useQuery({
+    queryKey: ['test-engineering-proposal', projectId, initialProposalId],
+    queryFn: () => getTestEngineeringProposal(required(projectId), required(initialProposalId)),
+    enabled: Boolean(projectId && initialProposalId),
   })
   const generate = useMutation({
     mutationFn: (apiDefinitionId: string) =>
@@ -79,9 +89,10 @@ export function useTestEngineering() {
   }
 
   async function reviewProposal(accept: boolean): Promise<boolean> {
-    if (!proposal) return false
+    const currentProposal = proposal ?? linkedProposal.data
+    if (!currentProposal) return false
     try {
-      setProposal(await review.mutateAsync({ changeSetId: proposal.change_set_id, accept }))
+      setProposal(await review.mutateAsync({ changeSetId: currentProposal.change_set_id, accept }))
       void message.success(accept ? 'Proposal 已接受' : 'Proposal 已拒绝')
       return true
     } catch (error) {
@@ -91,10 +102,11 @@ export function useTestEngineering() {
   }
 
   async function applyProposal(): Promise<boolean> {
-    if (!proposal) return false
+    const currentProposal = proposal ?? linkedProposal.data
+    if (!currentProposal) return false
     try {
-      const result = await apply.mutateAsync(proposal.change_set_id)
-      setProposal({ ...proposal, applied: true })
+      const result = await apply.mutateAsync(currentProposal.change_set_id)
+      setProposal({ ...currentProposal, applied: true })
       void message.success(
         `已进入现有执行体系：${result.workflow_ids.length} 个 Workflow / ${result.test_case_ids.length} 个 TestCase`,
       )
@@ -110,7 +122,7 @@ export function useTestEngineering() {
     apis,
     environments,
     generation: generate.data ?? null,
-    proposal,
+    proposal: proposal ?? linkedProposal.data ?? null,
     generateDesign,
     createProposal,
     reviewProposal,

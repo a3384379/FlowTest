@@ -18,6 +18,7 @@ import {
 import type { FormInstance } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { listServiceEndpoints } from '../features/service-targets/service-target-service'
 import type {
@@ -37,7 +38,8 @@ type GenerationForm = {
 }
 
 export default function TestEngineeringPage() {
-  const state = useTestEngineering()
+  const [searchParams] = useSearchParams()
+  const state = useTestEngineering(searchParams.get('proposal'))
   const [form] = Form.useForm<GenerationForm>()
   const [scenarioIds, setScenarioIds] = useState<string[]>([])
   const design = state.proposal?.design ?? state.generation?.design ?? null

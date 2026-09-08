@@ -21,6 +21,7 @@ from app.domain.test_assets import TestTargetType
 from app.domain.test_contexts import first_sensitive_value
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
+from app.models.api_assets import Environment
 from app.models.change_regression import ChangeRegressionRun
 from app.models.tasking import TestPlan, TestPlanItem
 from app.models.test_assets import TestCase, TestCaseVersion, TestSuite, TestSuiteVersion
@@ -31,6 +32,7 @@ from app.schemas.mcp_planning import (
     MCPCancelPreviewResponse,
     MCPPrepareChangeRegressionRequest,
     MCPPrepareChangeRegressionResponse,
+    MCPTestPlanUpdateAction,
     MCPTestPlanUpdateContent,
     MCPTestPlanUpdateRequest,
     MCPTestPlanUpdateResponse,
@@ -74,21 +76,8 @@ class MCPPlanningService:
                 message="Change Regression 来源不能包含 Secret、凭据或 PII",
                 status_code=422,
             )
-        change_payload = ChangeRegressionRunCreate(
-            title=payload.title,
-            source_ref=payload.source_ref,
-            candidate_ref=payload.candidate_ref,
-            git_diff=payload.git_diff,
-            openapi_diffs=payload.openapi_diffs,
-            schema_diffs=payload.schema_diffs,
-            test_plan_id=payload.test_plan_id,
-            release_policy_id=payload.release_policy_id,
-            release_risk_id=payload.release_risk_id,
-            deployment_check_id=payload.deployment_check_id,
-            generate_missing_tests=payload.generate_missing_tests,
-        )
-        await self._validate_regression_inputs(actor=actor, payload=payload)
         if payload.dry_run:
+            await self._validate_regression_inputs(actor=actor, payload=payload)
             comparison = await ContextInspectorService(self._session).compare_revisions(
                 actor=actor,
                 project_id=payload.project_id,
@@ -121,6 +110,20 @@ class MCPPlanningService:
         if cached is not None:
             cached["idempotency_replayed"] = True
             return MCPPrepareChangeRegressionResponse.model_validate(cached)
+
+        change_payload = ChangeRegressionRunCreate(
+            title=payload.title,
+            source_ref=payload.source_ref,
+            candidate_ref=payload.candidate_ref,
+            git_diff=payload.git_diff,
+            openapi_diffs=payload.openapi_diffs,
+            schema_diffs=payload.schema_diffs,
+            test_plan_id=payload.test_plan_id,
+            release_policy_id=payload.release_policy_id,
+            release_risk_id=payload.release_risk_id,
+            deployment_check_id=payload.deployment_check_id,
+            generate_missing_tests=payload.generate_missing_tests,
+        )
 
         async def action() -> MCPPrepareChangeRegressionResponse:
             # Revalidate mutable references after the idempotency claim.  The existing
@@ -206,12 +209,13 @@ class MCPPlanningService:
             )
         if payload.dry_run:
             plan = await self._project_plan(payload.project_id, payload.test_plan_id)
-            targets, unpublished = await self._resolve_plan_targets(payload, plan)
+            targets, unpublished, target_actions = await self._resolve_plan_targets(payload, plan)
             return MCPTestPlanUpdateResponse(
                 project_id=payload.project_id,
                 test_plan_id=plan.id,
                 proposed_item_count=len(targets),
                 unpublished_dependencies=unpublished,
+                target_actions=target_actions,
                 dry_run=True,
                 next_action="预检通过; 请在范围确认后创建待审核 Test Plan ChangeSet",
                 trace_id=get_trace_id(),
@@ -234,12 +238,15 @@ class MCPPlanningService:
 
         async def action() -> MCPTestPlanUpdateResponse:
             current_plan = await self._project_plan(payload.project_id, payload.test_plan_id)
-            current_targets, current_unpublished = await self._resolve_plan_targets(
-                payload, current_plan
-            )
+            (
+                current_targets,
+                current_unpublished,
+                current_actions,
+            ) = await self._resolve_plan_targets(payload, current_plan)
             current_content = MCPTestPlanUpdateContent(
                 test_plan_id=current_plan.id,
                 targets=current_targets,
+                target_actions=current_actions,
                 unpublished_dependencies=current_unpublished,
                 rationale=payload.rationale.strip(),
             )
@@ -247,6 +254,7 @@ class MCPPlanningService:
                 "schema_version": "s62-test-plan-update-v1",
                 "test_plan_id": str(current_plan.id),
                 "targets": current_content.model_dump(mode="json")["targets"],
+                "target_actions": current_content.model_dump(mode="json")["target_actions"],
                 "unpublished_dependencies": current_unpublished,
                 "rationale": current_content.rationale,
                 "governance": {
@@ -310,6 +318,7 @@ class MCPPlanningService:
                 change_set_id=change_set.id,
                 proposed_item_count=len(current_targets),
                 unpublished_dependencies=current_unpublished,
+                target_actions=current_actions,
                 dry_run=False,
                 next_action="请在现有 ChangeSet Review 中审核, 接受后才可加入草稿计划",
                 trace_id=get_trace_id(),
@@ -431,7 +440,11 @@ class MCPPlanningService:
 
     async def _resolve_plan_targets(
         self, payload: MCPTestPlanUpdateRequest, plan: TestPlan
-    ) -> tuple[list[MCPTestPlanUpdateTarget], list[str]]:
+    ) -> tuple[
+        list[MCPTestPlanUpdateTarget],
+        list[str],
+        list[MCPTestPlanUpdateAction],
+    ]:
         existing_items = list(
             (
                 await self._session.scalars(
@@ -446,45 +459,96 @@ class MCPPlanningService:
         }
         targets: list[MCPTestPlanUpdateTarget] = []
         unpublished: list[str] = []
-        for target_id in payload.workflow_ids:
-            target, dependencies = await self._resolve_workflow_target(
-                payload.project_id, target_id, environment_by_workflow
+        actions: list[MCPTestPlanUpdateAction] = []
+        existing_by_key: dict[tuple[str, UUID], list[TestPlanItem]] = {}
+        for item in existing_items:
+            existing_by_key.setdefault((item.target_type, item.target_id), []).append(item)
+
+        for requested in self._requested_targets(payload):
+            target_type = requested.target_type
+            target_id = requested.target_id
+            if target_type == "workflow":
+                target, dependencies = await self._resolve_workflow_target(
+                    payload.project_id,
+                    target_id,
+                    environment_by_workflow,
+                    requested,
+                )
+            elif target_type == "case":
+                target, dependencies = await self._resolve_case_target(
+                    payload.project_id, target_id, requested
+                )
+            else:
+                target, dependencies = await self._resolve_suite_target(
+                    payload.project_id, target_id, requested
+                )
+            targets.append(target)
+            unpublished.extend(dependencies)
+            actions.append(
+                _plan_target_action(
+                    target=target,
+                    existing=existing_by_key.get((target.target_type, target.target_id), []),
+                    has_unpublished_dependencies=bool(dependencies),
+                )
             )
-            targets.append(target)
-            unpublished.extend(dependencies)
-        for target_id in payload.test_case_ids:
-            target, dependencies = await self._resolve_case_target(payload.project_id, target_id)
-            targets.append(target)
-            unpublished.extend(dependencies)
-        for target_id in payload.test_suite_ids:
-            target, dependencies = await self._resolve_suite_target(payload.project_id, target_id)
-            targets.append(target)
-            unpublished.extend(dependencies)
-        return targets, sorted(set(unpublished))
+        return targets, sorted(set(unpublished)), actions
+
+    @staticmethod
+    def _requested_targets(
+        payload: MCPTestPlanUpdateRequest,
+    ) -> list[MCPTestPlanUpdateTarget]:
+        if payload.targets:
+            return list(payload.targets)
+        return (
+            [
+                MCPTestPlanUpdateTarget(target_type="workflow", target_id=target_id)
+                for target_id in payload.workflow_ids
+            ]
+            + [
+                MCPTestPlanUpdateTarget(target_type="case", target_id=target_id)
+                for target_id in payload.test_case_ids
+            ]
+            + [
+                MCPTestPlanUpdateTarget(target_type="suite", target_id=target_id)
+                for target_id in payload.test_suite_ids
+            ]
+        )
 
     async def _resolve_workflow_target(
         self,
         project_id: UUID,
         target_id: UUID,
         environment_by_workflow: dict[UUID, UUID],
+        requested: MCPTestPlanUpdateTarget | None = None,
     ) -> tuple[MCPTestPlanUpdateTarget, list[str]]:
         workflow = await self._session.get(Workflow, target_id)
         if workflow is None or workflow.project_id != project_id:
             raise AppError(code="WORKFLOW_NOT_FOUND", message="Workflow 不存在", status_code=404)
-        version = workflow.current_version
-        dependencies = (
-            []
-            if version is not None
+        requested_version = (requested.target_version if requested is not None else None) or (
+            requested.workflow_version if requested is not None else None
+        )
+        version = requested_version or workflow.current_version
+        version_published = bool(
+            version is not None
             and await self._session.scalar(
                 select(WorkflowVersion.id).where(
                     WorkflowVersion.workflow_id == workflow.id,
                     WorkflowVersion.version == version,
+                    WorkflowVersion.published_at.is_not(None),
                 )
             )
-            else [f"workflow:{workflow.id}:published_version"]
         )
-        environment_id = environment_by_workflow.get(workflow.id)
-        if environment_id is None:
+        dependencies = [] if version_published else [f"workflow:{workflow.id}:published_version"]
+        environment_id = (
+            requested.environment_id
+            if requested is not None and requested.environment_id is not None
+            else environment_by_workflow.get(workflow.id)
+        )
+        if environment_id is not None:
+            environment = await self._session.get(Environment, environment_id)
+            if environment is None or environment.project_id != project_id:
+                raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        else:
             dependencies.append(f"workflow:{workflow.id}:environment")
         return (
             MCPTestPlanUpdateTarget(
@@ -493,17 +557,25 @@ class MCPPlanningService:
                 target_version=version,
                 workflow_version=version,
                 environment_id=environment_id,
+                max_retries=requested.max_retries if requested is not None else 0,
+                runtime_variables=requested.runtime_variables if requested is not None else {},
+                runtime_headers=requested.runtime_headers if requested is not None else {},
             ),
             dependencies,
         )
 
     async def _resolve_case_target(
-        self, project_id: UUID, target_id: UUID
+        self,
+        project_id: UUID,
+        target_id: UUID,
+        requested: MCPTestPlanUpdateTarget | None = None,
     ) -> tuple[MCPTestPlanUpdateTarget, list[str]]:
         case = await self._session.get(TestCase, target_id)
         if case is None or case.project_id != project_id:
             raise AppError(code="TEST_CASE_NOT_FOUND", message="测试用例不存在", status_code=404)
-        version = case.current_version
+        version = (
+            requested.target_version if requested is not None else None
+        ) or case.current_version
         published = (
             version is not None
             and await self._session.scalar(
@@ -515,17 +587,29 @@ class MCPPlanningService:
             is not None
         )
         return (
-            MCPTestPlanUpdateTarget(target_type="case", target_id=case.id, target_version=version),
+            MCPTestPlanUpdateTarget(
+                target_type="case",
+                target_id=case.id,
+                target_version=version,
+                max_retries=requested.max_retries if requested is not None else 0,
+                runtime_variables=requested.runtime_variables if requested is not None else {},
+                runtime_headers=requested.runtime_headers if requested is not None else {},
+            ),
             [] if published else [f"case:{case.id}:published_version"],
         )
 
     async def _resolve_suite_target(
-        self, project_id: UUID, target_id: UUID
+        self,
+        project_id: UUID,
+        target_id: UUID,
+        requested: MCPTestPlanUpdateTarget | None = None,
     ) -> tuple[MCPTestPlanUpdateTarget, list[str]]:
         suite = await self._session.get(TestSuite, target_id)
         if suite is None or suite.project_id != project_id:
             raise AppError(code="TEST_SUITE_NOT_FOUND", message="测试套件不存在", status_code=404)
-        version = suite.current_version
+        version = (
+            requested.target_version if requested is not None else None
+        ) or suite.current_version
         published = (
             version is not None
             and await self._session.scalar(
@@ -538,7 +622,12 @@ class MCPPlanningService:
         )
         return (
             MCPTestPlanUpdateTarget(
-                target_type="suite", target_id=suite.id, target_version=version
+                target_type="suite",
+                target_id=suite.id,
+                target_version=version,
+                max_retries=requested.max_retries if requested is not None else 0,
+                runtime_variables=requested.runtime_variables if requested is not None else {},
+                runtime_headers=requested.runtime_headers if requested is not None else {},
             ),
             [] if published else [f"suite:{suite.id}:published_version"],
         )
@@ -563,6 +652,103 @@ class MCPPlanningService:
         return context.service_account_id
 
 
+def _plan_target_action(
+    *,
+    target: MCPTestPlanUpdateTarget,
+    existing: list[TestPlanItem],
+    has_unpublished_dependencies: bool,
+) -> MCPTestPlanUpdateAction:
+    if has_unpublished_dependencies:
+        reason = "目标版本或 Workflow 环境尚未满足发布条件"
+        action = "conflict"
+    elif target.target_version is None:
+        reason = "目标没有固定的已发布版本"
+        action = "conflict"
+    elif len(existing) > 1:
+        reason = "当前计划包含重复目标, 不能自动判断更新对象"
+        action = "conflict"
+    elif not existing:
+        reason = "目标尚未加入计划"
+        action = "add"
+    elif _plan_item_matches_target(existing[0], target):
+        reason = "计划中的版本与运行参数已经一致"
+        action = "noop"
+    else:
+        reason = "计划中的目标版本或运行参数将被替换"
+        action = "update"
+    return MCPTestPlanUpdateAction(
+        target_type=target.target_type,
+        target_id=target.target_id,
+        action=action,
+        current_version=existing[0].target_version if len(existing) == 1 else None,
+        requested_version=target.target_version,
+        current_fingerprint=(_plan_item_fingerprint(existing[0]) if len(existing) == 1 else None),
+        requested_fingerprint=_plan_target_fingerprint(target),
+        reason=reason,
+    )
+
+
+def _plan_item_matches_target(item: TestPlanItem, target: MCPTestPlanUpdateTarget) -> bool:
+    return (
+        item.target_version == target.target_version
+        and item.workflow_version == target.workflow_version
+        and item.environment_id == target.environment_id
+        and item.max_retries == target.max_retries
+        and dict(item.runtime_variables or {}) == target.runtime_variables
+        and dict(item.runtime_headers or {}) == target.runtime_headers
+    )
+
+
+def _plan_item_fingerprint(item: TestPlanItem) -> str:
+    return _fingerprint(
+        {
+            "target_type": item.target_type,
+            "target_id": str(item.target_id),
+            "target_version": item.target_version,
+            "workflow_version": item.workflow_version,
+            "environment_id": str(item.environment_id) if item.environment_id else None,
+            "max_retries": item.max_retries,
+            "runtime_variables": dict(item.runtime_variables or {}),
+            "runtime_headers": dict(item.runtime_headers or {}),
+        }
+    )
+
+
+def _plan_target_fingerprint(target: MCPTestPlanUpdateTarget) -> str:
+    return _fingerprint(
+        {
+            "target_type": target.target_type,
+            "target_id": str(target.target_id),
+            "target_version": target.target_version,
+            "workflow_version": target.workflow_version,
+            "environment_id": str(target.environment_id) if target.environment_id else None,
+            "max_retries": target.max_retries,
+            "runtime_variables": target.runtime_variables,
+            "runtime_headers": target.runtime_headers,
+        }
+    )
+
+
+def _plan_item_input(target: MCPTestPlanUpdateTarget) -> TestPlanItemInput:
+    if target.target_version is None:
+        raise AppError(
+            code="MCP_TEST_PLAN_DEPENDENCY_UNPUBLISHED",
+            message="测试资产尚未发布固定版本",
+            status_code=409,
+        )
+    return TestPlanItemInput(
+        target_type=TestTargetType(target.target_type),
+        target_id=target.target_id,
+        target_version=target.target_version,
+        workflow_id=target.target_id if target.target_type == "workflow" else None,
+        workflow_version=target.workflow_version,
+        environment_id=target.environment_id,
+        max_retries=target.max_retries,
+        runtime_variables=target.runtime_variables,
+        runtime_headers=target.runtime_headers,
+    )
+
+
 async def materialize_test_plan_update(
     *, session: AsyncSession, actor: User, change_set: AIChangeSet, content: object
 ) -> tuple[str, UUID]:
@@ -578,7 +764,9 @@ async def materialize_test_plan_update(
             message="测试计划建议内容无效",
             status_code=422,
         ) from error
-    plan = await session.get(TestPlan, proposal.test_plan_id)
+    plan = await session.scalar(
+        select(TestPlan).where(TestPlan.id == proposal.test_plan_id).with_for_update()
+    )
     if plan is None or plan.project_id != change_set.project_id:
         raise AppError(code="TEST_PLAN_NOT_FOUND", message="测试计划不存在", status_code=404)
     if proposal.unpublished_dependencies:
@@ -593,45 +781,73 @@ async def materialize_test_plan_update(
         ).all()
     )
     service = TestPlanService(session)
+    declared_actions = {
+        (action.target_type, action.target_id): action for action in proposal.target_actions
+    }
+    legacy_add_only = not proposal.target_actions
     for target in proposal.targets:
-        if any(
-            item.target_type == target.target_type and item.target_id == target.target_id
+        matches = [
+            item
             for item in existing
-        ):
+            if item.target_type == target.target_type and item.target_id == target.target_id
+        ]
+        # Proposals persisted before target_actions were introduced were add-only. Preserve
+        # that reviewed meaning instead of interpreting absent stale-state evidence as consent
+        # to replace an existing plan item.
+        if legacy_add_only and matches:
             continue
-        if target.target_version is None:
+        action = _plan_target_action(
+            target=target,
+            existing=matches,
+            has_unpublished_dependencies=False,
+        )
+        declared = declared_actions.get((target.target_type, target.target_id))
+        if declared is not None and (
+            declared.action != action.action
+            or declared.current_version != action.current_version
+            or declared.requested_version != action.requested_version
+            or declared.current_fingerprint != action.current_fingerprint
+            or declared.requested_fingerprint != action.requested_fingerprint
+        ):
             raise AppError(
-                code="MCP_TEST_PLAN_DEPENDENCY_UNPUBLISHED",
-                message="测试资产尚未发布固定版本",
+                code="MCP_TEST_PLAN_TARGET_CONFLICT",
+                message="审核后的测试计划目标状态已变化, 请重新生成建议",
                 status_code=409,
+                details={
+                    "target_type": target.target_type,
+                    "target_id": str(target.target_id),
+                    "expected_action": declared.action,
+                    "current_action": action.action,
+                },
             )
-        item = TestPlanItemInput(
-            target_type=TestTargetType(target.target_type),
-            target_id=target.target_id,
-            target_version=target.target_version,
-            workflow_id=target.target_id if target.target_type == "workflow" else None,
-            workflow_version=target.workflow_version,
-            environment_id=target.environment_id,
-            max_retries=target.max_retries,
-            runtime_variables=target.runtime_variables,
-            runtime_headers=target.runtime_headers,
-        )
-        await service.add_item(
-            actor=actor,
-            project_id=change_set.project_id,
-            plan_id=plan.id,
-            item=item,
-            commit=False,
-        )
-        existing.append(
-            TestPlanItem(
-                target_type=target.target_type,
-                target_id=target.target_id,
-                test_plan_id=plan.id,
-                target_version=target.target_version,
-                position=len(existing),
+        if action.action == "conflict":
+            raise AppError(
+                code="MCP_TEST_PLAN_TARGET_CONFLICT",
+                message="测试计划建议包含无法确定的目标操作",
+                status_code=409,
+                details={"target_type": target.target_type, "target_id": str(target.target_id)},
+            )
+        if action.action == "noop":
+            continue
+        item = _plan_item_input(target)
+        detail = (
+            await service.add_item(
+                actor=actor,
+                project_id=change_set.project_id,
+                plan_id=plan.id,
+                item=item,
+                commit=False,
+            )
+            if action.action == "add"
+            else await service.replace_item_version(
+                actor=actor,
+                project_id=change_set.project_id,
+                plan_id=plan.id,
+                item=item,
+                commit=False,
             )
         )
+        existing = detail.items
     return "test_plan", plan.id
 
 

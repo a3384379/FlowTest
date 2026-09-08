@@ -702,6 +702,12 @@ class MCPBootstrapService:
         existing: Service | None,
         payload: MCPEnsureServiceTargetRequest,
     ) -> None:
+        if existing is not None and not existing.enabled:
+            raise AppError(
+                code="SERVICE_DISABLED",
+                message="同一 Service Key 的 Service 已停用, 不会自动重新启用",
+                status_code=409,
+            )
         if existing is not None and existing.service_type != payload.service_type:
             raise AppError(
                 code="SERVICE_CONFIGURATION_CONFLICT",
@@ -717,6 +723,12 @@ class MCPBootstrapService:
     ) -> None:
         if existing is None:
             return
+        if not existing.enabled:
+            raise AppError(
+                code="ENDPOINT_DISABLED",
+                message="同一 Endpoint Variant 的 Endpoint 已停用, 不会自动重新启用",
+                status_code=409,
+            )
         if _normalize_base_url(existing.base_url) != base_url or not existing.tls_verify:
             raise AppError(
                 code="SERVICE_ENDPOINT_CONFIGURATION_CONFLICT",

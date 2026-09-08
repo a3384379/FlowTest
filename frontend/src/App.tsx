@@ -1,6 +1,7 @@
 import {
   ApiOutlined,
   AppstoreOutlined,
+  AuditOutlined,
   ApartmentOutlined,
   BarChartOutlined,
   BranchesOutlined,
@@ -63,6 +64,7 @@ const QualityCenterPage = lazy(() => import('./pages/QualityCenterPage'))
 const ReleaseGatePage = lazy(() => import('./pages/ReleaseGatePage'))
 const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const AIChangeSetsPage = lazy(() => import('./pages/AIChangeSetsPage'))
+const MCPChangeSetsPage = lazy(() => import('./pages/MCPChangeSetsPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const DataMockPage = lazy(() => import('./pages/DataMockPage'))
 const PlatformCapabilitiesPage = lazy(() => import('./pages/PlatformCapabilitiesPage'))
@@ -95,6 +97,7 @@ const sectionLabels: Record<ProjectSection, string> = {
   release: '发布门禁',
   ai: 'AI 助手',
   'ai-changes': 'AI 变更集',
+  'mcp-changes': 'MCP 变更集',
   reports: '测试报告',
   platform: '平台管理',
   fabric: '分布式执行面',
@@ -161,6 +164,7 @@ function AuthenticatedShell() {
             navigationItem('release', <SafetyCertificateOutlined />, pathFor('release')),
             navigationItem('ai', <RobotOutlined />, pathFor('ai')),
             navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
+            navigationItem('mcp-changes', <AuditOutlined />, pathFor('mcp-changes')),
             navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
             navigationItem('organization', <TeamOutlined />, '/organization'),
             ...(user?.is_system_admin
@@ -270,6 +274,7 @@ function ApplicationRoutes() {
       <Route path="/projects/:projectId/release" element={<ReleaseGatePage />} />
       <Route path="/projects/:projectId/ai" element={<AIAssistantPage />} />
       <Route path="/projects/:projectId/ai-changes" element={<AIChangeSetsPage />} />
+      <Route path="/projects/:projectId/mcp-changes" element={<MCPChangeSetsPage />} />
       <Route path="/projects/:projectId/reports" element={<ReportsPage />} />
       <Route path="/platform" element={<PlatformCapabilitiesPage />} />
       <Route path="/execution-fabric" element={<ExecutionFabricPage />} />
@@ -297,6 +302,7 @@ function ApplicationRoutes() {
           'release',
           'ai',
           'ai-changes',
+          'mcp-changes',
           'reports',
         ] as const
       ).map((section) => (

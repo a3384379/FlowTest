@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { listImpactRuns } from '../impact/impact-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { listReleaseRisks } from '../quality/quality-service'
@@ -14,11 +14,11 @@ import {
   type AIChangeSetInput,
 } from './ai-change-set-service'
 
-export function useAIChangeSets() {
+export function useAIChangeSets(initialChangeSetId: string | null = null) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useRouteScopedSelection(projectId, initialChangeSetId)
   const changeSets = useQuery({
     queryKey: ['ai-change-sets', projectId],
     queryFn: () => listAIChangeSets(required(projectId)),
@@ -27,9 +27,7 @@ export function useAIChangeSets() {
       query.state.data?.items.some((item) => item.status === 'generating') ? 1_000 : false,
   })
   const currentItems = changeSets.data?.items.filter((item) => item.project_id === projectId) ?? []
-  const activeId = currentItems.some((item) => item.id === selectedId)
-    ? selectedId
-    : (currentItems.at(0)?.id ?? null)
+  const activeId = selection ?? currentItems.at(0)?.id ?? null
   const detail = useQuery({
     queryKey: ['ai-change-set', projectId, activeId],
     queryFn: () => getAIChangeSet(required(activeId)),
@@ -64,7 +62,7 @@ export function useAIChangeSets() {
   async function addChangeSet(input: Omit<AIChangeSetInput, 'project_id'>) {
     try {
       const created = await create.mutateAsync({ ...input, project_id: required(projectId) })
-      setSelectedId(created.id)
+      setSelection(created.id)
       await queryClient.invalidateQueries({ queryKey: ['ai-change-sets', projectId] })
       void message.success('AI Draft Change Set 已提交生成')
       return true
@@ -101,7 +99,7 @@ export function useAIChangeSets() {
     impacts,
     risks,
     activeId,
-    select: setSelectedId,
+    select: setSelection,
     addChangeSet,
     reviewItem,
     creating: create.isPending,

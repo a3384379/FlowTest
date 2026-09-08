@@ -9,6 +9,7 @@ import {
   type WorkflowDefinition,
   type WorkflowExecution,
   type WorkflowExecutionDetail,
+  type Workflow,
   type WorkflowNodeExecution,
   type WorkflowVersionDiff,
 } from '../../lib/api'
@@ -21,11 +22,13 @@ import {
   listGrpcDescriptors,
 } from '../protocols/protocol-service'
 import { useExecutionEvents } from './use-execution-events'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import {
   createWorkflow,
   debugWorkflow,
   diffWorkflowVersions,
   executeWorkflow,
+  getWorkflow,
   getWorkflowExecution,
   listApis,
   listArtifacts,
@@ -40,13 +43,16 @@ import {
 export type CreateWorkflowInput = { name: string; description: string; apiId: string }
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
 
-export function useWorkflows() {
+export function useWorkflows(initialWorkflowId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const token = useAuthStore((store) => store.token)
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
-  const [workflowSelection, setWorkflowSelection] = useState<string | null>(null)
+  const [workflowSelection, setWorkflowSelection] = useRouteScopedSelection(
+    projectId,
+    initialWorkflowId ?? null,
+  )
   const [draftEdit, setDraftEdit] = useState<{
     workflowId: string
     definition: WorkflowDefinition
@@ -105,8 +111,11 @@ export function useWorkflows() {
     queryFn: () => listEventSources(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const workflowId = selectedOrFirst(workflowSelection, workflows.data?.items)
-  const selectedWorkflow = workflows.data?.items.find((item) => item.id === workflowId) ?? null
+  const { workflowId, selectedWorkflow } = useSelectedWorkflow(
+    projectId,
+    workflowSelection,
+    workflows.data?.items,
+  )
   const draftDefinition = draftSource(draftEdit, workflowId, selectedWorkflow)
   const breakpointNodes = draftDefinition.nodes.filter((node) => node.type !== 'start')
   const breakpointNodeId = selectedOrFirst(breakpointSelection, breakpointNodes)
@@ -398,6 +407,29 @@ export function useWorkflows() {
     comparing: diffMutation.isPending,
     replaying: replayMutation.isPending,
   }
+}
+
+function useSelectedWorkflow(
+  projectId: string | null,
+  workflowSelection: string | null,
+  workflows: Workflow[] | undefined,
+) {
+  const workflowId = workflowSelection ?? workflows?.at(0)?.id ?? null
+  const listedWorkflow = workflows?.find((item) => item.id === workflowId) ?? null
+  const workflowDetail = useQuery({
+    queryKey: ['workflow', projectId, workflowId],
+    queryFn: () => getWorkflow(requiredId(projectId), requiredId(workflowId)),
+    enabled: canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
+  })
+  return { workflowId, selectedWorkflow: listedWorkflow ?? workflowDetail.data ?? null }
+}
+
+function canLoadWorkflowDetail(
+  projectId: string | null,
+  workflowId: string | null,
+  listedWorkflow: Workflow | null,
+): boolean {
+  return Boolean(projectId && workflowId && !listedWorkflow)
 }
 
 function initialNodeExecutions(

@@ -19,6 +19,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 
 import type { CreateTestPlanInput } from '../features/task-plans/task-plan-service'
 import type { TestPlanTargetType } from '../features/task-plans/task-plan-service'
@@ -26,12 +27,13 @@ import { useTestPlans } from '../features/task-plans/use-test-plans'
 import type { TestPlan, TestPlanRun } from '../lib/api'
 
 export default function TestPlansPage() {
+  const [searchParams] = useSearchParams()
   const state = useTestPlans()
 
   return (
     <>
       <TaskHeading state={state} />
-      <TaskWorkspace state={state} />
+      <TaskWorkspace state={state} focusedId={searchParams.get('focus') ?? undefined} />
       <TokenCard state={state} />
       <TaskDialogs state={state} />
     </>
@@ -83,11 +85,15 @@ function TaskHeading({ state }: { state: TaskState }) {
   )
 }
 
-function TaskWorkspace({ state }: { state: TaskState }) {
+function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: string }) {
   return (
     <div className="task-plan-grid">
       <Card title="测试计划" loading={state.plans.isLoading}>
-        <PlanTable items={state.plans.data?.items ?? []} onRun={state.execute} />
+        <PlanTable
+          items={state.plans.data?.items ?? []}
+          focusedId={focusedId}
+          onRun={state.execute}
+        />
       </Card>
       <Card title="运行队列" loading={state.runs.isLoading}>
         <RunTable items={state.runs.data?.items ?? []} onCancel={state.cancel} />
@@ -150,13 +156,22 @@ function TaskDialogs({ state }: { state: TaskState }) {
   )
 }
 
-function PlanTable({ items, onRun }: { items: TestPlan[]; onRun: (id: string) => void }) {
+function PlanTable({
+  items,
+  focusedId,
+  onRun,
+}: {
+  items: TestPlan[]
+  focusedId?: string
+  onRun: (id: string) => void
+}) {
   return (
     <Table
       rowKey="id"
       size="small"
       pagination={false}
       dataSource={items}
+      rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       locale={{ emptyText: '暂无测试计划' }}
       columns={[
         { title: '名称', dataIndex: 'name' },

@@ -20,6 +20,7 @@ export type ProjectSection =
   | 'release'
   | 'ai'
   | 'ai-changes'
+  | 'mcp-changes'
   | 'reports'
   | 'platform'
   | 'fabric'
@@ -64,6 +65,7 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'release',
     'ai',
     'ai-changes',
+    'mcp-changes',
     'reports',
     'platform',
     'fabric',

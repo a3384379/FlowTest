@@ -44,7 +44,8 @@ export default function WorkflowsPage() {
   const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
   const [flowProposalOpen, setFlowProposalOpen] = useState(false)
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
-  const state = useWorkflows()
+  const initialWorkflowId = searchParams.get('focus') ?? undefined
+  const state = useWorkflows(initialWorkflowId)
 
   async function create(input: Parameters<typeof state.addWorkflow>[0]) {
     await state.addWorkflow(input)
