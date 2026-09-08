@@ -15,6 +15,14 @@ from app.domain.integration_plans import (
     PlanValidationResult,
 )
 from app.domain.mcp_read import MCPReadEnvelope
+from app.schemas.mcp_bootstrap import (
+    MCPEnsureEnvironmentRequest,
+    MCPEnsureEnvironmentResponse,
+    MCPEnsureProjectRequest,
+    MCPEnsureProjectResponse,
+    MCPEnsureServiceTargetRequest,
+    MCPEnsureServiceTargetResponse,
+)
 from app.schemas.mcp_connection import MCPConnectionRequest, MCPConnectionResponse
 from app.schemas.mcp_continuous import (
     MCPAffectedFlowsRequest,
@@ -102,6 +110,57 @@ class MCPReadGatewayClient:
             path="/api/v1/mcp/connection", payload=request.model_dump(mode="json"), token=token
         )
         return _validate_response(response, MCPConnectionResponse)
+
+    async def ensure_project(
+        self,
+        request: MCPEnsureProjectRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPEnsureProjectResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/bootstrap/projects/ensure",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers=(
+                {"Idempotency-Key": idempotency_key} if idempotency_key is not None else None
+            ),
+        )
+        return _validate_response(response, MCPEnsureProjectResponse)
+
+    async def ensure_test_environment(
+        self,
+        request: MCPEnsureEnvironmentRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPEnsureEnvironmentResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/bootstrap/environments/ensure",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers=(
+                {"Idempotency-Key": idempotency_key} if idempotency_key is not None else None
+            ),
+        )
+        return _validate_response(response, MCPEnsureEnvironmentResponse)
+
+    async def ensure_service_target(
+        self,
+        request: MCPEnsureServiceTargetRequest,
+        *,
+        idempotency_key: str | None = None,
+        token: str | None = None,
+    ) -> MCPEnsureServiceTargetResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/bootstrap/service-targets/ensure",
+            payload=request.model_dump(mode="json"),
+            token=token,
+            additional_headers=(
+                {"Idempotency-Key": idempotency_key} if idempotency_key is not None else None
+            ),
+        )
+        return _validate_response(response, MCPEnsureServiceTargetResponse)
 
     async def get_project(
         self,

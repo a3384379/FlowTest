@@ -40,13 +40,17 @@ CONTINUOUS_SKILL_PROFILES = (
         ),
         (
             "flowtest.inspect_connection",
+            "flowtest.ensure_project",
+            "flowtest.ensure_service_target",
+            "flowtest.ensure_test_environment",
             "flowtest.ingest_java_source_snapshot",
             "flowtest.ingest_database_evidence",
             "flowtest.inspect_entity_mapping",
         ),
         ("mcp:read", "mcp:evidence:write"),
-        (),
+        ("mcp:project:bootstrap",),
         (
+            "bootstrap_assets",
             "select_project",
             "inspect_contracts",
             "create_context",
@@ -140,7 +144,7 @@ class ContinuousQASkillManifest(BaseModel):
 
     schema_version: Literal["flowtest-skill-manifest-v1"]
     name: ContinuousSkillName
-    version: Literal["1.0.0-rc.1"]
+    version: Literal["1.1.0-rc.1"]
     minimum_mcp_version: Literal["s60-continuous-qa-v1"]
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]

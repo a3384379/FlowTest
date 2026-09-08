@@ -1,11 +1,12 @@
 # FlowTest 开发进度
 
-最后更新：2026-09-06（Asia/Shanghai）
+最后更新：2026-09-08（Asia/Shanghai）
 
-## 最新结论：V6.2 已合并，S61A 连接契约开发中
+## 最新结论：V6.2 已合并，S61B 初始化契约已完成本地实现
 
 V6.2 收尾 PR #89 已合并，2026-09-06 启动查询确认合并后 main 七项门禁全部成功。
-现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；当前 S61A 本地实现完成，待 PR 复审/CI 和合并，
+现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；S61A 已由 PR #90 合并，当前 S61B
+项目/环境/Service Target 受控初始化已完成本地实现与定向回归，待 PR 复审/CI 和合并；
 不将方案或定向回归算作后续阶段完成。阶段范围见 [能力审计](mcp-capability-audit.md) 和
 [ADR 0052](adr/0052-mcp-onboarding-connection-and-scope.md)。
 
@@ -38,8 +39,9 @@ P0/P1 为 0，精确 Head 与 Merge 后 Main Push 七项门禁全部成功；S53
 最终 PR 与 Merge 后 Main Push 七项门禁全部成功。H1 真实 Key Rotation 已由 PR #63 普通 Squash Merge，
 最终 P0/P1 为 0，PR 与 Merge 后 Main Push 七项门禁全部成功。S55 Sandbox Preview Beta 已由 PR #64
 普通 Squash Merge，合并后 Main 七项门禁全部成功。跨阶段最终审计 PR #69 已清除全部
-P0/P1，最终候选七项门禁全绿并普通 Squash Merge；合并后 Main 七项门禁也全部成功。当前分支
-Migration/Standalone 单 Head 为 `20260831_0051`。V6 RC 候选自动化证据已闭环，尚未创建正式
+P0/P1，最终候选七项门禁全绿并普通 Squash Merge；合并后 Main 七项门禁也全部成功。历史主线
+Migration/Standalone 单 Head 为 `20260831_0051`；S61B 分支新增迁移基线为 `20260908_0052`。
+V6 RC 候选自动化证据已闭环，尚未创建正式
 Tag/Release，连续 RC、安全审批和人工签署等 GA 外部门槛仍未满足，
 `GA_READY=NO`。
 V6.1 前置阶段 S57.0 已按三个独立 PR 完成：PR #71 收口 Planner/Compiler/Data 正确性，PR #72
@@ -74,6 +76,22 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
   实机测试前置要求。
 - Windows 自动打包与 CI、后端/前端自动化测试、Compose Playwright 继续保留；连续 RC 观察、
   外部恢复演练、安全审批、生产发布授权及人工签署不因本次决定自动豁免或视为完成。
+
+## S61B 项目、环境与 Service Target 初始化（本地实现）
+
+- 新增 `flowtest.ensure_project`、`flowtest.ensure_test_environment` 和
+  `flowtest.ensure_service_target` 三个严格 MCP 工具；默认 Dry Run，写入必须具备
+  `mcp:project:bootstrap` 与 `Idempotency-Key`。
+- 第一个项目使用组织级幂等回执和组织内 `external_key` 唯一约束；同键重放、不同参数冲突、
+  不同键复用和并发唯一性均不依赖伪造项目 ID。创建后仅授予既有产品规则中的 Owner 成员，
+  不修改成员权限、凭据或出站策略。
+- 环境只允许 `test`/`sandbox`，Service Target 只绑定这两类环境；TLS 默认且只能保持开启，
+  URL 凭据、查询参数、片段、敏感 Header/变量和未获批准的网络目标均拒绝，已有配置冲突不覆盖。
+- 新增 Alembic `20260908_0052` 与 Standalone 同步基线，更新 MCP Golden、连接 action、
+  Onboarding Skill 和自包含评测副本。定向 API/契约/Manifest/Standalone 测试已通过；尚未
+  将本地实现写成已合并或主线 CI 证据。
+
+S61B 完成后按顺序进入 S61C 有界契约导入；S61D/S61E 与 S62A/S62B 仍未开始。
 
 ## 已完成实现并合并：V6.1 S57.0 Foundation Correctness
 

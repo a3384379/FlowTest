@@ -16,6 +16,7 @@ ConnectionAction = Literal[
     "write_context_evidence",
     "propose_flow",
     "request_approved_sandbox_preview",
+    "bootstrap_project_assets",
 ]
 
 

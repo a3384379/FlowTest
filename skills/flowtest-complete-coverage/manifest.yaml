@@ -1,6 +1,6 @@
 schema_version: flowtest-skill-manifest-v1
 name: flowtest-complete-coverage
-version: 1.0.0-rc.1
+version: 1.1.0-rc.1
 minimum_mcp_version: s60-continuous-qa-v1
 required_tools:
 - flowtest.list_projects

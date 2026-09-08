@@ -102,6 +102,67 @@ class ProjectService:
         await self._session.refresh(project)
         return ProjectAccess(project=project, role=ProjectRole.OWNER)
 
+    async def create_bootstrap(
+        self,
+        *,
+        actor: User,
+        organization_id: UUID,
+        name: str,
+        description: str,
+        external_key: str | None,
+        service_account_id: UUID,
+    ) -> ProjectAccess:
+        """Create a project for an explicitly scoped MCP bootstrap principal.
+
+        This is intentionally separate from the user-facing create path: a
+        service account has no organization role and must be authorized by the
+        dedicated bootstrap scope.  The new project still receives the normal
+        owner membership so a human can review it; existing project members are
+        never modified by bootstrap.
+        """
+
+        context = get_tenant_context()
+        if (
+            context is None
+            or context.service_account_id != service_account_id
+            or context.organization_id != organization_id
+            or "mcp:project:bootstrap" not in context.scopes
+        ):
+            raise AppError(
+                code="MCP_SCOPE_REQUIRED",
+                message="服务账号缺少项目初始化权限范围",
+                status_code=403,
+            )
+        await OrganizationQuotaService(self._session).enforce(
+            organization_id=organization_id,
+            dimension=QuotaDimension.PROJECT_COUNT,
+        )
+        project = Project(
+            organization_id=organization_id,
+            external_key=external_key,
+            name=name.strip(),
+            description=description.strip(),
+            retention_days=settings.retention_default_days,
+            outbound_policy_enabled=settings.runtime_profile is not RuntimeProfile.STANDALONE,
+            created_by_id=actor.id,
+        )
+        self._projects.add(project)
+        await self._session.flush()
+        self._projects.add(
+            ProjectMember(project_id=project.id, user_id=actor.id, role=ProjectRole.OWNER)
+        )
+        self._audit.record(
+            actor_user_id=actor.id,
+            organization_id=organization_id,
+            project_id=project.id,
+            action="project.bootstrap_created",
+            resource_type="project",
+            resource_id=project.id,
+            details={"service_account_id": str(service_account_id)},
+        )
+        await self._session.flush()
+        return ProjectAccess(project=project, role=ProjectRole.OWNER)
+
     async def get(self, *, actor: User, project_id: UUID) -> ProjectAccess:
         return await self.authorize(actor=actor, project_id=project_id, editing=False)
 
@@ -484,6 +545,31 @@ class ProjectService:
         if not role.allows(required):
             raise AppError(code="PROJECT_FORBIDDEN", message="没有所需的项目权限", status_code=403)
         return ProjectAccess(project=project, role=role)
+
+    async def authorize_bootstrap(self, *, project_id: UUID) -> ProjectAccess:
+        """Authorize a project for the dedicated MCP bootstrap scope."""
+
+        context = get_tenant_context()
+        if context is None or context.service_account_id is None:
+            raise AppError(
+                code="MCP_AUTHENTICATION_REQUIRED",
+                message="MCP 初始化需要服务账号令牌",
+                status_code=401,
+            )
+        if "mcp:project:bootstrap" not in context.scopes:
+            raise AppError(
+                code="MCP_SCOPE_REQUIRED",
+                message="服务账号缺少项目初始化权限范围",
+                status_code=403,
+            )
+        project = await self._projects.get(project_id)
+        if (
+            project is None
+            or project.organization_id is None
+            or project.organization_id != context.organization_id
+        ):
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        return ProjectAccess(project=project, role=ProjectRole.EDITOR)
 
     async def _tenant_for_create(
         self,
