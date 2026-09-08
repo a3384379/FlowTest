@@ -2,14 +2,14 @@
 
 最后更新：2026-09-08（Asia/Shanghai）
 
-## 最新结论：V6.2 已合并，S61B 已合并，S61C 契约导入核心实现完成
+## 最新结论：V6.2 已合并，S61/S62 全部实现完成，集中门禁待执行
 
 V6.2 收尾 PR #89 已合并，2026-09-06 启动查询确认合并后 main 七项门禁全部成功。
 现按 MCP Closed Loop v1.1 方案串行推进 S61/S62；S61A 已由 PR #90 合并，S61B 项目/环境/
-Service Target 受控初始化已由 PR #91 合并并完成合并后门禁；当前 S61C 契约导入与 inspect_contract
-分页核心实现及定向回归完成，待本阶段集中 PR 门禁；
-不将方案或定向回归算作后续阶段完成。阶段范围见 [能力审计](mcp-capability-audit.md) 和
-[ADR 0052](adr/0052-mcp-onboarding-connection-and-scope.md)。
+Service Target 受控初始化已由 PR #91 合并并完成合并后门禁；S61C～S61E、S62A/S62B 的代码、迁移、
+Skill、Manifest、Golden 和定向回归均已完成，当前只待本阶段一次集中 PR 门禁、复审和主线验证；
+不将方案或定向回归冒充远程合并完成。阶段范围见 [能力审计](mcp-capability-audit.md)、
+[ADR 0052](adr/0052-mcp-onboarding-connection-and-scope.md) 和 [ADR 0054](adr/0054-s62-planning-and-preview-control.md)。
 
 本轮保留启动时 `deploy/ruoyi/compose.yaml` 的用户改动；不执行真实若依业务操作，不读取
 本机凭据补权限。真实宿主尚未暴露 FlowTest MCP，实际模型闭环暂未验收，隔离测试与此分开记录。
@@ -103,7 +103,30 @@ PR #37 远程源码验收。用户已授权提前进入 V4，S32～S36 小型化
 - 定向测试、旧 Import API 回归、MCP 工具注册、Ruff/mypy 已通过；S61C 完成后统一执行本阶段 PR 门禁，
   不重复触发容量/Compact 重门禁。
 
-S61C 完成后按顺序进入 S61D 资源发现、Readiness 与有限目标诊断；S61E 与 S62A/S62B 仍未开始。
+S61C 之后已完成 S61D 资源发现/Readiness/有限目标诊断、S61E Skill 整合与零接入交接、S62A 分析准备
+与 Test Plan 建议、S62B Preview 取消/结果续接；具体验证和未验证的真实宿主/LLM 边界见下节。
+
+## S61D～S62B MCP Closed Loop（开发完成，待集中门禁）
+
+- 工具目录从 44 增至 50：新增 `find_assets`、`inspect_project_readiness`、`check_service_target`、
+  `prepare_change_regression`、`propose_test_plan_update`、`cancel_preview`。所有入口均有严格 Schema、
+  Scope、组织/项目授权、脱敏、审计和稳定错误边界；旧 38 个工具保持兼容。
+- S61D 资源查询使用显式项目范围和真实分页；Readiness 区分可生成与可 Preview，并只返回凭据引用状态；
+  Target 检查复用既有 connectivity，明确 API Host 与 Worker 网络的差异。Proposal/Execution 读取补充
+  人工动作、可信深链、Main/Cleanup 状态和安全摘要。
+- S61E 五个 Skill 已接入 tools/list、版本/Scope 诊断、零项目初始化、资源续接、有界 A/B 双提案和
+  Graceful Cancel；缺工具只报告 `TOOL_UNAVAILABLE`/`SERVER_VERSION_UNSUPPORTED`，不回退浏览器、JWT、
+  SQL 或 Docker。生成 Skill 仍不自动 Accept、Apply、Publish 或 Execute。
+- S62A `prepare_change_regression` 复用 ChangeRegression/Impact/Maintenance 并以固定 Context 前后版本
+  生成分析证据；`propose_test_plan_update` 仅创建共享 AIChangeSet 的 typed `test_plan_update` Draft，
+  未发布依赖显式标记，人工接受后才可经 TestPlanService 物化。S62B `cancel_preview` 只请求现有
+  WorkflowService 的 Graceful Cancel，重复/终态请求幂等且不强制取消。
+- 新增 Alembic `20260908_0053`；Standalone/Transfer 基线同步到 `20260908_0053`，旧 SQLite 的 CHECK
+  约束重建保留已有数据和索引，downgrade 会先清理新类型再恢复旧约束。
+- 本轮定向证据：S56/S60 Skill 合约、S61D 资源发现、S62 规划、MCP SDK 注册、Golden、Standalone Runtime/
+  Transfer、Ruff、mypy 和五个 Skill Eval 均通过。尚未进行真实宿主/真实 LLM、若依业务、人工审核/Preview；
+  这些不因隔离 Fixture 通过而被标记完成。按用户要求不安排实机、公司 Windows、容量或 Compact 重门禁，
+  Windows 自动 CI 仍保留。
 
 ## 已完成实现并合并：V6.1 S57.0 Foundation Correctness
 

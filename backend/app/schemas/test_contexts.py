@@ -297,3 +297,7 @@ class FlowSpecProposalInspectionResponse(BaseModel):
     compilation: IntegrationPlanCompilation | None
     existing_definition: WorkflowDefinition | None
     proposed_definition: WorkflowDefinition
+    human_actions_required: list[str] = Field(default_factory=list, max_length=10)
+    review_url: str | None = Field(default=None, max_length=1024)
+    approval_url: str | None = Field(default=None, max_length=1024)
+    next_action: str = Field(default="重新读取提案状态", max_length=400)

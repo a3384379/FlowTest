@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SKILL_NAME = "flowtest-generate-integration-flow"
 SKILL_MANIFEST_SCHEMA_VERSION = "flowtest-skill-manifest-v1"
-SKILL_VERSION = "1.0.0-rc.2"
-SKILL_MINIMUM_MCP_VERSION = "s55-sandbox-preview-v1"
+SKILL_VERSION = "1.1.0-rc.1"
+SKILL_MINIMUM_MCP_VERSION = "s61-mcp-connection-v1"
 
 SKILL_REQUIRED_TOOLS = (
     "flowtest.list_projects",
@@ -30,8 +30,12 @@ SKILL_REQUIRED_TOOLS = (
     "flowtest.validate_flowspec",
     "flowtest.propose_flow_draft",
     "flowtest.inspect_flow_proposal",
+    "flowtest.find_assets",
+    "flowtest.inspect_project_readiness",
 )
 SKILL_OPTIONAL_TOOLS = (
+    "flowtest.inspect_connection",
+    "flowtest.check_service_target",
     "flowtest.inspect_entity_mapping",
     "flowtest.inspect_data_profile",
     "flowtest.preview_contract_import",
@@ -123,8 +127,8 @@ class IntegrationFlowSkillManifest(BaseModel):
 
     schema_version: Literal["flowtest-skill-manifest-v1"]
     name: Literal["flowtest-generate-integration-flow"]
-    version: Literal["1.0.0-rc.1", "1.0.0-rc.2"]
-    minimum_mcp_version: Literal["s55-sandbox-preview-v1"]
+    version: Literal["1.0.0-rc.1", "1.0.0-rc.2", "1.1.0-rc.1"]
+    minimum_mcp_version: Literal["s55-sandbox-preview-v1", "s61-mcp-connection-v1"]
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]
     required_scopes: list[str] = Field(min_length=1)

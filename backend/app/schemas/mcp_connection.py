@@ -18,6 +18,9 @@ ConnectionAction = Literal[
     "request_approved_sandbox_preview",
     "bootstrap_project_assets",
     "import_contract",
+    "prepare_change_regression",
+    "propose_test_plan_update",
+    "cancel_sandbox_preview",
 ]
 
 

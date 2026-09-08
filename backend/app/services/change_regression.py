@@ -111,6 +111,7 @@ class ChangeRegressionService:
         actor: User,
         project_id: UUID,
         payload: ChangeRegressionRunCreate,
+        commit: bool = True,
     ) -> ChangeRegressionBundle:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         plan = await self._project_plan(project_id, payload.test_plan_id)
@@ -132,6 +133,7 @@ class ChangeRegressionService:
                 openapi_diffs=payload.openapi_diffs,
                 schema_diffs=payload.schema_diffs,
             ),
+            commit=commit,
         )
         selected_assets = _selected_assets(impact)
         plan_items = list(
@@ -449,7 +451,10 @@ class ChangeRegressionService:
                 "missing_test_count": len(missing_tests),
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         bundle = await self._repository.get_bundle(run.id)
         if bundle is None:
             raise AppError(

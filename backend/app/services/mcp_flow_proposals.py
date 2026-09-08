@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.flow_spec import FlowSpecIssue
@@ -99,6 +100,21 @@ class MCPFlowProposalService:
             compilation=proposal.compilation,
             existing_definition=proposal.existing_definition,
             proposed_definition=proposal.proposed_definition,
+            human_actions_required=_proposal_actions(
+                review_status=proposal.view.item.review_status,
+                applied=proposal.view.change_set.applied_at is not None,
+            ),
+            review_url=_ui_link(f"/projects/{project_id}/flow-spec/proposals/{change_set_id}"),
+            approval_url=(
+                _ui_link(f"/projects/{project_id}/flow-spec/proposals/{change_set_id}/preview")
+                if proposal.view.item.review_status == "accepted"
+                and proposal.view.change_set.applied_at is None
+                else None
+            ),
+            next_action=_proposal_next_action(
+                review_status=proposal.view.item.review_status,
+                applied=proposal.view.change_set.applied_at is not None,
+            ),
         )
 
     async def _preview(
@@ -207,6 +223,27 @@ def require_mcp_flow_propose_scope() -> UUID:
             status_code=403,
         )
     return tenant.service_account_id
+
+
+def _ui_link(path: str) -> str:
+    """Build a trusted UI hand-off link without carrying a token or user input."""
+
+    origin = next((item.strip().rstrip("/") for item in settings.cors_origins if item.strip()), "")
+    return f"{origin}{path}" if origin else path
+
+
+def _proposal_actions(*, review_status: str, applied: bool) -> list[str]:
+    if applied:
+        return ["提案已经应用; 请读取执行或 Preview 证据"]
+    if review_status == "pending":
+        return ["请由人工检查并接受或拒绝该 Proposal"]
+    if review_status == "accepted":
+        return ["请创建一次性 Sandbox Preview Approval"]
+    return ["提案已拒绝; 如需继续请生成新的修订"]
+
+
+def _proposal_next_action(*, review_status: str, applied: bool) -> str:
+    return _proposal_actions(review_status=review_status, applied=applied)[0]
 
 
 def _source_ref(payload: FlowSpecProposalRequest) -> str:

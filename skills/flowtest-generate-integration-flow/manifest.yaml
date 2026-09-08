@@ -1,7 +1,7 @@
 schema_version: "flowtest-skill-manifest-v1"
 name: "flowtest-generate-integration-flow"
-version: "1.0.0-rc.2"
-minimum_mcp_version: "s55-sandbox-preview-v1"
+version: "1.1.0-rc.1"
+minimum_mcp_version: "s61-mcp-connection-v1"
 required_tools:
   - "flowtest.list_projects"
   - "flowtest.inspect_project"
@@ -20,7 +20,11 @@ required_tools:
   - "flowtest.validate_flowspec"
   - "flowtest.propose_flow_draft"
   - "flowtest.inspect_flow_proposal"
+  - "flowtest.find_assets"
+  - "flowtest.inspect_project_readiness"
 optional_tools:
+  - "flowtest.inspect_connection"
+  - "flowtest.check_service_target"
   - "flowtest.inspect_entity_mapping"
   - "flowtest.inspect_data_profile"
   - "flowtest.preview_contract_import"

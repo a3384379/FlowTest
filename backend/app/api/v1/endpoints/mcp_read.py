@@ -5,10 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 
-from app.api.dependencies import MCPCurrent, SessionDependency
+from app.api.dependencies import MCPBootstrapCurrent, MCPCurrent, SessionDependency
 from app.domain.evidence import DataProfile, SourceSnapshot
 from app.domain.mcp_read import MCPCallType, MCPReadCall, input_schema_hash
 from app.schemas.flow_spec import FlowSpecDiffRequest, FlowSpecValidateRequest
+from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_read import MCPReadResponse
 from app.schemas.test_engineering import TestEngineeringGenerateRequest
 from app.services.mcp_read import MCPReadService
@@ -267,6 +268,73 @@ async def inspect_run_evidence(
         actor=principal.actor,
         execution_id=execution_id,
         call=_call(request, "inspect_run_evidence", f"flowtest://runs/{execution_id}/evidence"),
+    )
+    return _response(result)
+
+
+@router.post("/projects/{project_id}/assets/find", response_model=MCPReadResponse)
+async def find_assets(
+    project_id: UUID,
+    payload: MCPFindAssetsRequest,
+    request: Request,
+    session: SessionDependency,
+    principal: MCPCurrent,
+) -> MCPReadResponse:
+    if payload.project_id != project_id:
+        from app.core.errors import AppError
+
+        raise AppError(code="PROJECT_ID_MISMATCH", message="项目 ID 与查询不一致", status_code=422)
+    from app.services.mcp_discovery import MCPDiscoveryService
+
+    result = await MCPDiscoveryService(session).find_assets(
+        actor=principal.actor,
+        payload=payload,
+        call=_call(request, "find_assets", f"flowtest://projects/{project_id}/assets"),
+    )
+    return _response(result)
+
+
+@router.get("/projects/{project_id}/readiness", response_model=MCPReadResponse)
+async def inspect_project_readiness(
+    project_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    principal: MCPCurrent,
+) -> MCPReadResponse:
+    from app.services.mcp_discovery import MCPDiscoveryService
+
+    result = await MCPDiscoveryService(session).inspect_project_readiness(
+        actor=principal.actor,
+        project_id=project_id,
+        call=_call(
+            request, "inspect_project_readiness", f"flowtest://projects/{project_id}/readiness"
+        ),
+    )
+    return _response(result)
+
+
+@router.post(
+    "/projects/{project_id}/service-targets/{endpoint_id}/check",
+    response_model=MCPReadResponse,
+)
+async def check_service_target(
+    project_id: UUID,
+    endpoint_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    principal: MCPBootstrapCurrent,
+) -> MCPReadResponse:
+    from app.services.mcp_discovery import MCPDiscoveryService
+
+    result = await MCPDiscoveryService(session).check_service_target(
+        actor=principal.actor,
+        project_id=project_id,
+        endpoint_id=endpoint_id,
+        call=_call(
+            request,
+            "check_service_target",
+            f"flowtest://projects/{project_id}/service-targets/{endpoint_id}",
+        ),
     )
     return _response(result)
 

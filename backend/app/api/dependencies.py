@@ -15,6 +15,10 @@ from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import token_service
 from app.domain.contract_hub import PactBrokerSource, ProviderInteractionVerifier
+from app.domain.mcp_planning import (
+    MCP_REGRESSION_PREPARE_SCOPE,
+    MCP_TEST_PLAN_PROPOSE_SCOPE,
+)
 from app.domain.mcp_read import MCP_READ_SCOPE
 from app.domain.runtime_profiles import RuntimeProfile
 from app.domain.sandbox_preview import MCP_PREVIEW_EXECUTE_SCOPE
@@ -255,6 +259,38 @@ async def get_mcp_contract_import_principal(
         reset_tenant_context(context_token)
 
 
+async def get_mcp_regression_prepare_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_REGRESSION_PREPARE_SCOPE,
+        missing_scope_message="服务账号缺少 Change Regression 分析准备权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
+async def get_mcp_test_plan_propose_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_TEST_PLAN_PROPOSE_SCOPE,
+        missing_scope_message="服务账号缺少 Test Plan 建议权限",
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
 async def _authenticate_mcp_principal(
     *,
     session: AsyncSession,
@@ -338,6 +374,16 @@ MCPBootstrapCurrent = Annotated[
 MCPContractImportCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_contract_import_principal),
+]
+
+MCPRegressionPrepareCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_regression_prepare_principal),
+]
+
+MCPTestPlanProposeCurrent = Annotated[
+    MCPAuthenticatedPrincipal,
+    Depends(get_mcp_test_plan_propose_principal),
 ]
 
 

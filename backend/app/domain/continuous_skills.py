@@ -37,12 +37,15 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.inspect_context_requirements",
             "flowtest.ingest_external_evidence",
             "flowtest.inspect_test_context",
+            "flowtest.find_assets",
+            "flowtest.inspect_project_readiness",
         ),
         (
             "flowtest.inspect_connection",
             "flowtest.ensure_project",
             "flowtest.ensure_service_target",
             "flowtest.ensure_test_environment",
+            "flowtest.check_service_target",
             "flowtest.ingest_java_source_snapshot",
             "flowtest.ingest_database_evidence",
             "flowtest.inspect_entity_mapping",
@@ -65,13 +68,18 @@ CONTINUOUS_SKILL_PROFILES = (
         (
             "flowtest.list_projects",
             "flowtest.inspect_project",
+            "flowtest.find_assets",
             "flowtest.inspect_contract",
             "flowtest.inspect_test_evidence",
             "flowtest.analyze_test_coverage",
             "flowtest.generate_test_design",
             "flowtest.propose_test_design",
         ),
-        ("flowtest.inspect_source_evidence",),
+        (
+            "flowtest.inspect_source_evidence",
+            "flowtest.inspect_project_readiness",
+            "flowtest.propose_test_plan_update",
+        ),
         ("mcp:read", "mcp:write"),
         (),
         (
@@ -89,6 +97,7 @@ CONTINUOUS_SKILL_PROFILES = (
         (
             "flowtest.list_projects",
             "flowtest.inspect_project",
+            "flowtest.find_assets",
             "flowtest.inspect_change_regression",
             "flowtest.inspect_change_impact",
             "flowtest.inspect_context_diff",
@@ -98,12 +107,18 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.propose_maintenance",
             "flowtest.inspect_flow_proposal",
         ),
-        ("flowtest.preview_flow_proposal",),
-        ("mcp:read", "mcp:flow:propose"),
-        ("mcp:preview:execute",),
+        (
+            "flowtest.preview_flow_proposal",
+            "flowtest.inspect_project_readiness",
+            "flowtest.propose_test_plan_update",
+        ),
+        ("mcp:read", "mcp:flow:propose", "mcp:regression:prepare"),
+        ("mcp:preview:execute", "mcp:test-plan:propose"),
         (
             "select_project",
+            "discover_assets",
             "inspect_existing_regression",
+            "prepare_analysis",
             "compare_context",
             "inspect_affected_flows",
             "dry_run",
@@ -117,6 +132,7 @@ CONTINUOUS_SKILL_PROFILES = (
         (
             "flowtest.list_projects",
             "flowtest.inspect_project",
+            "flowtest.find_assets",
             "flowtest.inspect_run_evidence",
             "flowtest.diagnose_failure",
             "flowtest.export_flowspec",
@@ -124,7 +140,12 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.propose_repair",
             "flowtest.inspect_flow_proposal",
         ),
-        ("flowtest.preview_flow_proposal", "flowtest.inspect_test_context"),
+        (
+            "flowtest.preview_flow_proposal",
+            "flowtest.inspect_test_context",
+            "flowtest.inspect_project_readiness",
+            "flowtest.cancel_preview",
+        ),
         ("mcp:read", "mcp:flow:propose"),
         ("mcp:preview:execute",),
         (
@@ -146,8 +167,8 @@ class ContinuousQASkillManifest(BaseModel):
 
     schema_version: Literal["flowtest-skill-manifest-v1"]
     name: ContinuousSkillName
-    version: Literal["1.1.0-rc.1"]
-    minimum_mcp_version: Literal["s60-continuous-qa-v1"]
+    version: Literal["1.2.0-rc.1"]
+    minimum_mcp_version: Literal["s61-mcp-connection-v1"]
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]
     required_scopes: list[str] = Field(min_length=1)

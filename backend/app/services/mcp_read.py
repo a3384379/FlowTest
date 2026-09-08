@@ -210,16 +210,28 @@ class MCPReadService:
                 raise AppError(
                     code="API_DEFINITION_NOT_FOUND", message="API 定义不存在", status_code=404
                 )
-            definitions = [definition]
-            total = 1
+            if service_id is not None and definition.service_id != service_id:
+                definitions = []
+            else:
+                definitions = [definition]
+            total = len(definitions)
         entries: list[JsonValue] = []
         for definition in definitions:
             current_version = await self._assets.get_version(
                 definition_id=definition.id,
-                version=version or definition.current_version,
+                version=version if version is not None else definition.current_version,
             )
-            if current_version is not None:
-                entries.append(_contract_summary(definition, current_version))
+            if current_version is None:
+                continue
+            if method is not None and current_version.method.upper() != method.upper():
+                continue
+            if path is not None and current_version.path != path:
+                continue
+            entries.append(_contract_summary(definition, current_version))
+        if api_definition_id is not None:
+            # An explicit definition is a point lookup, so report the filtered result rather
+            # than claiming a match when the requested version/method/path is absent.
+            total = len(entries)
         return await self._envelope(
             actor=actor,
             call=call,
@@ -307,8 +319,16 @@ class MCPReadService:
         )
         data: dict[str, JsonValue] = {
             "execution": _execution_summary(execution),
+            "main_status": execution.main_status,
+            "cleanup_status": execution.cleanup_status,
+            "cleanup_summary": _cleanup_summary(execution.cleanup_report),
             "nodes": [_node_execution_summary(node) for node in nodes],
             "children": [_execution_summary(child) for child in children],
+            "human_actions_required": cast(list[JsonValue], _execution_actions(execution)),
+            "next_action": _execution_next_action(execution),
+            "execution_url": (
+                f"/projects/{execution.project_id}/workflows/executions/{execution.id}"
+            ),
         }
         return await self._envelope(
             actor=actor,
@@ -836,10 +856,40 @@ def _execution_summary(execution: WorkflowExecution) -> dict[str, JsonValue]:
         "workflow_version_id": str(execution.workflow_version_id),
         "environment_id": str(execution.environment_id),
         "status": execution.status,
+        "main_status": execution.main_status,
+        "cleanup_status": execution.cleanup_status,
+        "cleanup_summary": _cleanup_summary(execution.cleanup_report),
         "error_code": execution.error_code,
         "dataset_row_index": execution.dataset_row_index,
         "started_at": _timestamp(execution.started_at),
         "completed_at": _timestamp(execution.completed_at),
+    }
+
+
+def _cleanup_summary(value: object) -> dict[str, JsonValue]:
+    """Return counts and flags from the persisted cleanup report, never messages."""
+
+    if not isinstance(value, dict):
+        return {
+            "activated_count": 0,
+            "skipped_count": 0,
+            "required_failure_count": 0,
+            "best_effort_failure_count": 0,
+            "warning_count": 0,
+            "force_cancel_skipped": False,
+        }
+
+    def _count(key: str) -> int:
+        item = value.get(key)
+        return len(item) if isinstance(item, (list, tuple)) else 0
+
+    return {
+        "activated_count": _count("activated_node_ids"),
+        "skipped_count": _count("skipped_node_ids"),
+        "required_failure_count": _count("required_failures"),
+        "best_effort_failure_count": _count("best_effort_failures"),
+        "warning_count": _count("warnings"),
+        "force_cancel_skipped": value.get("force_cancel_skipped") is True,
     }
 
 
@@ -855,6 +905,27 @@ def _node_execution_summary(node: WorkflowNodeExecution) -> dict[str, JsonValue]
         "started_at": _timestamp(node.started_at),
         "completed_at": _timestamp(node.completed_at),
     }
+
+
+def _execution_actions(execution: WorkflowExecution) -> list[str]:
+    if execution.run_purpose == "preview" and execution.status in {"queued", "running"}:
+        return ["如需停止 Preview，请使用有权控制该执行的 Graceful Cancel"]
+    if execution.status == "failed":
+        return ["请查看失败分类并在人工审核后决定是否生成修复提案"]
+    if execution.status == "cancelled":
+        return ["执行已取消；请检查 Cleanup 证据"]
+    return []
+
+
+def _execution_next_action(execution: WorkflowExecution) -> str:
+    actions = _execution_actions(execution)
+    if actions:
+        return actions[0]
+    if execution.status == "passed":
+        return "读取完整的安全执行证据"
+    if execution.status == "running":
+        return "等待执行完成后重新读取证据"
+    return "根据执行状态选择下一步"
 
 
 def _timestamp(value: datetime | None) -> str | None:

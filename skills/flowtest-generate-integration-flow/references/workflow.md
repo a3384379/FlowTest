@@ -12,7 +12,7 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 | Plan | `plan_integration_test`, `validate_integration_plan` | Deterministic operations, bindings, data/oracles, cleanup, and validation diagnostics |
 | Compile | `compile_integration_flowspec`, `explain_compiler_diagnostics`, `validate_flowspec` | Traceable FlowSpec and compilation fingerprint; zero static errors |
 | Dry run | `propose_flow_draft` with dry-run enabled | Proposed change summary without persistent proposal side effects |
-| Propose | `propose_flow_draft`, `inspect_flow_proposal` | Review-only proposal in the existing Visual Review flow |
+| Propose | `propose_flow_draft`, `inspect_flow_proposal` | One review-only proposal, or at most two explicitly requested correlated proposals, each independently recoverable in the existing Visual Review flow |
 | Preview, optional | `inspect_flow_proposal`, then `preview_flow_proposal` | Current accepted and unapplied proposal, explicit test-environment approval, bounded execution, cleanup evidence |
 
 ## Evidence routing
@@ -27,6 +27,10 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 - Pass the exact current Context revision returned by the previous operation.
 - If FlowTest reports a stale revision, re-read the Context and show the change; do not overwrite it.
 - Proposal creation is not Review, Apply, Publish, or Preview approval.
+- When two correlated proposals are explicitly requested, use separate idempotency keys and a
+  shared task reference. Treat partial success as partial success; never imply an atomic batch.
+  For the RuoYi announcement A/B scenario, A retains its created-data handoff and B must stop on
+  missing, ambiguous, or unmatched ownership evidence. Do not use a global notice ID.
 - Visual Review and Apply remain user actions in FlowTest. End the normal workflow after opening or linking to Visual Review.
 - Preview is a separate optional branch. Immediately before requesting approval or executing it, call `inspect_flow_proposal` again and require the proposal and item to be accepted, current, and unapplied (`applied=false`). Stop when review is incomplete, the proposal is stale, or it was already applied. Only then require the `mcp:preview:execute` scope, a fresh one-time approval bound to the service account and proposal, and a target explicitly classified as test.
 

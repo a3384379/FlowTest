@@ -30,6 +30,7 @@ from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.test_design import ChangeSetApproval, TestDesign
 from app.repositories.ai_change_sets import AIChangeSetRepository
+from app.schemas.mcp_planning import MCPTestPlanUpdateContent
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.schemas.test_design import (
     MCPControlledWriteCreate,
@@ -361,6 +362,10 @@ class MCPControlledWriteService:
                 return _json_object(
                     MCPTestCaseDraft.model_validate(candidate).model_dump(mode="json")
                 )
+            if item.item_type == "test_plan_update":
+                return _json_object(
+                    MCPTestPlanUpdateContent.model_validate(candidate).model_dump(mode="json")
+                )
         except (TypeError, ValueError) as error:
             raise AppError(
                 code="MCP_CHANGE_CONTENT_INVALID",
@@ -437,6 +442,15 @@ class MCPControlledWriteService:
                 commit=False,
             )
             return "test_case", created_case.id
+        if item.item_type == "test_plan_update":
+            from app.services.mcp_planning import materialize_test_plan_update
+
+            return await materialize_test_plan_update(
+                session=self._session,
+                actor=actor,
+                change_set=change_set,
+                content=content,
+            )
         raise AppError(
             code="MCP_CHANGE_ITEM_INVALID", message="MCP 不支持此变更项类型", status_code=422
         )

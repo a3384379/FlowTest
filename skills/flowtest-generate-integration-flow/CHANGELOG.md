@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-rc.1 — 2026-09-08
+
+- 对接 S61 MCP connection/discovery/readiness 契约，并支持零项目续接与缺工具/版本的安全停止。
+- 支持用户明确要求的最多两个关联提案，使用独立幂等键、共享任务引用和可恢复的部分完成语义。
+- 更新最小 MCP 版本、Scope、迁移 Golden 和独立评测包。
+
 ## 1.0.0-rc.2 — 2026-09-05
 
 - 交付包内 Golden 标注、Baseline、Fixtures、评分模型、来源清单及独立 evaluator。
