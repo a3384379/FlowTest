@@ -20,11 +20,11 @@ import {
   type ChangeRegressionInput,
 } from './change-regression-service'
 
-export function useChangeRegression() {
+export function useChangeRegression(initialRunId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId ?? null)
   const enabled = Boolean(projectId)
   const runs = useQuery({
     queryKey: ['change-regressions', projectId],

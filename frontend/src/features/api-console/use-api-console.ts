@@ -37,12 +37,12 @@ import {
   type HttpMethod,
 } from './api-service'
 
-export function useApiConsole() {
+export function useApiConsole(initialApiId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
   const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
-  const [apiSelection, setApiSelection] = useState<string | null>(null)
+  const [apiSelection, setApiSelection] = useState<string | null>(initialApiId ?? null)
   const [apiSearchInput, setApiSearchInput] = useState('')
   const [apiSearch, setApiSearch] = useState('')
   const [apiMethod, setApiMethod] = useState<HttpMethod | null>(null)
@@ -68,7 +68,7 @@ export function useApiConsole() {
       }),
     enabled: Boolean(projectId),
   })
-  const apiId = selectedOrFirst(apiSelection, apis.data?.items)
+  const apiId = apiSelection ?? apis.data?.items.at(0)?.id ?? null
   const apiDetail = useQuery({
     queryKey: ['api-detail', projectId, apiId],
     queryFn: () => getApiDetail(requiredId(projectId), requiredId(apiId)),

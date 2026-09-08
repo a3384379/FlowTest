@@ -5,14 +5,12 @@ import { useProjectContext } from '../projects/use-project-context'
 import { getContext } from './context-inspector-service'
 import { useContextPage } from './use-context-page'
 
-export function useContextInspector() {
+export function useContextInspector(initialContextId?: string) {
   const { projectId } = useProjectContext()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialContextId ?? null)
   const { contexts, page, setPage } = useContextPage(projectId)
   const items = contexts.data?.items ?? []
-  const activeId = items.some((item) => item.id === selectedId)
-    ? selectedId
-    : (items.at(0)?.id ?? null)
+  const activeId = selectedId ?? items.at(0)?.id ?? null
   const detail = useQuery({
     queryKey: ['context-inspector-detail', projectId, activeId],
     queryFn: () => getContext(required(projectId), required(activeId)),

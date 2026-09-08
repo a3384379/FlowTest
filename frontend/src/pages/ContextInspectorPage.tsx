@@ -14,7 +14,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import type {
   ContextDetail,
@@ -30,7 +30,8 @@ import { projectPath } from '../features/projects/project-routing'
 import { apiErrorMessage } from '../lib/api'
 
 export default function ContextInspectorPage() {
-  const state = useContextInspector()
+  const [searchParams] = useSearchParams()
+  const state = useContextInspector(searchParams.get('focus') ?? undefined)
   return (
     <>
       <div className="page-heading">

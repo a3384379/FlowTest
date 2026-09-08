@@ -47,6 +47,11 @@ export async function listWorkflows(projectId: string): Promise<Page<Workflow>> 
   return response.data
 }
 
+export async function getWorkflow(projectId: string, workflowId: string): Promise<Workflow> {
+  const response = await apiClient.get<Workflow>(`/projects/${projectId}/workflows/${workflowId}`)
+  return response.data
+}
+
 export async function createWorkflow(
   projectId: string,
   input: { name: string; description: string; apiId: string; apiVersion?: number },

@@ -21,6 +21,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 
 import { ReportTrendChart } from '../features/reports/ReportTrendChart'
 import type { CreateNotificationWebhookInput } from '../features/reports/report-service'
@@ -34,7 +35,8 @@ import type {
 } from '../lib/api'
 
 export default function ReportsPage() {
-  const state = useReports()
+  const [searchParams] = useSearchParams()
+  const state = useReports(searchParams.get('execution') ?? undefined)
   return (
     <>
       <ReportHeading state={state} />

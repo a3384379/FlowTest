@@ -21,6 +21,7 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
 import { useTestAssets } from '../features/test-assets/use-test-assets'
@@ -40,6 +41,7 @@ import {
 import type { Environment, Folder, TestCase, TestSuite, Workflow } from '../lib/api'
 
 export default function TestAssetsPage() {
+  const [searchParams] = useSearchParams()
   const state = useTestAssets()
   const [caseEditor, setCaseEditor] = useState<TestCase | null | undefined>(undefined)
   const [suiteEditor, setSuiteEditor] = useState<TestSuite | null | undefined>(undefined)
@@ -49,6 +51,8 @@ export default function TestAssetsPage() {
   const cases = pageItems(state.cases.data)
   const suites = pageItems(state.suites.data)
   const publishedCases = cases.filter((item) => item.current_version)
+  const focusedId = searchParams.get('focus') ?? undefined
+  const focusedType = searchParams.get('type')
 
   return (
     <>
@@ -66,6 +70,8 @@ export default function TestAssetsPage() {
         setSelectedCases={setSelectedCases}
         setSelectedSuites={setSelectedSuites}
         setFolderId={setFolderId}
+        focusedId={focusedId}
+        focusedType={focusedType}
       />
       <AssetDialogs
         state={state}
@@ -124,11 +130,14 @@ function AssetTabs(props: {
   setSelectedCases: (ids: string[]) => void
   setSelectedSuites: (ids: string[]) => void
   setFolderId: (id: string | null) => void
+  focusedId?: string
+  focusedType: string | null
 }) {
   return (
     <Card>
       <Tabs
         animated={false}
+        defaultActiveKey={props.focusedType === 'suite' ? 'suites' : 'cases'}
         items={[
           caseTab(props),
           suiteTab(props),
@@ -163,6 +172,7 @@ function caseTab(props: Parameters<typeof AssetTabs>[0]) {
       >
         <CaseTable
           items={cases}
+          focusedId={props.focusedId}
           loading={state.cases.isLoading}
           selected={selectedCases}
           onSelect={setSelectedCases}
@@ -205,6 +215,7 @@ function suiteTab(props: Parameters<typeof AssetTabs>[0]) {
       >
         <SuiteTable
           items={suites}
+          focusedId={props.focusedId}
           loading={state.suites.isLoading}
           selected={selectedSuites}
           onSelect={setSelectedSuites}
@@ -323,6 +334,7 @@ export function CaseTable({
   onPublish,
   onClone,
   onDiff,
+  focusedId,
 }: {
   items: TestCase[]
   loading: boolean
@@ -332,6 +344,7 @@ export function CaseTable({
   onPublish: (item: TestCase) => void
   onClone: (item: TestCase) => void
   onDiff: (item: TestCase) => void
+  focusedId?: string
 }) {
   return (
     <Table
@@ -340,6 +353,7 @@ export function CaseTable({
       loading={loading}
       pagination={false}
       dataSource={items}
+      rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       rowSelection={{ selectedRowKeys: selected, onChange: (keys) => onSelect(keys.map(String)) }}
       columns={[
         { title: '名称', dataIndex: 'name' },
@@ -380,6 +394,7 @@ export function SuiteTable({
   onPublish,
   onClone,
   onDiff,
+  focusedId,
 }: {
   items: TestSuite[]
   loading: boolean
@@ -389,6 +404,7 @@ export function SuiteTable({
   onPublish: (item: TestSuite) => void
   onClone: (item: TestSuite) => void
   onDiff: (item: TestSuite) => void
+  focusedId?: string
 }) {
   return (
     <Table
@@ -397,6 +413,7 @@ export function SuiteTable({
       loading={loading}
       pagination={false}
       dataSource={items}
+      rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       rowSelection={{ selectedRowKeys: selected, onChange: (keys) => onSelect(keys.map(String)) }}
       columns={[
         { title: '名称', dataIndex: 'name' },

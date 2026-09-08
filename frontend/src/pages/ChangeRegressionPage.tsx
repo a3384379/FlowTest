@@ -17,6 +17,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import type {
   ChangeRegressionRun,
@@ -32,7 +33,8 @@ import RegressionMaintenancePanel from '../features/change-regression/Regression
 const { TextArea } = Input
 
 export default function ChangeRegressionPage() {
-  const state = useChangeRegression()
+  const [searchParams] = useSearchParams()
+  const state = useChangeRegression(searchParams.get('run') ?? undefined)
   const [form] = Form.useForm()
   const detail = state.detail.data
   const plans = state.plans.data?.items ?? []
