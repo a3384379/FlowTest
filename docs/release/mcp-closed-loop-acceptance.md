@@ -1,14 +1,14 @@
 # MCP Closed Loop S61/S62 验收账本
 
-状态：S61A 已由 PR #90 合并，S61B 已由 PR #91 合并并完成合并后主线门禁；S61C～S62B 的
-实现、契约和隔离定向回归已完成，待本阶段一次集中门禁、PR 复审和主线验证。不标记真实宿主/LLM
-业务闭环或 GA 已完成。
+状态：S61A 已由 PR #90 合并，S61B 已由 PR #91 合并；S61C～S62B 已由 PR #94 合并到
+`7b67a614f437b9fcf992c536c022e28eacd34390`，候选与合并后主线 Required Gate 均成功。
+真实宿主/LLM 的 R06 业务闭环仍未执行，不标记为 PASS，也不标记 GA 已完成。
 
 ## 基线与交付范围
 
-2026-09-08 从 PR #91 合并后的主干开始，基线见 [能力审计](../mcp-capability-audit.md)。
-当前开发分支为 `codex/v6-s61d-resource-discovery`，从 S61B 合并后主干创建。本轮交付
-有界契约预览/提交、inspect_contract 分页、资源发现/Readiness、有限 Service Target 诊断、零接入
+2026-09-08 从 PR #91 合并后的主干开始开发，基线见 [能力审计](../mcp-capability-audit.md)。
+该阶段最终通过 PR #94 合并。本轮交付有界契约预览/提交、inspect_contract 分页、
+资源发现/Readiness、有限 Service Target 诊断、零接入
 Skill 整合、Change Regression 分析准备、Test Plan 更新建议和 Preview Graceful Cancel，同时更新
 MCP Client/Server、MCP Golden、五个 Skill、Standalone 基线与文档。工具数 42 → 50；新增 Scope 为
 `mcp:contract:import`、`mcp:regression:prepare`、`mcp:test-plan:propose`，bootstrap/read 复用既有
@@ -33,7 +33,7 @@ Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
   回归通过；这些是隔离确定性证据，不替代真实宿主 MCP 或真实 LLM 验收。PR #91 集中门禁与合并后
   Required Gate 全部成功。
 
-## S61C 验证记录（开发完成，待 PR）
+## S61C 验证记录（PR #94 已合并）
 
 - 新增 `flowtest.preview_contract_import` 与 `flowtest.commit_contract_import`，专用 Scope 为
   `mcp:contract:import`；支持批准 URL、有界 UTF-8 文档和代码证据生成的强类型 HTTP Operation。
@@ -44,9 +44,9 @@ Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
 - `inspect_contract` 增加真实 total、page/page_size、has_more/next_cursor/truncated、方法/路径/Service
   过滤与指定版本读取，并返回有界参数位置/required/type 和响应结构摘要。
 - 定向回归覆盖 schema 严格校验、source-derived OpenAPI 转换、dry-run/冻结摘要边界、ImportService 旧
-  合并兼容和 MCP 工具注册；集中 PR 门禁待本阶段完成后执行。
+  合并兼容和 MCP 工具注册；PR #94 候选与合并后主线门禁均已成功。
 
-## S61D/S61E/S62 验证记录（实现完成，待集中门禁）
+## S61D/S61E/S62 验证记录（PR #94 已合并）
 
 - `flowtest.find_assets` 使用项目范围内的显式 `union_all` 查询，支持 API、Workflow、Context、Proposal、
   测试资产、ImportRun、Execution 和 Change Regression；返回真实 total、稳定分页、安全摘要、版本、来源和深链。
@@ -64,8 +64,22 @@ Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
   `TestPlanService` 物化。迁移 `20260908_0053` 与 Standalone/Transfer 基线同步。
 - `flowtest.cancel_preview` 仅接受当前项目的 Preview Execution，复用 `WorkflowService.request_cancel(force=false)`；
   终态和重复请求幂等，不扩大到生产或强制取消，Cleanup 状态如实返回。
-- 当前定向回归：S56/S60 Skill 契约、S61D 资源发现、S62 规划、MCP SDK 注册、Golden、Standalone Runtime/Transfer
+- 定向回归：S56/S60 Skill 契约、S61D 资源发现、S62 规划、MCP SDK 注册、Golden、Standalone Runtime/Transfer
   均通过；Skill 自包含评测检查通过。该证据不替代真实 LLM Host、真实业务目标或人工 Review/Preview。
+
+## PR #94 合并与复审记录
+
+- PR 最终候选为 `9f4cf9643c94e677c99ba65466d34ed3ff45bef0`，合并提交为
+  `7b67a614f437b9fcf992c536c022e28eacd34390`；[PR #94](https://github.com/a3384379/FlowTest/pull/94)
+  已于 2026-09-09（北京时间）合并。
+- [候选 Required Gate](https://github.com/a3384379/FlowTest/actions/runs/34257413294) 与
+  [合并后主线 Required Gate](https://github.com/a3384379/FlowTest/actions/runs/34259821091) 均成功，覆盖 Backend、
+  Integration、Frontend、Security、Compose Smoke、Windows Bundle 与 V2→V3 升降级路径。
+- 合并后定向复审认可 S61/S62 的 N01～N05 修复，并核实旧 TestPlan 提案 add-only 兼容、无认证 API 的
+  全字段 Secret 扫描及 SPA 前进路由同步。复审另发现路由键或项目切走后返回时可能恢复旧手动选择；后续
+  维护补充了 A→B→A 与 project1→project2→project1 回归，并在 scope 变化时同步重置状态。
+- R06 保持 `NOT_RUN / WAITING_FOR_HOST`：真实 MCP 客户端、已安装 Skill、LLM 与若依 A/B 数据交接尚无
+  执行证据。单元测试、ASGI、Golden 或 Compose 成功不替代该验收。
 
 ## S61A 验证记录
 
@@ -95,11 +109,11 @@ Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
 | --- | --- | --- |
 | S61A 连接、权限契约 | 已完成 | PR #90 已合并，主线门禁全绿 |
 | S61B 项目/环境/服务初始化 | 已完成 | PR #91 已合并，合并后门禁全绿 |
-| S61C 有界契约导入 | 实现与定向回归完成 | 待本阶段集中门禁/PR |
-| S61D 读取/查找/Readiness/目标诊断 | 已完成 | 待本阶段集中门禁/PR |
-| S61E 零接入与生成 Skill | 已完成（真实宿主/模型未验证） | 待本阶段集中门禁/PR |
-| S62A 回归准备与 TestPlan 建议 | 已完成 | 待本阶段集中门禁/PR |
-| S62B 取消、结果续接与总验收 | 已完成 | 待本阶段集中门禁/PR |
+| S61C 有界契约导入 | 已完成 | PR #94 已合并，主线门禁全绿 |
+| S61D 读取/查找/Readiness/目标诊断 | 已完成 | PR #94 已合并，主线门禁全绿 |
+| S61E 零接入与生成 Skill | 已完成（真实宿主/模型未验证） | PR #94 已合并，主线门禁全绿 |
+| S62A 回归准备与 TestPlan 建议 | 已完成 | PR #94 已合并，主线门禁全绿 |
+| S62B 取消、结果续接与总验收 | 已完成 | PR #94 已合并，R06 待真实宿主执行 |
 
 ## 真实模型验收单独记录
 
@@ -119,4 +133,4 @@ Scope。S61B 的组织级幂等初始化已在 PR #91 闭环。
 ```
 
 该例仍只展示连接与读取；S61B 的零项目初始化必须由具备明确 Scope 的 MCP 工具执行，不能由
-用户手工复制 UUID 代替。S61/S62 的开发实现已完成，最终远程门禁和真实宿主/模型验收仍按上文单独记录。
+用户手工复制 UUID 代替。S61/S62 的开发实现与远程门禁已完成；真实宿主/模型验收仍按上文单独记录。
