@@ -225,7 +225,7 @@ async def _authenticate_mcp_principal(
     *,
     session: AsyncSession,
     credentials: HTTPAuthorizationCredentials | None,
-    required_scope: str,
+    required_scope: str | None,
     missing_scope_message: str,
 ) -> tuple[MCPAuthenticatedPrincipal, Token[TenantContext | None]]:
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -238,7 +238,7 @@ async def _authenticate_mcp_principal(
         credentials.credentials,
         touch_last_used=False,
     )
-    if required_scope not in tenant.scopes:
+    if required_scope is not None and required_scope not in tenant.scopes:
         raise AppError(
             code="MCP_SCOPE_REQUIRED",
             message=missing_scope_message,
@@ -259,6 +259,22 @@ MCPCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_authenticated_principal),
 ]
+
+
+async def get_mcp_connection_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session, credentials=credentials, required_scope=None, missing_scope_message=""
+    )
+    try:
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
+MCPConnectionCurrent = Annotated[MCPAuthenticatedPrincipal, Depends(get_mcp_connection_principal)]
 
 MCPWriteCurrent = Annotated[
     MCPAuthenticatedPrincipal,

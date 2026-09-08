@@ -56,7 +56,7 @@ from app.operations.standalone_transfer import (
     TRANSFER_SCHEMA_VERSION,
 )
 from app.schemas.ai_change_sets import AIChangeSetDetailResponse
-from app.schemas.mcp_continuous import MCP_CONTINUOUS_QA_VERSION
+from app.schemas.mcp_connection import MCP_CONNECTION_VERSION
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
 
@@ -351,7 +351,7 @@ async def test_mcp_tool_contract_is_frozen() -> None:
         tools = await create_mcp_server(client=gateway).list_tools()
 
     assert contract["server_name"] == MCP_SERVER_NAME
-    assert contract["server_version"] == MCP_CONTINUOUS_QA_VERSION
+    assert contract["server_version"] == MCP_CONNECTION_VERSION
     assert contract["read_schema_version"] == MCP_READ_SCHEMA_VERSION
     assert [tool.name for tool in tools] == contract["tools"]
 

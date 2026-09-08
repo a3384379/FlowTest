@@ -39,6 +39,7 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.inspect_test_context",
         ),
         (
+            "flowtest.inspect_connection",
             "flowtest.ingest_java_source_snapshot",
             "flowtest.ingest_database_evidence",
             "flowtest.inspect_entity_mapping",

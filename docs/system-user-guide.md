@@ -743,7 +743,9 @@ MCP Scope：
 | 创建、补充、查看或关闭 Test Context | `mcp:evidence:write` | 只给受信 Evidence Provider；不会继承自 `mcp:write` |
 | 预览或创建 FlowSpec Draft Proposal | `mcp:flow:propose` | S49 仅开放受控 Application API；MCP Tool 在 S51 注册 |
 
-Service Account 绑定签发人的组织和项目可见性。即使拥有 MCP Scope，也不能跨组织读取，也不能读取签发人无权访问的项目。签发后如果项目权限发生变化，调用结果会同步受限。
+Service Account 绑定签发人的组织；MCP 资产访问由机器账号自身的固定组织与 MCP Scope 决定，
+不继承签发人的 `is_system_admin`、项目成员或团队角色，也不能跨组织读取。当前 S61A 的粒度是
+组织内按账号 Scope 的明确机器授权；更细的项目 grant 将在 S61B 另行实现。
 
 ### 8.3 从源码启动 MCP Gateway
 
@@ -764,7 +766,8 @@ uv sync --project backend --locked
 | `FLOWTEST_MCP_PORT` | `8765` | HTTP Gateway 监听端口 |
 | `FLOWTEST_MCP_PATH` | `/mcp` | Streamable HTTP 路径 |
 
-命令参数会覆盖相应环境变量。Token 的命令行参数名是 `--token`；自动化中优先使用环境变量，避免 Token 出现在进程列表和 Shell 历史。
+命令参数会覆盖相应环境变量。CLI 不接受 Token 明文参数；使用 `--token-env-var` 指定环境变量名，
+避免 Token 出现在进程列表和 Shell 历史。可先运行 `flowtest-mcp setup` 检查连接并生成不含令牌的模板。
 
 ### 8.4 stdio 接入
 
@@ -793,7 +796,7 @@ uv run --project backend flowtest-mcp --transport stdio
       ],
       "env": {
         "FLOWTEST_MCP_API_BASE_URL": "https://flowtest.example.com",
-        "FLOWTEST_MCP_SERVICE_ACCOUNT_TOKEN": "ftsa_替换为真实令牌"
+        "FLOWTEST_MCP_SERVICE_ACCOUNT_TOKEN": "由 Secret Store 或宿主环境注入"
       }
     }
   }
@@ -841,7 +844,9 @@ http://127.0.0.1:8765/mcp
 
 ### 8.6 Tools
 
-当前共 21 个 Tool。
+本节保留基础 Tools 示例；当前 MCP 契约共 39 个 Tool（含 S61A 的
+`flowtest.inspect_connection`）。实际可用工具仍以宿主 `tools/list` 和服务账号 Scope 为准，
+未实现的 S61B/S62 工具不会因方案文档而提前出现。
 
 #### 8.6.1 项目、服务、契约和运行证据
 

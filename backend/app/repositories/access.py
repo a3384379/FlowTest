@@ -158,6 +158,29 @@ class ProjectRepository:
         ordered = sorted(accessible.values(), key=lambda item: item[0].created_at, reverse=True)
         return list(ordered[offset : offset + limit]), len(ordered)
 
+    async def list_for_organization(
+        self,
+        *,
+        organization_id: UUID,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[Project], int]:
+        """List projects for an explicitly organization-bound machine principal."""
+        statement = (
+            select(Project)
+            .where(Project.organization_id == organization_id)
+            .order_by(Project.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        projects = list((await self._session.scalars(statement)).all())
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(Project)
+            .where(Project.organization_id == organization_id)
+        )
+        return projects, int(total or 0)
+
     async def get_role(self, *, project_id: UUID, user_id: UUID) -> ProjectRole | None:
         role = await self._session.scalar(
             select(ProjectMember.role).where(

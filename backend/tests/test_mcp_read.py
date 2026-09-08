@@ -708,6 +708,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.inspect_affected_flows",
             "flowtest.inspect_change_impact",
             "flowtest.inspect_change_regression",
+            "flowtest.inspect_connection",
             "flowtest.inspect_context_diff",
             "flowtest.inspect_context_requirements",
             "flowtest.inspect_contract",
@@ -815,7 +816,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
         assert invalid_source_payload["data"]["error"]["code"] == (
             "MCP_JAVA_SOURCE_SNAPSHOT_INVALID"
         )
-        assert invalid_source_payload["trace_id"] == "mcp-gateway"
+        assert len(invalid_source_payload["trace_id"]) == 32
         assert invalid_source_marker not in json.dumps(invalid_source_payload)
         invalid_files_container_result = await server.call_tool(
             "flowtest.ingest_java_source_snapshot",

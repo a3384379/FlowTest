@@ -1,6 +1,6 @@
 {
   "server_name": "flowtest",
-  "server_version": "s60-continuous-qa-v1",
+  "server_version": "s61-mcp-connection-v1",
   "read_schema_version": "flowtest-mcp-read-schema-v1",
   "tools": [
     "flowtest.analyze_test_coverage",
@@ -20,6 +20,7 @@
     "flowtest.inspect_affected_flows",
     "flowtest.inspect_change_impact",
     "flowtest.inspect_change_regression",
+    "flowtest.inspect_connection",
     "flowtest.inspect_context_diff",
     "flowtest.inspect_context_requirements",
     "flowtest.inspect_contract",

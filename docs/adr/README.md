@@ -50,3 +50,7 @@
 46. State Knowledge 的证据派生与保守关联
 47. Context Inspector 的项目只读视图边界
 48. 失败诊断与受限 Repair Proposal
+49. Context / Knowledge Diff
+50. Affected Flow Selection
+51. Maintenance Proposal
+52. MCP 零接入连接、身份与 Scope 契约
