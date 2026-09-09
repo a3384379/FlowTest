@@ -12,6 +12,12 @@ import httpx
 from pydantic import JsonValue
 
 from app.core.logging import redact
+from app.core.redaction import (
+    RedactionMode,
+    RedactionPolicy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
@@ -94,6 +100,13 @@ class RunnerAgent:
                 self._renew_until_done(lease, cancellation),
                 name=f"runner-renew-{lease.lease_id}",
             )
+            policy_token = set_redaction_policy(
+                RedactionPolicy(
+                    mode=RedactionMode(lease.task.redaction_mode),
+                    source="execution",
+                    policy_version=lease.task.redaction_policy_version,
+                )
+            )
             try:
                 if _sha256(lease.task.plan) != lease.task.plan_sha256:
                     raise ValueError("Runner plan digest mismatch")
@@ -171,6 +184,7 @@ class RunnerAgent:
             finally:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
+                reset_redaction_policy(policy_token)
 
     async def _renew_until_done(
         self, lease: RunnerLeaseResponse, cancellation: CancellationToken

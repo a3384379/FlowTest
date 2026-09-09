@@ -26,6 +26,7 @@ import { useState } from 'react'
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
 import APIWorkbench from '../features/api-console/APIWorkbench'
 import CreateDialogs from '../features/api-console/CreateDialogs'
+import EnvironmentManager from '../features/api-console/EnvironmentManager'
 import ExecutionResultPanel from '../features/api-console/ExecutionResultPanel'
 import ImportDialog from '../features/api-console/ImportDialog'
 import type {
@@ -44,6 +45,7 @@ export default function ApiConsolePage() {
   const [dialog, setDialog] = useState<DialogState>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
+  const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
   const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
   const currentDefinition = selectedApiDefinition(consoleState)
   const artifacts = artifactItems(consoleState)
@@ -74,72 +76,13 @@ export default function ApiConsolePage() {
 
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <Typography.Title level={2}>接口管理</Typography.Title>
-          <Typography.Text type="secondary">
-            创建接口、发送真实请求，并检查断言和历史记录。
-          </Typography.Text>
-        </div>
-        <Space wrap>
-          <Select
-            aria-label="当前项目"
-            className="context-select"
-            loading={consoleState.projects.isLoading}
-            placeholder="选择项目"
-            value={consoleState.projectId}
-            onChange={consoleState.selectProject}
-            options={projectOptions(consoleState.projects.data?.items)}
-          />
-          <Button icon={<PlusOutlined />} onClick={() => setDialog('project')}>
-            新建项目
-          </Button>
-          <Button
-            icon={<ImportOutlined />}
-            disabled={!canCreateAssets}
-            onClick={() => setImportOpen(true)}
-          >
-            导入接口
-          </Button>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'har', label: '导出 HAR' },
-                { key: 'curl', label: '导出 cURL' },
-                { key: 'bruno', label: '导出 Bruno' },
-                { key: 'excel', label: '导出 Excel' },
-              ],
-              onClick: ({ key }) =>
-                consoleState.exportApis(key as 'har' | 'curl' | 'bruno' | 'excel'),
-            }}
-          >
-            <Button
-              icon={<DownloadOutlined />}
-              disabled={!canCreateAssets}
-              loading={consoleState.exporting}
-            >
-              导出
-            </Button>
-          </Dropdown>
-          <Select
-            aria-label="当前环境"
-            className="context-select"
-            loading={consoleState.environments.isLoading}
-            placeholder="选择环境"
-            value={consoleState.environmentId}
-            onChange={consoleState.setEnvironmentSelection}
-            disabled={!canCreateAssets}
-            options={projectOptions(consoleState.environments.data)}
-          />
-          <Button
-            icon={<PlusOutlined />}
-            disabled={!canCreateAssets}
-            onClick={() => setDialog('environment')}
-          >
-            新建环境
-          </Button>
-        </Space>
-      </div>
+      <ApiConsoleHeading
+        state={consoleState}
+        canCreateAssets={canCreateAssets}
+        onDialog={setDialog}
+        onImport={() => setImportOpen(true)}
+        onManageEnvironment={() => setEnvironmentManagerOpen(true)}
+      />
 
       <div className="console-grid">
         <Card
@@ -196,6 +139,7 @@ export default function ApiConsolePage() {
           onPreview={consoleState.previewRequest}
           onRename={() => setRenameTarget(currentDefinition)}
           artifacts={artifacts}
+          redactionMode={consoleState.redactionMode}
         />
       </div>
 
@@ -243,11 +187,106 @@ export default function ApiConsolePage() {
         onClose={() => setRenameTarget(null)}
         onRename={consoleState.renameApi}
       />
+      <EnvironmentManager
+        open={environmentManagerOpen}
+        environment={consoleState.environments.data?.find(
+          (item) => item.id === consoleState.environmentId,
+        )}
+        saving={consoleState.updatingEnvironment}
+        deleting={consoleState.deletingEnvironment}
+        onClose={() => setEnvironmentManagerOpen(false)}
+        onSave={async (input) => {
+          await consoleState.editEnvironment(consoleState.environmentId ?? '', input)
+          setEnvironmentManagerOpen(false)
+        }}
+        onDelete={async () => {
+          await consoleState.archiveEnvironment(consoleState.environmentId ?? '')
+          setEnvironmentManagerOpen(false)
+        }}
+      />
     </>
   )
 }
 
 type ConsoleState = ReturnType<typeof useApiConsole>
+
+function ApiConsoleHeading({
+  state,
+  canCreateAssets,
+  onDialog,
+  onImport,
+  onManageEnvironment,
+}: {
+  state: ConsoleState
+  canCreateAssets: boolean
+  onDialog: (dialog: DialogState) => void
+  onImport: () => void
+  onManageEnvironment: () => void
+}) {
+  return (
+    <div className="page-heading">
+      <div>
+        <Typography.Title level={2}>接口管理</Typography.Title>
+        <Typography.Text type="secondary">
+          创建接口、发送真实请求，并检查断言和历史记录。
+        </Typography.Text>
+      </div>
+      <Space wrap>
+        <Select
+          aria-label="当前项目"
+          className="context-select"
+          loading={state.projects.isLoading}
+          placeholder="选择项目"
+          value={state.projectId}
+          onChange={state.selectProject}
+          options={projectOptions(state.projects.data?.items)}
+        />
+        <Button icon={<PlusOutlined />} onClick={() => onDialog('project')}>
+          新建项目
+        </Button>
+        <Button icon={<ImportOutlined />} disabled={!canCreateAssets} onClick={onImport}>
+          导入接口
+        </Button>
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'har', label: '导出 HAR' },
+              { key: 'curl', label: '导出 cURL' },
+              { key: 'bruno', label: '导出 Bruno' },
+              { key: 'excel', label: '导出 Excel' },
+            ],
+            onClick: ({ key }) => state.exportApis(key as 'har' | 'curl' | 'bruno' | 'excel'),
+          }}
+        >
+          <Button icon={<DownloadOutlined />} disabled={!canCreateAssets} loading={state.exporting}>
+            导出
+          </Button>
+        </Dropdown>
+        <Select
+          aria-label="当前环境"
+          className="context-select"
+          loading={state.environments.isLoading}
+          placeholder={state.environmentPlaceholder}
+          status={state.environmentStatus}
+          value={state.environmentId}
+          onChange={state.setEnvironmentSelection}
+          disabled={!canCreateAssets}
+          options={projectOptions(state.environments.data)}
+        />
+        <Button
+          icon={<PlusOutlined />}
+          disabled={!canCreateAssets}
+          onClick={() => onDialog('environment')}
+        >
+          新建环境
+        </Button>
+        <Button disabled={!state.environmentId} onClick={onManageEnvironment}>
+          管理环境
+        </Button>
+      </Space>
+    </div>
+  )
+}
 
 function RunnerActions({ state, enabled }: { state: ConsoleState; enabled: boolean }) {
   return (

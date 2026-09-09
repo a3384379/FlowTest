@@ -605,9 +605,17 @@ class TestPlanService:
                 )
             workflow = await self._session.get(Workflow, workflow_id)
             environment = await self._session.get(Environment, item.environment_id)
-            if workflow is None or workflow.project_id != project_id:
+            if (
+                workflow is None
+                or workflow.project_id != project_id
+                or workflow.archived_at is not None
+            ):
                 raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
-            if environment is None or environment.project_id != project_id:
+            if (
+                environment is None
+                or environment.project_id != project_id
+                or environment.archived_at is not None
+            ):
                 raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
             version = item.target_version or item.workflow_version or workflow.current_version
             if version is None or await self._workflows.find_version(workflow.id, version) is None:

@@ -17,6 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
 from app.engine.contracts import (
     CapabilityBinding,
     FieldMapping,
@@ -926,6 +927,8 @@ def _unsupported_semantic_blockers(spec: FlowSpec) -> list[FlowSpecIssue]:
 
 
 def _collect_secret_issues(value: JsonValue, path: str, issues: list[FlowSpecIssue]) -> None:
+    if not redaction_enabled():
+        return
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}"

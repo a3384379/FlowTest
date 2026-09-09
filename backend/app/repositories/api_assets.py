@@ -25,6 +25,7 @@ class APIAssetRepository:
         query = select(Environment).where(
             Environment.project_id == project_id,
             Environment.name == name,
+            Environment.archived_at.is_(None),
         )
         if excluding_id is not None:
             query = query.where(Environment.id != excluding_id)
@@ -35,7 +36,10 @@ class APIAssetRepository:
             (
                 await self._session.scalars(
                     select(Environment)
-                    .where(Environment.project_id == project_id)
+                    .where(
+                        Environment.project_id == project_id,
+                        Environment.archived_at.is_(None),
+                    )
                     .order_by(Environment.created_at)
                 )
             ).all()

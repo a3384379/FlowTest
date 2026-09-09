@@ -25,6 +25,9 @@ from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowNode
 from app.engine.control_nodes import execute_control_node
 from app.engine.scheduler import ExecutionContext, WorkflowScheduler
 
+pytestmark = pytest.mark.redaction_on
+
+
 _FIXTURE = (
     Path(__file__).parent / "fixtures" / "v6_golden" / "login-create-query.integration-plan-v1.json"
 )

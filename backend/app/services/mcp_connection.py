@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.context import get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.test_contexts import first_sensitive_value
 from app.models.organizations import Organization, ServiceAccount
 from app.schemas.mcp_connection import (
@@ -36,7 +37,7 @@ class MCPConnectionService:
             )
         scopes = sorted(account.scopes)
         name = organization.name
-        if first_sensitive_value({"name": name}) is not None:
+        if redaction_enabled() and first_sensitive_value({"name": name}) is not None:
             name = "已授权组织"
         return MCPConnectionResponse(
             server_version=MCP_CONNECTION_VERSION,

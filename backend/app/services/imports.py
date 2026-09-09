@@ -537,7 +537,11 @@ class ImportService:
         if environment_id is None:
             return
         environment = await self._session.get(Environment, environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         if (
             allowed_environment_classifications is not None
@@ -867,7 +871,7 @@ class ImportService:
         if environment_id is None:
             return
         environment = await self._session.get(Environment, environment_id)
-        if environment is None:
+        if environment is None or environment.archived_at is not None:
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         server_urls = {
             operation.target_base_url

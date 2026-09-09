@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.flow_spec import FlowSpecIssue
 from app.domain.flow_spec_security import contains_sensitive_flow_spec_value
 from app.domain.flow_spec_security import (
@@ -228,6 +229,8 @@ class MCPFlowProposalService:
         return require_mcp_flow_propose_scope()
 
     def _reject_sensitive(self, payload: FlowSpecProposalRequest) -> None:
+        if not redaction_enabled():
+            return
         if first_sensitive_value(
             payload.model_dump(mode="json")
         ) is not None or contains_sensitive_flow_spec_value(payload.spec):

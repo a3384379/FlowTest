@@ -32,6 +32,9 @@ from app.models.performance import PerformanceRun
 from app.runner.k6 import K6ExecutionError, K6ProcessRunner
 from app.services.performance import PerformanceRunCoordinator
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "performance-admin@example.com"
 ADMIN_PASSWORD = "performance-password-123!"
 

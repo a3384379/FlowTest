@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
+from app.core.redaction import RedactionPolicy, project_redaction_policy, set_redaction_policy
 from app.domain.access import (
     FolderMoveError,
     ProjectCapability,
@@ -201,6 +202,40 @@ class ProjectService:
             capability=ProjectCapability.READ,
         )
         return _project_network_policy(access.project)
+
+    async def get_redaction_policy(self, *, actor: User, project_id: UUID) -> RedactionPolicy:
+        access = await self.authorize(actor=actor, project_id=project_id, editing=False)
+        return project_redaction_policy(access.project)
+
+    async def update_redaction_policy(
+        self, *, actor: User, project_id: UUID, mode: str
+    ) -> RedactionPolicy:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_SECURITY,
+        )
+        if mode not in {"off", "on"}:
+            raise AppError(
+                code="INVALID_REDACTION_MODE",
+                message="脱敏模式必须是 off 或 on",
+                status_code=422,
+            )
+        access.project.redaction_mode = mode
+        access.project.redaction_policy_version += 1
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="project.redaction_policy_updated",
+            resource_type="project",
+            resource_id=project_id,
+            details={"mode": mode, "policy_version": access.project.redaction_policy_version},
+        )
+        await self._session.commit()
+        await self._session.refresh(access.project)
+        policy = project_redaction_policy(access.project)
+        set_redaction_policy(policy)
+        return policy
 
     async def load_runtime_security_policy(self, project_id: UUID) -> OutboundNetworkPolicy:
         project = await self._projects.get(project_id)
@@ -532,19 +567,25 @@ class ProjectService:
                     message="服务账号缺少该项目操作所需的 MCP 权限范围",
                     status_code=403,
                 )
-            return ProjectAccess(
+            access = ProjectAccess(
                 project=project,
                 role=_service_account_project_role(context.scopes),
             )
+            set_redaction_policy(project_redaction_policy(project))
+            return access
         if actor.is_system_admin:
-            return ProjectAccess(project=project, role=None)
+            access = ProjectAccess(project=project, role=None)
+            set_redaction_policy(project_redaction_policy(project))
+            return access
         role = await self._projects.get_role(project_id=project_id, user_id=actor.id)
         if role is None:
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
         required = capability or (ProjectCapability.EDIT if editing else ProjectCapability.READ)
         if not role.allows(required):
             raise AppError(code="PROJECT_FORBIDDEN", message="没有所需的项目权限", status_code=403)
-        return ProjectAccess(project=project, role=role)
+        access = ProjectAccess(project=project, role=role)
+        set_redaction_policy(project_redaction_policy(project))
+        return access
 
     async def authorize_bootstrap(self, *, project_id: UUID) -> ProjectAccess:
         """Authorize a project for the dedicated MCP bootstrap scope."""
@@ -569,7 +610,9 @@ class ProjectService:
             or project.organization_id != context.organization_id
         ):
             raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
-        return ProjectAccess(project=project, role=ProjectRole.EDITOR)
+        access = ProjectAccess(project=project, role=ProjectRole.EDITOR)
+        set_redaction_policy(project_redaction_policy(project))
+        return access
 
     async def _tenant_for_create(
         self,

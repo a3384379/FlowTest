@@ -85,8 +85,9 @@ External Agent
             │ FlowTest MCP (stdio / Streamable HTTP)
             ▼
 FlowTest Application API
-  Context Revision → Typed Evidence → Plan → Compile → Draft → Visual Review
-                                                        └→ optional Sandbox Preview
+  Quick: Project/Environment/API → Simple Proposal → Visual Review
+  Deep:  Context Revision → Typed Evidence → Plan → Compile → Draft → Visual Review
+                                                                          └→ optional Sandbox Preview
 ```
 
 - FlowTest Server 不作为第三方 MCP Client，不发现、不认证、不保存 Code/Database MCP 地址或凭据。
@@ -97,13 +98,14 @@ FlowTest Application API
 
 ## 6. 安全基线
 
-- Secret 加密存储，日志和报告默认脱敏。
+- Secret 加密存储；日志和报告遵循安装级/项目级生效脱敏策略，安装级默认 OFF。OFF 不扫描、遮盖、替换或
+  因敏感分类阻断已有授权内容，也不扩大采集范围；显式 ON 时保留输出副本脱敏。
 - 目标 URL 执行 SSRF 校验并限制内网/元数据地址策略。
 - 请求、响应、上传、下载、超时与并发均设置上限。
 - 第一版只提供安全函数 DSL，不运行任意用户脚本。
 - 生产环境运行需要明显标识、权限控制和审计记录。
 - 生产配置拒绝示例密钥、示例管理员密码和不安全 Cookie。
-- 运行时响应只在内存中供字段映射使用，进入数据库、日志和报告前统一脱敏。
+- 运行时响应只在内存中供字段映射使用；进入数据库、日志和报告时按生效策略处理，策略 OFF 不自动改写原文。
 - 环境实验室不接受用户 Compose、命令、脚本、Secret 或卷；镜像必须是管理员白名单中的精确 Digest。
 - Pact 仅接受有界 HTTP Exact Contract；拒绝 Secret、Matching Rule、Generator 和 Plugin，Provider/Broker
   请求使用固定 Origin、禁止重定向并执行项目出站策略。

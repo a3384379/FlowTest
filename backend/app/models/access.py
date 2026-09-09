@@ -118,6 +118,12 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     ai_sample_sharing_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # Null means the project inherits the installation policy.  Keeping the
+    # nullable value preserves an explicit ``off`` choice during upgrades.
+    redaction_mode: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    redaction_policy_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

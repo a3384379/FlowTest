@@ -70,6 +70,8 @@ from app.services.integration_plans import (
 )
 from app.services.test_engineering import TestEngineeringService
 
+pytestmark = pytest.mark.redaction_on
+
 
 @pytest.fixture
 async def s50_session() -> AsyncIterator[tuple[AsyncSession, User, Project]]:

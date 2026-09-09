@@ -9,6 +9,11 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import redact
+from app.core.redaction import (
+    persisted_redaction_policy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.domain.durable_execution import checkpoint_input_hash
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
@@ -217,6 +222,7 @@ class WorkflowRunCoordinator:
         async with self._session_maker() as session:
             service = WorkflowService(session)
             execution = await service.load_execution_for_run(plan.execution_id)
+            policy_token = set_redaction_policy(persisted_redaction_policy(execution))
 
             async def publish_status(update: NodeStatusUpdate) -> None:
                 safe_result = (
@@ -288,13 +294,16 @@ class WorkflowRunCoordinator:
                             ),
                         )
 
-            completed, _nodes = await service.run_prepared(
-                execution=execution,
-                plan=plan,
-                on_node_status=publish_status,
-                cancellation=cancellation,
-            )
-            return completed
+            try:
+                completed, _nodes = await service.run_prepared(
+                    execution=execution,
+                    plan=plan,
+                    on_node_status=publish_status,
+                    cancellation=cancellation,
+                )
+                return completed
+            finally:
+                reset_redaction_policy(policy_token)
 
     async def _mark_failed(self, plan: WorkflowExecutionPlan) -> WorkflowExecution:
         async with self._session_maker() as session:

@@ -604,6 +604,40 @@ async def test_permission_matrix_security_policy_and_audit_access(client: AsyncC
     )
     assert forbidden_retention.status_code == 403
 
+    inherited_redaction = await client.get(
+        f"/api/v1/projects/{project_id}/redaction-policy", headers=viewer_headers
+    )
+    assert inherited_redaction.status_code == 200
+    assert inherited_redaction.json() == {
+        "mode": "off",
+        "source": "installation",
+        "policy_version": 1,
+    }
+    enabled_redaction = await client.put(
+        f"/api/v1/projects/{project_id}/redaction-policy",
+        headers=owner_headers,
+        json={"mode": "on"},
+    )
+    assert enabled_redaction.status_code == 200
+    assert enabled_redaction.json() == {
+        "mode": "on",
+        "source": "project",
+        "policy_version": 2,
+    }
+    forbidden_redaction = await client.put(
+        f"/api/v1/projects/{project_id}/redaction-policy",
+        headers=editor_headers,
+        json={"mode": "off"},
+    )
+    assert forbidden_redaction.status_code == 403
+    disabled_redaction = await client.put(
+        f"/api/v1/projects/{project_id}/redaction-policy",
+        headers=owner_headers,
+        json={"mode": "off"},
+    )
+    assert disabled_redaction.status_code == 200
+    assert disabled_redaction.json()["policy_version"] == 3
+
     audit = await client.get(
         f"/api/v1/projects/{project_id}/audit-logs",
         headers=owner_headers,

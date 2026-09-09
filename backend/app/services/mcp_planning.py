@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context, get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.mcp_planning import (
     MCP_REGRESSION_PREPARE_SCOPE,
     MCP_TEST_PLAN_PROPOSE_SCOPE,
@@ -70,7 +71,10 @@ class MCPPlanningService:
             "服务账号缺少 Change Regression 分析准备权限",
         )
         await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
-        if first_sensitive_value(payload.model_dump(mode="json")) is not None:
+        if (
+            redaction_enabled()
+            and first_sensitive_value(payload.model_dump(mode="json")) is not None
+        ):
             raise AppError(
                 code="MCP_SENSITIVE_INPUT",
                 message="Change Regression 来源不能包含 Secret、凭据或 PII",
@@ -201,7 +205,10 @@ class MCPPlanningService:
     ) -> MCPTestPlanUpdateResponse:
         self._require_scope(MCP_TEST_PLAN_PROPOSE_SCOPE, "服务账号缺少 Test Plan 建议权限")
         await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
-        if first_sensitive_value(payload.model_dump(mode="json")) is not None:
+        if (
+            redaction_enabled()
+            and first_sensitive_value(payload.model_dump(mode="json")) is not None
+        ):
             raise AppError(
                 code="MCP_SENSITIVE_INPUT",
                 message="测试计划建议说明不能包含 Secret 或 PII",
@@ -522,7 +529,11 @@ class MCPPlanningService:
         requested: MCPTestPlanUpdateTarget | None = None,
     ) -> tuple[MCPTestPlanUpdateTarget, list[str]]:
         workflow = await self._session.get(Workflow, target_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="Workflow 不存在", status_code=404)
         requested_version = (requested.target_version if requested is not None else None) or (
             requested.workflow_version if requested is not None else None
@@ -546,7 +557,11 @@ class MCPPlanningService:
         )
         if environment_id is not None:
             environment = await self._session.get(Environment, environment_id)
-            if environment is None or environment.project_id != project_id:
+            if (
+                environment is None
+                or environment.project_id != project_id
+                or environment.archived_at is not None
+            ):
                 raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         else:
             dependencies.append(f"workflow:{workflow.id}:environment")

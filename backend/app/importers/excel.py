@@ -46,7 +46,7 @@ def _operation(row: tuple[object, ...], indexes: dict[str, int], number: int) ->
         method = HttpMethod(method_value)
     except ValueError as error:
         raise ExcelImportError(f"Excel 第 {number} 行 HTTP 方法无效") from error
-    query_values = _json_object(_cell(row, indexes, "query"), number, "query")
+    query_parameters = _query_parameters(_cell(row, indexes, "query"), number)
     header_values = _json_object(_cell(row, indexes, "headers"), number, "headers")
     auth_values = _json_object(_cell(row, indexes, "auth_config"), number, "auth_config")
     auth_kind_value = _cell(row, indexes, "auth_kind") or "none"
@@ -63,20 +63,19 @@ def _operation(row: tuple[object, ...], indexes: dict[str, int], number: int) ->
             body = json.loads(body_text)
         except json.JSONDecodeError as error:
             raise ExcelImportError(f"Excel 第 {number} 行 body 不是有效 JSON") from error
+    explicit_kind = _cell(row, indexes, "body_kind")
+    if explicit_kind:
+        try:
+            body_kind = BodyKind(explicit_kind)
+        except ValueError as error:
+            raise ExcelImportError(f"Excel 第 {number} 行 body_kind 无效") from error
     return ImportedOperation(
         name=name[:200],
         description=_cell(row, indexes, "description")[:4000],
         request=APIVersionSpec(
             method=method,
             path=path,
-            query_parameters=tuple(
-                QueryParameterSpec(
-                    name=key,
-                    value=imported_value(key, str(value)),
-                    enabled=True,
-                )
-                for key, value in query_values.items()
-            ),
+            query_parameters=query_parameters,
             headers={key: imported_value(key, str(value)) for key, value in header_values.items()},
             body_kind=body_kind,
             body=body,  # type: ignore[arg-type]
@@ -105,3 +104,26 @@ def _json_object(value: str, number: int, field: str) -> dict[str, object]:
     if not isinstance(result, dict) or not all(isinstance(key, str) for key in result):
         raise ExcelImportError(f"Excel 第 {number} 行 {field} 必须是 JSON 对象")
     return result
+
+
+def _query_parameters(value: str, number: int) -> tuple[QueryParameterSpec, ...]:
+    try:
+        parsed = json.loads(value) if value else {}
+    except json.JSONDecodeError as error:
+        raise ExcelImportError(f"Excel 第 {number} 行 query 不是有效 JSON") from error
+    if isinstance(parsed, dict):
+        parsed = [{"name": key, "value": str(item)} for key, item in parsed.items()]
+    if not isinstance(parsed, list):
+        raise ExcelImportError(f"Excel 第 {number} 行 query 必须是对象或参数数组")
+    result = []
+    for item in parsed:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ExcelImportError(f"Excel 第 {number} 行 query 参数无效")
+        result.append(
+            QueryParameterSpec(
+                name=item["name"],
+                value=imported_value(item["name"], str(item.get("value", ""))),
+                enabled=bool(item.get("enabled", True)),
+            )
+        )
+    return tuple(result)

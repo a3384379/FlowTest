@@ -6,6 +6,8 @@ from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
+
 _SENSITIVE_NAME = re.compile(
     r"(^|[_\-.])(password|passwd|authorization|cookie|token|secret|api[_-]?key|"
     r"access[_-]?key|private[_-]?key|client[_-]?secret)($|[_\-.])",
@@ -61,7 +63,9 @@ class PerformanceHttpStep(BaseModel):
                 raise ValueError("HTTP header name is invalid")
             if len(value) > 8192 or "\n" in value or "\r" in value:
                 raise ValueError("HTTP header value is invalid")
-            if _is_sensitive_name(header_name) or _SECRET_VALUE.search(value):
+            if redaction_enabled() and (
+                _is_sensitive_name(header_name) or _SECRET_VALUE.search(value)
+            ):
                 raise ValueError(
                     "Sensitive HTTP headers are not supported by performance scenarios"
                 )
@@ -69,7 +73,9 @@ class PerformanceHttpStep(BaseModel):
         statuses = tuple(sorted(set(self.expected_statuses)))
         if any(status < 100 or status > 599 for status in statuses):
             raise ValueError("Expected HTTP status must be between 100 and 599")
-        if any(_is_sensitive_name(name) for name, _ in parse_qsl(urlsplit(self.url).query)):
+        if redaction_enabled() and any(
+            _is_sensitive_name(name) for name, _ in parse_qsl(urlsplit(self.url).query)
+        ):
             raise ValueError("Sensitive URL query parameters are not supported")
         if _contains_sensitive_body(self.body):
             raise ValueError("Sensitive request body fields are not supported")
@@ -228,6 +234,8 @@ def validate_metric_name(value: str) -> bool:
 
 
 def _contains_sensitive_body(value: JsonValue | None) -> bool:
+    if not redaction_enabled():
+        return False
     if isinstance(value, dict):
         return any(
             _is_sensitive_name(str(name)) or _contains_sensitive_body(item)

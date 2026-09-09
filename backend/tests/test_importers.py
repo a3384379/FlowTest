@@ -6,6 +6,8 @@ from app.domain.api_assets import AuthKind, BodyKind, HttpMethod
 from app.importers.contracts import ImportSourceType
 from app.importers.document import ImportDocumentError, parse_import_document
 
+pytestmark = pytest.mark.redaction_on
+
 
 def test_openapi3_yaml_parses_operations_auth_and_request_bodies() -> None:
     document = b"""

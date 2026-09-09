@@ -20,6 +20,9 @@ from app.models.access import User
 from app.services.execution_events import ExecutionEvent
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "workflow-admin@example.com"
 ADMIN_PASSWORD = "workflow-password-123!"
 

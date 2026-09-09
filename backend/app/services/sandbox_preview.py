@@ -329,6 +329,7 @@ class SandboxPreviewService:
         query = select(Environment).where(
             Environment.id == environment_id,
             Environment.project_id == project_id,
+            Environment.archived_at.is_(None),
         )
         if lock:
             query = query.with_for_update()

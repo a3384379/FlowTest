@@ -4,6 +4,7 @@ import {
   type Page,
   type Project,
   type ProjectPermission,
+  type ProjectRedactionPolicy,
   type ProjectRetentionPolicy,
   type ProjectSecurityPolicy,
 } from '../../lib/api'
@@ -38,6 +39,26 @@ export async function getProjectPermission(projectId: string): Promise<ProjectPe
 export async function getProjectSecurityPolicy(projectId: string): Promise<ProjectSecurityPolicy> {
   const response = await apiClient.get<ProjectSecurityPolicy>(
     `/projects/${projectId}/security-policy`,
+  )
+  return response.data
+}
+
+export async function getProjectRedactionPolicy(
+  projectId: string,
+): Promise<ProjectRedactionPolicy> {
+  const response = await apiClient.get<ProjectRedactionPolicy>(
+    `/projects/${projectId}/redaction-policy`,
+  )
+  return response.data
+}
+
+export async function updateProjectRedactionPolicy(
+  projectId: string,
+  mode: ProjectRedactionPolicy['mode'],
+): Promise<ProjectRedactionPolicy> {
+  const response = await apiClient.put<ProjectRedactionPolicy>(
+    `/projects/${projectId}/redaction-policy`,
+    { mode },
   )
   return response.data
 }

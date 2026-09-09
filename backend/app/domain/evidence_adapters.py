@@ -26,6 +26,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.redaction import redaction_enabled
 from app.domain.evidence import EvidenceBundle, EvidenceFinding, EvidenceSourceType
 from app.domain.test_contexts import (
     MAX_EXTERNAL_EVIDENCE_BYTES,
@@ -680,7 +681,11 @@ class DatabaseColumnEvidence(BaseModel):
         require_no_sensitive_scalar_values([self.name, self.data_type])
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
-        if self.masked_example is not None and "***" not in self.masked_example:
+        if (
+            redaction_enabled()
+            and self.masked_example is not None
+            and "***" not in self.masked_example
+        ):
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
             require_no_sensitive_scalar_values([self.masked_example])
@@ -1436,6 +1441,8 @@ def _require_unique_claim_ids(claims: list[JavaEvidenceClaim]) -> None:
 
 
 def _require_no_sensitive_data(value: BaseModel) -> None:
+    if not redaction_enabled():
+        return
     unsafe = first_sensitive_value(value.model_dump(mode="json"))
     if unsafe is not None:
         raise ValueError(f"evidence adapter contains sensitive data at {unsafe}")

@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID
 
+import pytest
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -23,6 +24,8 @@ from app.observability.metrics import MetricsRegistry, normalize_path, render_me
 from app.observability.task_metrics import TaskMetricsSnapshot
 from app.services.retention import RetentionCleanupService
 from app.services.workflow_runtime import _response_output
+
+pytestmark = pytest.mark.redaction_on
 
 
 class RecordingStorage:

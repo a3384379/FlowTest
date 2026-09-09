@@ -1,5 +1,18 @@
 # Examples
 
+## Quick smoke flow (default)
+
+When the project already contains the needed API definitions, select the explicit test
+environment and call `flowtest.propose_simple_flow` with the API ID/version pairs, the explicitly
+requested Chinese business steps, required field bindings, and bounded assertions. Declare values that
+are only known at run time in `inputs`; a required input without a default yields a reviewable
+draft with `readiness=needs_input`. No Context, Evidence, database MCP, dry-run round trip, or
+execution is required. Inspect the returned proposal and stop at Visual Review.
+
+For related flows, use separate idempotency keys and a shared `task_ref`. Pass the first
+flow's declared output into the second flow as an explicit input/binding; never search historical
+executions for an object to delete or reverse.
+
 ## Login → Create Order → Query Order
 
 1. Select the authorized Orders project and a test environment.

@@ -3,9 +3,10 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { ApiDefinition, Environment, RequestService, ServiceEndpoint } from '../lib/api'
+import { useAuthStore } from '../features/auth/auth-store'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { apiDefinition, environment, project, user } from '../test/fixtures'
 import { server } from '../test/server'
@@ -54,6 +55,15 @@ const endpoint: ServiceEndpoint = {
 }
 
 describe('RequestTargetsPage', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useAuthStore.setState({ user })
+  })
+  afterEach(() => {
+    localStorage.clear()
+    useAuthStore.setState({ user: null })
+  })
+
   it('manages services, endpoint variants, environment defaults, and API bindings', async () => {
     let services = [service]
     let environments = [targetEnvironment]
@@ -202,6 +212,69 @@ describe('RequestTargetsPage', () => {
 
     expect(await screen.findByText('请求目标加载失败')).toBeVisible()
     expect(screen.getByText('读取目标失败')).toBeVisible()
+  })
+
+  it('requires an explicit environment when multiple environments are available', async () => {
+    const secondEnvironment: Environment = {
+      ...targetEnvironment,
+      id: '00000000-0000-4000-8000-000000004010',
+      name: '集成测试',
+    }
+    let endpointRequests = 0
+    server.use(
+      projectHandlers(),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([targetEnvironment, secondEnvironment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([service])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/environments/:environmentId/service-endpoints`,
+        () => {
+          endpointRequests += 1
+          return HttpResponse.json([])
+        },
+      ),
+    )
+
+    renderPage()
+
+    expect(await screen.findByText('请先选择环境')).toBeVisible()
+    expect(endpointRequests).toBe(0)
+  })
+
+  it('keeps an invalid stored environment visible instead of falling back', async () => {
+    localStorage.setItem(
+      `flowtest:environment:v1:${encodeURIComponent(user.id)}:${encodeURIComponent(project.id)}`,
+      'missing-environment',
+    )
+    let endpointRequests = 0
+    server.use(
+      projectHandlers(),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([targetEnvironment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([service])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/environments/:environmentId/service-endpoints`,
+        () => {
+          endpointRequests += 1
+          return HttpResponse.json([])
+        },
+      ),
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('原环境已失效，请重新选择')
+    expect(endpointRequests).toBe(0)
   })
 })
 

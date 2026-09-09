@@ -24,6 +24,8 @@ from app.models.test_contexts import TestContextRevision as ContextRevisionModel
 from app.services import test_contexts as test_context_service
 from app.services.service_accounts import ServiceAccountService
 
+pytestmark = pytest.mark.redaction_on
+
 
 @pytest.fixture
 async def s49_context() -> AsyncIterator[dict[str, Any]]:

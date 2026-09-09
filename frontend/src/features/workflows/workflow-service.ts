@@ -26,12 +26,22 @@ export async function listEnvironments(projectId: string): Promise<Environment[]
   return response.data
 }
 
-export async function listApis(projectId: string): Promise<Page<ApiDefinition>> {
+export async function listApis(
+  projectId: string,
+  options: { page?: number; pageSize?: number; search?: string; method?: ApiMethod } = {},
+): Promise<Page<ApiDefinition>> {
   const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
-    params: { page: 1, page_size: 100 },
+    params: {
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 50,
+      ...(options.search?.trim() ? { search: options.search.trim() } : {}),
+      ...(options.method ? { method: options.method } : {}),
+    },
   })
   return response.data
 }
+
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export async function listArtifacts(projectId: string): Promise<Page<Artifact>> {
   const response = await apiClient.get<Page<Artifact>>(`/projects/${projectId}/files`, {
@@ -68,12 +78,17 @@ export async function updateWorkflowDraft(
   projectId: string,
   workflow: Workflow,
   definition: WorkflowDefinition,
+  expectedRevision = workflow.draft_revision,
 ): Promise<Workflow> {
   const response = await apiClient.patch<Workflow>(
     `/projects/${projectId}/workflows/${workflow.id}`,
-    { expected_revision: workflow.draft_revision, definition },
+    { expected_revision: expectedRevision, definition },
   )
   return response.data
+}
+
+export async function deleteWorkflow(projectId: string, workflowId: string): Promise<void> {
+  await apiClient.delete(`/projects/${projectId}/workflows/${workflowId}`)
 }
 
 export async function publishWorkflow(

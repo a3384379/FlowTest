@@ -107,7 +107,7 @@ def _searchable_resources(query: str) -> list[Select[Any]]:
             description=Workflow.description,
             section="workflows",
             updated_at=Workflow.updated_at,
-        ),
+        ).where(Workflow.archived_at.is_(None)),
         _resource_query(
             query=query,
             resource_type="test_case",
@@ -147,7 +147,7 @@ def _searchable_resources(query: str) -> list[Select[Any]]:
             description=literal(""),
             section="environments",
             updated_at=Environment.updated_at,
-        ),
+        ).where(Environment.archived_at.is_(None)),
         _resource_query(
             query=query,
             resource_type="mock_service",

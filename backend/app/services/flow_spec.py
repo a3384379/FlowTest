@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,6 +51,7 @@ from app.domain.maintenance_proposals import FlowSpecMaintenanceProvenance
 from app.domain.proposal_provenance import (
     MAINTENANCE_PROPOSAL_SCHEMA,
     MCP_PROPOSAL_SCHEMA,
+    QUICK_PROPOSAL_SCHEMA,
     REPAIR_PROPOSAL_SCHEMA,
 )
 from app.domain.test_engineering import OperationContract, fingerprint_contract
@@ -136,6 +138,18 @@ class FlowSpecImportProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowSpecQuickProvenance:
+    task_ref: str
+    scenario_key: str
+    source_ref: str
+    service_account_id: UUID
+    environment_id: UUID
+    expected_target_revision: int | None = None
+    proposal_id: UUID | None = None
+    proposal_revision: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class FlowSpecRepairProvenance:
     execution_id: UUID
     context_revision_id: UUID
@@ -203,7 +217,11 @@ class FlowSpecService:
     ) -> FlowSpecExport:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         workflow = await self._workflows.get(workflow_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         if version is None:
             definition = _load_definition(workflow.draft_definition)
@@ -285,8 +303,10 @@ class FlowSpecService:
         project_id: UUID,
         payload: FlowSpecImportRequest,
         provenance: FlowSpecImportProvenance | None = None,
+        quick_provenance: FlowSpecQuickProvenance | None = None,
         repair_provenance: FlowSpecRepairProvenance | None = None,
         maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
+        replace_change_set_id: UUID | None = None,
         commit: bool = True,
     ) -> FlowSpecChangeSetView:
         prepared = await self._prepare_import(
@@ -295,7 +315,7 @@ class FlowSpecService:
             payload=payload,
         )
         _validate_expected_target_revision(
-            prepared, provenance, repair_provenance, maintenance_provenance
+            prepared, provenance, quick_provenance, repair_provenance, maintenance_provenance
         )
         _validate_integration_plan_provenance(prepared.pipeline, provenance)
         snapshot = _source_snapshot(
@@ -306,46 +326,131 @@ class FlowSpecService:
             target_definition=prepared.target_definition,
             resource_mappings=prepared.mappings,
             provenance=provenance,
+            quick_provenance=quick_provenance,
             repair_provenance=repair_provenance,
             maintenance_provenance=maintenance_provenance,
         )
-        context_source = provenance or repair_provenance or maintenance_provenance
-        change_set = AIChangeSet(
-            project_id=project_id,
-            impact_run_id=maintenance_provenance.impact_run_id if maintenance_provenance else None,
-            release_risk_id=None,
-            ai_job_id=None,
-            title=prepared.pipeline.spec.name,
-            status="draft",
-            source_snapshot=snapshot,
-            source_fingerprint=prepared.pipeline.fingerprint,
-            source_type="flow_spec",
-            source_ref=_proposal_source_ref(
-                payload, prepared.pipeline.fingerprint, provenance, maintenance_provenance
-            ),
-            actor_type="service_account" if provenance is not None else "user",
-            actor_id=actor.id,
-            created_by_id=actor.id,
-            created_at=datetime.now(UTC),
+        source_ref = _proposal_source_ref(
+            payload,
+            prepared.pipeline.fingerprint,
+            provenance,
+            quick_provenance,
+            maintenance_provenance,
         )
-        self._session.add(change_set)
-        await self._session.flush()
-        item = AIChangeItem(
-            change_set_id=change_set.id,
-            suggestion_id=None,
-            position=0,
-            item_type="workflow",
-            action="update" if prepared.target is not None else "create",
-            title=prepared.pipeline.spec.name,
-            target_resource_id=prepared.target.id if prepared.target is not None else None,
-            target_snapshot_sha256=prepared.target_snapshot,
-            proposed_content={
+        if replace_change_set_id is None:
+            change_set = AIChangeSet(
+                project_id=project_id,
+                impact_run_id=(
+                    maintenance_provenance.impact_run_id if maintenance_provenance else None
+                ),
+                release_risk_id=None,
+                ai_job_id=None,
+                title=prepared.pipeline.spec.name,
+                status="draft",
+                source_snapshot=snapshot,
+                source_fingerprint=prepared.pipeline.fingerprint,
+                source_type="flow_spec",
+                source_ref=source_ref,
+                actor_type="service_account"
+                if provenance is not None or quick_provenance is not None
+                else "user",
+                actor_id=actor.id,
+                created_by_id=actor.id,
+                created_at=datetime.now(UTC),
+            )
+            self._session.add(change_set)
+            await self._session.flush()
+            item = AIChangeItem(
+                change_set_id=change_set.id,
+                suggestion_id=None,
+                position=0,
+                item_type="workflow",
+                action="update" if prepared.target is not None else "create",
+                title=prepared.pipeline.spec.name,
+                target_resource_id=prepared.target.id if prepared.target is not None else None,
+                target_snapshot_sha256=prepared.target_snapshot,
+                proposed_content={
+                    "flow_spec": cast(dict[str, Any], _spec_json(prepared.pipeline.spec))
+                },
+                review_status="pending",
+                review_note="",
+            )
+            self._session.add(item)
+        else:
+            change_set = await self._get_change_set(
+                replace_change_set_id,
+                project_id,
+                for_update=True,
+            )
+            existing_item = await self._item(change_set.id, for_update=True)
+            if existing_item is None:
+                raise AppError(
+                    code="FLOWSPEC_CHANGE_SET_INVALID",
+                    message="FlowSpec 变更集缺少变更项",
+                    status_code=409,
+                )
+            item = existing_item
+            if change_set.applied_at is not None or item.materialized_resource_id is not None:
+                raise AppError(
+                    code="FLOWSPEC_ALREADY_APPLIED",
+                    message="已应用的 FlowSpec 提案不能修订",
+                    status_code=409,
+                )
+            if quick_provenance is None:
+                raise AppError(
+                    code="FLOWSPEC_REVISION_SOURCE_INVALID",
+                    message="只有 Quick 提案支持通过该入口修订",
+                    status_code=422,
+                )
+            current_revision = _quick_proposal_revision(change_set.source_snapshot)
+            expected_revision = quick_provenance.proposal_revision - 1
+            if current_revision != expected_revision:
+                raise AppError(
+                    code="QUICK_PROPOSAL_REVISION_CONFLICT",
+                    message="Quick 提案版本已变化, 请读取最新提案后重试",
+                    status_code=409,
+                    details={
+                        "expected_revision": expected_revision,
+                        "current_revision": current_revision,
+                    },
+                )
+            if item.target_resource_id != (
+                prepared.target.id if prepared.target is not None else None
+            ):
+                raise AppError(
+                    code="QUICK_PROPOSAL_TARGET_MISMATCH",
+                    message="修订提案目标与原提案不一致",
+                    status_code=409,
+                )
+            change_set.title = prepared.pipeline.spec.name
+            change_set.status = "draft"
+            change_set.source_snapshot = snapshot
+            change_set.source_fingerprint = prepared.pipeline.fingerprint
+            change_set.source_ref = source_ref
+            change_set.actor_type = "service_account"
+            change_set.actor_id = actor.id
+            item.action = "update" if prepared.target is not None else "create"
+            item.title = prepared.pipeline.spec.name
+            item.target_resource_id = prepared.target.id if prepared.target is not None else None
+            item.target_snapshot_sha256 = prepared.target_snapshot
+            item.proposed_content = {
                 "flow_spec": cast(dict[str, Any], _spec_json(prepared.pipeline.spec))
-            },
-            review_status="pending",
-            review_note="",
+            }
+            item.review_status = "pending"
+            item.review_note = ""
+            item.reviewed_by_id = None
+            item.reviewed_at = None
+            item.materialized_resource_type = None
+            item.materialized_resource_id = None
+        context_revision_id = (
+            provenance.context_revision_id
+            if provenance is not None
+            else repair_provenance.context_revision_id
+            if repair_provenance is not None
+            else maintenance_provenance.context_revision_id
+            if maintenance_provenance is not None
+            else None
         )
-        self._session.add(item)
         self._audit.record(
             actor_user_id=actor.id,
             project_id=project_id,
@@ -363,7 +468,7 @@ class FlowSpecService:
                 "operation_mapping_count": len(prepared.mappings.operation_ids),
                 "actor_type": change_set.actor_type,
                 "context_revision_id": (
-                    str(context_source.context_revision_id) if context_source is not None else None
+                    str(context_revision_id) if context_revision_id is not None else None
                 ),
                 "repair_execution_id": (
                     str(repair_provenance.execution_id) if repair_provenance is not None else None
@@ -374,6 +479,12 @@ class FlowSpecService:
                 "maintenance_patch_kind": maintenance_provenance.patch_kind
                 if maintenance_provenance
                 else None,
+                "quick_proposal_revision": (
+                    quick_provenance.proposal_revision if quick_provenance is not None else None
+                ),
+                "replaced_change_set_id": (
+                    str(replace_change_set_id) if replace_change_set_id is not None else None
+                ),
             },
         )
         if commit:
@@ -714,7 +825,11 @@ class FlowSpecService:
             )
         else:
             target_workflow = await self._workflows.get_for_update(target_id)
-            if target_workflow is None or target_workflow.project_id != project_id:
+            if (
+                target_workflow is None
+                or target_workflow.project_id != project_id
+                or target_workflow.archived_at is not None
+            ):
                 raise AppError(
                     code="WORKFLOW_NOT_FOUND", message="目标工作流不存在", status_code=404
                 )
@@ -1024,7 +1139,11 @@ class FlowSpecService:
         if workflow_id is None:
             return None
         workflow = await self._workflows.get(workflow_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         return workflow
 
@@ -1239,6 +1358,7 @@ def _source_snapshot(
     target_definition: WorkflowDefinition | None,
     resource_mappings: ResolvedFlowSpecMappings,
     provenance: FlowSpecImportProvenance | None = None,
+    quick_provenance: FlowSpecQuickProvenance | None = None,
     repair_provenance: FlowSpecRepairProvenance | None = None,
     maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
 ) -> dict[str, Any]:
@@ -1287,6 +1407,27 @@ def _source_snapshot(
                     },
                 }
             )
+    if quick_provenance is not None:
+        snapshot.update(
+            {
+                "proposal_schema_version": QUICK_PROPOSAL_SCHEMA,
+                "context_revision_id": None,
+                "context_fingerprint": None,
+                "service_account_id": str(quick_provenance.service_account_id),
+                "target_environment_id": str(quick_provenance.environment_id),
+                "expected_target_revision": quick_provenance.expected_target_revision,
+                "quick": {
+                    "task_ref": quick_provenance.task_ref,
+                    "scenario_key": quick_provenance.scenario_key,
+                    "proposal_id": (
+                        str(quick_provenance.proposal_id)
+                        if quick_provenance.proposal_id is not None
+                        else None
+                    ),
+                    "proposal_revision": quick_provenance.proposal_revision,
+                },
+            }
+        )
     if repair_provenance is not None:
         snapshot.update(
             {
@@ -1319,13 +1460,24 @@ def _proposal_source_ref(
     payload: FlowSpecImportRequest,
     fingerprint: str,
     provenance: FlowSpecImportProvenance | None,
+    quick: FlowSpecQuickProvenance | None,
     maintenance: FlowSpecMaintenanceProvenance | None,
 ) -> str:
     if maintenance is not None:
         return f"maintenance://contexts/{maintenance.context_id}/revisions/{maintenance.context_revision_id}/workflows/{maintenance.workflow_id}"
     if provenance is not None:
         return provenance.source_ref
+    if quick is not None:
+        return quick.source_ref
     return payload.source_ref or f"flow-spec://{fingerprint}"
+
+
+def _quick_proposal_revision(snapshot: Mapping[str, Any]) -> int:
+    quick = snapshot.get("quick")
+    if not isinstance(quick, Mapping):
+        return 1
+    value = quick.get("proposal_revision")
+    return value if isinstance(value, int) and value >= 1 else 1
 
 
 def _validate_integration_plan_provenance(
@@ -1361,12 +1513,13 @@ def _validate_integration_plan_provenance(
 def _validate_expected_target_revision(
     prepared: _PreparedFlowSpecImport,
     provenance: FlowSpecImportProvenance | None,
+    quick_provenance: FlowSpecQuickProvenance | None = None,
     repair_provenance: FlowSpecRepairProvenance | None = None,
     maintenance_provenance: FlowSpecMaintenanceProvenance | None = None,
 ) -> None:
     sources = [
         value
-        for value in (provenance, repair_provenance, maintenance_provenance)
+        for value in (provenance, quick_provenance, repair_provenance, maintenance_provenance)
         if value is not None
     ]
     if not sources:
@@ -1530,17 +1683,37 @@ def _mapping_error(*, code: str, message: str, path: str) -> AppError:
     )
 
 
+def portable_contract_fingerprint(
+    version: APIVersion,
+    *,
+    service_ref: str | None,
+) -> str:
+    if version.canonical_contract:
+        contract = OperationContract.model_validate(version.canonical_contract).model_copy(
+            update={"service": service_ref}
+        )
+        return fingerprint_contract(contract)
+    if version.contract_fingerprint:
+        return version.contract_fingerprint
+    # Older imported assets may not have stored a contract fingerprint.  A
+    # deterministic identity still lets a pinned quick proposal pass the v3
+    # operation contract requirement and match the same asset on revalidation.
+    payload = {
+        "method": version.method,
+        "path": version.path,
+        "service": service_ref,
+    }
+    return sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def _portable_contract_fingerprint(
     version: APIVersion,
     *,
     service_ref: str | None,
-) -> str | None:
-    if not version.canonical_contract:
-        return version.contract_fingerprint
-    contract = OperationContract.model_validate(version.canonical_contract).model_copy(
-        update={"service": service_ref}
-    )
-    return fingerprint_contract(contract)
+) -> str:
+    return portable_contract_fingerprint(version, service_ref=service_ref)
 
 
 def _default_operation_version(

@@ -26,6 +26,8 @@ from app.services.flow_spec import FlowSpecService
 from app.services.idempotency import IdempotencyService
 from app.services.maintenance_proposals import MaintenanceProposalService
 
+pytestmark = pytest.mark.redaction_on
+
 
 async def _request(
     fixture: dict[str, Any], *, heuristic: bool = False, edge_only: bool = False

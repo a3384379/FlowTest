@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import SENSITIVE_KEYS, redact
+from app.core.redaction import redaction_enabled
 from app.domain.api_assets import BodyKind, JsonValue
 from app.domain.assertions import (
     AssertionOutcome,
@@ -503,6 +504,8 @@ def _response_filename(headers: httpx.Headers) -> str:
 
 
 def _redact_response_headers(headers: dict[str, str]) -> dict[str, str]:
+    if not redaction_enabled():
+        return headers
     return {
         name: "***" if name.lower() in SENSITIVE_RESPONSE_HEADERS else value
         for name, value in headers.items()
@@ -510,6 +513,8 @@ def _redact_response_headers(headers: dict[str, str]) -> dict[str, str]:
 
 
 def _redact_request_url(url: str) -> str:
+    if not redaction_enabled():
+        return url
     parsed = urlsplit(url)
     query = [
         (name, "***" if name.lower() in SENSITIVE_KEYS else value)

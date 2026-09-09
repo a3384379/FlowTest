@@ -56,7 +56,7 @@ function ReportHeading({ state }: { state: ReportState }) {
       <div>
         <Typography.Title level={2}>测试报告</Typography.Title>
         <Typography.Text type="secondary">
-          查看执行趋势、失败分类和脱敏步骤详情，并导出可离线查看的 HTML 报告。
+          查看执行趋势、失败分类和步骤详情，并导出可离线查看的 HTML 报告。
         </Typography.Text>
       </div>
       <Space>
@@ -334,8 +334,8 @@ function ReportDetailDialog({ state }: { state: ReportState }) {
 function NodePayload({ node }: { node: ReportNode }) {
   return (
     <div className="report-payload-grid">
-      <Payload title="脱敏请求" value={node.request} />
-      <Payload title="脱敏响应" value={node.response} />
+      <Payload title="请求" value={node.request} />
+      <Payload title="响应" value={node.response} />
       <Payload title="提取/断言" value={node.extraction ?? node.assertion} />
       <Payload title="变量映射" value={node.input_mappings} />
     </div>

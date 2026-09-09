@@ -252,10 +252,18 @@ class TestCaseService:
         self, project_id: UUID, definition: TestCaseDefinitionInput
     ) -> None:
         workflow = await self._session.get(Workflow, definition.workflow_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         environment = await self._session.get(Environment, definition.environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         if (
             definition.workflow_version is not None

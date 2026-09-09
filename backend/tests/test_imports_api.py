@@ -23,6 +23,9 @@ from app.main import app
 from app.models import Base
 from app.models.access import User
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "import-admin@example.com"
 ADMIN_PASSWORD = "import-password-123!"
 
@@ -818,6 +821,31 @@ async def test_har_curl_bruno_excel_import_and_export(import_client: AsyncClient
             assert b"live-token" not in exported.content
             assert b"live-password" not in exported.content
             assert b"live-auth" not in exported.content
+
+
+@pytest.mark.parametrize("project_name", ["1.22发票", "English project", '项目 "quoted"'])
+@pytest.mark.parametrize("export_format", ["har", "curl", "bruno", "excel"])
+async def test_export_unicode_filename(
+    import_client: AsyncClient, project_name: str, export_format: str
+) -> None:
+    headers = await _login_headers(import_client)
+    project = await import_client.post(
+        "/api/v1/projects", headers=headers, json={"name": project_name}
+    )
+    assert project.status_code == 201, project.text
+    response = await import_client.get(
+        f"/api/v1/projects/{project.json()['id']}/exports/apis",
+        headers=headers,
+        params={"format": export_format},
+    )
+    assert response.status_code == 200, response.text
+    disposition = response.headers["content-disposition"]
+    assert disposition.isascii()
+    assert "filename*=UTF-8''" in disposition
+    if export_format in {"har", "bruno"}:
+        assert isinstance(response.json(), dict)
+    elif export_format == "excel":
+        assert load_workbook(BytesIO(response.content)).active.max_row == 1
 
 
 async def _login_headers(client: AsyncClient) -> dict[str, str]:

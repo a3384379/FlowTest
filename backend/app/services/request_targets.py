@@ -172,7 +172,7 @@ class RequestTargetResolver:
             endpoint_revision=revision,
             base_url=resolved_base_url,
             path=resolved_path,
-            effective_url=f"{resolved_base_url}/{resolved_path}",
+            effective_url=join_service_path(resolved_base_url, render_template(path, variables)),
             headers=headers,
             variables=variables,
             secret_refs=allowed_secret_refs,
@@ -249,8 +249,10 @@ class RequestTargetResolver:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
         elif version.service_id is not None:
             service = await self._targets.get_service(version.service_id)
+            _require_bound_service(service)
         elif environment.default_service_id is not None:
             service = await self._targets.get_service(environment.default_service_id)
+            _require_bound_service(service)
         if service is not None:
             if service.project_id != project_id:
                 raise AppError(code="SERVICE_NOT_FOUND", message="Service 不存在", status_code=404)
@@ -299,6 +301,29 @@ class RequestTargetResolver:
                     name=name,
                 )
         return resolved
+
+
+def _require_bound_service(service: Service | None) -> None:
+    if service is None:
+        raise AppError(
+            code="SERVICE_NOT_FOUND", message="显式绑定的 Service 不存在", status_code=404
+        )
+
+
+def join_service_path(base_url: str, path: str) -> str:
+    try:
+        parsed = urlsplit(path)
+    except ValueError as error:
+        raise AppError(
+            code="API_PATH_NOT_RELATIVE", message="接口必须使用有效的服务相对路径", status_code=422
+        ) from error
+    if parsed.scheme or parsed.netloc or path.startswith("//"):
+        raise AppError(
+            code="API_PATH_NOT_RELATIVE",
+            message="接口路径必须是服务相对路径, 请将固定地址配置到所选环境或服务 Endpoint",
+            status_code=422,
+        )
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _secret_associated_data(project_id: UUID, environment_id: UUID | None, name: str) -> bytes:

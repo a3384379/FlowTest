@@ -1,7 +1,10 @@
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.errors import AppError
 from app.main import app
+
+pytestmark = pytest.mark.redaction_on
 
 
 @app.get("/_test/error")

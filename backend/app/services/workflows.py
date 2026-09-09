@@ -19,6 +19,12 @@ from app.core.context import get_trace_id
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.core.redaction import (
+    get_redaction_policy,
+    persisted_redaction_policy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.domain.api_assets import BodyKind
 from app.domain.data_nodes import (
     CredentialKind,
@@ -90,6 +96,7 @@ from app.engine.scheduler import (
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
 from app.models.runner_fabric import RunnerTask
+from app.models.tasking import TestPlanItem
 from app.models.workflows import (
     Workflow,
     WorkflowExecution,
@@ -246,6 +253,73 @@ class WorkflowService:
     async def get(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._get_workflow(project_id, workflow_id)
+
+    async def delete(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> None:
+        """Archive a workflow after checking live references and executions."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        workflow = await self._workflows.get_for_update(workflow_id)
+        if workflow is None or workflow.project_id != project_id:
+            raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
+        if workflow.archived_at is not None:
+            return
+        active_execution = await self._session.scalar(
+            select(WorkflowExecution.id)
+            .where(
+                WorkflowExecution.workflow_id == workflow_id,
+                WorkflowExecution.status.in_(("queued", "running")),
+            )
+            .limit(1)
+        )
+        plan_reference = await self._session.scalar(
+            select(TestPlanItem.id).where(TestPlanItem.workflow_id == workflow_id).limit(1)
+        )
+        subflow_reference = await self._find_subflow_reference(
+            project_id=project_id, workflow_id=workflow_id
+        )
+        if (
+            active_execution is not None
+            or plan_reference is not None
+            or subflow_reference is not None
+        ):
+            raise AppError(
+                code="WORKFLOW_IN_USE",
+                message="工作流仍被活动执行、测试计划或其他工作流引用,不能删除",
+                status_code=409,
+                details={
+                    "active_execution": active_execution is not None,
+                    "test_plan_reference": plan_reference is not None,
+                    "subflow_reference": subflow_reference,
+                },
+            )
+        workflow.archived_at = datetime.now(UTC)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="workflow.archived",
+            resource_type="workflow",
+            resource_id=workflow.id,
+            details={"historical_data_retained": True},
+        )
+        await self._session.commit()
+
+    async def _find_subflow_reference(self, *, project_id: UUID, workflow_id: UUID) -> str | None:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(Workflow).where(
+                        Workflow.project_id == project_id,
+                        Workflow.id != workflow_id,
+                        Workflow.archived_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        needle = str(workflow_id)
+        for candidate in rows:
+            if _contains_workflow_id(candidate.draft_definition, needle):
+                return str(candidate.id)
+        return None
 
     async def update_draft(
         self,
@@ -829,13 +903,17 @@ class WorkflowService:
         if isinstance(plan, WorkflowRunPlan) and isinstance(submitted, RunnerSingleExecutionResult):
             self._validate_remote_execution_id(plan.execution_id, submitted.execution_id)
             execution = await self.load_execution_for_run(plan.execution_id)
-            nodes = self._node_models(execution.id, submitted.result.to_domain())
-            await self._workflows.replace_node_executions(execution.id, nodes)
-            self._stage_run_result(
-                execution=execution,
-                plan=plan,
-                result=submitted.result.to_domain(),
-            )
+            token = set_redaction_policy(persisted_redaction_policy(execution))
+            try:
+                nodes = self._node_models(execution.id, submitted.result.to_domain())
+                await self._workflows.replace_node_executions(execution.id, nodes)
+                self._stage_run_result(
+                    execution=execution,
+                    plan=plan,
+                    result=submitted.result.to_domain(),
+                )
+            finally:
+                reset_redaction_policy(token)
             return execution
         if isinstance(plan, WorkflowBatchPlan) and isinstance(
             submitted, RunnerBatchExecutionResult
@@ -864,16 +942,24 @@ class WorkflowService:
         children: list[WorkflowExecution] = []
         for execution_id, child_plan in expected.items():
             execution = await self.load_execution_for_run(execution_id)
-            nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
-            await self._workflows.replace_node_executions(execution.id, nodes)
-            self._stage_run_result(
-                execution=execution,
-                plan=child_plan,
-                result=received[execution_id].result.to_domain(),
-            )
+            token = set_redaction_policy(persisted_redaction_policy(execution))
+            try:
+                nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
+                await self._workflows.replace_node_executions(execution.id, nodes)
+                self._stage_run_result(
+                    execution=execution,
+                    plan=child_plan,
+                    result=received[execution_id].result.to_domain(),
+                )
+            finally:
+                reset_redaction_policy(token)
             children.append(execution)
         parent = await self.load_execution_for_run(plan.execution_id)
-        self._stage_batch_completion(parent, children)
+        token = set_redaction_policy(persisted_redaction_policy(parent))
+        try:
+            self._stage_batch_completion(parent, children)
+        finally:
+            reset_redaction_policy(token)
         return parent
 
     def _stage_run_result(
@@ -1161,7 +1247,11 @@ class WorkflowService:
                 message="数据集子执行尚未全部完成",
                 status_code=409,
             )
-        self._stage_batch_completion(execution, children)
+        token = set_redaction_policy(persisted_redaction_policy(execution))
+        try:
+            self._stage_batch_completion(execution, children)
+        finally:
+            reset_redaction_policy(token)
         await self._session.commit()
         await self._session.refresh(execution)
         return execution
@@ -1848,9 +1938,12 @@ class WorkflowService:
         parent_execution_id: UUID | None = None,
         dataset_row_index: int | None = None,
     ) -> WorkflowExecution:
+        policy = get_redaction_policy()
         return WorkflowExecution(
             id=uuid4(),
             project_id=project_id,
+            redaction_mode=policy.mode.value,
+            redaction_policy_version=policy.policy_version,
             workflow_id=workflow.id,
             workflow_version_id=version.id,
             environment_id=environment_id,
@@ -1883,9 +1976,12 @@ class WorkflowService:
         parent_execution_id: UUID | None = None,
         dataset_row_index: int | None = None,
     ) -> WorkflowExecution:
+        policy = get_redaction_policy()
         return WorkflowExecution(
             id=uuid4(),
             project_id=project_id,
+            redaction_mode=policy.mode.value,
+            redaction_policy_version=policy.policy_version,
             workflow_id=workflow_id,
             workflow_version_id=None,
             environment_id=environment_id,
@@ -2026,13 +2122,21 @@ class WorkflowService:
 
     async def _get_workflow(self, project_id: UUID, workflow_id: UUID) -> Workflow:
         workflow = await self._workflows.get(workflow_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         return workflow
 
     async def _get_workflow_for_update(self, project_id: UUID, workflow_id: UUID) -> Workflow:
         workflow = await self._workflows.get_for_update(workflow_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(code="WORKFLOW_NOT_FOUND", message="工作流不存在", status_code=404)
         return workflow
 
@@ -2661,6 +2765,18 @@ def _grpc_method_matches(
 
 def _execution_plan_associated_data(execution_id: UUID) -> bytes:
     return f"workflow-execution:{execution_id}:run-plan".encode()
+
+
+def _contains_workflow_id(value: object, needle: str) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (str(item) == needle if key in {"workflow_id", "subflow_id"} else False)
+            or _contains_workflow_id(item, needle)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_workflow_id(item, needle) for item in value)
+    return False
 
 
 def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str) -> bool:

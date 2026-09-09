@@ -12,11 +12,17 @@ SKILL_MANIFEST_SCHEMA_VERSION = "flowtest-skill-manifest-v1"
 SKILL_VERSION = "1.1.0-rc.1"
 SKILL_MINIMUM_MCP_VERSION = "s61-mcp-connection-v1"
 
-SKILL_REQUIRED_TOOLS = (
+SKILL_QUICK_TOOLS = (
     "flowtest.list_projects",
     "flowtest.inspect_project",
-    "flowtest.discover_services",
     "flowtest.inspect_contract",
+    "flowtest.propose_simple_flow",
+    "flowtest.inspect_flow_proposal",
+    "flowtest.find_assets",
+    "flowtest.inspect_project_readiness",
+)
+SKILL_DEEP_TOOLS = (
+    "flowtest.discover_services",
     "flowtest.begin_test_context",
     "flowtest.inspect_context_requirements",
     "flowtest.ingest_external_evidence",
@@ -29,11 +35,10 @@ SKILL_REQUIRED_TOOLS = (
     "flowtest.explain_compiler_diagnostics",
     "flowtest.validate_flowspec",
     "flowtest.propose_flow_draft",
-    "flowtest.inspect_flow_proposal",
-    "flowtest.find_assets",
-    "flowtest.inspect_project_readiness",
 )
+SKILL_REQUIRED_TOOLS = SKILL_QUICK_TOOLS
 SKILL_OPTIONAL_TOOLS = (
+    *SKILL_DEEP_TOOLS,
     "flowtest.inspect_connection",
     "flowtest.check_service_target",
     "flowtest.inspect_entity_mapping",
@@ -42,12 +47,12 @@ SKILL_OPTIONAL_TOOLS = (
     "flowtest.commit_contract_import",
     "flowtest.preview_flow_proposal",
 )
-SKILL_REQUIRED_SCOPES = (
-    "mcp:read",
+SKILL_REQUIRED_SCOPES = ("mcp:read", "mcp:flow:propose")
+SKILL_OPTIONAL_SCOPES = (
     "mcp:evidence:write",
-    "mcp:flow:propose",
+    "mcp:preview:execute",
+    "mcp:contract:import",
 )
-SKILL_OPTIONAL_SCOPES = ("mcp:preview:execute", "mcp:contract:import")
 SKILL_STAGES = (
     "select_project",
     "create_context",
@@ -129,6 +134,8 @@ class IntegrationFlowSkillManifest(BaseModel):
     name: Literal["flowtest-generate-integration-flow"]
     version: Literal["1.0.0-rc.1", "1.0.0-rc.2", "1.1.0-rc.1"]
     minimum_mcp_version: Literal["s55-sandbox-preview-v1", "s61-mcp-connection-v1"]
+    quick_tools: list[str] = Field(default_factory=list)
+    deep_tools: list[str] = Field(default_factory=list)
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]
     required_scopes: list[str] = Field(min_length=1)
@@ -163,4 +170,10 @@ class IntegrationFlowSkillManifest(BaseModel):
             raise ValueError("required and optional tools must be disjoint")
         if set(self.required_scopes) & set(self.optional_scopes):
             raise ValueError("required and optional scopes must be disjoint")
+        if self.quick_tools and tuple(self.quick_tools) != SKILL_QUICK_TOOLS:
+            raise ValueError("quick tool contract mismatch")
+        if self.deep_tools and tuple(self.deep_tools) != SKILL_DEEP_TOOLS:
+            raise ValueError("deep tool contract mismatch")
+        if set(self.quick_tools) & set(self.deep_tools):
+            raise ValueError("quick and deep tools must be disjoint")
         return self

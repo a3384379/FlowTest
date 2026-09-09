@@ -14,6 +14,8 @@ from app.domain.test_design import (
     TestDesignDocument as DesignDocument,
 )
 
+pytestmark = pytest.mark.redaction_on
+
 
 def _design(*, confidence: float = 0.95) -> DesignDocument:
     return DesignDocument.model_validate(

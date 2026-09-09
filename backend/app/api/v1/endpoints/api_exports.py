@@ -1,4 +1,5 @@
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
@@ -24,5 +25,13 @@ async def export_apis(
     return Response(
         content=document.content,
         media_type=document.media_type,
-        headers={"Content-Disposition": f'attachment; filename="{document.filename}"'},
+        headers={"Content-Disposition": attachment_disposition(document.filename)},
     )
+
+
+def attachment_disposition(filename: str) -> str:
+    fallback = "".join(
+        character if character.isascii() and (character.isalnum() or character in "._-") else "_"
+        for character in filename
+    )
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"

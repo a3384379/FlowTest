@@ -23,6 +23,8 @@ from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecut
 from app.services.change_regression import ChangeRegressionService
 from app.services.service_accounts import ServiceAccountService
 
+pytestmark = pytest.mark.redaction_on
+
 
 async def _account(fixture: dict[str, Any], scopes: list[str]) -> tuple[UUID, str]:
     async with fixture["sessions"]() as session:

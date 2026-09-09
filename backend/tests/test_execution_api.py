@@ -22,6 +22,9 @@ from app.models.access import User
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.executions import _redact_request_url, _send_request
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "execution-admin@example.com"
 ADMIN_PASSWORD = "execution-password-123!"
 

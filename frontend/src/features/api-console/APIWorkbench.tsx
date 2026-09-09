@@ -1,3 +1,4 @@
+import RequestTargetSummary from './RequestTargetSummary'
 import { EditOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   Button,
@@ -22,6 +23,7 @@ import {
   parseBulkParameters,
   serializeBulkHeaders,
   serializeBulkParameters,
+  type BulkRedactionMode,
   type KeyValueField,
   type ParameterField,
 } from './bulk-edit'
@@ -38,6 +40,7 @@ type APIWorkbenchProps = {
   onPreview: () => Promise<unknown>
   onRename: () => void
   artifacts?: Artifact[]
+  redactionMode?: BulkRedactionMode
 }
 
 type WorkbenchFields = BodyEditorFields & {
@@ -54,6 +57,7 @@ type WorkbenchFields = BodyEditorFields & {
 export default function APIWorkbench(props: APIWorkbenchProps) {
   const [form] = Form.useForm<WorkbenchFields>()
   const [preview, setPreview] = useState<unknown>(null)
+  const redactionMode = props.redactionMode ?? 'off'
   useEffect(() => {
     if (props.detail) form.setFieldsValue(toFields(props.detail.version))
   }, [form, props.detail])
@@ -119,10 +123,15 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
             {
               key: 'headers',
               label: 'Headers',
-              children: <HeaderFields />,
+              children: <HeaderFields redactionMode={redactionMode} />,
               forceRender: true,
             },
-            { key: 'auth', label: 'Auth', children: <AuthFields />, forceRender: true },
+            {
+              key: 'auth',
+              label: 'Auth',
+              children: <AuthFields redactionMode={redactionMode} />,
+              forceRender: true,
+            },
             {
               key: 'body',
               label: 'Body',
@@ -140,12 +149,13 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
         />
       </Form>
       <Modal
-        title="最终请求预览（Secret 已脱敏）"
+        title="最终请求预览"
         open={preview !== null}
         footer={null}
         onCancel={() => setPreview(null)}
         width={760}
       >
+        <RequestTargetSummary preview={preview} />
         <pre className="preview-code">{JSON.stringify(preview, null, 2)}</pre>
       </Modal>
     </Card>
@@ -209,7 +219,7 @@ function ParameterFields() {
   )
 }
 
-function HeaderFields() {
+function HeaderFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
   const form = Form.useFormInstance<WorkbenchFields>()
   const [bulkText, setBulkText] = useState<string | null>(null)
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
@@ -220,14 +230,18 @@ function HeaderFields() {
         label="Headers"
         text={bulkText}
         errors={bulkErrors}
-        help="每行使用“Header 名: 值”；# 开头的注释行不会保存，敏感值请使用 {{secret.NAME}}。"
+        help={
+          redactionMode === 'on'
+            ? '每行使用“Header 名: 值”；# 开头的注释行不会保存，敏感值请使用 {{secret.NAME}}。'
+            : '每行使用“Header 名: 值”；# 开头的注释行不会保存，当前项目脱敏已关闭，输入值会按原样保留。'
+        }
         onChange={setBulkText}
         onCancel={() => {
           setBulkText(null)
           setBulkErrors([])
         }}
         onApply={() => {
-          const parsed = parseBulkHeaders(bulkText, originalHeaders)
+          const parsed = parseBulkHeaders(bulkText, originalHeaders, redactionMode)
           setBulkErrors(parsed.errors)
           if (parsed.errors.length) return
           form.setFieldValue('headers', parsed.values)
@@ -246,7 +260,7 @@ function HeaderFields() {
           onBulkEdit={() => {
             const headers = (form.getFieldValue('headers') ?? []) as KeyValueField[]
             setOriginalHeaders(headers)
-            setBulkText(serializeBulkHeaders(headers))
+            setBulkText(serializeBulkHeaders(headers, redactionMode))
             setBulkErrors([])
           }}
           render={(field) => (
@@ -255,7 +269,10 @@ function HeaderFields() {
                 <Input placeholder="名称" />
               </Form.Item>
               <Form.Item name={[field.name, 'value']}>
-                <Input.Password placeholder="值或 {{secret.NAME}}" visibilityToggle={false} />
+                <Input
+                  type={redactionMode === 'on' ? 'password' : 'text'}
+                  placeholder="值或 {{secret.NAME}}"
+                />
               </Form.Item>
             </>
           )}
@@ -265,7 +282,13 @@ function HeaderFields() {
   )
 }
 
-function KeyValueFields({ name }: { name: 'auth_config' }) {
+function KeyValueFields({
+  name,
+  redactionMode,
+}: {
+  name: 'auth_config'
+  redactionMode: BulkRedactionMode
+}) {
   return (
     <Form.List name={name}>
       {(fields, { add, remove }) => (
@@ -279,7 +302,10 @@ function KeyValueFields({ name }: { name: 'auth_config' }) {
                 <Input placeholder="名称" />
               </Form.Item>
               <Form.Item name={[field.name, 'value']}>
-                <Input.Password placeholder="值或 {{secret.NAME}}" visibilityToggle={false} />
+                <Input
+                  type={redactionMode === 'on' ? 'password' : 'text'}
+                  placeholder="值或 {{secret.NAME}}"
+                />
               </Form.Item>
             </>
           )}
@@ -289,7 +315,7 @@ function KeyValueFields({ name }: { name: 'auth_config' }) {
   )
 }
 
-function AuthFields() {
+function AuthFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
   return (
     <>
       <Form.Item name="auth_kind" label="认证方式">
@@ -305,7 +331,7 @@ function AuthFields() {
       <Typography.Paragraph type="secondary">
         Bearer 使用 token；Basic 使用 username/password；API Key 使用 name/value/in。
       </Typography.Paragraph>
-      <KeyValueFields name="auth_config" />
+      <KeyValueFields name="auth_config" redactionMode={redactionMode} />
     </>
   )
 }

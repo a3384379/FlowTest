@@ -268,12 +268,19 @@ class MCPBootstrapService:
         if (
             environment is None
             or environment.project_id != payload.project_id
+            or environment.archived_at is not None
             or environment.classification not in {"test", "sandbox"}
         ):
             raise AppError(
                 code="ENVIRONMENT_NOT_ALLOWED",
                 message="Service Target 只能绑定测试或 Sandbox 环境",
-                status_code=422 if environment is not None else 404,
+                status_code=(
+                    404
+                    if environment is None
+                    or environment.project_id != payload.project_id
+                    or environment.archived_at is not None
+                    else 422
+                ),
             )
         base_url = _normalize_base_url(str(payload.base_url))
         await self._validate_target_url(access, base_url)
@@ -487,6 +494,7 @@ class MCPBootstrapService:
                 select(Environment).where(
                     Environment.project_id == project_id,
                     Environment.name == name,
+                    Environment.archived_at.is_(None),
                 )
             ),
         )

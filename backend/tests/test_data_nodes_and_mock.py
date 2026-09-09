@@ -52,6 +52,9 @@ from app.services.data_nodes import (
 )
 from app.services.workflow_runtime import WorkflowNodeExecutor
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "data-admin@example.com"
 ADMIN_PASSWORD = "data-password-123!"
 

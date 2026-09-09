@@ -2,9 +2,11 @@ import {
   ApartmentOutlined,
   BugOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
   DiffOutlined,
   EyeOutlined,
   LockOutlined,
+  MoreOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RedoOutlined,
@@ -16,9 +18,12 @@ import {
   Card,
   Empty,
   Modal,
+  Popconfirm,
   Segmented,
   Select,
   Space,
+  Dropdown,
+  Tabs,
   Table,
   Tag,
   Typography,
@@ -33,6 +38,8 @@ import FlowSpecReviewDialog, {
 } from '../features/workflows/FlowSpecReviewDialog'
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
+import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
+import { useAuthStore } from '../features/auth/auth-store'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
 import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
 
@@ -46,6 +53,18 @@ export default function WorkflowsPage() {
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
+  const userId = useAuthStore((store) => store.user?.id)
+  const tabs = useWorkflowTabs({
+    userId,
+    projectId: state.projectId,
+    workflowIds: state.workflows.data?.items.map((item) => item.id) ?? [],
+    activeWorkflowId: state.workflowId,
+    hasExplicitFocus: Boolean(initialWorkflowId),
+    selectWorkflow: state.setWorkflowSelection,
+    saveWorkflowDraft: state.saveWorkflowDraft,
+    searchParams,
+    setSearchParams,
+  })
 
   async function create(input: Parameters<typeof state.addWorkflow>[0]) {
     await state.addWorkflow(input)
@@ -63,7 +82,19 @@ export default function WorkflowsPage() {
         }}
         onFlowProposal={() => setFlowProposalOpen(true)}
       />
-      <WorkflowWorkspace state={state} />
+      <WorkflowTabs
+        state={state}
+        workflowIds={tabs.workflowIds}
+        dirtyIds={tabs.dirtyIds}
+        storageError={tabs.storageError}
+        onActivate={tabs.activateWorkflow}
+        onClose={tabs.requestCloseTabs}
+        onCloseOthers={() =>
+          tabs.requestCloseTabs(tabs.workflowIds.filter((id) => id !== state.workflowId))
+        }
+        onCloseAll={() => tabs.requestCloseTabs(tabs.workflowIds)}
+      />
+      <WorkflowWorkspace state={state} onSelectWorkflow={tabs.activateWorkflow} />
       <RunConsoleCard state={state} />
       <DebugResultCard result={state.debugResult} />
       <Card title="工作流执行历史" className="workflow-result-card">
@@ -94,11 +125,9 @@ export default function WorkflowsPage() {
         onFlowSpecClose={() => setFlowSpecOpen(false)}
         onFlowProposalClose={() => {
           setFlowProposalOpen(false)
-          if (searchParams.has('proposal')) {
-            const next = new URLSearchParams(searchParams)
-            next.delete('proposal')
-            setSearchParams(next, { replace: true })
-          }
+          const next = new URLSearchParams(searchParams)
+          next.delete('proposal')
+          setSearchParams(next, { replace: true })
         }}
         onOpenRawMapping={(seed) => {
           setFlowProposalOpen(false)
@@ -106,26 +135,88 @@ export default function WorkflowsPage() {
           setFlowSpecOpen(true)
         }}
       />
-      {state.projectId && repairExecution && (
-        <FailureRepairDialog
-          key={repairExecution.id}
-          open
-          projectId={state.projectId}
-          execution={repairExecution}
-          onClose={() => setRepairExecution(undefined)}
-          onCreated={(proposalId) => {
-            setRepairExecution(undefined)
-            const next = new URLSearchParams(searchParams)
-            next.set('proposal', proposalId)
-            setSearchParams(next, { replace: true })
-          }}
-        />
-      )}
+      <RepairDialog
+        projectId={state.projectId}
+        execution={repairExecution}
+        searchParams={searchParams}
+        setSearchParams={setSearchParams}
+        onClose={() => setRepairExecution(undefined)}
+      />
+      <WorkflowTabCloseModal tabs={tabs} />
     </>
   )
 }
 
 type WorkflowState = ReturnType<typeof useWorkflows>
+
+type WorkflowTabsState = ReturnType<typeof useWorkflowTabs>
+
+function WorkflowTabCloseModal({ tabs }: { tabs: WorkflowTabsState }) {
+  const dirtyCount = tabs.pendingClose?.dirtyIds.length ?? 0
+  return (
+    <Modal
+      open={Boolean(tabs.pendingClose)}
+      title="关闭未保存页签"
+      onCancel={tabs.cancelPendingClose}
+      closable={!tabs.closingTabs}
+      maskClosable={!tabs.closingTabs}
+      footer={
+        <Space>
+          <Button disabled={tabs.closingTabs} onClick={tabs.cancelPendingClose}>
+            取消
+          </Button>
+          <Button
+            danger
+            loading={tabs.closingTabs}
+            onClick={() => void tabs.resolvePendingClose('discard')}
+          >
+            丢弃并关闭
+          </Button>
+          <Button
+            type="primary"
+            loading={tabs.closingTabs}
+            onClick={() => void tabs.resolvePendingClose('save')}
+          >
+            保存并关闭
+          </Button>
+        </Space>
+      }
+    >
+      {dirtyCount === 1 ? '当前页签有未保存修改。' : `${dirtyCount} 个页签有未保存修改。`}
+    </Modal>
+  )
+}
+
+function RepairDialog({
+  projectId,
+  execution,
+  searchParams,
+  setSearchParams,
+  onClose,
+}: {
+  projectId: string | null
+  execution: WorkflowExecution | undefined
+  searchParams: URLSearchParams
+  setSearchParams: (params: URLSearchParams, options?: { replace?: boolean }) => void
+  onClose: () => void
+}) {
+  if (!projectId || !execution) return null
+  return (
+    <FailureRepairDialog
+      key={execution.id}
+      open
+      projectId={projectId}
+      execution={execution}
+      onClose={onClose}
+      onCreated={(proposalId) => {
+        onClose()
+        const next = new URLSearchParams(searchParams)
+        next.set('proposal', proposalId)
+        setSearchParams(next, { replace: true })
+      }}
+    />
+  )
+}
 
 function FlowDialogs({
   state,
@@ -315,7 +406,8 @@ function WorkflowHeading({
         <Select
           aria-label="工作流环境"
           className="context-select"
-          placeholder="选择环境"
+          placeholder={state.environmentPlaceholder}
+          status={state.environmentStatus}
           value={state.environmentId}
           loading={state.environments.isLoading}
           disabled={!state.projectId}
@@ -341,14 +433,113 @@ function WorkflowHeading({
   )
 }
 
-function WorkflowWorkspace({ state }: { state: WorkflowState }) {
+function WorkflowTabs({
+  state,
+  workflowIds,
+  dirtyIds,
+  storageError,
+  onActivate,
+  onClose,
+  onCloseOthers,
+  onCloseAll,
+}: {
+  state: WorkflowState
+  workflowIds: string[]
+  dirtyIds: string[]
+  storageError: string | null
+  onActivate: (workflowId: string) => void
+  onClose: (workflowIds: string[]) => void
+  onCloseOthers: () => void
+  onCloseAll: () => void
+}) {
+  const workflows = state.workflows.data?.items ?? []
+  const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]))
+  const items = workflowIds.flatMap((id) => {
+    const workflow = byId.get(id)
+    if (!workflow) return []
+    const dirty = dirtyIds.includes(workflow.id)
+    return [
+      {
+        key: workflow.id,
+        label: (
+          <span>
+            {workflow.name}
+            {dirty && <Typography.Text type="warning"> ·</Typography.Text>}
+          </span>
+        ),
+        closable: true,
+      },
+    ]
+  })
+  if (items.length < 2) {
+    return storageError ? (
+      <Alert
+        showIcon
+        type="warning"
+        title="工作区页签保存失败"
+        description={storageError}
+        className="workflow-tabs-alert"
+      />
+    ) : null
+  }
+  return (
+    <div className="workflow-tabs">
+      <Space align="center" wrap>
+        <Tabs
+          type="editable-card"
+          hideAdd
+          activeKey={state.workflowId ?? undefined}
+          items={items}
+          onChange={onActivate}
+          onEdit={(targetKey, action) => {
+            if (action === 'remove' && typeof targetKey === 'string') onClose([targetKey])
+          }}
+        />
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'others', label: '关闭其他页签', disabled: items.length < 2 },
+              { key: 'all', label: '关闭全部页签' },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'others') onCloseOthers()
+              if (key === 'all') onCloseAll()
+            },
+          }}
+          trigger={['click']}
+        >
+          <Button type="text" icon={<MoreOutlined />} aria-label="页签操作" />
+        </Dropdown>
+      </Space>
+      {storageError && (
+        <Alert
+          showIcon
+          type="warning"
+          title="工作区页签保存失败"
+          description={storageError}
+          className="workflow-tabs-alert"
+        />
+      )}
+    </div>
+  )
+}
+
+function WorkflowWorkspace({
+  state,
+  onSelectWorkflow,
+}: {
+  state: WorkflowState
+  onSelectWorkflow: (workflowId: string) => void
+}) {
   return (
     <div className="workflow-grid">
       <Card title="工作流" loading={state.workflows.isLoading}>
         <WorkflowTable
           items={state.workflows.data?.items ?? []}
           selectedId={state.workflowId}
-          onSelect={state.setWorkflowSelection}
+          onSelect={onSelectWorkflow}
+          deleting={state.deleting}
+          onDelete={(id) => void state.deleteWorkflow(id)}
         />
       </Card>
       <Card
@@ -475,31 +666,8 @@ function DraftEditor({ state }: { state: WorkflowState }) {
   const resources = workflowDesignerResources(state, workflow.id)
   return (
     <>
-      {state.workspaceMode === 'history' && (
-        <Alert
-          showIcon
-          type="warning"
-          title="正在查看历史执行快照"
-          description="画布、节点配置、接口版本和运行结果均来自当次执行，不会随当前草稿变化。"
-          className="workflow-snapshot-alert"
-        />
-      )}
-      {state.workspaceMode === 'run' && state.activeExecutionId && (
-        <Alert
-          showIcon
-          type="info"
-          title="工作流正在运行"
-          description="节点状态和结果会实时更新，点击画布节点查看请求与响应。"
-          className="workflow-snapshot-alert"
-        />
-      )}
-      <Space className="workflow-meta" wrap>
-        <Tag color="blue">草稿 r{workflow.draft_revision}</Tag>
-        <PublishedTag version={workflow.current_version} />
-        {state.runtimeExecution && state.workspaceMode !== 'draft' && (
-          <Tag>执行 {state.runtimeExecution.id.slice(0, 8)}</Tag>
-        )}
-      </Space>
+      <DraftAlerts state={state} />
+      <DraftMetadata state={state} workflow={workflow} />
       <WorkflowDesigner
         key={`${workflow.id}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
         projectId={state.projectId}
@@ -520,6 +688,55 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         onChange={state.setDraftDefinition}
       />
     </>
+  )
+}
+
+function DraftAlerts({ state }: { state: WorkflowState }) {
+  const historyAlert = state.workspaceMode === 'history'
+  const runningAlert = state.workspaceMode === 'run' && Boolean(state.activeExecutionId)
+  return (
+    <>
+      {historyAlert && (
+        <Alert
+          showIcon
+          type="warning"
+          title="正在查看历史执行快照"
+          description="画布、节点配置、接口版本和运行结果均来自当次执行，不会随当前草稿变化。"
+          className="workflow-snapshot-alert"
+        />
+      )}
+      {runningAlert && (
+        <Alert
+          showIcon
+          type="info"
+          title="工作流正在运行"
+          description="节点状态和结果会实时更新，点击画布节点查看请求与响应。"
+          className="workflow-snapshot-alert"
+        />
+      )}
+      {state.draftStorageError && (
+        <Alert
+          showIcon
+          type="warning"
+          title="本地保存失败"
+          description={state.draftStorageError}
+          className="workflow-snapshot-alert"
+        />
+      )}
+    </>
+  )
+}
+
+function DraftMetadata({ state, workflow }: { state: WorkflowState; workflow: Workflow }) {
+  return (
+    <Space className="workflow-meta" wrap>
+      <Tag color="blue">草稿 r{workflow.draft_revision}</Tag>
+      <PublishedTag version={workflow.current_version} />
+      {state.draftRestored && <Tag color="orange">本地草稿已恢复</Tag>}
+      {state.runtimeExecution && state.workspaceMode !== 'draft' && (
+        <Tag>执行 {state.runtimeExecution.id.slice(0, 8)}</Tag>
+      )}
+    </Space>
   )
 }
 
@@ -568,10 +785,14 @@ function WorkflowTable({
   items,
   selectedId,
   onSelect,
+  deleting,
+  onDelete,
 }: {
   items: Workflow[]
   selectedId: string | null
   onSelect: (id: string) => void
+  deleting: boolean
+  onDelete: (id: string) => void
 }) {
   return (
     <Table
@@ -592,8 +813,29 @@ function WorkflowTable({
         },
         {
           title: '',
-          width: 40,
-          render: () => <ApartmentOutlined className="table-action-icon" />,
+          width: 100,
+          render: (_value, record) => (
+            <Space>
+              <ApartmentOutlined className="table-action-icon" />
+              <Popconfirm
+                title="删除工作流？"
+                description="历史执行和快照会保留，未保存的本地草稿会清理。"
+                okText="删除"
+                cancelText="取消"
+                onConfirm={() => onDelete(record.id)}
+              >
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  loading={deleting && record.id === selectedId}
+                  aria-label={`删除工作流 ${record.name}`}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              </Popconfirm>
+            </Space>
+          ),
         },
       ]}
     />

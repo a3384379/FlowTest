@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
+
 EVIDENCE_SCHEMA_VERSION = "flowtest-evidence-v1"
 MAX_EVIDENCE_BYTES = 512 * 1024
 MAX_SOURCE_FILES = 100
@@ -75,6 +77,8 @@ class EvidenceFinding(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def redact_sensitive_values(cls, value: object) -> object:
+        if not redaction_enabled():
+            return value
         if not isinstance(value, dict):
             return value
         structured = value.get("structured_data")
@@ -96,6 +100,8 @@ class EvidenceFinding(BaseModel):
 
     @model_validator(mode="after")
     def reject_sensitive_values(self) -> EvidenceFinding:
+        if not redaction_enabled():
+            return self
         unsafe_path = _sensitive_value_path(self.structured_data)
         if unsafe_path is not None:
             raise ValueError(f"evidence structured_data contains sensitive value at {unsafe_path}")
@@ -190,9 +196,12 @@ class EvidenceBundle(BaseModel):
             raise ValueError("evidence finding ids must be unique")
         if len(self.findings) > self.budget.max_findings:
             raise ValueError("evidence finding budget exceeded")
-        unsafe_warning = _sensitive_value_path(cast(JsonValue, self.warnings), path="$.warnings")
-        if unsafe_warning is not None:
-            raise ValueError(f"evidence metadata contains sensitive value at {unsafe_warning}")
+        if redaction_enabled():
+            unsafe_warning = _sensitive_value_path(
+                cast(JsonValue, self.warnings), path="$.warnings"
+            )
+            if unsafe_warning is not None:
+                raise ValueError(f"evidence metadata contains sensitive value at {unsafe_warning}")
         payload = self.model_dump(mode="json", exclude={"budget": {"max_bytes"}})
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if len(encoded.encode()) > self.budget.max_bytes:
@@ -230,7 +239,11 @@ class DataProfileColumn(BaseModel):
 
     @model_validator(mode="after")
     def validate_masked_example(self) -> DataProfileColumn:
-        if self.masked_example is not None and "***" not in self.masked_example:
+        if (
+            redaction_enabled()
+            and self.masked_example is not None
+            and "***" not in self.masked_example
+        ):
             raise ValueError("data profile examples must be masked")
         return self
 
@@ -817,6 +830,8 @@ def _finding(
 
 
 def _sensitive_value_path(value: JsonValue, path: str = "$") -> str | None:
+    if not redaction_enabled():
+        return None
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}"
@@ -845,6 +860,8 @@ def _is_redacted_marker(value: JsonValue) -> bool:
 
 
 def _sanitize_evidence_value(value: JsonValue, key: str = "") -> tuple[JsonValue, bool]:
+    if not redaction_enabled():
+        return value, False
     if isinstance(value, dict):
         result: dict[str, JsonValue] = {}
         changed = False
@@ -894,6 +911,8 @@ def _url_contains_userinfo(value: str) -> bool:
 
 
 def _safe_source_enum_value(value: str | int | float | bool) -> bool:
+    if not redaction_enabled():
+        return True
     if not isinstance(value, str):
         return True
     return len(value) <= 80 and not _looks_sensitive_value(value)
