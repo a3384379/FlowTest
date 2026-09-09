@@ -80,6 +80,15 @@ if ($null -eq $python) {
     if ($LASTEXITCODE -ne 0) {
         Add-PreflightError("Python 依赖不完整；请重新生成 Standalone 离线包")
     }
+    $mcpScript = Join-Path $Root "deploy\standalone\mcp.ps1"
+    if (Test-Path -LiteralPath $mcpScript) {
+        try {
+            & $mcpScript -ValidateOnly
+            if ($LASTEXITCODE -ne 0) { Add-PreflightError("MCP 集成流程工具验证失败") }
+        } catch {
+            Add-PreflightError("MCP 集成流程工具验证失败：$($_.Exception.Message)")
+        }
+    }
 }
 
 $dataPath = Join-Path $Root "data"
