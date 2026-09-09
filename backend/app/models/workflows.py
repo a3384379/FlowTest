@@ -83,6 +83,10 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "AND dataset_row_index >= 0)",
             name="workflow_execution_dataset_child",
         ),
+        CheckConstraint(
+            "redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
         UniqueConstraint(
             "parent_execution_id",
             "dataset_row_index",

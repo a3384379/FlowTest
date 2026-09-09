@@ -30,6 +30,10 @@ class AIJob(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('pending', 'running', 'completed', 'failed')",
             name="ai_job_status",
         ),
+        CheckConstraint(
+            "redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(

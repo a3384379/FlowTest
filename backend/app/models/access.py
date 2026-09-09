@@ -88,6 +88,10 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "queued_run_limit BETWEEN 1 AND 5000",
             name="project_queued_run_limit",
         ),
+        CheckConstraint(
+            "redaction_mode IS NULL OR redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
     )
 
     organization_id: Mapped[UUID | None] = mapped_column(
