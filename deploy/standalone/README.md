@@ -88,8 +88,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 ## 通过 MCP 创建流程提案
 
 离线包包含 MCP Adapter 和 `skills\flowtest-generate-integration-flow\`。先保持 Standalone Web/API
-运行，再由管理员在 FlowTest 组织治理页签发最小权限机器账号；至少需要 `mcp:evidence:write` 和
-`mcp:flow:propose`，零项目初始化、契约导入和沙箱预览分别需要对应的额外 Scope。Token 只存入用户
+运行，再由管理员在 FlowTest 组织治理页签发最小权限机器账号；至少需要 `mcp:read`、
+`mcp:evidence:write` 和 `mcp:flow:propose`，零项目初始化、契约导入和沙箱预览分别需要对应的额外
+Scope。Token 只存入用户
 环境或公司凭据工具，不要写入 `.env`、命令参数、客户端配置或日志。
 
 可以先做不读取 Token、不访问业务 API 的离线自检：
