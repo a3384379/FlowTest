@@ -43,10 +43,12 @@ Remove-Item -LiteralPath $filtered -Force
 $backendTarget = Join-Path $Destination "backend"
 $frontendTarget = Join-Path $Destination "frontend\dist"
 $deployTarget = Join-Path $Destination "deploy\standalone"
-New-Item -ItemType Directory -Force -Path $backendTarget, $frontendTarget, $deployTarget | Out-Null
+$skillTarget = Join-Path $Destination "skills\flowtest-generate-integration-flow"
+New-Item -ItemType Directory -Force -Path $backendTarget, $frontendTarget, $deployTarget, $skillTarget | Out-Null
 Copy-Item -Recurse -Path (Join-Path $Root "backend\*") -Destination $backendTarget
 Copy-Item -Recurse -Path (Join-Path $Root "frontend\dist\*") -Destination $frontendTarget
 Copy-Item -Recurse -Path (Join-Path $Root "deploy\standalone\*") -Destination $deployTarget
 Copy-Item -Path (Join-Path $Root "deploy\standalone\.env.example") -Destination $deployTarget
+Copy-Item -Recurse -Path (Join-Path $Root "skills\flowtest-generate-integration-flow\*") -Destination $skillTarget
 Write-Host "Standalone Windows 离线包已生成：$Destination"
 Write-Host "请将整个目录复制到云桌面，再运行 deploy\standalone\start.ps1。"

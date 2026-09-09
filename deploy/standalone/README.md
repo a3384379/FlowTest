@@ -12,8 +12,8 @@ Standalone 是不依赖 Docker、WSL2、PostgreSQL、Redis、MinIO 或虚拟化�
   本机回环端口和写入应用目录。
 - 建议至少 2 个 vCPU、4 GB 内存、10 GB 可用磁盘。Core2 Duo 级云桌面可以用于低并发功能测试，
   不作为容量或性能测试环境。
-- API URL/Swagger UI 导入、Postman 风格请求体与多参数编辑、可视化流程编排、数据节点、运行观测和历史快照
-  在 Standalone 包中默认开启；Teams、契约、质量和多协议能力也使用同一进程内实现。
+- API URL/Swagger UI 导入、Postman 风格请求体与多参数编辑、可视化流程编排、MCP 集成流程提案、数据节点、
+  运行观测和历史快照在 Standalone 包中默认开启；Teams、契约、质量和多协议能力也使用同一进程内实现。
 - Performance Lab、Environment Lab 和 Runner Fabric 在该档位固定关闭；AI 和 OIDC 默认关闭。需要访问的
   HTTP、GraphQL、gRPC、Kafka 或外部 Redis 目标仍需公司网络策略单独放行。
 - 所有业务数据位于 `data\flowtest.db` 和 `data\artifacts\`；事件历史和限流状态为进程内数据，
@@ -84,6 +84,30 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```powershell
 .\deploy\standalone\stop.ps1
 ```
+
+## 通过 MCP 创建流程提案
+
+离线包包含 MCP Adapter 和 `skills\flowtest-generate-integration-flow\`。先保持 Standalone Web/API
+运行，再由管理员在 FlowTest 组织治理页签发最小权限机器账号；至少需要 `mcp:read`、
+`mcp:evidence:write` 和 `mcp:flow:propose`，零项目初始化、契约导入和沙箱预览分别需要对应的额外
+Scope。Token 只存入用户
+环境或公司凭据工具，不要写入 `.env`、命令参数、客户端配置或日志。
+
+可以先做不读取 Token、不访问业务 API 的离线自检：
+
+```powershell
+.\deploy\standalone\mcp.ps1 -ValidateOnly
+```
+
+stdio 客户端应以 `powershell.exe` 为命令，并将以下参数加入 MCP 配置（把路径替换成实际解压目录）：
+
+```text
+-NoProfile -ExecutionPolicy Bypass -File C:\flowtest-standalone\deploy\standalone\mcp.ps1 -Transport stdio -ApiBaseUrl http://127.0.0.1:8000
+```
+
+客户端只引用环境变量名 `FLOWTEST_MCP_SERVICE_ACCOUNT_TOKEN`。连接后先调用
+`flowtest.inspect_connection`，再按 Skill 执行 Plan、Validate、Compile 和 Proposal。MCP 只创建待审核
+草稿/提案，不会自动 Review、Apply、Publish，也不会绕过人工权限控制。
 
 ## 项目出站安全策略与本地接口
 

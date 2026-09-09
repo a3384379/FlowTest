@@ -81,8 +81,10 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
 
 ## V6 集成流程 Skill
 
-Standalone 可通过本机 stdio 启动 `flowtest-mcp`，并安装仓库中的
-`skills/flowtest-generate-integration-flow/`。Skill 不要求 Docker，也不改变 Standalone 数据目录；其
+Standalone 离线包已包含本机 stdio MCP Adapter、`deploy/standalone/mcp.ps1` 和
+`skills/flowtest-generate-integration-flow/`。保持 Web/API 运行后，可先执行
+`deploy/standalone/mcp.ps1 -ValidateOnly` 验证关键流程工具，再把该脚本配置给 MCP 客户端。Skill
+不要求 Docker，也不改变 Standalone 数据目录；其
 Minimum MCP Version、Scope、Visual Review 与 Preview 约束见
 [集成流程生成 Skill 手册](mcp-integration-flow-skill.md)。升级离线包后必须重新验证 Skill Manifest 与
 MCP Server 版本相容，不能把旧 Skill 与新 Gateway 的部分文件混用。
