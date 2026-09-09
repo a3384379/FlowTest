@@ -10,7 +10,7 @@ from hashlib import sha256
 from typing import Final, cast
 from uuid import uuid4
 
-from sqlalchemy import Table, delete, insert, select
+from sqlalchemy import Table, delete, insert, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -58,13 +58,23 @@ async def _prepare() -> None:
             session.add(user)
             await session.flush()
         project_id = uuid4()
+        # This fixture is intentionally inserted at revision 0042, before
+        # columns introduced by later migrations (for example the project
+        # redaction policy in 0054).  A Core insert built from the current ORM
+        # table would apply Python-side defaults for those future columns and
+        # fail against the historical schema.  Keep the insert contract
+        # explicit so the verifier remains valid as the ORM evolves.
         await session.execute(
-            project_table.insert().values(
-                id=project_id,
-                name="S47.2 migration verifier",
-                description="Ephemeral migration acceptance fixture",
-                created_by_id=user.id,
-            )
+            text(
+                "INSERT INTO projects (id, name, description, created_by_id) "
+                "VALUES (:id, :name, :description, :created_by_id)"
+            ),
+            {
+                "id": project_id,
+                "name": "S47.2 migration verifier",
+                "description": "Ephemeral migration acceptance fixture",
+                "created_by_id": user.id,
+            },
         )
         await session.flush()
         definition = APIDefinition(
