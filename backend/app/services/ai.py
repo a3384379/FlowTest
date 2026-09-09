@@ -14,6 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.core.redaction import (
+    get_redaction_policy,
+    persisted_redaction_policy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.domain.access import ProjectCapability, ProjectRole
 from app.domain.ai import (
     AIInputError,
@@ -129,8 +135,11 @@ class AIJobService:
             )
         except AIInputError as error:
             raise AppError(code="AI_INPUT_INVALID", message=str(error), status_code=422) from error
+        policy = get_redaction_policy()
         job = AIJob(
             project_id=payload.project_id,
+            redaction_mode=policy.mode.value,
+            redaction_policy_version=policy.policy_version,
             job_type=payload.job_type,
             status="pending",
             sanitized_input=sanitized.payload,
@@ -292,6 +301,13 @@ class AIJobRunner:
         job = await self._repository.get_job_for_update(job_id)
         if job is None:
             raise AppError(code="AI_JOB_NOT_FOUND", message="AI 任务不存在", status_code=404)
+        policy_token = set_redaction_policy(persisted_redaction_policy(job))
+        try:
+            return await self._run_pending(job)
+        finally:
+            reset_redaction_policy(policy_token)
+
+    async def _run_pending(self, job: AIJob) -> AIJob:
         if job.status != "pending":
             return job
         job.status = "running"

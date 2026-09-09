@@ -67,7 +67,7 @@ function RuntimeNodeDetail({
         observation={observation}
       />
       <Typography.Paragraph type="secondary" className="workflow-redaction-note">
-        请求、响应和变量均为执行时脱敏快照，不展示 Authorization、Cookie、Token 等敏感值。
+        请求、响应和变量按本次执行策略展示；开启脱敏时，敏感值会显示为占位符。
       </Typography.Paragraph>
     </aside>
   )

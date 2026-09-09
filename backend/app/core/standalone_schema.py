@@ -130,6 +130,7 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_default_targets(connection)
     await _ensure_api_version_service_identity(connection)
     await _ensure_s61b_schema(connection)
+    await _ensure_experience_policy_columns(connection)
     await connection.execute(
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "
@@ -300,6 +301,36 @@ async def _ensure_s61b_schema(connection: AsyncConnection) -> None:
     receipt_table = cast(Table, OrganizationIdempotencyRecord.__table__)
     await connection.execute(CreateTable(receipt_table, if_not_exists=True))
     await _ensure_table_indexes(connection, receipt_table)
+
+
+async def _ensure_experience_policy_columns(connection: AsyncConnection) -> None:
+    """Upgrade existing Standalone SQLite databases for policy-aware tasks."""
+
+    for table, column, definition in (
+        ("projects", "redaction_mode", "VARCHAR(8)"),
+        ("projects", "redaction_policy_version", "INTEGER NOT NULL DEFAULT 1"),
+        ("environments", "archived_at", "DATETIME"),
+        ("workflows", "archived_at", "DATETIME"),
+        ("workflow_executions", "redaction_mode", "VARCHAR(8) NOT NULL DEFAULT 'off'"),
+        (
+            "workflow_executions",
+            "redaction_policy_version",
+            "INTEGER NOT NULL DEFAULT 1",
+        ),
+        ("ai_jobs", "redaction_mode", "VARCHAR(8) NOT NULL DEFAULT 'off'"),
+        ("ai_jobs", "redaction_policy_version", "INTEGER NOT NULL DEFAULT 1"),
+    ):
+        await _add_column_if_missing(
+            connection,
+            table=table,
+            column=column,
+            definition=definition,
+        )
+    for table, column in (("environments", "archived_at"), ("workflows", "archived_at")):
+        if column in await _table_column_contract(connection, table):
+            await connection.execute(
+                text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
+            )
 
 
 async def _table_column_contract(

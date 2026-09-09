@@ -96,6 +96,8 @@ class WorkflowExecutionResponse(BaseModel):
 
     id: UUID
     project_id: UUID
+    redaction_mode: str | None = None
+    redaction_policy_version: int | None = None
     workflow_id: UUID | None
     workflow_version_id: UUID | None
     environment_id: UUID

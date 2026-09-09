@@ -12,6 +12,8 @@ from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, JsonValue
 
+from app.core.redaction import redaction_enabled
+
 _SCHEMA_KEYS = frozenset(
     {
         "type",
@@ -196,6 +198,8 @@ def semantic_schema_fingerprint(schema: Mapping[str, object]) -> str:
 
 
 def looks_sensitive_contract_value(value: str) -> bool:
+    if not redaction_enabled():
+        return False
     if value in {"", "***"} or value.startswith("secret://") or "{{secret." in value:
         return False
     return bool(
@@ -215,6 +219,8 @@ def looks_sensitive_contract_value(value: str) -> bool:
 def contains_sensitive_contract_value(value: object) -> bool:
     """Return whether a JSON-like value contains a credential or direct identifier."""
 
+    if not redaction_enabled():
+        return False
     return _sensitive_json_value(value)
 
 
@@ -229,9 +235,9 @@ def _sanitize_parameter(
         or location not in {"path", "query", "header", "cookie"}
     ):
         return None
-    if "example" in parameter and parameter.get("example") is not None:
+    if redaction_enabled() and "example" in parameter and parameter.get("example") is not None:
         _drop_hint(parameter.get("example"), state, semantic=False)
-    return {
+    result: dict[str, JsonValue] = {
         "name": name,
         "location": location,
         "required": bool(parameter.get("required")),
@@ -242,6 +248,9 @@ def _sanitize_parameter(
         else None,
         "source_ref": _safe_optional_text(parameter.get("source_ref"), state),
     }
+    if not redaction_enabled() and "example" in parameter:
+        result["example"] = cast(JsonValue, parameter.get("example"))
+    return result
 
 
 def _sanitize_request_body(
@@ -287,7 +296,10 @@ def _sanitize_schema(
     result: dict[str, JsonValue] = {}
     for key, raw in schema.items():
         if key in _DANGEROUS_HINT_KEYS:
-            _drop_hint(raw, state, semantic=key == "const")
+            if redaction_enabled():
+                _drop_hint(raw, state, semantic=key == "const")
+            else:
+                result[key] = cast(JsonValue, raw)
             continue
         if key not in _SCHEMA_KEYS:
             continue
@@ -342,6 +354,8 @@ def _sanitize_schema_item(key: str, raw: object, state: _SanitizationState) -> J
 
 
 def _sanitize_enum(values: list[object], state: _SanitizationState) -> JsonValue:
+    if not redaction_enabled():
+        return cast(JsonValue, values)
     if not any(_sensitive_json_value(value) for value in values):
         return cast(JsonValue, values)
     state.redacted_count += sum(_sensitive_json_value(value) for value in values)
@@ -408,7 +422,7 @@ def _sanitize_generic(value: JsonValue, state: _SanitizationState) -> JsonValue:
         return {key: _sanitize_generic(child, state) for key, child in value.items()}
     if isinstance(value, list):
         return [_sanitize_generic(child, state) for child in value]
-    if isinstance(value, str) and looks_sensitive_contract_value(value):
+    if redaction_enabled() and isinstance(value, str) and looks_sensitive_contract_value(value):
         state.redacted_count += 1
         state.semantic_value_removed = True
         return "***"
@@ -434,6 +448,8 @@ def _safe_optional_text(value: object, state: _SanitizationState) -> str | None:
 
 
 def _sensitive_json_value(value: object) -> bool:
+    if not redaction_enabled():
+        return False
     if isinstance(value, str):
         return looks_sensitive_contract_value(value)
     if isinstance(value, Mapping):

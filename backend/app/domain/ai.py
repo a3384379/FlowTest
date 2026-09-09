@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from pydantic import JsonValue
 
+from app.core.redaction import redaction_enabled
+
 REDACTED = "[REDACTED]"
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_DEPTH = 32
@@ -142,11 +144,20 @@ def _sanitize_value(
         for raw_key, item in value.items():
             key = str(raw_key)
             item_path = f"{path}.{key}"
-            if _is_sensitive_key(key) and not _is_schema_definition(item, schema_mode):
+            if (
+                redaction_enabled()
+                and _is_sensitive_key(key)
+                and not _is_schema_definition(item, schema_mode)
+            ):
                 result[key] = REDACTED
                 redacted.append(item_path)
                 continue
-            if schema_mode and key in _SCHEMA_VALUE_KEYS and _path_has_sensitive_name(path):
+            if (
+                redaction_enabled()
+                and schema_mode
+                and key in _SCHEMA_VALUE_KEYS
+                and _path_has_sensitive_name(path)
+            ):
                 result[key] = REDACTED
                 redacted.append(item_path)
                 continue
@@ -171,7 +182,7 @@ def _sanitize_value(
             )
             for index, item in enumerate(value)
         ]
-    if isinstance(value, str):
+    if redaction_enabled() and isinstance(value, str):
         cleaned = _redact_embedded_secrets(value)
         if cleaned != value:
             redacted.append(path)

@@ -16,6 +16,8 @@ from app.schemas.access import (
     ProjectCapacityPolicy,
     ProjectCreate,
     ProjectPermissionResponse,
+    ProjectRedactionPolicy,
+    ProjectRedactionPolicyUpdate,
     ProjectResponse,
     ProjectRetentionPolicy,
     ProjectRetentionUpdate,
@@ -112,6 +114,37 @@ async def update_project_security_policy(
         enabled=policy.enabled,
         allowed_hosts=list(policy.allowed_hosts),
         allowed_private_cidrs=list(policy.allowed_private_cidrs),
+    )
+
+
+@router.get("/{project_id}/redaction-policy", response_model=ProjectRedactionPolicy)
+async def get_project_redaction_policy(
+    project_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> ProjectRedactionPolicy:
+    policy = await ProjectService(session).get_redaction_policy(
+        actor=current_user, project_id=project_id
+    )
+    return ProjectRedactionPolicy(
+        mode=policy.mode.value,
+        source=policy.source,
+        policy_version=policy.policy_version,
+    )
+
+
+@router.put("/{project_id}/redaction-policy", response_model=ProjectRedactionPolicy)
+async def update_project_redaction_policy(
+    project_id: UUID,
+    payload: ProjectRedactionPolicyUpdate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectRedactionPolicy:
+    policy = await ProjectService(session).update_redaction_policy(
+        actor=current_user, project_id=project_id, mode=payload.mode
+    )
+    return ProjectRedactionPolicy(
+        mode=policy.mode.value,
+        source=policy.source,
+        policy_version=policy.policy_version,
     )
 
 

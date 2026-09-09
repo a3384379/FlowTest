@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.core.redaction import redaction_enabled
 from app.domain.api_assets import APIVersionSpec, AuthKind, BodyKind, HttpMethod, JsonValue
 from app.domain.test_engineering import OperationContract
 
@@ -103,6 +104,8 @@ def imported_value(name: str, value: str) -> str:
 
 
 def is_sensitive_import_name(name: str) -> bool:
+    if not redaction_enabled():
+        return False
     lowered = name.lower()
     if lowered in SENSITIVE_IMPORT_NAMES:
         return True

@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
 from app.domain.evidence import EvidenceRef, EvidenceSourceType
 
 TEST_DESIGN_SCHEMA_VERSION = "1.0"
@@ -309,6 +310,8 @@ def evaluate_governance(
 def sensitive_paths(value: object, *, path: str = "$", _key: str | None = None) -> tuple[str, ...]:
     """Return paths only; never include sensitive values in an error or audit record."""
 
+    if not redaction_enabled():
+        return ()
     findings: list[str] = []
     if isinstance(value, dict):
         for key, child in value.items():

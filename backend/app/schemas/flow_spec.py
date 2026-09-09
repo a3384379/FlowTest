@@ -97,6 +97,7 @@ class FlowSpecChangeSetDetailResponse(FlowSpecChangeSetResponse):
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult
     diff: list[FlowSpecDiffItem]
+    proposal_origin: FlowSpecProposalOrigin = "import"
 
 
 class FlowSpecVisualProposalResponse(BaseModel):

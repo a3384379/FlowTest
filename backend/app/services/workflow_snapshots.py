@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.core.redaction import redaction_enabled
 from app.domain.api_assets import BodyKind, QueryParameterSpec
 from app.domain.data_nodes import CredentialKind
 from app.domain.event_protocols import EventSourceKind
@@ -694,7 +695,11 @@ class WorkflowSnapshotBuilder:
 
     async def _get_environment(self, project_id: UUID, environment_id: UUID) -> Environment:
         environment = await self._api_repository.get_environment(environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         return environment
 
@@ -899,9 +904,10 @@ def _redacted_api_spec(
         "basic": {"password"},
         "api_key": {"value"},
     }.get(version.auth_kind, set())
-    for field in sensitive_auth_fields:
-        if field in auth_config:
-            auth_config[field] = "***"
+    if redaction_enabled():
+        for field in sensitive_auth_fields:
+            if field in auth_config:
+                auth_config[field] = "***"
     return cast(
         dict[str, object],
         redact(

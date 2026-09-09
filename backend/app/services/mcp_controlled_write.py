@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context, get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.mcp_read import MCPReadCall
 from app.domain.test_design import (
     TestDesignDocument,
@@ -477,6 +478,8 @@ class MCPControlledWriteService:
             )
 
     def _reject_sensitive(self, value: object) -> None:
+        if not redaction_enabled():
+            return
         paths = sensitive_paths(value)
         if paths:
             raise AppError(

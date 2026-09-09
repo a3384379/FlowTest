@@ -13,6 +13,8 @@ from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from app.core.redaction import redaction_enabled
+
 CONTEXT_REVISION_SCHEMA_VERSION: Final[Literal["flowtest-context-revision-v1"]] = (
     "flowtest-context-revision-v1"
 )
@@ -107,6 +109,8 @@ def evidence_state_scalar_text(value: str | int | float | bool) -> str:
 
 
 def is_sensitive_identifier(name: str) -> bool:
+    if not redaction_enabled():
+        return False
     segmented = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
     segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", segmented)
     segmented = re.sub(
@@ -707,7 +711,11 @@ class ExternalDatabaseColumnClaim(BaseModel):
         )
         if self.foreign_key is not None:
             require_no_sensitive_scalar_values([self.foreign_key])
-        if self.masked_example is not None and "***" not in self.masked_example:
+        if (
+            redaction_enabled()
+            and self.masked_example is not None
+            and "***" not in self.masked_example
+        ):
             raise ValueError("database examples must be masked")
         if self.masked_example is not None:
             require_no_sensitive_scalar_values([self.masked_example])
@@ -882,9 +890,10 @@ class ExternalEvidenceEnvelope(BaseModel):
     @model_validator(mode="after")
     def validate_envelope(self) -> ExternalEvidenceEnvelope:
         payload = self.model_dump(mode="json")
-        unsafe = first_sensitive_value(payload)
-        if unsafe is not None:
-            raise ValueError(f"external evidence contains sensitive data at {unsafe}")
+        if redaction_enabled():
+            unsafe = first_sensitive_value(payload)
+            if unsafe is not None:
+                raise ValueError(f"external evidence contains sensitive data at {unsafe}")
         identifiers = [finding.id for finding in self.findings]
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("evidence finding ids must be unique")
@@ -1058,6 +1067,8 @@ def completeness_snapshot(
 def require_no_sensitive_scalar_values(
     values: Sequence[str | int | float | bool],
 ) -> None:
+    if not redaction_enabled():
+        return
     for value in values:
         if first_sensitive_value({"value": str(value)}) is not None:
             raise ValueError("external evidence contains sensitive scalar value")
@@ -1089,6 +1100,8 @@ def require_no_sensitive_reference_values(model: BaseModel) -> None:
 
 
 def first_sensitive_value(value: object, *, path: str = "$") -> str | None:
+    if not redaction_enabled():
+        return None
     if isinstance(value, dict):
         for key, child in value.items():
             found = first_sensitive_value(child, path=f"{path}.{key}")

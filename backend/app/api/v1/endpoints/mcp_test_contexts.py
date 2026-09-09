@@ -16,6 +16,7 @@ from app.api.dependencies import (
 from app.composition import build_workflow_service
 from app.domain.evidence_adapters import EntityMappingResult
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.schemas.mcp_simple_flows import SimpleFlowProposalResponse, SimpleFlowRequest
 from app.schemas.sandbox_preview import (
     MCPSandboxPreviewExecuteRequest,
     SandboxPreviewExecuteRequest,
@@ -46,6 +47,7 @@ from app.services.evidence_adapters import EvidenceAdapterService
 from app.services.idempotency import IdempotencyService, require_idempotency_key
 from app.services.mcp_flow_proposals import MCPFlowProposalService
 from app.services.mcp_integration_plans import MCPIntegrationPlanService
+from app.services.mcp_simple_flows import MCPSimpleFlowService
 from app.services.sandbox_preview import SandboxPreviewService
 from app.services.test_contexts import TestContextService
 
@@ -247,6 +249,24 @@ async def propose_flow_draft(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> FlowSpecProposalResponse:
     return await MCPFlowProposalService(session).propose(
+        actor=principal.actor,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+
+
+@flow_router.post(
+    "/simple-proposals",
+    response_model=SimpleFlowProposalResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def propose_simple_flow(
+    payload: SimpleFlowRequest,
+    session: SessionDependency,
+    principal: MCPFlowProposalCurrent,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> SimpleFlowProposalResponse:
+    return await MCPSimpleFlowService(session).propose(
         actor=principal.actor,
         payload=payload,
         idempotency_key=idempotency_key,

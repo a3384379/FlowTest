@@ -1,3 +1,4 @@
+import { exportError, exportFilename } from './export-download'
 import {
   apiClient,
   type Artifact,
@@ -84,6 +85,23 @@ export async function createEnvironment(
 ): Promise<Environment> {
   const response = await apiClient.post<Environment>(`/projects/${projectId}/environments`, input)
   return response.data
+}
+
+export async function updateEnvironment(
+  projectId: string,
+  environmentId: string,
+  input: Partial<CreateEnvironmentInput>,
+): Promise<Environment> {
+  return (
+    await apiClient.patch<Environment>(
+      `/projects/${projectId}/environments/${environmentId}`,
+      input,
+    )
+  ).data
+}
+
+export async function deleteEnvironment(projectId: string, environmentId: string): Promise<void> {
+  await apiClient.delete(`/projects/${projectId}/environments/${environmentId}`)
 }
 
 export async function listApis(
@@ -204,12 +222,16 @@ export async function exportApis(
   projectId: string,
   exportFormat: 'har' | 'curl' | 'bruno' | 'excel',
 ): Promise<void> {
-  const response = await apiClient.get<Blob>(`/projects/${projectId}/exports/apis`, {
-    params: { format: exportFormat },
-    responseType: 'blob',
-  })
+  const response = await apiClient
+    .get<Blob>(`/projects/${projectId}/exports/apis`, {
+      params: { format: exportFormat },
+      responseType: 'blob',
+    })
+    .catch(async (error: unknown) => {
+      throw await exportError(error)
+    })
   const disposition = String(response.headers['content-disposition'] ?? '')
-  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `flowtest.${exportFormat}`
+  const filename = exportFilename(disposition, exportFormat)
   const url = URL.createObjectURL(response.data)
   const anchor = document.createElement('a')
   anchor.href = url

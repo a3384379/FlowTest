@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.context import get_trace_id
+from app.core.redaction import RedactionMode, get_redaction_policy
 
 SENSITIVE_KEYS = frozenset(
     {
@@ -26,7 +27,21 @@ SENSITIVE_KEYS = frozenset(
 )
 
 
-def redact(value: Any) -> Any:
+def redact(value: Any, *, mode: RedactionMode | str | None = None) -> Any:
+    """Apply the active output policy without changing the source value.
+
+    OFF returns the value untouched and, crucially, does not traverse it.  The
+    optional mode is used by characterization tests and explicit ON-only
+    maintenance paths; normal callers inherit the request-scoped project policy.
+    """
+
+    effective_mode = RedactionMode(mode) if mode is not None else get_redaction_policy().mode
+    if effective_mode is RedactionMode.OFF:
+        return value
+    return _redact_on(value)
+
+
+def _redact_on(value: Any) -> Any:
     if isinstance(value, Mapping):
         variable_name = value.get("variable")
         sensitive_variable = isinstance(variable_name, str) and _is_sensitive_key(variable_name)
@@ -34,12 +49,12 @@ def redact(value: Any) -> Any:
             str(key): (
                 "***"
                 if _is_sensitive_key(str(key)) or (sensitive_variable and str(key) == "value")
-                else redact(item)
+                else _redact_on(item)
             )
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [redact(item) for item in value]
+        return [_redact_on(item) for item in value]
     return value
 
 

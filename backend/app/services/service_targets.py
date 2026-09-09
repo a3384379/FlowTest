@@ -151,6 +151,7 @@ class ServiceTargetService:
                     select(Environment.id).where(
                         Environment.project_id == project_id,
                         Environment.default_service_id == service_id,
+                        Environment.archived_at.is_(None),
                     )
                 )
             ).all()
@@ -189,7 +190,10 @@ class ServiceTargetService:
         workflows = list(
             (
                 await self._session.scalars(
-                    select(Workflow).where(Workflow.project_id == project_id)
+                    select(Workflow).where(
+                        Workflow.project_id == project_id,
+                        Workflow.archived_at.is_(None),
+                    )
                 )
             ).all()
         )
@@ -230,6 +234,7 @@ class ServiceTargetService:
                 .where(
                     TestPlan.project_id == project_id,
                     TestPlanItem.target_type == "workflow",
+                    Environment.archived_at.is_(None),
                 )
             )
         ).all()
@@ -511,7 +516,11 @@ class ServiceTargetService:
 
     async def _get_environment(self, *, project_id: UUID, environment_id: UUID) -> Environment:
         environment = await self._session.get(Environment, environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         return environment
 

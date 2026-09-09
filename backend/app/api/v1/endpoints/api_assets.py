@@ -123,6 +123,20 @@ async def update_environment(
     return EnvironmentResponse.model_validate(environment)
 
 
+@router.delete("/environments/{environment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_environment(
+    project_id: UUID,
+    environment_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> None:
+    await APIAssetService(session).delete_environment(
+        actor=current_user,
+        project_id=project_id,
+        environment_id=environment_id,
+    )
+
+
 @router.get("/secrets", response_model=list[SecretMetadata])
 async def list_secrets(
     project_id: UUID,

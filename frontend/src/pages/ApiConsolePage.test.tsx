@@ -1,14 +1,22 @@
+import { useAuthStore } from '../features/auth/auth-store'
+import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import ApiConsolePage from './ApiConsolePage'
 import { apiDefinition, environment, executionDetail, project } from '../test/fixtures'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
+
+beforeEach(() => useAuthStore.setState({ user: authenticatedUser }))
+afterEach(() => {
+  useAuthStore.setState({ user: null })
+  localStorage.clear()
+})
 
 describe('ApiConsolePage', () => {
   it('runs an API and renders its assertion and history', async () => {

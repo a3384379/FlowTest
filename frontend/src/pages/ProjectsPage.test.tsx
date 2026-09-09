@@ -14,6 +14,7 @@ describe('ProjectsPage', () => {
   it('shows the permission matrix, updates network policy and renders audit trace', async () => {
     const saved = vi.fn()
     const savedRetention = vi.fn()
+    const savedRedaction = vi.fn()
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -67,6 +68,14 @@ describe('ProjectsPage', () => {
         savedRetention(body)
         return HttpResponse.json({ ...body, maximum_days: 3650 })
       }),
+      http.get(`/api/v1/projects/${project.id}/redaction-policy`, () =>
+        HttpResponse.json({ mode: 'off', source: 'installation', policy_version: 1 }),
+      ),
+      http.put(`/api/v1/projects/${project.id}/redaction-policy`, async ({ request }) => {
+        const body = (await request.json()) as { mode: 'off' | 'on' }
+        savedRedaction(body)
+        return HttpResponse.json({ ...body, source: 'project', policy_version: 2 })
+      }),
       http.get(`/api/v1/projects/${project.id}/audit-logs`, () =>
         HttpResponse.json({
           items: [
@@ -111,6 +120,9 @@ describe('ProjectsPage', () => {
     await browser.type(retention, '120')
     await browser.click(screen.getByRole('button', { name: '保存保留策略' }))
     await waitFor(() => expect(savedRetention).toHaveBeenCalledWith({ retention_days: 120 }))
+    expect(screen.getByText('来源：安装默认')).toBeVisible()
+    await browser.click(screen.getByRole('switch', { name: '开启项目脱敏' }))
+    await waitFor(() => expect(savedRedaction).toHaveBeenCalledWith({ mode: 'on' }))
   })
 })
 

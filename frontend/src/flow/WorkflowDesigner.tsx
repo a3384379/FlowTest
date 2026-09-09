@@ -32,8 +32,8 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Button, Empty, Select, Space, Tag, Typography } from 'antd'
-import { useMemo, useState, type ReactNode } from 'react'
+import { Alert, Button, Empty, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import type {
   ApiDefinition,
@@ -47,6 +47,8 @@ import type {
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import WorkflowRunInspector from './WorkflowRunInspector'
+import { getApiDetail } from '../features/api-console/api-service'
+import { listApis } from '../features/workflows/workflow-service'
 import {
   addApiNode,
   addEventProtocolNode,
@@ -141,6 +143,8 @@ function WorkflowDesignerReady({
 }: ReadyDesignerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useState<string | undefined>(firstResourceId(apis))
+  const [apiSelectionOverride, setApiSelectionOverride] = useState<ApiDefinition | undefined>()
+  const [apiSelectionProjectId, setApiSelectionProjectId] = useState(projectId)
   const [graphqlSelection, setGraphqlSelection] = useState<string | undefined>(
     firstResourceId(graphqlSchemas),
   )
@@ -185,8 +189,14 @@ function WorkflowDesignerReady({
   )
   const selected = selectedNode(definition, selectedId)
   const canvasEditable = isCanvasEditable(editable, mode)
-  const selectedApiId = selectedResourceId(apiSelection, apis)
-  const selectedApi = apis.find((api) => api.id === selectedApiId)
+  const selectedApi = resolveSelectedApi(
+    apiSelection,
+    apiSelectionProjectId,
+    projectId,
+    apis,
+    apiSelectionOverride,
+  )
+  const selectedApiId = selectedApi?.id
   const selectedGraphql = selectedSchema(graphqlSelection, graphqlSchemas)
   const selectedGrpc = selectedSchema(grpcSelection, grpcDescriptors)
   const selectedSubflow = selectedWorkflow(subflowSelection, publishedWorkflows)
@@ -270,8 +280,10 @@ function WorkflowDesignerReady({
     <div className="workflow-designer">
       <DesignerModeToolbar mode={mode}>
         <DesignerToolbar
+          projectId={projectId}
           runtimeMode={runtimeMode}
           apiSelection={selectedApiId}
+          apiSelectionOverride={apiSelectionOverride}
           apis={apis}
           graphqlSchemas={graphqlSchemas}
           grpcDescriptors={grpcDescriptors}
@@ -288,7 +300,16 @@ function WorkflowDesignerReady({
           hasDataset={definition.nodes.some((node) => node.type === 'dataset')}
           hasSqlCredential={credentials.some((item) => ['postgresql', 'mysql'].includes(item.kind))}
           hasRedisCredential={credentials.some((item) => item.kind === 'redis')}
-          onApiSelection={setApiSelection}
+          onApiSelection={(value) => {
+            setApiSelection(value)
+            setApiSelectionProjectId(projectId)
+            setApiSelectionOverride(undefined)
+          }}
+          onApiPicked={(api) => {
+            setApiSelection(api.id)
+            setApiSelectionProjectId(projectId)
+            setApiSelectionOverride(api)
+          }}
           onGraphqlSelection={setGraphqlSelection}
           onGrpcSelection={setGrpcSelection}
           onKafkaSelection={setKafkaSelection}
@@ -488,6 +509,21 @@ function firstResourceId(items: Array<{ id: string }>): string | undefined {
   return items.at(0)?.id
 }
 
+function resolveSelectedApi(
+  selection: string | undefined,
+  selectionProjectId: string | null | undefined,
+  projectId: string | null | undefined,
+  apis: ApiDefinition[],
+  override?: ApiDefinition,
+): ApiDefinition | undefined {
+  if (selectionProjectId === projectId && selection) {
+    if (override?.id === selection) return override
+    const selected = apis.find((api) => api.id === selection)
+    if (selected) return selected
+  }
+  return apis.at(0)
+}
+
 function optionalResourceId(item: { id: string } | undefined): string | undefined {
   return item?.id
 }
@@ -495,13 +531,6 @@ function optionalResourceId(item: { id: string } | undefined): string | undefine
 function selectedNode(definition: WorkflowDefinition, selectedId: string | null) {
   if (!selectedId) return null
   return definition.nodes.find((node) => node.id === selectedId) ?? null
-}
-
-function selectedResourceId(
-  selection: string | undefined,
-  resources: Array<{ id: string }>,
-): string | undefined {
-  return selection ?? resources.at(0)?.id
 }
 
 function selectedSchema(selection: string | undefined, schemas: SchemaArtifact[]) {
@@ -530,8 +559,10 @@ function workflowReference(workflow: Workflow | undefined) {
 }
 
 function DesignerToolbar({
+  projectId,
   runtimeMode,
   apiSelection,
+  apiSelectionOverride,
   apis,
   graphqlSelection,
   graphqlSchemas,
@@ -549,6 +580,7 @@ function DesignerToolbar({
   hasSqlCredential,
   hasRedisCredential,
   onApiSelection,
+  onApiPicked,
   onGraphqlSelection,
   onGrpcSelection,
   onKafkaSelection,
@@ -571,8 +603,10 @@ function DesignerToolbar({
   onRedo,
   onAutoLayout,
 }: {
+  projectId?: string | null
   runtimeMode?: 'run' | 'history'
   apiSelection?: string
+  apiSelectionOverride?: ApiDefinition
   apis: ApiDefinition[]
   graphqlSelection?: string
   graphqlSchemas: SchemaArtifact[]
@@ -590,6 +624,7 @@ function DesignerToolbar({
   hasSqlCredential: boolean
   hasRedisCredential: boolean
   onApiSelection: (value: string) => void
+  onApiPicked: (api: ApiDefinition) => void
   onGraphqlSelection: (value: string) => void
   onGrpcSelection: (value: string) => void
   onKafkaSelection: (value: string) => void
@@ -612,6 +647,7 @@ function DesignerToolbar({
   onRedo: () => void
   onAutoLayout: () => void
 }) {
+  const [apiPickerOpen, setApiPickerOpen] = useState(false)
   if (runtimeMode) {
     return (
       <div className="workflow-toolbar workflow-runtime-toolbar">
@@ -638,9 +674,15 @@ function DesignerToolbar({
           disabled={!editable}
           placeholder="选择接口"
           className="workflow-api-select"
-          options={apis.map((api) => ({ label: api.name, value: api.id }))}
+          options={apiOptions(apis, apiSelectionOverride).map((api) => ({
+            label: api.name,
+            value: api.id,
+          }))}
           onChange={onApiSelection}
         />
+        <Button disabled={!editable || !projectId} onClick={() => setApiPickerOpen(true)}>
+          搜索接口
+        </Button>
         <Button
           icon={<PlusOutlined />}
           disabled={isControlDisabled(editable, Boolean(apiSelection))}
@@ -840,8 +882,166 @@ function DesignerToolbar({
       <Typography.Text type="secondary">
         拖动节点调整位置，从节点右侧连接到下一节点。
       </Typography.Text>
+      <ApiPicker
+        open={apiPickerOpen}
+        projectId={projectId}
+        selectedId={apiSelection}
+        onClose={() => setApiPickerOpen(false)}
+        onSelect={(api) => {
+          onApiPicked(api)
+          setApiPickerOpen(false)
+        }}
+      />
     </div>
   )
+}
+
+function ApiPicker({
+  open,
+  projectId,
+  selectedId,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  projectId?: string | null
+  selectedId?: string
+  onClose: () => void
+  onSelect: (api: ApiDefinition) => void
+}) {
+  const [search, setSearch] = useState('')
+  const [method, setMethod] = useState<ApiMethod>()
+  const [page, setPage] = useState(1)
+  const [result, setResult] = useState<ApiPage>({ items: [], total: 0, page: 1, page_size: 20 })
+  const [loading, setLoading] = useState(false)
+  const [queryError, setQueryError] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<ApiDefinition>()
+  const [retryNonce, setRetryNonce] = useState(0)
+
+  useEffect(() => {
+    if (!open || !projectId) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setQueryError(false)
+      void listApis(projectId, { page, pageSize: 20, search, method })
+        .then(async (next) => {
+          if (!active) return
+          setResult(next)
+          if (selectedId && !next.items.some((item) => item.id === selectedId)) {
+            try {
+              const detail = await getApiDetail(projectId, selectedId)
+              if (active) setSelectedRecord(detail.definition)
+            } catch {
+              if (active) setSelectedRecord(undefined)
+            }
+          } else {
+            setSelectedRecord(undefined)
+          }
+        })
+        .catch(() => {
+          if (active) setQueryError(true)
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [method, open, page, projectId, retryNonce, search, selectedId])
+
+  return (
+    <Modal title="选择接口" open={open} onCancel={onClose} footer={null} width={760} destroyOnClose>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        {queryError && (
+          <Alert
+            type="error"
+            showIcon
+            message="接口查询失败"
+            description="请检查项目权限或网络后重试。"
+            action={
+              <Button type="link" onClick={() => setRetryNonce((value) => value + 1)}>
+                重试
+              </Button>
+            }
+          />
+        )}
+        {selectedRecord && (
+          <Alert
+            type="info"
+            showIcon
+            message={`当前已选：${selectedRecord.name} · v${selectedRecord.current_version}`}
+            description="该接口不在当前搜索页，已按 ID 读取并保留选择。"
+          />
+        )}
+        <Space.Compact block>
+          <Input.Search
+            aria-label="搜索接口名称路径说明"
+            allowClear
+            placeholder="搜索名称、路径或说明"
+            value={search}
+            onChange={(event) => {
+              setPage(1)
+              setSearch(event.target.value)
+            }}
+            onSearch={() => setPage(1)}
+          />
+          <Select<ApiMethod>
+            aria-label="选择接口方法"
+            allowClear
+            placeholder="全部方法"
+            value={method}
+            options={apiMethods.map((item) => ({ value: item, label: item }))}
+            onChange={(value) => {
+              setPage(1)
+              setMethod(value)
+            }}
+            style={{ width: 130 }}
+          />
+        </Space.Compact>
+        <Table
+          rowKey="id"
+          size="small"
+          loading={loading}
+          dataSource={result.items}
+          pagination={{
+            current: result.page,
+            pageSize: result.page_size,
+            total: result.total,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
+          rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
+          onRow={(record) => ({ onClick: () => onSelect(record) })}
+          columns={[
+            { title: '接口名称', dataIndex: 'name' },
+            { title: '说明', dataIndex: 'description', ellipsis: true },
+            { title: '版本', dataIndex: 'current_version', render: (value: number) => `v${value}` },
+            {
+              title: '选择',
+              width: 80,
+              render: (_: unknown, record: ApiDefinition) => (
+                <Button type="link" onClick={() => onSelect(record)}>
+                  选择
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </Space>
+    </Modal>
+  )
+}
+
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+type ApiPage = { items: ApiDefinition[]; total: number; page: number; page_size: number }
+const apiMethods: ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
+function apiOptions(apis: ApiDefinition[], selected?: ApiDefinition): ApiDefinition[] {
+  if (!selected || apis.some((api) => api.id === selected.id)) return apis
+  return [selected, ...apis]
 }
 
 function WorkflowNodeCard({ data }: NodeProps<CanvasNode>) {

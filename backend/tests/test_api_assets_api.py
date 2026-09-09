@@ -15,6 +15,9 @@ from app.main import app
 from app.models import Base
 from app.models.access import User
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "assets-admin@example.com"
 ADMIN_PASSWORD = "assets-password-123!"
 
@@ -982,3 +985,23 @@ async def test_service_target_management_update_and_connectivity(
     assert connectivity.status_code == 200, connectivity.text
     assert connectivity.json()["status"] == "unexpected_status"
     assert connectivity.json()["http_status"] == 200
+
+
+async def test_duplicate_query_values_are_preserved(asset_client: AsyncClient) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    response = await asset_client.post(
+        f"/api/v1/projects/{project['id']}/apis",
+        headers=headers,
+        json={
+            "name": "重复查询参数",
+            "request": {
+                "method": "GET",
+                "path": "/orders",
+                "query_parameters": [{"name": "tag", "value": "a"}, {"name": "tag", "value": "b"}],
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    version = response.json()["version"]
+    assert [item["value"] for item in version["query_parameters"]] == ["a", "b"]

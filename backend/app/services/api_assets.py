@@ -2,14 +2,17 @@ import re
 from base64 import b64encode
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.api_assets import (
     REDACTED_VALUE,
     APIVersionSpec,
@@ -32,6 +35,8 @@ from app.domain.test_engineering import (
 from app.models.access import Folder, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.service_targets import Service, ServiceEndpoint
+from app.models.tasking import TestPlanItem
+from app.models.workflows import WorkflowExecution
 from app.repositories.access import ProjectRepository
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
@@ -225,6 +230,55 @@ class APIAssetService:
         await self._session.commit()
         await self._session.refresh(environment)
         return environment
+
+    async def delete_environment(
+        self, *, actor: User, project_id: UUID, environment_id: UUID
+    ) -> None:
+        await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
+        environment = (
+            await self._session.execute(
+                select(Environment).where(Environment.id == environment_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if environment is None or environment.project_id != project_id:
+            raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
+        if environment.archived_at is not None:
+            return
+        active_execution_count = int(
+            await self._session.scalar(
+                select(WorkflowExecution.id)
+                .where(
+                    WorkflowExecution.project_id == project_id,
+                    WorkflowExecution.environment_id == environment_id,
+                    WorkflowExecution.status.in_(("queued", "running")),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+        plan_reference = await self._session.scalar(
+            select(TestPlanItem.id).where(TestPlanItem.environment_id == environment_id).limit(1)
+        )
+        if active_execution_count or plan_reference is not None:
+            raise AppError(
+                code="ENVIRONMENT_IN_USE",
+                message="环境仍被活动执行或测试计划引用,不能删除",
+                status_code=409,
+                details={
+                    "active_execution": bool(active_execution_count),
+                    "test_plan_reference": plan_reference is not None,
+                },
+            )
+        environment.archived_at = datetime.now(UTC)
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="environment.archived",
+            resource_type="environment",
+            resource_id=environment.id,
+            details={"historical_data_retained": True},
+        )
+        await self._session.commit()
 
     async def list_secrets(self, *, actor: User, project_id: UUID) -> list[Secret]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=False)
@@ -610,10 +664,13 @@ class APIAssetService:
             method=prepared.method,
             body=redacted_request.body,
         )
-        target_snapshot = cast(
-            dict[str, JsonValue],
-            _redact_json(cast(JsonValue, target_snapshot), tuple(target.secret_values.values())),
-        )
+        if redaction_enabled():
+            target_snapshot = cast(
+                dict[str, JsonValue],
+                _redact_json(
+                    cast(JsonValue, target_snapshot), tuple(target.secret_values.values())
+                ),
+            )
         target_snapshot["resolved_url"] = redacted_request.url
         target_snapshot["headers"] = {
             item.name: {"value": item.value, "source": item.source.value}
@@ -662,7 +719,11 @@ class APIAssetService:
 
     async def _get_environment(self, project_id: UUID, environment_id: UUID) -> Environment:
         environment = await self._assets.get_environment(environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         return environment
 
@@ -933,6 +994,8 @@ def _redacted_request(
     auth_kind: AuthKind,
     auth_config: dict[str, str],
 ) -> PreparedRequest:
+    if not redaction_enabled():
+        return prepared
     secrets = tuple(secret_values.values())
     api_key_name = auth_config.get("name", "X-API-Key").lower()
     redacted_headers = tuple(
@@ -968,6 +1031,8 @@ def _redacted_request(
 
 
 def _redact_json(value: JsonValue, secrets: tuple[str, ...]) -> JsonValue:
+    if not redaction_enabled():
+        return value
     if isinstance(value, str):
         return _redact_text(value, secrets)
     if isinstance(value, list):
@@ -978,6 +1043,8 @@ def _redact_json(value: JsonValue, secrets: tuple[str, ...]) -> JsonValue:
 
 
 def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
+    if not redaction_enabled():
+        return value
     redacted = value
     for secret in sorted(secrets, key=len, reverse=True):
         redacted = redacted.replace(secret, REDACTED_VALUE)
@@ -991,6 +1058,8 @@ def _redact_url(
     auth_kind: AuthKind,
     auth_config: dict[str, str],
 ) -> str:
+    if not redaction_enabled():
+        return url
     redacted = _redact_text(url, secrets)
     if auth_kind is not AuthKind.API_KEY or auth_config.get("in", "header") != "query":
         return redacted
@@ -1062,7 +1131,7 @@ def _partial_contract(request: APIVersionSpec) -> OperationContract:
             ),
             name=request.auth_config.get("name"),
         ),
-        parameters=parameters,
+        parameters=list({(item.location, item.name): item for item in parameters}.values()),
         request_body=request_body,
         request=request_body.schema_ if request_body is not None else {},
         responses={},

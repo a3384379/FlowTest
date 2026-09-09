@@ -26,6 +26,9 @@ from app.models.access import User
 from app.models.ai import AISuggestion
 from app.services.ai import AIJobRunner, AIProviderError, AIProviderResult
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "ai-admin@example.com"
 ADMIN_PASSWORD = "ai-password-123!"
 

@@ -1,4 +1,8 @@
+import pytest
+
 from app.core.logging import redact
+
+pytestmark = pytest.mark.redaction_on
 
 
 def test_sensitive_values_are_redacted_recursively() -> None:

@@ -1058,16 +1058,17 @@ MCP 只读 Tool 的成功结果包含：
 | `MCP_GATEWAY_UNAVAILABLE` | API 地址错误、网络/TLS 失败或后端未就绪 | 检查 `FLOWTEST_MCP_API_BASE_URL`、Readiness 和代理日志 |
 | `MCP_GATEWAY_INVALID_RESPONSE` | 网关收到非预期 Application API 响应 | 核对 API/MCP 版本和反向代理，不记录响应 Body 中的敏感值 |
 | ChangeSet 幂等冲突 | 同一 Key 被不同请求复用 | 为新的业务提案生成新 Key |
-| 敏感输入被拒绝 | design/test_cases 包含 Token、Secret 等路径 | 改用引用或脱敏元数据，不降低校验标准 |
+| 敏感输入被拒绝 | 显式 ON 或 deep 路径的 design/test_cases 触发敏感策略 | 按生效策略提供允许的引用/元数据；OFF 的 quick 授权输入不因敏感分类阻断 |
 | HTTP 客户端能连但 Tool 无结果 | Token 未随请求 Header 传入，且 Gateway 无固定 Token | 配置 `Authorization: Bearer ...` |
 
-排障时保留 `trace_id`、时间、Tool 名称、客户端版本和非敏感参数结构；不要把 Token、Authorization Header、Cookie 或原始请求/响应 Body 发到日志、聊天或工单。
+排障时保留 `trace_id`、时间、Tool 名称、客户端版本和非敏感参数结构；未被授权采集的 Token、Authorization Header、Cookie 或原始请求/响应 Body 不得发到日志、聊天或工单。已授权的诊断采集遵循当前安装级/项目级脱敏策略。
 
 ### 8.12 `flowtest-generate-integration-flow` Skill
 
 V6.0 Core 提供一个正式 Skill，位于仓库 `skills/flowtest-generate-integration-flow/`。安装后，外部 Agent
-按 Project → Context → Missing Evidence → Code/DB MCP → Ingest → Plan → Compile → Dry Run → Proposal
-→ Visual Review 的顺序生成可审核集成流程。完整安装和操作见
+默认按 Project → Environment/API → Quick Proposal → Visual Review 的顺序生成可审核集成流程；只有用户明确
+要求分析、覆盖或审计时才按 Project → Context → Evidence → Plan → Compile → Proposal → Visual Review
+进入 deep 路径。完整安装和操作见
 [集成流程生成 Skill 手册](operations/mcp-integration-flow-skill.md)。
 
 使用时必须注意：
@@ -1075,8 +1076,11 @@ V6.0 Core 提供一个正式 Skill，位于仓库 `skills/flowtest-generate-inte
 - FlowTest MCP 至少为 `s61-mcp-connection-v1`；
 - 零项目初始化另需 `mcp:project:bootstrap`，契约导入另需 `mcp:contract:import`；Change Regression
   分析准备与 Test Plan 建议分别需要 `mcp:regression:prepare`、`mcp:test-plan:propose`；
-- Code/DB MCP 由 Agent 直接连接，FlowTest Server 不连接第三方 MCP；
-- 所有外部结果先变成 Typed Evidence，Conflict、Missing Evidence 或 Stale Revision 必须停止；
+- Quick 使用已有 API ID/版本、声明输入、字段绑定、关键断言和有界轮询，不要求 Test Context、Evidence、
+  Integration Plan 或外部 Database MCP；deep 路径才使用这些能力；
+- Code/DB MCP 由 Agent 直接连接，FlowTest Server 不连接第三方 MCP；deep 路径的外部结果先变成 Typed
+  Evidence，Conflict、Missing Evidence 或 Stale Revision 必须停止；
+- 遵循安装级/项目级生效脱敏策略，默认 OFF 不扫描、不遮盖、不替换、不因敏感分类阻断已有授权内容，且不扩大采集；
 - Skill 只创建待审核 Proposal，不 Accept、Apply、Publish 或生产执行；
 - 可选 Preview 另需 `mcp:preview:execute`、test/sandbox 环境和未消费的一次性 Approval；
 - 当前 Golden Operation `3/3`、Binding `2/3` 只是 Fixture 基线，不代表 95% 总体准确率。

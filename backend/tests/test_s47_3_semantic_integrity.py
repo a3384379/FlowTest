@@ -66,6 +66,8 @@ from app.services.change_regression import (
 from app.services.impact import _openapi_source_key
 from app.services.test_engineering_proposals import _validate_change_regression_target
 
+pytestmark = pytest.mark.redaction_on
+
 
 def _identity() -> OperationIdentity:
     return OperationIdentity(

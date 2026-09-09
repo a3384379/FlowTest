@@ -122,7 +122,7 @@ def _detect_source_type(document: Mapping[str, object]) -> ImportSourceType:
     log = document.get("log")
     if isinstance(log, Mapping) and "entries" in log:
         return ImportSourceType.HAR
-    if document.get("bruno"):
+    if document.get("bruno") or (document.get("version") == "1" and "items" in document):
         return ImportSourceType.BRUNO
     raise ImportDocumentError(
         "无法识别导入格式, 请选择 OpenAPI、Swagger、Postman、HAR、cURL、Bruno 或 Excel"

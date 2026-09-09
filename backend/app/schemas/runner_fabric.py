@@ -129,6 +129,8 @@ class RunnerLeaseTaskResponse(BaseModel):
     allowed_private_cidrs: list[str]
     resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
     reset_retry_budget: bool = False
+    redaction_mode: Literal["off", "on"] = "off"
+    redaction_policy_version: int = Field(default=1, ge=1)
 
 
 class RunnerCheckpointResume(BaseModel):

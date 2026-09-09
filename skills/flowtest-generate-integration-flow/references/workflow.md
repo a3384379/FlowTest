@@ -1,6 +1,16 @@
 # Workflow contract
 
-Use this reference whenever the skill is invoked. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
+Use this reference whenever the skill is invoked. The quick path is the default; deep stages are an explicit branch. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
+
+## Quick path (default)
+
+1. `list_projects`/`find_assets` → select one authorized project and one explicit non-production environment.
+2. `propose_simple_flow` → submit existing API definition IDs and pinned versions, a bounded list of named steps, bindings, assertions, outputs, polling limits, and declared runtime inputs. The server resolves resources and creates a review-only FlowSpec draft without Context, Evidence, Integration Plan, database MCP, or execution.
+3. Read `proposal_id`, `proposal_revision`, `static_validation`, `readiness`, `missing_inputs`, `diagnostics`, and `execution_status=not_run`. Use `inspect_flow_proposal` and stop at Visual Review.
+4. To revise a Quick proposal, reuse its `proposal_id` with the exact current `proposal_revision` as `expected_revision`; the server updates that proposal in place and returns the next revision. A stale revision is rejected without replacing the newer draft.
+5. For each explicitly requested flow, use a distinct idempotency key and share the caller's `task_ref` for correlated proposals. A failed proposal does not roll back or recreate successful proposals.
+
+Use the deep path below only when the user explicitly asks for evidence, full coverage, source/database analysis, or an audit.
 
 | Stage | FlowTest MCP operations | Required result |
 | --- | --- | --- |
@@ -12,7 +22,7 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 | Plan | `plan_integration_test`, `validate_integration_plan` | Deterministic operations, bindings, data/oracles, cleanup, and validation diagnostics |
 | Compile | `compile_integration_flowspec`, `explain_compiler_diagnostics`, `validate_flowspec` | Traceable FlowSpec and compilation fingerprint; zero static errors |
 | Dry run | `propose_flow_draft` with dry-run enabled | Proposed change summary without persistent proposal side effects |
-| Propose | `propose_flow_draft`, `inspect_flow_proposal` | One review-only proposal, or at most two explicitly requested correlated proposals, each independently recoverable in the existing Visual Review flow |
+| Propose | `propose_flow_draft`, `inspect_flow_proposal` | One or more explicitly requested bounded review-only proposals, each independently recoverable in the existing Visual Review flow |
 | Preview, optional | `inspect_flow_proposal`, then `preview_flow_proposal` | Current accepted and unapplied proposal, explicit test-environment approval, bounded execution, cleanup evidence |
 
 ## Evidence routing
@@ -27,7 +37,7 @@ Use this reference whenever the skill is invoked. The output of one stage is the
 - Pass the exact current Context revision returned by the previous operation.
 - If FlowTest reports a stale revision, re-read the Context and show the change; do not overwrite it.
 - Proposal creation is not Review, Apply, Publish, or Preview approval.
-- When two correlated proposals are explicitly requested, use separate idempotency keys and a
+- When correlated proposals are explicitly requested, use separate idempotency keys and a
   shared task reference. Treat partial success as partial success; never imply an atomic batch.
   For the RuoYi announcement A/B scenario, A retains its created-data handoff and B must stop on
   missing, ambiguous, or unmatched ownership evidence. Do not use a global notice ID.

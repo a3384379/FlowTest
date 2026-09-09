@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context, get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.mcp_read import EvidenceRef, MCPReadCall, MCPReadEnvelope
 from app.domain.test_contexts import first_sensitive_value
 from app.models.access import User
@@ -431,7 +432,11 @@ class MCPDiscoveryService(MCPReadService):
                 status_code=404,
             )
         environment = await self._session.get(Environment, endpoint.environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         if not endpoint.enabled:
             result: dict[str, object] = {
@@ -560,7 +565,11 @@ class MCPDiscoveryService(MCPReadService):
         endpoint_bindings: frozenset[tuple[UUID, str]] | None = None
         if environment_id is not None:
             environment = await self._session.get(Environment, environment_id)
-            if environment is None or environment.project_id != project_id:
+            if (
+                environment is None
+                or environment.project_id != project_id
+                or environment.archived_at is not None
+            ):
                 raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         if context_revision_id is not None:
             revision = await self._session.get(TestContextRevision, context_revision_id)
@@ -720,6 +729,7 @@ class MCPDiscoveryService(MCPReadService):
         environment_conditions = [
             Environment.project_id == project_id,
             Environment.classification.in_(["test", "sandbox"]),
+            Environment.archived_at.is_(None),
         ]
         if target.environment_id is not None:
             environment_conditions.append(Environment.id == target.environment_id)
@@ -1257,7 +1267,7 @@ def _credential_reference_value(value: object, *, depth: int) -> bool:
 
 def _safe_text(value: str, fallback: str) -> str:
     text = value.strip()[:400] if value else ""
-    if not text or first_sensitive_value({"value": text}) is not None:
+    if not text or (redaction_enabled() and first_sensitive_value({"value": text}) is not None):
         return fallback[:200] or "未命名资源"
     return text
 

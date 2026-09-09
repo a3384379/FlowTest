@@ -24,6 +24,7 @@ import {
   type Credential,
   type Environment,
   type FlowSpecChangeSetCursor,
+  type FlowSpecProposalOrigin,
   type FlowSpecVisualProposal,
   type ExecutionCheckpoint,
   type IntegrationPlan,
@@ -85,9 +86,14 @@ function useSandboxPreview(
   const environments = resources.environments.filter((environment) =>
     ['test', 'sandbox'].includes(environment.classification ?? 'unclassified'),
   )
-  const environmentId = environments.some((environment) => environment.id === environmentSelection)
-    ? environmentSelection
-    : environments.at(0)?.id
+  const environmentId =
+    environmentSelection === undefined
+      ? environments.length === 1
+        ? environments[0]?.id
+        : undefined
+      : environments.some((environment) => environment.id === environmentSelection)
+        ? environmentSelection
+        : undefined
   const query = useQuery({
     queryKey: ['sandbox-preview', projectId, proposalId, executionId],
     queryFn: async (): Promise<PreviewLiveState> => ({
@@ -389,6 +395,9 @@ function ReviewActions({
   return (
     <Card title="审核操作" size="small">
       <Space wrap>
+        <Tag color={proposalOriginColor(item.proposal_origin)}>
+          提案来源：{proposalOriginLabel(item.proposal_origin)}
+        </Tag>
         <Tag color={item.review_status === 'accepted' ? 'green' : 'gold'}>
           审核状态：{reviewStatusLabel(item.review_status)}
         </Tag>
@@ -808,6 +817,20 @@ function reviewStatusLabel(value: FlowSpecVisualProposal['proposal']['review_sta
 
 function changeSetStatusLabel(value: string): string {
   return { draft: '草稿', accepted: '已接受', rejected: '已拒绝' }[value] ?? '未知'
+}
+
+function proposalOriginLabel(value: FlowSpecProposalOrigin | undefined): string {
+  return {
+    mcp: '深度 MCP',
+    quick: 'Quick 轻量',
+    repair: '失败修复',
+    maintenance: '维护',
+    import: 'FlowSpec 导入',
+  }[value ?? 'import']
+}
+
+function proposalOriginColor(value: FlowSpecProposalOrigin | undefined): string {
+  return value === 'quick' ? 'blue' : value === 'repair' ? 'orange' : 'default'
 }
 
 function selectedVisual(

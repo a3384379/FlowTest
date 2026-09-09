@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.canonical_contracts import contains_sensitive_contract_value
 from app.domain.maintenance_proposals import FlowSpecMaintenanceProvenance
 from app.domain.proposal_provenance import proposal_origin
@@ -200,7 +201,7 @@ class RegressionMaintenanceService:
     ) -> ChangeRegressionBundle:
         run = await self._editable(actor, project_id, run_id)
         snapshot = _required_snapshot(run)
-        if contains_sensitive_contract_value(payload.note):
+        if redaction_enabled() and contains_sensitive_contract_value(payload.note):
             raise _error("SENSITIVE_NOTE", "审核说明不能包含敏感值")
         if not snapshot.affected.analysis_complete and not payload.acknowledge_incomplete_analysis:
             raise _error("ANALYSIS_REVIEW_REQUIRED", "请明确确认未覆盖诊断和人工补充检查")

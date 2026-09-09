@@ -13,6 +13,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
 from app.domain.canonical_contracts import (
     sanitize_contract_payload,
     semantic_contract_fingerprint,
@@ -1586,7 +1587,11 @@ def _valid_value(data: dict[str, JsonValue]) -> JsonValue:
     name = data.get("name")
     schema = data.get("schema")
     redacted_enum = isinstance(schema, dict) and "x-flowtest-redacted-enum" in schema
-    if isinstance(name, str) and (_is_sensitive_field_name(name) or redacted_enum):
+    if (
+        redaction_enabled()
+        and isinstance(name, str)
+        and (_is_sensitive_field_name(name) or redacted_enum)
+    ):
         normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "value"
         return f"secret://test-data/{normalized}"
     values = data.get("enum")

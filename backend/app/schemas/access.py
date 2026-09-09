@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -102,6 +102,16 @@ class ProjectSecurityPolicy(BaseModel):
     enabled: bool | None = None
     allowed_hosts: list[str] = Field(default_factory=list, max_length=100)
     allowed_private_cidrs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ProjectRedactionPolicy(BaseModel):
+    mode: Literal["off", "on"]
+    source: Literal["installation", "project"]
+    policy_version: int = Field(ge=1)
+
+
+class ProjectRedactionPolicyUpdate(BaseModel):
+    mode: Literal["off", "on"]
 
 
 class ProjectRetentionPolicy(BaseModel):

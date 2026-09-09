@@ -56,6 +56,12 @@ export type Project = {
   role: 'owner' | 'editor' | 'viewer' | null
 }
 
+export type ProjectRedactionPolicy = {
+  mode: 'off' | 'on'
+  source: 'installation' | 'project'
+  policy_version: number
+}
+
 export type DashboardTrendPoint = {
   date: string
   total: number
@@ -687,6 +693,7 @@ export type FlowSpecChangeSetDetail = FlowSpecChangeSet & {
   validation: FlowSpecValidationResult
   compatibility: FlowSpecCompatibilityResult
   diff: Array<{ path: string; before: unknown; after: unknown }>
+  proposal_origin?: FlowSpecProposalOrigin
 }
 
 export type FlowSpecApplyResult = {
@@ -909,7 +916,7 @@ export type FlowSpecMcpProposalPage = {
   page_size: number
 }
 
-export type FlowSpecProposalOrigin = 'mcp' | 'repair' | 'maintenance' | 'import'
+export type FlowSpecProposalOrigin = 'mcp' | 'quick' | 'repair' | 'maintenance' | 'import'
 
 export type FlowSpecProposal = FlowSpecChangeSet & {
   proposal_origin: FlowSpecProposalOrigin

@@ -67,7 +67,10 @@ class WorkflowRepository:
             (
                 await self._session.scalars(
                     select(Workflow)
-                    .where(Workflow.project_id == project_id)
+                    .where(
+                        Workflow.project_id == project_id,
+                        Workflow.archived_at.is_(None),
+                    )
                     .order_by(Workflow.updated_at.desc())
                     .offset(offset)
                     .limit(limit)
@@ -75,7 +78,9 @@ class WorkflowRepository:
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count()).select_from(Workflow).where(Workflow.project_id == project_id)
+            select(func.count())
+            .select_from(Workflow)
+            .where(Workflow.project_id == project_id, Workflow.archived_at.is_(None))
         )
         return items, int(total or 0)
 
@@ -89,6 +94,7 @@ class WorkflowRepository:
         query = select(Workflow.id).where(
             Workflow.project_id == project_id,
             Workflow.name == name,
+            Workflow.archived_at.is_(None),
         )
         if excluding_id is not None:
             query = query.where(Workflow.id != excluding_id)

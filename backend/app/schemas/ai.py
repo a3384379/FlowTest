@@ -49,6 +49,8 @@ class AIJobResponse(BaseModel):
 
     id: UUID
     project_id: UUID
+    redaction_mode: Literal["off", "on"] | None = None
+    redaction_policy_version: int | None = None
     job_type: AIJobType
     status: AIJobStatus
     input_sha256: str

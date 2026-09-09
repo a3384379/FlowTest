@@ -32,6 +32,9 @@ from app.domain.test_contexts import (
     first_sensitive_value,
 )
 
+pytestmark = pytest.mark.redaction_on
+
+
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "v6_golden"
 RUOYI_ROOT = FIXTURE_ROOT.parents[4] / "RuoYi"
 PROJECT_ID = "00000000-0000-0000-0000-000000000001"

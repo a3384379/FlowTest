@@ -18,7 +18,11 @@
 
 ## Security and observability
 
-- Never log passwords, authorization headers, cookies, tokens, secrets, or unredacted sensitive bodies.
+- Automatic redaction is OFF by default. Do not expand logging or data collection. Values that
+  are not covered by an already-authorized diagnostic capture must stay out of logs; when that
+  existing capture is enabled, follow the active installation/project policy: ON applies the
+  existing redaction, while OFF does not scan, mask, substitute, or block the authorized values.
+  Project policy is request-scoped.
 - All externally visible errors use the standard error envelope and include a trace ID.
 - Treat target URLs, uploaded files, imported documents, workflow definitions, and templates as untrusted input.
 - Secret values are write-only at API boundaries and encrypted at rest.

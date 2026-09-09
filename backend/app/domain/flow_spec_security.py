@@ -7,6 +7,7 @@ import re
 import jmespath
 from jmespath.exceptions import JMESPathError
 
+from app.core.redaction import redaction_enabled
 from app.domain.flow_spec import FlowSpec
 from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.test_contexts import first_sensitive_value, is_sensitive_identifier
@@ -18,6 +19,8 @@ _SECRET_REFERENCE = re.compile(r"secret://[A-Za-z0-9._:/-]+")
 def contains_sensitive_flow_spec_value(spec: FlowSpec | FlowSpecV2) -> bool:
     """Reject credentials and correlated literals without returning their values."""
 
+    if not redaction_enabled():
+        return False
     if first_sensitive_value(spec.model_dump(mode="json")) is not None:
         return True
     if any(is_sensitive_identifier(name) for name in spec.variables):

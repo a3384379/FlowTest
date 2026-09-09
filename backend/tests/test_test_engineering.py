@@ -30,6 +30,8 @@ from app.schemas.test_engineering import (
 )
 from app.services.test_engineering_proposals import _scenario_workflow, _selected_scenarios
 
+pytestmark = pytest.mark.redaction_on
+
 
 def _orders_contract() -> OperationContract:
     return OperationContract.model_validate(

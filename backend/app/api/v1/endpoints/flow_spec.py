@@ -459,6 +459,7 @@ def flow_spec_change_set_detail(
         validation=view.pipeline.validation,
         compatibility=view.pipeline.compatibility,
         diff=list(view.diff),
+        proposal_origin=proposal_origin(view.change_set.source_snapshot),
     )
 
 

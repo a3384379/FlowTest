@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.context import get_trace_id
 from app.core.logging import redact
+from app.core.redaction import redaction_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,10 @@ def _safe_validation_errors(error: RequestValidationError) -> list[dict[str, Any
     for item in error.errors():
         safe_item = _json_safe_validation_value(redact(dict(item)))
         location = item.get("loc", ())
-        if isinstance(location, (list, tuple)) and any(
-            _is_sensitive_location_part(str(part)) for part in location
+        if (
+            redaction_enabled()
+            and isinstance(location, (list, tuple))
+            and any(_is_sensitive_location_part(str(part)) for part in location)
         ):
             safe_item["input"] = "***"
         safe_errors.append(safe_item)
