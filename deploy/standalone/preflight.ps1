@@ -54,7 +54,9 @@ $osSummary = if ($null -ne $os) {
 Require-Path "backend\app\main.py" "后端代码"
 Require-Path "frontend\dist\index.html" "前端静态文件"
 Require-Path "deploy\standalone\start.ps1" "启动脚本"
+Require-Path "deploy\standalone\mcp.ps1" "MCP 启动脚本"
 Require-Path "deploy\standalone\.env.example" "环境变量模板"
+Require-Path "skills\flowtest-generate-integration-flow\manifest.yaml" "集成流程 Skill Manifest"
 
 $portablePython = Join-Path $Root "runtime\python.exe"
 $python = $null
@@ -74,7 +76,7 @@ if ($null -eq $python) {
     if (Test-Path -LiteralPath (Join-Path $Root "runtime\Lib\site-packages")) {
         $env:PYTHONPATH = "$($Root)\backend;$($Root)\runtime\Lib\site-packages"
     }
-    & $python -c "import fastapi, sqlalchemy, uvicorn" 2>$null
+    & $python -c "import fastapi, mcp, sqlalchemy, uvicorn" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Add-PreflightError("Python 依赖不完整；请重新生成 Standalone 离线包")
     }
