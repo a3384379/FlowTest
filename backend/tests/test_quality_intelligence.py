@@ -76,6 +76,9 @@ from app.services.quality_intelligence import (
 )
 from app.services.test_assets import TestCaseService as CaseService
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "quality-intelligence@example.com"
 ADMIN_PASSWORD = "quality-intelligence-password-123!"
 VIEWER_EMAIL = "quality-intelligence-viewer@example.com"

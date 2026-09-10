@@ -44,6 +44,8 @@ from app.models.access import Project, User
 from app.models.organizations import Organization
 from app.services.service_accounts import ServiceAccountService
 
+pytestmark = pytest.mark.redaction_on
+
 
 @pytest.fixture
 async def s52_context() -> AsyncIterator[dict[str, Any]]:

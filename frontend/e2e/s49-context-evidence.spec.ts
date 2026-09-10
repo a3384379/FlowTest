@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { authenticate } from './support/auth'
+import { enableProjectRedaction } from './support/redaction'
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
@@ -47,6 +48,7 @@ test('S49 Context、Evidence 与 Draft Proposal 受控闭环', async ({ page }) 
   })
   expect(projectResponse.status()).toBe(201)
   const project = (await projectResponse.json()) as Project
+  await enableProjectRedaction(page.request, project.id, userHeaders)
 
   const combined = await createServiceAccount(
     page.request,

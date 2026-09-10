@@ -34,10 +34,10 @@ describe('API workbench bulk editing', () => {
       { name: 'X-Region', value: 'cn' },
     ]
 
-    const text = serializeBulkHeaders(headers)
+    const text = serializeBulkHeaders(headers, 'on')
     expect(text).toContain('Authorization: ******')
     expect(text).not.toContain('legacy-token')
-    expect(parseBulkHeaders(text, headers)).toEqual({ values: headers, errors: [] })
+    expect(parseBulkHeaders(text, headers, 'on')).toEqual({ values: headers, errors: [] })
   })
 
   it('rejects duplicate or newly exposed sensitive headers', () => {
@@ -48,12 +48,21 @@ describe('API workbench bulk editing', () => {
         'Authorization: Bearer literal-token',
       ].join('\n'),
       [],
+      'on',
     )
 
     expect(result.errors).toEqual([
       '第 2 行：Header 名称与第 1 行重复',
       '第 3 行：敏感 Header 请使用 {{secret.NAME}} 引用',
     ])
+  })
+
+  it('preserves sensitive headers when redaction is off', () => {
+    const headers = [{ name: 'Authorization', value: 'Bearer synthetic-token' }]
+    const text = serializeBulkHeaders(headers)
+
+    expect(text).toBe('Authorization: Bearer synthetic-token')
+    expect(parseBulkHeaders(text, headers)).toEqual({ values: headers, errors: [] })
   })
 
   it('round-trips unique form fields and ignores comments', () => {

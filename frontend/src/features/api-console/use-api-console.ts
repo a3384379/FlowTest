@@ -1,3 +1,4 @@
+import { useEnvironmentSelection } from '../projects/environment-selection'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useEffect, useState } from 'react'
@@ -15,6 +16,7 @@ import {
   createApiVersion,
   createEnvironment,
   createProject,
+  deleteEnvironment,
   discoverApiDocumentUrl,
   downloadArtifact,
   mergeApiImport,
@@ -30,6 +32,7 @@ import {
   uploadArtifact,
   previewApi,
   updateApiDefinition,
+  updateEnvironment,
   type ImportPreviewInput,
   type ApiVersionInput,
   type CreateApiInput,
@@ -37,12 +40,12 @@ import {
   type CreateProjectInput,
   type HttpMethod,
 } from './api-service'
+import { getProjectRedactionPolicy } from '../projects/project-service'
 
 export function useApiConsole(initialApiId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
-  const [environmentSelection, setEnvironmentSelection] = useState<string | null>(null)
   const [apiSelection, setApiSelection] = useRouteScopedSelection(projectId, initialApiId ?? null)
   const [apiSearchInput, setApiSearchInput] = useState('')
   const [apiSearch, setApiSearch] = useState('')
@@ -57,7 +60,13 @@ export function useApiConsole(initialApiId?: string) {
     queryFn: () => listEnvironments(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const environmentId = selectedOrFirst(environmentSelection, environments.data)
+  const {
+    environmentId,
+    selectEnvironment: setEnvironmentSelection,
+    selectionInvalid: environmentSelectionInvalid,
+    environmentPlaceholder,
+    environmentStatus,
+  } = useEnvironmentSelection(projectId, environments.data)
   const apis = useQuery({
     queryKey: ['apis', projectId, apiPage, apiSearch, apiMethod],
     queryFn: () =>
@@ -85,10 +94,23 @@ export function useApiConsole(initialApiId?: string) {
     queryFn: () => listArtifacts(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
+  const redactionMode = useProjectRedactionMode(projectId)
 
   const projectMutation = useMutation({ mutationFn: createProject })
   const environmentMutation = useMutation({
     mutationFn: (input: CreateEnvironmentInput) => createEnvironment(requiredId(projectId), input),
+  })
+  const updateEnvironmentMutation = useMutation({
+    mutationFn: ({
+      environmentId,
+      input,
+    }: {
+      environmentId: string
+      input: Partial<CreateEnvironmentInput>
+    }) => updateEnvironment(requiredId(projectId), environmentId, input),
+  })
+  const deleteEnvironmentMutation = useMutation({
+    mutationFn: (environmentId: string) => deleteEnvironment(requiredId(projectId), environmentId),
   })
   const apiMutation = useMutation({
     mutationFn: (input: CreateApiInput) => createApi(requiredId(projectId), input),
@@ -196,7 +218,6 @@ export function useApiConsole(initialApiId?: string) {
 
   function selectProject(value: string) {
     selectContextProject(value)
-    setEnvironmentSelection(null)
     setApiSelection(null)
     setApiSearchInput('')
     setApiSearch('')
@@ -221,6 +242,23 @@ export function useApiConsole(initialApiId?: string) {
     })
   }
 
+  async function editEnvironment(environmentId: string, input: Partial<CreateEnvironmentInput>) {
+    await withErrorMessage(message.error, async () => {
+      await updateEnvironmentMutation.mutateAsync({ environmentId, input })
+      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      void message.success('环境配置已更新')
+    })
+  }
+
+  async function archiveEnvironment(targetEnvironmentId: string) {
+    await withErrorMessage(message.error, async () => {
+      await deleteEnvironmentMutation.mutateAsync(targetEnvironmentId)
+      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      if (targetEnvironmentId === environmentId) setEnvironmentSelection(null)
+      void message.success('环境已删除，历史记录仍会保留')
+    })
+  }
+
   async function addApi(input: CreateApiInput) {
     await withErrorMessage(message.error, async () => {
       const definition = await apiMutation.mutateAsync(input)
@@ -241,6 +279,9 @@ export function useApiConsole(initialApiId?: string) {
     selectProject,
     environments,
     environmentId,
+    environmentSelectionInvalid,
+    environmentPlaceholder,
+    environmentStatus,
     setEnvironmentSelection,
     apis,
     apiId,
@@ -257,6 +298,7 @@ export function useApiConsole(initialApiId?: string) {
     setApiPage,
     history,
     artifacts,
+    redactionMode,
     expectedStatus,
     setExpectedStatus,
     result,
@@ -276,6 +318,10 @@ export function useApiConsole(initialApiId?: string) {
     executing: executionMutation.isPending,
     addProject,
     addEnvironment,
+    editEnvironment,
+    archiveEnvironment,
+    updatingEnvironment: updateEnvironmentMutation.isPending,
+    deletingEnvironment: deleteEnvironmentMutation.isPending,
     addApi,
     saveVersion: versionMutation.mutateAsync,
     savingVersion: versionMutation.isPending,
@@ -299,14 +345,16 @@ export function useApiConsole(initialApiId?: string) {
   }
 }
 
-export type ApiConsoleDetail = ApiDetail
-
-type Identified = { id: string }
-
-function selectedOrFirst(selection: string | null, items?: Identified[]): string | null {
-  if (selection && items?.some((item) => item.id === selection)) return selection
-  return items?.at(0)?.id ?? null
+function useProjectRedactionMode(projectId: string | null): 'off' | 'on' {
+  const policy = useQuery({
+    queryKey: ['project-redaction-policy', projectId],
+    queryFn: () => getProjectRedactionPolicy(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  return policy.data?.mode === 'on' ? 'on' : 'off'
 }
+
+export type ApiConsoleDetail = ApiDetail
 
 function requiredId(value: string | null): string {
   if (!value) throw new Error('缺少必要的资源标识')

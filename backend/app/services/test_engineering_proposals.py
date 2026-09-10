@@ -439,7 +439,11 @@ class TestEngineeringProposalService:
 
     async def _target_environment(self, project_id: UUID, environment_id: UUID) -> Environment:
         environment = await self._session.get(Environment, environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
         return environment
 

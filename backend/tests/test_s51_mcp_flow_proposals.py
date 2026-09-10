@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,9 +29,14 @@ from app.models.governance import IdempotencyRecord
 from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
+from app.repositories.api_assets import APIAssetRepository
+from app.repositories.workflows import WorkflowRepository
+from app.schemas.mcp_simple_flows import SimpleFlowRequest
 from app.schemas.test_contexts import FlowSpecProposalRequest
 from app.services.mcp_flow_proposals import _contains_unsafe_jmespath_literal
 from app.services.service_accounts import ServiceAccountService
+
+pytestmark = pytest.mark.redaction_on
 
 
 @pytest.fixture
@@ -324,6 +330,54 @@ def test_jmespath_secret_literal_detection_preserves_dynamic_paths() -> None:
     assert not _contains_unsafe_jmespath_literal("steps.login.output.password")
     assert not _contains_unsafe_jmespath_literal("'secret://runtime/password'")
     assert not _contains_unsafe_jmespath_literal("to_string('secret://runtime/password')")
+
+
+def test_quick_input_default_must_match_declared_type() -> None:
+    with pytest.raises(ValueError, match="input default does not match declared type"):
+        SimpleFlowRequest.model_validate(
+            {
+                "project_id": "00000000-0000-4000-8000-000000000001",
+                "environment_id": "00000000-0000-4000-8000-000000000002",
+                "name": "类型校验",
+                "task_ref": "quick-type-check",
+                "scenario_key": "type-check",
+                "inputs": [{"name": "count", "type": "integer", "default": "one"}],
+                "steps": [
+                    {
+                        "key": "step",
+                        "name": "步骤",
+                        "api": {
+                            "api_definition_id": "00000000-0000-4000-8000-000000000003",
+                            "version": 1,
+                        },
+                    }
+                ],
+            }
+        )
+
+
+def test_quick_status_code_assertion_requires_expected_http_status() -> None:
+    payload = {
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "environment_id": "00000000-0000-4000-8000-000000000002",
+        "name": "状态码校验",
+        "task_ref": "quick-status-check",
+        "scenario_key": "status-check",
+        "steps": [
+            {
+                "key": "step",
+                "name": "步骤",
+                "api": {
+                    "api_definition_id": "00000000-0000-4000-8000-000000000003",
+                    "version": 1,
+                },
+                "assertions": [{"target": "status_code", "operator": "status_code"}],
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="expected HTTP status code"):
+        SimpleFlowRequest.model_validate(payload)
 
 
 def _assert_secret_not_exposed(response: Response, secret: str) -> None:
@@ -696,6 +750,268 @@ async def test_mcp_flow_proposal_rejects_sensitive_values_before_persistence(
     assert safe_response.json()["error"]["code"] == "FLOWSPEC_IMPORT_INVALID"
     async with s51_context["sessions"]() as session:
         assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 0
+
+
+@pytest.mark.asyncio
+async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempotently(
+    s51_context: dict[str, Any],
+) -> None:
+    payload = {
+        "project_id": str(s51_context["project_id"]),
+        "environment_id": str(s51_context["sandbox_environment_id"]),
+        "name": "快速健康检查",
+        "task_ref": "quick-health-task",
+        "scenario_key": "health-check",
+        "inputs": [
+            {"name": "trace_id", "type": "string", "default": "trace-1"},
+            {
+                "name": "attempts",
+                "type": "integer",
+                "default": 3,
+                "description": "请求次数",
+            },
+        ],
+        "steps": [
+            {
+                "key": "lookup",
+                "name": "查询健康状态",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+                "bindings": [
+                    {
+                        "target": "header.X-Trace-Id",
+                        "source": {"kind": "input", "name": "trace_id"},
+                    },
+                    {
+                        "target": "body.attempts",
+                        "source": {"kind": "input", "name": "attempts"},
+                    },
+                    {
+                        "target": "body.enabled",
+                        "source": {"kind": "constant", "value": True},
+                    },
+                ],
+                "assertions": [
+                    {"target": "status_code", "operator": "status_code", "expected": 200}
+                ],
+                "polling": {"max_attempts": 3, "interval_seconds": 1.5, "timeout_seconds": 20},
+                "outputs": [{"name": "health", "source": "body.status"}],
+            },
+            {
+                "key": "repeat",
+                "name": "再次检查",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+                "bindings": [
+                    {
+                        "target": "query.trace",
+                        "source": {"kind": "previous_output", "name": "lookup.body.status"},
+                    }
+                ],
+            },
+        ],
+    }
+    headers = {**s51_context["mcp_headers"], "Idempotency-Key": "quick-health-v1"}
+    response = await s51_context["client"].post(
+        "/api/v1/mcp/flow/simple-proposals", headers=headers, json=payload
+    )
+    assert response.status_code == 202, response.text
+    result = response.json()
+    assert result["generation_mode"] == "quick"
+    assert result["execution_status"] == "not_run"
+    assert result["status"] == "draft_created"
+    assert result["readiness"] == "ready"
+    assert result["target_workflow_id"] is None
+    assert result["proposal_revision"] == 1
+    replay = await s51_context["client"].post(
+        "/api/v1/mcp/flow/simple-proposals", headers=headers, json=payload
+    )
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["proposal_id"] == result["proposal_id"]
+    assert replay.json()["idempotency_replayed"] is True
+    inspection = await s51_context["client"].get(
+        f"/api/v1/mcp/flow/proposals/{result['proposal_id']}",
+        params={"project_id": str(s51_context["project_id"])},
+        headers=s51_context["mcp_headers"],
+    )
+    assert inspection.status_code == 200, inspection.text
+    proposed = inspection.json()["proposed_definition"]
+    lookup_config = next(node["config"] for node in proposed["nodes"] if node["id"] == "lookup")
+    assert lookup_config["max_retries"] == 2
+    assert lookup_config["retry_delay_seconds"] == 1.5
+    assert lookup_config["timeout_seconds"] == 20
+    lookup_edge = next(edge for edge in proposed["edges"] if edge["target"] == "lookup")
+    transforms = {
+        mapping["target"]["key"]: mapping["transform"]["kind"]
+        for mapping in lookup_edge["mappings"]
+    }
+    assert transforms["attempts"] == "json_parse"
+    assert transforms["enabled"] == "json_parse"
+    assert {node["id"] for node in proposed["nodes"]} >= {
+        "start",
+        "lookup",
+        "lookup.output.health",
+        "lookup.assert.1",
+        "lookup.output.forward",
+        "repeat",
+        "repeat.output.forward",
+        "end",
+    }
+    assert any(
+        edge["source"] == "lookup.output.forward"
+        and edge["target"] == "repeat"
+        and edge["mappings"]
+        for edge in proposed["edges"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_quick_flow_bounds_derived_ids(s51_context: dict[str, Any]) -> None:
+    step_key = "s" * 120
+    payload = {
+        "project_id": str(s51_context["project_id"]),
+        "environment_id": str(s51_context["sandbox_environment_id"]),
+        "name": "长标识符流程",
+        "task_ref": "quick-long-identifiers",
+        "scenario_key": "long-identifiers",
+        "steps": [
+            {
+                "key": step_key,
+                "name": "长标识符步骤",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+                "outputs": [{"name": "o" * 160, "source": "body.status"}],
+                "assertions": [
+                    {"target": "status_code", "operator": "status_code", "expected": 200}
+                ],
+            }
+        ],
+    }
+    response = await s51_context["client"].post(
+        "/api/v1/mcp/flow/simple-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "quick-long-ids-v1"},
+        json=payload,
+    )
+    assert response.status_code == 202, response.text
+    inspection = await s51_context["client"].get(
+        f"/api/v1/mcp/flow/proposals/{response.json()['proposal_id']}",
+        params={"project_id": str(s51_context["project_id"])},
+        headers=s51_context["mcp_headers"],
+    )
+    definition = inspection.json()["proposed_definition"]
+    assert all(len(node["id"]) <= 128 for node in definition["nodes"])
+    assert all(len(edge["id"]) <= 128 for edge in definition["edges"])
+
+
+@pytest.mark.asyncio
+async def test_archived_asset_names_remain_reserved(s51_context: dict[str, Any]) -> None:
+    async with s51_context["sessions"]() as session:
+        environment = await session.get(Environment, s51_context["sandbox_environment_id"])
+        actor = await session.scalar(select(User).limit(1))
+        assert environment is not None and actor is not None
+        environment.archived_at = datetime.now(UTC)
+        workflow = Workflow(
+            project_id=s51_context["project_id"],
+            folder_id=None,
+            name="已归档工作流",
+            description="",
+            draft_definition={},
+            draft_revision=1,
+            current_version=None,
+            archived_at=datetime.now(UTC),
+            created_by_id=actor.id,
+        )
+        session.add(workflow)
+        await session.commit()
+
+        assets = APIAssetRepository(session)
+        workflows = WorkflowRepository(session)
+        assert (
+            await assets.find_environment_by_name(
+                project_id=s51_context["project_id"], name=environment.name
+            )
+            is environment
+        )
+        assert await workflows.name_exists(project_id=s51_context["project_id"], name=workflow.name)
+
+
+@pytest.mark.asyncio
+async def test_quick_flow_revision_updates_same_proposal_and_rejects_stale_editor(
+    s51_context: dict[str, Any],
+) -> None:
+    payload = {
+        "project_id": str(s51_context["project_id"]),
+        "environment_id": str(s51_context["sandbox_environment_id"]),
+        "name": "可修订的健康检查",
+        "task_ref": "quick-revision-task",
+        "scenario_key": "health-check-revision",
+        "steps": [
+            {
+                "key": "lookup",
+                "name": "查询健康状态",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+            }
+        ],
+    }
+    client = s51_context["client"]
+    created = await client.post(
+        "/api/v1/mcp/flow/simple-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "quick-revision-v1"},
+        json=payload,
+    )
+    assert created.status_code == 202, created.text
+    proposal_id = created.json()["proposal_id"]
+
+    revised = await client.post(
+        "/api/v1/mcp/flow/simple-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "quick-revision-v2"},
+        json={
+            **payload,
+            "proposal_id": proposal_id,
+            "expected_revision": 1,
+            "name": "可修订的健康检查-已更新",
+        },
+    )
+    assert revised.status_code == 202, revised.text
+    assert revised.json()["proposal_id"] == proposal_id
+    assert revised.json()["proposal_revision"] == 2
+
+    stale = await client.post(
+        "/api/v1/mcp/flow/simple-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "quick-revision-stale"},
+        json={
+            **payload,
+            "proposal_id": proposal_id,
+            "expected_revision": 1,
+            "name": "过期编辑",
+        },
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["code"] == "QUICK_PROPOSAL_REVISION_CONFLICT"
+
+    async with s51_context["sessions"]() as session:
+        proposals = list(
+            (
+                await session.scalars(
+                    select(AIChangeSet).where(
+                        AIChangeSet.project_id == s51_context["project_id"],
+                        AIChangeSet.source_type == "flow_spec",
+                    )
+                )
+            ).all()
+        )
+        assert len(proposals) == 1
+        assert proposals[0].id == UUID(proposal_id)
+        assert proposals[0].source_snapshot["quick"]["proposal_revision"] == 2
 
 
 @pytest.mark.asyncio

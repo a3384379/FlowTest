@@ -31,6 +31,8 @@ from app.models.ai import AIChangeSet
 from app.models.api_assets import APIVersion
 from app.services.flow_spec import _operation_contract_matches
 
+pytestmark = pytest.mark.redaction_on
+
 ADMIN_EMAIL = "flowspec-admin@example.com"
 ADMIN_PASSWORD = "flowspec-password-123!"
 

@@ -84,6 +84,7 @@ class RetryCategory(StrEnum):
 class MappingTransformKind(StrEnum):
     IDENTITY = "identity"
     TEMPLATE = "template"
+    JSON_PARSE = "json_parse"
 
 
 class MappingTargetLocation(StrEnum):

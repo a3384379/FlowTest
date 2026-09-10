@@ -23,10 +23,22 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
   await page.getByRole('row').filter({ hasText: parentName }).first().click()
   await expect(page.getByText('已发布 v2')).toBeVisible()
 
+  await selectWorkflowEnvironment(page)
   await verifyCanvasEditing(page)
   await verifyVersionDiff(page)
   await verifyExecutionDebugAndReplay(page)
 })
+
+async function selectWorkflowEnvironment(page: Page) {
+  const environment = page.getByRole('combobox', { name: '工作流环境' })
+  await expect(environment).toBeEnabled()
+  await environment.click()
+  const dropdown = page.locator('.ant-select-dropdown:visible').last()
+  const firstOption = dropdown.locator('.ant-select-item-option').first()
+  await expect(firstOption).toBeVisible()
+  await firstOption.click()
+  await expect(page.getByRole('button', { name: /运\s*行/ })).toBeEnabled()
+}
 
 async function verifyCanvasEditing(page: Page) {
   const forEachNode = page.locator('.react-flow__node[data-id="foreach"]')

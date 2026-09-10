@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.context import get_trace_id
 from app.core.logging import redact
+from app.core.redaction import redaction_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -108,13 +109,25 @@ def _safe_validation_errors(error: RequestValidationError) -> list[dict[str, Any
     safe_errors: list[dict[str, Any]] = []
     for item in error.errors():
         safe_item = _json_safe_validation_value(redact(dict(item)))
+        if _is_security_validation_error(item.get("msg")):
+            # Rejected executable input is never echoed back, even when the
+            # project deliberately keeps ordinary authorized values in OFF.
+            safe_item["input"] = "***"
         location = item.get("loc", ())
-        if isinstance(location, (list, tuple)) and any(
-            _is_sensitive_location_part(str(part)) for part in location
+        if (
+            redaction_enabled()
+            and isinstance(location, (list, tuple))
+            and any(_is_sensitive_location_part(str(part)) for part in location)
         ):
             safe_item["input"] = "***"
         safe_errors.append(safe_item)
     return safe_errors
+
+
+def _is_security_validation_error(message: object) -> bool:
+    if not isinstance(message, str):
+        return False
+    return "write sql" in message.lower()
 
 
 def _json_safe_validation_value(value: Any) -> Any:

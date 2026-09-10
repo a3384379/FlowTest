@@ -8,7 +8,7 @@ import secrets
 import time
 from typing import Any, cast
 
-from smoke_s4 import APIClient, SmokeConfig, _change_password
+from smoke_s4 import APIClient, SmokeConfig, _change_password, _enable_redaction
 
 
 def main() -> None:
@@ -38,6 +38,7 @@ def _run_acceptance(client: APIClient, token: str) -> dict[str, str]:
         token=token,
     )
     project_id = str(project["id"])
+    _enable_redaction(client, token, project_id)
     status_response = client.json("GET", f"/ai/status?project_id={project_id}", token=token)
     if status_response["enabled"] is not True or not status_response["model"]:
         raise RuntimeError("AI feature is not enabled for the S21 acceptance stack")

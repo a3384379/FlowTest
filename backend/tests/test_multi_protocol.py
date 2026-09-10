@@ -61,6 +61,8 @@ from app.services.protocol_runtime import (
     build_grpc_channel,
 )
 
+pytestmark = pytest.mark.redaction_on
+
 ADMIN_EMAIL = "protocol-admin@example.com"
 ADMIN_PASSWORD = "protocol-password-123!"
 

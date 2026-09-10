@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -5,6 +6,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -42,6 +44,7 @@ class Environment(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     variables: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 

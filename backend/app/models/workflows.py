@@ -34,6 +34,7 @@ class Workflow(UuidPrimaryKeyMixin, TimestampMixin, Base):
     draft_definition: Mapped[dict[str, Any]] = mapped_column(JSON)
     draft_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     current_version: Mapped[int | None] = mapped_column(Integer)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
 
@@ -82,6 +83,10 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "AND dataset_row_index >= 0)",
             name="workflow_execution_dataset_child",
         ),
+        CheckConstraint(
+            "redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
         UniqueConstraint(
             "parent_execution_id",
             "dataset_row_index",
@@ -91,6 +96,12 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    redaction_mode: Mapped[str] = mapped_column(
+        String(8), default="off", server_default="off", nullable=False
+    )
+    redaction_policy_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
     )
     workflow_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("workflows.id", ondelete="RESTRICT"), index=True

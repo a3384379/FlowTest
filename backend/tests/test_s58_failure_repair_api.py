@@ -48,6 +48,8 @@ from app.models.workflows import (
 from app.schemas.failure_repair import RepairProposalCreate
 from app.services.failure_repair import FailureRepairService
 
+pytestmark = pytest.mark.redaction_on
+
 
 @pytest.fixture
 async def failure_repair_api() -> AsyncIterator[dict[str, Any]]:

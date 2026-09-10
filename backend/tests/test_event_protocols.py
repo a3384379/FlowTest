@@ -66,6 +66,9 @@ from app.services.event_runtime import (
 )
 from app.services.event_sources import _event_endpoints, _registry_url, _source_fingerprint
 
+pytestmark = pytest.mark.redaction_on
+
+
 ADMIN_EMAIL = "event-admin@example.com"
 ADMIN_PASSWORD = "event-admin-password-123!"
 

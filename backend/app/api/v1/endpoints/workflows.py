@@ -114,6 +114,20 @@ async def update_workflow_draft(
     return WorkflowResponse.model_validate(workflow)
 
 
+@router.delete("/workflows/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow(
+    project_id: UUID,
+    workflow_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> None:
+    await WorkflowService(session).delete(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+    )
+
+
 @router.post("/workflows/{workflow_id}/versions", response_model=WorkflowVersionResponse)
 async def publish_workflow(
     project_id: UUID,

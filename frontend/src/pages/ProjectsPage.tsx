@@ -25,10 +25,12 @@ import AccessManagementPanel from '../features/projects/AccessManagementPanel'
 import AssetManagementPanel from '../features/projects/AssetManagementPanel'
 import {
   getProjectPermission,
+  getProjectRedactionPolicy,
   getProjectRetentionPolicy,
   getProjectSecurityPolicy,
   listProjectAuditLogs,
   updateProjectSecurityPolicy,
+  updateProjectRedactionPolicy,
   updateProjectRetentionPolicy,
 } from '../features/projects/project-service'
 import { useProjectContext } from '../features/projects/use-project-context'
@@ -37,6 +39,7 @@ import {
   type AuditLog,
   type ProjectCapability,
   type ProjectPermission,
+  type ProjectRedactionPolicy,
   type ProjectRetentionPolicy,
   type ProjectSecurityPolicy,
 } from '../lib/api'
@@ -87,6 +90,11 @@ function useProjectsPageState() {
     queryFn: () => getProjectRetentionPolicy(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
+  const redaction = useQuery({
+    queryKey: ['project-redaction-policy', projectId],
+    queryFn: () => getProjectRedactionPolicy(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
   const canManageSecurity = hasCapability(permission.data, 'manage_security')
   const canManageMembers = hasCapability(permission.data, 'manage_members')
   const canEdit = hasCapability(permission.data, 'edit')
@@ -122,6 +130,18 @@ function useProjectsPageState() {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
+  const updateRedaction = useMutation({
+    mutationFn: (mode: ProjectRedactionPolicy['mode']) =>
+      updateProjectRedactionPolicy(requiredId(projectId), mode),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-redaction-policy', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-audit', projectId] }),
+      ])
+      void message.success('脱敏生效策略已保存')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
   return {
     projectId,
     projects: projects.data?.items ?? [],
@@ -140,6 +160,10 @@ function useProjectsPageState() {
     retentionLoading: retention.isLoading,
     updateRetention: (days: number) => updateRetention.mutate(days),
     updateRetentionPending: updateRetention.isPending,
+    redaction: redaction.data,
+    redactionLoading: redaction.isLoading,
+    updateRedaction: (mode: ProjectRedactionPolicy['mode']) => updateRedaction.mutate(mode),
+    updateRedactionPending: updateRedaction.isPending,
     canViewAudit,
     audit: audit.data?.items ?? [],
     auditLoading: audit.isLoading,
@@ -182,6 +206,13 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           canManage={state.canManageSecurity}
           saving={state.updateRetentionPending}
           onSave={state.updateRetention}
+        />
+        <RedactionPolicyPanel
+          policy={state.redaction}
+          loading={state.redactionLoading}
+          canManage={state.canManageSecurity}
+          saving={state.updateRedactionPending}
+          onSave={state.updateRedaction}
         />
         {state.projectId && (
           <Col span={24}>
@@ -237,6 +268,61 @@ function RetentionPolicyPanel({
       </Card>
     </Col>
   )
+}
+
+function RedactionPolicyPanel({
+  policy,
+  loading,
+  canManage,
+  saving,
+  onSave,
+}: {
+  policy?: ProjectRedactionPolicy
+  loading: boolean
+  canManage: boolean
+  saving: boolean
+  onSave: (mode: ProjectRedactionPolicy['mode']) => void
+}) {
+  const mode = policy?.mode ?? 'off'
+  const source = policy?.source ?? 'installation'
+  return (
+    <Col xs={24} xl={10}>
+      <Card title="输出脱敏策略" loading={loading}>
+        <Typography.Paragraph type="secondary">
+          关闭时保留当前已授权输入、预览、报告和日志采集的原文，不扩大数据采集范围。需要兼容旧版输出时可显式开启。
+        </Typography.Paragraph>
+        <Space align="center">
+          <Switch
+            aria-label="开启项目脱敏"
+            checked={mode === 'on'}
+            disabled={!canManage || saving}
+            loading={saving}
+            onChange={(checked) => onSave(redactionModeFromChecked(checked))}
+          />
+          <Typography.Text>{redactionModeLabels[mode]}</Typography.Text>
+          <Tag color={redactionSourceColors[source]}>来源：{redactionSourceLabels[source]}</Tag>
+          <Typography.Text type="secondary">策略 v{policy?.policy_version ?? 1}</Typography.Text>
+        </Space>
+      </Card>
+    </Col>
+  )
+}
+
+const redactionModeLabels: Record<ProjectRedactionPolicy['mode'], string> = {
+  off: '已关闭',
+  on: '已开启',
+}
+const redactionSourceLabels: Record<ProjectRedactionPolicy['source'], string> = {
+  installation: '安装默认',
+  project: '项目设置',
+}
+const redactionSourceColors: Record<ProjectRedactionPolicy['source'], string> = {
+  installation: 'default',
+  project: 'blue',
+}
+
+function redactionModeFromChecked(checked: boolean): ProjectRedactionPolicy['mode'] {
+  return checked ? 'on' : 'off'
 }
 
 function PermissionPanel({ data, loading }: { data?: ProjectPermission; loading: boolean }) {

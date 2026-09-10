@@ -22,6 +22,8 @@ from app.schemas.test_contexts import (
     IngestExternalEvidenceRequest,
 )
 
+pytestmark = pytest.mark.redaction_on
+
 
 def test_context_revision_fingerprint_is_stable_and_evidence_is_strict() -> None:
     first = RevisionReference(source_ref="repository://service-a", revision="abc1234")

@@ -7,6 +7,7 @@ from pydantic import BaseModel, JsonValue
 
 from app.core.context import get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.mcp_read import EvidenceRef, MCPReadCall, MCPReadEnvelope
 from app.domain.test_contexts import first_sensitive_value
 from app.models.access import User
@@ -232,7 +233,9 @@ class MCPContinuousService(MCPReadService):
         self, actor: User, project_id: UUID, call: MCPReadCall, result: BaseModel
     ) -> MCPReadEnvelope:
         data = cast(JsonValue, result.model_dump(mode="json"))
-        if len(result.model_dump_json()) > 2_000_000 or first_sensitive_value(data) is not None:
+        if len(result.model_dump_json()) > 2_000_000 or (
+            redaction_enabled() and first_sensitive_value(data) is not None
+        ):
             raise AppError(
                 code="MCP_CONTINUOUS_OUTPUT_UNAVAILABLE",
                 message="当前结果超出安全输出边界, 请在授权的产品界面检查",

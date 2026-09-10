@@ -14,6 +14,8 @@ from app.main import app
 from app.mcp.client import MCPReadGatewayClient
 from app.mcp.server import create_mcp_server
 
+pytestmark = pytest.mark.redaction_on
+
 
 def test_runtime_profile_compatibility_matrix_is_explicit() -> None:
     expected = {
@@ -138,6 +140,7 @@ async def test_mcp_red_team_surface_has_no_uncontrolled_mutation_tools() -> None
         "flowtest.propose_flow_draft",
         "flowtest.propose_maintenance",
         "flowtest.propose_repair",
+        "flowtest.propose_simple_flow",
         "flowtest.propose_test_design",
         "flowtest.propose_test_plan_update",
         "flowtest.validate_flowspec",

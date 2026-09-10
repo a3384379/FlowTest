@@ -45,6 +45,8 @@ from app.services.workflow_snapshots import (
     _without_suppressed_headers,
 )
 
+pytestmark = pytest.mark.redaction_on
+
 
 def test_canonical_contract_redacts_nested_hints_and_sensitive_enum() -> None:
     raw = _sensitive_contract("openapi://orders", "42")

@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.responses import Response
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import close_database, engine, session_factory
 from app.core.errors import AppError, register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.redaction import (
+    installation_redaction_policy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.core.storage import ensure_storage_bucket, object_storage
 from app.domain.runtime_profiles import RuntimeProfile
 from app.engine.events import ExecutionEventBus
@@ -85,6 +91,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.metrics_registry = metrics
+
+    @application.middleware("http")
+    async def reset_request_redaction_policy(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        token = set_redaction_policy(installation_redaction_policy())
+        try:
+            return await call_next(request)
+        finally:
+            reset_redaction_policy(token)
+
     instrument_fastapi(application, engine)
     application.add_middleware(
         CORSMiddleware,
@@ -92,6 +109,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
     )
     application.add_middleware(RateLimitMiddleware)
     application.add_middleware(MetricsMiddleware, registry=metrics)

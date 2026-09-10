@@ -20,6 +20,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.core.redaction import redaction_enabled
 from app.domain.expressions import SafeExpressionError, validate_safe_expression
 from app.domain.flow_spec import (
     FLOW_SPEC_FINGERPRINT_VERSION,
@@ -408,7 +409,11 @@ def _validate_recipe_payload(recipe: PlanDataRecipe) -> None:
         raise ValueError("constant or safe-record recipes require a value")
     if recipe.kind not in value_kinds and recipe.value is not None:
         raise ValueError("only constant or safe-record recipes may contain a value")
-    if recipe.value is not None and first_sensitive_value({"value": recipe.value}) is not None:
+    if (
+        redaction_enabled()
+        and recipe.value is not None
+        and first_sensitive_value({"value": recipe.value}) is not None
+    ):
         raise ValueError("data recipes cannot persist PII or sensitive literals")
     if (recipe.kind == "secret_reference") != (recipe.secret_ref is not None):
         raise ValueError("secret recipes require only a secret reference")
@@ -2653,6 +2658,8 @@ def _oracle_conflict_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
 
 
 def _secret_literal_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    if not redaction_enabled():
+        return []
     diagnostics: list[PlanDiagnostic] = []
     for operation_index, operation in enumerate(plan.operations):
         for group_name, values in (

@@ -30,10 +30,20 @@ class AIJob(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('pending', 'running', 'completed', 'failed')",
             name="ai_job_status",
         ),
+        CheckConstraint(
+            "redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    redaction_mode: Mapped[str] = mapped_column(
+        String(8), default="off", server_default="off", nullable=False
+    )
+    redaction_policy_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
     )
     job_type: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(

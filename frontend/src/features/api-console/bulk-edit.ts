@@ -1,6 +1,7 @@
 export type KeyValueField = { name: string; value: string }
 export type ParameterField = KeyValueField & { enabled: boolean }
 export type BulkParseResult<T> = { values: T[]; errors: string[] }
+export type BulkRedactionMode = 'off' | 'on'
 
 export const REDACTED_BULK_VALUE = '******'
 
@@ -42,10 +43,13 @@ export function parseBulkParameters(text: string): BulkParseResult<ParameterFiel
   return { values, errors }
 }
 
-export function serializeBulkHeaders(headers: KeyValueField[]): string {
+export function serializeBulkHeaders(
+  headers: KeyValueField[],
+  redactionMode: BulkRedactionMode = 'off',
+): string {
   return headers
     .map((header) => {
-      const value = shouldMaskHeader(header) ? REDACTED_BULK_VALUE : header.value
+      const value = shouldMaskHeader(header, redactionMode) ? REDACTED_BULK_VALUE : header.value
       return `${header.name}: ${value}`
     })
     .join('\n')
@@ -80,6 +84,7 @@ export function parseBulkKeyValues(text: string): BulkParseResult<KeyValueField>
 export function parseBulkHeaders(
   text: string,
   currentHeaders: KeyValueField[],
+  redactionMode: BulkRedactionMode = 'off',
 ): BulkParseResult<KeyValueField> {
   const values: KeyValueField[] = []
   const errors: string[] = []
@@ -101,7 +106,7 @@ export function parseBulkHeaders(
       continue
     }
     seen.set(normalizedName, line.number)
-    const restored = restoreHeaderValue(parsed, existing, line.number)
+    const restored = restoreHeaderValue(parsed, existing, line.number, redactionMode)
     if (typeof restored === 'string') {
       errors.push(restored)
       continue
@@ -130,7 +135,9 @@ function restoreHeaderValue(
   header: KeyValueField,
   existing: Map<string, string>,
   lineNumber: number,
+  redactionMode: BulkRedactionMode,
 ): KeyValueField | string {
+  if (redactionMode === 'off') return header
   if (!isSensitiveName(header.name)) return header
   if (header.value === REDACTED_BULK_VALUE) {
     const currentValue = existing.get(normalizeName(header.name))
@@ -144,8 +151,12 @@ function restoreHeaderValue(
   return header
 }
 
-function shouldMaskHeader(header: KeyValueField): boolean {
-  return isSensitiveName(header.name) && !secretReferencePattern.test(header.value)
+function shouldMaskHeader(header: KeyValueField, redactionMode: BulkRedactionMode): boolean {
+  return (
+    redactionMode === 'on' &&
+    isSensitiveName(header.name) &&
+    !secretReferencePattern.test(header.value)
+  )
 }
 
 function isSensitiveName(name: string): boolean {

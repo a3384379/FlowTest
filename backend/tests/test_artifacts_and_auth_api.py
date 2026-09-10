@@ -232,7 +232,7 @@ async def test_binary_response_is_externalized_and_file_assertions_run(
         ),
     ],
 )
-async def test_authentication_modes_are_sent_and_redacted(
+async def test_authentication_modes_are_sent_and_preserved_when_redaction_is_off(
     file_client: AsyncClient,
     path: str,
     auth: dict[str, Any],
@@ -264,8 +264,12 @@ async def test_authentication_modes_are_sent_and_redacted(
     if expected_query:
         assert parse_qs(urlsplit(str(seen[0].url)).query)[expected_query[0]] == [expected_query[1]]
     persisted = execution.json()["execution"]
-    assert "secret" not in str(persisted["request_headers"])
-    assert "secret" not in persisted["request_url"]
+    # The installation default is OFF: automatic masking must not rewrite
+    # values that the caller was already authorized to send and inspect.
+    if expected_header:
+        assert expected_header[1] in persisted["request_headers"].values()
+    if expected_query:
+        assert expected_query[1] in persisted["request_url"]
 
 
 async def _login_headers(client: AsyncClient) -> dict[str, str]:

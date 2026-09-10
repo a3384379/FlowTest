@@ -2,8 +2,10 @@ import json
 import re
 import shlex
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from urllib.parse import parse_qsl, urlsplit
+
+from pydantic import JsonValue
 
 from app.domain.api_assets import APIVersionSpec, AuthKind, BodyKind, HttpMethod, QueryParameterSpec
 from app.importers.contracts import ImportedOperation, imported_value
@@ -87,7 +89,7 @@ def _consume_curl_token(tokens: list[str], index: int, state: _CurlState) -> int
 def parse_bruno(
     content: bytes, document: Mapping[str, object] | None
 ) -> tuple[ImportedOperation, ...]:
-    if document is not None and document.get("bruno"):
+    if document is not None and "items" in document:
         items = _sequence(document.get("items"), "Bruno 集合缺少 items")
         return tuple(_bruno_json_operation(item, index) for index, item in enumerate(items, 1))
     try:
@@ -143,6 +145,8 @@ def _har_operation(raw: object, index: int) -> ImportedOperation:
 def _bruno_json_operation(raw: object, index: int) -> ImportedOperation:
     item = _mapping(raw, f"Bruno item {index} 不是对象")
     request = _mapping(item.get("request"), f"Bruno item {index} 缺少 request")
+    if item.get("type") == "http-request":
+        return _native_bruno_operation(item, request, index)
     headers_raw = _mapping(request.get("headers", {}), "Bruno headers 不是对象")
     headers = {
         str(name): imported_value(str(name), str(value)) for name, value in headers_raw.items()
@@ -241,3 +245,71 @@ def _bruno_block_mapping(text: str, block_name: str) -> dict[str, str]:
         if separator and name.strip():
             result[name.strip()] = imported_value(name.strip(), value.strip())
     return result
+
+
+def _native_bruno_operation(
+    item: Mapping[str, object], request: Mapping[str, object], index: int
+) -> ImportedOperation:
+    headers = {}
+    for raw in _sequence(request.get("headers", []), "Bruno headers 不是数组"):
+        header = _mapping(raw, "Bruno header 不是对象")
+        if header.get("enabled", True):
+            name = str(header.get("name", ""))
+            headers[name] = imported_value(name, str(header.get("value", "")))
+    body = _mapping(request.get("body", {"mode": "none"}), "Bruno body 不是对象")
+    mode = body.get("mode", "none")
+    body_text = str(body.get("json", "null")) if mode == "json" else None
+    operation = _url_operation(
+        str(item.get("name") or f"Bruno request {index}"),
+        str(request.get("method", "GET")),
+        str(request.get("url", "")),
+        headers,
+        body_text,
+        _native_bruno_auth(request.get("auth")),
+        description=str(item.get("description", "")),
+    )
+    if mode == "text":
+        return replace(
+            operation,
+            request=replace(
+                operation.request, body_kind=BodyKind.RAW, body=str(body.get("text", ""))
+            ),
+        )
+    if mode in {"formUrlEncoded", "multipartForm"}:
+        values: dict[str, JsonValue] = {}
+        for raw in _sequence(body.get(str(mode), []), "Bruno form 不是数组"):
+            field = _mapping(raw, "Bruno form 字段不是对象")
+            if field.get("enabled", True):
+                name = str(field.get("name", ""))
+                values[name] = imported_value(name, str(field.get("value", "")))
+        if mode == "multipartForm":
+            return replace(
+                operation,
+                request=replace(
+                    operation.request,
+                    body_kind=BodyKind.MULTIPART,
+                    body={"fields": values, "files": []},
+                ),
+            )
+        return replace(
+            operation, request=replace(operation.request, body_kind=BodyKind.FORM, body=values)
+        )
+    return operation
+
+
+def _native_bruno_auth(raw: object) -> tuple[AuthKind, dict[str, str]]:
+    auth = _mapping(raw or {"mode": "none"}, "Bruno auth 不是对象")
+    mode = str(auth.get("mode", "none"))
+    if mode in {"none", "inherit"}:
+        return AuthKind.NONE, {}
+    if mode not in {"bearer", "basic", "apikey"}:
+        raise HttpFormatError("暂不支持该 Bruno 认证类型")
+    values = _mapping(auth.get(mode, {}), "Bruno auth 配置不是对象")
+    config = {str(name): imported_value(str(name), str(value)) for name, value in values.items()}
+    if mode == "apikey":
+        return AuthKind.API_KEY, {
+            "name": config.get("key", "X-API-Key"),
+            "value": config.get("value", ""),
+            "in": "query" if config.get("placement") == "queryparams" else "header",
+        }
+    return AuthKind(mode), config

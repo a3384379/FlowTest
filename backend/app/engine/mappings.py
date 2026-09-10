@@ -67,6 +67,16 @@ def resolve_field_mappings(
 def _transform(value: JsonValue, kind: MappingTransformKind, template: str) -> JsonValue:
     if kind is MappingTransformKind.IDENTITY:
         return value
+    if kind is MappingTransformKind.JSON_PARSE:
+        if not isinstance(value, str):
+            return value
+        try:
+            return cast(JsonValue, json.loads(value))
+        except json.JSONDecodeError as error:
+            raise MappingResolutionError(
+                code="INVALID_JSON_MAPPING_VALUE",
+                message="映射值不是有效的 JSON",
+            ) from error
     if template == "{{value}}":
         return value
     rendered = template.replace("{{value}}", _stringify(value))

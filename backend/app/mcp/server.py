@@ -59,6 +59,7 @@ from app.schemas.mcp_planning import (
     MCPPrepareChangeRegressionRequest,
     MCPTestPlanUpdateRequest,
 )
+from app.schemas.mcp_simple_flows import SimpleFlowRequest
 from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
@@ -70,6 +71,8 @@ MCP_INSTRUCTIONS = (
     "确定性 Integration Plan 与"
     "只进入待审核状态的 Flow Draft、Repair、关联现有 Change Regression 的 Maintenance，"
     "以及固定 Context 的 Change Regression 准备和 Test Plan 更新建议。"
+    "flowtest.propose_simple_flow 是默认的 quick 入口：只需已有项目、环境、API ID/版本、"
+    "少量步骤和必要输入即可创建待审核草稿，不要求 Test Context、Evidence 或外部数据库 MCP；"
     "Contract Import 只能从批准的 URL、有界文档或强类型 Operation 进入 Preview；"
     "Commit 使用冻结预览摘要，绝不重新抓取 URL。"
     "Context Diff、Affected Flow、资源发现、项目就绪和失败诊断只读；"
@@ -77,8 +80,8 @@ MCP_INSTRUCTIONS = (
     "Preview 可由有权主体请求 Graceful Cancel，但 FlowTest 不会主动连接任意外部 MCP Server。"
     "它不会自动发布、正式环境执行、删除、修改"
     "权限、审核、Apply 或创建 Credential；Flow Proposal 默认 Dry Run，必须由人工"
-    "检查并显式接受后才能应用。输出中的请求值、认证信息、"
-    "Secret、PII 和响应体会被省略或脱敏。"
+    "检查并显式接受后才能应用。输出是否处理敏感内容遵循当前安装级/项目级策略；"
+    "OFF 时不会扫描、遮盖、替换或因敏感分类阻断，也不会扩大数据采集范围。"
 )
 
 
@@ -709,6 +712,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_plan_integration_tool(server, client)
     _register_preview_contract_import_tool(server, client)
     _register_preview_flow_proposal_tool(server, client)
+    _register_propose_simple_flow_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
     _register_propose_maintenance_tool(server, client)
     _register_propose_repair_tool(server, client)
@@ -894,6 +898,30 @@ def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayC
         return await _tool_payload(
             client.propose_flow_draft(
                 payload,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_propose_simple_flow_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_simple_flow",
+        description=(
+            "Create one deterministic quick FlowSpec draft from existing API IDs and a bounded "
+            "set of steps, bindings, assertions, and inputs. No Test Context, Evidence, "
+            "external database or execution is required; the result always stops at human review."
+        ),
+        structured_output=True,
+    )
+    async def propose_simple_flow(
+        request: SimpleFlowRequest,
+        idempotency_key: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_simple_flow(
+                request,
                 idempotency_key=idempotency_key,
                 token=_request_token(ctx, client),
             )

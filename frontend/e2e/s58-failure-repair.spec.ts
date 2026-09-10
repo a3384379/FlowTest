@@ -46,7 +46,7 @@ test('S58 失败诊断创建受限 Repair Proposal 并完成 Re-preview', async 
   expect(execution.execution.error_code).toBe('MAPPING_SOURCE_MISSING')
 
   await page.goto(`/projects/${project.id}/workflows`)
-  await expect(page.getByRole('cell', { name: `S58 Repair ${suffix}` })).toBeVisible()
+  await expect(page.getByRole('cell', { name: `S58 Repair ${suffix}`, exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '失败诊断' })).toBeVisible()
   await page.getByRole('button', { name: '失败诊断' }).click()
 

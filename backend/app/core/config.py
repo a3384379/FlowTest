@@ -2,6 +2,7 @@ import re
 from base64 import urlsafe_b64decode
 from binascii import Error as BinasciiError
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     runtime_profile: RuntimeProfile = RuntimeProfile.FULL
     debug: bool = False
     log_level: str = "INFO"
+    redaction_mode: Literal["off", "on"] = "off"
+    redaction_policy_version: int = Field(default=1, ge=1)
+    generation_default_mode: Literal["quick", "deep"] = "quick"
     api_v1_prefix: str = "/api/v1"
     data_dir: str = ".flowtest-data"
     frontend_dist_dir: str = ""

@@ -35,7 +35,10 @@ class APIAssetRepository:
             (
                 await self._session.scalars(
                     select(Environment)
-                    .where(Environment.project_id == project_id)
+                    .where(
+                        Environment.project_id == project_id,
+                        Environment.archived_at.is_(None),
+                    )
                     .order_by(Environment.created_at)
                 )
             ).all()

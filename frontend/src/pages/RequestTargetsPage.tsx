@@ -39,6 +39,7 @@ import {
   type UpdateRequestServiceInput,
 } from '../features/service-targets/service-target-service'
 import { listSecrets } from '../features/projects/asset-service'
+import { useEnvironmentSelection } from '../features/projects/environment-selection'
 import { useProjectContext } from '../features/projects/use-project-context'
 import {
   listApis,
@@ -67,7 +68,6 @@ type ImpactEditTarget =
 
 export default function RequestTargetsPage() {
   const { projectId } = useProjectContext()
-  const [environmentId, setEnvironmentId] = useState<string>()
   const [serviceForm] = Form.useForm<ServiceForm>()
   const [endpointForm] = Form.useForm<EndpointForm>()
   const [serviceEditForm] = Form.useForm<ServiceEditForm>()
@@ -83,23 +83,22 @@ export default function RequestTargetsPage() {
     queryFn: () => listEnvironments(required(projectId)),
     enabled: Boolean(projectId),
   })
+  const {
+    environmentId,
+    selectEnvironment: setEnvironmentId,
+    selectionInvalid: environmentSelectionInvalid,
+    environmentPlaceholder,
+    environmentStatus,
+  } = useEnvironmentSelection(projectId, environments.data)
   const services = useQuery({
     queryKey: ['request-target-services', projectId],
     queryFn: () => listRequestServices(required(projectId)),
     enabled: Boolean(projectId),
   })
   const endpoints = useQuery({
-    queryKey: [
-      'request-target-endpoints',
-      projectId,
-      activeEnvironmentId(environments.data, environmentId),
-    ],
-    queryFn: () =>
-      listServiceEndpoints(
-        required(projectId),
-        required(activeEnvironmentId(environments.data, environmentId)),
-      ),
-    enabled: Boolean(projectId && activeEnvironmentId(environments.data, environmentId)),
+    queryKey: ['request-target-endpoints', projectId, environmentId],
+    queryFn: () => listServiceEndpoints(required(projectId), required(environmentId)),
+    enabled: Boolean(projectId && environmentId),
   })
   const apis = useQuery({
     queryKey: ['request-target-apis', projectId],
@@ -115,7 +114,6 @@ export default function RequestTargetsPage() {
   const serviceItems = listItems(services.data)
   const endpointItems = listItems(endpoints.data)
   const apiItems = pageItems(apis.data)
-  const activeId = activeEnvironmentId(environmentItems, environmentId)
 
   const createService = useMutation({
     mutationFn: (input: ServiceForm) => createRequestService(required(projectId), input),
@@ -127,18 +125,10 @@ export default function RequestTargetsPage() {
   })
   const createEndpoint = useMutation({
     mutationFn: (input: EndpointForm) =>
-      createServiceEndpoint(
-        required(projectId),
-        required(activeEnvironmentId(environments.data, environmentId)),
-        input,
-      ),
+      createServiceEndpoint(required(projectId), required(environmentId), input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: [
-          'request-target-endpoints',
-          projectId,
-          activeEnvironmentId(environments.data, environmentId),
-        ],
+        queryKey: ['request-target-endpoints', projectId, environmentId],
       })
       endpointForm.resetFields()
       messageApi.success('Endpoint Variant 已创建')
@@ -148,10 +138,7 @@ export default function RequestTargetsPage() {
     mutationFn: (serviceId: string | null) =>
       setEnvironmentDefaultService(
         required(projectId),
-        selectedEnvironment(
-          required(activeEnvironmentId(environments.data, environmentId)),
-          environments.data,
-        ),
+        selectedEnvironment(required(environmentId), environments.data),
         serviceId,
       ),
     onSuccess: async () => {
@@ -211,7 +198,7 @@ export default function RequestTargetsPage() {
 
   const error =
     environments.error ?? services.error ?? endpoints.error ?? apis.error ?? secrets.error
-  const selected = environmentItems.find((item) => item.id === activeId)
+  const selected = environmentItems.find((item) => item.id === environmentId)
   const serviceOptions = useMemo(() => toServiceOptions(serviceItems), [serviceItems])
 
   return (
@@ -256,8 +243,11 @@ export default function RequestTargetsPage() {
           <EnvironmentEndpointCard
             environments={environments.data ?? []}
             selected={selected}
-            environmentId={activeId}
+            environmentId={environmentId}
             onEnvironmentChange={setEnvironmentId}
+            environmentSelectionInvalid={environmentSelectionInvalid}
+            environmentPlaceholder={environmentPlaceholder}
+            environmentStatus={environmentStatus}
             serviceOptions={serviceOptions}
             endpointForm={endpointForm}
             endpoints={endpointItems}
@@ -381,6 +371,9 @@ function EnvironmentEndpointCard({
   selected,
   environmentId,
   onEnvironmentChange,
+  environmentSelectionInvalid,
+  environmentPlaceholder,
+  environmentStatus,
   serviceOptions,
   endpointForm,
   endpoints,
@@ -399,8 +392,11 @@ function EnvironmentEndpointCard({
 }: {
   environments: Environment[]
   selected: Environment | undefined
-  environmentId: string | undefined
+  environmentId: string | null
   onEnvironmentChange: (value: string) => void
+  environmentSelectionInvalid: boolean
+  environmentPlaceholder: string
+  environmentStatus: 'error' | undefined
   serviceOptions: Array<{ value: string; label: string }>
   endpointForm: ReturnType<typeof Form.useForm<EndpointForm>>[0]
   endpoints: ServiceEndpoint[]
@@ -424,8 +420,10 @@ function EnvironmentEndpointCard({
         <Select
           aria-label="目标环境"
           style={{ minWidth: 180 }}
-          value={environmentId}
+          value={environmentId ?? undefined}
           onChange={onEnvironmentChange}
+          placeholder={environmentPlaceholder}
+          status={environmentStatus}
           options={environments.map((item) => ({ value: item.id, label: item.name }))}
         />
       }
@@ -445,8 +443,22 @@ function EnvironmentEndpointCard({
               loading={defaultSubmitting}
             />
           </Space>
-        ) : null}
-        <Form<EndpointForm> form={endpointForm} layout="inline" onFinish={onEndpointFinish}>
+        ) : environmentSelectionInvalid ? (
+          <Alert
+            type="warning"
+            showIcon
+            title={environmentPlaceholder}
+            description="请选择当前项目中仍可用的环境后再管理 Endpoint。"
+          />
+        ) : (
+          <Alert type="info" showIcon title="请先选择环境" />
+        )}
+        <Form<EndpointForm>
+          form={endpointForm}
+          layout="inline"
+          onFinish={onEndpointFinish}
+          disabled={!environmentId}
+        >
           <Form.Item name="service_id" rules={[{ required: true, message: '请选择 Service' }]}>
             <Select
               aria-label="Endpoint Service"
@@ -908,13 +920,6 @@ function selectedEnvironment(
   const environment = environments?.find((item) => item.id === environmentId)
   if (!environment) throw new Error('环境不存在')
   return environment
-}
-
-function activeEnvironmentId(
-  environments: Environment[] | undefined,
-  selectedId: string | undefined,
-): string | undefined {
-  return selectedId ?? environments?.[0]?.id
 }
 
 function listItems<T>(items: T[] | undefined): T[] {

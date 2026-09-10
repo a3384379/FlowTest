@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.canonical_contracts import contains_sensitive_contract_value
 from app.domain.failure_repair import (
     FailureDiagnosis,
@@ -86,9 +87,10 @@ class FailureRepairService:
         payload: RepairProposalCreate,
     ) -> PreparedRepairProposal:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        if contains_sensitive_contract_value(
-            payload.rationale
-        ) or contains_sensitive_flow_spec_value(payload.proposed_spec):
+        if redaction_enabled() and (
+            contains_sensitive_contract_value(payload.rationale)
+            or contains_sensitive_flow_spec_value(payload.proposed_spec)
+        ):
             raise AppError(
                 code="REPAIR_SENSITIVE_INPUT_FORBIDDEN",
                 message="修复提案不能包含凭据、个人标识或其他敏感值, 请使用 secret:// 引用",
@@ -205,7 +207,11 @@ class FailureRepairService:
 
     async def _target_workflow(self, project_id: UUID, workflow_id: UUID | None) -> Workflow:
         workflow = await self._workflows.get(workflow_id) if workflow_id is not None else None
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             raise AppError(
                 code="REPAIR_TARGET_REQUIRED",
                 message="修复 Proposal 只能更新当前项目中的既有工作流",

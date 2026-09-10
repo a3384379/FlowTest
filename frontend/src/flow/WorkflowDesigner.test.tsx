@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import WorkflowDesigner from './WorkflowDesigner'
+import WorkflowDesigner, { applyCanvasNodeChanges } from './WorkflowDesigner'
 import {
   addEventProtocolNode,
   addProtocolNode,
@@ -13,10 +13,109 @@ import {
   pasteNode,
 } from './workflow-graph'
 import { apiDefinition, workflow, workflowDefinition } from '../test/fixtures'
-import type { Artifact, Credential, WorkflowDefinition } from '../lib/api'
+import type { ApiDefinition, Artifact, Credential, WorkflowDefinition } from '../lib/api'
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
+import { getApiDetail } from '../features/api-console/api-service'
+import { listApis } from '../features/workflows/workflow-service'
+
+vi.mock('../features/api-console/api-service', () => ({
+  getApiDetail: vi.fn(),
+}))
+vi.mock('../features/workflows/workflow-service', () => ({
+  listApis: vi.fn(),
+}))
 
 describe('WorkflowDesigner', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('loads a selected API by ID when it is outside the current search page', async () => {
+    const selected: ApiDefinition = { ...apiDefinition, name: '第 200 个接口' }
+    vi.mocked(listApis).mockResolvedValue({ items: [], total: 250, page: 1, page_size: 20 })
+    vi.mocked(getApiDetail).mockResolvedValue({ definition: selected, version: {} as never })
+    const browser = userEvent.setup()
+
+    render(
+      <WorkflowDesigner
+        projectId={apiDefinition.project_id}
+        definition={workflowDefinition}
+        apis={[apiDefinition]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={vi.fn()}
+      />,
+    )
+
+    await browser.click(screen.getByRole('button', { name: '搜索接口' }))
+    await waitFor(() =>
+      expect(getApiDetail).toHaveBeenCalledWith(apiDefinition.project_id, apiDefinition.id),
+    )
+    await waitFor(() => expect(screen.getByText(/当前已选：第 200 个接口/)).toBeInTheDocument())
+  })
+
+  it('ignores stale API search responses and keeps the selected row usable', async () => {
+    let resolveFirst:
+      | ((value: {
+          items: ApiDefinition[]
+          total: number
+          page: number
+          page_size: number
+        }) => void)
+      | undefined
+    const firstResponse = new Promise<{
+      items: ApiDefinition[]
+      total: number
+      page: number
+      page_size: number
+    }>((resolve) => {
+      resolveFirst = resolve
+    })
+    const searched: ApiDefinition = {
+      ...apiDefinition,
+      id: '00000000-0000-4000-8000-000000000099',
+      name: '命中接口',
+    }
+    vi.mocked(listApis)
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce({ items: [searched], total: 1, page: 1, page_size: 20 })
+    const onChange = vi.fn()
+    const browser = userEvent.setup()
+    render(
+      <WorkflowDesigner
+        projectId={apiDefinition.project_id}
+        definition={workflowDefinition}
+        apis={[]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+
+    await browser.click(screen.getByRole('button', { name: '搜索接口' }))
+    await waitFor(() => expect(listApis).toHaveBeenCalledTimes(1))
+    await browser.type(screen.getByLabelText('搜索接口名称路径说明'), '命中')
+    await waitFor(() => expect(listApis).toHaveBeenCalledTimes(2), { timeout: 1000 })
+    expect(screen.getByText('命中接口')).toBeInTheDocument()
+    resolveFirst?.({ items: [{ ...searched, name: '过期结果' }], total: 1, page: 1, page_size: 20 })
+    await waitFor(() => expect(screen.queryByText('过期结果')).not.toBeInTheDocument())
+    await browser.click(screen.getByRole('button', { name: '选择' }))
+    await browser.click(screen.getByRole('button', { name: /添加接口节点/ }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            config: expect.objectContaining({ api_definition_id: searched.id }),
+          }),
+        ]),
+      }),
+    )
+  })
+
   it('locks the published execution snapshot while a run is active', () => {
     render(
       <WorkflowDesigner
@@ -297,6 +396,35 @@ describe('WorkflowDesigner', () => {
     expect(autoLayoutWorkflow(workflowDefinition).nodes.map((node) => node.position.x)).toEqual([
       0, 240, 480,
     ])
+  })
+
+  it('ignores stale or no-op canvas position changes', () => {
+    const canvasNodes = workflowDefinition.nodes.map((node) => ({
+      id: node.id,
+      type: 'workflowNode' as const,
+      position: node.position,
+      data: {
+        label: node.name,
+        nodeType: node.type,
+        status: '',
+        runtimeLabel: '',
+      },
+    }))
+
+    const unchanged = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'api', type: 'position', position: workflowDefinition.nodes[1].position },
+    ])
+    expect(unchanged).toBe(workflowDefinition)
+
+    const moved = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'api', type: 'position', position: { x: 320, y: 40 } },
+    ])
+    expect(moved.nodes.find((node) => node.id === 'api')?.position).toEqual({ x: 320, y: 40 })
+
+    const stale = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'removed', type: 'position', position: { x: 320, y: 40 } },
+    ])
+    expect(stale).toBe(workflowDefinition)
   })
 
   it('adds and configures published SubFlow and ForEach nodes', async () => {

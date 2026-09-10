@@ -278,6 +278,19 @@ body {
   gap: 16px;
 }
 
+.workflow-tabs {
+  margin: -8px 0 16px;
+}
+
+.workflow-tabs .ant-tabs {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.workflow-tabs-alert {
+  margin-top: 8px;
+}
+
 .task-plan-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

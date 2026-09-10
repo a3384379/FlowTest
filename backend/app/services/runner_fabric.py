@@ -362,7 +362,9 @@ class RunnerFabricService:
             organization_id=pool.organization_id,
             dimension=QuotaDimension.RUNNER_CONCURRENCY,
         )
-        plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
+        workflow_service = WorkflowService(self._session)
+        execution = await workflow_service.load_execution_for_run(task.execution_id)
+        plan = await workflow_service.load_execution_plan(task.execution_id)
         policy = await ProjectService(self._session).load_runtime_security_policy(task.project_id)
         lease = self._acquire(task=task, runner=runner, pool=pool, now=now)
         await self._repository.set_execution_family_status(task.execution_id, "running")
@@ -400,6 +402,8 @@ class RunnerFabricService:
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
                 resume_checkpoints=resume_checkpoints,
                 reset_retry_budget=reset_retry_budget,
+                redaction_mode=execution.redaction_mode,
+                redaction_policy_version=execution.redaction_policy_version,
             ),
         )
 

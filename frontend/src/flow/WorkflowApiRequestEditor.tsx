@@ -337,7 +337,7 @@ function RequestEditor({
       )}
       <Modal
         width={760}
-        title="最终请求预览（Secret 已脱敏）"
+        title="最终请求预览"
         open={preview !== null}
         footer={null}
         onCancel={() => setPreview(null)}

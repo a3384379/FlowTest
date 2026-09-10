@@ -10,10 +10,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
     go mod init flowtest.local/k6-build; \
-    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.1; \
+    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.2; \
     GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2; \
     go version -m /out/k6 | grep -F 'go1.26.6'; \
-    go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     /out/k6 version | grep -F 'k6 v2.2.0'
 
 FROM go-toolchain AS docker-cli-builder
@@ -28,9 +28,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
     cp vendor.mod go.mod; \
     cp vendor.sum go.sum; \
-    go get google.golang.org/grpc@v1.83.1; \
+    go get google.golang.org/grpc@v1.83.2; \
     go mod vendor; \
-    grep -Fx '# google.golang.org/grpc v1.83.1' vendor/modules.txt; \
+    grep -Fx '# google.golang.org/grpc v1.83.2' vendor/modules.txt; \
     mv go.mod vendor.mod; \
     mv go.sum vendor.sum; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get google.golang.org/grpc@v1.83.1 golang.org/x/crypto@v0.56.0; \
+    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.56.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -64,7 +64,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         PREFIX=/out \
         ./hack/make.sh binary-daemon; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.6'; \
-    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.56.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
@@ -79,15 +79,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
     git tag v2.3.3; \
-    go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.83.1; \
+    go get golang.org/x/text@v0.41.0 google.golang.org/grpc@v1.83.2; \
     go mod vendor; \
     make \
         VERSION=v2.3.3 \
         REVISION=aad11006b869517fcd3009450b6f82da282e1a9b \
         bin/containerd bin/ctr bin/containerd-shim-runc-v2; \
-    go version -m bin/containerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
-    go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'; \
-    go version -m bin/containerd-shim-runc-v2 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.1'
+    go version -m bin/containerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
+    go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
+    go version -m bin/containerd-shim-runc-v2 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'
 
 FROM docker:29.7.2-dind@sha256:12e683a161823b2a839aeea999b9d960e6e1f9a97b1679ad6b441982e2d9cf07 AS environment-daemon-base
 # Alpine 3.24's x86_64 repository has not backported util-linux 2.42.3 yet.

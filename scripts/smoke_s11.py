@@ -8,7 +8,14 @@ import secrets
 from typing import Any
 from urllib.request import urlopen
 
-from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password, _create_api
+from smoke_s4 import (
+    APIClient,
+    SmokeConfig,
+    _allow_compose_target,
+    _change_password,
+    _create_api,
+    _enable_redaction,
+)
 from smoke_s5 import _wait_for_completion
 from smoke_s6 import _assert_parallel, _parallel_definition
 
@@ -40,6 +47,7 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
         token=token,
     )
     project_id = str(project["id"])
+    _enable_redaction(client, token, project_id)
     _allow_compose_target(client, token, project_id, config.target_url)
     retention = client.json(
         "PUT",

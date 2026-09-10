@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.canonical_contracts import contains_sensitive_contract_value
 from app.domain.failure_repair import RepairScopeError, validate_flow_patch_scope
 from app.domain.flow_spec_security import contains_sensitive_flow_spec_value
@@ -130,6 +131,7 @@ class MaintenanceProposalService:
             .where(
                 Workflow.id == workflow_id,
                 Workflow.project_id == project_id,
+                Workflow.archived_at.is_(None),
             )
             .execution_options(populate_existing=True)
             .with_for_update()
@@ -156,8 +158,9 @@ class MaintenanceProposalService:
 
 
 def _validate_input(payload: MaintenanceProposalCreate, project_id: UUID) -> None:
-    if contains_sensitive_contract_value(payload.rationale) or contains_sensitive_flow_spec_value(
-        payload.proposed_spec
+    if redaction_enabled() and (
+        contains_sensitive_contract_value(payload.rationale)
+        or contains_sensitive_flow_spec_value(payload.proposed_spec)
     ):
         raise AppError(
             code="MAINTENANCE_SENSITIVE_INPUT_FORBIDDEN",

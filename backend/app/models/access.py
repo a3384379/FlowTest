@@ -88,6 +88,10 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "queued_run_limit BETWEEN 1 AND 5000",
             name="project_queued_run_limit",
         ),
+        CheckConstraint(
+            "redaction_mode IS NULL OR redaction_mode IN ('off', 'on')",
+            name="redaction_mode",
+        ),
     )
 
     organization_id: Mapped[UUID | None] = mapped_column(
@@ -117,6 +121,12 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     queued_run_limit: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
     ai_sample_sharing_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
+    )
+    # Null means the project inherits the installation policy.  Keeping the
+    # nullable value preserves an explicit ``off`` choice during upgrades.
+    redaction_mode: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    redaction_policy_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
     )
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 

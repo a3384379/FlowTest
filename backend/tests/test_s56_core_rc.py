@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import yaml
 
 from app.domain.sandbox_preview import MCP_SANDBOX_PREVIEW_SERVER_VERSION
@@ -14,6 +15,9 @@ from app.domain.v6_evaluation import (
 )
 from app.domain.v6_skill import IntegrationFlowSkillManifest
 from app.services.service_accounts import SERVICE_ACCOUNT_SCOPES
+
+pytestmark = pytest.mark.redaction_on
+
 
 WORKSPACE_ROOT = Path(__file__).parents[2]
 SKILL_ROOT = WORKSPACE_ROOT / "skills" / "flowtest-generate-integration-flow"
@@ -83,9 +87,9 @@ def test_skill_reinspects_accepted_unapplied_proposal_before_preview() -> None:
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     workflow = (SKILL_ROOT / "references/workflow.md").read_text(encoding="utf-8")
 
-    skill_preview = skill[skill.index("9. Only") :]
-    inspect_index = skill_preview.index("inspect_flow_proposal")
-    preview_index = skill_preview.index("preview_flow_proposal")
+    skill_preview = skill[skill.index("Follow the quick stages") :]
+    inspect_index = skill_preview.index("inspect_flow_proposal", skill_preview.index("5."))
+    preview_index = skill_preview.index("preview_flow_proposal", inspect_index)
     assert inspect_index < preview_index
     assert "accepted" in skill_preview[inspect_index:preview_index]
     assert "applied=false" in skill_preview[inspect_index:preview_index]

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import get_tenant_context
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.domain.evidence_adapters import (
     EntityMappingBudgetExceeded,
     EntityMappingResult,
@@ -238,6 +239,10 @@ class TestContextService:
         context = await self._load_context(
             actor=actor, context_id=context_id, editing=True, for_update=True
         )
+        # FastAPI validates the envelope before the project policy is loaded.
+        # Re-check the parsed payload after authorization so a project that opts
+        # into redaction cannot accept sensitive evidence on the first request.
+        _require_safe_external_evidence(envelope)
         await self._require_accepting_evidence(actor=actor, context=context)
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
@@ -495,7 +500,11 @@ class TestContextService:
         if environment_id is None:
             return
         environment = await self._session.get(Environment, environment_id)
-        if environment is None or environment.project_id != project_id:
+        if (
+            environment is None
+            or environment.project_id != project_id
+            or environment.archived_at is not None
+        ):
             raise AppError(code="ENVIRONMENT_NOT_FOUND", message="环境不存在", status_code=404)
 
     async def _require_accepting_evidence(self, *, actor: User, context: TestContext) -> None:
@@ -857,10 +866,23 @@ def _require_initial_references_same_project(
 
 
 def _require_safe_initial_context(payload: BeginTestContextRequest) -> None:
+    if not redaction_enabled():
+        return
     if first_sensitive_value(payload.model_dump(mode="json")) is not None:
         raise AppError(
             code="TEST_CONTEXT_SENSITIVE_INPUT",
             message="测试上下文包含敏感信息, 请先脱敏后重试",
+            status_code=422,
+        )
+
+
+def _require_safe_external_evidence(envelope: ExternalEvidenceEnvelope) -> None:
+    if not redaction_enabled():
+        return
+    if first_sensitive_value(envelope.model_dump(mode="json")) is not None:
+        raise AppError(
+            code="TEST_CONTEXT_SENSITIVE_INPUT",
+            message="外部证据包含敏感信息, 请先脱敏后重试",
             status_code=422,
         )
 

@@ -31,6 +31,14 @@ def test_cron_timezone_interval_and_schedule_validation() -> None:
         cron_expression="0 9 * * 1-5",
         timezone_name="Asia/Shanghai",
     ) == datetime(2026, 8, 11, 1, 0, tzinfo=UTC)
+    near_daily_schedule = datetime(2026, 8, 11, 0, 59, 30, tzinfo=UTC)
+    assert next_scheduled_at(
+        near_daily_schedule,
+        enabled=True,
+        interval_seconds=None,
+        cron_expression="0 9 * * 1-5",
+        timezone_name="Asia/Shanghai",
+    ) == datetime(2026, 8, 11, 1, 0, tzinfo=UTC)
     assert (
         next_scheduled_at(
             now,

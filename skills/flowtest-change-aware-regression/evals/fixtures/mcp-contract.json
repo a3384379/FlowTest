@@ -49,6 +49,7 @@
     "flowtest.propose_flow_draft",
     "flowtest.propose_maintenance",
     "flowtest.propose_repair",
+    "flowtest.propose_simple_flow",
     "flowtest.propose_test_design",
     "flowtest.propose_test_plan_update",
     "flowtest.validate_flowspec",

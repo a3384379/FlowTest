@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.context import get_tenant_context, get_trace_id
 from app.core.errors import AppError
+from app.core.redaction import redaction_enabled
 from app.importers.contracts import ImportChange, ImportSourceType, is_sensitive_import_name
 from app.importers.sources import ImportDocumentFetcher
 from app.models.access import User
@@ -522,7 +523,7 @@ def _validate_structural_schema(value: object, *, depth: int = 0) -> None:
         if len(value) > 80:
             raise AppError(code="IMPORT_TOO_LARGE", message="接口 Schema 字段过多", status_code=413)
         for key, item in value.items():
-            if key.lower() in {"example", "examples", "default"}:
+            if redaction_enabled() and key.lower() in {"example", "examples", "default"}:
                 raise AppError(
                     code="IMPORT_SENSITIVE_INPUT",
                     message="强类型接口不能携带请求或响应示例值",

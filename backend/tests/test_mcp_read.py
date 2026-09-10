@@ -30,6 +30,8 @@ from app.models.test_design import TestDesign as DesignModel
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
 from app.services.service_accounts import ServiceAccountService
 
+pytestmark = pytest.mark.redaction_on
+
 
 @pytest.fixture
 async def mcp_context() -> AsyncIterator[dict[str, Any]]:
@@ -737,6 +739,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.propose_flow_draft",
             "flowtest.propose_maintenance",
             "flowtest.propose_repair",
+            "flowtest.propose_simple_flow",
             "flowtest.propose_test_design",
             "flowtest.propose_test_plan_update",
             "flowtest.validate_flowspec",

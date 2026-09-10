@@ -48,6 +48,7 @@ from app.schemas.mcp_planning import (
     MCPTestPlanUpdateRequest,
     MCPTestPlanUpdateResponse,
 )
+from app.schemas.mcp_simple_flows import SimpleFlowProposalResponse, SimpleFlowRequest
 from app.schemas.sandbox_preview import SandboxPreviewExecutionResponse
 from app.schemas.test_contexts import (
     CompilerDiagnosticsResponse,
@@ -583,6 +584,22 @@ class MCPReadGatewayClient:
             additional_headers={"Idempotency-Key": idempotency_key},
         )
         return _validate_response(response, FlowSpecProposalResponse)
+
+    async def propose_simple_flow(
+        self,
+        payload: SimpleFlowRequest | Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> SimpleFlowProposalResponse:
+        body = _model_payload(payload)
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/simple-proposals",
+            payload=body,
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, SimpleFlowProposalResponse)
 
     async def inspect_flow_proposal(
         self,

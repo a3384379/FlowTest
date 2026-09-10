@@ -270,6 +270,7 @@ describe('APIWorkbench', () => {
         onSave={onSave}
         onPreview={vi.fn()}
         onRename={vi.fn()}
+        redactionMode="on"
       />,
     )
 
@@ -304,6 +305,38 @@ describe('APIWorkbench', () => {
       ],
       headers: { Authorization: 'Bearer legacy-token', 'X-Region': 'cn' },
     })
+  })
+
+  it('shows sensitive API fields as ordinary inputs when redaction is off', async () => {
+    const user = userEvent.setup()
+    const sensitiveDetail: ApiDetail = {
+      ...detail,
+      version: {
+        ...detail.version,
+        headers: { Authorization: 'Bearer synthetic-token' },
+        auth_config: { token: 'Bearer synthetic-token' },
+      },
+    }
+    render(
+      <APIWorkbench
+        detail={sensitiveDetail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={vi.fn()}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Headers' }))
+    expect(
+      within(screen.getByRole('tabpanel')).getByDisplayValue('Bearer synthetic-token'),
+    ).toHaveAttribute('type', 'text')
+    await user.click(screen.getByRole('tab', { name: 'Auth' }))
+    expect(
+      within(screen.getByRole('tabpanel')).getByDisplayValue('Bearer synthetic-token'),
+    ).toHaveAttribute('type', 'text')
   })
 })
 

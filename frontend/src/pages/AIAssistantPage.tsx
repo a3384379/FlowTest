@@ -70,7 +70,7 @@ function AIPageHeader({ canCreate, onCreate }: { canCreate: boolean; onCreate: (
       <div>
         <Typography.Title level={2}>AI 助手</Typography.Title>
         <Typography.Text type="secondary">
-          基于 Schema 和脱敏元数据生成可审核建议。AI 不会读取 Secret、自动发布或自动执行。
+          基于 Schema 和项目元数据生成可审核建议。AI 不会读取 Secret、自动发布或自动执行。
         </Typography.Text>
       </div>
       <Button type="primary" icon={<PlusOutlined />} disabled={!canCreate} onClick={onCreate}>

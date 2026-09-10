@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.core.redaction import get_redaction_policy
 from app.domain.ai import REDACTED, AIInputError, sanitize_ai_input
 from app.domain.governance import QuotaDimension
 from app.engine.contracts import AssertNodeConfig, NodeType, WorkflowDefinition
@@ -96,8 +97,11 @@ class AIChangeSetService:
             sanitized = sanitize_ai_input(schema_document=None, metadata=metadata, sample=None)
         except AIInputError as error:
             raise AppError(code="AI_INPUT_INVALID", message=str(error), status_code=422) from error
+        policy = get_redaction_policy()
         job = AIJob(
             project_id=payload.project_id,
+            redaction_mode=policy.mode.value,
+            redaction_policy_version=policy.policy_version,
             job_type="change_set",
             status="pending",
             sanitized_input=sanitized.payload,
@@ -347,7 +351,11 @@ class AIChangeSetService:
                 "snapshot_sha256": _target_hash(target),
             }
         workflow = await self._repository.get_workflow(target_id)
-        if workflow is None or workflow.project_id != project_id:
+        if (
+            workflow is None
+            or workflow.project_id != project_id
+            or workflow.archived_at is not None
+        ):
             return None
         return {
             "target_type": "workflow",
@@ -690,7 +698,11 @@ def _restore_redacted_value(
 def _ensure_target(
     target: TestCase | Workflow | None, project_id: UUID, expected_hash: str | None
 ) -> None:
-    if target is None or target.project_id != project_id:
+    if (
+        target is None
+        or target.project_id != project_id
+        or (isinstance(target, Workflow) and target.archived_at is not None)
+    ):
         raise AppError(
             code="AI_CHANGE_TARGET_NOT_FOUND", message="AI 变更目标不存在", status_code=404
         )
