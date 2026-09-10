@@ -90,6 +90,15 @@ def main() -> None:
             token=token,
         )
         project_id = str(project["id"])
+        # The repository default is OFF.  This acceptance flow specifically
+        # verifies that sensitive request bodies are redacted when a project
+        # opts into the ON policy.
+        client.call(
+            "PUT",
+            f"/projects/{project_id}/redaction-policy",
+            {"mode": "on"},
+            token=token,
+        )
         target_host = urlsplit(config.target_url).hostname or "mock-target"
         client.call(
             "PUT",
