@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import WorkflowDesigner from './WorkflowDesigner'
+import WorkflowDesigner, { applyCanvasNodeChanges } from './WorkflowDesigner'
 import {
   addEventProtocolNode,
   addProtocolNode,
@@ -396,6 +396,35 @@ describe('WorkflowDesigner', () => {
     expect(autoLayoutWorkflow(workflowDefinition).nodes.map((node) => node.position.x)).toEqual([
       0, 240, 480,
     ])
+  })
+
+  it('ignores stale or no-op canvas position changes', () => {
+    const canvasNodes = workflowDefinition.nodes.map((node) => ({
+      id: node.id,
+      type: 'workflowNode' as const,
+      position: node.position,
+      data: {
+        label: node.name,
+        nodeType: node.type,
+        status: '',
+        runtimeLabel: '',
+      },
+    }))
+
+    const unchanged = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'api', type: 'position', position: workflowDefinition.nodes[1].position },
+    ])
+    expect(unchanged).toBe(workflowDefinition)
+
+    const moved = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'api', type: 'position', position: { x: 320, y: 40 } },
+    ])
+    expect(moved.nodes.find((node) => node.id === 'api')?.position).toEqual({ x: 320, y: 40 })
+
+    const stale = applyCanvasNodeChanges(workflowDefinition, canvasNodes, [
+      { id: 'removed', type: 'position', position: { x: 320, y: 40 } },
+    ])
+    expect(stale).toBe(workflowDefinition)
   })
 
   it('adds and configures published SubFlow and ForEach nodes', async () => {

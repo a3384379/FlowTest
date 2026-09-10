@@ -1121,7 +1121,9 @@ function proposalEdgeColor(status: ProposalGraphStatus | undefined): string | un
   return colors[status]
 }
 
-function applyCanvasNodeChanges(
+// The helper is exported for focused canvas state regression coverage.
+// eslint-disable-next-line react-refresh/only-export-components
+export function applyCanvasNodeChanges(
   definition: WorkflowDefinition,
   nodes: CanvasNode[],
   changes: NodeChange<CanvasNode>[],
@@ -1133,13 +1135,19 @@ function applyCanvasNodeChanges(
   if (!positionChanges.length) return definition
   const changed = applyNodeChanges(positionChanges, nodes)
   const positions = new Map(changed.map((node) => [node.id, node.position]))
-  return {
-    ...definition,
-    nodes: definition.nodes.map((node) => ({
-      ...node,
-      position: positions.get(node.id) ?? node.position,
-    })),
-  }
+  let positionsChanged = false
+  const nextNodes = definition.nodes.map((node) => {
+    const position = positions.get(node.id)
+    if (
+      position === undefined ||
+      (position.x === node.position.x && position.y === node.position.y)
+    ) {
+      return node
+    }
+    positionsChanged = true
+    return { ...node, position }
+  })
+  return positionsChanged ? { ...definition, nodes: nextNodes } : definition
 }
 
 function applyCanvasEdgeChanges(

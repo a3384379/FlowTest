@@ -239,6 +239,10 @@ class TestContextService:
         context = await self._load_context(
             actor=actor, context_id=context_id, editing=True, for_update=True
         )
+        # FastAPI validates the envelope before the project policy is loaded.
+        # Re-check the parsed payload after authorization so a project that opts
+        # into redaction cannot accept sensitive evidence on the first request.
+        _require_safe_external_evidence(envelope)
         await self._require_accepting_evidence(actor=actor, context=context)
         _require_same_project(context.project_id, envelope)
         current = await self._current_revision(context, for_update=True)
@@ -868,6 +872,17 @@ def _require_safe_initial_context(payload: BeginTestContextRequest) -> None:
         raise AppError(
             code="TEST_CONTEXT_SENSITIVE_INPUT",
             message="测试上下文包含敏感信息, 请先脱敏后重试",
+            status_code=422,
+        )
+
+
+def _require_safe_external_evidence(envelope: ExternalEvidenceEnvelope) -> None:
+    if not redaction_enabled():
+        return
+    if first_sensitive_value(envelope.model_dump(mode="json")) is not None:
+        raise AppError(
+            code="TEST_CONTEXT_SENSITIVE_INPUT",
+            message="外部证据包含敏感信息, 请先脱敏后重试",
             status_code=422,
         )
 
