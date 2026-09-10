@@ -1126,7 +1126,10 @@ function applyCanvasNodeChanges(
   nodes: CanvasNode[],
   changes: NodeChange<CanvasNode>[],
 ): WorkflowDefinition {
-  const positionChanges = changes.filter((change) => change.type === 'position')
+  const knownNodeIds = new Set(definition.nodes.map((node) => node.id))
+  const positionChanges = changes.filter(
+    (change) => change.type === 'position' && knownNodeIds.has(change.id),
+  )
   if (!positionChanges.length) return definition
   const changed = applyNodeChanges(positionChanges, nodes)
   const positions = new Map(changed.map((node) => [node.id, node.position]))

@@ -149,7 +149,7 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
         />
       </Form>
       <Modal
-        title="最终请求预览"
+        title={previewTitle(redactionMode)}
         open={preview !== null}
         footer={null}
         onCancel={() => setPreview(null)}
@@ -160,6 +160,10 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
       </Modal>
     </Card>
   )
+}
+
+function previewTitle(redactionMode: BulkRedactionMode): string {
+  return redactionMode === 'on' ? '最终请求预览（Secret 已脱敏）' : '最终请求预览（按原样展示）'
 }
 
 function ParameterFields() {

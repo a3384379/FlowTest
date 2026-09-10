@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { authenticate } from './support/auth'
+import { enableProjectRedaction } from './support/redaction'
 
 type Identified = { id: string }
 type ExecutionDetail = {
@@ -28,6 +29,7 @@ test('S53 Login → Create → Query → DB Read 与跨系统断言真实执行'
   const headers = authorization(token)
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   const project = await createProject(page.request, headers, suffix)
+  await enableProjectRedaction(page.request, project.id, headers)
   await allowComposeTargets(page.request, headers, project.id)
   const environment = await createEnvironment(page.request, headers, project.id, suffix)
   await storeAccessToken(page.request, headers, project.id, environment.id, token)

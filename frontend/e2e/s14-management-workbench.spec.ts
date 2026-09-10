@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { administratorEmail, authenticate } from './support/auth'
+import { enableProjectRedaction } from './support/redaction'
 
 test('S14 团队、测试资产与 API 工作台主路径', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
@@ -46,7 +47,9 @@ async function createIsolatedProject(request: APIRequestContext, suffix: string)
     },
   })
   expect(created.ok(), await created.text()).toBeTruthy()
-  return ((await created.json()) as { id: string }).id
+  const project = (await created.json()) as { id: string }
+  await enableProjectRedaction(request, project.id, { Authorization: `Bearer ${token}` })
+  return project.id
 }
 
 async function createEnvironment(page: import('@playwright/test').Page, name: string) {

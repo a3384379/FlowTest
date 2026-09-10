@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { authenticate } from './support/auth'
+import { enableProjectRedaction } from './support/redaction'
 
 type IssuedServiceAccount = { token: string }
 type Organization = { id: string }
@@ -50,6 +51,7 @@ test('S52 Java/DB Evidence 形成可追溯候选并显式暴露歧义', async ({
   })
   expect(projectResponse.status()).toBe(201)
   const project = (await projectResponse.json()) as Project
+  await enableProjectRedaction(page.request, project.id, userHeaders)
   const account = await createServiceAccount(
     page.request,
     organizationId,
