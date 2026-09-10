@@ -12,7 +12,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
 from urllib.request import urlopen
 
-from smoke_s4 import APIClient, SmokeConfig, _allow_compose_target, _change_password
+from smoke_s4 import (
+    APIClient,
+    SmokeConfig,
+    _allow_compose_target,
+    _change_password,
+    _enable_redaction,
+)
 from smoke_s5 import _api_request, _start_and_wait, _wait_for_completion
 
 _CONTRACT_SECURITY_SENTINELS: Final = (
@@ -96,6 +102,7 @@ def _create_portable_project(
         token=token,
     )
     project_id = str(project["id"])
+    _enable_redaction(client, token, project_id)
     _allow_compose_target(client, token, project_id, config.target_url)
     environment = client.json(
         "POST",

@@ -149,6 +149,7 @@ def _run_acceptance(client: APIClient, config: SmokeConfig, token: str) -> dict[
         token=token,
     )
     project_id = str(project["id"])
+    _enable_redaction(client, token, project_id)
     _allow_compose_target(client, token, project_id, config.target_url)
     environment = client.json(
         "POST",
@@ -377,6 +378,17 @@ def _change_password(client: APIClient, token: str, current: str, new: str) -> N
         "POST",
         "/auth/change-password",
         {"current_password": current, "new_password": new},
+        token=token,
+    )
+
+
+def _enable_redaction(client: APIClient, token: str, project_id: str) -> None:
+    """Opt security-focused smoke scenarios into the project ON policy."""
+
+    client.json(
+        "PUT",
+        f"/projects/{project_id}/redaction-policy",
+        {"mode": "on"},
         token=token,
     )
 
