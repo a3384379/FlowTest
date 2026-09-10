@@ -1,7 +1,7 @@
 import { useEnvironmentSelection } from '../projects/environment-selection'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   apiErrorMessage,
@@ -139,7 +139,10 @@ export function useWorkflows(initialWorkflowId?: string) {
     workflows.data?.items,
   )
   const selectedWorkflowId = selectedWorkflow?.id
-  const draftKey = workflowDraftIdentity(userId, projectId, workflowId)
+  const draftKey = useMemo(
+    () => workflowDraftIdentity(userId, projectId, workflowId),
+    [projectId, userId, workflowId],
+  )
   useEffect(() => {
     const previousUserId = previousUserIdRef.current
     if (previousUserId && previousUserId !== userId) {
