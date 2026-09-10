@@ -1,7 +1,7 @@
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, KeyOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   createEnvironment,
@@ -17,6 +17,7 @@ import {
   writeSecret,
 } from './asset-service'
 import { apiErrorMessage, type Environment, type Folder } from '../../lib/api'
+import { useAuthStore } from '../auth/auth-store'
 
 export default function AssetManagementPanel({
   projectId,
@@ -103,6 +104,7 @@ function useAssetManagement(projectId: string) {
     secretsLoading: secrets.isLoading,
     pending: mutation.isPending,
     run: mutation.mutate,
+    runAsync: mutation.mutateAsync,
   }
 }
 
@@ -200,24 +202,78 @@ function FolderManagement({ state, canEdit }: { state: AssetState; canEdit: bool
 
 function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdit: boolean }) {
   const [form] = Form.useForm<{ variables: string; headers: string }>()
+  const [hasDraft, setHasDraft] = useState(false)
+  const [draftStorageError, setDraftStorageError] = useState(false)
   const configuration = state.configuration
+  const userId = useAuthStore((store) => store.user?.id)
+  const storageKey = userId
+    ? `flowtest:project-variables-draft:v1:${userId}:${state.projectId}`
+    : null
+  useEffect(() => {
+    if (!configuration) return
+    let active = true
+    let hasStoredDraft = false
+    let storageFailed = false
+    const serverValues = {
+      variables: formatRecord(configuration.variables),
+      headers: formatRecord(configuration.headers),
+    }
+    if (!storageKey) {
+      form.setFieldsValue(serverValues)
+    } else {
+      try {
+        const stored: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
+        if (isConfigurationDraft(stored)) {
+          hasStoredDraft = true
+          form.setFieldsValue(stored)
+        } else {
+          form.setFieldsValue(serverValues)
+        }
+      } catch {
+        form.setFieldsValue(serverValues)
+        storageFailed = true
+      }
+    }
+    queueMicrotask(() => {
+      if (!active) return
+      setHasDraft(hasStoredDraft)
+      setDraftStorageError(storageFailed)
+    })
+    return () => {
+      active = false
+    }
+  }, [configuration, form, storageKey])
   return (
     <Form
       form={form}
       layout="vertical"
-      key={configuration ? JSON.stringify(configuration) : 'loading'}
-      initialValues={{
-        variables: formatRecord(configuration?.variables),
-        headers: formatRecord(configuration?.headers),
+      onValuesChange={(_, values) => {
+        setHasDraft(true)
+        if (!storageKey) return
+        try {
+          window.localStorage.setItem(storageKey, JSON.stringify(values))
+          setDraftStorageError(false)
+        } catch {
+          setDraftStorageError(true)
+        }
       }}
-      onFinish={(values) =>
-        state.run(() =>
+      onFinish={async (values) => {
+        await state.runAsync(() =>
           updateProjectConfiguration(state.projectId, {
             variables: parseRecord(values.variables),
             headers: parseRecord(values.headers),
           }),
         )
-      }
+        if (storageKey) {
+          try {
+            window.localStorage.removeItem(storageKey)
+          } catch {
+            // A successful server save is authoritative even when browser storage is unavailable.
+          }
+        }
+        setHasDraft(false)
+        setDraftStorageError(false)
+      }}
     >
       <Form.Item name="variables" label="项目变量（JSON）" rules={[jsonRecordRule]}>
         <Input.TextArea rows={6} className="code-input" readOnly={!canEdit} />
@@ -225,12 +281,25 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
       <Form.Item name="headers" label="项目 Header（JSON）" rules={[jsonRecordRule]}>
         <Input.TextArea rows={6} className="code-input" readOnly={!canEdit} />
       </Form.Item>
-      {canEdit && (
-        <Button htmlType="submit" type="primary" loading={state.pending}>
-          保存项目配置
-        </Button>
-      )}
+      <Space wrap>
+        {canEdit && (
+          <Button htmlType="submit" type="primary" loading={state.pending}>
+            保存项目配置
+          </Button>
+        )}
+        {hasDraft && <Tag color="orange">本地未保存</Tag>}
+        {draftStorageError && <Tag color="red">浏览器无法持久化草稿，请先保存再离开</Tag>}
+      </Space>
     </Form>
+  )
+}
+
+function isConfigurationDraft(value: unknown): value is { variables: string; headers: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { variables?: unknown }).variables === 'string' &&
+    typeof (value as { headers?: unknown }).headers === 'string'
   )
 }
 

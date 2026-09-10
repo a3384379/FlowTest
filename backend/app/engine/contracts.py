@@ -11,6 +11,28 @@ from app.domain.capabilities import CapabilityId, SemanticVersion
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
 
+class RuntimeInputDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: VariableName
+    value_type: Literal["string", "number", "integer", "boolean", "object", "array"]
+    required: bool = True
+    nullable: bool = False
+    description: str = Field(default="", max_length=1000)
+
+
+class ApiPollingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expression: str = Field(min_length=1, max_length=500)
+    operator: ComparisonOperator = ComparisonOperator.EQUALS
+    expected: JsonValue = None
+    terminal_failure_values: tuple[JsonValue, ...] = Field(default=(), max_length=20)
+    max_attempts: int = Field(default=1, ge=1, le=20)
+    interval_seconds: float = Field(default=0, ge=0, le=60)
+    timeout_seconds: int = Field(default=30, ge=1, le=300)
+
+
 class NodeType(StrEnum):
     START = "start"
     API = "api"
@@ -352,6 +374,7 @@ class ApiNodeConfig(BaseModel):
         max_length=2,
     )
     retry_delay_seconds: float = Field(default=0, ge=0, le=60)
+    polling: ApiPollingConfig | None = None
 
     @model_validator(mode="after")
     def validate_retry_categories(self) -> "ApiNodeConfig":
@@ -458,6 +481,7 @@ class WorkflowDefinition(BaseModel):
 
     schema_version: str = "1.0"
     variables: dict[VariableName, str] = Field(default_factory=dict)
+    runtime_inputs: list[RuntimeInputDefinition] = Field(default_factory=list, max_length=1000)
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
     settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
@@ -465,6 +489,7 @@ class WorkflowDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowDefinition":
+        self._validate_runtime_inputs()
         node_ids = [node.id for node in self.nodes]
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("Workflow node IDs must be unique")
@@ -502,6 +527,11 @@ class WorkflowDefinition(BaseModel):
         self._validate_cleanup_targets(cleanup_nodes, main_node_ids)
         self._validate_cleanup_request_budget(cleanup_nodes)
         return self
+
+    def _validate_runtime_inputs(self) -> None:
+        input_names = [item.name for item in self.runtime_inputs]
+        if len(input_names) != len(set(input_names)):
+            raise ValueError("Workflow runtime input names must be unique")
 
     @staticmethod
     def _validate_cleanup_targets(

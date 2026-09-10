@@ -7,6 +7,7 @@ import pytest
 from pydantic import JsonValue
 
 from app.core.errors import AppError
+from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import (
     FieldMapping,
@@ -28,8 +29,10 @@ from app.engine.scheduler import (
     NodeStatusUpdate,
     WorkflowScheduler,
 )
+from app.services.api_assets import PreparedRequest
 from app.services.workflow_runtime import (
     PreparedSubflow,
+    PreparedWorkflowRequest,
     WorkflowNodeExecutor,
     _nested_checkpoint_id,
     _nested_scope,
@@ -45,6 +48,112 @@ class ControlExecutor:
         if node.type.value == "api":
             return self._api_outputs[node.id]
         return await execute_control_node(node, context)
+
+
+class AllowOutbound:
+    async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_api_business_polling_waits_for_completion_without_transport_retries() -> None:
+    states = iter(["pending", "pending", "success"])
+    request_count = 0
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"status": next(states)})
+
+    node = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "success",
+                    "terminal_failure_values": ["failed"],
+                    "max_attempts": 3,
+                    "interval_seconds": 0,
+                    "timeout_seconds": 10,
+                },
+            },
+        )
+    )
+    request = PreparedRequest(
+        method=HttpMethod.GET,
+        url="https://example.test/status",
+        headers=(),
+        body=None,
+        variables=(),
+    )
+    prepared = PreparedWorkflowRequest(
+        request=request,
+        redacted_request=request,
+        body_kind=BodyKind.NONE,
+        multipart=None,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {node.id: prepared},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        output = await executor.execute(node, ExecutionContext())
+
+    assert request_count == 3
+    assert output["polling_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_api_business_polling_stops_on_terminal_failure() -> None:
+    request_count = 0
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"status": "failed"})
+
+    node = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "success",
+                    "terminal_failure_values": ["failed"],
+                    "max_attempts": 4,
+                },
+            },
+        )
+    )
+    request = PreparedRequest(
+        method=HttpMethod.GET,
+        url="https://example.test/status",
+        headers=(),
+        body=None,
+        variables=(),
+    )
+    prepared = PreparedWorkflowRequest(request, request, BodyKind.NONE, None)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {node.id: prepared},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        with pytest.raises(NodeExecutionError, match="业务失败终态") as error_info:
+            await executor.execute(node, ExecutionContext())
+
+    assert error_info.value.code == "POLLING_TERMINAL_FAILURE"
+    assert request_count == 1
 
 
 @pytest.mark.asyncio

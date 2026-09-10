@@ -27,6 +27,7 @@ type WorkflowTabHookInput = {
   hasExplicitFocus: boolean
   selectWorkflow: (workflowId: string | null) => void
   saveWorkflowDraft: (workflowId: string) => Promise<void>
+  memoryDraftIds?: string[]
   searchParams: URLSearchParams
   setSearchParams: (params: URLSearchParams, options?: { replace?: boolean }) => void
 }
@@ -125,11 +126,13 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     queueMicrotask(() => setStorageError(result.ok ? null : result.error))
   }, [input.activeWorkflowId, storageKey, storageReady, workflowIds])
 
+  const memoryDraftIds = new Set(input.memoryDraftIds ?? [])
   const dirtyIds = workflowIds.filter((workflowId) =>
     Boolean(
-      input.userId &&
-      input.projectId &&
-      readWorkflowDraft(workflowDraftKey(input.userId, input.projectId, workflowId)),
+      memoryDraftIds.has(workflowId) ||
+      (input.userId &&
+        input.projectId &&
+        readWorkflowDraft(workflowDraftKey(input.userId, input.projectId, workflowId))),
     ),
   )
 

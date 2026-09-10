@@ -41,6 +41,7 @@ type APIWorkbenchProps = {
   onRename: () => void
   artifacts?: Artifact[]
   redactionMode?: BulkRedactionMode
+  draftScope?: string
 }
 
 type WorkbenchFields = BodyEditorFields & {
@@ -55,31 +56,33 @@ type WorkbenchFields = BodyEditorFields & {
 }
 
 export default function APIWorkbench(props: APIWorkbenchProps) {
+  if (!props.detail) {
+    return props.loading ? <Card loading /> : <Empty description="请选择接口后进行持续编辑" />
+  }
+  return <LoadedAPIWorkbench {...props} detail={props.detail} />
+}
+
+function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
   const [form] = Form.useForm<WorkbenchFields>()
   const [preview, setPreview] = useState<unknown>(null)
+  const draft = useApiDraft(form, props)
   const redactionMode = props.redactionMode ?? 'off'
-  useEffect(() => {
-    if (props.detail) form.setFieldsValue(toFields(props.detail.version))
-  }, [form, props.detail])
-  if (!props.detail && !props.loading) {
-    return <Empty description="请选择接口后进行持续编辑" />
-  }
   return (
     <Card
       loading={props.loading}
       title={
         <Space>
-          <span>{props.detail?.definition.name ?? '接口工作台'}</span>
-          {props.detail && <Tag color="blue">v{props.detail.version.version}</Tag>}
-          {props.detail && (
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              aria-label="重命名接口"
-              onClick={props.onRename}
-            />
-          )}
+          <span>{props.detail.definition.name}</span>
+          <Tag color="blue">v{props.detail.version.version}</Tag>
+          {draft.restored && <Tag color="orange">本地未保存</Tag>}
+          {draft.storageError && <Tag color="red">浏览器无法持久化草稿，请先保存再离开</Tag>}
+          <Button
+            type="text"
+            size="small"
+            icon={<EditOutlined />}
+            aria-label="重命名接口"
+            onClick={props.onRename}
+          />
         </Space>
       }
       extra={
@@ -101,7 +104,12 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
         </Space>
       }
     >
-      <Form form={form} layout="vertical" onFinish={(values) => props.onSave(toInput(values))}>
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={draft.onValuesChange}
+        onFinish={draft.onFinish}
+      >
         <div className="workbench-request-line">
           <Form.Item name="method" rules={[{ required: true }]}>
             <Select
@@ -160,6 +168,73 @@ export default function APIWorkbench(props: APIWorkbenchProps) {
       </Modal>
     </Card>
   )
+}
+
+function useApiDraft(
+  form: ReturnType<typeof Form.useForm<WorkbenchFields>>[0],
+  props: APIWorkbenchProps,
+) {
+  const [restored, setRestored] = useState(false)
+  const [storageError, setStorageError] = useState(false)
+  useEffect(() => {
+    if (!props.detail) return
+    const stored = readApiDraft(props.draftScope, props.detail.definition.id)
+    form.setFieldsValue(stored ?? toFields(props.detail.version))
+    queueMicrotask(() => setRestored(Boolean(stored)))
+  }, [form, props.detail, props.draftScope])
+  return {
+    restored,
+    storageError,
+    onValuesChange: (_: unknown, values: WorkbenchFields) => {
+      if (!props.detail) return
+      setStorageError(!writeApiDraft(props.draftScope, props.detail.definition.id, values))
+      setRestored(true)
+    },
+    onFinish: async (values: WorkbenchFields) => {
+      await props.onSave(toInput(values))
+      if (props.detail) removeApiDraft(props.draftScope, props.detail.definition.id)
+      setRestored(false)
+      setStorageError(false)
+    },
+  }
+}
+
+function apiDraftKey(scope: string | undefined, apiId: string): string | null {
+  return scope
+    ? `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${encodeURIComponent(apiId)}`
+    : null
+}
+
+function readApiDraft(scope: string | undefined, apiId: string): WorkbenchFields | null {
+  const key = apiDraftKey(scope, apiId)
+  if (!key) return null
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? 'null')
+    return value && typeof value === 'object' ? (value as WorkbenchFields) : null
+  } catch {
+    return null
+  }
+}
+
+function writeApiDraft(scope: string | undefined, apiId: string, value: WorkbenchFields): boolean {
+  const key = apiDraftKey(scope, apiId)
+  if (!key) return false
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function removeApiDraft(scope: string | undefined, apiId: string): void {
+  const key = apiDraftKey(scope, apiId)
+  if (!key) return
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // Saving succeeded; stale storage is ignored when it cannot be accessed.
+  }
 }
 
 function previewTitle(redactionMode: BulkRedactionMode): string {

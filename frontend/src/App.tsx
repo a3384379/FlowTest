@@ -31,11 +31,12 @@ import {
   Select,
   Space,
   Spin,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
-import { lazy, Suspense, useEffect, type ReactNode } from 'react'
-import { Link, Navigate, Route, Routes } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 
 import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
@@ -142,38 +143,7 @@ function AuthenticatedShell() {
           theme="dark"
           mode="inline"
           selectedKeys={[section]}
-          items={[
-            navigationItem('dashboard', <DashboardOutlined />, pathFor('dashboard')),
-            navigationItem('settings', <FolderOpenOutlined />, pathFor('settings')),
-            navigationItem('services', <AppstoreOutlined />, pathFor('services')),
-            navigationItem('request-targets', <ShareAltOutlined />, pathFor('request-targets')),
-            navigationItem('apis', <ApiOutlined />, pathFor('apis')),
-            navigationItem('protocols', <CodeOutlined />, pathFor('protocols')),
-            navigationItem('assets', <FundProjectionScreenOutlined />, pathFor('assets')),
-            navigationItem('workflows', <ApartmentOutlined />, pathFor('workflows')),
-            navigationItem('data', <DatabaseOutlined />, pathFor('data')),
-            navigationItem('tasks', <ScheduleOutlined />, pathFor('tasks')),
-            navigationItem('performance', <ExperimentOutlined />, pathFor('performance')),
-            navigationItem('environments', <CloudServerOutlined />, pathFor('environments')),
-            navigationItem('contracts', <ShareAltOutlined />, pathFor('contracts')),
-            navigationItem('test-engineering', <ExperimentOutlined />, pathFor('test-engineering')),
-            navigationItem('contexts', <FileSearchOutlined />, pathFor('contexts')),
-            navigationItem('impact', <FileSearchOutlined />, pathFor('impact')),
-            navigationItem('change-regression', <BranchesOutlined />, pathFor('change-regression')),
-            navigationItem('quality', <SafetyCertificateOutlined />, pathFor('quality')),
-            navigationItem('release', <SafetyCertificateOutlined />, pathFor('release')),
-            navigationItem('ai', <RobotOutlined />, pathFor('ai')),
-            navigationItem('ai-changes', <RobotOutlined />, pathFor('ai-changes')),
-            navigationItem('mcp-changes', <AuditOutlined />, pathFor('mcp-changes')),
-            navigationItem('reports', <BarChartOutlined />, pathFor('reports')),
-            navigationItem('organization', <TeamOutlined />, '/organization'),
-            ...(user?.is_system_admin
-              ? [
-                  navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'),
-                  navigationItem('platform', <ToolOutlined />, '/platform'),
-                ]
-              : []),
-          ]}
+          items={shellNavigationItems(Boolean(user?.is_system_admin), pathFor)}
         />
       </Sider>
       <Layout>
@@ -209,6 +179,13 @@ function AuthenticatedShell() {
             className="page-breadcrumb"
             items={breadcrumbItems(currentProject?.name ?? null, section)}
           />
+          <ProjectWorkspaceTabs
+            visible={Boolean(projectId && !isGlobalAdministration)}
+            userId={authenticatedUserId(user)}
+            projectId={projectId}
+            activeSection={section}
+            pathFor={pathFor}
+          />
           <AuthenticatedContent
             hasNoProjects={hasNoProjects}
             isGlobalAdministration={isGlobalAdministration}
@@ -218,6 +195,138 @@ function AuthenticatedShell() {
       </Layout>
     </Layout>
   )
+}
+
+function authenticatedUserId(user: { id: string } | null | undefined): string {
+  return user?.id ?? 'anonymous'
+}
+
+function shellNavigationItems(
+  isSystemAdmin: boolean,
+  pathFor: (section: ProjectSection) => string,
+) {
+  const projectItems = (Object.keys(sectionLabels) as ProjectSection[])
+    .filter((section) => !['organization', 'fabric', 'platform'].includes(section))
+    .map((section) => navigationItem(section, navigationIcon(section), pathFor(section)))
+  const globalItems = [navigationItem('organization', <TeamOutlined />, '/organization')]
+  if (isSystemAdmin) {
+    globalItems.push(navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'))
+    globalItems.push(navigationItem('platform', <ToolOutlined />, '/platform'))
+  }
+  return [...projectItems, ...globalItems]
+}
+
+function navigationIcon(section: ProjectSection): ReactNode {
+  const icons: Partial<Record<ProjectSection, ReactNode>> = {
+    dashboard: <DashboardOutlined />,
+    settings: <FolderOpenOutlined />,
+    services: <AppstoreOutlined />,
+    'request-targets': <ShareAltOutlined />,
+    apis: <ApiOutlined />,
+    protocols: <CodeOutlined />,
+    assets: <FundProjectionScreenOutlined />,
+    workflows: <ApartmentOutlined />,
+    data: <DatabaseOutlined />,
+    tasks: <ScheduleOutlined />,
+    performance: <ExperimentOutlined />,
+    environments: <CloudServerOutlined />,
+    contracts: <ShareAltOutlined />,
+    'test-engineering': <ExperimentOutlined />,
+    contexts: <FileSearchOutlined />,
+    impact: <FileSearchOutlined />,
+    'change-regression': <BranchesOutlined />,
+    quality: <SafetyCertificateOutlined />,
+    release: <SafetyCertificateOutlined />,
+    ai: <RobotOutlined />,
+    'ai-changes': <RobotOutlined />,
+    'mcp-changes': <AuditOutlined />,
+    reports: <BarChartOutlined />,
+  }
+  return icons[section] ?? <AppstoreOutlined />
+}
+
+function ProjectWorkspaceTabs(props: {
+  visible: boolean
+  userId: string
+  projectId: string | null
+  activeSection: ProjectSection
+  pathFor: (section: ProjectSection) => string
+}) {
+  if (!props.visible || !props.projectId) return null
+  return (
+    <WorkspaceTabs
+      key={`${props.userId}:${props.projectId}`}
+      {...props}
+      projectId={props.projectId}
+    />
+  )
+}
+
+function WorkspaceTabs({
+  userId,
+  projectId,
+  activeSection,
+  pathFor,
+}: {
+  userId: string
+  projectId: string
+  activeSection: ProjectSection
+  pathFor: (section: ProjectSection) => string
+}) {
+  const navigate = useNavigate()
+  const storageKey = `flowtest:workspace-tabs:v1:${userId}:${projectId}`
+  const [sections, setSections] = useState<ProjectSection[]>(() => readWorkspaceTabs(storageKey))
+
+  useEffect(() => {
+    queueMicrotask(() =>
+      setSections((current) => {
+        const next = current.includes(activeSection) ? current : [...current, activeSection]
+        writeWorkspaceTabs(storageKey, next)
+        return next
+      }),
+    )
+  }, [activeSection, storageKey])
+
+  function close(section: ProjectSection) {
+    setSections((current) => {
+      const next = current.filter((item) => item !== section)
+      writeWorkspaceTabs(storageKey, next)
+      if (section === activeSection) navigate(pathFor(next.at(-1) ?? 'dashboard'))
+      return next
+    })
+  }
+
+  return (
+    <Tabs
+      className="workspace-navigation-tabs"
+      type="editable-card"
+      hideAdd
+      activeKey={activeSection}
+      items={sections.map((item) => ({ key: item, label: sectionLabels[item] }))}
+      onChange={(item) => navigate(pathFor(item as ProjectSection))}
+      onEdit={(item, action) => action === 'remove' && close(item as ProjectSection)}
+    />
+  )
+}
+
+function writeWorkspaceTabs(storageKey: string, sections: ProjectSection[]): void {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(sections))
+  } catch {
+    // Navigation remains usable for the current session.
+  }
+}
+
+function readWorkspaceTabs(storageKey: string): ProjectSection[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
+    if (!Array.isArray(value)) return []
+    return value.filter(
+      (item): item is ProjectSection => typeof item === 'string' && item in sectionLabels,
+    )
+  } catch {
+    return []
+  }
 }
 
 function AuthenticatedContent({

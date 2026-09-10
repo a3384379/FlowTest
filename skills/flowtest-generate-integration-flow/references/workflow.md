@@ -28,7 +28,7 @@ Use the deep path below only when the user explicitly asks for evidence, full co
 ## Evidence routing
 
 - Code MCP: request only pinned symbol, route, DTO, validation, and call-relationship facts. Convert the result to the Java or generic external Evidence schema before ingest.
-- Database MCP: request only schema, relationship, constraint, index, enum summary, and redacted aggregate profile facts. Never request row data or write SQL.
+- Database MCP: request schema, relationship, constraint, index, enum summary, and aggregate profile facts. Use only a small necessary row sample when that capture is already authorized; follow the effective redaction policy and never issue write SQL.
 - No external MCP: ask the user for an exported, redacted, bounded artifact and ingest it through the same typed contract.
 - Conflict: retain both evidence references and stop. Do not select the more convenient claim.
 

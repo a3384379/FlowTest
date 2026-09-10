@@ -181,6 +181,50 @@ class WorkflowVersionDiff:
     changes: tuple[VersionChange, ...]
 
 
+def _validate_runtime_inputs(
+    definition: WorkflowDefinition, runtime_variables: dict[str, str]
+) -> None:
+    available = {**definition.variables, **runtime_variables}
+    issues: list[dict[str, str]] = []
+    for item in definition.runtime_inputs:
+        if item.name not in available:
+            if item.required:
+                issues.append({"name": item.name, "code": "missing", "expected": item.value_type})
+            continue
+        value = available[item.name]
+        if not _runtime_value_matches(value, item.value_type, nullable=item.nullable):
+            issues.append({"name": item.name, "code": "type_mismatch", "expected": item.value_type})
+    if issues:
+        raise AppError(
+            code="WORKFLOW_RUNTIME_INPUT_INVALID",
+            message="运行参数缺失或类型不匹配",
+            status_code=422,
+            details={"inputs": issues},
+        )
+
+
+def _runtime_value_matches(value: str, value_type: str, *, nullable: bool) -> bool:
+    if value_type == "string":
+        return True
+    try:
+        decoded = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if decoded is None:
+        return nullable
+    if value_type == "number":
+        return isinstance(decoded, (int, float)) and not isinstance(decoded, bool)
+    if value_type == "integer":
+        return isinstance(decoded, int) and not isinstance(decoded, bool)
+    if value_type == "boolean":
+        return isinstance(decoded, bool)
+    if value_type == "object":
+        return isinstance(decoded, dict)
+    if value_type == "array":
+        return isinstance(decoded, list)
+    return False
+
+
 class WorkflowService:
     def __init__(
         self,
@@ -469,6 +513,7 @@ class WorkflowService:
         selected = await self._select_version(workflow, version)
         definition = self._load_definition(selected.definition)
         scope = _upstream_node_ids(definition, breakpoint_node_id, include_target=False)
+        _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare(
             actor=actor,
             project_id=project_id,
@@ -591,6 +636,7 @@ class WorkflowService:
         workflow = await self._get_workflow(project_id, workflow_id)
         selected = await self._select_version(workflow, version)
         definition = self._load_definition(selected.definition)
+        _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare(
             actor=actor,
             project_id=project_id,

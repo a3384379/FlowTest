@@ -3,6 +3,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -32,6 +33,10 @@ def require_idempotency_key(key: str | None) -> str:
             status_code=422,
         )
     return key
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((perf_counter() - started) * 1000))
 
 
 class IdempotencyService:
@@ -67,7 +72,9 @@ class IdempotencyService:
         request_payload: object,
         action: Callable[[], Awaitable[BaseModel]],
         atomic_action: bool = False,
+        capture_server_timings: bool = False,
     ) -> dict[str, Any]:
+        run_started = perf_counter()
         if key is None:
             return (await action()).model_dump(mode="json")
         require_idempotency_key(key)
@@ -87,7 +94,15 @@ class IdempotencyService:
             record.status = "completed"
             record.response_status = 200
             record.response_body = response
+            commit_started = perf_counter()
             await self._session.commit()
+            if capture_server_timings:
+                timings = response.get("timings_ms")
+                if isinstance(timings, dict):
+                    timings["transaction"] = _elapsed_ms(commit_started)
+                    timings["total"] = _elapsed_ms(run_started)
+                    record.response_body = response
+                    await self._session.commit()
         except Exception:
             await self._session.rollback()
             # Legacy actions can commit or send requests before failing. Their outcome

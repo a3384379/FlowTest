@@ -67,7 +67,9 @@ from app.services.idempotency import IdempotencyService, require_idempotency_key
 from app.services.mcp_flow_proposals import require_mcp_flow_propose_scope
 from app.services.projects import ProjectService
 
-_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+_PATH = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:(?:\.[A-Za-z_][A-Za-z0-9_]*)|(?:\[(?:0|[1-9][0-9]*)\]))*$"
+)
 _INPUT_REFERENCE = re.compile(r"^\{\{input\.([A-Za-z_][A-Za-z0-9_.-]*)\}\}$")
 _RESPONSE_PATH_ROOTS = frozenset(
     {"body", "data", "error", "headers", "response", "status", "status_code", "value"}
@@ -131,6 +133,7 @@ class MCPSimpleFlowService:
             operation="propose_simple_flow",
             request_payload=request_payload,
             atomic_action=True,
+            capture_server_timings=True,
             action=lambda: self._persist(
                 actor=actor,
                 payload=payload,
@@ -186,14 +189,13 @@ class MCPSimpleFlowService:
             )
         except AppError as error:
             raise _with_quick_diagnostics(error) from error
-        validate_ms = _elapsed_ms(validate_started)
+        validate_and_stage_ms = _elapsed_ms(validate_started)
         if view.change_set.status != "draft" or view.item.review_status != "pending":
             raise AppError(
                 code="QUICK_PROPOSAL_NOT_DRAFT",
                 message="Quick 提案未创建为待审核草稿",
                 status_code=500,
             )
-        persist_ms = _elapsed_ms(validate_started)
         proposal_id = view.change_set.id
         return SimpleFlowProposalResponse(
             project_id=payload.project_id,
@@ -209,8 +211,7 @@ class MCPSimpleFlowService:
             timings_ms={
                 "resolve": resolve_ms,
                 "build": build_ms,
-                "validate": validate_ms,
-                "persist": persist_ms,
+                "validate_and_stage": validate_and_stage_ms,
             },
             flow_spec_fingerprint=view.pipeline.fingerprint,
             target_workflow_id=view.item.target_resource_id,
@@ -546,16 +547,22 @@ def _input_state(
     parameters: list[FlowSpecParameter] = []
     missing: list[str] = []
     for item in payload.inputs:
-        value = _json_value(item.default)
-        values[item.name] = value
+        has_default = "default" in item.model_fields_set
+        value = _json_value(item.default) if has_default else None
+        if value is not None:
+            values[item.name] = value
         parameters.append(
             FlowSpecParameter(
                 name=item.name,
                 source=FlowSpecParameterSource.RUNTIME,
                 value=value,
+                value_type=item.type,
+                required=item.required,
+                nullable=item.nullable,
+                description=item.description,
             )
         )
-        if item.required and item.default is None:
+        if item.required and not has_default:
             missing.append(item.name)
     return values, parameters, missing
 
@@ -794,18 +801,7 @@ def _api_node_config(
     polling = step.polling
     if polling is None:
         return ApiNodeConfig(api_definition_id=api_definition_id, api_version=version.version)
-    retries = polling.max_attempts - 1
-    if retries > 3:
-        raise _quick_error(
-            code="QUICK_POLLING_LIMIT_EXCEEDED",
-            message="Quick 轮询最多允许 4 次只读请求",
-            field_path=f"steps.{step.key}.polling.max_attempts",
-            node_key=step.key,
-            expected="1-4",
-            actual=str(polling.max_attempts),
-            repair_hint="缩短轮询次数或将复杂轮询拆为后续可审查步骤",
-        )
-    if retries and version.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+    if polling.max_attempts > 1 and version.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
         raise _quick_error(
             code="QUICK_POLLING_SIDE_EFFECT",
             message="Quick 轮询只允许 GET、HEAD 或 OPTIONS 等只读请求",
@@ -819,8 +815,15 @@ def _api_node_config(
         api_definition_id=api_definition_id,
         api_version=version.version,
         timeout_seconds=polling.timeout_seconds,
-        max_retries=retries,
-        retry_delay_seconds=polling.interval_seconds,
+        polling={
+            "expression": _path_expression(polling.target, step.key, "polling"),
+            "operator": polling.operator,
+            "expected": polling.expected,
+            "terminal_failure_values": polling.terminal_failure_values,
+            "max_attempts": polling.max_attempts,
+            "interval_seconds": polling.interval_seconds,
+            "timeout_seconds": polling.timeout_seconds,
+        },
     )
 
 

@@ -51,6 +51,12 @@ import {
 
 export type CreateWorkflowInput = { name: string; description: string; apiId: string }
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
+type WorkflowDraftEdit = {
+  workflowId: string
+  definition: WorkflowDefinition
+  baseRevision: number
+  editVersion: number
+}
 
 export function useWorkflows(initialWorkflowId?: string) {
   const { message } = App.useApp()
@@ -63,15 +69,14 @@ export function useWorkflows(initialWorkflowId?: string) {
     initialWorkflowId ?? null,
   )
   const [workflowSelectionCleared, setWorkflowSelectionCleared] = useState(false)
-  const [draftEdit, setDraftEdit] = useState<{
-    workflowId: string
-    definition: WorkflowDefinition
-    baseRevision: number
-    editVersion: number
-  } | null>(null)
+  const [draftEdit, setDraftEdit] = useState<WorkflowDraftEdit | null>(null)
+  const memoryDraftsRef = useRef(new Map<string, WorkflowDraftEdit>())
+  const [memoryDraftIds, setMemoryDraftIds] = useState<string[]>([])
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null)
   const draftVersionRef = useRef(0)
   const previousUserIdRef = useRef<string | undefined>(userId)
+  const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
+  const previousDraftScopeRef = useRef(draftScope)
   const [lastResult, setLastResult] = useState<WorkflowExecutionDetail | null>(null)
   const [activeExecution, setActiveExecution] = useState<WorkflowExecution | null>(null)
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
@@ -152,6 +157,21 @@ export function useWorkflows(initialWorkflowId?: string) {
     previousUserIdRef.current = userId
   }, [userId])
   useEffect(() => {
+    if (previousDraftScopeRef.current === draftScope) return
+    previousDraftScopeRef.current = draftScope
+    memoryDraftsRef.current.clear()
+    draftVersionRef.current = 0
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      setMemoryDraftIds([])
+      setDraftEdit(null)
+    })
+    return () => {
+      active = false
+    }
+  }, [draftScope])
+  useEffect(() => {
     let active = true
     queueMicrotask(() => {
       if (!active) return
@@ -160,8 +180,12 @@ export function useWorkflows(initialWorkflowId?: string) {
         draftVersionRef.current = 0
         return
       }
+      const inMemory = memoryDraftsRef.current.get(selectedWorkflowId)
       const restored = readWorkflowDraft(draftKey)
-      if (restored) {
+      if (inMemory) {
+        setDraftEdit(inMemory)
+        draftVersionRef.current = inMemory.editVersion
+      } else if (restored) {
         setDraftEdit({
           workflowId: restored.resourceKey.workflowId,
           definition: restored.content,
@@ -301,12 +325,33 @@ export function useWorkflows(initialWorkflowId?: string) {
     const expectedRevision = draftEdit?.baseRevision ?? selectedWorkflow?.draft_revision
     if (!expectedRevision) return
     const editVersionAtStart = draftVersionRef.current
+    const workflowIdAtStart = workflowId
+    const draftKeyAtStart = draftKey
     await runMutation(message.error, async () => {
-      await saveMutation.mutateAsync({ definition: draftDefinition, expectedRevision })
-      if (draftVersionRef.current === editVersionAtStart && draftKey) {
-        const removed = removeWorkflowDraft(draftKey)
+      const saved = await saveMutation.mutateAsync({
+        definition: draftDefinition,
+        expectedRevision,
+      })
+      if (!workflowIdAtStart || !draftKeyAtStart) return
+      const latest = memoryDraftsRef.current.get(workflowIdAtStart)
+      if (!latest || latest.editVersion === editVersionAtStart) {
+        memoryDraftsRef.current.delete(workflowIdAtStart)
+        setMemoryDraftIds([...memoryDraftsRef.current.keys()])
+        const removed = removeWorkflowDraft(draftKeyAtStart)
         if (!removed.ok) setDraftStorageError(removed.error)
-        else setDraftEdit(null)
+        else if (workflowId === workflowIdAtStart) setDraftEdit(null)
+      } else {
+        const rebased = { ...latest, baseRevision: saved.draft_revision }
+        memoryDraftsRef.current.set(workflowIdAtStart, rebased)
+        setMemoryDraftIds([...memoryDraftsRef.current.keys()])
+        const persisted = writeWorkflowDraft(
+          draftKeyAtStart,
+          rebased.definition,
+          rebased.baseRevision,
+          rebased.editVersion,
+        )
+        setDraftStorageError(persisted.ok ? null : persisted.error)
+        if (workflowId === workflowIdAtStart) setDraftEdit(rebased)
       }
       await refreshWorkflows()
       void message.success(
@@ -430,20 +475,46 @@ export function useWorkflows(initialWorkflowId?: string) {
   async function saveWorkflowDraftFor(targetWorkflowId: string): Promise<void> {
     if (!projectId || !userId) return
     const targetWorkflow = workflows.data?.items.find((item) => item.id === targetWorkflowId)
-    const targetDraft = readWorkflowDraft(workflowDraftKey(userId, projectId, targetWorkflowId))
+    const targetKey = workflowDraftKey(userId, projectId, targetWorkflowId)
+    const memoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
+    const storedDraft = readWorkflowDraft(targetKey)
+    const targetDraft =
+      memoryDraft ??
+      (storedDraft
+        ? {
+            workflowId: targetWorkflowId,
+            definition: storedDraft.content,
+            baseRevision: storedDraft.baseRevision,
+            editVersion: storedDraft.editVersion,
+          }
+        : null)
     if (!targetWorkflow || !targetDraft) return
     await runMutation(message.error, async () => {
-      await updateWorkflowDraft(
+      const saved = await updateWorkflowDraft(
         projectId,
         targetWorkflow,
-        targetDraft.content,
+        targetDraft.definition,
         targetDraft.baseRevision,
       )
-      const latestDraft = readWorkflowDraft(workflowDraftKey(userId, projectId, targetWorkflowId))
-      if (!latestDraft || latestDraft.editVersion === targetDraft.editVersion) {
-        const removed = removeWorkflowDraft(workflowDraftKey(userId, projectId, targetWorkflowId))
-        if (!removed.ok) setDraftStorageError(removed.error)
+      const latestMemoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
+      if (latestMemoryDraft && latestMemoryDraft.editVersion !== targetDraft.editVersion) {
+        const rebased = { ...latestMemoryDraft, baseRevision: saved.draft_revision }
+        memoryDraftsRef.current.set(targetWorkflowId, rebased)
+        setMemoryDraftIds([...memoryDraftsRef.current.keys()])
+        const persisted = writeWorkflowDraft(
+          targetKey,
+          rebased.definition,
+          rebased.baseRevision,
+          rebased.editVersion,
+        )
+        setDraftStorageError(persisted.ok ? null : persisted.error)
+        await refreshWorkflows()
+        return
       }
+      memoryDraftsRef.current.delete(targetWorkflowId)
+      setMemoryDraftIds([...memoryDraftsRef.current.keys()])
+      const removed = removeWorkflowDraft(targetKey)
+      if (!removed.ok) setDraftStorageError(removed.error)
       await refreshWorkflows()
     })
   }
@@ -501,13 +572,17 @@ export function useWorkflows(initialWorkflowId?: string) {
         const baseRevision = draftEdit?.baseRevision ?? selectedWorkflow?.draft_revision ?? 1
         const persisted = writeWorkflowDraft(draftKey, definition, baseRevision, editVersion)
         draftVersionRef.current = editVersion
-        setDraftEdit({ workflowId, definition, baseRevision, editVersion })
+        const edit = { workflowId, definition, baseRevision, editVersion }
+        memoryDraftsRef.current.set(workflowId, edit)
+        setMemoryDraftIds([...memoryDraftsRef.current.keys()])
+        setDraftEdit(edit)
         setDraftStorageError(persisted.ok ? null : persisted.error)
         setExecutionDefinition(null)
       }
     },
     draftRestored: Boolean(draftEdit),
     draftStorageError,
+    memoryDraftIds,
     nodeStatuses: workspaceView.statuses,
     activeExecutionId,
     lastResult,

@@ -41,7 +41,10 @@ def test_flagship_skill_manifest_matches_live_mcp_contract() -> None:
     assert manifest.minimum_mcp_version == MCP_SANDBOX_PREVIEW_SERVER_VERSION
     assert set(manifest.required_tools) | set(manifest.optional_tools) <= available_tools
     assert set(manifest.required_scopes) | set(manifest.optional_scopes) <= SERVICE_ACCOUNT_SCOPES
-    assert manifest.stages[-2:] == ["visual_review", "optional_sandbox_preview"]
+    assert manifest.default_mode == "quick"
+    assert manifest.stages == manifest.quick_stages
+    assert manifest.quick_stages[-1] == "inspect_visual_review"
+    assert manifest.deep_stages[-2:] == ["visual_review", "optional_sandbox_preview"]
 
     tool_contract = " ".join(manifest.required_tools + manifest.optional_tools).lower()
     assert all(
