@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +29,8 @@ from app.models.governance import IdempotencyRecord
 from app.models.organizations import Organization
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.workflows import Workflow, WorkflowExecution
+from app.repositories.api_assets import APIAssetRepository
+from app.repositories.workflows import WorkflowRepository
 from app.schemas.mcp_simple_flows import SimpleFlowRequest
 from app.schemas.test_contexts import FlowSpecProposalRequest
 from app.services.mcp_flow_proposals import _contains_unsafe_jmespath_literal
@@ -351,6 +354,30 @@ def test_quick_input_default_must_match_declared_type() -> None:
                 ],
             }
         )
+
+
+def test_quick_status_code_assertion_requires_expected_http_status() -> None:
+    payload = {
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "environment_id": "00000000-0000-4000-8000-000000000002",
+        "name": "状态码校验",
+        "task_ref": "quick-status-check",
+        "scenario_key": "status-check",
+        "steps": [
+            {
+                "key": "step",
+                "name": "步骤",
+                "api": {
+                    "api_definition_id": "00000000-0000-4000-8000-000000000003",
+                    "version": 1,
+                },
+                "assertions": [{"target": "status_code", "operator": "status_code"}],
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="expected HTTP status code"):
+        SimpleFlowRequest.model_validate(payload)
 
 
 def _assert_secret_not_exposed(response: Response, secret: str) -> None:
@@ -735,7 +762,15 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
         "name": "快速健康检查",
         "task_ref": "quick-health-task",
         "scenario_key": "health-check",
-        "inputs": [{"name": "trace_id", "type": "string", "default": "trace-1"}],
+        "inputs": [
+            {"name": "trace_id", "type": "string", "default": "trace-1"},
+            {
+                "name": "attempts",
+                "type": "integer",
+                "default": 3,
+                "description": "请求次数",
+            },
+        ],
         "steps": [
             {
                 "key": "lookup",
@@ -748,9 +783,19 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
                     {
                         "target": "header.X-Trace-Id",
                         "source": {"kind": "input", "name": "trace_id"},
-                    }
+                    },
+                    {
+                        "target": "body.attempts",
+                        "source": {"kind": "input", "name": "attempts"},
+                    },
+                    {
+                        "target": "body.enabled",
+                        "source": {"kind": "constant", "value": True},
+                    },
                 ],
-                "assertions": [{"target": "status_code", "operator": "status_code"}],
+                "assertions": [
+                    {"target": "status_code", "operator": "status_code", "expected": 200}
+                ],
                 "polling": {"max_attempts": 3, "interval_seconds": 1.5, "timeout_seconds": 20},
                 "outputs": [{"name": "health", "source": "body.status"}],
             },
@@ -799,6 +844,13 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
     assert lookup_config["max_retries"] == 2
     assert lookup_config["retry_delay_seconds"] == 1.5
     assert lookup_config["timeout_seconds"] == 20
+    lookup_edge = next(edge for edge in proposed["edges"] if edge["target"] == "lookup")
+    transforms = {
+        mapping["target"]["key"]: mapping["transform"]["kind"]
+        for mapping in lookup_edge["mappings"]
+    }
+    assert transforms["attempts"] == "json_parse"
+    assert transforms["enabled"] == "json_parse"
     assert {node["id"] for node in proposed["nodes"]} >= {
         "start",
         "lookup",
@@ -815,6 +867,78 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
         and edge["mappings"]
         for edge in proposed["edges"]
     )
+
+
+@pytest.mark.asyncio
+async def test_quick_flow_bounds_derived_ids(s51_context: dict[str, Any]) -> None:
+    step_key = "s" * 120
+    payload = {
+        "project_id": str(s51_context["project_id"]),
+        "environment_id": str(s51_context["sandbox_environment_id"]),
+        "name": "长标识符流程",
+        "task_ref": "quick-long-identifiers",
+        "scenario_key": "long-identifiers",
+        "steps": [
+            {
+                "key": step_key,
+                "name": "长标识符步骤",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+                "outputs": [{"name": "o" * 160, "source": "body.status"}],
+                "assertions": [
+                    {"target": "status_code", "operator": "status_code", "expected": 200}
+                ],
+            }
+        ],
+    }
+    response = await s51_context["client"].post(
+        "/api/v1/mcp/flow/simple-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "quick-long-ids-v1"},
+        json=payload,
+    )
+    assert response.status_code == 202, response.text
+    inspection = await s51_context["client"].get(
+        f"/api/v1/mcp/flow/proposals/{response.json()['proposal_id']}",
+        params={"project_id": str(s51_context["project_id"])},
+        headers=s51_context["mcp_headers"],
+    )
+    definition = inspection.json()["proposed_definition"]
+    assert all(len(node["id"]) <= 128 for node in definition["nodes"])
+    assert all(len(edge["id"]) <= 128 for edge in definition["edges"])
+
+
+@pytest.mark.asyncio
+async def test_archived_asset_names_remain_reserved(s51_context: dict[str, Any]) -> None:
+    async with s51_context["sessions"]() as session:
+        environment = await session.get(Environment, s51_context["sandbox_environment_id"])
+        actor = await session.scalar(select(User).limit(1))
+        assert environment is not None and actor is not None
+        environment.archived_at = datetime.now(UTC)
+        workflow = Workflow(
+            project_id=s51_context["project_id"],
+            folder_id=None,
+            name="已归档工作流",
+            description="",
+            draft_definition={},
+            draft_revision=1,
+            current_version=None,
+            archived_at=datetime.now(UTC),
+            created_by_id=actor.id,
+        )
+        session.add(workflow)
+        await session.commit()
+
+        assets = APIAssetRepository(session)
+        workflows = WorkflowRepository(session)
+        assert (
+            await assets.find_environment_by_name(
+                project_id=s51_context["project_id"], name=environment.name
+            )
+            is environment
+        )
+        assert await workflows.name_exists(project_id=s51_context["project_id"], name=workflow.name)
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,8 @@ from app.engine.contracts import (
     MappingSource,
     MappingTarget,
     MappingTargetLocation,
+    MappingTransform,
+    MappingTransformKind,
     Position,
     StartNodeConfig,
     WorkflowSettings,
@@ -57,6 +59,7 @@ from app.schemas.mcp_simple_flows import (
     SimpleFlowProposalResponse,
     SimpleFlowRequest,
     SimpleFlowStep,
+    SimpleInputType,
 )
 from app.services.flow_spec import FlowSpecQuickProvenance, portable_contract_fingerprint
 from app.services.flow_spec import FlowSpecService as ApplicationFlowSpecService
@@ -342,7 +345,7 @@ class MCPSimpleFlowService:
                 step,
                 prior_steps=prior_steps,
                 prior_sources=prior_sources,
-                input_names=set(input_values),
+                input_types={item.name: item.type for item in payload.inputs},
                 constant_values=input_values,
             )
             mapping_groups: dict[str, list[FieldMapping]] = {}
@@ -351,7 +354,7 @@ class MCPSimpleFlowService:
             chain_mappings = mapping_groups.pop(previous_node, [])
             edges.append(
                 FlowSpecEdge(
-                    id=f"edge-{previous_node}-{api_id}",
+                    id=_edge_id(previous_node, api_id),
                     source=previous_node,
                     target=api_id,
                     mappings=chain_mappings,
@@ -360,7 +363,7 @@ class MCPSimpleFlowService:
             for source_node, source_mappings in mapping_groups.items():
                 edges.append(
                     FlowSpecEdge(
-                        id=f"edge-{source_node}-{api_id}-mapping",
+                        id=_edge_id(source_node, api_id, "mapping"),
                         source=source_node,
                         target=api_id,
                         mappings=source_mappings,
@@ -368,7 +371,7 @@ class MCPSimpleFlowService:
                 )
             previous_node = api_id
             for output_index, output in enumerate(step.outputs, start=1):
-                output_id = f"{api_id}.output.{output.name}"
+                output_id = _node_id(api_id, "output", output.name)
                 expression = _path_expression(output.source, api_id, "outputs")
                 nodes.append(
                     FlowSpecNode(
@@ -388,14 +391,14 @@ class MCPSimpleFlowService:
                 )
                 edges.append(
                     FlowSpecEdge(
-                        id=f"edge-{api_id}-{output_id}",
+                        id=_edge_id(previous_node, output_id),
                         source=previous_node,
                         target=output_id,
                     )
                 )
                 previous_node = output_id
             for assertion_index, assertion in enumerate(step.assertions, start=1):
-                assertion_id = f"{api_id}.assert.{assertion_index}"
+                assertion_id = _node_id(api_id, "assert", str(assertion_index))
                 source_node, expression = _assertion_path(assertion.target, api_id)
                 expected_source, expected_expression, expected = _assertion_expected(
                     assertion, set(input_values)
@@ -421,7 +424,7 @@ class MCPSimpleFlowService:
                 )
                 edges.append(
                     FlowSpecEdge(
-                        id=f"edge-{previous_node}-{assertion_id}",
+                        id=_edge_id(previous_node, assertion_id),
                         source=previous_node,
                         target=assertion_id,
                     )
@@ -446,7 +449,7 @@ class MCPSimpleFlowService:
             )
             edges.append(
                 FlowSpecEdge(
-                    id=f"edge-{previous_node}-{forward_id}",
+                    id=_edge_id(previous_node, forward_id),
                     source=previous_node,
                     target=forward_id,
                 )
@@ -464,7 +467,7 @@ class MCPSimpleFlowService:
             )
         )
         edges.append(
-            FlowSpecEdge(id=f"edge-{previous_node}-end", source=previous_node, target=end_id)
+            FlowSpecEdge(id=_edge_id(previous_node, end_id), source=previous_node, target=end_id)
         )
         return _BuiltQuickFlow(
             spec=FlowSpec(
@@ -550,7 +553,6 @@ def _input_state(
                 name=item.name,
                 source=FlowSpecParameterSource.RUNTIME,
                 value=value,
-                description=item.description,
             )
         )
         if item.required and item.default is None:
@@ -563,7 +565,7 @@ def _bindings(
     *,
     prior_steps: dict[str, SimpleFlowStep],
     prior_sources: dict[str, str],
-    input_names: set[str],
+    input_types: dict[str, SimpleInputType],
     constant_values: dict[str, str],
 ) -> list[FieldMapping]:
     mappings: list[FieldMapping] = []
@@ -573,12 +575,30 @@ def _bindings(
             binding,
             prior_steps=prior_steps,
             prior_sources=prior_sources,
-            input_names=input_names,
+            input_names=set(input_types),
             constant_values=constant_values,
+        )
+        parse_json = location in {
+            MappingTargetLocation.BODY,
+            MappingTargetLocation.VARIABLE,
+        } and (
+            (binding.source.kind == "constant" and not isinstance(binding.source.value, str))
+            or (
+                binding.source.kind == "input"
+                and binding.source.name is not None
+                and input_types[binding.source.name] != "string"
+            )
         )
         mappings.append(
             FieldMapping(
                 source=MappingSource(node_id=source_node, path=source_path),
+                transform=MappingTransform(
+                    kind=(
+                        MappingTransformKind.JSON_PARSE
+                        if parse_json
+                        else MappingTransformKind.IDENTITY
+                    )
+                ),
                 target=MappingTarget(node_id=step.key, location=location, key=key),
             )
         )
@@ -722,7 +742,22 @@ def _path_expression(value: str, step_key: str, kind: str) -> str:
 
 
 def _forward_node_id(step_key: str) -> str:
-    return f"{step_key}.output.forward"
+    return _node_id(step_key, "output", "forward")
+
+
+def _node_id(*parts: str) -> str:
+    return _bounded_id(".".join(parts))
+
+
+def _edge_id(*parts: str) -> str:
+    return _bounded_id(f"edge-{'-'.join(parts)}")
+
+
+def _bounded_id(value: str) -> str:
+    if len(value) <= 128:
+        return value
+    digest = sha256(value.encode()).hexdigest()[:16]
+    return f"{value[:111]}.{digest}"
 
 
 def _forward_variable_name(step_key: str) -> str:

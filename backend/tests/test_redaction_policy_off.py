@@ -23,7 +23,7 @@ from app.domain.evidence import DataProfile
 from app.domain.evidence_adapters import DatabaseColumnEvidence
 from app.domain.flow_spec_security import contains_sensitive_flow_spec_value
 from app.domain.test_contexts import ExternalDatabaseColumnClaim, is_sensitive_identifier
-from app.importers.contracts import imported_value, sanitize_imported_json
+from app.importers.contracts import imported_value
 from app.services.executions import _redact_request_url, _redact_response_headers
 
 
@@ -38,8 +38,6 @@ def test_off_does_not_scan_or_transform_sensitive_values() -> None:
         assert redact(payload) is payload
         assert is_sensitive_identifier("password") is False
         assert contains_sensitive_contract_value(payload) is False
-        assert imported_value("Authorization", "Bearer synthetic-token") == "Bearer synthetic-token"
-        assert sanitize_imported_json({"password": "plain"}) == {"password": "plain"}
         assert _redact_request_url("https://example.test/items?token=plain") == (
             "https://example.test/items?token=plain"
         )

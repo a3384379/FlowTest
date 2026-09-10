@@ -80,6 +80,19 @@ class SimpleAssertion(BaseModel):
     operator: SimpleAssertionOperator
     expected: JsonValue = None
 
+    @model_validator(mode="after")
+    def validate_status_code(self) -> "SimpleAssertion":
+        if self.operator != "status_code":
+            return self
+        if (
+            "expected" not in self.model_fields_set
+            or not isinstance(self.expected, int)
+            or isinstance(self.expected, bool)
+            or not 100 <= self.expected <= 599
+        ):
+            raise ValueError("status_code assertions require an expected HTTP status code")
+        return self
+
 
 class SimplePolling(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -94,7 +94,6 @@ class WorkflowRepository:
         query = select(Workflow.id).where(
             Workflow.project_id == project_id,
             Workflow.name == name,
-            Workflow.archived_at.is_(None),
         )
         if excluding_id is not None:
             query = query.where(Workflow.id != excluding_id)

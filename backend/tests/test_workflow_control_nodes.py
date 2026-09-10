@@ -230,6 +230,50 @@ def test_field_mapping_template_transform_is_typed_and_deterministic(
     assert resolved[0].value == expected
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("3", 3),
+        ("true", True),
+        ('{"region":"cn"}', {"region": "cn"}),
+        ("[1,2]", [1, 2]),
+    ],
+)
+def test_field_mapping_json_parse_transform_preserves_json_types(
+    value: str,
+    expected: JsonValue,
+) -> None:
+    context = ExecutionContext()
+    context.record_output("source", {"value": value})
+    mapping = FieldMapping.model_validate(
+        {
+            "source": {"node_id": "source", "path": "value"},
+            "transform": {"kind": "json_parse"},
+            "target": {"node_id": "target", "location": "body", "key": "value"},
+        }
+    )
+
+    resolved = resolve_field_mappings([mapping], context)
+
+    assert resolved[0].value == expected
+
+
+def test_field_mapping_json_parse_transform_rejects_invalid_json() -> None:
+    context = ExecutionContext()
+    context.record_output("source", {"value": "not-json"})
+    mapping = FieldMapping.model_validate(
+        {
+            "source": {"node_id": "source", "path": "value"},
+            "transform": {"kind": "json_parse"},
+            "target": {"node_id": "target", "location": "body", "key": "value"},
+        }
+    )
+
+    with pytest.raises(MappingResolutionError, match="不是有效的 JSON") as invalid:
+        resolve_field_mappings([mapping], context)
+    assert invalid.value.code == "INVALID_JSON_MAPPING_VALUE"
+
+
 @pytest.mark.asyncio
 async def test_control_node_handles_optional_extract_delay_dataset_and_boundaries() -> None:
     context = ExecutionContext(dataset_variables={"region": "cn"})
