@@ -71,9 +71,7 @@ def next_scheduled_at(
     except (CroniterBadCronError, CroniterBadDateError, ValueError) as error:
         raise ScheduleValidationError("invalid cron schedule") from error
     following_utc = following.astimezone(UTC)
-    recurrence_seconds = (
-        next_following.astimezone(UTC) - following_utc
-    ).total_seconds()
+    recurrence_seconds = (next_following.astimezone(UTC) - following_utc).total_seconds()
     if recurrence_seconds <= 60 and (following_utc - now.astimezone(UTC)).total_seconds() < 60:
         raise ScheduleValidationError("cron schedule must not run more than once per minute")
     return following_utc
