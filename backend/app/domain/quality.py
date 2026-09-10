@@ -65,11 +65,16 @@ def next_scheduled_at(
         raise ScheduleValidationError("unknown schedule timezone") from error
     localized_now = now.astimezone(timezone)
     try:
-        following = croniter(cron_expression, localized_now).get_next(datetime)
+        iterator = croniter(cron_expression, localized_now)
+        following = iterator.get_next(datetime)
+        next_following = iterator.get_next(datetime)
     except (CroniterBadCronError, CroniterBadDateError, ValueError) as error:
         raise ScheduleValidationError("invalid cron schedule") from error
     following_utc = following.astimezone(UTC)
-    if (following_utc - now.astimezone(UTC)).total_seconds() < 60:
+    recurrence_seconds = (
+        next_following.astimezone(UTC) - following_utc
+    ).total_seconds()
+    if recurrence_seconds <= 60 and (following_utc - now.astimezone(UTC)).total_seconds() < 60:
         raise ScheduleValidationError("cron schedule must not run more than once per minute")
     return following_utc
 
