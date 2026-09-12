@@ -334,11 +334,11 @@ function CreatePlanDialog({
           />
         </Form.Item>
         <Form.Item name="targetId" label={targetLabel(targetType)} rules={[{ required: true }]}>
-          <Select options={targetOptions} />
+          <Select showSearch optionFilterProp="label" options={targetOptions} />
         </Form.Item>
         {targetType === 'workflow' && (
           <Form.Item name="environmentId" label="环境" rules={[{ required: true }]}>
-            <Select options={options(environments)} />
+            <Select showSearch optionFilterProp="label" options={options(environments)} />
           </Form.Item>
         )}
         <Form.Item name="scheduleMode" label="调度方式">

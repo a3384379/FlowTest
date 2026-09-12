@@ -1,3 +1,4 @@
+import { useDraftSession } from '../drafts/draft-session'
 import RequestTargetSummary from './RequestTargetSummary'
 import { EditOutlined, SaveOutlined } from '@ant-design/icons'
 import {
@@ -44,7 +45,7 @@ type APIWorkbenchProps = {
   draftScope?: string
 }
 
-type WorkbenchFields = BodyEditorFields & {
+export type WorkbenchFields = BodyEditorFields & {
   method: ApiVersion['method']
   path: string
   query_parameters: Array<KeyValueField & { enabled: boolean }>
@@ -53,6 +54,17 @@ type WorkbenchFields = BodyEditorFields & {
   auth_config: KeyValueField[]
   extraction_rules: ApiVersion['extraction_rules']
   assertions: Array<Omit<ApiVersion['assertions'][number], 'expected'> & { expected_text: string }>
+}
+
+type PersistedApiDraft = {
+  schemaVersion: 2
+  fields: WorkbenchFields
+  baseVersion: number
+}
+
+type RestoredApiDraft = {
+  fields: WorkbenchFields
+  baseVersion: number | null
 }
 
 export default function APIWorkbench(props: APIWorkbenchProps) {
@@ -75,6 +87,9 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
           <span>{props.detail.definition.name}</span>
           <Tag color="blue">v{props.detail.version.version}</Tag>
           {draft.restored && <Tag color="orange">本地未保存</Tag>}
+          {draft.serverChanged && (
+            <Tag color="orange">服务器有新版本，已保留本地编辑，请核对后保存</Tag>
+          )}
           {draft.storageError && <Tag color="red">浏览器无法持久化草稿，请先保存再离开</Tag>}
           <Button
             type="text"
@@ -189,23 +204,31 @@ function useApiDraft(
   form: ReturnType<typeof Form.useForm<WorkbenchFields>>[0],
   props: APIWorkbenchProps & { detail: ApiDetail },
 ) {
+  const session = useDraftSession()
+  const identity = JSON.stringify([props.draftScope ?? null, props.detail.definition.id])
+  const activeIdentity = useRef(identity)
+  const baseline = useRef<{ identity: string; version: number } | null>(null)
   const [restored, setRestored] = useState(false)
   const [storageError, setStorageError] = useState(false)
-  const editVersionRef = useRef(0)
-  const activeApiIdRef = useRef(props.detail.definition.id)
-  const loadedDraftIdentityRef = useRef<string | null>(null)
+  const [serverChanged, setServerChanged] = useState(false)
   useEffect(() => {
-    activeApiIdRef.current = props.detail.definition.id
-  }, [props.detail.definition.id])
+    activeIdentity.current = identity
+  }, [identity])
   useEffect(() => {
-    const identity = JSON.stringify([props.draftScope ?? null, props.detail.definition.id])
-    if (loadedDraftIdentityRef.current === identity) return
-    loadedDraftIdentityRef.current = identity
-    const stored = readApiDraft(props.draftScope, props.detail.definition.id)
-    form.setFieldsValue(stored ?? toFields(props.detail.version))
-    editVersionRef.current = 0
-    queueMicrotask(() => setRestored(Boolean(stored)))
-  }, [form, props.detail, props.draftScope])
+    const changedIdentity = baseline.current?.identity !== identity
+    const incomingVersion = props.detail.version.version
+    if (!changedIdentity && baseline.current?.version === incomingVersion) return
+    const draft = restoreApiSessionDraft(session, identity, props)
+    if (draft) session.apis.set(identity, draft)
+    if (changedIdentity || !draft)
+      form.setFieldsValue(draft?.fields ?? toFields(props.detail.version))
+    baseline.current = { identity, version: incomingVersion }
+    queueMicrotask(() => {
+      setRestored(Boolean(draft))
+      setStorageError(Boolean(draft && draft.storageError))
+      setServerChanged(Boolean(draft && draft.baseVersion !== incomingVersion))
+    })
+  }, [form, props, identity, session])
   useEffect(() => {
     if (!restored || !storageError) return
     const blockUnload = (event: BeforeUnloadEvent) => event.preventDefault()
@@ -213,30 +236,72 @@ function useApiDraft(
     return () => window.removeEventListener('beforeunload', blockUnload)
   }, [restored, storageError])
   function persist(values: WorkbenchFields) {
-    editVersionRef.current += 1
-    setStorageError(!writeApiDraft(props.draftScope, props.detail.definition.id, values))
+    const baseVersion = session.apis.get(identity)?.baseVersion ?? props.detail.version.version
+    const failed = !writeApiDraft(props.draftScope, props.detail.definition.id, values, baseVersion)
+    session.apis.set(identity, {
+      fields: structuredClone(values),
+      generation: session.nextGeneration(),
+      storageError: failed,
+      baseVersion,
+    })
+    session.markUnsafe(identity, failed)
+    setStorageError(failed)
     setRestored(true)
   }
   return {
     restored,
     storageError,
+    serverChanged,
     onValuesChange: (_: unknown, values: WorkbenchFields) => persist(values),
     persistCurrent: () => queueMicrotask(() => persist(form.getFieldsValue(true))),
     onFinish: async (values: WorkbenchFields) => {
-      const apiIdAtStart = props.detail.definition.id
-      const editVersionAtStart = editVersionRef.current
-      await props.onSave(toInput(values))
-      if (
-        activeApiIdRef.current !== apiIdAtStart ||
-        editVersionRef.current !== editVersionAtStart
-      ) {
+      const generation = session.apis.get(identity)?.generation
+      const saved = await props.onSave(toInput(values))
+      const latest = session.apis.get(identity)
+      if (latest && latest.generation !== generation) {
+        const persisted = writeApiDraft(
+          props.draftScope,
+          props.detail.definition.id,
+          latest.fields,
+          saved.version,
+        )
+        session.apis.set(identity, {
+          ...latest,
+          storageError: !persisted,
+          baseVersion: saved.version,
+        })
+        session.markUnsafe(identity, !persisted)
+        setStorageError(!persisted)
         return
       }
-      const removed = removeApiDraft(props.draftScope, apiIdAtStart)
+      // An inactive resource is retained for its next mount; it cannot clear another form.
+      if (activeIdentity.current !== identity) return
+      const removed = removeApiDraft(props.draftScope, props.detail.definition.id)
+      if (removed) session.apis.delete(identity)
+      session.markUnsafe(identity, !removed)
       setRestored(!removed)
       setStorageError(!removed)
+      setServerChanged(false)
     },
   }
+}
+
+function restoreApiSessionDraft(
+  session: ReturnType<typeof useDraftSession>,
+  identity: string,
+  props: APIWorkbenchProps & { detail: ApiDetail },
+) {
+  const memory = session.apis.get(identity)
+  if (memory) return memory
+  const stored = readApiDraft(props.draftScope, props.detail.definition.id)
+  return stored
+    ? {
+        fields: stored.fields,
+        generation: session.nextGeneration(),
+        storageError: false,
+        baseVersion: stored.baseVersion ?? props.detail.version.version,
+      }
+    : null
 }
 
 function apiDraftKey(scope: string | undefined, apiId: string): string | null {
@@ -245,26 +310,47 @@ function apiDraftKey(scope: string | undefined, apiId: string): string | null {
     : null
 }
 
-function readApiDraft(scope: string | undefined, apiId: string): WorkbenchFields | null {
+function readApiDraft(scope: string | undefined, apiId: string): RestoredApiDraft | null {
   const key = apiDraftKey(scope, apiId)
   if (!key) return null
   try {
     const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? 'null')
-    return value && typeof value === 'object' ? (value as WorkbenchFields) : null
+    if (isPersistedApiDraft(value)) {
+      return { fields: value.fields, baseVersion: value.baseVersion }
+    }
+    return value && typeof value === 'object'
+      ? { fields: value as WorkbenchFields, baseVersion: null }
+      : null
   } catch {
     return null
   }
 }
 
-function writeApiDraft(scope: string | undefined, apiId: string, value: WorkbenchFields): boolean {
+function writeApiDraft(
+  scope: string | undefined,
+  apiId: string,
+  fields: WorkbenchFields,
+  baseVersion: number,
+): boolean {
   const key = apiDraftKey(scope, apiId)
   if (!key) return false
   try {
-    window.localStorage.setItem(key, JSON.stringify(value))
+    const draft: PersistedApiDraft = { schemaVersion: 2, fields, baseVersion }
+    window.localStorage.setItem(key, JSON.stringify(draft))
     return true
   } catch {
     return false
   }
+}
+
+function isPersistedApiDraft(value: unknown): value is PersistedApiDraft {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as Partial<PersistedApiDraft>
+  return (
+    draft.schemaVersion === 2 &&
+    typeof draft.baseVersion === 'number' &&
+    Boolean(draft.fields && typeof draft.fields === 'object')
+  )
 }
 
 function removeApiDraft(scope: string | undefined, apiId: string): boolean {

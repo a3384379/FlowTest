@@ -2,9 +2,10 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
+from functools import partial
 from typing import Any, Protocol
 
 from pydantic import JsonValue
@@ -22,6 +23,8 @@ from app.engine.contracts import (
     WorkflowPhase,
     WorkflowRunStatus,
 )
+from app.engine.request_accounting import node_type_consumes_request
+from app.engine.request_accounting import resumed_request_attempts as _resumed_request_attempts
 from app.engine.results import NodeObservation, NodeResult, normalize_node_result
 
 
@@ -98,6 +101,7 @@ class NodeStatusUpdate:
     phase: WorkflowPhase = WorkflowPhase.MAIN
     best_effort: bool = False
     request_reserved: bool = False
+    request_attempts: int = 0
 
 
 NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
@@ -137,6 +141,10 @@ class ExecutionContext:
     _extracted_variables: dict[str, JsonValue] = field(default_factory=dict)
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
+    request_attempts: dict[str, int] = field(default_factory=dict, repr=False)
+    request_reservers: dict[str, Callable[[], Awaitable[None]]] = field(
+        default_factory=dict, repr=False
+    )
     request_budget: RequestBudget | None = field(default=None, repr=False)
     status_callback: NodeStatusCallback | None = field(default=None, repr=False)
     checkpoint_scope: tuple[str, ...] = field(default=(), repr=False)
@@ -487,6 +495,7 @@ class WorkflowScheduler:
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
         notified: dict[str, NodeStatus] = {}
         attempt_offsets = resume_attempts or {}
+        _restore_request_attempts(run_context, resume_records)
         reservations = {
             record.node_id: _AttemptReservation(
                 attempts=record.attempts,
@@ -657,7 +666,9 @@ class WorkflowScheduler:
                 started_at=started_at,
                 input_hash=input_hash,
             )
-            await _notify_attempt_reserved(
+
+            context.request_reservers[node.id] = partial(
+                _notify_attempt_reserved,
                 node,
                 attempts=attempts,
                 started_at=started_at,
@@ -665,6 +676,7 @@ class WorkflowScheduler:
                 context=context,
                 callback=on_node_status,
             )
+            await context.request_reservers[node.id]()
             failure: NodeExecutionError
             try:
                 async with asyncio.timeout(policy.timeout_seconds):
@@ -784,15 +796,6 @@ def _node_consumes_request(node: WorkflowNode) -> bool:
     return node_type_consumes_request(node.effective_type)
 
 
-def node_type_consumes_request(node_type: NodeType) -> bool:
-    return node_type in {
-        NodeType.API,
-        NodeType.SQL,
-        NodeType.REDIS,
-        NodeType.CAPABILITY,
-    }
-
-
 def _nested_request_attempts(
     records: tuple[NodeRunRecord, ...],
     *,
@@ -810,12 +813,6 @@ def _nested_request_attempts(
                 _resumed_request_attempts(record, record.attempts),
             )
     return sum(attempts.values())
-
-
-def _resumed_request_attempts(record: NodeRunRecord | None, reserved_attempts: int) -> int:
-    if record is None:
-        return reserved_attempts
-    return max(reserved_attempts, record.attempts, len(record.result.observations))
 
 
 def _schedule_runtime_limit(
@@ -1345,6 +1342,13 @@ async def _notify_status_changes(
     context: ExecutionContext,
     callback: NodeStatusCallback | None,
 ) -> None:
+    for node_id, completed_record in tuple(records.items()):
+        count = context.request_attempts.get(node_id, 0)
+        if count > completed_record.result.request_attempts:
+            records[node_id] = replace(
+                completed_record,
+                result=completed_record.result.model_copy(update={"request_attempts": count}),
+            )
     if callback is None:
         return
     for node_id, status in statuses.items():
@@ -1361,6 +1365,7 @@ async def _notify_status_changes(
                 name=nodes[node_id].name,
                 status=status,
                 attempts=record.attempts if record else 0,
+                request_attempts=context.request_attempts.get(node_id, 0),
                 error_code=record.error_code if record else None,
                 error_message=record.error_message if record else None,
                 result=record.result if record else None,
@@ -1384,6 +1389,8 @@ async def _notify_attempt_reserved(
     context: ExecutionContext,
     callback: NodeStatusCallback | None,
 ) -> None:
+    if _node_consumes_request(node):
+        context.request_attempts[node.id] = context.request_attempts.get(node.id, 0) + 1
     if callback is None:
         return
     await callback(
@@ -1403,6 +1410,7 @@ async def _notify_attempt_reserved(
             phase=node.phase,
             best_effort=node.best_effort,
             request_reserved=_node_consumes_request(node),
+            request_attempts=context.request_attempts.get(node.id, 0),
         )
     )
 
@@ -1415,3 +1423,10 @@ def _input_hash(node_id: str, context_snapshot: dict[str, JsonValue]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _restore_request_attempts(
+    context: ExecutionContext, records: tuple[NodeRunRecord, ...]
+) -> None:
+    for record in records:
+        context.request_attempts[record.node_id] = _resumed_request_attempts(record)

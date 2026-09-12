@@ -141,6 +141,7 @@ class RunnerCheckpointResume(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
+    request_attempts: int = Field(default=0, ge=0)
     output: JsonValue = None
     result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)
@@ -162,6 +163,7 @@ class RunnerCheckpointRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     status: NodeStatus
     attempts: int = Field(ge=0, le=100)
+    request_attempts: int = Field(default=0, ge=0)
     output: JsonValue = None
     result: NodeResult | None = None
     error_code: str | None = Field(default=None, max_length=100)

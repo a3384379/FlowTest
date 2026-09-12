@@ -1127,3 +1127,138 @@ def _preview_test_prepared_workflow(
         subflows={"outer": parent},
     )
     return PreparedWorkflow(snapshot=prepared.snapshot, runs=(prepared,))
+
+
+def test_nested_preview_uses_polling_reservations_for_main_and_cleanup() -> None:
+    from app.engine.request_accounting import preview_node_request_attempts
+    from app.services.workflow_runtime import _preview_node_request_attempts as runtime_attempts
+    from app.services.workflows import _preview_node_request_attempts as service_attempts
+
+    parent = _preview_test_definition(with_cleanup=True, subflow=True)
+    raw = _preview_test_definition(with_cleanup=True).model_dump(mode="json")
+    for node in raw["nodes"]:
+        if node["type"] == "api":
+            node["config"]["max_retries"] = 2
+            node["config"]["polling"] = {
+                "expression": "body.status",
+                "expected": "done",
+                "max_attempts": 4,
+            }
+            if node["phase"] == "cleanup":
+                node["cleanup_retry_budget"] = 1
+    leaf = WorkflowDefinition.model_validate(raw)
+    for node in leaf.nodes:
+        assert (
+            service_attempts(node) == runtime_attempts(node) == preview_node_request_attempts(node)
+        )
+    bounded = _bounded_preview_prepared_workflow(
+        _preview_test_prepared_workflow(parent, leaf), PreviewBudget(max_requests=40, max_nodes=100)
+    )
+    nested = bounded.runs[0].subflows["outer"].subflows["nested"]
+    assert nested.definition.run_policy.request_budget == 12
+    assert nested.definition.run_policy.cleanup_request_budget == 8
+    assert nested.snapshot["preview_request_reservation"] == 20
+
+
+@pytest.mark.asyncio
+async def test_real_preview_preparation_plan_and_nested_polling_scheduler(
+    s51_context: dict[str, Any],  # noqa: F811 - pytest injects the imported fixture
+) -> None:
+    import httpx
+    from test_workflow_control_nodes import AllowOutbound
+
+    from app.domain.network import OutboundNetworkPolicy
+    from app.engine.scheduler import ExecutionContext, WorkflowScheduler
+    from app.models.access import User
+    from app.models.workflows import Workflow, WorkflowVersion
+    from app.services.workflow_runtime import WorkflowNodeExecutor
+
+    async with s51_context["sessions"]() as session:
+        actor = await session.scalar(select(User))
+        leaf_payload = _preview_test_definition(with_cleanup=True).model_dump(mode="json")
+        for node in leaf_payload["nodes"]:
+            if node["type"] == "api":
+                node["config"]["api_definition_id"] = str(s51_context["definition_id"])
+        leaf_payload["nodes"][1]["config"].update(
+            {
+                "max_retries": 2,
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "done",
+                    "max_attempts": 4,
+                    "interval_seconds": 0.01,
+                },
+            }
+        )
+        WorkflowDefinition.model_validate(leaf_payload)
+        child = Workflow(
+            project_id=s51_context["project_id"],
+            name="轮询子流程",
+            draft_definition=leaf_payload,
+            draft_revision=1,
+            current_version=1,
+            created_by_id=actor.id,
+        )
+        session.add(child)
+        await session.flush()
+        session.add(
+            WorkflowVersion(
+                workflow_id=child.id,
+                version=1,
+                definition=leaf_payload,
+                fingerprint="c" * 64,
+                published_at=datetime.now(UTC),
+                created_by_id=actor.id,
+            )
+        )
+        await session.flush()
+        parent_payload = _preview_test_definition(with_cleanup=True, subflow=True).model_dump(
+            mode="json"
+        )
+        parent_payload["nodes"][1]["config"]["workflow_id"] = str(child.id)
+        parent_payload["nodes"][-1]["config"]["api_definition_id"] = str(
+            s51_context["definition_id"]
+        )
+        parent = WorkflowDefinition.model_validate(parent_payload)
+        execution, plan = await WorkflowService(session).prepare_preview_execution(
+            actor=actor,
+            project_id=s51_context["project_id"],
+            workflow_id=None,
+            change_set_id=uuid4(),
+            approval_id=uuid4(),
+            proposal_fingerprint="a" * 64,
+            context_fingerprint="b" * 64,
+            definition=parent,
+            environment_id=s51_context["sandbox_environment_id"],
+            runtime_variables={},
+            runtime_headers={},
+            budget=PreviewBudget(max_requests=14, max_nodes=100),
+        )
+        assert isinstance(plan, WorkflowRunPlan)
+        nested = plan.prepared.subflows["work"]
+        assert nested.definition.run_policy.request_budget == 12
+        assert nested.definition.run_policy.cleanup_request_budget == 1
+        sent = 0
+
+        def respond(_request: httpx.Request) -> httpx.Response:
+            nonlocal sent
+            sent += 1
+            return httpx.Response(200, json={"status": "done" if sent >= 4 else "pending"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            executor = WorkflowNodeExecutor(
+                client,
+                plan.prepared.requests,
+                plan.definition,
+                OutboundNetworkPolicy(),
+                subflows=plan.prepared.subflows,
+                outbound_guard=AllowOutbound(),
+            )
+            result = await WorkflowScheduler(executor).run(
+                plan.definition,
+                context=ExecutionContext(),
+                shared_request_budget=RequestBudget(plan.request_budget),
+            )
+        assert result.status.value == "passed", result
+        assert sent == 6  # Four polls and independently budgeted child/parent cleanup.
+        assert execution.run_purpose == "preview"

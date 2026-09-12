@@ -1,4 +1,11 @@
-import { expect, test, type APIRequestContext, type Page, type Response } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from '@playwright/test'
 
 import { authenticate } from './support/auth'
 
@@ -37,9 +44,11 @@ async function createCase(
   await dialog.getByLabel('用例名称').fill(caseName)
   await chooseOption(page, dialog.getByLabel('已发布工作流'), workflowName)
   await chooseOption(page, dialog.getByLabel('运行环境'), environmentName)
-  await dialog.getByLabel('标签').fill('s15')
-  await page.keyboard.press('Enter')
-  await page.keyboard.press('Escape')
+  const tagsSelect = dialog.getByLabel('标签')
+  await tagsSelect.fill('s15')
+  await tagsSelect.press('Enter')
+  await expect(selectControl(tagsSelect)).toContainText('s15')
+  await tagsSelect.press('Escape')
   const created = waitForProjectPost(page, '/test-cases')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
   await expectSuccessful(created)
@@ -182,16 +191,21 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await expect(runQueue.getByRole('row').nth(1)).toContainText('passed', { timeout: 30_000 })
 }
 
-async function chooseOption(
-  page: Page,
-  select: ReturnType<Page['getByLabel']>,
-  optionName: string,
-) {
+async function chooseOption(page: Page, select: Locator, optionName: string) {
+  await expect(select).toBeEnabled()
   await select.click()
+  if (await select.isEditable()) await select.fill(optionName)
   const dropdown = page.locator('.ant-select-dropdown:visible').last()
   const option = dropdown.getByText(optionName, { exact: true })
   await expect(option).toBeVisible()
   await option.click()
+  await expect(selectControl(select)).toContainText(optionName)
+}
+
+function selectControl(select: Locator): Locator {
+  return select.locator(
+    'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]',
+  )
 }
 
 function assetRow(page: Page, name: string) {

@@ -1,3 +1,6 @@
+import { ConfigProvider } from 'antd'
+import { createMemoryRouter, RouterProvider, Link, Outlet } from 'react-router-dom'
+import { DraftSessionProvider } from '../drafts/DraftSessionProvider'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -36,6 +39,169 @@ describe('APIWorkbench', () => {
     await user.click(screen.getByRole('button', { name: /保存新版本/ }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(screen.queryByText('本地未保存')).not.toBeInTheDocument()
+  })
+
+  it('warns when a restored draft was written against an older server version', async () => {
+    const scope = 'stale-draft:project'
+    const props = {
+      loading: false,
+      saving: false,
+      previewing: false,
+      onSave: vi.fn(),
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+      draftScope: scope,
+    }
+    const first = render(<APIWorkbench {...props} detail={detail} />)
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/draft-from-v1' },
+    })
+    first.unmount()
+
+    render(
+      <APIWorkbench
+        {...props}
+        detail={{ ...detail, version: { ...detail.version, version: 2, path: '/server-v2' } }}
+      />,
+    )
+
+    expect(await screen.findByDisplayValue('/draft-from-v1')).toBeVisible()
+    expect(screen.getByText('服务器有新版本，已保留本地编辑，请核对后保存')).toBeVisible()
+  })
+
+  it('retains a newer A draft after an A to B to A save race, including another project', async () => {
+    let finish!: (value: ApiVersion) => void
+    const onSave = vi.fn(
+      () =>
+        new Promise<ApiVersion>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const common = {
+      loading: false,
+      saving: false,
+      previewing: false,
+      onSave,
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+    }
+    const view = (resource: ApiDetail, scope = 'aba:project-a') => (
+      <APIWorkbench {...common} detail={resource} draftScope={scope} />
+    )
+    const rendered = render(view(detail))
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/submitted-a' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    rendered.rerender(view({ ...detail, definition: { ...detail.definition, id: 'b' } }))
+    rendered.rerender(view(detail, 'aba:project-b'))
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/project-b' },
+    })
+    rendered.rerender(view(detail))
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/newer-a' },
+    })
+    finish({ ...detail.version, version: 2, path: '/submitted-a' })
+    expect(await screen.findByDisplayValue('/newer-a')).toBeVisible()
+    expect(screen.getByText('本地未保存')).toBeVisible()
+    const key = `flowtest:api-draft:v1:${encodeURIComponent('aba:project-a')}:${detail.definition.id}`
+    expect(JSON.parse(localStorage.getItem(key)!).fields.path).toBe('/newer-a')
+    rendered.rerender(view(detail, 'aba:project-b'))
+    expect(await screen.findByDisplayValue('/project-b')).toBeVisible()
+  })
+
+  it('refreshes a clean baseline but retains and flags dirty edits on server updates', async () => {
+    const props = {
+      loading: false,
+      saving: false,
+      previewing: false,
+      onSave: vi.fn(),
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+      draftScope: 'refresh:project',
+    }
+    const rendered = render(<APIWorkbench {...props} detail={detail} />)
+    rendered.rerender(
+      <APIWorkbench
+        {...props}
+        detail={{ ...detail, version: { ...detail.version, version: 2, path: '/server-v2' } }}
+      />,
+    )
+    expect(await screen.findByDisplayValue('/server-v2')).toBeVisible()
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/dirty-v2' },
+    })
+    rendered.rerender(
+      <APIWorkbench
+        {...props}
+        detail={{ ...detail, version: { ...detail.version, version: 3, path: '/server-v3' } }}
+      />,
+    )
+    expect(await screen.findByDisplayValue('/dirty-v2')).toBeVisible()
+    expect(await screen.findByText('服务器有新版本，已保留本地编辑，请核对后保存')).toBeVisible()
+  })
+
+  it('guards real SPA links and restores memory drafts after editor unmount with failed storage', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota')
+    })
+    const user = userEvent.setup()
+    const router = createMemoryRouter(
+      [
+        {
+          element: (
+            <DraftSessionProvider>
+              <Link to="/other">侧栏变量</Link>
+              <Link to="/api">接口模块</Link>
+              <Outlet />
+            </DraftSessionProvider>
+          ),
+          children: [
+            {
+              path: '/api',
+              element: (
+                <APIWorkbench
+                  detail={detail}
+                  loading={false}
+                  saving={false}
+                  previewing={false}
+                  onSave={vi.fn()}
+                  onPreview={vi.fn()}
+                  onRename={vi.fn()}
+                  draftScope="spa:project"
+                />
+              ),
+            },
+            { path: '/other', element: <div>变量模块内容</div> },
+          ],
+        },
+      ],
+      { initialEntries: ['/api'] },
+    )
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <RouterProvider router={router} />
+      </ConfigProvider>,
+    )
+    fireEvent.change(await screen.findByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/memory-only' },
+    })
+    await user.click(screen.getByRole('link', { name: '侧栏变量' }))
+    await waitFor(() => expect(screen.getByText('草稿尚未持久化')).toBeVisible())
+    await user.click(screen.getByRole('button', { name: '留在当前页保存' }))
+    expect(screen.getByDisplayValue('/memory-only')).toBeVisible()
+    await user.click(screen.getByRole('link', { name: '侧栏变量' }))
+    await user.click(screen.getByRole('button', { name: '保留草稿并切换' }))
+    expect(await screen.findByText('变量模块内容')).toBeVisible()
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    await user.click(screen.getByRole('link', { name: '接口模块' }))
+    await user.click(screen.getByRole('button', { name: '保留草稿并切换' }))
+    expect(await screen.findByDisplayValue('/memory-only')).toBeVisible()
+    expect(screen.getByText('本地未保存')).toBeVisible()
   })
 
   it('renders loading and empty states without a selected API', () => {
@@ -137,7 +303,7 @@ describe('APIWorkbench', () => {
     expect(await screen.findByDisplayValue('/edited-while-saving')).toBeVisible()
     expect(screen.getByText('本地未保存')).toBeVisible()
     const key = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
-    expect(JSON.parse(localStorage.getItem(key) ?? '{}').path).toBe('/edited-while-saving')
+    expect(JSON.parse(localStorage.getItem(key) ?? '{}').fields.path).toBe('/edited-while-saving')
   })
 
   it('does not clear the newly selected API when the previous save finishes', async () => {
@@ -188,7 +354,7 @@ describe('APIWorkbench', () => {
 
     expect(await screen.findByDisplayValue('/second-api')).toBeVisible()
     const firstKey = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
-    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').path).toBe('/first-draft')
+    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').fields.path).toBe('/first-draft')
   })
 
   it('edits a selected API continuously and saves a new typed version', async () => {

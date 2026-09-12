@@ -1309,3 +1309,92 @@ def _mapping(path: str, *, template: str | None = None) -> FieldMapping:
             "target": {"node_id": "target", "location": "body", "key": "value"},
         }
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_after", [None, 2])
+async def test_polling_checkpoints_reserve_before_send_and_recovery_counts_every_request(
+    stop_after: int | None,
+) -> None:
+    from dataclasses import replace
+
+    from app.runner.workflow import _remaining_request_budget as runner_budget
+    from app.services.workflow_runtime import _checkpoint_record
+    from app.services.workflows import _remaining_preview_request_budget
+
+    sent = 0
+    cancellation = CancellationToken()
+    checkpoints: list[NodeStatusUpdate] = []
+
+    async def checkpoint(update: NodeStatusUpdate) -> None:
+        if update.request_reserved:
+            assert update.request_attempts == sent + 1
+            checkpoints.append(update)
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        nonlocal sent
+        sent += 1
+        assert checkpoints[-1].request_attempts == sent
+        if sent == stop_after:
+            cancellation.cancel()
+        return httpx.Response(200, json={"status": "pending"})
+
+    node = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "done",
+                    "max_attempts": 4,
+                    "interval_seconds": 0.01,
+                },
+            },
+        )
+    )
+    definition = _wrapper_workflow(node)
+    definition = definition.model_copy(
+        update={"run_policy": definition.run_policy.model_copy(update={"request_budget": 3})}
+    )
+    request = PreparedRequest(HttpMethod.GET, "https://example.test/status", (), None, ())
+    prepared = PreparedWorkflowRequest(request, request, BodyKind.NONE, None)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {node.id: prepared},
+            definition,
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),
+        )
+        result = await WorkflowScheduler(executor).run(
+            definition, on_node_status=checkpoint, cancellation=cancellation
+        )
+        expected_count = stop_after or 3
+        assert sent == expected_count
+        assert [update.request_attempts for update in checkpoints] == list(
+            range(1, expected_count + 1)
+        )
+        crash_record = _checkpoint_record(checkpoints[-1])
+        resumed = await WorkflowScheduler(executor).run(
+            definition,
+            on_node_status=checkpoint,
+            resume_records=(crash_record,),
+            resume_attempts={node.id: crash_record.attempts},
+        )
+    assert sent == 3
+    resumed_record = next(item for item in resumed.records if item.node_id == "poll")
+    assert resumed_record.result.request_attempts == 3
+    record = next(item for item in result.records if item.node_id == "poll")
+    assert record.attempts == 1
+    assert record.result.request_attempts == expected_count
+    # Even a crash after the reservation but before observing the response retains the debit.
+    for restored in (crash_record, record):
+        assert _remaining_preview_request_budget(5, (restored,)).remaining == 5 - expected_count
+        assert runner_budget(5, (restored,)).remaining == 5 - expected_count
+    # Historical checkpoints without explicit counts retain observation-based accounting.
+    historical = replace(record, result=record.result.model_copy(update={"request_attempts": 0}))
+    assert _remaining_preview_request_budget(5, (historical,)).remaining == 5 - max(
+        record.attempts, len(record.result.observations)
+    )

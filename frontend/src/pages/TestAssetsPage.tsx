@@ -519,10 +519,10 @@ export function CaseDialog({
           <Input.TextArea rows={2} />
         </Form.Item>
         <Form.Item name="workflowId" label="已发布工作流" rules={[{ required: true }]}>
-          <Select options={workflows.map(option)} />
+          <Select showSearch optionFilterProp="label" options={workflows.map(option)} />
         </Form.Item>
         <Form.Item name="environmentId" label="运行环境" rules={[{ required: true }]}>
-          <Select options={environments.map(option)} />
+          <Select showSearch optionFilterProp="label" options={environments.map(option)} />
         </Form.Item>
         <Form.Item name="folderId" label="目录">
           <Select allowClear options={folders.map(option)} />
@@ -571,7 +571,7 @@ export function SuiteDialog({
           <Input.TextArea rows={2} />
         </Form.Item>
         <Form.Item name="caseIds" label="已发布测试用例" rules={[{ required: true }]}>
-          <Select mode="multiple" options={cases.map(option)} />
+          <Select mode="multiple" showSearch optionFilterProp="label" options={cases.map(option)} />
         </Form.Item>
         <Form.Item name="folderId" label="目录">
           <Select allowClear options={folders.map(option)} />
