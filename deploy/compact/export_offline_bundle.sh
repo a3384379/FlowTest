@@ -40,7 +40,7 @@ backend_source="${FLOWTEST_BACKEND_IMAGE:-flowtest/backend:local}"
 frontend_source="${FLOWTEST_FRONTEND_IMAGE:-flowtest/frontend:local}"
 postgres_source="${FLOWTEST_POSTGRES_IMAGE:-postgres:17.6-alpine}"
 redis_source="${FLOWTEST_REDIS_IMAGE:-redis:8.2.1-alpine}"
-minio_source="${FLOWTEST_MINIO_IMAGE:-minio/minio:RELEASE.2025-07-23T15-54-02Z}"
+minio_source="${FLOWTEST_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z}"
 
 for image_reference in \
   "${backend_source}" \
