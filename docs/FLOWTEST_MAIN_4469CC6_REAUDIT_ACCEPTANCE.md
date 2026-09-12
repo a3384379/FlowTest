@@ -4,6 +4,8 @@
 
 审计基线：`4469cc62fb3f1e2dba497838cecceb6ddbc48994`。输入报告：`FlowTest_Main_4469cc6_Reaudit.md`。
 
+已验证实现提交：`4280dc347bd970bf8e205baca8445a4019b63ac9`（`fix: resolve main reaudit input budgets and draft lifecycle gaps`）。后续仅补充本验收文档，不改变运行代码。
+
 本记录仅覆盖该报告 B01—B05。审计报告作为缺陷证据，不将报告中的建议或历史测试数字视为本次验收结果。
 
 ## 修复与可复现证据
@@ -40,6 +42,8 @@ Playwright CLI 使用最终镜像和本地专用验收账号，在现有 E2E 项
 本地截图：`output/playwright/main-4469cc6-draft-session.png`。跨项目隔离、ABA 晚响应与 clean/dirty 版本刷新由确定性组件测试覆盖，不扩大为真实浏览器已验证范围。未保存或发布测试编辑，也未触发业务请求。
 
 最终验收使用独立重新打开的浏览器。更早会话在本地镜像替换时引用旧资源文件而失败，该会话不计通过；登录前的一次未认证 refresh 401 不计为受保护页面运行错误。
+
+最终受保护页面会话的控制台检查为 0 errors、0 warnings。
 
 ## 验证边界
 
