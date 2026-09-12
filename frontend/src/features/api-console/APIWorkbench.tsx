@@ -56,6 +56,17 @@ export type WorkbenchFields = BodyEditorFields & {
   assertions: Array<Omit<ApiVersion['assertions'][number], 'expected'> & { expected_text: string }>
 }
 
+type PersistedApiDraft = {
+  schemaVersion: 2
+  fields: WorkbenchFields
+  baseVersion: number
+}
+
+type RestoredApiDraft = {
+  fields: WorkbenchFields
+  baseVersion: number | null
+}
+
 export default function APIWorkbench(props: APIWorkbenchProps) {
   if (!props.detail) {
     return props.loading ? <Card loading /> : <Empty description="请选择接口后进行持续编辑" />
@@ -225,12 +236,13 @@ function useApiDraft(
     return () => window.removeEventListener('beforeunload', blockUnload)
   }, [restored, storageError])
   function persist(values: WorkbenchFields) {
-    const failed = !writeApiDraft(props.draftScope, props.detail.definition.id, values)
+    const baseVersion = session.apis.get(identity)?.baseVersion ?? props.detail.version.version
+    const failed = !writeApiDraft(props.draftScope, props.detail.definition.id, values, baseVersion)
     session.apis.set(identity, {
       fields: structuredClone(values),
       generation: session.nextGeneration(),
       storageError: failed,
-      baseVersion: session.apis.get(identity)?.baseVersion ?? props.detail.version.version,
+      baseVersion,
     })
     session.markUnsafe(identity, failed)
     setStorageError(failed)
@@ -247,7 +259,19 @@ function useApiDraft(
       const saved = await props.onSave(toInput(values))
       const latest = session.apis.get(identity)
       if (latest && latest.generation !== generation) {
-        session.apis.set(identity, { ...latest, baseVersion: saved.version })
+        const persisted = writeApiDraft(
+          props.draftScope,
+          props.detail.definition.id,
+          latest.fields,
+          saved.version,
+        )
+        session.apis.set(identity, {
+          ...latest,
+          storageError: !persisted,
+          baseVersion: saved.version,
+        })
+        session.markUnsafe(identity, !persisted)
+        setStorageError(!persisted)
         return
       }
       // An inactive resource is retained for its next mount; it cannot clear another form.
@@ -272,10 +296,10 @@ function restoreApiSessionDraft(
   const stored = readApiDraft(props.draftScope, props.detail.definition.id)
   return stored
     ? {
-        fields: stored,
+        fields: stored.fields,
         generation: session.nextGeneration(),
         storageError: false,
-        baseVersion: props.detail.version.version,
+        baseVersion: stored.baseVersion ?? props.detail.version.version,
       }
     : null
 }
@@ -286,26 +310,47 @@ function apiDraftKey(scope: string | undefined, apiId: string): string | null {
     : null
 }
 
-function readApiDraft(scope: string | undefined, apiId: string): WorkbenchFields | null {
+function readApiDraft(scope: string | undefined, apiId: string): RestoredApiDraft | null {
   const key = apiDraftKey(scope, apiId)
   if (!key) return null
   try {
     const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? 'null')
-    return value && typeof value === 'object' ? (value as WorkbenchFields) : null
+    if (isPersistedApiDraft(value)) {
+      return { fields: value.fields, baseVersion: value.baseVersion }
+    }
+    return value && typeof value === 'object'
+      ? { fields: value as WorkbenchFields, baseVersion: null }
+      : null
   } catch {
     return null
   }
 }
 
-function writeApiDraft(scope: string | undefined, apiId: string, value: WorkbenchFields): boolean {
+function writeApiDraft(
+  scope: string | undefined,
+  apiId: string,
+  fields: WorkbenchFields,
+  baseVersion: number,
+): boolean {
   const key = apiDraftKey(scope, apiId)
   if (!key) return false
   try {
-    window.localStorage.setItem(key, JSON.stringify(value))
+    const draft: PersistedApiDraft = { schemaVersion: 2, fields, baseVersion }
+    window.localStorage.setItem(key, JSON.stringify(draft))
     return true
   } catch {
     return false
   }
+}
+
+function isPersistedApiDraft(value: unknown): value is PersistedApiDraft {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as Partial<PersistedApiDraft>
+  return (
+    draft.schemaVersion === 2 &&
+    typeof draft.baseVersion === 'number' &&
+    Boolean(draft.fields && typeof draft.fields === 'object')
+  )
 }
 
 function removeApiDraft(scope: string | undefined, apiId: string): boolean {

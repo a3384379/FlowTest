@@ -41,6 +41,34 @@ describe('APIWorkbench', () => {
     expect(screen.queryByText('本地未保存')).not.toBeInTheDocument()
   })
 
+  it('warns when a restored draft was written against an older server version', async () => {
+    const scope = 'stale-draft:project'
+    const props = {
+      loading: false,
+      saving: false,
+      previewing: false,
+      onSave: vi.fn(),
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+      draftScope: scope,
+    }
+    const first = render(<APIWorkbench {...props} detail={detail} />)
+    fireEvent.change(screen.getByPlaceholderText('/api/users/{{user_id}}'), {
+      target: { value: '/draft-from-v1' },
+    })
+    first.unmount()
+
+    render(
+      <APIWorkbench
+        {...props}
+        detail={{ ...detail, version: { ...detail.version, version: 2, path: '/server-v2' } }}
+      />,
+    )
+
+    expect(await screen.findByDisplayValue('/draft-from-v1')).toBeVisible()
+    expect(screen.getByText('服务器有新版本，已保留本地编辑，请核对后保存')).toBeVisible()
+  })
+
   it('retains a newer A draft after an A to B to A save race, including another project', async () => {
     let finish!: (value: ApiVersion) => void
     const onSave = vi.fn(
@@ -79,7 +107,7 @@ describe('APIWorkbench', () => {
     expect(await screen.findByDisplayValue('/newer-a')).toBeVisible()
     expect(screen.getByText('本地未保存')).toBeVisible()
     const key = `flowtest:api-draft:v1:${encodeURIComponent('aba:project-a')}:${detail.definition.id}`
-    expect(JSON.parse(localStorage.getItem(key)!).path).toBe('/newer-a')
+    expect(JSON.parse(localStorage.getItem(key)!).fields.path).toBe('/newer-a')
     rendered.rerender(view(detail, 'aba:project-b'))
     expect(await screen.findByDisplayValue('/project-b')).toBeVisible()
   })
@@ -275,7 +303,7 @@ describe('APIWorkbench', () => {
     expect(await screen.findByDisplayValue('/edited-while-saving')).toBeVisible()
     expect(screen.getByText('本地未保存')).toBeVisible()
     const key = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
-    expect(JSON.parse(localStorage.getItem(key) ?? '{}').path).toBe('/edited-while-saving')
+    expect(JSON.parse(localStorage.getItem(key) ?? '{}').fields.path).toBe('/edited-while-saving')
   })
 
   it('does not clear the newly selected API when the previous save finishes', async () => {
@@ -326,7 +354,7 @@ describe('APIWorkbench', () => {
 
     expect(await screen.findByDisplayValue('/second-api')).toBeVisible()
     const firstKey = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
-    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').path).toBe('/first-draft')
+    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').fields.path).toBe('/first-draft')
   })
 
   it('edits a selected API continuously and saves a new typed version', async () => {
