@@ -18,9 +18,11 @@ type BodyFormContext = BodyEditorFields & { headers: KeyValueField[] }
 export default function BodyEditor({
   artifacts,
   syncHeaders = true,
+  onProgrammaticChange = () => undefined,
 }: {
   artifacts: Artifact[]
   syncHeaders?: boolean
+  onProgrammaticChange?: () => void
 }) {
   const form = Form.useFormInstance<BodyFormContext>()
   const mode = Form.useWatch('body_mode', form) ?? 'none'
@@ -35,6 +37,7 @@ export default function BodyEditor({
       recommendedContentType(nextMode, nextRawType),
     )
     form.setFieldValue('headers', result.headers)
+    onProgrammaticChange()
     autoContentType.current = result.autoValue
   }
 
@@ -57,6 +60,7 @@ export default function BodyEditor({
         mode={mode}
         rawType={rawType}
         artifacts={artifacts}
+        onProgrammaticChange={onProgrammaticChange}
         onRawTypeChange={(value) => syncContentType(mode, value)}
       />
     </Space>
@@ -68,26 +72,38 @@ function BodyContent({
   rawType,
   artifacts,
   onRawTypeChange,
+  onProgrammaticChange,
 }: {
   mode: BodyMode
   rawType: RawBodyType
   artifacts: Artifact[]
   onRawTypeChange: (value: RawBodyType) => void
+  onProgrammaticChange: () => void
 }) {
   if (mode === 'none') {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该请求不发送 Body" />
   }
-  if (mode === 'form') return <FormBodyFields />
-  if (mode === 'multipart') return <MultipartBodyFields artifacts={artifacts} />
-  return <RawBodyFields rawType={rawType} onRawTypeChange={onRawTypeChange} />
+  if (mode === 'form') return <FormBodyFields onProgrammaticChange={onProgrammaticChange} />
+  if (mode === 'multipart') {
+    return <MultipartBodyFields artifacts={artifacts} onProgrammaticChange={onProgrammaticChange} />
+  }
+  return (
+    <RawBodyFields
+      rawType={rawType}
+      onRawTypeChange={onRawTypeChange}
+      onProgrammaticChange={onProgrammaticChange}
+    />
+  )
 }
 
 function RawBodyFields({
   rawType,
   onRawTypeChange,
+  onProgrammaticChange,
 }: {
   rawType: RawBodyType
   onRawTypeChange: (value: RawBodyType) => void
+  onProgrammaticChange: () => void
 }) {
   const form = Form.useFormInstance<BodyFormContext>()
   const contentType = recommendedContentType('raw', rawType)
@@ -99,6 +115,7 @@ function RawBodyFields({
         'body_text',
         value?.trim() ? JSON.stringify(JSON.parse(value), null, 2) : '',
       )
+      onProgrammaticChange()
       void form.validateFields(['body_text'])
     } catch {
       void form.validateFields(['body_text'])
@@ -135,7 +152,7 @@ function RawBodyFields({
   )
 }
 
-function FormBodyFields() {
+function FormBodyFields({ onProgrammaticChange }: { onProgrammaticChange: () => void }) {
   const form = Form.useFormInstance<BodyFormContext>()
   const [bulkText, setBulkText] = useState<string | null>(null)
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
@@ -153,6 +170,7 @@ function FormBodyFields() {
           setBulkErrors(parsed.errors)
           if (parsed.errors.length) return
           form.setFieldValue('body_form', parsed.values)
+          onProgrammaticChange()
           setBulkText(null)
         }}
       />
@@ -184,7 +202,13 @@ function FormBodyFields() {
   )
 }
 
-function MultipartBodyFields({ artifacts }: { artifacts: Artifact[] }) {
+function MultipartBodyFields({
+  artifacts,
+  onProgrammaticChange,
+}: {
+  artifacts: Artifact[]
+  onProgrammaticChange: () => void
+}) {
   const form = Form.useFormInstance<BodyFormContext>()
   const [bulkText, setBulkText] = useState<string | null>(null)
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
@@ -207,6 +231,7 @@ function MultipartBodyFields({ artifacts }: { artifacts: Artifact[] }) {
             ...parsed.values.map((field) => ({ ...field, kind: 'text' as const })),
             ...files,
           ])
+          onProgrammaticChange()
           setBulkText(null)
         }}
       />
@@ -234,7 +259,13 @@ function MultipartBodyFields({ artifacts }: { artifacts: Artifact[] }) {
                 setBulkErrors([])
               }}
               bulkEditLabel="批量编辑文本字段"
-              render={(field) => <MultipartRow field={field} artifacts={artifacts} />}
+              render={(field) => (
+                <MultipartRow
+                  field={field}
+                  artifacts={artifacts}
+                  onProgrammaticChange={onProgrammaticChange}
+                />
+              )}
             />
             <Form.ErrorList errors={errors} />
           </>
@@ -244,7 +275,15 @@ function MultipartBodyFields({ artifacts }: { artifacts: Artifact[] }) {
   )
 }
 
-function MultipartRow({ field, artifacts }: { field: { name: number }; artifacts: Artifact[] }) {
+function MultipartRow({
+  field,
+  artifacts,
+  onProgrammaticChange,
+}: {
+  field: { name: number }
+  artifacts: Artifact[]
+  onProgrammaticChange: () => void
+}) {
   const form = Form.useFormInstance<BodyFormContext>()
   const kind = Form.useWatch(['body_multipart', field.name, 'kind'], form) ?? 'text'
   return (
@@ -260,7 +299,10 @@ function MultipartRow({ field, artifacts }: { field: { name: number }; artifacts
             { value: 'text', label: 'Text' },
             { value: 'file', label: 'File' },
           ]}
-          onChange={() => form.setFieldValue(['body_multipart', field.name, 'value'], '')}
+          onChange={() => {
+            form.setFieldValue(['body_multipart', field.name, 'value'], '')
+            onProgrammaticChange()
+          }}
         />
       </Form.Item>
       <Form.Item

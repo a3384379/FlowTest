@@ -21,12 +21,15 @@ class SimpleFlowInput(BaseModel):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
     type: SimpleInputType
     required: bool = True
+    nullable: bool = False
     default: JsonValue = None
     description: str = Field(default="", max_length=1000)
 
     @model_validator(mode="after")
     def validate_default_type(self) -> "SimpleFlowInput":
         if self.default is None:
+            if "default" in self.model_fields_set and not self.nullable:
+                raise ValueError("null input defaults require nullable=true")
             return self
         valid = {
             "string": isinstance(self.default, str),
@@ -100,6 +103,16 @@ class SimplePolling(BaseModel):
     max_attempts: int = Field(default=1, ge=1, le=20)
     interval_seconds: float = Field(default=0, ge=0, le=60)
     timeout_seconds: int = Field(default=30, ge=1, le=300)
+    target: str = Field(min_length=1, max_length=500)
+    operator: Literal["equals", "not_equals", "contains", "exists"] = "equals"
+    expected: JsonValue = None
+    terminal_failure_values: list[JsonValue] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_completion(self) -> "SimplePolling":
+        if self.operator != "exists" and "expected" not in self.model_fields_set:
+            raise ValueError("polling completion requires expected unless operator is exists")
+        return self
 
 
 class SimpleFlowOutput(BaseModel):
@@ -168,6 +181,16 @@ class SimpleFlowDiagnostic(BaseModel):
     retryable: bool = False
 
 
+class SimpleFlowTimings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolve: int = Field(default=0, ge=0)
+    build: int = Field(default=0, ge=0)
+    validate_and_stage: int = Field(default=0, ge=0)
+    transaction: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
+
+
 class SimpleFlowProposalResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -184,7 +207,7 @@ class SimpleFlowProposalResponse(BaseModel):
     execution_status: Literal["not_run"] = "not_run"
     review_url: str = Field(max_length=1024)
     diagnostics: list[SimpleFlowDiagnostic] = Field(default_factory=list, max_length=500)
-    timings_ms: dict[str, int] = Field(default_factory=dict, max_length=20)
+    timings_ms: SimpleFlowTimings = Field(default_factory=SimpleFlowTimings)
     flow_spec_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_workflow_id: UUID | None = None
     target_revision: int | None = None

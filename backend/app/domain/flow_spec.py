@@ -23,6 +23,7 @@ from app.engine.contracts import (
     FieldMapping,
     NodeType,
     Position,
+    RuntimeInputDefinition,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
@@ -118,6 +119,9 @@ class FlowSpecParameter(BaseModel):
         pattern=r"^secret://[A-Za-z0-9._:/-]+$",
     )
     description: str = Field(default="", max_length=1000)
+    value_type: Literal["string", "number", "integer", "boolean", "object", "array"] = "string"
+    required: bool = False
+    nullable: bool = False
 
     @model_validator(mode="after")
     def validate_source(self) -> FlowSpecParameter:
@@ -759,8 +763,27 @@ def workflow_definition_to_flow_spec(
             variables=dict(definition.variables),
             settings=definition.settings,
             parameters=[
-                FlowSpecParameter(name=key, source=FlowSpecParameterSource.RUNTIME, value=value)
-                for key, value in definition.variables.items()
+                *[
+                    FlowSpecParameter(
+                        name=item.name,
+                        source=FlowSpecParameterSource.RUNTIME,
+                        value=definition.variables.get(item.name),
+                        value_type=item.value_type,
+                        required=item.required,
+                        nullable=item.nullable,
+                        description=item.description,
+                    )
+                    for item in definition.runtime_inputs
+                ],
+                *[
+                    FlowSpecParameter(
+                        name=key,
+                        source=FlowSpecParameterSource.RUNTIME,
+                        value=value,
+                    )
+                    for key, value in definition.variables.items()
+                    if key not in {item.name for item in definition.runtime_inputs}
+                ],
             ],
         )
     )
@@ -786,12 +809,27 @@ def flow_spec_to_workflow_definition(
     ]
     edges = [WorkflowEdge.model_validate(edge.model_dump(mode="json")) for edge in spec.edges]
     variables = dict(spec.variables)
+    runtime_inputs: list[RuntimeInputDefinition] = []
     for parameter in spec.parameters:
-        if parameter.source in {FlowSpecParameterSource.RUNTIME, FlowSpecParameterSource.CONSTANT}:
-            variables[parameter.name] = parameter.value or variables.get(parameter.name, "")
+        if (
+            parameter.source in {FlowSpecParameterSource.RUNTIME, FlowSpecParameterSource.CONSTANT}
+            and parameter.value is not None
+        ):
+            variables[parameter.name] = parameter.value
+        if parameter.source is FlowSpecParameterSource.RUNTIME:
+            runtime_inputs.append(
+                RuntimeInputDefinition(
+                    name=parameter.name,
+                    value_type=parameter.value_type,
+                    required=parameter.required,
+                    nullable=parameter.nullable,
+                    description=parameter.description,
+                )
+            )
     return WorkflowDefinition(
         schema_version="1.0",
         variables=variables,
+        runtime_inputs=runtime_inputs,
         nodes=nodes,
         edges=edges,
         settings=spec.settings,
@@ -899,7 +937,7 @@ def _unsupported_semantic_blockers(spec: FlowSpec) -> list[FlowSpecIssue]:
                     path=f"$.parameters[{index}].source",
                 )
             )
-        if parameter.description:
+        if parameter.description and parameter.source is not FlowSpecParameterSource.RUNTIME:
             blockers.append(
                 FlowSpecIssue(
                     code="UNSUPPORTED_PARAMETER_DESCRIPTION",

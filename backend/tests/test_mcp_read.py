@@ -235,7 +235,7 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
             organization_id=organization.id,
             name="MCP writer",
             account_key="mcp-writer",
-            scopes=["mcp:write"],
+            scopes=["mcp:write", "mcp:flow:propose"],
             expires_at=None,
             metadata={"purpose": "controlled-write tests"},
         )
@@ -334,6 +334,59 @@ def _controlled_write_payload(context: dict[str, Any], *, objective: str) -> dic
             }
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_registered_quick_tool_preserves_omitted_and_explicit_defaults(
+    mcp_context: dict[str, Any],
+) -> None:
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with MCPReadGatewayClient(
+        base_url="http://test",
+        token=mcp_context["write_token"],
+        transport=transport,
+    ) as gateway:
+        server = create_mcp_server(client=gateway)
+        result = await server.call_tool(
+            "flowtest.propose_simple_flow",
+            {
+                "request": {
+                    "project_id": str(mcp_context["project_id"]),
+                    "environment_id": str(mcp_context["environment_id"]),
+                    "name": "保留 Quick 输入默认值语义",
+                    "task_ref": "audit-pr98-defaults",
+                    "scenario_key": "audit.defaults",
+                    "inputs": [
+                        {"name": "omitted", "type": "string"},
+                        {"name": "nullable", "type": "string", "nullable": True, "default": None},
+                        {"name": "zero", "type": "integer", "default": 0},
+                        {"name": "disabled", "type": "boolean", "default": False},
+                        {"name": "empty", "type": "string", "default": ""},
+                        {"name": "object", "type": "object", "default": {}},
+                        {"name": "array", "type": "array", "default": []},
+                    ],
+                    "steps": [
+                        {
+                            "key": "request",
+                            "name": "调用接口",
+                            "api": {
+                                "api_definition_id": str(mcp_context["definition_id"]),
+                                "version": 1,
+                            },
+                        }
+                    ],
+                },
+                "idempotency_key": "audit-pr98-defaults-v1",
+            },
+        )
+
+    assert result.is_error is False
+    # The fixture intentionally has a service mismatch. Reaching semantic service
+    # validation proves the registered tool, gateway and ASGI request parser all
+    # accepted the omitted default alongside explicit null/zero/false/empty values.
+    assert result.structured_content["data"]["error"]["code"] == (
+        "FLOWSPEC_OPERATION_SERVICE_MISMATCH"
+    )
 
 
 @pytest.mark.asyncio

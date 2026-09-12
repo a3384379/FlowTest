@@ -62,6 +62,8 @@ export default function WorkflowsPage() {
     hasExplicitFocus: Boolean(initialWorkflowId),
     selectWorkflow: state.setWorkflowSelection,
     saveWorkflowDraft: state.saveWorkflowDraft,
+    discardWorkflowDraft: state.discardWorkflowDraft,
+    memoryDraftIds: state.memoryDraftIds,
     searchParams,
     setSearchParams,
   })

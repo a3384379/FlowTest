@@ -14,6 +14,12 @@ import { useWorkflowTabs } from './use-workflow-tabs'
 const draft = { nodes: [], edges: [] } as unknown as WorkflowDefinition
 
 describe('useWorkflowTabs', () => {
+  it('ignores close resolution when no close request is pending', async () => {
+    const rendered = renderTabsHook()
+    await act(async () => rendered.result.current.resolvePendingClose('discard'))
+    expect(rendered.result.current.pendingClose).toBeNull()
+  })
+
   beforeEach(() => {
     sessionStorage.clear()
     localStorage.clear()
@@ -181,6 +187,75 @@ describe('useWorkflowTabs', () => {
     expect(rendered.result.current.closingTabs).toBe(false)
   })
 
+  it('uses the workflow draft lifecycle to discard an in-memory draft', async () => {
+    const discardWorkflowDraft = vi.fn(() => ({ ok: true }) as const)
+    const rendered = renderHook(() =>
+      useWorkflowTabs({
+        userId: 'user-1',
+        projectId: 'project-1',
+        workflowIds: ['one'],
+        activeWorkflowId: 'one',
+        hasExplicitFocus: true,
+        selectWorkflow: vi.fn(),
+        saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+        discardWorkflowDraft,
+        memoryDraftIds: ['one'],
+        searchParams: new URLSearchParams('focus=one'),
+        setSearchParams: vi.fn(),
+      }),
+    )
+
+    await waitFor(() => expect(rendered.result.current.dirtyIds).toEqual(['one']))
+    act(() => rendered.result.current.requestCloseTabs(['one']))
+    await act(async () => rendered.result.current.resolvePendingClose('discard'))
+    expect(discardWorkflowDraft).toHaveBeenCalledWith('one')
+  })
+
+  it('keeps the close request open when the workflow lifecycle cannot discard', async () => {
+    const discardWorkflowDraft = vi.fn(() => ({ ok: false, error: '内存草稿仍被保留' }) as const)
+    const rendered = renderHook(() =>
+      useWorkflowTabs({
+        userId: 'user-1',
+        projectId: 'project-1',
+        workflowIds: ['one'],
+        activeWorkflowId: 'one',
+        hasExplicitFocus: true,
+        selectWorkflow: vi.fn(),
+        saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+        discardWorkflowDraft,
+        memoryDraftIds: ['one'],
+        searchParams: new URLSearchParams('focus=one'),
+        setSearchParams: vi.fn(),
+      }),
+    )
+
+    await waitFor(() => expect(rendered.result.current.dirtyIds).toEqual(['one']))
+    act(() => rendered.result.current.requestCloseTabs(['one']))
+    await act(async () => rendered.result.current.resolvePendingClose('discard'))
+    expect(rendered.result.current.storageError).toBe('内存草稿仍被保留')
+    expect(rendered.result.current.pendingClose).not.toBeNull()
+  })
+
+  it('can discard an in-memory draft without browser identity', async () => {
+    const rendered = renderHook(() =>
+      useWorkflowTabs({
+        userId: undefined,
+        projectId: null,
+        workflowIds: ['one'],
+        activeWorkflowId: 'one',
+        hasExplicitFocus: true,
+        selectWorkflow: vi.fn(),
+        saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+        memoryDraftIds: ['one'],
+        searchParams: new URLSearchParams('focus=one'),
+        setSearchParams: vi.fn(),
+      }),
+    )
+    act(() => rendered.result.current.requestCloseTabs(['one']))
+    await act(async () => rendered.result.current.resolvePendingClose('discard'))
+    expect(rendered.result.current.pendingClose).toBeNull()
+  })
+
   it('surfaces tab storage errors while retaining the in-memory tabs', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('full', 'QuotaExceededError')
@@ -236,6 +311,63 @@ describe('useWorkflowTabs', () => {
     await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one']))
     rendered.rerender({ userId: undefined })
     await waitFor(() => expect(readWorkflowTabs(key)).toBeNull())
+  })
+
+  it('clears tabs from the previous user without deleting another project for the same user', async () => {
+    const firstUserKey = workflowTabKey('user-1', 'project-1')
+    const sameUserProjectKey = workflowTabKey('user-1', 'project-2')
+    writeWorkflowTabs(firstUserKey, ['one'], 'one')
+    writeWorkflowTabs(sameUserProjectKey, ['two'], 'two')
+    const rendered = renderHook(
+      ({ userId, projectId }: { userId: string; projectId: string }) =>
+        useWorkflowTabs({
+          userId,
+          projectId,
+          workflowIds: ['one', 'two'],
+          activeWorkflowId: null,
+          hasExplicitFocus: true,
+          selectWorkflow: vi.fn(),
+          saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+          searchParams: new URLSearchParams(),
+          setSearchParams: vi.fn(),
+        }),
+      { initialProps: { userId: 'user-1', projectId: 'project-1' } },
+    )
+
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one']))
+    rendered.rerender({ userId: 'user-1', projectId: 'project-2' })
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['two']))
+    expect(readWorkflowTabs(firstUserKey)).not.toBeNull()
+
+    rendered.rerender({ userId: 'user-2', projectId: 'project-1' })
+    await waitFor(() => expect(readWorkflowTabs(sameUserProjectKey)).toBeNull())
+  })
+
+  it('reports a previous-user tab cleanup failure during an identity switch', async () => {
+    writeWorkflowTabs(workflowTabKey('user-1', 'project-1'), ['one'], 'one')
+    const rendered = renderHook(
+      ({ userId }: { userId: string }) =>
+        useWorkflowTabs({
+          userId,
+          projectId: 'project-1',
+          workflowIds: ['one'],
+          activeWorkflowId: 'one',
+          hasExplicitFocus: true,
+          selectWorkflow: vi.fn(),
+          saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+          searchParams: new URLSearchParams('focus=one'),
+          setSearchParams: vi.fn(),
+        }),
+      { initialProps: { userId: 'user-1' } },
+    )
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one']))
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+
+    rendered.rerender({ userId: 'user-2' })
+
+    await waitFor(() => expect(rendered.result.current.storageError).toBe('工作区页签清理失败'))
   })
 })
 

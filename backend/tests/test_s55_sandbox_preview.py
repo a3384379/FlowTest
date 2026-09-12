@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -55,6 +56,50 @@ def test_preview_rejects_runtime_routing_headers(header_name: str) -> None:
             approval_id=uuid4(),
             runtime_headers={header_name: "production.internal"},
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name",
+    ["prepare_preview_target_fingerprint", "prepare_preview_execution"],
+)
+async def test_preview_preparation_rejects_missing_runtime_inputs_before_target_requests(
+    method_name: str,
+) -> None:
+    definition_payload = _preview_test_definition(with_cleanup=True).model_dump(mode="json")
+    definition_payload["runtime_inputs"] = [
+        {"name": "required_id", "value_type": "string", "required": True}
+    ]
+    definition = WorkflowDefinition.model_validate(definition_payload)
+    service = object.__new__(WorkflowService)
+    service._projects = SimpleNamespace(authorize=AsyncMock())  # type: ignore[attr-defined]
+    service._validate_publishable = AsyncMock()  # type: ignore[method-assign]
+    prepare_preview = AsyncMock()
+    service._snapshots = SimpleNamespace(prepare_preview=prepare_preview)  # type: ignore[attr-defined]
+    common = {
+        "actor": cast(Any, SimpleNamespace(id=uuid4())),
+        "project_id": uuid4(),
+        "workflow_id": None,
+        "change_set_id": uuid4(),
+        "proposal_fingerprint": "a" * 64,
+        "definition": definition,
+        "environment_id": uuid4(),
+        "runtime_variables": {},
+        "runtime_headers": {},
+        "budget": PreviewBudget(),
+    }
+    if method_name == "prepare_preview_execution":
+        common.update(
+            approval_id=uuid4(),
+            context_fingerprint="b" * 64,
+        )
+
+    with pytest.raises(AppError) as error_info:
+        await getattr(service, method_name)(**common)
+
+    assert error_info.value.status_code == 422
+    assert error_info.value.code == "WORKFLOW_RUNTIME_INPUT_INVALID"
+    prepare_preview.assert_not_awaited()
 
 
 @pytest.mark.asyncio

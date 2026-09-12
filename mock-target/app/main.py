@@ -358,6 +358,7 @@ def _change_set_workflow_definition() -> dict[str, object]:
     return {
         "schema_version": "1.0",
         "variables": [],
+        "runtime_inputs": [],
         "nodes": [
             _change_set_workflow_node("start", "start", "开始", x=0),
             _change_set_workflow_node("end", "end", "结束", x=240),

@@ -34,9 +34,53 @@ from app.repositories.workflows import WorkflowRepository
 from app.schemas.mcp_simple_flows import SimpleFlowRequest
 from app.schemas.test_contexts import FlowSpecProposalRequest
 from app.services.mcp_flow_proposals import _contains_unsafe_jmespath_literal
+from app.services.mcp_simple_flows import _path_expression
 from app.services.service_accounts import ServiceAccountService
+from app.services.workflows import _validate_runtime_inputs
 
 pytestmark = pytest.mark.redaction_on
+
+
+def test_quick_safe_paths_support_bounded_array_indexes() -> None:
+    assert _path_expression("body.data.records[0].billId", "lookup", "output") == (
+        "body.data.records[0].billId"
+    )
+    with pytest.raises(Exception, match="安全的响应路径"):
+        _path_expression("body.data.records[-1].billId", "lookup", "output")
+
+
+def test_runtime_input_contract_distinguishes_missing_and_json_types() -> None:
+    from app.engine.contracts import WorkflowDefinition
+
+    definition = WorkflowDefinition.model_validate(
+        {
+            "runtime_inputs": [
+                {"name": "bill_id", "value_type": "string", "required": True},
+                {"name": "attempts", "value_type": "integer", "required": True},
+                {"name": "filters", "value_type": "array", "required": False},
+            ],
+            "nodes": [
+                {
+                    "id": "start",
+                    "name": "开始",
+                    "type": "start",
+                    "position": {"x": 0, "y": 0},
+                    "config": {},
+                },
+                {
+                    "id": "end",
+                    "name": "结束",
+                    "type": "end",
+                    "position": {"x": 100, "y": 0},
+                    "config": {},
+                },
+            ],
+            "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        }
+    )
+    with pytest.raises(Exception, match="运行参数缺失或类型不匹配"):
+        _validate_runtime_inputs(definition, {"attempts": '"3"'})
+    _validate_runtime_inputs(definition, {"bill_id": "null", "attempts": "3", "filters": "[]"})
 
 
 @pytest.fixture
@@ -796,7 +840,14 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
                 "assertions": [
                     {"target": "status_code", "operator": "status_code", "expected": 200}
                 ],
-                "polling": {"max_attempts": 3, "interval_seconds": 1.5, "timeout_seconds": 20},
+                "polling": {
+                    "max_attempts": 3,
+                    "interval_seconds": 1.5,
+                    "timeout_seconds": 20,
+                    "target": "body.status",
+                    "expected": "ready",
+                    "terminal_failure_values": ["failed"],
+                },
                 "outputs": [{"name": "health", "source": "body.status"}],
             },
             {
@@ -827,6 +878,22 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
     assert result["readiness"] == "ready"
     assert result["target_workflow_id"] is None
     assert result["proposal_revision"] == 1
+    assert set(result["timings_ms"]) == {
+        "resolve",
+        "build",
+        "validate_and_stage",
+        "transaction",
+        "total",
+    }
+    assert all(value >= 0 for value in result["timings_ms"].values())
+    assert result["timings_ms"]["total"] >= result["timings_ms"]["transaction"]
+    async with s51_context["sessions"]() as separate_session:
+        persisted = await separate_session.scalar(
+            select(IdempotencyRecord).where(IdempotencyRecord.idempotency_key == "quick-health-v1")
+        )
+        assert persisted is not None
+        assert persisted.response_body is not None
+        assert persisted.response_body["timings_ms"] == result["timings_ms"]
     replay = await s51_context["client"].post(
         "/api/v1/mcp/flow/simple-proposals", headers=headers, json=payload
     )
@@ -840,9 +907,20 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
     )
     assert inspection.status_code == 200, inspection.text
     proposed = inspection.json()["proposed_definition"]
+    runtime_inputs = {item["name"]: item for item in proposed["runtime_inputs"]}
+    assert runtime_inputs["attempts"] == {
+        "name": "attempts",
+        "value_type": "integer",
+        "required": True,
+        "nullable": False,
+        "description": "请求次数",
+    }
+    assert runtime_inputs["trace_id"]["value_type"] == "string"
     lookup_config = next(node["config"] for node in proposed["nodes"] if node["id"] == "lookup")
-    assert lookup_config["max_retries"] == 2
-    assert lookup_config["retry_delay_seconds"] == 1.5
+    assert lookup_config["max_retries"] == 0
+    assert lookup_config["polling"]["max_attempts"] == 3
+    assert lookup_config["polling"]["interval_seconds"] == 1.5
+    assert lookup_config["polling"]["expression"] == "body.status"
     assert lookup_config["timeout_seconds"] == 20
     lookup_edge = next(edge for edge in proposed["edges"] if edge["target"] == "lookup")
     transforms = {

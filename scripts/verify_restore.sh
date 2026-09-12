@@ -64,7 +64,7 @@ docker run -d --name "${postgres_container}" --network "${network}" \
 docker run -d --name "${minio_container}" --network "${network}" \
   -e MINIO_ROOT_USER=flowtest -e MINIO_ROOT_PASSWORD=restore-verification \
   -v "${minio_volume}:/data" \
-  minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
+  quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
 
 wait_for_postgres
 wait_for_minio

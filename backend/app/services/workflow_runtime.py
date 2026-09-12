@@ -11,12 +11,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
+import jmespath
+from jmespath.exceptions import JMESPathError
 from pydantic import JsonValue
 
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import redact
 from app.domain.api_assets import BodyKind
+from app.domain.assertions import compare_values
 from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
@@ -294,6 +297,63 @@ class WorkflowNodeExecutor:
             )
         except MappingResolutionError as error:
             raise NodeExecutionError(code=error.code, message=error.message) from error
+        polling_started = perf_counter()
+        attempts = config.polling.max_attempts if config.polling is not None else 1
+        for polling_attempt in range(1, attempts + 1):
+            if polling_attempt > 1:
+                _claim_polling_request_budget(node, context.request_budget)
+            output = await self._execute_api_attempt(
+                node=node,
+                context=context,
+                config=config,
+                prepared=prepared,
+                request=request,
+                redacted_request=redacted_request,
+                mapping_trace=mapping_trace,
+                timeout_seconds=_polling_attempt_timeout(config, polling_started, node.name),
+            )
+            if config.polling is None:
+                return output
+            try:
+                actual = cast(JsonValue, jmespath.search(config.polling.expression, output))
+            except JMESPathError as error:
+                raise NodeExecutionError(
+                    code="INVALID_JMESPATH",
+                    message=f"节点 {node.name} 的轮询表达式无效",
+                ) from error
+            if actual in config.polling.terminal_failure_values:
+                raise NodeExecutionError(
+                    code="POLLING_TERMINAL_FAILURE",
+                    message=f"节点 {node.name} 返回业务失败终态",
+                    output={**output, "polling_value": actual},
+                )
+            if compare_values(actual, config.polling.expected, config.polling.operator):
+                return {**output, "polling_attempts": polling_attempt, "polling_value": actual}
+            elapsed = perf_counter() - polling_started
+            if (
+                polling_attempt == attempts
+                or elapsed + config.polling.interval_seconds >= config.polling.timeout_seconds
+            ):
+                raise NodeExecutionError(
+                    code="POLLING_BUDGET_EXHAUSTED",
+                    message=f"节点 {node.name} 在轮询预算内未达到完成条件",
+                    output={**output, "polling_attempts": polling_attempt, "polling_value": actual},
+                )
+            await asyncio.sleep(config.polling.interval_seconds)
+        raise AssertionError("polling loop must return or raise")
+
+    async def _execute_api_attempt(
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        config: ApiNodeConfig,
+        prepared: PreparedWorkflowRequest,
+        request: PreparedRequest,
+        redacted_request: PreparedRequest,
+        mapping_trace: list[NodeInputMapping],
+        timeout_seconds: float,
+    ) -> dict[str, JsonValue]:
         attempt = len(context.observations_of(node.id)) + 1
         started_at = datetime.now(UTC)
         started = perf_counter()
@@ -317,7 +377,7 @@ class WorkflowNodeExecutor:
                 self._client,
                 request,
                 body_kind=prepared.body_kind,
-                timeout_seconds=300,
+                timeout_seconds=timeout_seconds,
                 multipart=prepared.multipart,
             )
         except httpx.TimeoutException as error:
@@ -684,6 +744,29 @@ class WorkflowNodeExecutor:
         return prepared
 
 
+def _polling_attempt_timeout(config: ApiNodeConfig, started: float, node_name: str) -> float:
+    request_timeout = float(config.timeout_seconds or 300)
+    if config.polling is None:
+        return request_timeout
+    remaining_seconds = config.polling.timeout_seconds - (perf_counter() - started)
+    if remaining_seconds <= 0:
+        raise NodeExecutionError(
+            code="POLLING_BUDGET_EXHAUSTED",
+            message=f"节点 {node_name} 已耗尽轮询时间预算",
+        )
+    return min(request_timeout, remaining_seconds)
+
+
+def _claim_polling_request_budget(node: WorkflowNode, budget: RequestBudget | None) -> None:
+    if budget is None or budget.claim():
+        return
+    is_cleanup = node.phase is WorkflowPhase.CLEANUP
+    raise NodeExecutionError(
+        code="CLEANUP_REQUEST_BUDGET_EXHAUSTED" if is_cleanup else "REQUEST_BUDGET_EXHAUSTED",
+        message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
+    )
+
+
 def _require_preview_for_each_request_reservation(
     prepared: PreparedSubflow,
     request_budget: RequestBudget | None,
@@ -749,10 +832,20 @@ def _remaining_preview_request_reservation(
 def _preview_node_request_attempts(node: WorkflowNode) -> int:
     if not node_type_consumes_request(node.effective_type):
         return 0
-    if node.phase is WorkflowPhase.CLEANUP:
-        return node.cleanup_retry_budget + 1
     config = parse_node_config(node)
-    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
+    polling_attempts = (
+        config.polling.max_attempts
+        if isinstance(config, ApiNodeConfig) and config.polling is not None
+        else 1
+    )
+    retry_attempts = (
+        node.cleanup_retry_budget + 1
+        if node.phase is WorkflowPhase.CLEANUP
+        else config.max_retries + 1
+        if isinstance(config, ApiNodeConfig)
+        else 1
+    )
+    return retry_attempts * polling_attempts
 
 
 def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:

@@ -412,7 +412,7 @@ async def _send_request(
     request: PreparedRequest,
     *,
     body_kind: BodyKind,
-    timeout_seconds: int,
+    timeout_seconds: int | float,
     multipart: PreparedMultipart | None = None,
 ) -> httpx.Response:
     headers = {header.name: header.value for header in request.headers}

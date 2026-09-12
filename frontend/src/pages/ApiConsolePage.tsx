@@ -36,6 +36,7 @@ import type {
   HttpMethod,
 } from '../features/api-console/api-service'
 import { useApiConsole } from '../features/api-console/use-api-console'
+import { useAuthStore } from '../features/auth/auth-store'
 import type { ApiDefinition, Execution, ExecutionDetail } from '../lib/api'
 
 type DialogState = 'project' | 'environment' | 'api' | null
@@ -47,6 +48,7 @@ export default function ApiConsolePage() {
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
   const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
   const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
+  const userId = useAuthStore((state) => state.user?.id)
   const currentDefinition = selectedApiDefinition(consoleState)
   const artifacts = artifactItems(consoleState)
   const apis = apiItems(consoleState)
@@ -140,6 +142,7 @@ export default function ApiConsolePage() {
           onRename={() => setRenameTarget(currentDefinition)}
           artifacts={artifacts}
           redactionMode={consoleState.redactionMode}
+          draftScope={apiDraftScope(userId, consoleState.projectId)}
         />
       </div>
 
@@ -206,6 +209,10 @@ export default function ApiConsolePage() {
       />
     </>
   )
+}
+
+function apiDraftScope(userId: string | undefined, projectId: string | null): string | undefined {
+  return userId && projectId ? `${userId}:${projectId}` : undefined
 }
 
 type ConsoleState = ReturnType<typeof useApiConsole>

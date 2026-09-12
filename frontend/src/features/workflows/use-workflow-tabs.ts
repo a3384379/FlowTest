@@ -5,6 +5,7 @@ import {
   removeWorkflowDraft,
   workflowDraftKey,
   WORKFLOW_DRAFT_EVENT,
+  type DraftStorageResult,
 } from './workflow-draft-store'
 import {
   readWorkflowTabs,
@@ -27,6 +28,8 @@ type WorkflowTabHookInput = {
   hasExplicitFocus: boolean
   selectWorkflow: (workflowId: string | null) => void
   saveWorkflowDraft: (workflowId: string) => Promise<void>
+  discardWorkflowDraft?: (workflowId: string) => DraftStorageResult
+  memoryDraftIds?: string[]
   searchParams: URLSearchParams
   setSearchParams: (params: URLSearchParams, options?: { replace?: boolean }) => void
 }
@@ -45,6 +48,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   const [closingTabs, setClosingTabs] = useState(false)
   const [, setDraftRevision] = useState(0)
   const previousStorageKeyRef = useRef<WorkflowTabKey | null>(null)
+  const cleanupErrorRef = useRef<string | null>(null)
   const storageReady = Boolean(storageIdentity && loadedStorageIdentity === storageIdentity)
 
   useEffect(() => {
@@ -61,6 +65,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     const previous = previousStorageKeyRef.current
     if (previous && (!storageKey || previous.userId !== storageKey.userId)) {
       const result = removeWorkflowTabs(previous)
+      cleanupErrorRef.current = result.ok ? null : result.error
       if (!result.ok) setStorageError(result.error)
     }
     previousStorageKeyRef.current = storageKey
@@ -74,14 +79,14 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
         setWorkflowIds([])
         setRestoredActiveWorkflowId(null)
         setLoadedStorageIdentity(null)
-        setStorageError(null)
+        setStorageError(cleanupErrorRef.current)
         return
       }
       const stored = readWorkflowTabs(storageKey)
       setWorkflowIds(stored?.workflowIds ?? [])
       setRestoredActiveWorkflowId(stored?.activeWorkflowId ?? null)
       setLoadedStorageIdentity(storageIdentity)
-      setStorageError(null)
+      setStorageError(cleanupErrorRef.current)
     })
     return () => {
       active = false
@@ -122,14 +127,16 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   useEffect(() => {
     if (!storageReady || !storageKey) return
     const result = writeWorkflowTabs(storageKey, workflowIds, input.activeWorkflowId)
-    queueMicrotask(() => setStorageError(result.ok ? null : result.error))
+    queueMicrotask(() => setStorageError(result.ok ? cleanupErrorRef.current : result.error))
   }, [input.activeWorkflowId, storageKey, storageReady, workflowIds])
 
+  const memoryDraftIds = new Set(input.memoryDraftIds ?? [])
   const dirtyIds = workflowIds.filter((workflowId) =>
     Boolean(
-      input.userId &&
-      input.projectId &&
-      readWorkflowDraft(workflowDraftKey(input.userId, input.projectId, workflowId)),
+      memoryDraftIds.has(workflowId) ||
+      (input.userId &&
+        input.projectId &&
+        readWorkflowDraft(workflowDraftKey(input.userId, input.projectId, workflowId))),
     ),
   )
 
@@ -177,10 +184,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
         }
       } else {
         for (const workflowId of pendingClose.dirtyIds) {
-          if (!input.userId || !input.projectId) continue
-          const removed = removeWorkflowDraft(
-            workflowDraftKey(input.userId, input.projectId, workflowId),
-          )
+          const removed = discardDraft(input, workflowId)
           if (!removed.ok) {
             setStorageError(removed.error)
             return
@@ -208,6 +212,12 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     resolvePendingClose,
     cancelPendingClose: () => setPendingClose(null),
   }
+}
+
+function discardDraft(input: WorkflowTabHookInput, workflowId: string): DraftStorageResult {
+  if (input.discardWorkflowDraft) return input.discardWorkflowDraft(workflowId)
+  if (!input.userId || !input.projectId) return { ok: true }
+  return removeWorkflowDraft(workflowDraftKey(input.userId, input.projectId, workflowId))
 }
 
 function uniqueIds(ids: string[]): string[] {

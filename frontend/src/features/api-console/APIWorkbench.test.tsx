@@ -1,11 +1,196 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import APIWorkbench from './APIWorkbench'
 import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 describe('APIWorkbench', () => {
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('restores independent local API edits and clears them after save', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
+    const props = {
+      detail,
+      loading: false,
+      saving: false,
+      previewing: false,
+      onSave,
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+      draftScope: 'user-1:project-1',
+    }
+    const first = render(<APIWorkbench {...props} />)
+    const path = screen.getByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(path)
+    await user.type(path, '/locally-edited')
+    expect(await screen.findByText('本地未保存')).toBeInTheDocument()
+    first.unmount()
+
+    render(<APIWorkbench {...props} />)
+    expect(await screen.findByDisplayValue('/locally-edited')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('本地未保存')).not.toBeInTheDocument()
+  })
+
+  it('renders loading and empty states without a selected API', () => {
+    const common = {
+      saving: false,
+      previewing: false,
+      onSave: vi.fn(),
+      onPreview: vi.fn(),
+      onRename: vi.fn(),
+    }
+    const loading = render(<APIWorkbench {...common} loading />)
+    expect(document.querySelector('.ant-skeleton')).toBeInTheDocument()
+    loading.unmount()
+    render(<APIWorkbench {...common} loading={false} />)
+    expect(screen.getByText('请选择接口后进行持续编辑')).toBeVisible()
+  })
+
+  it('keeps edits visible and warns when browser draft storage is unavailable', async () => {
+    const scope = 'user-storage:project-storage'
+    const key = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
+    localStorage.setItem(key, '{corrupt')
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage is unavailable')
+    })
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('Storage is unavailable')
+    })
+    const user = userEvent.setup()
+    render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+
+    const path = await screen.findByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(path)
+    await user.type(path, '/kept-in-form')
+    expect(screen.getByDisplayValue('/kept-in-form')).toBeVisible()
+    expect(screen.getByText('浏览器无法持久化草稿，请先保存再离开')).toBeVisible()
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    expect(await screen.findByDisplayValue('/kept-in-form')).toBeVisible()
+
+    setItem.mockRestore()
+    removeItem.mockRestore()
+  })
+
+  it('keeps edits made while an API save is pending as the next local draft', async () => {
+    const scope = 'user-race:project-race'
+    let finishSave: ((value: ApiVersion) => void) | undefined
+    const onSave = vi.fn(
+      () =>
+        new Promise<ApiVersion>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const user = userEvent.setup()
+    const rendered = render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    const path = await screen.findByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(path)
+    await user.type(path, '/submitted')
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await user.clear(path)
+    await user.type(path, '/edited-while-saving')
+    rendered.rerender(
+      <APIWorkbench
+        detail={{ ...detail, version: { ...detail.version, path: '/submitted', version: 2 } }}
+        loading={false}
+        saving
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    finishSave?.({ ...detail.version, path: '/submitted', version: 2 })
+
+    expect(await screen.findByDisplayValue('/edited-while-saving')).toBeVisible()
+    expect(screen.getByText('本地未保存')).toBeVisible()
+    const key = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
+    expect(JSON.parse(localStorage.getItem(key) ?? '{}').path).toBe('/edited-while-saving')
+  })
+
+  it('does not clear the newly selected API when the previous save finishes', async () => {
+    const scope = 'user-switch:project-switch'
+    let finishSave: ((value: ApiVersion) => void) | undefined
+    const onSave = vi.fn(
+      () =>
+        new Promise<ApiVersion>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const user = userEvent.setup()
+    const rendered = render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    const firstPath = await screen.findByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(firstPath)
+    await user.type(firstPath, '/first-draft')
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() => expect(finishSave).toBeTypeOf('function'))
+    const nextDetail = {
+      ...detail,
+      definition: { ...detail.definition, id: 'api-definition-2', name: '第二个接口' },
+      version: { ...detail.version, path: '/second-api' },
+    }
+    rendered.rerender(
+      <APIWorkbench
+        detail={nextDetail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    finishSave?.({ ...detail.version, path: '/first-draft', version: 2 })
+
+    expect(await screen.findByDisplayValue('/second-api')).toBeVisible()
+    const firstKey = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
+    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').path).toBe('/first-draft')
+  })
+
   it('edits a selected API continuously and saves a new typed version', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async (input) => ({ ...detail.version, ...input, version: 2 }))
@@ -271,6 +456,7 @@ describe('APIWorkbench', () => {
         onPreview={vi.fn()}
         onRename={vi.fn()}
         redactionMode="on"
+        draftScope="bulk-user:bulk-project"
       />,
     )
 

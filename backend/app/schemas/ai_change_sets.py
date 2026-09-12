@@ -291,6 +291,23 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
             "value": {"type": "string", "maxLength": 100_000},
         }
     )
+    runtime_input = _strict_object(
+        {
+            "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            },
+            "value_type": {
+                "type": "string",
+                "enum": ["string", "number", "integer", "boolean", "object", "array"],
+            },
+            "required": {"type": "boolean"},
+            "nullable": {"type": "boolean"},
+            "description": {"type": "string", "maxLength": 1000},
+        }
+    )
     position = _strict_object({"x": {"type": "number"}, "y": {"type": "number"}})
     binding = _strict_object(
         {
@@ -425,6 +442,7 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
         {
             "schema_version": {"type": "string", "minLength": 1, "maxLength": 32},
             "variables": {"type": "array", "maxItems": 500, "items": named_value},
+            "runtime_inputs": {"type": "array", "maxItems": 1000, "items": runtime_input},
             "nodes": {"type": "array", "minItems": 2, "maxItems": 1000, "items": node},
             "edges": {"type": "array", "maxItems": 5000, "items": edge},
             "settings": settings,

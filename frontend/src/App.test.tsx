@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { useAuthStore } from './features/auth/auth-store'
@@ -14,6 +14,7 @@ import { server } from './test/server'
 
 describe('App authentication', () => {
   beforeEach(() => {
+    localStorage.clear()
     setAccessToken(null)
     useAuthStore.setState({
       initialized: false,
@@ -22,6 +23,8 @@ describe('App authentication', () => {
       user: null,
     })
   })
+
+  afterEach(() => vi.restoreAllMocks())
 
   it('logs in, shows the lazy dashboard, and logs out', async () => {
     server.use(
@@ -43,6 +46,57 @@ describe('App authentication', () => {
     expect(screen.getByText('接口自动化测试平台')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /退出/ }))
     expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
+  })
+
+  it('restores and navigates project workspace tabs', async () => {
+    authenticateExistingUser()
+    localStorage.setItem(
+      `flowtest:workspace-tabs:v1:${user.id}:${project.id}`,
+      JSON.stringify(['apis', 'invalid-section']),
+    )
+    renderApp(`/projects/${project.id}/dashboard`)
+    const browser = userEvent.setup()
+
+    expect(await screen.findByRole('tab', { name: '质量总览' })).toBeVisible()
+    const apiTab = screen.getByRole('tab', { name: '接口管理' })
+    const close = apiTab.closest('.ant-tabs-tab')?.querySelector('.ant-tabs-tab-remove')
+    expect(close).toBeInstanceOf(HTMLElement)
+    fireEvent.click(close as HTMLElement)
+    expect(screen.queryByRole('tab', { name: '接口管理' })).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('link', { name: '接口管理' }))
+    expect(await screen.findByRole('tab', { name: '接口管理' })).toBeVisible()
+    await browser.click(screen.getByRole('tab', { name: '质量总览' }))
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+  })
+
+  it('recovers from a corrupt workspace draft and closes the active tab safely', async () => {
+    authenticateExistingUser()
+    localStorage.setItem(`flowtest:workspace-tabs:v1:${user.id}:${project.id}`, '{corrupt')
+    renderApp(`/projects/${project.id}/apis`)
+
+    const apiTab = await screen.findByRole('tab', { name: '接口管理' })
+    const close = apiTab.closest('.ant-tabs-tab')?.querySelector('.ant-tabs-tab-remove')
+    expect(close).toBeInstanceOf(HTMLElement)
+    fireEvent.click(close as HTMLElement)
+
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+  })
+
+  it('ignores non-array workspace data when browser storage cannot be updated', async () => {
+    authenticateExistingUser()
+    localStorage.setItem(
+      `flowtest:workspace-tabs:v1:${user.id}:${project.id}`,
+      JSON.stringify({ section: 'apis' }),
+    )
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage is unavailable')
+    })
+
+    renderApp(`/projects/${project.id}/dashboard`)
+
+    expect(await screen.findByRole('tab', { name: '质量总览' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+    setItem.mockRestore()
   })
 
   it('requires a password change after first login', async () => {

@@ -53,7 +53,12 @@ SKILL_OPTIONAL_SCOPES = (
     "mcp:preview:execute",
     "mcp:contract:import",
 )
-SKILL_STAGES = (
+SKILL_QUICK_STAGES = (
+    "select_project",
+    "propose_simple_flow",
+    "inspect_visual_review",
+)
+SKILL_DEEP_STAGES = (
     "select_project",
     "create_context",
     "inspect_missing_evidence",
@@ -66,13 +71,14 @@ SKILL_STAGES = (
     "visual_review",
     "optional_sandbox_preview",
 )
+SKILL_STAGES = SKILL_QUICK_STAGES
 
 
 class SkillExternalDependency(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: Literal["code_mcp", "database_mcp"]
-    access: Literal["read_only", "schema_and_profile_only"]
+    access: Literal["read_only", "schema_and_profile_only", "schema_profile_authorized_samples"]
     optional: bool
 
 
@@ -136,6 +142,9 @@ class IntegrationFlowSkillManifest(BaseModel):
     minimum_mcp_version: Literal["s55-sandbox-preview-v1", "s61-mcp-connection-v1"]
     quick_tools: list[str] = Field(default_factory=list)
     deep_tools: list[str] = Field(default_factory=list)
+    default_mode: Literal["quick"] = "quick"
+    quick_stages: list[str] = Field(min_length=1)
+    deep_stages: list[str] = Field(min_length=1)
     required_tools: list[str] = Field(min_length=1)
     optional_tools: list[str]
     required_scopes: list[str] = Field(min_length=1)
@@ -155,6 +164,8 @@ class IntegrationFlowSkillManifest(BaseModel):
             "required_scopes": SKILL_REQUIRED_SCOPES,
             "optional_scopes": SKILL_OPTIONAL_SCOPES,
             "stages": SKILL_STAGES,
+            "quick_stages": SKILL_QUICK_STAGES,
+            "deep_stages": SKILL_DEEP_STAGES,
         }
         actual = {
             "required_tools": tuple(self.required_tools),
@@ -162,6 +173,8 @@ class IntegrationFlowSkillManifest(BaseModel):
             "required_scopes": tuple(self.required_scopes),
             "optional_scopes": tuple(self.optional_scopes),
             "stages": tuple(self.stages),
+            "quick_stages": tuple(self.quick_stages),
+            "deep_stages": tuple(self.deep_stages),
         }
         mismatches = [name for name, value in expected.items() if actual[name] != value]
         if mismatches:

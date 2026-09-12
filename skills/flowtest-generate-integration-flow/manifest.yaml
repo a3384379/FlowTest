@@ -2,6 +2,7 @@ schema_version: "flowtest-skill-manifest-v1"
 name: "flowtest-generate-integration-flow"
 version: "1.1.0-rc.1"
 minimum_mcp_version: "s61-mcp-connection-v1"
+default_mode: "quick"
 quick_tools:
   - "flowtest.list_projects"
   - "flowtest.inspect_project"
@@ -65,9 +66,17 @@ external_dependencies:
     access: "read_only"
     optional: true
   - kind: "database_mcp"
-    access: "schema_and_profile_only"
+    access: "schema_profile_authorized_samples"
     optional: true
 stages:
+  - "select_project"
+  - "propose_simple_flow"
+  - "inspect_visual_review"
+quick_stages:
+  - "select_project"
+  - "propose_simple_flow"
+  - "inspect_visual_review"
+deep_stages:
   - "select_project"
   - "create_context"
   - "inspect_missing_evidence"
@@ -95,9 +104,9 @@ stop_conditions:
   - "the Context revision or proposal revision is stale"
   - "a requested sandbox preview has not been accepted in Visual Review or the proposal is already applied"
   - "the explicitly requested deep path has missing normative evidence or unresolved conflicts"
-  - "deep evidence contains secrets, raw sensitive bodies, database rows, or executable code"
+  - "when effective redaction is ON, deep evidence contains values rejected by that active policy; executable code is always rejected"
   - "the requested result requires arbitrary code, write SQL, automatic repair, publish, or production execution"
-  - "cleanup cannot be proven or any cleanup action fails"
+  - "an explicitly requested execution cannot prove required cleanup, or an attempted cleanup action fails"
   - "the requested change would hide or weaken a product defect"
 security_rules:
   - "keep tenant, organization, project, Context, and approval identities aligned"

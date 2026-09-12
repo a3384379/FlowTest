@@ -15,6 +15,7 @@ from app.engine.scheduler import (
     NodeRunRecord,
     NodeStatusUpdate,
     WorkflowScheduler,
+    _execution_policy,
 )
 from app.observability.tracing import TracingNodeExecutor
 
@@ -108,6 +109,23 @@ def api_node(node_id: str, **config: object) -> dict[str, object]:
             **config,
         },
     }
+
+
+def test_polling_node_timeout_covers_the_business_polling_window() -> None:
+    node = WorkflowNode.model_validate(
+        api_node(
+            "poll",
+            timeout_seconds=2,
+            polling={
+                "expression": "body.status",
+                "expected": "ready",
+                "max_attempts": 3,
+                "timeout_seconds": 20,
+            },
+        )
+    )
+
+    assert _execution_policy(node, 30).timeout_seconds == 20
 
 
 def cleanup_node(
