@@ -2,6 +2,8 @@
 
 更新时间：2026-09-12
 
+本文件保留 PR #98 修复时的历史验收记录。主线 `4469cc6` 复审新增的 B01—B05 及其对 A02/A04/A05 的补充验证，以 [主线复审修复验收记录](FLOWTEST_MAIN_4469CC6_REAUDIT_ACCEPTANCE.md) 为准。
+
 审计基线：`9813c6601d78bc87323c0750e58cc8ea376da8be`（PR #98 复审固定 SHA）
 
 已验证实现提交：`95471f7`（`fix: close PR 98 audit gaps`）

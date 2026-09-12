@@ -402,7 +402,7 @@ class MCPSimpleFlowService:
                 assertion_id = _node_id(api_id, "assert", str(assertion_index))
                 source_node, expression = _assertion_path(assertion.target, api_id)
                 expected_source, expected_expression, expected = _assertion_expected(
-                    assertion, set(input_values)
+                    assertion, {parameter.name for parameter in parameters}
                 )
                 config = AssertNodeConfig(
                     source_node_id=source_node,

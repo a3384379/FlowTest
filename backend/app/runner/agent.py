@@ -298,6 +298,7 @@ def _checkpoint_payload(
         name=update.name,
         status=update.status,
         attempts=update.attempts,
+        request_attempts=update.request_attempts,
         output=redacted_result.output if redacted_result is not None else None,
         result=redacted_result,
         error_code=update.error_code,

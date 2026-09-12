@@ -247,6 +247,10 @@ class DurableExecutionService:
             if payload.result is None
             else json_object(redact(payload.result.model_dump(mode="json")))
         )
+        request_attempts = max(
+            payload.request_attempts, payload.result.request_attempts if payload.result else 0
+        )
+        redacted_result["request_attempts"] = request_attempts
         redacted_variables = json_object(redact(payload.extracted_variables))
         existing = await self._repository.get_checkpoint(
             execution_id=payload.execution_id,
@@ -256,6 +260,10 @@ class DurableExecutionService:
         )
         output_digest = checkpoint_output_digest(redacted_output)
         if existing is not None:
+            request_attempts = max(
+                int(existing.result.get("request_attempts", 0)), request_attempts
+            )
+            redacted_result["request_attempts"] = request_attempts
             if existing.input_hash != payload.input_hash:
                 raise AppError(
                     code="EXECUTION_CHECKPOINT_CONFLICT",
@@ -274,6 +282,12 @@ class DurableExecutionService:
                 existing.fencing_token = payload.fencing_token
                 existing.lease_id = lease_id
                 existing.runner_id = runner_id
+            elif existing.status == payload.status.value == NodeStatus.RUNNING.value:
+                existing.result = {
+                    **existing.result,
+                    "request_attempts": request_attempts,
+                }
+                existing.finished_at = payload.finished_at
             elif existing.status != payload.status.value or existing.output_digest != output_digest:
                 raise AppError(
                     code="EXECUTION_CHECKPOINT_CONFLICT",
@@ -413,7 +427,10 @@ class DurableExecutionService:
 def checkpoint_to_node_record(checkpoint: ExecutionCheckpoint) -> NodeRunRecord:
     status = NodeStatus(checkpoint.status)
     result = (
-        NodeResult(status=NodeStatus.CANCELLED)
+        NodeResult(
+            status=NodeStatus.CANCELLED,
+            request_attempts=checkpoint.result.get("request_attempts", 0),
+        )
         if status is NodeStatus.RUNNING
         else NodeResult.model_validate(checkpoint.result)
     )
@@ -443,6 +460,7 @@ def checkpoint_to_runner_resume(checkpoint: ExecutionCheckpoint) -> RunnerCheckp
         name=record.name,
         status=record.status,
         attempts=record.attempts,
+        request_attempts=record.result.request_attempts,
         output=record.output,
         result=None if record.status is NodeStatus.RUNNING else record.result,
         error_code=record.error_code,

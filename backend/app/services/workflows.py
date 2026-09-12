@@ -83,6 +83,10 @@ from app.engine.protocol_nodes import (
     GrpcCapabilityConfig,
     parse_protocol_config,
 )
+from app.engine.request_accounting import node_type_consumes_request, resumed_request_attempts
+from app.engine.request_accounting import (
+    preview_node_request_attempts as _preview_node_request_attempts,
+)
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
@@ -91,7 +95,6 @@ from app.engine.scheduler import (
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
-    node_type_consumes_request,
 )
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
@@ -2607,15 +2610,6 @@ def _preview_request_requirements(
     return main, cleanup
 
 
-def _preview_node_request_attempts(node: WorkflowNode) -> int:
-    if not node_type_consumes_request(node.effective_type):
-        return 0
-    if node.phase is WorkflowPhase.CLEANUP:
-        return node.cleanup_retry_budget + 1
-    config = parse_node_config(node)
-    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
-
-
 def _preview_definition_with_phase_request_limits(
     definition: WorkflowDefinition,
     *,
@@ -2755,7 +2749,9 @@ def _remaining_preview_request_budget(
     attempts: dict[str, int] = {}
     for record in records:
         if node_type_consumes_request(record.node_type):
-            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+            attempts[record.node_id] = max(
+                attempts.get(record.node_id, 0), resumed_request_attempts(record)
+            )
     return RequestBudget(max(limit - sum(attempts.values()), 0))
 
 

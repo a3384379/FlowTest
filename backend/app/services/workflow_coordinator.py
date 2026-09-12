@@ -278,6 +278,7 @@ class WorkflowRunCoordinator:
                                 name=update.name,
                                 status=update.status,
                                 attempts=update.attempts,
+                                request_attempts=update.request_attempts,
                                 output=safe_result.output if safe_result is not None else None,
                                 result=safe_result,
                                 error_code=update.error_code,

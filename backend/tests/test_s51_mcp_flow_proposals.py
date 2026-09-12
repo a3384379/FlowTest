@@ -1391,3 +1391,86 @@ def _workflow_definition(definition_id: UUID) -> dict[str, object]:
         ],
         "settings": {"fail_fast": True, "concurrency": 1, "default_timeout_seconds": 30},
     }
+
+
+@pytest.mark.asyncio
+async def test_registered_quick_tool_accepts_required_input_assertion_without_default(
+    s51_context: dict[str, Any],
+) -> None:
+    from test_workflow_control_nodes import ControlExecutor
+
+    from app.engine.contracts import WorkflowDefinition
+    from app.engine.scheduler import ExecutionContext, WorkflowScheduler
+
+    request = {
+        "project_id": str(s51_context["project_id"]),
+        "environment_id": str(s51_context["sandbox_environment_id"]),
+        "name": "运行时组织断言",
+        "task_ref": "reaudit-b01",
+        "scenario_key": "org",
+        "inputs": [{"name": "orgCode", "type": "string", "required": True}],
+        "steps": [
+            {
+                "key": "lookup",
+                "name": "查询组织",
+                "api": {
+                    "api_definition_id": str(s51_context["definition_id"]),
+                    "version": 1,
+                },
+                "bindings": [
+                    {"target": "header.X-Org", "source": {"kind": "input", "name": "orgCode"}}
+                ],
+                "assertions": [
+                    {
+                        "target": "body.orgCode",
+                        "operator": "equals",
+                        "expected": "{{input.orgCode}}",
+                    }
+                ],
+            }
+        ],
+    }
+    async with MCPReadGatewayClient(
+        base_url="http://test",
+        token=s51_context["mcp_headers"]["Authorization"].removeprefix("Bearer "),
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+    ) as gateway:
+        server = create_mcp_server(client=gateway)
+        result = await server.call_tool(
+            "flowtest.propose_simple_flow",
+            {
+                "request": request,
+                "idempotency_key": "reaudit-b01",
+            },
+        )
+        assert not result.is_error
+        data = result.structured_content
+        assert data["readiness"] == "needs_input", data
+        inspection = await s51_context["client"].get(
+            f"/api/v1/mcp/flow/proposals/{data['proposal_id']}",
+            params={"project_id": request["project_id"]},
+            headers=s51_context["mcp_headers"],
+        )
+        assert inspection.status_code == 200, inspection.text
+        definition = WorkflowDefinition.model_validate(inspection.json()["proposed_definition"])
+        assert definition.runtime_inputs[0].required
+        assert definition.runtime_inputs[0].value_type == "string"
+        with pytest.raises(Exception, match="运行参数缺失"):
+            _validate_runtime_inputs(definition, {})
+        _validate_runtime_inputs(definition, {"orgCode": "acme"})
+        executed = await WorkflowScheduler(
+            ControlExecutor({"lookup": {"body": {"orgCode": "acme"}}})
+        ).run(
+            definition,
+            context=ExecutionContext(runtime_variables={"orgCode": "acme"}),
+        )
+        assert executed.status.value == "passed"
+        request["steps"][0]["assertions"][0]["expected"] = "{{input.undeclared}}"
+        rejected = await server.call_tool(
+            "flowtest.propose_simple_flow",
+            {
+                "request": request,
+                "idempotency_key": "reaudit-b01-undeclared",
+            },
+        )
+        assert rejected.structured_content["data"]["error"]["code"] == "QUICK_INPUT_NOT_DECLARED"

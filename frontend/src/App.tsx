@@ -1,3 +1,4 @@
+import { DraftSessionProvider } from './features/drafts/DraftSessionProvider'
 import {
   ApiOutlined,
   AppstoreOutlined,
@@ -119,9 +120,11 @@ export default function App() {
   if (!token || !user) return <LoginPage />
   if (user.requires_password_change) return <PasswordChangePage />
   return (
-    <ProjectProvider>
-      <AuthenticatedShell />
-    </ProjectProvider>
+    <DraftSessionProvider key={user.id}>
+      <ProjectProvider>
+        <AuthenticatedShell />
+      </ProjectProvider>
+    </DraftSessionProvider>
   )
 }
 

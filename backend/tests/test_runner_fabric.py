@@ -463,6 +463,18 @@ async def test_durable_command_and_checkpoint_edge_cases(
             actor_user_id=actor.id,
             payload=reservation_payload,
         )
+        for count in (1, 2, 3, 2):
+            await durable.record_checkpoint(
+                project_id=project.id,
+                lease_id=None,
+                runner_id=None,
+                actor_user_id=actor.id,
+                payload=reservation_payload.model_copy(update={"request_attempts": count}),
+            )
+        async with fabric_sessions() as reread_session:
+            reread = await reread_session.get(type(reservation), reservation.id)
+            assert reread is not None
+            assert checkpoint_to_runner_resume(reread).request_attempts == 3
         assert reservation.status == NodeStatus.RUNNING.value
         resume_reservation = checkpoint_to_runner_resume(reservation)
         assert resume_reservation.result is None
@@ -476,6 +488,7 @@ async def test_durable_command_and_checkpoint_edge_cases(
                 {
                     **reservation_payload.model_dump(mode="python"),
                     "status": NodeStatus.PASSED,
+                    "request_attempts": 1,
                     "output": result.output,
                     "result": result,
                 }
@@ -483,6 +496,7 @@ async def test_durable_command_and_checkpoint_edge_cases(
         )
         assert finalized_reservation.id == reservation.id
         assert finalized_reservation.status == NodeStatus.PASSED.value
+        assert checkpoint_to_runner_resume(finalized_reservation).request_attempts == 3
 
         zero_attempt = await durable.record_checkpoint(
             project_id=project.id,

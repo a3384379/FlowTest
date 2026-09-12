@@ -11,6 +11,7 @@ from pydantic import JsonValue
 from app.core.logging import redact
 from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import NodeStatus
+from app.engine.request_accounting import node_type_consumes_request, resumed_request_attempts
 from app.engine.results import NodeResult
 from app.engine.scheduler import (
     CancellationToken,
@@ -20,7 +21,6 @@ from app.engine.scheduler import (
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
-    node_type_consumes_request,
 )
 from app.observability.tracing import TracingNodeExecutor
 from app.runner.results import (
@@ -295,12 +295,16 @@ def _remaining_request_budget(
     attempts: dict[str, int] = {}
     for record in records:
         if node_type_consumes_request(record.node_type):
-            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+            attempts[record.node_id] = max(
+                attempts.get(record.node_id, 0), resumed_request_attempts(record)
+            )
     return RequestBudget(max(limit - sum(attempts.values()), 0))
 
 
 def _resume_record(checkpoint: RunnerCheckpointResume) -> NodeRunRecord:
-    result = checkpoint.result or NodeResult(status=NodeStatus.CANCELLED)
+    result = checkpoint.result or NodeResult(
+        status=NodeStatus.CANCELLED, request_attempts=checkpoint.request_attempts
+    )
     return NodeRunRecord(
         node_id=checkpoint.node_id,
         node_type=checkpoint.node_type,

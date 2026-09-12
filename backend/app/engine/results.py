@@ -107,6 +107,7 @@ class NodeResult(BaseModel):
     metrics: tuple[NodeMetric, ...] = ()
     artifacts: tuple[NodeArtifact, ...] = ()
     trace: NodeTrace | None = None
+    request_attempts: int = Field(default=0, ge=0)
     observations: tuple[NodeObservation, ...] = ()
     redacted_paths: tuple[str, ...] = ()
     error: NodeResultError | None = None

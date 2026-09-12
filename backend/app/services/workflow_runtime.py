@@ -59,6 +59,10 @@ from app.engine.protocol_nodes import (
     PreparedProtocolNode,
     resolve_protocol_config,
 )
+from app.engine.request_accounting import node_type_consumes_request, resumed_request_attempts
+from app.engine.request_accounting import (
+    preview_node_request_attempts as _preview_node_request_attempts,
+)
 from app.engine.results import (
     HttpRequestSnapshot,
     HttpResponseSnapshot,
@@ -77,7 +81,6 @@ from app.engine.scheduler import (
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
-    node_type_consumes_request,
 )
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.data_nodes import (
@@ -301,7 +304,7 @@ class WorkflowNodeExecutor:
         attempts = config.polling.max_attempts if config.polling is not None else 1
         for polling_attempt in range(1, attempts + 1):
             if polling_attempt > 1:
-                _claim_polling_request_budget(node, context.request_budget)
+                await _claim_polling_request_budget(node, context)
             output = await self._execute_api_attempt(
                 node=node,
                 context=context,
@@ -757,14 +760,18 @@ def _polling_attempt_timeout(config: ApiNodeConfig, started: float, node_name: s
     return min(request_timeout, remaining_seconds)
 
 
-def _claim_polling_request_budget(node: WorkflowNode, budget: RequestBudget | None) -> None:
-    if budget is None or budget.claim():
-        return
-    is_cleanup = node.phase is WorkflowPhase.CLEANUP
-    raise NodeExecutionError(
-        code="CLEANUP_REQUEST_BUDGET_EXHAUSTED" if is_cleanup else "REQUEST_BUDGET_EXHAUSTED",
-        message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
-    )
+async def _claim_polling_request_budget(node: WorkflowNode, context: ExecutionContext) -> None:
+    budget = context.request_budget
+    if budget is not None and not budget.claim():
+        is_cleanup = node.phase is WorkflowPhase.CLEANUP
+        raise NodeExecutionError(
+            code="CLEANUP_REQUEST_BUDGET_EXHAUSTED" if is_cleanup else "REQUEST_BUDGET_EXHAUSTED",
+            message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
+        )
+    reserve = context.request_reservers.get(node.id)
+    if reserve is not None:
+        # Await durable acknowledgement before issuing the next outbound request.
+        await reserve()
 
 
 def _require_preview_for_each_request_reservation(
@@ -810,7 +817,7 @@ def _remaining_preview_request_reservation(
         completed_reservation += (
             maximum_attempts
             if record.status in {NodeStatus.PASSED, NodeStatus.SKIPPED}
-            else min(record.attempts, maximum_attempts)
+            else min(resumed_request_attempts(record), maximum_attempts)
         )
     for node_id, subflow in prepared.subflows.items():
         subflow_node = nodes.get(node_id)
@@ -827,25 +834,6 @@ def _remaining_preview_request_reservation(
         )
         completed_reservation += nested_reservation - nested_remaining
     return max(reservation - completed_reservation, 0)
-
-
-def _preview_node_request_attempts(node: WorkflowNode) -> int:
-    if not node_type_consumes_request(node.effective_type):
-        return 0
-    config = parse_node_config(node)
-    polling_attempts = (
-        config.polling.max_attempts
-        if isinstance(config, ApiNodeConfig) and config.polling is not None
-        else 1
-    )
-    retry_attempts = (
-        node.cleanup_retry_budget + 1
-        if node.phase is WorkflowPhase.CLEANUP
-        else config.max_retries + 1
-        if isinstance(config, ApiNodeConfig)
-        else 1
-    )
-    return retry_attempts * polling_attempts
 
 
 def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:
@@ -910,7 +898,9 @@ def _nested_resume_records(
 
 
 def _checkpoint_record(update: NodeStatusUpdate) -> NodeRunRecord:
-    result = update.result or NodeResult(status=NodeStatus.CANCELLED)
+    result = update.result or NodeResult(
+        status=NodeStatus.CANCELLED, request_attempts=update.request_attempts
+    )
     return NodeRunRecord(
         node_id=update.node_id,
         node_type=update.node_type,
