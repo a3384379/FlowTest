@@ -82,11 +82,113 @@ describe('APIWorkbench', () => {
     await user.type(path, '/kept-in-form')
     expect(screen.getByDisplayValue('/kept-in-form')).toBeVisible()
     expect(screen.getByText('浏览器无法持久化草稿，请先保存再离开')).toBeVisible()
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
     await user.click(screen.getByRole('button', { name: /保存新版本/ }))
     expect(await screen.findByDisplayValue('/kept-in-form')).toBeVisible()
 
     setItem.mockRestore()
     removeItem.mockRestore()
+  })
+
+  it('keeps edits made while an API save is pending as the next local draft', async () => {
+    const scope = 'user-race:project-race'
+    let finishSave: ((value: ApiVersion) => void) | undefined
+    const onSave = vi.fn(
+      () =>
+        new Promise<ApiVersion>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const user = userEvent.setup()
+    const rendered = render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    const path = await screen.findByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(path)
+    await user.type(path, '/submitted')
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await user.clear(path)
+    await user.type(path, '/edited-while-saving')
+    rendered.rerender(
+      <APIWorkbench
+        detail={{ ...detail, version: { ...detail.version, path: '/submitted', version: 2 } }}
+        loading={false}
+        saving
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    finishSave?.({ ...detail.version, path: '/submitted', version: 2 })
+
+    expect(await screen.findByDisplayValue('/edited-while-saving')).toBeVisible()
+    expect(screen.getByText('本地未保存')).toBeVisible()
+    const key = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
+    expect(JSON.parse(localStorage.getItem(key) ?? '{}').path).toBe('/edited-while-saving')
+  })
+
+  it('does not clear the newly selected API when the previous save finishes', async () => {
+    const scope = 'user-switch:project-switch'
+    let finishSave: ((value: ApiVersion) => void) | undefined
+    const onSave = vi.fn(
+      () =>
+        new Promise<ApiVersion>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const user = userEvent.setup()
+    const rendered = render(
+      <APIWorkbench
+        detail={detail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    const firstPath = await screen.findByPlaceholderText('/api/users/{{user_id}}')
+    await user.clear(firstPath)
+    await user.type(firstPath, '/first-draft')
+    await user.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() => expect(finishSave).toBeTypeOf('function'))
+    const nextDetail = {
+      ...detail,
+      definition: { ...detail.definition, id: 'api-definition-2', name: '第二个接口' },
+      version: { ...detail.version, path: '/second-api' },
+    }
+    rendered.rerender(
+      <APIWorkbench
+        detail={nextDetail}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+        draftScope={scope}
+      />,
+    )
+    finishSave?.({ ...detail.version, path: '/first-draft', version: 2 })
+
+    expect(await screen.findByDisplayValue('/second-api')).toBeVisible()
+    const firstKey = `flowtest:api-draft:v1:${encodeURIComponent(scope)}:${detail.definition.id}`
+    expect(JSON.parse(localStorage.getItem(firstKey) ?? '{}').path).toBe('/first-draft')
   })
 
   it('edits a selected API continuously and saves a new typed version', async () => {
@@ -354,6 +456,7 @@ describe('APIWorkbench', () => {
         onPreview={vi.fn()}
         onRename={vi.fn()}
         redactionMode="on"
+        draftScope="bulk-user:bulk-project"
       />,
     )
 

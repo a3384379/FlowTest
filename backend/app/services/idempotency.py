@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -99,10 +99,21 @@ class IdempotencyService:
             if capture_server_timings:
                 timings = response.get("timings_ms")
                 if isinstance(timings, dict):
-                    timings["transaction"] = _elapsed_ms(commit_started)
-                    timings["total"] = _elapsed_ms(run_started)
+                    response = {
+                        **response,
+                        "timings_ms": {
+                            **timings,
+                            "transaction": _elapsed_ms(commit_started),
+                            "total": _elapsed_ms(run_started),
+                        },
+                    }
                     record.response_body = response
-                    await self._session.commit()
+                    try:
+                        await self._session.commit()
+                    except SQLAlchemyError:
+                        # Timing enrichment is observational; the completed operation
+                        # and its first durable response remain authoritative.
+                        await self._session.rollback()
         except Exception:
             await self._session.rollback()
             # Legacy actions can commit or send requests before failing. Their outcome

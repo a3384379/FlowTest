@@ -36,6 +36,7 @@ from app.services.workflow_runtime import (
     WorkflowNodeExecutor,
     _nested_checkpoint_id,
     _nested_scope,
+    _preview_node_request_attempts,
 )
 from app.services.workflows import WorkflowService
 
@@ -107,6 +108,71 @@ async def test_api_business_polling_waits_for_completion_without_transport_retri
 
     assert request_count == 3
     assert output["polling_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_api_polling_claims_request_budget_for_every_http_attempt() -> None:
+    request_count = 0
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"status": "pending"})
+
+    node = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "success",
+                    "max_attempts": 3,
+                    "interval_seconds": 0,
+                    "timeout_seconds": 10,
+                },
+            },
+        )
+    )
+    request = PreparedRequest(HttpMethod.GET, "https://example.test/status", (), None, ())
+    prepared = PreparedWorkflowRequest(request, request, BodyKind.NONE, None)
+    definition_payload = _wrapper_workflow(node).model_dump(mode="json")
+    definition_payload["run_policy"] = {"request_budget": 2}
+    definition = WorkflowDefinition.model_validate(definition_payload)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {node.id: prepared},
+            definition,
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        result = await WorkflowScheduler(executor).run(definition)
+
+    record = next(item for item in result.records if item.node_id == "poll")
+    assert request_count == 2
+    assert record.error_code == "REQUEST_BUDGET_EXHAUSTED"
+
+
+def test_preview_reserves_polling_attempts_across_transport_retries() -> None:
+    node = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "max_retries": 2,
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "success",
+                    "max_attempts": 4,
+                },
+            },
+        )
+    )
+
+    assert _preview_node_request_attempts(node) == 12
 
 
 @pytest.mark.asyncio

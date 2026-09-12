@@ -44,6 +44,9 @@ def test_off_does_not_scan_or_transform_sensitive_values() -> None:
         assert _redact_response_headers({"Set-Cookie": "session=plain"}) == {
             "Set-Cookie": "session=plain"
         }
+        assert imported_value("Authorization", "Bearer synthetic-token") == (
+            "Bearer synthetic-token"
+        )
         sanitized = sanitize_ai_input(schema_document=None, metadata=payload, sample=payload)
         assert sanitized.redacted_paths == ()
         assert sanitized.payload["metadata"] == payload
@@ -60,6 +63,12 @@ def test_on_preserves_explicit_redaction_behavior() -> None:
         assert is_sensitive_identifier("password") is True
         assert contains_sensitive_contract_value(payload) is True
         assert imported_value("Authorization", "Bearer synthetic-token").startswith("{{secret.")
+        assert imported_value("Authorization", "{{secret.IMPORTED_TOKEN}}") == (
+            "{{secret.IMPORTED_TOKEN}}"
+        )
+        assert imported_value("Authorization", "secret://payments/token") == (
+            "secret://payments/token"
+        )
         sanitized = sanitize_ai_input(schema_document=None, metadata=payload, sample=None)
         assert sanitized.redacted_paths
         assert "synthetic-token" not in json.dumps(sanitized.payload, ensure_ascii=False)

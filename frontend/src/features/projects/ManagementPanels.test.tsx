@@ -254,13 +254,49 @@ describe('project management panels', () => {
 
     expect(screen.getByDisplayValue('{"draft":"memory"}')).toBeVisible()
     expect(screen.getByText('浏览器无法持久化草稿，请先保存再离开')).toBeVisible()
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: '保存项目配置' }))
     await waitFor(() => expect(updates).toBe(1))
-    expect(screen.queryByText('本地未保存')).not.toBeInTheDocument()
+    expect(screen.getByText('本地未保存')).toBeVisible()
+    expect(screen.getByText('浏览器无法持久化草稿，请先保存再离开')).toBeVisible()
+  })
+
+  it('keeps configuration edits made while a save is pending', async () => {
+    registerAssetQueries()
+    let finishSave: (() => void) | undefined
+    server.use(
+      http.put(
+        `/api/v1/projects/${projectId}/configuration`,
+        () =>
+          new Promise<ReturnType<typeof HttpResponse.json>>((resolve) => {
+            finishSave = () =>
+              resolve(HttpResponse.json({ project_id: projectId, variables: {}, headers: {} }))
+          }),
+      ),
+    )
+    renderPanel(<AssetManagementPanel projectId={projectId} canEdit />)
+    expect(await screen.findByText(folder.name)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '项目变量与 Header' }))
+    const variables = within(screen.getByRole('tabpanel')).getAllByRole('textbox')[0]
+    fireEvent.change(variables, { target: { value: '{"submitted":"value"}' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存项目配置' }))
+    await waitFor(() => expect(finishSave).toBeTypeOf('function'))
+    fireEvent.change(variables, { target: { value: '{"newer":"edit"}' } })
+    finishSave?.()
+
+    expect(await screen.findByDisplayValue('{"newer":"edit"}')).toBeVisible()
+    expect(screen.getByText('本地未保存')).toBeVisible()
   })
 
   it('edits configuration without browser persistence when no user scope exists', async () => {
     registerAssetQueries()
+    server.use(
+      http.put(`/api/v1/projects/${projectId}/configuration`, () =>
+        HttpResponse.json({ project_id: projectId, variables: {}, headers: {} }),
+      ),
+    )
     useAuthStore.setState({ user: null })
 
     renderPanel(<AssetManagementPanel projectId={projectId} canEdit />)
@@ -268,6 +304,10 @@ describe('project management panels', () => {
     fireEvent.click(screen.getByRole('tab', { name: '项目变量与 Header' }))
 
     expect(await screen.findAllByDisplayValue('{}')).toHaveLength(2)
+    const variables = within(screen.getByRole('tabpanel')).getAllByRole('textbox')[0]
+    fireEvent.change(variables, { target: { value: '{"memory":"only"}' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存项目配置' }))
+    await waitFor(() => expect(screen.queryByText('本地未保存')).not.toBeInTheDocument())
   })
 
   it('renders project assets read-only for viewers', async () => {

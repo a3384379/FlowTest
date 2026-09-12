@@ -1,7 +1,7 @@
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, KeyOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   createEnvironment,
@@ -204,6 +204,9 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
   const [form] = Form.useForm<{ variables: string; headers: string }>()
   const [hasDraft, setHasDraft] = useState(false)
   const [draftStorageError, setDraftStorageError] = useState(false)
+  const editVersionRef = useRef(0)
+  const memoryDraftRef = useRef<{ variables: string; headers: string } | null>(null)
+  const draftIdentityRef = useRef<string | null>(null)
   const configuration = state.configuration
   const userId = useAuthStore((store) => store.user?.id)
   const storageKey = userId
@@ -211,6 +214,11 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
     : null
   useEffect(() => {
     if (!configuration) return
+    if (draftIdentityRef.current !== storageKey) {
+      draftIdentityRef.current = storageKey
+      editVersionRef.current = 0
+      memoryDraftRef.current = null
+    }
     let active = true
     let hasStoredDraft = false
     let storageFailed = false
@@ -218,7 +226,10 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
       variables: formatRecord(configuration.variables),
       headers: formatRecord(configuration.headers),
     }
-    if (!storageKey) {
+    if (memoryDraftRef.current) {
+      hasStoredDraft = true
+      form.setFieldsValue(memoryDraftRef.current)
+    } else if (!storageKey) {
       form.setFieldsValue(serverValues)
     } else {
       try {
@@ -243,11 +254,19 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
       active = false
     }
   }, [configuration, form, storageKey])
+  useEffect(() => {
+    if (!hasDraft || !draftStorageError) return
+    const blockUnload = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', blockUnload)
+    return () => window.removeEventListener('beforeunload', blockUnload)
+  }, [draftStorageError, hasDraft])
   return (
     <Form
       form={form}
       layout="vertical"
       onValuesChange={(_, values) => {
+        editVersionRef.current += 1
+        memoryDraftRef.current = values
         setHasDraft(true)
         if (!storageKey) return
         try {
@@ -258,21 +277,31 @@ function ConfigurationManagement({ state, canEdit }: { state: AssetState; canEdi
         }
       }}
       onFinish={async (values) => {
+        const editVersionAtStart = editVersionRef.current
+        const identityAtStart = storageKey
         await state.runAsync(() =>
           updateProjectConfiguration(state.projectId, {
             variables: parseRecord(values.variables),
             headers: parseRecord(values.headers),
           }),
         )
+        if (
+          draftIdentityRef.current !== identityAtStart ||
+          editVersionRef.current !== editVersionAtStart
+        ) {
+          return
+        }
+        let removed = true
         if (storageKey) {
           try {
             window.localStorage.removeItem(storageKey)
           } catch {
-            // A successful server save is authoritative even when browser storage is unavailable.
+            removed = false
           }
         }
-        setHasDraft(false)
-        setDraftStorageError(false)
+        if (removed) memoryDraftRef.current = null
+        setHasDraft(!removed)
+        setDraftStorageError(!removed)
       }}
     >
       <Form.Item name="variables" label="项目变量（JSON）" rules={[jsonRecordRule]}>

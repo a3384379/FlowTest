@@ -908,7 +908,9 @@ def _validate_base_url(value: str) -> str:
 
 def _model_payload(value: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
+        # MCP models distinguish an omitted optional value from an explicit null.
+        # Keep that distinction when the typed tool request crosses the HTTP gateway.
+        return value.model_dump(mode="json", exclude_unset=True)
     return dict(value)
 
 

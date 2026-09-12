@@ -701,6 +701,7 @@ class WorkflowService:
             await self._get_workflow(project_id, workflow_id)
         bounded = _bounded_preview_definition(definition, budget)
         await self._validate_publishable(project_id, workflow_id or change_set_id, bounded)
+        _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare_preview(
             actor=actor,
             project_id=project_id,
@@ -755,6 +756,7 @@ class WorkflowService:
             await self._get_workflow(project_id, workflow_id)
         bounded = _bounded_preview_definition(definition, budget)
         await self._validate_publishable(project_id, workflow_id or change_set_id, bounded)
+        _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare_preview(
             actor=actor,
             project_id=project_id,

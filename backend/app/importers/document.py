@@ -4,6 +4,13 @@ from dataclasses import replace
 
 import yaml
 
+from app.core.redaction import (
+    RedactionMode,
+    RedactionPolicy,
+    get_redaction_policy,
+    reset_redaction_policy,
+    set_redaction_policy,
+)
 from app.importers.contracts import ImportedOperation, ImportSourceType, sanitize_imported_json
 from app.importers.excel import ExcelImportError, parse_excel
 from app.importers.http_formats import HttpFormatError, parse_bruno, parse_curl, parse_har
@@ -18,32 +25,49 @@ class ImportDocumentError(ValueError):
 def parse_import_document(
     content: bytes,
     requested_type: ImportSourceType = ImportSourceType.AUTO,
+    *,
+    policy: RedactionPolicy | None = None,
+) -> tuple[ImportSourceType, tuple[ImportedOperation, ...]]:
+    policy = policy or get_redaction_policy()
+    token = set_redaction_policy(policy)
+    try:
+        return _parse_import_document(content, requested_type, policy)
+    finally:
+        reset_redaction_policy(token)
+
+
+def _parse_import_document(
+    content: bytes,
+    requested_type: ImportSourceType,
+    policy: RedactionPolicy,
 ) -> tuple[ImportSourceType, tuple[ImportedOperation, ...]]:
     if requested_type is ImportSourceType.EXCEL or (
         requested_type is ImportSourceType.AUTO and content.startswith(b"PK")
     ):
-        return ImportSourceType.EXCEL, _parse_excel_document(content)
+        return ImportSourceType.EXCEL, _parse_excel_document(content, policy)
     if requested_type is ImportSourceType.CURL or (
         requested_type is ImportSourceType.AUTO and content.lstrip().lower().startswith(b"curl ")
     ):
-        return ImportSourceType.CURL, _parse_curl_document(content)
+        return ImportSourceType.CURL, _parse_curl_document(content, policy)
     document = _load_document_or_none(content, requested_type)
     source_type = (
         _detect_source_type(document) if requested_type is ImportSourceType.AUTO else requested_type
     )
-    return source_type, _non_empty(_parse_mapping_operations(source_type, content, document))
+    return source_type, _non_empty(
+        _parse_mapping_operations(source_type, content, document), policy
+    )
 
 
-def _parse_excel_document(content: bytes) -> tuple[ImportedOperation, ...]:
+def _parse_excel_document(content: bytes, policy: RedactionPolicy) -> tuple[ImportedOperation, ...]:
     try:
-        return _non_empty(parse_excel(content))
+        return _non_empty(parse_excel(content), policy)
     except ExcelImportError as error:
         raise ImportDocumentError(str(error)) from error
 
 
-def _parse_curl_document(content: bytes) -> tuple[ImportedOperation, ...]:
+def _parse_curl_document(content: bytes, policy: RedactionPolicy) -> tuple[ImportedOperation, ...]:
     try:
-        return _non_empty(parse_curl(content))
+        return _non_empty(parse_curl(content), policy)
     except HttpFormatError as error:
         raise ImportDocumentError(str(error)) from error
 
@@ -67,9 +91,13 @@ def _parse_mapping_operations(
     raise ImportDocumentError("不支持的导入格式")
 
 
-def _non_empty(operations: tuple[ImportedOperation, ...]) -> tuple[ImportedOperation, ...]:
+def _non_empty(
+    operations: tuple[ImportedOperation, ...], policy: RedactionPolicy
+) -> tuple[ImportedOperation, ...]:
     if not operations:
         raise ImportDocumentError("文档中没有可导入的 HTTP 接口")
+    if policy.mode is RedactionMode.OFF:
+        return operations
     return tuple(
         replace(
             operation,

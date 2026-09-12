@@ -14,7 +14,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import BodyEditor from './BodyEditor'
 import { toBodyFields, toBodyInput, type BodyEditorFields } from './body-edit'
@@ -127,11 +127,21 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
         <Tabs
           key={props.detail?.definition.id}
           items={[
-            { key: 'params', label: 'Params', children: <ParameterFields />, forceRender: true },
+            {
+              key: 'params',
+              label: 'Params',
+              children: <ParameterFields onProgrammaticChange={draft.persistCurrent} />,
+              forceRender: true,
+            },
             {
               key: 'headers',
               label: 'Headers',
-              children: <HeaderFields redactionMode={redactionMode} />,
+              children: (
+                <HeaderFields
+                  redactionMode={redactionMode}
+                  onProgrammaticChange={draft.persistCurrent}
+                />
+              ),
               forceRender: true,
             },
             {
@@ -143,7 +153,12 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
             {
               key: 'body',
               label: 'Body',
-              children: <BodyEditor artifacts={props.artifacts ?? []} />,
+              children: (
+                <BodyEditor
+                  artifacts={props.artifacts ?? []}
+                  onProgrammaticChange={draft.persistCurrent}
+                />
+              ),
               forceRender: true,
             },
             { key: 'extract', label: '提取', children: <ExtractionFields />, forceRender: true },
@@ -172,29 +187,54 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
 
 function useApiDraft(
   form: ReturnType<typeof Form.useForm<WorkbenchFields>>[0],
-  props: APIWorkbenchProps,
+  props: APIWorkbenchProps & { detail: ApiDetail },
 ) {
   const [restored, setRestored] = useState(false)
   const [storageError, setStorageError] = useState(false)
+  const editVersionRef = useRef(0)
+  const activeApiIdRef = useRef(props.detail.definition.id)
+  const loadedDraftIdentityRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!props.detail) return
+    activeApiIdRef.current = props.detail.definition.id
+  }, [props.detail.definition.id])
+  useEffect(() => {
+    const identity = JSON.stringify([props.draftScope ?? null, props.detail.definition.id])
+    if (loadedDraftIdentityRef.current === identity) return
+    loadedDraftIdentityRef.current = identity
     const stored = readApiDraft(props.draftScope, props.detail.definition.id)
     form.setFieldsValue(stored ?? toFields(props.detail.version))
+    editVersionRef.current = 0
     queueMicrotask(() => setRestored(Boolean(stored)))
   }, [form, props.detail, props.draftScope])
+  useEffect(() => {
+    if (!restored || !storageError) return
+    const blockUnload = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', blockUnload)
+    return () => window.removeEventListener('beforeunload', blockUnload)
+  }, [restored, storageError])
+  function persist(values: WorkbenchFields) {
+    editVersionRef.current += 1
+    setStorageError(!writeApiDraft(props.draftScope, props.detail.definition.id, values))
+    setRestored(true)
+  }
   return {
     restored,
     storageError,
-    onValuesChange: (_: unknown, values: WorkbenchFields) => {
-      if (!props.detail) return
-      setStorageError(!writeApiDraft(props.draftScope, props.detail.definition.id, values))
-      setRestored(true)
-    },
+    onValuesChange: (_: unknown, values: WorkbenchFields) => persist(values),
+    persistCurrent: () => queueMicrotask(() => persist(form.getFieldsValue(true))),
     onFinish: async (values: WorkbenchFields) => {
+      const apiIdAtStart = props.detail.definition.id
+      const editVersionAtStart = editVersionRef.current
       await props.onSave(toInput(values))
-      if (props.detail) removeApiDraft(props.draftScope, props.detail.definition.id)
-      setRestored(false)
-      setStorageError(false)
+      if (
+        activeApiIdRef.current !== apiIdAtStart ||
+        editVersionRef.current !== editVersionAtStart
+      ) {
+        return
+      }
+      const removed = removeApiDraft(props.draftScope, apiIdAtStart)
+      setRestored(!removed)
+      setStorageError(!removed)
     },
   }
 }
@@ -227,13 +267,14 @@ function writeApiDraft(scope: string | undefined, apiId: string, value: Workbenc
   }
 }
 
-function removeApiDraft(scope: string | undefined, apiId: string): void {
+function removeApiDraft(scope: string | undefined, apiId: string): boolean {
   const key = apiDraftKey(scope, apiId)
-  if (!key) return
+  if (!key) return true
   try {
     window.localStorage.removeItem(key)
+    return true
   } catch {
-    // Saving succeeded; stale storage is ignored when it cannot be accessed.
+    return false
   }
 }
 
@@ -241,7 +282,7 @@ function previewTitle(redactionMode: BulkRedactionMode): string {
   return redactionMode === 'on' ? '最终请求预览（Secret 已脱敏）' : '最终请求预览（按原样展示）'
 }
 
-function ParameterFields() {
+function ParameterFields({ onProgrammaticChange }: { onProgrammaticChange: () => void }) {
   const form = Form.useFormInstance<WorkbenchFields>()
   const [bulkText, setBulkText] = useState<string | null>(null)
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
@@ -262,6 +303,7 @@ function ParameterFields() {
           setBulkErrors(parsed.errors)
           if (parsed.errors.length) return
           form.setFieldValue('query_parameters', parsed.values)
+          onProgrammaticChange()
           setBulkText(null)
         }}
       />
@@ -298,7 +340,13 @@ function ParameterFields() {
   )
 }
 
-function HeaderFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
+function HeaderFields({
+  redactionMode,
+  onProgrammaticChange,
+}: {
+  redactionMode: BulkRedactionMode
+  onProgrammaticChange: () => void
+}) {
   const form = Form.useFormInstance<WorkbenchFields>()
   const [bulkText, setBulkText] = useState<string | null>(null)
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
@@ -324,6 +372,7 @@ function HeaderFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
           setBulkErrors(parsed.errors)
           if (parsed.errors.length) return
           form.setFieldValue('headers', parsed.values)
+          onProgrammaticChange()
           setBulkText(null)
         }}
       />

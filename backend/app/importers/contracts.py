@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.core.redaction import redaction_enabled
 from app.domain.api_assets import APIVersionSpec, AuthKind, BodyKind, HttpMethod, JsonValue
 from app.domain.test_engineering import OperationContract
 
@@ -96,7 +97,13 @@ def _json_string_mapping(values: dict[str, str]) -> dict[str, JsonValue]:
 
 
 def imported_value(name: str, value: str) -> str:
+    if not redaction_enabled():
+        return value
     if not is_sensitive_import_name(name):
+        return value
+    if re.fullmatch(r"\{\{secret\.[A-Za-z_][A-Za-z0-9_.-]*\}\}", value) or value.startswith(
+        "secret://"
+    ):
         return value
     secret_name = re.sub(r"[^A-Za-z0-9_]", "_", name).upper()
     return f"{{{{secret.IMPORTED_{secret_name}}}}}"
@@ -114,6 +121,8 @@ def is_sensitive_import_name(name: str) -> bool:
 
 
 def sanitize_imported_json(value: JsonValue) -> JsonValue:
+    if not redaction_enabled():
+        return value
     if isinstance(value, list):
         return [sanitize_imported_json(item) for item in value]
     if isinstance(value, dict):

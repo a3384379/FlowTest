@@ -300,6 +300,8 @@ class WorkflowNodeExecutor:
         polling_started = perf_counter()
         attempts = config.polling.max_attempts if config.polling is not None else 1
         for polling_attempt in range(1, attempts + 1):
+            if polling_attempt > 1:
+                _claim_polling_request_budget(node, context.request_budget)
             output = await self._execute_api_attempt(
                 node=node,
                 context=context,
@@ -755,6 +757,16 @@ def _polling_attempt_timeout(config: ApiNodeConfig, started: float, node_name: s
     return min(request_timeout, remaining_seconds)
 
 
+def _claim_polling_request_budget(node: WorkflowNode, budget: RequestBudget | None) -> None:
+    if budget is None or budget.claim():
+        return
+    is_cleanup = node.phase is WorkflowPhase.CLEANUP
+    raise NodeExecutionError(
+        code="CLEANUP_REQUEST_BUDGET_EXHAUSTED" if is_cleanup else "REQUEST_BUDGET_EXHAUSTED",
+        message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
+    )
+
+
 def _require_preview_for_each_request_reservation(
     prepared: PreparedSubflow,
     request_budget: RequestBudget | None,
@@ -820,10 +832,20 @@ def _remaining_preview_request_reservation(
 def _preview_node_request_attempts(node: WorkflowNode) -> int:
     if not node_type_consumes_request(node.effective_type):
         return 0
-    if node.phase is WorkflowPhase.CLEANUP:
-        return node.cleanup_retry_budget + 1
     config = parse_node_config(node)
-    return config.max_retries + 1 if isinstance(config, ApiNodeConfig) else 1
+    polling_attempts = (
+        config.polling.max_attempts
+        if isinstance(config, ApiNodeConfig) and config.polling is not None
+        else 1
+    )
+    retry_attempts = (
+        node.cleanup_retry_budget + 1
+        if node.phase is WorkflowPhase.CLEANUP
+        else config.max_retries + 1
+        if isinstance(config, ApiNodeConfig)
+        else 1
+    )
+    return retry_attempts * polling_attempts
 
 
 def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dict[str, JsonValue]:

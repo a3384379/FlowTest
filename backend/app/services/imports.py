@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
+from app.core.redaction import get_redaction_policy
 from app.domain.api_assets import APIVersionSpec
 from app.domain.canonical_schemas import CanonicalSchemaValidationError
 from app.domain.test_engineering import OperationContract, fingerprint_contract
@@ -117,7 +118,9 @@ class ImportService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         source = _file_source(source_name)
         try:
-            detected_type, operations = parse_import_document(content, source_type)
+            detected_type, operations = parse_import_document(
+                content, source_type, policy=get_redaction_policy()
+            )
         except CanonicalSchemaValidationError as error:
             raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
@@ -406,7 +409,9 @@ class ImportService:
         max_results: int | None = None,
     ) -> ImportPreviewSummary:
         try:
-            detected_type, operations = parse_import_document(content, source_type)
+            detected_type, operations = parse_import_document(
+                content, source_type, policy=get_redaction_policy()
+            )
         except CanonicalSchemaValidationError as error:
             raise _canonical_contract_error(error) from error
         except ImportDocumentError as error:
@@ -592,7 +597,11 @@ class ImportService:
                 code="IMPORT_ALREADY_APPLIED", message="导入预览已经合并", status_code=409
             )
         content, frozen_target = self._load_preview_payload(run)
-        _, operations = parse_import_document(content, ImportSourceType(run.source_type))
+        _, operations = parse_import_document(
+            content,
+            ImportSourceType(run.source_type),
+            policy=get_redaction_policy(),
+        )
         source = ImportSourceIdentity(
             kind=ImportSourceKind(run.source_kind),
             key=run.source_key,

@@ -887,6 +887,13 @@ async def test_quick_flow_proposal_builds_reviewable_graph_and_replays_idempoten
     }
     assert all(value >= 0 for value in result["timings_ms"].values())
     assert result["timings_ms"]["total"] >= result["timings_ms"]["transaction"]
+    async with s51_context["sessions"]() as separate_session:
+        persisted = await separate_session.scalar(
+            select(IdempotencyRecord).where(IdempotencyRecord.idempotency_key == "quick-health-v1")
+        )
+        assert persisted is not None
+        assert persisted.response_body is not None
+        assert persisted.response_body["timings_ms"] == result["timings_ms"]
     replay = await s51_context["client"].post(
         "/api/v1/mcp/flow/simple-proposals", headers=headers, json=payload
     )

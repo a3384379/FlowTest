@@ -751,8 +751,12 @@ def _remaining_request_budget(
         return parent
     used = 0
     if not reset:
+        records_by_id = {record.node_id: record for record in resume_records}
         used = sum(
-            (resume_attempts or {}).get(node.id, 0)
+            _resumed_request_attempts(
+                records_by_id.get(node.id),
+                (resume_attempts or {}).get(node.id, 0),
+            )
             for node in nodes
             if _node_consumes_request(node)
         )
@@ -801,8 +805,17 @@ def _nested_request_attempts(
             and record.phase is phase
             and node_type_consumes_request(record.node_type)
         ):
-            attempts[record.node_id] = max(attempts.get(record.node_id, 0), record.attempts)
+            attempts[record.node_id] = max(
+                attempts.get(record.node_id, 0),
+                _resumed_request_attempts(record, record.attempts),
+            )
     return sum(attempts.values())
+
+
+def _resumed_request_attempts(record: NodeRunRecord | None, reserved_attempts: int) -> int:
+    if record is None:
+        return reserved_attempts
+    return max(reserved_attempts, record.attempts, len(record.result.observations))
 
 
 def _schedule_runtime_limit(
@@ -978,11 +991,13 @@ def _cleanup_run_status(
 def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _ExecutionPolicy:
     if node.effective_type is NodeType.API:
         config = ApiNodeConfig.model_validate(node.effective_config)
+        request_timeout = config.timeout_seconds or default_timeout_seconds
+        polling_timeout = config.polling.timeout_seconds if config.polling is not None else 0
         return _ExecutionPolicy(
             timeout_seconds=(
                 node.cleanup_timeout_seconds
                 if node.phase is WorkflowPhase.CLEANUP
-                else config.timeout_seconds or default_timeout_seconds
+                else max(request_timeout, polling_timeout)
             ),
             max_retries=(
                 node.cleanup_retry_budget
