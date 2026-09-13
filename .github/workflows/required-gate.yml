@@ -2,10 +2,14 @@ name: Required Gate Controller
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [labeled]
   push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   actions: read
@@ -15,6 +19,7 @@ permissions:
 
 jobs:
   controller:
+    if: ${{ github.event_name != 'pull_request_target' || github.event.label.name == 'ci:milestone' }}
     name: Required Gate Controller
     runs-on: ubuntu-latest
     timeout-minutes: 100

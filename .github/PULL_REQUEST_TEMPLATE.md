@@ -30,6 +30,7 @@
 - [ ] Frontend：format、lint、coverage、build
 - [ ] Compose Playwright E2E 或说明不适用原因
 - [ ] Golden / Roundtrip / Migration / Failure-path（按变更适用）
+- [ ] 阶段候选稳定后已添加 `ci:milestone`，最新 Head 的完整远程门禁通过
 - 证据：<!-- 命令、CI Run、截图或 Trace；不要粘贴 Secret -->
 
 ## 风险、审批与 Review Thread

@@ -219,11 +219,15 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
 
     assert "pull_request_target" in workflow["on"]
     assert "pull_request" not in workflow["on"]
-    assert "edited" in workflow["on"]["pull_request_target"]["types"]
-    assert "concurrency" not in workflow
+    assert workflow["on"]["pull_request_target"]["types"] == ["labeled"]
+    assert workflow["concurrency"]["cancel-in-progress"] == "true"
     assert workflow["permissions"]["statuses"] == "write"
     assert "checks" not in workflow["permissions"]
     controller = workflow["jobs"]["controller"]
+    assert controller["if"] == (
+        "${{ github.event_name != 'pull_request_target' "
+        "|| github.event.label.name == 'ci:milestone' }}"
+    )
     assert controller["name"] == "Required Gate Controller"
     checkout = next(step for step in controller["steps"] if "uses" in step)
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha || github.sha }}"
@@ -252,3 +256,31 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
     assert complete_status["if"] == "always()"
     assert ".base.sha, .head.sha" in complete_status["run"]
     assert '"${BASE_SHA} ${HEAD_SHA}"' in complete_status["run"]
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_names"),
+    [
+        ("backend-ci.yml", ("test", "integration")),
+        ("frontend-ci.yml", ("build",)),
+        ("security-ci.yml", ("source-and-images",)),
+        ("compose-ci.yml", ("smoke",)),
+        ("standalone-windows.yml", ("bundle",)),
+        ("upgrade-ci.yml", ("rehearse-v2-to-v3-upgrade-and-rollback",)),
+    ],
+)
+def test_pull_request_ci_runs_only_for_milestone_label(
+    workflow_name: str,
+    job_names: tuple[str, ...],
+) -> None:
+    workflow = yaml.load(
+        (WORKSPACE_ROOT / ".github/workflows" / workflow_name).read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+
+    assert workflow["on"]["pull_request"]["types"] == ["labeled"]
+    assert workflow["concurrency"]["cancel-in-progress"] == "true"
+    expected_condition = (
+        "${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:milestone' }}"
+    )
+    assert all(workflow["jobs"][name]["if"] == expected_condition for name in job_names)

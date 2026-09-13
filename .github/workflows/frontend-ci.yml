@@ -2,6 +2,7 @@ name: Frontend CI
 
 on:
   pull_request:
+    types: [labeled]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-ci.yml"
@@ -12,11 +13,16 @@ on:
       - ".github/workflows/frontend-ci.yml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:milestone' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
