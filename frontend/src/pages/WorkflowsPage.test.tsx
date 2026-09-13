@@ -28,7 +28,7 @@ afterEach(() => {
 })
 
 describe('WorkflowsPage', () => {
-  it('publishes and runs an immutable workflow version', async () => {
+  beforeEach(() => {
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -106,6 +106,9 @@ describe('WorkflowsPage', () => {
           }),
       ),
     )
+  })
+
+  it('debugs the selected workflow without changing its definition', async () => {
     renderPage()
     const browser = userEvent.setup()
 
@@ -116,6 +119,12 @@ describe('WorkflowsPage', () => {
     await browser.click(screen.getByRole('button', { name: /调试至断点/ }))
     expect(await screen.findByText('已运行至断点前')).toBeInTheDocument()
     expect(screen.getByText('断点调试结果')).toBeVisible()
+  })
+
+  it('adds and removes a node, then explicitly applies and saves configuration', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText(workflow.name)
     fireEvent.click(screen.getAllByText('开始')[0])
     expect(screen.getByRole('button', { name: /删除节点/ })).toBeDisabled()
     await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
@@ -130,7 +139,12 @@ describe('WorkflowsPage', () => {
     await browser.click(screen.getByRole('button', { name: '应用节点配置' }))
     await browser.click(screen.getByRole('button', { name: /保存草稿/ }))
     expect(await screen.findByText('草稿已保存')).toBeInTheDocument()
+  })
 
+  it('publishes and runs an immutable workflow version', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText(workflow.name)
     await browser.click(screen.getByRole('button', { name: /cloud-upload 发布服务器草稿/ }))
     await browser.click(screen.getByRole('button', { name: '发布服务器草稿' }))
     expect(await screen.findByText('工作流 v2 已发布')).toBeInTheDocument()
