@@ -16,7 +16,7 @@ import { server } from '../test/server'
 import EnvironmentLabPage from './EnvironmentLabPage'
 
 const fixtureImage =
-  'cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33'
+  'docker.io/nginxinc/nginx-unprivileged@sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce'
 
 const template: EnvironmentTemplateVersion = {
   id: '00000000-0000-4000-8000-000000001001',

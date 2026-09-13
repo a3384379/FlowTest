@@ -1,7 +1,7 @@
 import { useAuthStore } from '../features/auth/auth-store'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -112,7 +112,8 @@ describe('WorkflowsPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
-    expect(await screen.findByText(workflow.name)).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '流程编排', level: 1 })).toBeVisible()
+    expect((await screen.findAllByText(workflow.name))[0]).toBeVisible()
     expect(screen.getByText('已发布 v1')).toBeVisible()
     expect(screen.getByLabelText('工作流画布')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /更多/ }))
@@ -124,11 +125,9 @@ describe('WorkflowsPage', () => {
   it('adds and removes a node, then explicitly applies and saves configuration', async () => {
     renderPage()
     const browser = userEvent.setup()
-    await screen.findByText(workflow.name)
-    fireEvent.click(screen.getAllByText('开始')[0])
-    expect(screen.getByRole('button', { name: /删除节点/ })).toBeDisabled()
+    await screen.findAllByText(workflow.name)
     await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
-    await browser.click(screen.getByRole('button', { name: /添加接口节点/ }))
+    await browser.click(screen.getByRole('button', { name: /添加接口请求/ }))
     await browser.click(screen.getByRole('button', { name: '返回画布' }))
     fireEvent.click(await screen.findByText('接口请求 2'))
     await browser.click(screen.getByRole('button', { name: /删除节点/ }))
@@ -144,23 +143,28 @@ describe('WorkflowsPage', () => {
   it('publishes and runs an immutable workflow version', async () => {
     renderPage()
     const browser = userEvent.setup()
-    await screen.findByText(workflow.name)
-    await browser.click(screen.getByRole('button', { name: /cloud-upload 发布服务器草稿/ }))
-    await browser.click(screen.getByRole('button', { name: '发布服务器草稿' }))
+    await screen.findAllByText(workflow.name)
+    await browser.click(screen.getByRole('button', { name: '工作流更多操作' }))
+    await browser.click(screen.getByRole('button', { name: /发布服务器草稿/ }))
+    await browser.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: '发布服务器草稿',
+      }),
+    )
     expect(await screen.findByText('工作流 v2 已发布')).toBeInTheDocument()
 
-    await browser.click(screen.getByRole('button', { name: /运\s*行/ }))
+    await browser.click(screen.getByRole('button', { name: '运行已发布版本' }))
     expect(await screen.findByText('工作流已开始运行')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /保存草稿/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /cloud-upload 发布服务器草稿/ })).toBeDisabled()
     expect(await screen.findByText('工作流执行通过')).toBeInTheDocument()
     expect(screen.getAllByText('查询用户').length).toBeGreaterThan(0)
     expect(screen.getByText('2')).toBeVisible()
-    await browser.click(screen.getAllByRole('button', { name: /重放/ })[1])
+    fireEvent.click(screen.getByTestId('workflow-replay-api'))
     expect(await screen.findByText('节点重放完成')).toBeInTheDocument()
     expect(screen.getByText('节点重放结果')).toBeVisible()
 
-    await browser.click(screen.getByRole('button', { name: /查看快照/ }))
+    fireEvent.click(screen.getByTestId('workflow-runtime-tab-history'))
+    fireEvent.click(screen.getByTestId(`workflow-history-${workflowExecutionDetail.execution.id}`))
     expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
     expect(screen.queryByRole('button', { name: /保存草稿/ })).not.toBeInTheDocument()

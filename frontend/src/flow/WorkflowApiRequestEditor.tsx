@@ -7,7 +7,13 @@ import {
   type BulkDraft,
 } from '../features/api-console/use-bulk-draft'
 import { useNodeEditContext } from './editor/node-edit-session'
-import { applyOwnedRequestSections, extraRequestPolicies } from './editor/request-overrides'
+import { useInspectorPresentation } from './editor/inspector-presentation'
+import {
+  applyRequestEditorDraft,
+  extraRequestPolicies,
+  requestOverridesFromFields,
+  type RequestOverrides,
+} from './editor/request-overrides'
 import { EyeOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -55,12 +61,6 @@ type BodyOverride = {
   value: unknown
 }
 
-type RequestOverrides = {
-  query_parameters?: ApiVersion['query_parameters']
-  headers?: Record<string, string>
-  body?: BodyOverride
-}
-
 type EditorProps = {
   projectId?: string | null
   environmentId?: string | null
@@ -73,31 +73,51 @@ type EditorProps = {
 
 export default function WorkflowApiRequestEditor(props: EditorProps) {
   const [open, setOpen] = useState(false)
+  const presentation = useInspectorPresentation()
   const apiId = stringValue(props.node.config.api_definition_id)
   const pinnedVersion = numberValue(props.node.config.api_version)
   const currentVersion = props.api?.current_version
 
+  const summary = (
+    <Space orientation="vertical" className="full-width" size="small">
+      <RequestInheritanceSummary node={props.node} version={pinnedVersion ?? currentVersion} />
+      {canUpgrade(props.editable, pinnedVersion, currentVersion) && (
+        <Button
+          type="link"
+          className="workflow-request-upgrade"
+          onClick={() =>
+            props.onUpdate({
+              ...props.node,
+              config: { ...props.node.config, api_version: currentVersion },
+            })
+          }
+        >
+          更新至接口最新 v{currentVersion}
+        </Button>
+      )}
+    </Space>
+  )
+  if (presentation === 'fullscreen') {
+    return (
+      <div className="workflow-request-inline">
+        {summary}
+        {!apiId || !props.projectId ? (
+          <Alert type="warning" showIcon title="选择接口和项目后可配置节点请求" />
+        ) : (
+          <RequestEditorLoader
+            {...props}
+            apiId={apiId}
+            pinnedVersion={pinnedVersion}
+            onClose={() => undefined}
+          />
+        )}
+      </div>
+    )
+  }
   return (
     <>
       <Space orientation="vertical" className="full-width" size="small">
-        <RequestInheritanceSummary
-          node={props.node}
-          version={pinnedVersion ?? props.api?.current_version}
-        />
-        {canUpgrade(props.editable, pinnedVersion, currentVersion) && (
-          <Button
-            type="link"
-            className="workflow-request-upgrade"
-            onClick={() =>
-              props.onUpdate({
-                ...props.node,
-                config: { ...props.node.config, api_version: currentVersion },
-              })
-            }
-          >
-            更新至接口最新 v{currentVersion}
-          </Button>
-        )}
+        {summary}
         <Button
           block
           icon={<SettingOutlined />}
@@ -201,6 +221,7 @@ function RequestEditor({
   function remember(nextModes = modes, tab = activeTab, dirty = true) {
     session?.setRequest(
       {
+        apiVersion: detail.version,
         fields: form.getFieldsValue(true),
         modes: nextModes,
         customDrafts: customDrafts.current,
@@ -241,28 +262,15 @@ function RequestEditor({
   async function save() {
     if (!editable) return false
     try {
-      const overrides = await effectiveOverrides()
-      const next: WorkflowNode = {
-        ...node,
-        config: {
-          ...node.config,
-          api_version: detail.version,
-          request_overrides: applyOwnedRequestSections(node.config.request_overrides, {
-            params:
-              overrides.query_parameters === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.query_parameters },
-            headers:
-              overrides.headers === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.headers },
-            body:
-              overrides.body === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.body },
-          }),
-        },
-      }
+      await effectiveOverrides()
+      const next = applyRequestEditorDraft(node, {
+        apiVersion: detail.version,
+        fields: form.getFieldsValue(true),
+        modes,
+        customDrafts: customDrafts.current,
+        activeTab,
+        bulkDrafts: bulkDrafts.current,
+      })
       if (session) {
         if (!session.apply(next)) {
           setError('节点配置未能应用，请检查名称、JSON 字段或外部修改冲突。')
@@ -628,12 +636,7 @@ function buildOverrides(
   values: RequestEditorFields,
   modes: ReturnType<typeof sectionModes>,
 ): RequestOverrides {
-  const body = toBodyInput(values)
-  return {
-    ...(modes.params === 'custom' ? { query_parameters: values.query_parameters ?? [] } : {}),
-    ...(modes.headers === 'custom' ? { headers: toRecord(values.headers) } : {}),
-    ...(modes.body === 'custom' ? { body: { kind: body.body_kind, value: body.body } } : {}),
-  }
+  return requestOverridesFromFields(values, modes)
 }
 
 function withFileMetadata(value: unknown, artifacts: Artifact[]): unknown {
@@ -670,12 +673,6 @@ function modeFor(value: unknown): SectionMode {
 
 function toKeyValues(value: Record<string, string>): KeyValueField[] {
   return Object.entries(value).map(([name, fieldValue]) => ({ name, value: fieldValue }))
-}
-
-function toRecord(values: KeyValueField[] = []): Record<string, string> {
-  return Object.fromEntries(
-    values.filter((item) => item.name).map((item) => [item.name, item.value]),
-  )
 }
 
 function stringValue(value: unknown): string {

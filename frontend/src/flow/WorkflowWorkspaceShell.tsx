@@ -2,12 +2,16 @@ import { Button, Splitter } from 'antd'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { readLayoutPreferences, writeLayoutPreferences } from './editor/layout-preferences'
 export default function WorkflowWorkspaceShell({
+  header,
   list,
   children,
+  runtimeDock,
   preferenceKey,
 }: {
+  header: ReactNode
   list: ReactNode
   children: ReactNode
+  runtimeDock?: ReactNode
   preferenceKey: string
 }) {
   const root = useRef<HTMLDivElement>(null)
@@ -31,7 +35,8 @@ export default function WorkflowWorkspaceShell({
     setStorageError(!writeLayoutPreferences(preferenceKey, { listWidth: sizes[0] }))
   }
   return (
-    <div ref={root} className="workflow-workspace">
+    <div ref={root} className="workflow-workspace" data-testid="workflow-workbench">
+      {header}
       <Button
         className="workflow-list-toggle"
         aria-label="切换工作流列表"
@@ -57,17 +62,23 @@ export default function WorkflowWorkspaceShell({
           max={320}
           resizable={!collapsed}
         >
-          <div className="workflow-list-pane" hidden={collapsed}>
+          <div className="workflow-list-pane" data-testid="workflow-list-panel" hidden={collapsed}>
             {list}
           </div>
         </Splitter.Panel>
         <Splitter.Panel min={0}>
-          <div className="workflow-workspace-main">{children}</div>
+          <div className="workflow-workspace-main" data-testid="workflow-editor-main">
+            {children}
+            {runtimeDock}
+          </div>
         </Splitter.Panel>
       </Splitter>
     </div>
   )
 }
 function listCollapsed(preference: boolean | null, width: number): boolean {
-  return preference ?? (width > 0 && width < 1240)
+  if (preference === true) return true
+  if (width > 0 && width < 920) return true
+  if (preference === false) return false
+  return width > 0 && width < 1120
 }

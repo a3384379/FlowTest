@@ -114,25 +114,26 @@ it('bounds history, truncates redo, and resets a stale drag on external replacem
   expect(result.current.dragging).toBe(false)
   expect(result.current.definition.variables).toEqual({ external: 'true' })
 })
-it('keeps node and edge multi-selection transient and removes stale primary selection', () => {
+it('keeps node and edge selection mutually exclusive and prunes stale selection', async () => {
   const onChange = vi.fn()
-  const { result } = renderHook(() => useWorkflowEditor(workflowDefinition, true, onChange))
+  const { result, rerender } = renderHook(
+    ({ definition }) => useWorkflowEditor(definition, true, onChange),
+    { initialProps: { definition: workflowDefinition } },
+  )
   act(() => {
     result.current.click('edge', workflowDefinition.edges[0].id)
-    result.current.click('node', 'api', true)
     result.current.click('node', 'api')
   })
-  expect(result.current.selection.edgeIds).toHaveLength(1)
-  act(() =>
-    result.current.selectionChanges('node', [{ type: 'select', id: 'api', selected: false }]),
-  )
-  expect(result.current.selection.primary).toBeNull()
-  act(() =>
-    result.current.selectionChanges('edge', [
-      { type: 'select', id: workflowDefinition.edges[0].id, selected: false },
-    ]),
-  )
-  expect(result.current.selection.edgeIds).toHaveLength(0)
+  expect(result.current.selection).toEqual({ kind: 'node', id: 'api' })
+  rerender({
+    definition: {
+      ...workflowDefinition,
+      nodes: workflowDefinition.nodes.filter((node) => node.id !== 'api'),
+      edges: [],
+    },
+  })
+  await act(async () => undefined)
+  expect(result.current.selection).toBeNull()
   expect(onChange).not.toHaveBeenCalled()
   act(() => {
     result.current.undo()

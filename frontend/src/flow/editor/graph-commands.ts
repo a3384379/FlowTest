@@ -9,7 +9,7 @@ import {
 } from './graph-analysis'
 import type {
   EditDiagnostic,
-  EditorSelection,
+  WorkflowSelection,
   GraphConnectionInput,
   GraphEditResult,
   NodePositionUpdate,
@@ -46,28 +46,30 @@ function retainedReferences(node: WorkflowNode, deleted: Set<string>): EditDiagn
 }
 export function planDeletion(
   definition: WorkflowDefinition,
-  selection: EditorSelection,
+  selection: WorkflowSelection,
 ): DeletionPlan {
-  const selected = new Set(selection.nodeIds)
+  const selectedNodeId = selection?.kind === 'node' ? selection.id : null
   const mainEnds = definition.nodes.filter(
     (node) => node.phase !== 'cleanup' && resolveEffectiveNodeType(node) === 'end',
   )
   const protectedNodeIds = definition.nodes
     .filter(
       (node) =>
-        selected.has(node.id) &&
+        selectedNodeId === node.id &&
         (resolveEffectiveNodeType(node) === 'start' ||
           (mainEnds.length === 1 && mainEnds[0].id === node.id)),
     )
     .map((node) => node.id)
   const protectedIds = new Set(protectedNodeIds)
   const deleteNodeIds = definition.nodes
-    .filter((node) => selected.has(node.id) && !protectedIds.has(node.id))
+    .filter((node) => selectedNodeId === node.id && !protectedIds.has(node.id))
     .map((node) => node.id)
   const deleted = new Set(deleteNodeIds)
   const edges = definition.edges.filter(
     (edge) =>
-      selection.edgeIds.includes(edge.id) || deleted.has(edge.source) || deleted.has(edge.target),
+      (selection?.kind === 'edge' && selection.id === edge.id) ||
+      deleted.has(edge.source) ||
+      deleted.has(edge.target),
   )
   const mappingCount = edges.reduce((count, edge) => count + edge.mappings.length, 0)
   return {
@@ -79,10 +81,7 @@ export function planDeletion(
       .filter((node) => !deleted.has(node.id))
       .flatMap((node) => retainedReferences(node, deleted)),
     requiresConfirmation:
-      mappingCount > 0 ||
-      edges.some((edge) => edge.condition != null) ||
-      deleteNodeIds.length > 1 ||
-      selection.edgeIds.length > 1,
+      mappingCount > 0 || edges.some((edge) => edge.condition != null) || deleteNodeIds.length > 1,
   }
 }
 export function applyDeletion(definition: WorkflowDefinition, plan: DeletionPlan): GraphEditResult {

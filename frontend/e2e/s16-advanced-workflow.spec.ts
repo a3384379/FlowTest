@@ -14,12 +14,13 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
 
   const accessToken = await accessTokenFromSession(page.request)
   const project = await firstProject(page.request, accessToken)
+  await createWorkflowEnvironment(page.request, accessToken, project.id, suffix)
   const child = await createPublishedChild(page.request, accessToken, project.id, suffix)
   const parentName = `S16 ForEach 编排 ${suffix}`
   await createVersionedParent(page.request, accessToken, project.id, child.id, parentName)
 
-  await page.getByRole('link', { name: '流程编排' }).click()
-  await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
+  await page.goto(`/projects/${project.id}/workflows`)
+  await expect(page.getByTestId('workflow-workbench')).toBeVisible()
   const listToggle = page.getByRole('button', { name: '切换工作流列表' })
   if ((await listToggle.getAttribute('aria-expanded')) === 'false') await listToggle.click()
   await page.getByRole('button', { name: parentName, exact: true }).click()
@@ -33,6 +34,7 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
 })
 
 async function selectWorkflowEnvironment(page: Page) {
+  await page.getByRole('button', { name: '工作流更多操作', exact: true }).click()
   const environment = page.getByRole('combobox', { name: '工作流环境' })
   await expect(environment).toBeEnabled()
   await environment.click()
@@ -41,6 +43,7 @@ async function selectWorkflowEnvironment(page: Page) {
   await expect(firstOption).toBeVisible()
   await firstOption.click()
   await expect(page.getByRole('button', { name: /运\s*行/ })).toBeEnabled()
+  await page.keyboard.press('Escape')
 }
 
 async function verifyCanvasEditing(page: Page) {
@@ -50,8 +53,10 @@ async function verifyCanvasEditing(page: Page) {
   await expect(page.getByText('已发布子流程')).toBeVisible()
   await expect(page.getByText('循环并发')).toBeVisible()
 
-  await page.getByRole('button', { name: /复s*制/ }).click()
-  await page.getByRole('button', { name: /粘s*贴/ }).click()
+  await page.getByRole('button', { name: '画布编辑操作', exact: true }).click()
+  await page.getByRole('menuitem', { name: /复\s*制节点/ }).click()
+  await page.getByRole('button', { name: '画布编辑操作', exact: true }).click()
+  await page.getByRole('menuitem', { name: /粘\s*贴节点/ }).click()
   await expect(page.locator('.react-flow__node')).toHaveCount(4)
   await page.getByRole('button', { name: /撤s*销/ }).click()
   await expect(page.locator('.react-flow__node')).toHaveCount(3)
@@ -75,23 +80,19 @@ async function verifyExecutionDebugAndReplay(page: Page) {
   await page.getByRole('button', { name: /运\s*行/ }).click()
   await expect(page.getByText('工作流执行通过').last()).toBeVisible({ timeout: 30_000 })
 
-  const latestRun = page.locator('.ant-card').filter({ hasText: '最近一次运行' })
+  const latestRun = page.getByTestId('workflow-runtime-dock')
   const forEachRow = latestRun.getByRole('row').filter({ hasText: '批量调用 v2' })
   await expect(forEachRow).toContainText('passed')
   await forEachRow.getByRole('button', { name: /重s*放/ }).click()
-  await expect(page.getByText('节点重放结果')).toBeVisible()
-  await expect(page.locator('.ant-card').filter({ hasText: '节点重放结果' })).toContainText(
-    'passed',
-  )
+  await expect(latestRun).toContainText('节点重放结果')
+  await expect(latestRun).toContainText('passed')
 
   await page.getByRole('button', { name: /更\s*多/ }).click()
   await page.getByLabel('调试断点').click()
   await page.getByText('批量调用 v2', { exact: true }).last().click()
   await page.getByRole('button', { name: /调试至断点/ }).click()
-  await expect(page.getByText('断点调试结果')).toBeVisible()
-  await expect(page.locator('.ant-card').filter({ hasText: '断点调试结果' })).toContainText(
-    'passed',
-  )
+  await expect(latestRun).toContainText('断点调试结果')
+  await expect(latestRun).toContainText('passed')
 }
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {
@@ -108,6 +109,23 @@ async function firstProject(request: APIRequestContext, token: string): Promise<
   const body = (await response.json()) as { items: Identified[] }
   expect(body.items.length).toBeGreaterThan(0)
   return body.items[0]
+}
+
+async function createWorkflowEnvironment(
+  request: APIRequestContext,
+  token: string,
+  projectId: string,
+  suffix: string,
+): Promise<void> {
+  const response = await request.post(`/api/v1/projects/${projectId}/environments`, {
+    headers: authorization(token),
+    data: {
+      name: `S16 运行环境 ${suffix}`,
+      base_url: 'http://backend:8000',
+      classification: 'test',
+    },
+  })
+  expect(response.status(), await response.text()).toBe(201)
 }
 
 async function createPublishedChild(

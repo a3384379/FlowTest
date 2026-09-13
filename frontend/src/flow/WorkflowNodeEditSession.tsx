@@ -10,6 +10,7 @@ import {
   type WorkflowRequestEditorDraft,
 } from './editor/node-edit-session'
 import { jsonEqual } from './editor/editor-types'
+import { applyRequestEditorDraft } from './editor/request-overrides'
 
 function nodeContent(node: WorkflowNode): Omit<WorkflowNode, 'position'> {
   const { position: _position, ...content } = node
@@ -119,7 +120,16 @@ export default function WorkflowNodeEditSession({
   }
   const applyRef = useRef<() => Promise<boolean>>(async () => false)
   useEffect(() => {
-    applyRef.current = async () => (requestApply.current ? requestApply.current() : apply())
+    applyRef.current = async () => {
+      if (requestApply.current) return requestApply.current()
+      if (!latest.current.requestDraft) return apply()
+      try {
+        return apply(applyRequestEditorDraft(latest.current.draftNode, latest.current.requestDraft))
+      } catch {
+        setError('请修正请求字段和 JSON 格式后再应用。')
+        return false
+      }
+    }
   })
   useEffect(() => {
     session.nodeEditorActions.set(key, () => applyRef.current())

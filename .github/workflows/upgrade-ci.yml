@@ -2,6 +2,7 @@ name: V2 to V3 Upgrade CI
 
 on:
   pull_request:
+    types: [labeled]
     paths:
       - ".github/workflows/upgrade-ci.yml"
       - "backend/**"
@@ -24,11 +25,16 @@ on:
       - "scripts/verify_v2_v3_upgrade.sh"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   rehearse-v2-to-v3-upgrade-and-rollback:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:milestone' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

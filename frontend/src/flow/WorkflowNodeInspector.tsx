@@ -35,6 +35,7 @@ import {
   listServiceEndpoints,
 } from '../features/service-targets/service-target-service'
 import WorkflowApiRequestEditor from './WorkflowApiRequestEditor'
+import { useInspectorPresentation } from './editor/inspector-presentation'
 
 type InspectorProps = {
   projectId?: string | null
@@ -69,53 +70,103 @@ export default function WorkflowNodeInspector({
   onChange,
   onDelete,
 }: InspectorProps) {
+  const presentation = useInspectorPresentation()
   if (!originalNode) return <EmptyInspector />
   const node = editorNode(originalNode)
   const updateNode = (updated: WorkflowNode) =>
     onChange(replaceNode(definition, restoreEditedNode(originalNode, updated)))
   return (
-    <aside className="workflow-inspector">
-      <Typography.Title level={5}>节点配置</Typography.Title>
-      <Field label="名称">
-        <Input
-          disabled={!editable}
-          value={node.name}
-          onChange={(event) => updateNode({ ...node, name: event.target.value })}
-        />
-      </Field>
-      <InspectorNodeFields
-        node={node}
-        definition={definition}
-        apis={apis}
-        artifacts={artifacts}
-        workflows={workflows}
-        credentials={credentials}
-        graphqlSchemas={graphqlSchemas}
-        grpcDescriptors={grpcDescriptors}
-        eventSources={eventSources}
-        projectId={projectId}
-        environmentId={environmentId}
-        editable={editable}
-        onUpdate={updateNode}
-      />
-      {node.type === 'api' && (
-        <MappingFields
+    <aside
+      className={`workflow-inspector workflow-node-configuration${presentation === 'fullscreen' ? ' is-fullscreen' : ''}`}
+    >
+      <ConfigSection title="基本信息" description="节点名称与类型标识" className="config-basic">
+        <Field label="名称">
+          <Input
+            disabled={!editable}
+            value={node.name}
+            onChange={(event) => updateNode({ ...node, name: event.target.value })}
+          />
+        </Field>
+        <Tag>{nodeTypeName(node)}</Tag>
+      </ConfigSection>
+      <div className="workflow-node-configuration-main">
+        <InspectorNodeFields
           node={node}
           definition={definition}
+          apis={apis}
+          artifacts={artifacts}
+          workflows={workflows}
+          credentials={credentials}
+          graphqlSchemas={graphqlSchemas}
+          grpcDescriptors={grpcDescriptors}
+          eventSources={eventSources}
+          projectId={projectId}
+          environmentId={environmentId}
           editable={editable}
-          onChange={onChange}
+          onUpdate={updateNode}
         />
-      )}
-      <Button
-        danger
-        icon={<DeleteOutlined />}
-        disabled={!editable || node.type === 'start'}
-        onClick={onDelete}
-      >
-        删除节点
-      </Button>
+        {node.type === 'api' && (
+          <MappingFields
+            node={node}
+            definition={definition}
+            editable={editable}
+            onChange={onChange}
+          />
+        )}
+      </div>
+      <div className="workflow-config-danger">
+        <Button
+          danger
+          icon={<DeleteOutlined />}
+          disabled={!editable || node.type === 'start'}
+          onClick={onDelete}
+        >
+          删除节点
+        </Button>
+      </div>
     </aside>
   )
+}
+
+function ConfigSection({
+  title,
+  description,
+  className = '',
+  children,
+}: {
+  title: string
+  description?: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <section className={`workflow-config-section ${className}`}>
+      <header className="workflow-config-section-heading">
+        <Typography.Title level={5}>{title}</Typography.Title>
+        {description && <Typography.Text type="secondary">{description}</Typography.Text>}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+function nodeTypeName(node: WorkflowNode): string {
+  if (node.type === 'capability') return node.capability_id ?? 'Capability'
+  const labels: Partial<Record<WorkflowNode['type'], string>> = {
+    start: '开始节点',
+    end: '结束节点',
+    api: '接口请求',
+    extract: '提取变量',
+    assert: '断言校验',
+    condition: '条件判断',
+    delay: '等待',
+    dataset: '数据集',
+    subflow: '子流程',
+    for_each: 'ForEach',
+    sql: '只读 SQL',
+    redis: 'Redis 读取',
+  }
+  return labels[node.type] ?? node.type
 }
 
 function InspectorNodeFields({
@@ -1272,60 +1323,86 @@ function ApiFields({
   const api = resolvedApi
   return (
     <>
-      <Field label="接口">
-        <Select
-          disabled={!editable}
-          value={stringConfig(node, 'api_definition_id') || undefined}
-          options={availableApis.map((api) => ({ label: api.name, value: api.id }))}
-          onChange={(value) => {
-            const selected = availableApis.find((api) => api.id === value)
-            onUpdate({
-              ...node,
-              config: {
-                ...node.config,
-                api_definition_id: value,
-                api_version: selected?.current_version,
-                request_overrides: {},
-              },
-            })
-          }}
+      <ConfigSection
+        title="请求目标"
+        description="选择接口版本、Service 和 Endpoint Variant"
+        className="config-target"
+      >
+        <Field label="接口">
+          <Select
+            disabled={!editable}
+            value={stringConfig(node, 'api_definition_id') || undefined}
+            options={availableApis.map((api) => ({ label: api.name, value: api.id }))}
+            onChange={(value) => {
+              const selected = availableApis.find((api) => api.id === value)
+              onUpdate({
+                ...node,
+                config: {
+                  ...node.config,
+                  api_definition_id: value,
+                  api_version: selected?.current_version,
+                  request_overrides: {},
+                },
+              })
+            }}
+          />
+        </Field>
+        <RequestTargetFields
+          projectId={projectId}
+          environmentId={environmentId}
+          node={node}
+          api={api}
+          editable={editable}
+          onUpdate={onUpdate}
         />
-      </Field>
-      <RequestTargetFields
-        projectId={projectId}
-        environmentId={environmentId}
-        node={node}
-        api={api}
-        editable={editable}
-        onUpdate={onUpdate}
-      />
-      <WorkflowApiRequestEditor
-        projectId={projectId}
-        environmentId={environmentId}
-        node={node}
-        api={api}
-        artifacts={artifacts}
-        editable={editable}
-        onUpdate={onUpdate}
-      />
-      <Field label="超时（秒）">
-        <InputNumber
-          disabled={!editable}
-          min={1}
-          max={300}
-          value={numberConfig(node, 'timeout_seconds', 30)}
-          onChange={(value) => onUpdate(updateNodeConfig(node, 'timeout_seconds', value ?? 30))}
+      </ConfigSection>
+      <ConfigSection
+        title="Params / Headers / Body"
+        description="继承接口模板，或只覆盖当前节点拥有的请求字段"
+        className="config-request"
+      >
+        <WorkflowApiRequestEditor
+          projectId={projectId}
+          environmentId={environmentId}
+          node={node}
+          api={api}
+          artifacts={artifacts}
+          editable={editable}
+          onUpdate={onUpdate}
         />
-      </Field>
-      <Field label="最大重试次数">
-        <InputNumber
-          disabled={!editable}
-          min={0}
-          max={3}
-          value={numberConfig(node, 'max_retries', 0)}
-          onChange={(value) => onUpdate(updateNodeConfig(node, 'max_retries', value ?? 0))}
-        />
-      </Field>
+      </ConfigSection>
+      <ConfigSection
+        title="重试 / 超时 / Polling"
+        description="控制传输重试与业务完成条件"
+        className="config-policy"
+      >
+        <Field label="超时（秒）">
+          <InputNumber
+            disabled={!editable}
+            min={1}
+            max={300}
+            value={numberConfig(node, 'timeout_seconds', 30)}
+            onChange={(value) => onUpdate(updateNodeConfig(node, 'timeout_seconds', value ?? 30))}
+          />
+        </Field>
+        <Field label="最大重试次数">
+          <InputNumber
+            disabled={!editable}
+            min={0}
+            max={3}
+            value={numberConfig(node, 'max_retries', 0)}
+            onChange={(value) => onUpdate(updateNodeConfig(node, 'max_retries', value ?? 0))}
+          />
+        </Field>
+        <Field label="Polling（JSON，可选）">
+          <WorkflowJsonInput
+            fieldKey="polling"
+            value={node.config.polling ?? null}
+            editable={editable}
+            onChange={(value) => onUpdate(updateNodeConfig(node, 'polling', value))}
+          />
+        </Field>
+      </ConfigSection>
     </>
   )
 }
@@ -1656,7 +1733,7 @@ function MappingFields({
     incoming.find((edge) => edge.id === incomingId) ??
     (incoming.length === 1 ? incoming[0] : undefined)
   return (
-    <section className="mapping-section">
+    <section className="mapping-section workflow-config-section config-mapping">
       <Space className="mapping-heading">
         <Typography.Text strong>入站字段映射</Typography.Text>
         <Button

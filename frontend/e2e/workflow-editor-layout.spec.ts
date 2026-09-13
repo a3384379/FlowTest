@@ -1,60 +1,95 @@
-import { expect, test } from '@playwright/test'
-import { clickEdge, closeInspector, publishAndRun, seedEditor } from './support/workflow-editor'
+import { expect, test, type Locator, type Page } from '@playwright/test'
+import { seedEditor } from './support/workflow-editor'
 
-for (const viewport of [
-  { width: 1920, height: 1080 },
-  { width: 1440, height: 900 },
-  { width: 1280, height: 720 },
-]) {
-  test(`ACC01/LAY：${viewport.width} 下工作区、专注、配置、连线、节点库和历史`, async ({
-    page,
-  }, testInfo) => {
+const viewports = [
+  { width: 1280, height: 800, minimumCanvasHeight: 460, listVisible: false },
+  { width: 1440, height: 900, minimumCanvasHeight: 600, listVisible: true },
+  { width: 1920, height: 1080, minimumCanvasHeight: 720, listVisible: true },
+]
+
+for (const viewport of viewports) {
+  test(`Phase 1 geometry：${viewport.width}×${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport)
     await seedEditor(page)
-    await page.getByRole('button', { name: 'Fit View', exact: true }).click()
-    const canvas = page.getByLabel('工作流画布', { exact: true })
-    expect((await canvas.boundingBox())!.height).toBeGreaterThan(150)
-    expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(
-      viewport.height + 1,
-    )
-    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('normal.png') })
-    await page.getByRole('button', { name: '专注模式', exact: true }).click()
-    expect((await canvas.boundingBox())!.height).toBeGreaterThan(viewport.height - 180)
-    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('focus.png') })
-    await page.getByRole('button', { name: '退出专注模式', exact: true }).click()
+
+    const workbench = page.getByTestId('workflow-workbench')
+    const editorMain = page.getByTestId('workflow-editor-main')
+    const canvas = page.getByTestId('workflow-canvas-stage')
+    const toolbar = page.getByTestId('workflow-canvas-toolbar')
+    const list = page.getByTestId('workflow-list-panel')
+
+    await expect(workbench).toBeVisible()
+    await expect(canvas).toBeVisible()
+    expect((await requiredBox(canvas)).height).toBeGreaterThanOrEqual(viewport.minimumCanvasHeight)
+    expect((await requiredBox(toolbar)).height).toBeLessThanOrEqual(56)
+    await expectPageWithoutOverflow(page, viewport)
+
+    if (viewport.listVisible) {
+      await expect(list).toBeVisible()
+      const listWidth = (await requiredBox(list)).width
+      expect(listWidth).toBeGreaterThanOrEqual(240)
+      expect(listWidth).toBeLessThanOrEqual(280)
+    } else {
+      await expect(list).toBeHidden()
+    }
+
+    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('default-edit.png') })
+
     await page.locator('.react-flow__node[data-id=api]').click()
-    const name = page.getByRole('textbox', { name: '名称', exact: true })
-    await name.fill('配置输入保留')
-    await page.getByRole('button', { name: '最大化配置', exact: true }).click()
-    await expect(name).toHaveValue('配置输入保留')
+    const inspector = page.getByTestId('workflow-inspector')
+    await expect(inspector).toBeVisible()
+    const canvasShare = (await requiredBox(canvas)).width / (await requiredBox(editorMain)).width
+    expect(canvasShare).toBeGreaterThanOrEqual(0.52)
+    expect((await requiredBox(inspector)).width).toBeGreaterThanOrEqual(320)
+
+    await page.getByRole('button', { name: '专注模式', exact: true }).click()
+    const focusToolbar = page.getByTestId('workflow-focus-toolbar')
+    await expect(focusToolbar).toBeVisible()
+    await expect(list).toBeHidden()
+    await expect(inspector).toBeHidden()
+    expect((await requiredBox(canvas)).width / viewport.width).toBeGreaterThanOrEqual(0.88)
+    for (const name of [
+      '保存草稿',
+      '运行已发布版本',
+      '调试至断点',
+      'plus 添加节点',
+      'undo 撤销',
+      'redo 重做',
+      'apartment 自动布局',
+      '退出专注模式',
+    ]) {
+      await expect(focusToolbar.getByRole('button', { name, exact: true })).toBeVisible()
+    }
+    await expect(
+      focusToolbar.getByRole('button', { name: '运行已发布版本', exact: true }),
+    ).toHaveCSS('color', 'rgb(71, 84, 103)')
+    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('focus.png') })
+
+    await focusToolbar.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
+    const nodeLibrary = page.getByRole('dialog', { name: '添加节点', exact: true })
+    await expect(nodeLibrary).toBeVisible()
+    await expect(page.getByRole('searchbox', { name: '搜索节点类型', exact: true })).toBeVisible()
+    const libraryBox = await requiredBox(nodeLibrary)
+    expect(libraryBox.y).toBeLessThanOrEqual(1)
+    expect(libraryBox.height).toBeGreaterThanOrEqual(viewport.height - 1)
     await page.screenshot({
       animations: 'disabled',
-      path: testInfo.outputPath('configuration.png'),
+      path: testInfo.outputPath('focus-node-library.png'),
     })
-    await page.keyboard.press('Escape')
-    await expect(name).toHaveValue('配置输入保留')
-    await page.getByRole('button', { name: '应用节点配置', exact: true }).click()
-    await closeInspector(page)
-    await clickEdge(page)
-    await expect(page.getByRole('heading', { name: '连线配置', exact: true })).toBeVisible()
-    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('edge.png') })
-    await closeInspector(page)
-    await page.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
-    await expect(page.getByRole('searchbox', { name: '搜索节点类型', exact: true })).toBeVisible()
-    await expect(
-      page.getByRole('searchbox', { name: '搜索节点类型', exact: true }),
-    ).toBeInViewport()
-    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('library.png') })
-    await page.getByRole('button', { name: '返回画布', exact: true }).click()
-    await page.getByRole('button', { name: 'save 保存草稿', exact: true }).click()
-    await expect(page.getByText('草稿已保存').last()).toBeVisible()
-    await publishAndRun(page)
-    await page.getByRole('button', { name: 'eye 查看快照', exact: true }).click()
-    await expect(page.getByText('历史快照 · 只读')).toBeVisible()
-    await expect(page.locator('.react-flow__edge')).toHaveCount(2)
-    await expect.poll(async () => (await canvas.boundingBox())?.height ?? 0).toBeGreaterThan(100)
-    if ((await canvas.boundingBox())!.height <= 320)
-      await expect(page.locator('.react-flow__minimap')).toBeHidden()
-    await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('history.png') })
   })
+}
+
+async function requiredBox(locator: Locator) {
+  const box = await locator.boundingBox()
+  expect(box).not.toBeNull()
+  return box!
+}
+
+async function expectPageWithoutOverflow(page: Page, viewport: { width: number; height: number }) {
+  const size = await page.evaluate(() => ({
+    height: document.body.scrollHeight,
+    width: document.body.scrollWidth,
+  }))
+  expect(size.height).toBeLessThanOrEqual(viewport.height + 1)
+  expect(size.width).toBeLessThanOrEqual(viewport.width + 1)
 }

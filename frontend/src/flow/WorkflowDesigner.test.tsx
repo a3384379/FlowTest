@@ -107,7 +107,7 @@ describe('WorkflowDesigner', () => {
     resolveFirst?.({ items: [{ ...searched, name: '过期结果' }], total: 1, page: 1, page_size: 20 })
     await waitFor(() => expect(screen.queryByText('过期结果')).not.toBeInTheDocument())
     await browser.click(screen.getByRole('button', { name: '选择' }))
-    await browser.click(screen.getByRole('button', { name: /添加接口节点/ }))
+    await browser.click(screen.getByRole('button', { name: /添加接口请求/ }))
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         nodes: expect.arrayContaining([
@@ -357,9 +357,9 @@ describe('WorkflowDesigner', () => {
     render(<DesignerHarness initial={workflowDefinition} credentials={dataCredentials} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'plus 添加节点' }))
-    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: 'SQL' } })
+    const search = screen.getByLabelText('搜索节点类型')
+    fireEvent.change(search, { target: { value: 'SQL' } })
     expect(screen.getByRole('button', { name: /只读 SQL/ })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /Redis 读取/ })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /只读 SQL/ }))
     fireEvent.click(screen.getByTestId('rf__node-sql-4'))
     expect(screen.getByDisplayValue('SELECT 1 AS healthy')).toBeVisible()
@@ -369,6 +369,7 @@ describe('WorkflowDesigner', () => {
     expect(screen.getByDisplayValue('SELECT id FROM users WHERE id = :id')).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    fireEvent.change(search, { target: { value: 'Redis' } })
     fireEvent.click(screen.getByRole('button', { name: /Redis 读取/ }))
     fireEvent.click(screen.getByTestId('rf__node-redis-5'))
     expect(screen.getByText(/Redis 仅允许 GET\/MGET/)).toBeVisible()
@@ -392,8 +393,10 @@ describe('WorkflowDesigner', () => {
     render(<DesignerHarness initial={workflowDefinition} />)
 
     fireEvent.click(screen.getByTestId('rf__node-api'))
-    await browser.click(screen.getByRole('button', { name: /复制/ }))
-    await browser.click(screen.getByRole('button', { name: /粘贴/ }))
+    await browser.click(screen.getByRole('button', { name: /编辑/ }))
+    await browser.click(screen.getByRole('menuitem', { name: /复制节点/ }))
+    await browser.click(screen.getByRole('button', { name: /编辑/ }))
+    await browser.click(screen.getByRole('menuitem', { name: /粘贴节点/ }))
     expect(screen.getByText('查询用户 副本')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /撤销/ }))
     expect(screen.queryByText('查询用户 副本')).not.toBeInTheDocument()
@@ -497,6 +500,7 @@ describe('WorkflowDesigner', () => {
         statuses={{}}
         editable
         surface="workspace"
+        focusActions={<button>真实保存命令</button>}
         onChange={onChange}
       />,
     )
@@ -513,6 +517,7 @@ describe('WorkflowDesigner', () => {
     expect(onChange).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '专注模式' }))
     expect(screen.getByRole('button', { name: '退出专注模式' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '真实保存命令' })).toBeVisible()
     fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'F' })
     expect(screen.getByRole('button', { name: '专注模式' })).toBeVisible()
     view.rerender(

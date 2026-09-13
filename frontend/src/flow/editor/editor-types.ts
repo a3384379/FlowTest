@@ -1,10 +1,6 @@
 import type { WorkflowDefinition, WorkflowNode } from '../../lib/api'
 
-export type EditorSelection = {
-  nodeIds: readonly string[]
-  edgeIds: readonly string[]
-  primary: { kind: 'node' | 'edge'; id: string } | null
-}
+export type WorkflowSelection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null
 export type EditDiagnostic = {
   code: string
   severity: 'error' | 'warning'
@@ -23,8 +19,8 @@ export type GraphConnectionInput = {
   branch: 'true' | 'false' | null
   edgeId: string
 }
-export function emptySelection(): EditorSelection {
-  return { nodeIds: [], edgeIds: [], primary: null }
+export function emptySelection(): WorkflowSelection {
+  return null
 }
 export function jsonEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true

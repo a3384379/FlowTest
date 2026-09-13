@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { DraftContext, DraftSession } from '../features/drafts/draft-session'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
+import { InspectorPresentationContext } from './editor/inspector-presentation'
 import { workflowDefinition } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -265,6 +266,33 @@ describe('WorkflowApiRequestEditor', () => {
     expect(session.unsafe.size).toBe(0)
   })
 
+  it('applies request edits after restoring the fullscreen inspector to quick mode', async () => {
+    const user = userEvent.setup()
+    const session = new DraftSession()
+    const changed = vi.fn()
+    vi.mocked(getApiDetail).mockResolvedValue({
+      ...detail,
+      version: { ...detail.version, body_kind: 'json', body: { initial: true } },
+    })
+    render(<RequestSessionHarness session={session} changed={changed} startFullscreen />)
+
+    await screen.findByText('继承接口模板 v3')
+    await user.click(screen.getByRole('tab', { name: 'Body' }))
+    await user.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+    fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+      target: { value: '{"preserved":true}' },
+    })
+    await user.click(screen.getByRole('button', { name: '还原配置测试' }))
+    await user.click(screen.getByRole('button', { name: '应用节点配置' }))
+
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+    expect(changed.mock.calls[0][0].nodes[0].config).toMatchObject({
+      api_version: 3,
+      request_overrides: { body: { kind: 'json', value: { preserved: true } } },
+    })
+    expect(session.unsafe.size).toBe(0)
+  })
+
   it('reports a missing pinned interface version', async () => {
     const user = userEvent.setup()
     vi.mocked(getApiDetail).mockRejectedValueOnce(new Error('missing'))
@@ -360,9 +388,11 @@ const node: WorkflowNode = {
 function RequestSessionHarness({
   session,
   changed,
+  startFullscreen = false,
 }: {
   session: DraftSession
-  changed: () => void
+  changed: (value: import('../lib/api').WorkflowDefinition) => void
+  startFullscreen?: boolean
 }) {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
@@ -371,9 +401,13 @@ function RequestSessionHarness({
     ...workflowDefinition,
     nodes: [{ ...node, config: { ...node.config, request_overrides: {} } }],
   })
+  const [presentation, setPresentation] = useState<'quick' | 'fullscreen'>(
+    startFullscreen ? 'fullscreen' : 'quick',
+  )
   return (
     <QueryClientProvider client={queryClient}>
       <DraftContext.Provider value={session}>
+        {startFullscreen && <button onClick={() => setPresentation('quick')}>还原配置测试</button>}
         <WorkflowNodeEditSession
           scope="request-session:"
           node={definition.nodes[0]}
@@ -381,19 +415,21 @@ function RequestSessionHarness({
           editable
           onChange={(next) => {
             setDefinition(next)
-            changed()
+            changed(next)
           }}
         >
           {(draft, update) => (
-            <WorkflowApiRequestEditor
-              node={draft}
-              projectId="project-1"
-              environmentId="environment-1"
-              api={detail.definition}
-              artifacts={[artifact]}
-              editable
-              onUpdate={(updated) => update({ ...definition, nodes: [updated] })}
-            />
+            <InspectorPresentationContext.Provider value={presentation}>
+              <WorkflowApiRequestEditor
+                node={draft}
+                projectId="project-1"
+                environmentId="environment-1"
+                api={detail.definition}
+                artifacts={[artifact]}
+                editable
+                onUpdate={(updated) => update({ ...definition, nodes: [updated] })}
+              />
+            </InspectorPresentationContext.Provider>
           )}
         </WorkflowNodeEditSession>
       </DraftContext.Provider>

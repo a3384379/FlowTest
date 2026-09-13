@@ -53,7 +53,8 @@ test('S58 失败诊断创建受限 Repair Proposal 并完成 Re-preview', async 
   await expect(
     page.getByRole('button', { name: `S58 Repair ${suffix}`, exact: true }),
   ).toBeVisible()
-  await page.getByText('执行结果与历史', { exact: true }).click()
+  await page.getByRole('button', { name: '打开执行历史', exact: true }).click()
+  await page.getByTestId('workflow-runtime-tab-history').click()
   await expect(page.getByRole('button', { name: '失败诊断' })).toBeVisible()
   await page.getByRole('button', { name: '失败诊断' }).click()
 

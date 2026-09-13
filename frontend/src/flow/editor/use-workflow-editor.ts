@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { NodeChange, EdgeChange } from '@xyflow/react'
 import type { WorkflowDefinition } from '../../lib/api'
 import { applyDeletion, applyNodePositions, planDeletion } from './graph-commands'
 import {
   emptySelection,
   jsonEqual,
-  type EditorSelection,
+  type WorkflowSelection,
   type GraphEditResult,
   type NodePositionUpdate,
 } from './editor-types'
@@ -13,12 +12,12 @@ import {
 type HistoryEntry = {
   before: WorkflowDefinition
   after: WorkflowDefinition
-  selectionBefore: EditorSelection
-  selectionAfter: EditorSelection
+  selectionBefore: WorkflowSelection
+  selectionAfter: WorkflowSelection
 }
 type EditorState = {
   definition: WorkflowDefinition
-  selection: EditorSelection
+  selection: WorkflowSelection
   past: HistoryEntry[]
   future: HistoryEntry[]
   positions: Map<string, NodePositionUpdate['position']>
@@ -37,26 +36,21 @@ function initialState(definition: WorkflowDefinition): EditorState {
   }
 }
 function pruneSelection(
-  selection: EditorSelection,
+  selection: WorkflowSelection,
   definition: WorkflowDefinition,
-): EditorSelection {
-  const nodeIds = selection.nodeIds.filter((id) => definition.nodes.some((node) => node.id === id))
-  const edgeIds = selection.edgeIds.filter((id) => definition.edges.some((edge) => edge.id === id))
-  const primary = selection.primary
-  return {
-    nodeIds,
-    edgeIds,
-    primary:
-      primary && (primary.kind === 'node' ? nodeIds : edgeIds).includes(primary.id)
-        ? primary
-        : null,
-  }
+): WorkflowSelection {
+  if (!selection) return null
+  const exists =
+    selection.kind === 'node'
+      ? definition.nodes.some((node) => node.id === selection.id)
+      : definition.edges.some((edge) => edge.id === selection.id)
+  return exists ? selection : null
 }
 export function useWorkflowEditor(
   definition: WorkflowDefinition,
   canEdit: boolean,
   onChange: (next: WorkflowDefinition) => void,
-  initialSelection: EditorSelection = emptySelection(),
+  initialSelection: WorkflowSelection = emptySelection(),
 ) {
   const latest = useRef({ ...initialState(definition), selection: initialSelection })
   const [state, setState] = useState(latest.current)
@@ -135,41 +129,12 @@ export function useWorkflowEditor(
   function notify(message: string | null) {
     publish({ ...latest.current, message })
   }
-  function select(selection: EditorSelection) {
+  function select(selection: WorkflowSelection) {
     if (jsonEqual(selection, latest.current.selection)) return
     publish({ ...latest.current, selection })
   }
-  function click(kind: 'node' | 'edge', id: string, multiple = false) {
-    const current = latest.current.selection
-    const ids = kind === 'node' ? current.nodeIds : current.edgeIds
-    if (multiple || ids.includes(id)) {
-      select({
-        ...current,
-        [kind === 'node' ? 'nodeIds' : 'edgeIds']: [...new Set([...ids, id])],
-        primary: { kind, id },
-      })
-      return
-    }
-    select({
-      nodeIds: kind === 'node' ? [id] : [],
-      edgeIds: kind === 'edge' ? [id] : [],
-      primary: { kind, id },
-    })
-  }
-  function selectionChanges(kind: 'node' | 'edge', changes: Array<NodeChange | EdgeChange>) {
-    const current = latest.current.selection
-    const ids = new Set(kind === 'node' ? current.nodeIds : current.edgeIds)
-    for (const change of changes) {
-      if (change.type !== 'select') continue
-      if (change.selected) ids.add(change.id)
-      else ids.delete(change.id)
-    }
-    select(
-      pruneSelection(
-        { ...current, [kind === 'node' ? 'nodeIds' : 'edgeIds']: [...ids] },
-        latest.current.definition,
-      ),
-    )
+  function click(kind: 'node' | 'edge', id: string) {
+    select({ kind, id })
   }
   function positionsChanged(updates: NodePositionUpdate[], dragging?: boolean) {
     if (!canApplyPositions(mode.current, updates.length, cancelledDrag.current, dragging)) return
@@ -237,7 +202,6 @@ export function useWorkflowEditor(
     notify,
     select,
     click,
-    selectionChanges,
     positionsChanged,
     beginDrag,
     endDrag,
