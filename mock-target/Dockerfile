@@ -10,6 +10,7 @@ ENV PATH="/usr/local/bin:$PATH" \
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
+    apt-get upgrade -y; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         dpkg-dev \
