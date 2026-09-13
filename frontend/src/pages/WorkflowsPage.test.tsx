@@ -28,7 +28,7 @@ afterEach(() => {
 })
 
 describe('WorkflowsPage', () => {
-  it('publishes and runs an immutable workflow version', async () => {
+  beforeEach(() => {
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -41,6 +41,11 @@ describe('WorkflowsPage', () => {
       ),
       http.get(`/api/v1/projects/${project.id}/files`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+      http.get(
+        `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
+        () => HttpResponse.json([]),
       ),
       http.get('/api/v1/credentials', () => HttpResponse.json([])),
       http.get('/api/v1/graphql/schemas', () =>
@@ -85,7 +90,7 @@ describe('WorkflowsPage', () => {
       http.post(
         `/api/v1/projects/${project.id}/workflows/${workflow.id}/executions`,
         async ({ request }) => {
-          expect(await request.json()).toEqual({ environment_id: environment.id })
+          expect(await request.json()).toEqual({ environment_id: environment.id, version: 1 })
           return HttpResponse.json(workflowRunningExecution, { status: 202 })
         },
       ),
@@ -101,34 +106,53 @@ describe('WorkflowsPage', () => {
           }),
       ),
     )
+  })
+
+  it('debugs the selected workflow without changing its definition', async () => {
     renderPage()
     const browser = userEvent.setup()
 
     expect(await screen.findByText(workflow.name)).toBeVisible()
     expect(screen.getByText('已发布 v1')).toBeVisible()
     expect(screen.getByLabelText('工作流画布')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /更多/ }))
     await browser.click(screen.getByRole('button', { name: /调试至断点/ }))
     expect(await screen.findByText('已运行至断点前')).toBeInTheDocument()
     expect(screen.getByText('断点调试结果')).toBeVisible()
+  })
+
+  it('adds and removes a node, then explicitly applies and saves configuration', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText(workflow.name)
     fireEvent.click(screen.getAllByText('开始')[0])
     expect(screen.getByRole('button', { name: /删除节点/ })).toBeDisabled()
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
     await browser.click(screen.getByRole('button', { name: /添加接口节点/ }))
+    await browser.click(screen.getByRole('button', { name: '返回画布' }))
     fireEvent.click(await screen.findByText('接口请求 2'))
     await browser.click(screen.getByRole('button', { name: /删除节点/ }))
     fireEvent.click(screen.getByTestId('rf__node-api'))
     const nameInput = screen.getByDisplayValue('查询用户')
-    await browser.clear(nameInput)
-    await browser.type(nameInput, '用户查询')
+    fireEvent.change(nameInput, { target: { value: '用户查询' } })
+    expect(nameInput).toHaveValue('用户查询')
+    await browser.click(screen.getByRole('button', { name: '应用节点配置' }))
     await browser.click(screen.getByRole('button', { name: /保存草稿/ }))
     expect(await screen.findByText('草稿已保存')).toBeInTheDocument()
+  })
 
-    await browser.click(screen.getByRole('button', { name: /发布版本/ }))
+  it('publishes and runs an immutable workflow version', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText(workflow.name)
+    await browser.click(screen.getByRole('button', { name: /cloud-upload 发布服务器草稿/ }))
+    await browser.click(screen.getByRole('button', { name: '发布服务器草稿' }))
     expect(await screen.findByText('工作流 v2 已发布')).toBeInTheDocument()
 
     await browser.click(screen.getByRole('button', { name: /运\s*行/ }))
     expect(await screen.findByText('工作流已开始运行')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /保存草稿/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /发布版本/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /cloud-upload 发布服务器草稿/ })).toBeDisabled()
     expect(await screen.findByText('工作流执行通过')).toBeInTheDocument()
     expect(screen.getAllByText('查询用户').length).toBeGreaterThan(0)
     expect(screen.getByText('2')).toBeVisible()
@@ -190,6 +214,7 @@ describe('WorkflowsPage', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByText('已发布 v2')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /更多/ }))
     await browser.click(screen.getByRole('button', { name: /版本 Diff/ }))
     expect(diffRequested).toBe(true)
     expect(screen.getByText(/nodes\.api\.name/)).toHaveTextContent('查询当前用户')

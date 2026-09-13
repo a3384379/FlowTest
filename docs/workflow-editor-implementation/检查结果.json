@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-13",
+  "branch": "codex/workflow-orchestration-optimization",
+  "base_commit": "b445786a0441d3b87b77cc95ce250ad99d9b36a7",
+  "development_progress_percent": 100,
+  "backend": {
+    "ruff_format_exit": 0,
+    "ruff_check_exit": 0,
+    "mypy_exit": 0,
+    "mypy_files": 391,
+    "pytest_exit": 0,
+    "passed": 1344,
+    "skipped": 5,
+    "warnings": 2,
+    "coverage_percent": 90.62
+  },
+  "frontend": {
+    "format_exit": 0,
+    "lint_exit": 0,
+    "coverage_exit": 0,
+    "build_exit": 0,
+    "test_files": 84,
+    "passed": 377,
+    "coverage_percent": {
+      "statements": 86.02,
+      "branches": 80.82,
+      "functions": 84.98,
+      "lines": 88.18
+    }
+  },
+  "browser": {
+    "exit": 0,
+    "passed": 10,
+    "duration_seconds": 54.1,
+    "environment": "flowtest-workflow-acceptance Compose, localhost:13000",
+    "viewport_sizes": [
+      [
+        1920,
+        1080
+      ],
+      [
+        1440,
+        900
+      ],
+      [
+        1280,
+        720
+      ]
+    ],
+    "final_screenshots": 18,
+    "traces": 10,
+    "report": "output/playwright/workflow-optimization/report/index.html"
+  },
+  "matrix": {
+    "items": 96,
+    "evidence_index": "验收进度.json",
+    "note": "混合证据层级；不是 96 个独立浏览器测试。Windows 实机及系统中文输入法未独立验收，相关按键分支由自动事件测试覆盖。"
+  },
+  "original_documents": {
+    "files": 42,
+    "sha256_mismatches": 0
+  },
+  "workspace": {
+    "committed": false,
+    "pushed": false,
+    "preserved_user_change": "deploy/ruoyi/compose.yaml",
+    "original_frontend_updated": true
+  },
+  "logs": [
+    "output/playwright/workflow-optimization/checks/backend-pytest.log",
+    "output/playwright/workflow-optimization/checks/backend-mypy.log",
+    "output/playwright/workflow-optimization/checks/frontend-format.log",
+    "output/playwright/workflow-optimization/checks/frontend-lint.log",
+    "output/playwright/workflow-optimization/checks/frontend-coverage.log",
+    "output/playwright/workflow-optimization/checks/frontend-build.log",
+    "output/playwright/workflow-optimization/checks/playwright.log",
+    "output/playwright/workflow-optimization/checks/compose-build.log"
+  ]
+}

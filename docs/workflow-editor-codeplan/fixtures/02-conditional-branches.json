@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "开始",
+      "position": {
+        "x": 0,
+        "y": 80
+      },
+      "config": {}
+    },
+    {
+      "id": "api",
+      "type": "api",
+      "name": "查询测试对象",
+      "position": {
+        "x": 240,
+        "y": 80
+      },
+      "config": {
+        "api_definition_id": "00000000-0000-4000-8000-000000000001",
+        "api_version": 3,
+        "request_overrides": {},
+        "max_retries": 0,
+        "retry_on": [
+          "network_error",
+          "5xx"
+        ]
+      }
+    },
+    {
+      "id": "check",
+      "type": "condition",
+      "name": "判断结果",
+      "position": {
+        "x": 480,
+        "y": 80
+      },
+      "config": {
+        "source_node_id": "api",
+        "expression": "body.enabled",
+        "operator": "equals",
+        "expected": true
+      }
+    },
+    {
+      "id": "end-true",
+      "type": "end",
+      "name": "真分支结束",
+      "position": {
+        "x": 720,
+        "y": 0
+      },
+      "config": {}
+    },
+    {
+      "id": "end-false",
+      "type": "end",
+      "name": "假分支结束",
+      "position": {
+        "x": 720,
+        "y": 180
+      },
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "s-a",
+      "source": "start",
+      "target": "api",
+      "condition": null,
+      "mappings": []
+    },
+    {
+      "id": "a-c",
+      "source": "api",
+      "target": "check",
+      "condition": null,
+      "mappings": []
+    },
+    {
+      "id": "c-t",
+      "source": "check",
+      "target": "end-true",
+      "condition": "true",
+      "mappings": []
+    },
+    {
+      "id": "c-f",
+      "source": "check",
+      "target": "end-false",
+      "condition": "false",
+      "mappings": []
+    }
+  ],
+  "settings": {
+    "fail_fast": true,
+    "concurrency": 20,
+    "default_timeout_seconds": 30
+  }
+}

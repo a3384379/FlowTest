@@ -1,5 +1,6 @@
+import { useBulkDraft } from './use-bulk-draft'
 import { Button, Empty, Form, Input, Segmented, Select, Space, Typography } from 'antd'
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 
 import {
   recommendedContentType,
@@ -154,8 +155,7 @@ function RawBodyFields({
 
 function FormBodyFields({ onProgrammaticChange }: { onProgrammaticChange: () => void }) {
   const form = Form.useFormInstance<BodyFormContext>()
-  const [bulkText, setBulkText] = useState<string | null>(null)
-  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  const { bulkText, setBulkText, bulkErrors, setBulkErrors } = useBulkDraft('body-form')
   if (bulkText !== null) {
     return (
       <BulkEditor
@@ -210,8 +210,7 @@ function MultipartBodyFields({
   onProgrammaticChange: () => void
 }) {
   const form = Form.useFormInstance<BodyFormContext>()
-  const [bulkText, setBulkText] = useState<string | null>(null)
-  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  const { bulkText, setBulkText, bulkErrors, setBulkErrors } = useBulkDraft('body-multipart')
   if (bulkText !== null) {
     return (
       <BulkEditor

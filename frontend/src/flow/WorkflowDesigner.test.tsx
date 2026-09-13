@@ -17,6 +17,7 @@ import type { ApiDefinition, Artifact, Credential, WorkflowDefinition } from '..
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import { getApiDetail } from '../features/api-console/api-service'
 import { listApis } from '../features/workflows/workflow-service'
+import { DraftContext, DraftSession } from '../features/drafts/draft-session'
 
 vi.mock('../features/api-console/api-service', () => ({
   getApiDetail: vi.fn(),
@@ -49,6 +50,7 @@ describe('WorkflowDesigner', () => {
       />,
     )
 
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
     await browser.click(screen.getByRole('button', { name: '搜索接口' }))
     await waitFor(() =>
       expect(getApiDetail).toHaveBeenCalledWith(apiDefinition.project_id, apiDefinition.id),
@@ -96,6 +98,7 @@ describe('WorkflowDesigner', () => {
       />,
     )
 
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
     await browser.click(screen.getByRole('button', { name: '搜索接口' }))
     await waitFor(() => expect(listApis).toHaveBeenCalledTimes(1))
     await browser.type(screen.getByLabelText('搜索接口名称路径说明'), '命中')
@@ -129,8 +132,7 @@ describe('WorkflowDesigner', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /添加接口节点/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /添加结束节点/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /添加节点/ })).toBeDisabled()
     fireEvent.click(screen.getByText('查询用户'))
     expect(screen.getByDisplayValue('查询用户')).toBeDisabled()
     expect(screen.getByRole('button', { name: /删除节点/ })).toBeDisabled()
@@ -156,7 +158,7 @@ describe('WorkflowDesigner', () => {
       />,
     )
 
-    expect(screen.getByText('请选择工作流')).toBeVisible()
+    expect(screen.getByText('暂无可展示的流程定义或执行快照')).toBeVisible()
   })
 
   it('configures S7 control nodes, datasets, and field mappings', async () => {
@@ -178,6 +180,7 @@ describe('WorkflowDesigner', () => {
       target: { value: 'mapped_email' },
     })
 
+    await browser.click(screen.getByRole('button', { name: '应用节点配置' }))
     fireEvent.click(screen.getByText('校验状态'))
     expect(screen.getByDisplayValue('status_code')).toBeVisible()
     expect(screen.getByDisplayValue('200')).toBeVisible()
@@ -191,6 +194,8 @@ describe('WorkflowDesigner', () => {
 
     fireEvent.click(screen.getByText('用户数据'))
     expect(screen.getByText(/users\.json/)).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: '数据集' } })
     expect(screen.getByRole('button', { name: /数据集/ })).toBeDisabled()
   })
 
@@ -199,7 +204,7 @@ describe('WorkflowDesigner', () => {
     expect(delay.nodes.at(-1)?.config).toEqual({ seconds: 1 })
     const extracted = addTypedNode(workflowDefinition, 'extract', null)
     expect(extracted.nodes.at(-1)?.config).toMatchObject({
-      source_node_id: 'end',
+      source_node_id: 'api',
       expression: 'body',
     })
     const asserted = addTypedNode(workflowDefinition, 'assert', null)
@@ -240,6 +245,8 @@ describe('WorkflowDesigner', () => {
         eventSources={[kafkaSource, websocketSource]}
       />,
     )
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: 'Kafka' } })
     await browser.click(screen.getByRole('button', { name: /Kafka Produce/ }))
     fireEvent.click(screen.getByText('Kafka Produce', { selector: '.flow-node strong' }))
     expect(screen.getByDisplayValue('flowtest.orders')).toBeVisible()
@@ -257,7 +264,7 @@ describe('WorkflowDesigner', () => {
     expect(loop.nodes.at(-1)?.config).toMatchObject({
       workflow_id: workflow.id,
       workflow_version: 3,
-      source_node_id: 'end',
+      source_node_id: 'api',
       expression: 'body.items',
       concurrency: 5,
       fail_fast: true,
@@ -349,6 +356,8 @@ describe('WorkflowDesigner', () => {
   it('adds and configures credential-bound SQL and Redis nodes', () => {
     render(<DesignerHarness initial={workflowDefinition} credentials={dataCredentials} />)
 
+    fireEvent.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: 'SQL' } })
     expect(screen.getByRole('button', { name: /只读 SQL/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Redis 读取/ })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /只读 SQL/ }))
@@ -359,6 +368,7 @@ describe('WorkflowDesigner', () => {
     })
     expect(screen.getByDisplayValue('SELECT id FROM users WHERE id = :id')).toBeVisible()
 
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
     fireEvent.click(screen.getByRole('button', { name: /Redis 读取/ }))
     fireEvent.click(screen.getByTestId('rf__node-redis-5'))
     expect(screen.getByText(/Redis 仅允许 GET\/MGET/)).toBeVisible()
@@ -447,10 +457,79 @@ describe('WorkflowDesigner', () => {
     await browser.click(screen.getByText('首项失败即停止'))
     await browser.click(screen.getByText('继续处理其他项'))
 
+    await browser.click(screen.getByRole('button', { name: '应用节点配置' }))
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: '子流程' } })
     await browser.click(screen.getByRole('button', { name: /子流程/ }))
     await browser.click(screen.getByRole('button', { name: /ForEach/ }))
     expect(screen.getAllByText('子流程').length).toBeGreaterThan(1)
     expect(screen.getByText('循环子流程')).toBeVisible()
+  })
+
+  it('deletes the selected canvas node through the keyboard and restores its identity', async () => {
+    render(<DesignerHarness initial={workflowDefinition} />)
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'Delete' })
+    await waitFor(() => expect(screen.queryByTestId('rf__node-api')).not.toBeInTheDocument())
+    fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'z', ctrlKey: true })
+    expect(screen.getByTestId('rf__node-api')).toBeInTheDocument()
+  })
+  it('does not ask to apply an unfinished form when clicking its already selected node', async () => {
+    render(
+      <DraftContext.Provider value={new DraftSession()}>
+        <DesignerHarness initial={workflowDefinition} />
+      </DraftContext.Provider>,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '尚未应用的名称' } })
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    await waitFor(() => expect(screen.getByDisplayValue('尚未应用的名称')).toBeVisible())
+    expect(screen.queryAllByText('节点配置尚未应用')).toHaveLength(0)
+  })
+  it('uses the right-click target and guards editable input and proposal actions', async () => {
+    const onChange = vi.fn()
+    const view = render(
+      <WorkflowDesigner
+        definition={workflowDefinition}
+        apis={[apiDefinition]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        surface="workspace"
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-start'))
+    fireEvent.contextMenu(screen.getByTestId('rf__node-api'), { clientX: 100, clientY: 100 })
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: '复制节点' })).toBeInTheDocument(),
+    )
+    expect(screen.getByDisplayValue('查询用户')).toBeVisible()
+    fireEvent.click(screen.getByRole('menuitem', { name: '复制节点' }))
+    fireEvent.keyDown(screen.getByDisplayValue('查询用户'), { key: 'Delete' })
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'v', ctrlKey: true })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '专注模式' }))
+    expect(screen.getByRole('button', { name: '退出专注模式' })).toBeVisible()
+    fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'F' })
+    expect(screen.getByRole('button', { name: '专注模式' })).toBeVisible()
+    view.rerender(
+      <WorkflowDesigner
+        definition={workflowDefinition}
+        apis={[apiDefinition]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        mode="proposal"
+        onChange={onChange}
+      />,
+    )
+    expect(screen.getByText('提案模式')).toBeVisible()
+    fireEvent.keyDown(screen.getByLabelText('工作流画布'), { key: 'Delete' })
+    expect(onChange).toHaveBeenCalledTimes(1)
   })
 
   it('labels the first two condition edges and rejects a third branch', () => {

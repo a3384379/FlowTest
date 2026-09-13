@@ -146,10 +146,11 @@ export async function executeWorkflow(
   projectId: string,
   workflowId: string,
   environmentId: string,
+  version?: number,
 ): Promise<WorkflowExecution> {
   const response = await apiClient.post<WorkflowExecution>(
     `/projects/${projectId}/workflows/${workflowId}/executions`,
-    { environment_id: environmentId },
+    { environment_id: environmentId, ...(version === undefined ? {} : { version }) },
     { headers: { 'Idempotency-Key': crypto.randomUUID() } },
   )
   return response.data

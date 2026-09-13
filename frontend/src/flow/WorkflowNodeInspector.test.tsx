@@ -156,3 +156,36 @@ function withApiConfig(
     ),
   }
 }
+
+it('EDGE09 requires an explicit incoming edge and updates only that edge', async () => {
+  const definition: WorkflowDefinition = {
+    ...workflowDefinition,
+    nodes: [...workflowDefinition.nodes, { ...workflowDefinition.nodes[1], id: 'other' }],
+    edges: [
+      ...workflowDefinition.edges,
+      { id: 'other-api', source: 'other', target: 'api', condition: null, mappings: [] },
+    ],
+  }
+  const update = vi.fn()
+  render(
+    <WorkflowNodeInspector
+      node={definition.nodes[1]}
+      definition={definition}
+      apis={[apiDefinition]}
+      artifacts={[]}
+      credentials={[]}
+      editable
+      onChange={update}
+      onDelete={vi.fn()}
+    />,
+  )
+  const browser = userEvent.setup()
+  const add = screen.getByRole('button', { name: 'plus 添加' })
+  expect(add).toBeDisabled()
+  await browser.click(screen.getByRole('combobox', { name: '选择入站连线' }))
+  await browser.click(screen.getByText('other → api', { exact: true }))
+  await browser.click(add)
+  const changed: WorkflowDefinition = update.mock.calls[0][0]
+  expect(changed.edges.find((edge) => edge.id === 'other-api')?.mappings).toHaveLength(1)
+  expect(changed.edges.find((edge) => edge.id === 'start-api')?.mappings).toEqual([])
+})

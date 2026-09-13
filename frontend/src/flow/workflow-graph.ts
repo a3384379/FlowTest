@@ -1,3 +1,4 @@
+import { effectiveConfig, resolveEffectiveNodeType } from './editor/graph-analysis'
 import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
 import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
@@ -216,9 +217,14 @@ function defaultNodeConfig(
   subflow: { workflowId: string; workflowVersion: number } | null,
   credentials: Credential[],
 ): Record<string, unknown> {
-  const sourceNodeId = definition.nodes.at(-1)?.id ?? 'start'
+  const sourceNodeId =
+    definition.nodes.findLast(
+      (node) =>
+        !['start', 'end'].includes(resolveEffectiveNodeType(node)) && node.phase !== 'cleanup',
+    )?.id ?? ''
   if (isSourceNodeType(type)) {
-    return sourceNodeConfig(type, sourceNodeId)
+    const config = sourceNodeConfig(type, sourceNodeId)
+    return type === 'extract' ? { ...config, variable: uniqueExtractVariable(definition) } : config
   }
   if (isNestedNodeType(type)) {
     return nestedNodeConfig(type, sourceNodeId, subflow)
@@ -323,9 +329,9 @@ export function pasteNode(
     nodes: [
       ...definition.nodes,
       {
-        ...copied,
+        ...structuredClone(copied),
         id,
-        name: `${copied.name} 副本`,
+        name: `${copied.name.slice(0, 197)} 副本`,
         position: { x: copied.position.x + 40, y: copied.position.y + 40 },
         config: structuredClone(copied.config),
         configuration: copied.configuration ? structuredClone(copied.configuration) : undefined,
@@ -381,16 +387,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function autoLayoutWorkflow(definition: WorkflowDefinition): WorkflowDefinition {
   const levels = workflowLevels(definition)
-  const rows = new Map<number, number>()
+  const main = layoutPhase(
+    definition.nodes.filter((node) => node.phase !== 'cleanup'),
+    levels,
+    0,
+  )
+  const cleanupOffset = Math.max(0, ...[...main.values()].map((position) => position.y)) + 240
+  const cleanup = layoutPhase(
+    definition.nodes.filter((node) => node.phase === 'cleanup'),
+    levels,
+    cleanupOffset,
+  )
+  const positions = new Map([...main, ...cleanup])
   return {
     ...definition,
-    nodes: definition.nodes.map((node) => {
+    nodes: definition.nodes.map((node) => ({
+      ...node,
+      position: positions.get(node.id) ?? node.position,
+    })),
+  }
+}
+function layoutPhase(nodes: WorkflowNode[], levels: Map<string, number>, offset: number) {
+  const rows = new Map<number, number>()
+  return new Map(
+    nodes.map((node) => {
       const level = levels.get(node.id) ?? 0
       const row = rows.get(level) ?? 0
       rows.set(level, row + 1)
-      return { ...node, position: { x: level * 240, y: row * 120 } }
+      return [node.id, { x: level * 240, y: row * 120 + offset }]
     }),
-  }
+  )
+}
+function uniqueExtractVariable(definition: WorkflowDefinition): string {
+  const names = new Set(definition.nodes.map((node) => effectiveConfig(node).variable))
+  let name = 'extracted_value'
+  let index = 2
+  while (names.has(name)) name = `extracted_value_${index++}`
+  return name
 }
 
 function workflowLevels(definition: WorkflowDefinition): Map<string, number> {

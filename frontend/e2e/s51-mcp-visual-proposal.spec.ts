@@ -213,6 +213,7 @@ async function reviewAndApplyInUI(
   await expect(dialog).toBeHidden()
   await expect(page.getByText('草稿 r1')).toBeVisible()
   await expect(page.getByText('未发布')).toBeVisible()
+  await page.getByText('执行结果与历史', { exact: true }).click()
   await expect(page.getByText('暂无执行记录')).toBeVisible()
 }
 

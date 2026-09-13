@@ -1,0 +1,181 @@
+{
+  "repository": "a3384379/FlowTest",
+  "branch": "main",
+  "commit": "b445786a0441d3b87b77cc95ce250ad99d9b36a7",
+  "merge_pr": 99,
+  "inspection_date": "2026-09-13",
+  "method": "GitHub connector read-only static inspection of listed source ranges and prior identical blobs",
+  "not_performed": [
+    "repository modification",
+    "dependency installation",
+    "TypeScript compilation",
+    "unit or E2E tests",
+    "live environment API execution",
+    "complete repository audit",
+    "lockfile resolution"
+  ],
+  "sources": [
+    {
+      "id": "S01",
+      "path": "AGENTS.md",
+      "blob_sha": "d2582caa29c28ef7b3434f9c10ca0fe5bb5b17cc",
+      "read_scope": "全部",
+      "purpose": "工程约束",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/AGENTS.md"
+    },
+    {
+      "id": "S02",
+      "path": "frontend/package.json",
+      "blob_sha": "75f9128383209b547bb43ebac46bce1cc3ac2c33",
+      "read_scope": "全部",
+      "purpose": "依赖声明与命令；非 lockfile 解析结果",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/package.json"
+    },
+    {
+      "id": "S03",
+      "path": "frontend/src/pages/WorkflowsPage.tsx",
+      "blob_sha": "3652288c8ef6276471e04feb85556864475d1686",
+      "read_scope": "1-200；前轮相同 blob 的 360-705",
+      "purpose": "工作区、页签、设计器 key、运行和导入入口",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/pages/WorkflowsPage.tsx"
+    },
+    {
+      "id": "S04",
+      "path": "frontend/src/flow/WorkflowDesigner.tsx",
+      "blob_sha": "349574c39bb3d884d826eea10f8c37bf6688ab32",
+      "read_scope": "150-380,1110-1210；前轮相同 blob 其他相关段落",
+      "purpose": "受控画布、事件、历史与删除",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/flow/WorkflowDesigner.tsx"
+    },
+    {
+      "id": "S05",
+      "path": "frontend/src/flow/WorkflowNodeInspector.tsx",
+      "blob_sha": "8889a9a966f2a550ecbdb4a8ccc00c969bda461f",
+      "read_scope": "370-600,1000-1320,1500-1820；前轮相同 blob 1-290",
+      "purpose": "节点配置、映射、请求目标",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/flow/WorkflowNodeInspector.tsx"
+    },
+    {
+      "id": "S06",
+      "path": "frontend/src/flow/WorkflowApiRequestEditor.tsx",
+      "blob_sha": "895f4c3e8ae2b8c91e116e6555b8b0529e372ab7",
+      "read_scope": "175-355,470-680；前轮相同 blob 1-200",
+      "purpose": "Drawer、继承/覆盖、保存与预览",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/flow/WorkflowApiRequestEditor.tsx"
+    },
+    {
+      "id": "S07",
+      "path": "frontend/src/flow/workflow-graph.ts",
+      "blob_sha": "47bea5f0aed604f4f12b671211ce04e520252bd0",
+      "read_scope": "180-430；前轮相同 blob 1-190",
+      "purpose": "节点工厂、分支、复制、布局",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/flow/workflow-graph.ts"
+    },
+    {
+      "id": "S08",
+      "path": "frontend/src/features/workflows/use-workflows.ts",
+      "blob_sha": "e9b0e55a3df2634d01227c8c532f4e589c16b804",
+      "read_scope": "1-320,325-695,900-1100",
+      "purpose": "草稿生命周期、保存并发、发布和执行",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/workflows/use-workflows.ts"
+    },
+    {
+      "id": "S09",
+      "path": "frontend/src/features/workflows/workflow-service.ts",
+      "blob_sha": "f652b3244aefd99062ebb4a28e796d62b3f9e1cb",
+      "read_scope": "全部",
+      "purpose": "现有服务契约",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/workflows/workflow-service.ts"
+    },
+    {
+      "id": "S10",
+      "path": "frontend/src/features/workflows/workflow-draft-store.ts",
+      "blob_sha": "291f13aed96776b0e4ada3fa6c5e47bd172b915d",
+      "read_scope": "全部",
+      "purpose": "本地草稿分区与失败语义",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/workflows/workflow-draft-store.ts"
+    },
+    {
+      "id": "S11",
+      "path": "frontend/src/features/api-console/api-service.ts",
+      "blob_sha": "95b71676c00ff69aaaf18ca247be9eb462e7db10",
+      "read_scope": "1-215",
+      "purpose": "指定版本获取、请求预览可用参数",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/api-console/api-service.ts"
+    },
+    {
+      "id": "S12",
+      "path": "frontend/src/lib/api.ts",
+      "blob_sha": "f08e0e05aa555326fa20d4df0139b82cd8da9e71",
+      "read_scope": "1-100,480-820",
+      "purpose": "工作流类型、mapping 与运行策略",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/lib/api.ts"
+    },
+    {
+      "id": "S13",
+      "path": "backend/app/engine/contracts.py",
+      "blob_sha": "7eb28220101c40f483bb4273507ad7560a677513",
+      "read_scope": "1-900（实际文件内容范围内）",
+      "purpose": "后端严格工作流/节点/边契约与 DAG 校验",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/backend/app/engine/contracts.py"
+    },
+    {
+      "id": "S14",
+      "path": "backend/app/schemas/workflows.py",
+      "blob_sha": "e0c08df8c425a44dab73a5a31d3bb84848851c52",
+      "read_scope": "全部",
+      "purpose": "草稿更新、执行、调试与 diff 请求响应",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/backend/app/schemas/workflows.py"
+    },
+    {
+      "id": "S15",
+      "path": "frontend/src/styles.css",
+      "blob_sha": "eb68d0cc192d365c66cfeb3196e800c48b42e905",
+      "read_scope": "545-630；前轮相同 blob 布局相关段落",
+      "purpose": "固定尺寸与工作区样式",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/styles.css"
+    },
+    {
+      "id": "S16",
+      "path": "frontend/src/App.tsx",
+      "blob_sha": "e05f2e4a4bf4c41a3fd6a33e9fe68e463844d9c5",
+      "read_scope": "185-325",
+      "purpose": "应用壳与项目页签不可替换",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/App.tsx"
+    },
+    {
+      "id": "S17",
+      "path": "frontend/src/flow/WorkflowDesigner.test.tsx",
+      "blob_sha": "183db8e50852c8020cecac2d9d14ca7c696f9612",
+      "read_scope": "380-495；前轮相同 blob 1-260",
+      "purpose": "已有交互与 helper 测试",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/flow/WorkflowDesigner.test.tsx"
+    },
+    {
+      "id": "S18",
+      "path": "frontend/playwright.config.ts",
+      "blob_sha": "115aa42659af2e6825644aea173a4bdf5f3a4d10",
+      "read_scope": "全部",
+      "purpose": "测试目录、项目、worker、证据设置",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/playwright.config.ts"
+    },
+    {
+      "id": "S19",
+      "path": "frontend/src/features/drafts/draft-session.ts",
+      "blob_sha": "993f688782123262cdee0db13bb6efc680f8ec7b",
+      "read_scope": "全部",
+      "purpose": "节点事务式表单离页时复用已有会话内存",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/drafts/draft-session.ts"
+    },
+    {
+      "id": "S20",
+      "path": "frontend/src/features/drafts/DraftSessionProvider.tsx",
+      "blob_sha": "ec6ec923e11eab9cdeb64a855dcee9a82e30cd0e",
+      "read_scope": "全部",
+      "purpose": "beforeunload、路由阻断与保留草稿文案一致性",
+      "url": "https://github.com/a3384379/FlowTest/blob/b445786a0441d3b87b77cc95ce250ad99d9b36a7/frontend/src/features/drafts/DraftSessionProvider.tsx"
+    }
+  ],
+  "baseline_rechecked_date": "2026-09-13",
+  "baseline_recheck_result": "GitHub branches re-read: main remained b445786a0441d3b87b77cc95ce250ad99d9b36a7"
+}

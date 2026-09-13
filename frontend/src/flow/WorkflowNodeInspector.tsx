@@ -1,3 +1,7 @@
+import { editorNode, restoreEditedNode } from './editor/graph-analysis'
+import { getApiDetail } from '../features/api-console/api-service'
+import WorkflowJsonInput from './WorkflowJsonInput'
+import MappingEditor from './WorkflowMappingEditor'
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -52,7 +56,7 @@ type InspectorProps = {
 export default function WorkflowNodeInspector({
   projectId,
   environmentId,
-  node,
+  node: originalNode,
   definition,
   apis,
   artifacts,
@@ -65,8 +69,10 @@ export default function WorkflowNodeInspector({
   onChange,
   onDelete,
 }: InspectorProps) {
-  if (!node) return <EmptyInspector />
-  const updateNode = (updated: WorkflowNode) => onChange(replaceNode(definition, updated))
+  if (!originalNode) return <EmptyInspector />
+  const node = editorNode(originalNode)
+  const updateNode = (updated: WorkflowNode) =>
+    onChange(replaceNode(definition, restoreEditedNode(originalNode, updated)))
   return (
     <aside className="workflow-inspector">
       <Typography.Title level={5}>节点配置</Typography.Title>
@@ -158,6 +164,27 @@ function InspectorNodeFields({
       />
     )
   }
+  if (node.type === 'capability')
+    return (
+      <Alert
+        type="info"
+        title="此能力版本暂不支持可视化配置"
+        description={
+          <pre>
+            {JSON.stringify(
+              {
+                capability_id: node.capability_id,
+                capability_version: node.capability_version,
+                configuration: node.configuration,
+                bindings: node.bindings,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        }
+      />
+    )
   if (node.type === 'sql' || node.type === 'redis') {
     return (
       <DataNodeFields
@@ -976,16 +1003,11 @@ function CapabilityJson({
   const value = node.configuration?.[configKey] ?? fallback
   return (
     <Field label={label}>
-      <Input.TextArea
-        key={`${node.id}-${configKey}-${JSON.stringify(value)}`}
-        className="code-input"
-        rows={3}
-        disabled={!editable}
-        defaultValue={JSON.stringify(value, null, 2)}
-        onBlur={(event) => {
-          const parsed = parseJsonInput(event.target.value)
-          if (parsed !== undefined) onUpdate(updateCapabilityConfig(node, configKey, parsed))
-        }}
+      <WorkflowJsonInput
+        fieldKey={configKey}
+        value={value}
+        editable={editable}
+        onChange={(parsed) => onUpdate(updateCapabilityConfig(node, configKey, parsed))}
       />
     </Field>
   )
@@ -1156,28 +1178,14 @@ function JsonConfig({
 }) {
   return (
     <Field label={label}>
-      <Input.TextArea
-        key={`${node.id}-${configKey}-${JSON.stringify(node.config[configKey])}`}
-        className="code-input"
-        rows={3}
-        disabled={!editable}
-        defaultValue={JSON.stringify(node.config[configKey] ?? fallback, null, 2)}
-        onBlur={(event) => {
-          const parsed = parseJsonInput(event.target.value)
-          if (parsed !== undefined) onUpdate(updateNodeConfig(node, configKey, parsed))
-        }}
+      <WorkflowJsonInput
+        fieldKey={configKey}
+        value={node.config[configKey] ?? fallback}
+        editable={editable}
+        onChange={(value) => onUpdate(updateNodeConfig(node, configKey, value))}
       />
     </Field>
   )
-}
-
-function parseJsonInput(value: string): unknown | undefined {
-  try {
-    return JSON.parse(value) as unknown
-  } catch (error) {
-    if (error instanceof SyntaxError) return undefined
-    throw error
-  }
 }
 
 function ForEachFields({
@@ -1256,16 +1264,21 @@ function ApiFields({
   editable: boolean
   onUpdate: (node: WorkflowNode) => void
 }) {
-  const api = apis.find((item) => item.id === stringConfig(node, 'api_definition_id'))
+  const apiId = stringConfig(node, 'api_definition_id')
+  const resolvedApi = useApiIdentity(projectId, apiId, apis)
+  const availableApis = resolvedApi
+    ? [...apis.filter((item) => item.id !== apiId), resolvedApi]
+    : apis
+  const api = resolvedApi
   return (
     <>
       <Field label="接口">
         <Select
           disabled={!editable}
           value={stringConfig(node, 'api_definition_id') || undefined}
-          options={apis.map((api) => ({ label: api.name, value: api.id }))}
+          options={availableApis.map((api) => ({ label: api.name, value: api.id }))}
           onChange={(value) => {
-            const selected = apis.find((api) => api.id === value)
+            const selected = availableApis.find((api) => api.id === value)
             onUpdate({
               ...node,
               config: {
@@ -1638,6 +1651,10 @@ function MappingFields({
   onChange: (definition: WorkflowDefinition) => void
 }) {
   const incoming = definition.edges.filter((edge) => edge.target === node.id)
+  const [incomingId, setIncomingId] = useState<string>()
+  const chosen =
+    incoming.find((edge) => edge.id === incomingId) ??
+    (incoming.length === 1 ? incoming[0] : undefined)
   return (
     <section className="mapping-section">
       <Space className="mapping-heading">
@@ -1646,15 +1663,27 @@ function MappingFields({
           size="small"
           type="text"
           icon={<PlusOutlined />}
-          disabled={!editable || incoming.length === 0}
+          disabled={!editable || !chosen}
           onClick={() => {
-            const edge = incoming.at(0)
+            const edge = chosen
             if (edge) onChange(replaceEdge(definition, addMapping(edge)))
           }}
         >
           添加
         </Button>
       </Space>
+      {incoming.length > 1 && (
+        <Select
+          aria-label="选择入站连线"
+          value={incomingId}
+          placeholder="选择需要添加映射的连线"
+          options={incoming.map((edge) => ({
+            value: edge.id,
+            label: `${edge.source} → ${edge.target}`,
+          }))}
+          onChange={setIncomingId}
+        />
+      )}
       {incoming.flatMap((edge) =>
         edge.mappings.map((mapping, index) => (
           <MappingEditor
@@ -1672,63 +1701,6 @@ function MappingFields({
         <Typography.Text type="secondary">连接上游节点后可映射</Typography.Text>
       )}
     </section>
-  )
-}
-
-function MappingEditor({
-  mapping,
-  editable,
-  onUpdate,
-  onDelete,
-}: {
-  mapping: WorkflowFieldMapping
-  editable: boolean
-  onUpdate: (mapping: WorkflowFieldMapping) => void
-  onDelete: () => void
-}) {
-  return (
-    <div className="mapping-editor">
-      <Input
-        aria-label="映射源表达式"
-        disabled={!editable}
-        placeholder="源 JMESPath"
-        value={mapping.source.path}
-        onChange={(event) =>
-          onUpdate({ ...mapping, source: { ...mapping.source, path: event.target.value } })
-        }
-      />
-      <Select
-        aria-label="映射目标位置"
-        disabled={!editable}
-        value={mapping.target.location}
-        options={[
-          { value: 'query', label: 'Query' },
-          { value: 'header', label: 'Header' },
-          { value: 'body', label: 'Body' },
-          { value: 'variable', label: 'Variable' },
-        ]}
-        onChange={(value) =>
-          onUpdate({ ...mapping, target: { ...mapping.target, location: value } })
-        }
-      />
-      <Input
-        aria-label="映射目标字段"
-        disabled={!editable}
-        placeholder="目标字段"
-        value={mapping.target.key}
-        onChange={(event) =>
-          onUpdate({ ...mapping, target: { ...mapping.target, key: event.target.value } })
-        }
-      />
-      <Button
-        danger
-        type="text"
-        aria-label="删除映射"
-        icon={<MinusCircleOutlined />}
-        disabled={!editable}
-        onClick={onDelete}
-      />
-    </div>
   )
 }
 
@@ -1878,3 +1850,27 @@ const comparisonOptions = [
   { value: 'greater_than', label: '大于' },
   { value: 'less_than', label: '小于' },
 ]
+
+function useApiIdentity(
+  projectId: string | null | undefined,
+  apiId: string,
+  apis: ApiDefinition[],
+) {
+  const listed = apis.find((item) => item.id === apiId)
+  const [resolved, setResolved] = useState<ApiDefinition>()
+  useEffect(() => {
+    if (listed || !projectId || !apiId) return
+    let active = true
+    void getApiDetail(projectId, apiId)
+      .then((detail) => {
+        if (active) setResolved(detail.definition)
+      })
+      .catch(() => {
+        if (active) setResolved(undefined)
+      })
+    return () => {
+      active = false
+    }
+  }, [listed, projectId, apiId])
+  return listed ?? (resolved?.id === apiId ? resolved : undefined)
+}

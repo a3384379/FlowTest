@@ -1,3 +1,13 @@
+import WorkflowRequestDrawer from './WorkflowRequestDrawer'
+import axios from 'axios'
+import { apiErrorMessage } from '../lib/api'
+import {
+  BulkDraftContext,
+  useBulkDraft,
+  type BulkDraft,
+} from '../features/api-console/use-bulk-draft'
+import { useNodeEditContext } from './editor/node-edit-session'
+import { applyOwnedRequestSections, extraRequestPolicies } from './editor/request-overrides'
 import { EyeOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -6,7 +16,6 @@ import {
   Checkbox,
   ConfigProvider,
   Descriptions,
-  Drawer,
   Form,
   Input,
   Modal,
@@ -75,23 +84,20 @@ export default function WorkflowApiRequestEditor(props: EditorProps) {
           node={props.node}
           version={pinnedVersion ?? props.api?.current_version}
         />
-        {props.editable &&
-          pinnedVersion !== undefined &&
-          currentVersion !== undefined &&
-          pinnedVersion !== currentVersion && (
-            <Button
-              type="link"
-              className="workflow-request-upgrade"
-              onClick={() =>
-                props.onUpdate({
-                  ...props.node,
-                  config: { ...props.node.config, api_version: currentVersion },
-                })
-              }
-            >
-              更新至接口最新 v{currentVersion}
-            </Button>
-          )}
+        {canUpgrade(props.editable, pinnedVersion, currentVersion) && (
+          <Button
+            type="link"
+            className="workflow-request-upgrade"
+            onClick={() =>
+              props.onUpdate({
+                ...props.node,
+                config: { ...props.node.config, api_version: currentVersion },
+              })
+            }
+          >
+            更新至接口最新 v{currentVersion}
+          </Button>
+        )}
         <Button
           block
           icon={<SettingOutlined />}
@@ -101,22 +107,16 @@ export default function WorkflowApiRequestEditor(props: EditorProps) {
           配置节点请求
         </Button>
       </Space>
-      <Drawer
-        destroyOnHidden
-        size="large"
-        title="节点请求配置"
-        open={open}
-        onClose={() => setOpen(false)}
-      >
-        {open && (
+      <WorkflowRequestDrawer projectId={props.projectId} open={open} onClose={() => setOpen(false)}>
+        {
           <RequestEditorLoader
             {...props}
             apiId={apiId}
             pinnedVersion={pinnedVersion}
             onClose={() => setOpen(false)}
           />
-        )}
-      </Drawer>
+        }
+      </WorkflowRequestDrawer>
     </>
   )
 }
@@ -178,17 +178,42 @@ function RequestEditor({
   onUpdate,
   onClose,
 }: EditorProps & { detail: ApiVersion; onClose: () => void }) {
+  const session = useNodeEditContext()
+  const restored = session?.draft.requestDraft
   const [form] = Form.useForm<RequestEditorFields>()
   const inherited = useMemo(() => requestOverrides(node), [node])
-  const [modes, setModes] = useState(() => sectionModes(inherited))
-  const customDrafts = useRef<Partial<Record<RequestSectionKey, Partial<RequestEditorFields>>>>({})
+  const [modes, setModes] = useState(() => restored?.modes ?? sectionModes(inherited))
+  const customDrafts = useRef<Partial<Record<RequestSectionKey, Partial<RequestEditorFields>>>>(
+    restored?.customDrafts ?? {},
+  )
   const templateFields = useMemo(() => editorFields(detail, {}), [detail])
   const [preview, setPreview] = useState<unknown>(null)
   const [previewing, setPreviewing] = useState(false)
 
+  const [initialFields] = useState(() => restored?.fields ?? editorFields(detail, inherited))
+  const [activeTab, setActiveTab] = useState(() => restored?.activeTab ?? 'params')
+  const bulkDrafts = useRef<Record<string, BulkDraft>>(restored?.bulkDrafts ?? {})
+  const [error, setError] = useState<string | null>(null)
+  const watchedFields = Form.useWatch([], form) as RequestEditorFields | undefined
   useEffect(() => {
-    form.setFieldsValue(editorFields(detail, inherited))
-  }, [detail, form, inherited])
+    form.setFieldsValue(initialFields)
+  }, [form, initialFields])
+  function remember(nextModes = modes, tab = activeTab, dirty = true) {
+    session?.setRequest(
+      {
+        fields: form.getFieldsValue(true),
+        modes: nextModes,
+        customDrafts: customDrafts.current,
+        activeTab: tab,
+        bulkDrafts: bulkDrafts.current,
+      },
+      dirty,
+    )
+  }
+  useEffect(() => {
+    session?.registerRequestApply(save)
+    return () => session?.registerRequestApply(null)
+  })
 
   function changeMode(section: RequestSectionKey, nextMode: SectionMode) {
     const currentMode = modes[section]
@@ -201,25 +226,56 @@ function RequestEditor({
         ? (customDrafts.current[section] ?? fieldsForSection(templateFields, section))
         : fieldsForSection(templateFields, section)
     form.setFieldsValue(nextFields)
-    setModes((current) => ({ ...current, [section]: nextMode }))
+    const nextModes = { ...modes, [section]: nextMode }
+    setModes(nextModes)
+    remember(nextModes)
   }
 
   async function effectiveOverrides(): Promise<RequestOverrides> {
+    if (Object.values(bulkDrafts.current).some((draft) => draft.text !== null))
+      throw new Error('请先应用或取消批量输入')
     const values = await form.validateFields()
     return buildOverrides(values, modes)
   }
 
   async function save() {
-    const overrides = await effectiveOverrides()
-    onUpdate({
-      ...node,
-      config: {
-        ...node.config,
-        api_version: detail.version,
-        request_overrides: overrides,
-      },
-    })
-    onClose()
+    if (!editable) return false
+    try {
+      const overrides = await effectiveOverrides()
+      const next: WorkflowNode = {
+        ...node,
+        config: {
+          ...node.config,
+          api_version: detail.version,
+          request_overrides: applyOwnedRequestSections(node.config.request_overrides, {
+            params:
+              overrides.query_parameters === undefined
+                ? { mode: 'inherit' }
+                : { mode: 'custom', value: overrides.query_parameters },
+            headers:
+              overrides.headers === undefined
+                ? { mode: 'inherit' }
+                : { mode: 'custom', value: overrides.headers },
+            body:
+              overrides.body === undefined
+                ? { mode: 'inherit' }
+                : { mode: 'custom', value: overrides.body },
+          }),
+        },
+      }
+      if (session) {
+        if (!session.apply(next)) {
+          setError('节点配置未能应用，请检查名称、JSON 字段或外部修改冲突。')
+          return false
+        }
+      } else onUpdate(next)
+      setError(null)
+      onClose()
+      return true
+    } catch {
+      setError('请修正请求字段和 JSON 格式后再应用。')
+      return false
+    }
   }
 
   async function showPreview() {
@@ -229,12 +285,16 @@ function RequestEditor({
       const overrides = await effectiveOverrides()
       const result = await previewApi(projectId, detail.api_definition_id, environmentId, {
         version: detail.version,
+        serviceOverride: stringValue(node.config.service_override),
+        endpointVariant: stringValue(node.config.endpoint_variant),
         queryParametersOverride: overrides.query_parameters,
         headersOverride: overrides.headers,
         bodyOverride: overrides.body?.value,
         useBodyOverride: overrides.body !== undefined,
       })
       setPreview(withFileMetadata(result, artifacts))
+    } catch (error) {
+      setError(previewFailureMessage(error))
     } finally {
       setPreviewing(false)
     }
@@ -257,87 +317,98 @@ function RequestEditor({
         ]}
         className="workflow-request-base"
       />
-      <Form form={form} layout="vertical">
-        <Tabs
-          items={[
-            {
-              key: 'params',
-              label: sectionLabel('Params', modes.params),
-              children: (
-                <RequestSection
-                  mode={modes.params}
-                  editable={editable}
-                  onMode={(mode) => changeMode('params', mode)}
-                >
-                  <ParameterFields />
-                </RequestSection>
-              ),
-              forceRender: true,
-            },
-            {
-              key: 'headers',
-              label: sectionLabel('Headers', modes.headers),
-              children: (
-                <RequestSection
-                  mode={modes.headers}
-                  editable={editable}
-                  onMode={(mode) => changeMode('headers', mode)}
-                >
-                  <HeaderFields />
-                </RequestSection>
-              ),
-              forceRender: true,
-            },
-            {
-              key: 'body',
-              label: sectionLabel('Body', modes.body),
-              children: (
-                <RequestSection
-                  mode={modes.body}
-                  editable={editable}
-                  onMode={(mode) => changeMode('body', mode)}
-                >
-                  <BodyEditor artifacts={artifacts} syncHeaders={modes.headers === 'custom'} />
-                </RequestSection>
-              ),
-              forceRender: true,
-            },
-            {
-              key: 'auth',
-              label: 'Auth',
-              children: (
-                <Alert
-                  showIcon
-                  type="info"
-                  title={`继承接口认证方式：${detail.auth_kind}`}
-                  description="认证信息继续由接口模板和环境 Secret 管理，工作流节点不复制明文凭据。"
-                />
-              ),
-            },
-          ]}
-        />
-      </Form>
-      <Space className="workflow-request-actions" wrap>
-        <Button
-          icon={<EyeOutlined />}
-          loading={previewing}
-          disabled={!environmentId}
-          onClick={() => void showPreview()}
-        >
-          预览最终请求
-        </Button>
-        {editable && (
-          <Button type="primary" onClick={() => void save()}>
-            保存节点配置
-          </Button>
-        )}
-      </Space>
-      {!environmentId && (
-        <Typography.Text type="secondary">选择环境后可预览最终请求。</Typography.Text>
-      )}
+      <BulkDraftContext.Provider
+        value={{
+          drafts: restored?.bulkDrafts ?? {},
+          onChange: (key, value) => {
+            bulkDrafts.current = { ...bulkDrafts.current, [key]: value }
+            remember()
+          },
+        }}
+      >
+        <Form form={form} layout="vertical" onValuesChange={() => remember()}>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(tab) => {
+              setActiveTab(tab)
+              remember(modes, tab, false)
+            }}
+            items={[
+              {
+                key: 'params',
+                label: sectionLabel('Params', modes.params),
+                children: (
+                  <RequestSection
+                    mode={modes.params}
+                    editable={editable}
+                    onMode={(mode) => changeMode('params', mode)}
+                  >
+                    <ParameterFields />
+                  </RequestSection>
+                ),
+                forceRender: true,
+              },
+              {
+                key: 'headers',
+                label: sectionLabel('Headers', modes.headers),
+                children: (
+                  <RequestSection
+                    mode={modes.headers}
+                    editable={editable}
+                    onMode={(mode) => changeMode('headers', mode)}
+                  >
+                    <HeaderFields />
+                  </RequestSection>
+                ),
+                forceRender: true,
+              },
+              {
+                key: 'body',
+                label: sectionLabel('Body', modes.body),
+                children: (
+                  <RequestSection
+                    mode={modes.body}
+                    editable={editable}
+                    onMode={(mode) => changeMode('body', mode)}
+                  >
+                    <BodyEditor
+                      artifacts={artifacts}
+                      syncHeaders={modes.headers === 'custom'}
+                      onProgrammaticChange={() => remember()}
+                    />
+                  </RequestSection>
+                ),
+                forceRender: true,
+              },
+              {
+                key: 'auth',
+                label: 'Auth',
+                children: (
+                  <Alert
+                    showIcon
+                    type="info"
+                    title={`继承接口认证方式：${detail.auth_kind}`}
+                    description="认证信息继续由接口模板和环境 Secret 管理，工作流节点不复制明文凭据。"
+                  />
+                ),
+              },
+            ]}
+          />
+        </Form>
+      </BulkDraftContext.Provider>
+      <RequestActions
+        error={error}
+        policies={extraRequestPolicies(node.config.request_overrides)}
+        limitation={previewLimitation(node, detail, modes, watchedFields ?? initialFields)}
+        environmentId={environmentId}
+        editable={editable}
+        previewing={previewing}
+        onPreview={() => void showPreview()}
+        onSave={() => void save()}
+      />
       <Modal
         width={760}
-        title="最终请求预览"
+        title="模板请求预览（不发送）"
         open={preview !== null}
         footer={null}
         onCancel={() => setPreview(null)}
@@ -346,6 +417,14 @@ function RequestEditor({
       </Modal>
     </>
   )
+}
+
+function previewFailureMessage(error: unknown): string {
+  if (!axios.isAxiosError<{ error?: { trace_id?: unknown } }>(error))
+    return '预览失败，请检查请求字段、JSON 格式与环境配置。'
+  const traceId = error.response?.data?.error?.trace_id
+  const message = apiErrorMessage(error)
+  return typeof traceId === 'string' ? `${message}（追踪 ID：${traceId}）` : message
 }
 
 function RequestSection({
@@ -392,8 +471,7 @@ function RequestSection({
 
 function ParameterFields() {
   const form = Form.useFormInstance<RequestEditorFields>()
-  const [bulkText, setBulkText] = useState<string | null>(null)
-  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  const { bulkText, setBulkText, bulkErrors, setBulkErrors } = useBulkDraft('params')
   if (bulkText !== null) {
     return (
       <BulkEditor
@@ -449,8 +527,7 @@ function ParameterFields() {
 
 function HeaderFields() {
   const form = Form.useFormInstance<RequestEditorFields>()
-  const [bulkText, setBulkText] = useState<string | null>(null)
-  const [bulkErrors, setBulkErrors] = useState<string[]>([])
+  const { bulkText, setBulkText, bulkErrors, setBulkErrors } = useBulkDraft('headers')
   if (bulkText !== null) {
     return (
       <BulkEditor
@@ -622,5 +699,82 @@ function isBodyOverride(value: unknown): value is BodyOverride {
     isRecord(value) &&
     ['none', 'json', 'raw', 'form', 'multipart'].includes(String(value.kind)) &&
     'value' in value
+  )
+}
+
+function previewLimitation(
+  node: WorkflowNode,
+  detail: ApiVersion,
+  modes: ReturnType<typeof sectionModes>,
+  fields: RequestEditorFields,
+): string | null {
+  if (extraRequestPolicies(node.config.request_overrides).length)
+    return '当前预览接口不支持节点的额外请求策略，预览已禁用。'
+  if (modes.body !== 'custom') return null
+  try {
+    const body = toBodyInput(fields)
+    if (body.body_kind !== detail.body_kind || body.body === null)
+      return '当前预览接口无法表达该 Body 类型变化或空值覆盖，预览已禁用。'
+  } catch {
+    return '请先修正 Body JSON 格式。'
+  }
+  return null
+}
+
+function canUpgrade(editable: boolean, pinned?: number, current?: number): boolean {
+  return editable && pinned !== undefined && current !== undefined && pinned !== current
+}
+
+function RequestActions({
+  error,
+  policies,
+  limitation,
+  environmentId,
+  editable,
+  previewing,
+  onPreview,
+  onSave,
+}: {
+  error: string | null
+  policies: string[]
+  limitation: string | null
+  environmentId?: string | null
+  editable: boolean
+  previewing: boolean
+  onPreview: () => void
+  onSave: () => void
+}) {
+  return (
+    <>
+      {' '}
+      {error && <Alert type="error" title={error} />}
+      <Alert
+        type="info"
+        title="模板请求预览（不发送）"
+        description="不包含上游运行结果、边映射、运行时凭据或轮询结果；实际执行以已发布版本为准。"
+      />
+      {policies.length > 0 && (
+        <Alert type="info" title="已保留其他请求策略" description={policies.join('、')} />
+      )}
+      {limitation && <Alert type="warning" title={limitation} />}
+      <Space className="workflow-request-actions" wrap>
+        <Button
+          icon={<EyeOutlined />}
+          loading={previewing}
+          disabled={!environmentId || Boolean(limitation)}
+          onClick={onPreview}
+        >
+          预览模板请求
+        </Button>
+        {editable && (
+          <Button type="primary" onClick={onSave}>
+            保存节点配置
+          </Button>
+        )}
+      </Space>
+      {!environmentId && (
+        <Typography.Text type="secondary">选择环境后可预览模板请求。</Typography.Text>
+      )}
+    </>
   )
 }
