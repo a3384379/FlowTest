@@ -46,7 +46,14 @@ test('S58 失败诊断创建受限 Repair Proposal 并完成 Re-preview', async 
   expect(execution.execution.error_code).toBe('MAPPING_SOURCE_MISSING')
 
   await page.goto(`/projects/${project.id}/workflows`)
-  await expect(page.getByRole('cell', { name: `S58 Repair ${suffix}`, exact: true })).toBeVisible()
+  const listToggle = page.getByRole('button', { name: '切换工作流列表' })
+  await expect(listToggle).toHaveAttribute('aria-expanded', 'false')
+  await listToggle.click()
+  await expect(listToggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(
+    page.getByRole('button', { name: `S58 Repair ${suffix}`, exact: true }),
+  ).toBeVisible()
+  await page.getByText('执行结果与历史', { exact: true }).click()
   await expect(page.getByRole('button', { name: '失败诊断' })).toBeVisible()
   await page.getByRole('button', { name: '失败诊断' }).click()
 

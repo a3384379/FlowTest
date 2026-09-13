@@ -38,7 +38,10 @@ export default function WorkflowRequestDrawer({
     <Drawer
       title="节点请求配置"
       open={open}
-      onClose={onClose}
+      onClose={(event) => {
+        if (maximized && event.type === 'keydown') setMaximized(false)
+        else onClose()
+      }}
       size={maximized ? '100vw' : Math.min(width, viewport)}
       resizable={{
         onResize: resize,

@@ -20,7 +20,10 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
 
   await page.getByRole('link', { name: '流程编排' }).click()
   await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
-  await page.getByRole('row').filter({ hasText: parentName }).first().click()
+  const listToggle = page.getByRole('button', { name: '切换工作流列表' })
+  if ((await listToggle.getAttribute('aria-expanded')) === 'false') await listToggle.click()
+  await page.getByRole('button', { name: parentName, exact: true }).click()
+  await listToggle.click()
   await expect(page.getByText('已发布 v2')).toBeVisible()
 
   await selectWorkflowEnvironment(page)
@@ -59,6 +62,7 @@ async function verifyCanvasEditing(page: Page) {
 }
 
 async function verifyVersionDiff(page: Page) {
+  await page.getByRole('button', { name: /更\s*多/ }).click()
   await page.getByRole('button', { name: /版本 Diff/ }).click()
   const dialog = page.getByRole('dialog', { name: '工作流版本 Diff' })
   await expect(dialog).toContainText('批量调用 v1')
@@ -80,6 +84,7 @@ async function verifyExecutionDebugAndReplay(page: Page) {
     'passed',
   )
 
+  await page.getByRole('button', { name: /更\s*多/ }).click()
   await page.getByLabel('调试断点').click()
   await page.getByText('批量调用 v2', { exact: true }).last().click()
   await page.getByRole('button', { name: /调试至断点/ }).click()
