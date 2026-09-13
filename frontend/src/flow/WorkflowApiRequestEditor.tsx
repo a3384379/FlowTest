@@ -8,7 +8,12 @@ import {
 } from '../features/api-console/use-bulk-draft'
 import { useNodeEditContext } from './editor/node-edit-session'
 import { useInspectorPresentation } from './editor/inspector-presentation'
-import { applyOwnedRequestSections, extraRequestPolicies } from './editor/request-overrides'
+import {
+  applyRequestEditorDraft,
+  extraRequestPolicies,
+  requestOverridesFromFields,
+  type RequestOverrides,
+} from './editor/request-overrides'
 import { EyeOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -54,12 +59,6 @@ type RequestEditorFields = BodyEditorFields & {
 type BodyOverride = {
   kind: ApiVersion['body_kind']
   value: unknown
-}
-
-type RequestOverrides = {
-  query_parameters?: ApiVersion['query_parameters']
-  headers?: Record<string, string>
-  body?: BodyOverride
 }
 
 type EditorProps = {
@@ -222,6 +221,7 @@ function RequestEditor({
   function remember(nextModes = modes, tab = activeTab, dirty = true) {
     session?.setRequest(
       {
+        apiVersion: detail.version,
         fields: form.getFieldsValue(true),
         modes: nextModes,
         customDrafts: customDrafts.current,
@@ -262,28 +262,15 @@ function RequestEditor({
   async function save() {
     if (!editable) return false
     try {
-      const overrides = await effectiveOverrides()
-      const next: WorkflowNode = {
-        ...node,
-        config: {
-          ...node.config,
-          api_version: detail.version,
-          request_overrides: applyOwnedRequestSections(node.config.request_overrides, {
-            params:
-              overrides.query_parameters === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.query_parameters },
-            headers:
-              overrides.headers === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.headers },
-            body:
-              overrides.body === undefined
-                ? { mode: 'inherit' }
-                : { mode: 'custom', value: overrides.body },
-          }),
-        },
-      }
+      await effectiveOverrides()
+      const next = applyRequestEditorDraft(node, {
+        apiVersion: detail.version,
+        fields: form.getFieldsValue(true),
+        modes,
+        customDrafts: customDrafts.current,
+        activeTab,
+        bulkDrafts: bulkDrafts.current,
+      })
       if (session) {
         if (!session.apply(next)) {
           setError('节点配置未能应用，请检查名称、JSON 字段或外部修改冲突。')
@@ -649,12 +636,7 @@ function buildOverrides(
   values: RequestEditorFields,
   modes: ReturnType<typeof sectionModes>,
 ): RequestOverrides {
-  const body = toBodyInput(values)
-  return {
-    ...(modes.params === 'custom' ? { query_parameters: values.query_parameters ?? [] } : {}),
-    ...(modes.headers === 'custom' ? { headers: toRecord(values.headers) } : {}),
-    ...(modes.body === 'custom' ? { body: { kind: body.body_kind, value: body.body } } : {}),
-  }
+  return requestOverridesFromFields(values, modes)
 }
 
 function withFileMetadata(value: unknown, artifacts: Artifact[]): unknown {
@@ -691,12 +673,6 @@ function modeFor(value: unknown): SectionMode {
 
 function toKeyValues(value: Record<string, string>): KeyValueField[] {
   return Object.entries(value).map(([name, fieldValue]) => ({ name, value: fieldValue }))
-}
-
-function toRecord(values: KeyValueField[] = []): Record<string, string> {
-  return Object.fromEntries(
-    values.filter((item) => item.name).map((item) => [item.name, item.value]),
-  )
 }
 
 function stringValue(value: unknown): string {

@@ -15,6 +15,7 @@ export type RequestModes = {
   body: 'inherit' | 'custom'
 }
 export type WorkflowRequestEditorDraft = {
+  apiVersion: number
   fields: RequestEditorFields
   modes: RequestModes
   customDrafts: Partial<Record<keyof RequestModes, Partial<RequestEditorFields>>>

@@ -338,3 +338,27 @@ test('FORM/KEY/LIFE：无效 JSON 保留、顶栏写保护及路由往返恢复�
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText('草稿已保存').last()).toBeVisible()
 })
+
+test('FORM：全屏请求编辑在还原后仍由外层应用动作提交', async ({ page }) => {
+  const fixture = await seedEditor(page)
+  await page.locator('.react-flow__node[data-id=api]').click()
+  await page.getByRole('button', { name: '最大化配置', exact: true }).click()
+  await page.getByRole('tab', { name: 'Body', exact: true }).click()
+  const body = page.getByRole('tabpanel', { name: /^Body/ })
+  await body.getByText('节点自定义', { exact: true }).click()
+  await body.getByText('raw', { exact: true }).click()
+  await page.getByRole('textbox', { name: 'JSON Body', exact: true }).fill('{"preserved":true}')
+  await page.getByRole('button', { name: '还原配置', exact: true }).click()
+  await page.getByRole('button', { name: '应用节点配置', exact: true }).click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  await expect(page.getByText('草稿已保存').last()).toBeVisible()
+
+  const saved = await page.request.get(`/api/v1${fixture.root}/workflows`, {
+    headers: fixture.headers,
+  })
+  expect(saved.ok()).toBeTruthy()
+  expect((await saved.json()).items[0].draft_definition.nodes[1].config).toMatchObject({
+    api_version: 1,
+    request_overrides: { body: { kind: 'json', value: { preserved: true } } },
+  })
+})
