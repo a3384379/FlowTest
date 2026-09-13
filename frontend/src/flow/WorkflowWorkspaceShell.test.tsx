@@ -21,6 +21,7 @@ it('collapses by workspace width without changing preferences, preserves input, 
   )
   render(
     <WorkflowWorkspaceShell
+      header={<div>工作台 Header</div>}
       preferenceKey="layout"
       list={<input aria-label="列表搜索" defaultValue="工作流" />}
     >
@@ -28,7 +29,7 @@ it('collapses by workspace width without changing preferences, preserves input, 
     </WorkflowWorkspaceShell>,
   )
   act(() =>
-    callback([{ contentRect: { width: 900 } }] as ResizeObserverEntry[], {} as ResizeObserver),
+    callback([{ contentRect: { width: 1050 } }] as ResizeObserverEntry[], {} as ResizeObserver),
   )
   expect(screen.getByRole('button', { name: '切换工作流列表' })).toHaveAttribute(
     'aria-expanded',
@@ -46,12 +47,54 @@ it('collapses by workspace width without changing preferences, preserves input, 
   fireEvent.click(screen.getByRole('button', { name: '切换工作流列表' }))
   expect(JSON.parse(localStorage.getItem('layout')!).listCollapsed).toBe(true)
 })
+it('forces the list closed only when the workspace cannot fit its minimum surfaces', () => {
+  let callback: ResizeObserverCallback = () => undefined
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(observe: ResizeObserverCallback) {
+        callback = observe
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  )
+  localStorage.setItem('layout', JSON.stringify({ listCollapsed: false }))
+  render(
+    <WorkflowWorkspaceShell
+      header={<div>Header</div>}
+      preferenceKey="layout"
+      list={<div>列表</div>}
+    >
+      <div>画布</div>
+    </WorkflowWorkspaceShell>,
+  )
+  act(() =>
+    callback([{ contentRect: { width: 880 } }] as ResizeObserverEntry[], {} as ResizeObserver),
+  )
+  expect(screen.getByRole('button', { name: '切换工作流列表' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
+  act(() =>
+    callback([{ contentRect: { width: 1180 } }] as ResizeObserverEntry[], {} as ResizeObserver),
+  )
+  expect(screen.getByRole('button', { name: '切换工作流列表' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+})
 it('keeps an explicit layout usable when preference storage fails', () => {
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new Error('quota')
   })
   render(
-    <WorkflowWorkspaceShell preferenceKey="layout" list={<div>列表内容</div>}>
+    <WorkflowWorkspaceShell
+      header={<div>Header</div>}
+      preferenceKey="layout"
+      list={<div>列表内容</div>}
+    >
       <div>画布内容</div>
     </WorkflowWorkspaceShell>,
   )

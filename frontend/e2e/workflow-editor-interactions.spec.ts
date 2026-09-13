@@ -5,6 +5,7 @@ import {
   closeInspector,
   dragBetween,
   publishAndRun,
+  reconnectEdgeBetween,
   seedEditor,
 } from './support/workflow-editor'
 
@@ -12,7 +13,7 @@ test.use({ viewport: { width: 1920, height: 1080 } })
 test('SEL/DEL/EDGE：真实连线命中、创建、重连、映射确认与撤销', async ({ page }) => {
   await seedEditor(page)
   await clickEdge(page)
-  await expect(page.getByRole('heading', { name: '连线配置' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '连接关系' })).toBeVisible()
   await canvasKey(page, 'Delete')
   await expect(page.locator('.react-flow__edge')).toHaveCount(1)
   await dragBetween(
@@ -26,8 +27,8 @@ test('SEL/DEL/EDGE：真实连线命中、创建、重连、映射确认与撤�
   await canvasKey(page, 'ControlOrMeta+z')
   await expect(page.locator('.react-flow__edge')).toHaveCount(2)
   await page.getByRole('button', { name: '添加映射', exact: true }).click()
-  await page.getByRole('button', { name: 'Fit View', exact: true }).click()
-  await dragBetween(
+  await page.getByRole('button', { name: 'aim 适应画布', exact: true }).click()
+  await reconnectEdgeBetween(
     page,
     page.locator('.react-flow__edge[data-id=start-api] .react-flow__edgeupdater-target'),
     page.locator('.react-flow__node[data-id=end] .target'),
@@ -73,8 +74,10 @@ test('HIST/KEY/PAL：拖动单事务、输入焦点保护和节点库新增', as
   await expect(page.getByText('节点内容已从外部更新', { exact: false })).toHaveCount(0)
   await closeInspector(page)
   await page.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
+  await page.getByRole('button', { name: '基础', exact: true }).click()
   await page
-    .getByRole('button', { name: 'clock-circle 延时', exact: true })
+    .locator('.workflow-library-card')
+    .filter({ hasText: '等待' })
     .dragTo(page.getByLabel('工作流画布', { exact: true }), { targetPosition: { x: 180, y: 140 } })
   await expect(page.locator('.react-flow__node')).toHaveCount(4)
   await page.getByRole('button', { name: '返回画布', exact: true }).click()
@@ -106,7 +109,7 @@ test('FORM/LIFE：原始请求会话、保存、固定版本运行和只读历�
   await page.getByRole('textbox', { name: '批量编辑 Params' }).fill('acceptance: preserved')
   await page.getByRole('button', { name: '应用并返回表格', exact: true }).click()
   await page.getByRole('button', { name: '保存节点配置', exact: true }).click()
-  await page.getByRole('button', { name: 'save 保存草稿', exact: true }).click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText('草稿已保存').last()).toBeVisible()
   const saved = await page.request.get(`/api/v1${fixture.root}/workflows`, {
     headers: fixture.headers,
@@ -117,7 +120,17 @@ test('FORM/LIFE：原始请求会话、保存、固定版本运行和只读历�
       .query_parameters,
   ).toEqual([{ name: 'acceptance', value: 'preserved', enabled: true }])
   await publishAndRun(page)
-  await page.getByRole('button', { name: 'eye 查看快照', exact: true }).click()
+  const editorMain = page.getByTestId('workflow-editor-main')
+  const runtimeDock = editorMain.getByTestId('workflow-runtime-dock')
+  await expect(runtimeDock).toBeVisible()
+  await expect
+    .poll(async () => (await runtimeDock.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(200)
+  await expect
+    .poll(async () => (await runtimeDock.boundingBox())?.height ?? 999)
+    .toBeLessThanOrEqual(280)
+  await page.getByTestId('workflow-runtime-tab-history').click()
+  await page.locator('[data-testid^="workflow-history-"]').first().click()
   await expect(page.getByText('历史快照 · 只读')).toBeVisible()
   await expect(page.locator('.react-flow__edge')).toHaveCount(2)
   await canvasKey(page, 'ControlOrMeta+a')
@@ -138,14 +151,15 @@ test('ACC/FORM/PAL：从节点库建立四节点流程，保存前不执行，�
   await page.locator('.react-flow__node[data-id=api]').click()
   await closeInspector(page)
   await page.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
-  await page.getByRole('button', { name: 'check-circle 断言', exact: true }).click()
+  await page.getByRole('button', { name: '控制与校验', exact: true }).click()
+  await page.getByRole('button', { name: 'plus 添加断言校验', exact: true }).click()
   await page.getByRole('button', { name: '返回画布', exact: true }).click()
   const assertion = page.locator('.react-flow__node').filter({ hasText: '断言校验' })
   await expect(assertion).toHaveCount(1)
   const assertionId = await assertion.getAttribute('data-id')
   await closeInspector(page)
   await page.getByRole('button', { name: 'apartment 自动布局', exact: true }).click()
-  await page.getByRole('button', { name: 'Fit View', exact: true }).click()
+  await page.getByRole('button', { name: 'aim 适应画布', exact: true }).click()
   await clickEdge(page, 'api-end')
   await canvasKey(page, 'Delete')
   await closeInspector(page)
@@ -154,13 +168,14 @@ test('ACC/FORM/PAL：从节点库建立四节点流程，保存前不执行，�
     page.locator('.react-flow__node[data-id=api] .source'),
     assertion.locator('.target'),
   )
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2)
   await dragBetween(
     page,
     assertion.locator('.source'),
     page.locator('.react-flow__node[data-id=end] .target'),
   )
   await expect(page.locator('.react-flow__edge')).toHaveCount(3)
-  await page.getByRole('button', { name: 'save 保存草稿', exact: true }).click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText('草稿已保存').last()).toBeVisible()
   expect(executions).toEqual([])
   const saved = await page.request.get(`/api/v1${fixture.root}/workflows`, {
@@ -183,26 +198,26 @@ test('ACC/FORM/PAL：从节点库建立四节点流程，保存前不执行，�
   await expect(inspector.getByText('HTTP 200', { exact: true })).toHaveCount(0)
 })
 
-test('SEL/HIST/KEY：多选共同移动、撤销、取消拖动与鼠标悬停不夺取输入焦点', async ({ page }) => {
+test('SEL/HIST/KEY：单选互斥、单节点移动撤销、取消拖动与输入焦点保护', async ({ page }) => {
   await seedEditor(page)
   const api = page.locator('.react-flow__node[data-id=api]')
   const end = page.locator('.react-flow__node[data-id=end]')
   await api.click()
-  await page.getByRole('button', { name: 'Fit View', exact: true }).click()
+  await page.getByRole('button', { name: 'aim 适应画布', exact: true }).click()
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(1)
   await end.click({ modifiers: ['Shift'] })
-  await expect(page.locator('.react-flow__node.selected')).toHaveCount(2)
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(1)
+  await expect(end).toHaveClass(/selected/)
   const original = await Promise.all(
     [api, end].map((node) => node.evaluate((element) => element.style.transform)),
   )
-  const bounds = (await api.boundingBox())!
+  const bounds = (await end.boundingBox())!
   await page.mouse.move(bounds.x + 45, bounds.y + 25)
   await page.mouse.down()
   await page.mouse.move(bounds.x + 95, bounds.y + 75, { steps: 30 })
   await page.mouse.up()
-  for (const [index, node] of [api, end].entries())
-    await expect
-      .poll(() => node.evaluate((element) => element.style.transform))
-      .not.toBe(original[index])
+  await expect.poll(() => api.evaluate((element) => element.style.transform)).toBe(original[0])
+  await expect.poll(() => end.evaluate((element) => element.style.transform)).not.toBe(original[1])
   await canvasKey(page, 'ControlOrMeta+z')
   for (const [index, node] of [api, end].entries())
     await expect
@@ -284,7 +299,6 @@ test('EDGE/DEL：同目标真假分支的交换、删除确认、撤销和非法
     page.locator('.react-flow__node[data-id=api] .target'),
   )
   await expect(page.locator('.react-flow__edge')).toHaveCount(4)
-  await expect(page.getByText(/不能连接自身/)).toBeVisible()
 })
 
 test('FORM/KEY/LIFE：无效 JSON 保留、顶栏写保护及路由往返恢复请求会话', async ({ page }) => {
@@ -308,7 +322,7 @@ test('FORM/KEY/LIFE：无效 JSON 保留、顶栏写保护及路由往返恢复�
   await expect(json).toBeVisible()
   await expect(json).toHaveValue('{"unfinished":')
   await drawer.getByRole('button', { name: '关闭', exact: true }).click()
-  await page.getByRole('button', { name: 'save 保存草稿', exact: true }).click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText(/有尚未应用的节点配置/).last()).toBeVisible()
   await page.getByRole('menuitem', { name: '接口管理' }).click()
   await page.getByRole('button', { name: '保留草稿并切换', exact: true }).click()
@@ -321,6 +335,6 @@ test('FORM/KEY/LIFE：无效 JSON 保留、顶栏写保护及路由往返恢复�
   await expect(drawer.getByRole('tab', { name: /^Body/ })).toHaveAttribute('aria-selected', 'true')
   await json.fill('{"complete":true}')
   await drawer.getByRole('button', { name: '保存节点配置', exact: true }).click()
-  await page.getByRole('button', { name: 'save 保存草稿', exact: true }).click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText('草稿已保存').last()).toBeVisible()
 })

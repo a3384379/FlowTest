@@ -51,5 +51,9 @@ it('reports write failure without throwing or clearing draft storage', () => {
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
     throw new DOMException('disabled')
   })
-  expect(readLayoutPreferences('layout').listWidth).toBe(220)
+  expect(readLayoutPreferences('layout').listWidth).toBe(256)
+})
+
+it('uses the accepted default workflow list width', () => {
+  expect(readLayoutPreferences('new-layout').listWidth).toBe(256)
 })

@@ -1,4 +1,6 @@
 import WorkflowWorkspaceShell from '../flow/WorkflowWorkspaceShell'
+import WorkflowWorkbenchHeader from '../flow/WorkflowWorkbenchHeader'
+import WorkflowRuntimeDock from '../flow/WorkflowRuntimeDock'
 import { workflowLayoutKey } from '../flow/editor/layout-preferences'
 import {
   BugOutlined,
@@ -6,11 +8,14 @@ import {
   DeleteOutlined,
   DiffOutlined,
   EyeOutlined,
+  HistoryOutlined,
+  ImportOutlined,
   LockOutlined,
   MoreOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RedoOutlined,
+  RobotOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import {
@@ -31,7 +36,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -77,16 +82,7 @@ export default function WorkflowsPage() {
   }
 
   return (
-    <div className="workflow-workspace-page">
-      <WorkflowHeading
-        state={state}
-        onCreate={() => setCreateOpen(true)}
-        onFlowSpec={() => {
-          setFlowSpecSeed(undefined)
-          setFlowSpecOpen(true)
-        }}
-        onFlowProposal={() => setFlowProposalOpen(true)}
-      />
+    <div className="workflow-workspace-page" data-testid="workflow-page">
       <WorkflowTabs
         state={state}
         workflowIds={tabs.workflowIds}
@@ -99,23 +95,17 @@ export default function WorkflowsPage() {
         }
         onCloseAll={() => tabs.requestCloseTabs(tabs.workflowIds)}
       />
-      <WorkflowWorkspace state={state} onSelectWorkflow={tabs.activateWorkflow} />
-      <details className="workflow-bottom-panel" open={showExecutionPanels(state)}>
-        <summary>执行结果与历史</summary>
-        <RunConsoleCard state={state} />
-        <DebugResultCard result={state.debugResult} />
-        <Card title="工作流执行历史" className="workflow-result-card">
-          <ExecutionTable
-            items={(state.executions.data?.items ?? []).filter(
-              (item) => item.workflow_id === state.workflowId,
-            )}
-            selectedId={state.historyExecutionId}
-            loading={state.historyLoading}
-            onView={state.showHistory}
-            onRepair={setRepairExecution}
-          />
-        </Card>
-      </details>
+      <WorkflowWorkspace
+        state={state}
+        onSelectWorkflow={tabs.activateWorkflow}
+        onCreate={() => setCreateOpen(true)}
+        onFlowSpec={() => {
+          setFlowSpecSeed(undefined)
+          setFlowSpecOpen(true)
+        }}
+        onFlowProposal={() => setFlowProposalOpen(true)}
+        onRepair={setRepairExecution}
+      />
       <VersionDiffDialog state={state} />
       <CreateWorkflowDialog
         open={createOpen}
@@ -158,6 +148,119 @@ export default function WorkflowsPage() {
 type WorkflowState = ReturnType<typeof useWorkflows>
 
 type WorkflowTabsState = ReturnType<typeof useWorkflowTabs>
+type RuntimeDockMode = 'run' | 'history' | 'debug'
+
+function WorkflowExecutionPanels({
+  state,
+  onRepair,
+  forceOpen = false,
+}: {
+  state: WorkflowState
+  onRepair: (execution: WorkflowExecution) => void
+  forceOpen?: boolean
+}) {
+  if (!forceOpen && !showExecutionPanels(state)) return null
+  const mode = executionDockMode(state)
+  const preferredTab = preferredExecutionTab(state, mode, forceOpen)
+  const items = executionDockItems(state, onRepair)
+  return (
+    <WorkflowRuntimeDock
+      mode={mode}
+      status={state.runtimeExecution && <StatusTag status={state.runtimeExecution.status} />}
+    >
+      <WorkflowRuntimeTabs key={preferredTab} initialKey={preferredTab} items={items} />
+    </WorkflowRuntimeDock>
+  )
+}
+
+function executionDockMode(state: WorkflowState): RuntimeDockMode {
+  if (state.workspaceMode === 'draft') return state.debugResult ? 'debug' : 'run'
+  if (state.workspaceMode === 'history') return 'history'
+  return 'run'
+}
+
+function preferredExecutionTab(
+  state: WorkflowState,
+  mode: RuntimeDockMode,
+  forceOpen: boolean,
+): string {
+  if (mode === 'history') return 'history'
+  if (state.debugResult || mode === 'debug') return 'debug'
+  if (forceOpen && state.workspaceMode === 'draft') return 'history'
+  return 'run'
+}
+
+function executionDockItems(
+  state: WorkflowState,
+  onRepair: (execution: WorkflowExecution) => void,
+): Array<{ key: string; label: string; children: ReactNode }> {
+  return [
+    {
+      key: 'run',
+      label: state.workspaceMode === 'history' ? '执行详情' : '最近运行',
+      children: <RunConsolePanel state={state} />,
+    },
+    ...(state.debugResult
+      ? [
+          {
+            key: 'debug',
+            label: '调试结果',
+            children: <DebugResultPanel result={state.debugResult} />,
+          },
+        ]
+      : []),
+    {
+      key: 'history',
+      label: '执行历史',
+      children: (
+        <div className="workflow-runtime-panel">
+          <ExecutionTable
+            items={(state.executions.data?.items ?? []).filter(
+              (item) => item.workflow_id === state.workflowId,
+            )}
+            selectedId={state.historyExecutionId}
+            loading={state.historyLoading}
+            onView={state.showHistory}
+            onRepair={onRepair}
+          />
+        </div>
+      ),
+    },
+  ]
+}
+
+function WorkflowRuntimeTabs({
+  initialKey,
+  items,
+}: {
+  initialKey: string
+  items: Array<{ key: string; label: string; children: ReactNode }>
+}) {
+  const [activeKey, setActiveKey] = useState(initialKey)
+  const activeItem = items.find((item) => item.key === activeKey) ?? items[0]
+  return (
+    <div className="workflow-runtime-tabs">
+      <div className="workflow-runtime-tab-list" role="tablist" aria-label="运行面板视图">
+        {items.map((item) => (
+          <Button
+            key={item.key}
+            type="text"
+            role="tab"
+            data-testid={`workflow-runtime-tab-${item.key}`}
+            aria-selected={item.key === activeItem?.key}
+            className={item.key === activeItem?.key ? 'is-active' : ''}
+            onClick={() => setActiveKey(item.key)}
+          >
+            {item.label}
+          </Button>
+        ))}
+      </div>
+      <div className="workflow-runtime-tab-panel" role="tabpanel">
+        {activeItem?.children}
+      </div>
+    </div>
+  )
+}
 
 function WorkflowTabCloseModal({ tabs }: { tabs: WorkflowTabsState }) {
   const dirtyCount = tabs.pendingClose?.dirtyIds.length ?? 0
@@ -349,22 +452,22 @@ function WorkflowProposalDialog({
   )
 }
 
-function RunConsoleCard({ state }: { state: WorkflowState }) {
+function RunConsolePanel({ state }: { state: WorkflowState }) {
   return (
-    <Card
-      title="最近一次运行"
-      className="workflow-result-card"
-      extra={
-        state.runtimeExecution && (
+    <div className="workflow-runtime-panel">
+      <div className="workflow-runtime-panel-heading">
+        <Typography.Text strong>
+          {state.workspaceMode === 'history' ? '历史执行详情' : '最近一次运行'}
+        </Typography.Text>
+        {state.runtimeExecution && (
           <Space wrap>
             <StatusTag status={state.runtimeExecution.status} />
             <Typography.Text type="secondary">
               {state.runtimeExecution.id} · {executionDuration(state.runtimeExecution)}
             </Typography.Text>
           </Space>
-        )
-      }
-    >
+        )}
+      </div>
       {state.runtimeChildren.length ? (
         <DatasetRunSummary items={state.runtimeChildren} />
       ) : (
@@ -378,11 +481,11 @@ function RunConsoleCard({ state }: { state: WorkflowState }) {
           }
         />
       )}
-    </Card>
+    </div>
   )
 }
 
-function WorkflowHeading({
+function WorkbenchMore({
   state,
   onCreate,
   onFlowSpec,
@@ -393,50 +496,130 @@ function WorkflowHeading({
   onFlowSpec: () => void
   onFlowProposal: () => void
 }) {
+  const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
-    <div className="page-heading">
-      <div>
-        <Typography.Title level={2}>流程编排</Typography.Title>
-        <Typography.Text type="secondary">
-          管理草稿和不可变发布版本，验证 DAG 并运行固定快照。
-        </Typography.Text>
-      </div>
-      <Space wrap>
-        <Select
-          aria-label="工作流项目"
-          className="context-select"
-          placeholder="选择项目"
-          value={state.projectId}
-          loading={state.projects.isLoading}
-          options={options(state.projects.data?.items)}
-          onChange={state.selectProject}
-        />
-        <Select
-          aria-label="工作流环境"
-          className="context-select"
-          placeholder={state.environmentPlaceholder}
-          status={state.environmentStatus}
-          value={state.environmentId}
-          loading={state.environments.isLoading}
-          disabled={!state.projectId}
-          options={options(state.environments.data)}
-          onChange={state.setEnvironmentSelection}
-        />
+    <Popover
+      title="工作流与版本"
+      trigger="click"
+      content={
+        <Space className="workflow-more-content" orientation="vertical" align="start">
+          <Typography.Text type="secondary">项目与环境</Typography.Text>
+          <Select
+            aria-label="工作流项目"
+            placeholder="选择项目"
+            value={state.projectId}
+            loading={state.projects.isLoading}
+            options={options(state.projects.data?.items)}
+            onChange={state.selectProject}
+          />
+          <Select
+            aria-label="工作流环境"
+            placeholder={state.environmentPlaceholder}
+            status={state.environmentStatus}
+            value={state.environmentId}
+            loading={state.environments.isLoading}
+            disabled={!state.projectId}
+            options={options(state.environments.data)}
+            onChange={state.setEnvironmentSelection}
+          />
+          <Button
+            icon={<PlusOutlined />}
+            disabled={!state.projectId || !state.apis.data?.items.length}
+            onClick={onCreate}
+          >
+            新建工作流
+          </Button>
+          <Button
+            icon={<CloudUploadOutlined />}
+            disabled={disabled}
+            loading={state.publishing}
+            onClick={() => void state.publish()}
+          >
+            发布服务器草稿
+          </Button>
+          <Select
+            aria-label="调试断点"
+            className="workflow-breakpoint-select"
+            value={state.breakpointNodeId}
+            disabled={disabled}
+            placeholder="选择调试断点"
+            options={state.breakpointNodes.map((node) => ({ value: node.id, label: node.name }))}
+            onChange={state.setBreakpointSelection}
+          />
+          <Button
+            icon={<DiffOutlined />}
+            disabled={(state.selectedWorkflow?.current_version ?? 0) < 2}
+            loading={state.comparing}
+            onClick={() => void state.compareLatestVersions()}
+          >
+            版本 Diff
+          </Button>
+          <Button icon={<ImportOutlined />} disabled={!state.workflowId} onClick={onFlowSpec}>
+            FlowSpec 导入 / 映射
+          </Button>
+          <Button icon={<RobotOutlined />} disabled={!state.projectId} onClick={onFlowProposal}>
+            MCP 流程提案
+          </Button>
+        </Space>
+      }
+    >
+      <Button icon={<MoreOutlined />} aria-label="工作流更多操作">
+        更多
+      </Button>
+    </Popover>
+  )
+}
+
+function HeaderPrimaryActions({ state }: { state: WorkflowState }) {
+  const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
+  const canDebug = canExecute(state) && Boolean(state.breakpointNodeId)
+  return (
+    <Space className="workflow-header-primary-actions">
+      <Button
+        icon={<SaveOutlined />}
+        aria-label="保存草稿"
+        disabled={disabled}
+        loading={state.saving}
+        onClick={() => void state.saveDraft()}
+      >
+        保存
+      </Button>
+      <Button
+        type="primary"
+        icon={<PlayCircleOutlined />}
+        aria-label="运行已发布版本"
+        disabled={!canExecute(state)}
+        loading={state.executing || Boolean(state.activeExecutionId)}
+        onClick={() => void state.execute()}
+      >
+        运行
+      </Button>
+      {state.breakpointNodeId && (
         <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          disabled={!state.projectId || !state.apis.data?.items.length}
-          onClick={onCreate}
+          icon={<BugOutlined />}
+          aria-label="调试至断点"
+          disabled={!canDebug}
+          loading={state.debugging}
+          onClick={() => void state.debugToBreakpoint()}
         >
-          新建工作流
+          调试
         </Button>
-        <Button disabled={!state.workflowId} onClick={onFlowSpec}>
-          FlowSpec 导入 / 映射
-        </Button>
-        <Button disabled={!state.projectId} onClick={onFlowProposal}>
-          MCP 流程提案
-        </Button>
-      </Space>
+      )}
+    </Space>
+  )
+}
+
+function WorkflowListTitle({ onCreate, disabled }: { onCreate: () => void; disabled: boolean }) {
+  return (
+    <div className="workflow-list-title">
+      <span>工作流</span>
+      <Button
+        type="text"
+        icon={<PlusOutlined />}
+        aria-label="新建工作流"
+        disabled={disabled}
+        onClick={onCreate}
+      />
     </div>
   )
 }
@@ -535,17 +718,61 @@ function WorkflowTabs({
 function WorkflowWorkspace({
   state,
   onSelectWorkflow,
+  onCreate,
+  onFlowSpec,
+  onFlowProposal,
+  onRepair,
 }: {
   state: WorkflowState
   onSelectWorkflow: (workflowId: string) => void
+  onCreate: () => void
+  onFlowSpec: () => void
+  onFlowProposal: () => void
+  onRepair: (execution: WorkflowExecution) => void
 }) {
   const userId = useAuthStore((store) => store.user?.id)
+  const [historyDockOpen, setHistoryDockOpen] = useState(false)
   return (
     <WorkflowWorkspaceShell
       key={workflowLayoutKey(userId, state.projectId)}
       preferenceKey={workflowLayoutKey(userId, state.projectId)}
+      header={
+        <WorkflowWorkbenchHeader
+          left={workspaceTitle(state)}
+          center={<WorkspaceModeSwitch state={state} />}
+          right={
+            <Space>
+              {state.workspaceMode !== 'history' && <HeaderPrimaryActions state={state} />}
+              {state.workspaceMode === 'draft' && !state.debugResult && (
+                <Button
+                  icon={<HistoryOutlined />}
+                  aria-label={historyDockOpen ? '关闭执行历史' : '打开执行历史'}
+                  onClick={() => setHistoryDockOpen((open) => !open)}
+                >
+                  执行历史
+                </Button>
+              )}
+              <WorkbenchMore
+                state={state}
+                onCreate={onCreate}
+                onFlowSpec={onFlowSpec}
+                onFlowProposal={onFlowProposal}
+              />
+            </Space>
+          }
+        />
+      }
       list={
-        <Card className="workflow-list-card" title="工作流" loading={state.workflows.isLoading}>
+        <Card
+          className="workflow-list-card"
+          title={
+            <WorkflowListTitle
+              onCreate={onCreate}
+              disabled={!state.projectId || !state.apis.data?.items.length}
+            />
+          }
+          loading={state.workflows.isLoading}
+        >
           <WorkflowTable
             items={state.workflows.data?.items ?? []}
             selectedId={state.workflowId}
@@ -555,19 +782,13 @@ function WorkflowWorkspace({
           />
         </Card>
       }
+      runtimeDock={
+        <WorkflowExecutionPanels state={state} onRepair={onRepair} forceOpen={historyDockOpen} />
+      }
     >
       <Card
-        title={workspaceTitle(state)}
+        className="workflow-workbench-card"
         loading={state.workspaceMode === 'history' && state.historyLoading}
-        extra={
-          <Space wrap>
-            <WorkspaceModeSwitch state={state} />
-            {state.workspaceMode !== 'history' &&
-              (state.workspaceMode === 'draft' ||
-                Boolean(state.activeExecutionId) ||
-                Boolean(state.lastResult)) && <DraftActions state={state} />}
-          </Space>
-        }
       >
         <DraftEditor state={state} />
       </Card>
@@ -605,25 +826,34 @@ function WorkspaceModeSwitch({ state }: { state: WorkflowState }) {
 }
 
 function workspaceTitle(state: WorkflowState) {
+  const workflow = state.selectedWorkflow
   if (state.workspaceMode === 'history') {
     return (
-      <Space>
-        历史执行快照
-        <Tag icon={<LockOutlined />} color="gold">
-          不可修改
-        </Tag>
-      </Space>
+      <div className="workflow-workspace-title">
+        <span className="workflow-workspace-name">{workflow?.name ?? '历史执行快照'}</span>
+        <Space size={4} wrap>
+          <Tag icon={<LockOutlined />} color="gold">
+            历史快照 · 不可修改
+          </Tag>
+        </Space>
+      </div>
     )
   }
-  return state.workspaceMode === 'run' ? '实时运行视图' : '可视化草稿'
+  return (
+    <div className="workflow-workspace-title">
+      <span className="workflow-workspace-name">{workflow?.name ?? '流程工作区'}</span>
+      {workflow && <DraftMetadata state={state} workflow={workflow} />}
+    </div>
+  )
 }
 
-function DraftActions({ state }: { state: WorkflowState }) {
+function FocusDraftActions({ state }: { state: WorkflowState }) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
-    <Space wrap>
+    <Space className="workflow-focus-commands">
       <Button
         icon={<SaveOutlined />}
+        aria-label="保存草稿"
         disabled={disabled}
         loading={state.saving}
         onClick={() => void state.saveDraft()}
@@ -631,56 +861,24 @@ function DraftActions({ state }: { state: WorkflowState }) {
         保存草稿
       </Button>
       <Button
-        icon={<CloudUploadOutlined />}
-        disabled={disabled}
-        loading={state.publishing}
-        onClick={() => void state.publish()}
-      >
-        发布服务器草稿
-      </Button>
-      <Button
         type="primary"
         icon={<PlayCircleOutlined />}
+        aria-label="运行已发布版本"
         disabled={!canExecute(state)}
         loading={state.executing || Boolean(state.activeExecutionId)}
         onClick={() => void state.execute()}
       >
         运行已发布版本
       </Button>
-      <Popover
-        title="调试与版本"
-        trigger="click"
-        content={
-          <Space orientation="vertical" align="start">
-            <Select
-              aria-label="调试断点"
-              className="workflow-breakpoint-select"
-              value={state.breakpointNodeId}
-              disabled={disabled}
-              options={state.breakpointNodes.map((node) => ({ value: node.id, label: node.name }))}
-              onChange={state.setBreakpointSelection}
-            />
-            <Button
-              icon={<BugOutlined />}
-              disabled={!canExecute(state) || !state.breakpointNodeId}
-              loading={state.debugging}
-              onClick={() => void state.debugToBreakpoint()}
-            >
-              调试至断点
-            </Button>
-            <Button
-              icon={<DiffOutlined />}
-              disabled={(state.selectedWorkflow?.current_version ?? 0) < 2}
-              loading={state.comparing}
-              onClick={() => void state.compareLatestVersions()}
-            >
-              版本 Diff
-            </Button>
-          </Space>
-        }
+      <Button
+        icon={<BugOutlined />}
+        aria-label="调试至断点"
+        disabled={!canExecute(state) || !state.breakpointNodeId}
+        loading={state.debugging}
+        onClick={() => void state.debugToBreakpoint()}
       >
-        <Button icon={<MoreOutlined />}>更多</Button>
-      </Popover>
+        调试至断点
+      </Button>
     </Space>
   )
 }
@@ -692,7 +890,6 @@ function DraftEditor({ state }: { state: WorkflowState }) {
   return (
     <>
       <DraftAlerts state={state} />
-      <DraftMetadata state={state} workflow={workflow} />
       <WorkflowDesigner
         key={`${workflow.id}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
         surface="workspace"
@@ -712,6 +909,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         runtimeMode={state.workspaceMode === 'draft' ? undefined : state.workspaceMode}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
+        focusActions={<FocusDraftActions state={state} />}
         onChange={state.setDraftDefinition}
       />
     </>
@@ -926,6 +1124,7 @@ function NodeTable({
                     type="link"
                     size="small"
                     icon={<RedoOutlined />}
+                    data-testid={`workflow-replay-${node.node_id}`}
                     loading={replaying}
                     onClick={() => onReplay(node.node_id)}
                   >
@@ -940,16 +1139,18 @@ function NodeTable({
   )
 }
 
-function DebugResultCard({ result }: { result: WorkflowState['debugResult'] }) {
+function DebugResultPanel({ result }: { result: WorkflowState['debugResult'] }) {
   if (!result) return null
   return (
-    <Card
-      title={result.mode === 'breakpoint' ? '断点调试结果' : '节点重放结果'}
-      className="workflow-result-card"
-      extra={<Tag color={result.status === 'passed' ? 'green' : 'red'}>{result.status}</Tag>}
-    >
+    <div className="workflow-runtime-panel">
+      <div className="workflow-runtime-panel-heading">
+        <Typography.Text strong>
+          {result.mode === 'breakpoint' ? '断点调试结果' : '节点重放结果'}
+        </Typography.Text>
+        <Tag color={result.status === 'passed' ? 'green' : 'red'}>{result.status}</Tag>
+      </div>
       <NodeTable nodes={result.nodes} />
-    </Card>
+    </div>
   )
 }
 
@@ -1067,6 +1268,7 @@ function ExecutionTable({
                 type="link"
                 size="small"
                 icon={<EyeOutlined />}
+                data-testid={`workflow-history-${item.id}`}
                 onClick={() => onView(item.id)}
               >
                 查看快照
@@ -1125,6 +1327,8 @@ function options(items?: Array<{ id: string; name: string }>) {
 
 function showExecutionPanels(state: WorkflowState): boolean {
   return (
-    state.workspaceMode === 'run' || (state.workspaceMode === 'draft' && Boolean(state.debugResult))
+    state.workspaceMode === 'run' ||
+    state.workspaceMode === 'history' ||
+    (state.workspaceMode === 'draft' && Boolean(state.debugResult))
   )
 }

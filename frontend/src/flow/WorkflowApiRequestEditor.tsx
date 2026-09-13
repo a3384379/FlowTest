@@ -7,6 +7,7 @@ import {
   type BulkDraft,
 } from '../features/api-console/use-bulk-draft'
 import { useNodeEditContext } from './editor/node-edit-session'
+import { useInspectorPresentation } from './editor/inspector-presentation'
 import { applyOwnedRequestSections, extraRequestPolicies } from './editor/request-overrides'
 import { EyeOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -73,31 +74,51 @@ type EditorProps = {
 
 export default function WorkflowApiRequestEditor(props: EditorProps) {
   const [open, setOpen] = useState(false)
+  const presentation = useInspectorPresentation()
   const apiId = stringValue(props.node.config.api_definition_id)
   const pinnedVersion = numberValue(props.node.config.api_version)
   const currentVersion = props.api?.current_version
 
+  const summary = (
+    <Space orientation="vertical" className="full-width" size="small">
+      <RequestInheritanceSummary node={props.node} version={pinnedVersion ?? currentVersion} />
+      {canUpgrade(props.editable, pinnedVersion, currentVersion) && (
+        <Button
+          type="link"
+          className="workflow-request-upgrade"
+          onClick={() =>
+            props.onUpdate({
+              ...props.node,
+              config: { ...props.node.config, api_version: currentVersion },
+            })
+          }
+        >
+          更新至接口最新 v{currentVersion}
+        </Button>
+      )}
+    </Space>
+  )
+  if (presentation === 'fullscreen') {
+    return (
+      <div className="workflow-request-inline">
+        {summary}
+        {!apiId || !props.projectId ? (
+          <Alert type="warning" showIcon title="选择接口和项目后可配置节点请求" />
+        ) : (
+          <RequestEditorLoader
+            {...props}
+            apiId={apiId}
+            pinnedVersion={pinnedVersion}
+            onClose={() => undefined}
+          />
+        )}
+      </div>
+    )
+  }
   return (
     <>
       <Space orientation="vertical" className="full-width" size="small">
-        <RequestInheritanceSummary
-          node={props.node}
-          version={pinnedVersion ?? props.api?.current_version}
-        />
-        {canUpgrade(props.editable, pinnedVersion, currentVersion) && (
-          <Button
-            type="link"
-            className="workflow-request-upgrade"
-            onClick={() =>
-              props.onUpdate({
-                ...props.node,
-                config: { ...props.node.config, api_version: currentVersion },
-              })
-            }
-          >
-            更新至接口最新 v{currentVersion}
-          </Button>
-        )}
+        {summary}
         <Button
           block
           icon={<SettingOutlined />}

@@ -8,7 +8,7 @@ export function workflowLayoutKey(userId?: string | null, projectId?: string | n
   return `flowtest:workflow-layout:v1:${[window.location.origin, userId ?? 'anonymous', projectId ?? 'embedded'].map(encodeURIComponent).join(':')}`
 }
 function defaults(): WorkflowLayoutPreferences {
-  return { inspectorWidth: 400, listWidth: 220, requestWidth: 760, listCollapsed: null }
+  return { inspectorWidth: 400, listWidth: 256, requestWidth: 760, listCollapsed: null }
 }
 export function readLayoutPreferences(key: string): WorkflowLayoutPreferences {
   try {
@@ -17,7 +17,7 @@ export function readLayoutPreferences(key: string): WorkflowLayoutPreferences {
     const value = raw as Record<string, unknown>
     return {
       inspectorWidth: dimension(value.inspectorWidth, 400, 320, 640),
-      listWidth: dimension(value.listWidth, 220, 180, 320),
+      listWidth: dimension(value.listWidth, 256, 180, 320),
       requestWidth: dimension(value.requestWidth, 760, 480, 4096),
       listCollapsed: typeof value.listCollapsed === 'boolean' ? value.listCollapsed : null,
     }

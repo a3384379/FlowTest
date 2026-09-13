@@ -23,17 +23,14 @@ const mapped = fixture('03-mapped-edge.json')
 const cleanup = fixture('05-cleanup-phase.json')
 const capability = fixture('08-capability-start.json')
 const graph = (value: unknown) => structuredClone(value) as WorkflowDefinition
-const selection = (nodeIds: string[] = [], edgeIds: string[] = []) => ({
-  nodeIds,
-  edgeIds,
-  primary: null,
-})
+const nodeSelection = (id: string) => ({ kind: 'node' as const, id })
+const edgeSelection = (id: string) => ({ kind: 'edge' as const, id })
 
 describe('workflow graph commands', () => {
   it('DEL01/04 deletes and retains a recoverable complete mapped edge without mutating input', () => {
     const definition = graph(mapped)
     const original = structuredClone(definition)
-    const plan = planDeletion(definition, selection([], ['a-b']))
+    const plan = planDeletion(definition, edgeSelection('a-b'))
     expect(plan.mappingCount).toBe(1)
     expect(plan.requiresConfirmation).toBe(true)
     const result = applyDeletion(definition, plan)
@@ -45,14 +42,17 @@ describe('workflow graph commands', () => {
   it('DEL06 protects legacy and capability boundaries', () => {
     for (const input of [linear, capability]) {
       const definition = graph(input)
-      const plan = planDeletion(definition, selection(['start', 'end']))
-      expect(plan.protectedNodeIds).toEqual(['start', 'end'])
-      expect(applyDeletion(definition, plan).kind).toBe('unchanged')
+      const startPlan = planDeletion(definition, nodeSelection('start'))
+      const endPlan = planDeletion(definition, nodeSelection('end'))
+      expect(startPlan.protectedNodeIds).toEqual(['start'])
+      expect(endPlan.protectedNodeIds).toEqual(['end'])
+      expect(applyDeletion(definition, startPlan).kind).toBe('unchanged')
+      expect(applyDeletion(definition, endPlan).kind).toBe('unchanged')
     }
   })
   it('DEL07 blocks deletion referenced by a retained cleanup node', () => {
     const definition = graph(cleanup)
-    const plan = planDeletion(definition, selection(['api']))
+    const plan = planDeletion(definition, nodeSelection('api'))
     expect(plan.references.some((issue) => issue.nodeId === 'cleanup')).toBe(true)
     expect(applyDeletion(definition, plan).kind).toBe('blocked')
   })
@@ -216,12 +216,12 @@ it('preserves legacy capability representation and refuses opaque retained refer
     bindings: [{ input: 'x', expression: 'node_outputs.api.body' }],
   }
   const withOpaque = { ...graph(linear), nodes: [...graph(linear).nodes, opaque] }
-  const plan = planDeletion(withOpaque, selection(['api']))
+  const plan = planDeletion(withOpaque, nodeSelection('api'))
   expect(plan.references.map((issue) => issue.code)).toEqual(
     expect.arrayContaining(['BINDING_REVIEW', 'CAPABILITY_REVIEW']),
   )
   expect(applyDeletion(withOpaque, plan).kind).toBe('blocked')
-  expect(applyDeletion(withOpaque, planDeletion(withOpaque, selection())).kind).toBe('unchanged')
+  expect(applyDeletion(withOpaque, planDeletion(withOpaque, null)).kind).toBe('unchanged')
 })
 
 it.each([
@@ -261,7 +261,7 @@ it('accepts ordinary snapshot edges when serialization omits null conditions', (
     JSON.stringify(linear, (_key, value) => (value === null ? undefined : value)),
   ) as WorkflowDefinition
   expect(analyzeGraph(snapshot)).toEqual([])
-  expect(planDeletion(snapshot, selection([], [snapshot.edges[0].id])).requiresConfirmation).toBe(
+  expect(planDeletion(snapshot, edgeSelection(snapshot.edges[0].id)).requiresConfirmation).toBe(
     false,
   )
 })

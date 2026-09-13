@@ -104,19 +104,64 @@ export async function clickEdge(page: Page, id = 'start-api') {
   })
   expect(hit, '连线存在可点击且未被节点遮挡的命中区').not.toBeNull()
   await page.mouse.click(hit!.x, hit!.y)
-  await expect(page.getByRole('heading', { name: '连线配置', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '连接关系', exact: true })).toBeVisible()
 }
 export async function dragBetween(page: Page, source: Locator, target: Locator) {
-  await source.click({ trial: true })
-  await target.click({ trial: true })
+  await source.waitFor({ state: 'visible' })
+  await target.waitFor({ state: 'visible' })
+  await page.waitForTimeout(100)
+  expect(await isCenterHitTarget(source), '连接源的中心点必须可命中').toBe(true)
+  expect(await isCenterHitTarget(target), '连接目标的中心点必须可命中').toBe(true)
   const from = await source.boundingBox()
   const to = await target.boundingBox()
   expect(from).not.toBeNull()
   expect(to).not.toBeNull()
-  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2)
+  const start = { x: from!.x + from!.width / 2, y: from!.y + from!.height / 2 }
+  const end = { x: to!.x + to!.width / 2, y: to!.y + to!.height / 2 }
+  await page.mouse.move(start.x, start.y)
   await page.mouse.down()
-  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 30 })
+  await page.mouse.move(end.x, end.y, { steps: 30 })
   await page.mouse.up()
+  await nextAnimationFrame(page)
+}
+
+async function isCenterHitTarget(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return top === element || element.contains(top)
+  })
+}
+
+async function nextAnimationFrame(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+}
+export async function reconnectEdgeBetween(page: Page, source: Locator, target: Locator) {
+  const from = await source.boundingBox()
+  const to = await target.boundingBox()
+  expect(from).not.toBeNull()
+  expect(to).not.toBeNull()
+  const start = { x: from!.x + from!.width / 2, y: from!.y + from!.height / 2 }
+  const end = { x: to!.x + to!.width / 2, y: to!.y + to!.height / 2 }
+  await source.evaluate(
+    (element, points) => {
+      const mouse = (type: string, x: number, y: number, buttons: number) =>
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button: 0,
+          buttons,
+          clientX: x,
+          clientY: y,
+        })
+      element.dispatchEvent(mouse('mousedown', points.start.x, points.start.y, 1))
+      const dropTarget = document.elementFromPoint(points.end.x, points.end.y)
+      dropTarget?.dispatchEvent(mouse('mousemove', points.end.x, points.end.y, 1))
+      dropTarget?.dispatchEvent(mouse('mouseup', points.end.x, points.end.y, 0))
+    },
+    { start, end },
+  )
 }
 export async function canvasKey(page: Page, key: string) {
   await page.getByLabel('工作流画布', { exact: true }).focus()
@@ -125,14 +170,15 @@ export async function canvasKey(page: Page, key: string) {
 export async function closeInspector(page: Page) {
   const button = page.getByRole('button', { name: '关闭配置', exact: true })
   if (await button.isVisible()) await button.click()
-  await page.getByRole('button', { name: 'Fit View', exact: true }).click()
+  await page.getByRole('button', { name: 'aim 适应画布', exact: true }).click()
 }
 export async function publishAndRun(page: Page) {
+  await page.getByRole('button', { name: '工作流更多操作', exact: true }).click()
   await page.getByRole('button', { name: 'cloud-upload 发布服务器草稿', exact: true }).click()
   await page
     .getByRole('dialog', { name: '发布服务器草稿？', exact: true })
     .getByRole('button', { name: '发布服务器草稿', exact: true })
     .click()
-  await page.getByRole('button', { name: 'play-circle 运行已发布版本', exact: true }).click()
+  await page.getByRole('button', { name: '运行已发布版本', exact: true }).click()
   await expect(page.getByText('工作流执行通过').last()).toBeVisible({ timeout: 30000 })
 }

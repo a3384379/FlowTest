@@ -198,7 +198,7 @@ async function reviewAndApplyInUI(
   changeSetId: string,
 ): Promise<void> {
   await page.goto(`/projects/${projectId}/workflows?proposal=${encodeURIComponent(changeSetId)}`)
-  await expect(page.getByRole('heading', { name: '流程编排' })).toBeVisible()
+  await expect(page.getByTestId('workflow-workbench')).toBeVisible()
   const dialog = page.getByRole('dialog', { name: 'Flow Proposal 可视化审核' })
   await expect(dialog.getByText('提案模式')).toBeVisible()
   await expect(dialog.getByText('证据 / 置信度')).toBeVisible()
@@ -213,7 +213,9 @@ async function reviewAndApplyInUI(
   await expect(dialog).toBeHidden()
   await expect(page.getByText('草稿 r1')).toBeVisible()
   await expect(page.getByText('未发布')).toBeVisible()
-  await page.getByText('执行结果与历史', { exact: true }).click()
+  await page.getByRole('button', { name: '打开执行历史', exact: true }).click()
+  await expect(page.getByTestId('workflow-runtime-dock')).toBeVisible()
+  await page.getByTestId('workflow-runtime-tab-history').click()
   await expect(page.getByText('暂无执行记录')).toBeVisible()
 }
 

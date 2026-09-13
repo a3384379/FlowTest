@@ -590,18 +590,6 @@ body {
   word-break: break-word;
 }
 
-.workflow-designer-body {
-  display: grid;
-  grid-template-columns: minmax(540px, 1fr) 420px;
-  min-height: 540px;
-}
-
-.workflow-canvas {
-  min-width: 0;
-  height: 540px;
-  background: #f8faff;
-}
-
 .workflow-inspector {
   padding: 16px;
   border-left: 1px solid #e5eaf2;
@@ -1214,10 +1202,6 @@ body {
   .v3-context-inspector {
     border-top: 1px solid #e5e7f8;
     border-left: 0;
-  }
-
-  .workflow-designer-body {
-    grid-template-columns: 1fr;
   }
 
   .workflow-inspector {

@@ -2,18 +2,25 @@ import { updateCanvasDimensions, type CanvasDimensions } from './editor/canvas-d
 import { workflowLayoutKey } from './editor/layout-preferences'
 import WorkflowContextMenu from './WorkflowContextMenu'
 import WorkflowDiagnostics from './WorkflowDiagnostics'
-import WorkflowNodeLibrary from './WorkflowNodeLibrary'
+import WorkflowNodeLibrary, { type NodeLibraryItem } from './WorkflowNodeLibrary'
 import WorkflowInspectorShell from './WorkflowInspectorShell'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import { useAuthStore } from '../features/auth/auth-store'
 import { useDraftSession } from '../features/drafts/draft-session'
 import { nodeEditorScope } from './editor/editor-identity'
+import { nodeRegistryItem, type NodeRegistryKey } from './editor/node-registry'
 import './workflow-editor.css'
 import WorkflowEdgeInspector from './WorkflowEdgeInspector'
 import WorkflowShortcutHelp from './WorkflowShortcutHelp'
+import { WorkflowEdgeActions, WorkflowNodeActions } from './WorkflowSelectionActions'
 import { useWorkflowEditor } from './editor/use-workflow-editor'
 import { useCanvasHotkeys } from './editor/use-canvas-hotkeys'
-import { emptySelection, jsonEqual, type GraphConnectionInput } from './editor/editor-types'
+import {
+  emptySelection,
+  jsonEqual,
+  type GraphConnectionInput,
+  type WorkflowSelection,
+} from './editor/editor-types'
 import {
   connectGraphNodes,
   planDeletion,
@@ -31,8 +38,13 @@ import {
   DatabaseOutlined,
   ExportOutlined,
   FlagOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  AimOutlined,
+  MoreOutlined,
   PlusOutlined,
   PlayCircleOutlined,
+  QuestionCircleOutlined,
   RedoOutlined,
   RetweetOutlined,
   SnippetsOutlined,
@@ -41,20 +53,36 @@ import {
 import {
   applyNodeChanges,
   Background,
+  BaseEdge,
   Controls,
+  getBezierPath,
   Handle,
   MarkerType,
   MiniMap,
+  Panel,
   Position,
   ReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeChange,
   type NodeProps,
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Alert, Button, Empty, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import {
+  Alert,
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import type {
@@ -102,6 +130,7 @@ type DesignerProps = {
   runtimeMode?: 'run' | 'history'
   runtimeNodes?: WorkflowNodeExecution[]
   runtimeContext?: Record<string, unknown>
+  focusActions?: ReactNode
   onChange: (definition: WorkflowDefinition) => void
 }
 
@@ -112,13 +141,26 @@ type NodeData = Record<string, unknown> & {
   nodeType: WorkflowNode['type']
   status: string
   runtimeLabel: string
+  canCopy?: boolean
+  canDelete?: boolean
+  onConfigure?: () => void
+  onCopy?: () => void
+  onDelete?: () => void
 }
 
 type CanvasNode = Node<NodeData, 'workflowNode'>
+type CanvasEdgeData = Record<string, unknown> & {
+  branch: 'true' | 'false' | null
+  editable: boolean
+  onConfigure: () => void
+  onDelete: () => void
+}
+type CanvasEdge = Edge<CanvasEdgeData, 'workflowEdge'>
 
 const nodeTypes = { workflowNode: WorkflowNodeCard }
-const NODE_INITIAL_WIDTH = 190
-const NODE_INITIAL_HEIGHT = 64
+const edgeTypes = { workflowEdge: WorkflowCanvasEdge }
+const NODE_INITIAL_WIDTH = 210
+const NODE_INITIAL_HEIGHT = 72
 
 export default function WorkflowDesigner(props: DesignerProps) {
   return (
@@ -166,6 +208,7 @@ function WorkflowDesignerReady({
   runtimeMode,
   runtimeNodes,
   runtimeContext,
+  focusActions,
   onChange,
 }: ReadyDesignerProps) {
   const canvasEditable = canMutateGraph(editable, mode, runtimeMode)
@@ -181,7 +224,8 @@ function WorkflowDesignerReady({
   const selectedId = primaryNodeId(editor.selection)
   const selectedEdge = primaryEdge(definition, editor.selection)
   const canvasRef = useRef<HTMLDivElement>(null)
-  const flowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null)
+  const flowRef = useRef<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null)
+  useCanvasAutoFrame(canvasRef, flowRef, definition, editor.selection)
   const dropPosition = useRef<{ x: number; y: number } | null>(null)
   const [dimensions, setDimensions] = useState<CanvasDimensions>(() => new Map())
   const [focusMode, setFocusMode] = useState(false)
@@ -215,39 +259,42 @@ function WorkflowDesignerReady({
     () => new Map(runtimeNodes.map((node) => [node.node_id, node])),
     [runtimeNodes],
   )
-  const nodes = useMemo(
-    () =>
-      definition.nodes.map((node) => ({
-        ...toCanvasNode(
-          node,
-          displayNodeStatus(node.id, statuses, proposalNodeStatuses),
-          runtimeByNode.get(node.id),
-        ),
-        measured: dimensions.get(node.id),
-        selected: editor.selection.nodeIds.includes(node.id),
-        position: editor.positions.get(node.id) ?? node.position,
-      })),
-    [
-      definition.nodes,
-      dimensions,
-      proposalNodeStatuses,
-      runtimeByNode,
-      statuses,
-      editor.selection.nodeIds,
-      editor.positions,
-    ],
-  )
-  const edges = useMemo(
-    () =>
-      definition.edges.map((edge) => ({
-        ...toCanvasEdge(edge, proposalEdgeStatuses[edge.id]),
-        selected: editor.selection.edgeIds.includes(edge.id),
-        sourceHandle: edge.condition ?? 'out',
-        interactionWidth: 24,
-        ariaLabel: `从 ${definition.nodes.find((node) => node.id === edge.source)?.name ?? edge.source} 到 ${definition.nodes.find((node) => node.id === edge.target)?.name ?? edge.target} 的连线`,
-      })),
-    [definition.edges, definition.nodes, proposalEdgeStatuses, editor.selection.edgeIds],
-  )
+  const diagnostics = useMemo(() => analyzeGraph(definition), [definition])
+  const nodes = definition.nodes.map((node) => ({
+    ...toCanvasNode(
+      node,
+      displayNodeStatus(node.id, statuses, proposalNodeStatuses),
+      runtimeByNode.get(node.id),
+    ),
+    measured: dimensions.get(node.id),
+    selected: editor.selection?.kind === 'node' && editor.selection.id === node.id,
+    position: editor.positions.get(node.id) ?? node.position,
+    data: {
+      ...toCanvasNode(
+        node,
+        displayNodeStatus(node.id, statuses, proposalNodeStatuses),
+        runtimeByNode.get(node.id),
+      ).data,
+      canCopy: canvasEditable && resolveEffectiveNodeType(node) !== 'start',
+      canDelete: canvasEditable && canDeleteNode(definition, node),
+      onConfigure: configureInspector,
+      onCopy: copySelectedNode,
+      onDelete: () => void requestDelete(),
+    },
+  }))
+  const edges = definition.edges.map((edge) => ({
+    ...toCanvasEdge(edge, proposalEdgeStatuses[edge.id]),
+    selected: editor.selection?.kind === 'edge' && editor.selection.id === edge.id,
+    sourceHandle: edge.condition ?? 'out',
+    interactionWidth: 24,
+    data: {
+      branch: edge.condition,
+      editable: canvasEditable,
+      onConfigure: configureInspector,
+      onDelete: () => void requestDelete(),
+    },
+    ariaLabel: `从 ${definition.nodes.find((node) => node.id === edge.source)?.name ?? edge.source} 到 ${definition.nodes.find((node) => node.id === edge.target)?.name ?? edge.target} 的连线`,
+  }))
   const selected = selectedNode(definition, selectedId)
   const selectedApi = resolveSelectedApi(
     apiSelection,
@@ -293,15 +340,15 @@ function WorkflowDesignerReady({
     }
     return true
   }
-  async function selectObject(kind: 'node' | 'edge', id: string, multiple = false) {
-    const primary = editor.latest.current.selection.primary
-    if (primary?.kind === kind && primary.id === id) return
+  async function selectObject(kind: 'node' | 'edge', id: string) {
+    const selection = editor.latest.current.selection
+    if (selection?.kind === kind && selection.id === id) return
     if (draftSession.dirtyNodeEditorKeys(scope).length && !(await finishSelectionChange())) return
-    editor.click(kind, id, multiple)
+    editor.click(kind, id)
   }
   async function openObjectMenu(kind: 'node' | 'edge', id: string, event: React.MouseEvent) {
     await selectObject(kind, id)
-    if (editor.latest.current.selection.primary?.id !== id) return
+    if (editor.latest.current.selection?.id !== id) return
     setMenuPoint({ x: event.clientX, y: event.clientY })
     canvasRef.current?.focus()
   }
@@ -427,7 +474,7 @@ function WorkflowDesignerReady({
     if (
       selected &&
       resolveEffectiveNodeType(selected) !== 'start' &&
-      editor.selection.nodeIds.length === 1
+      editor.selection?.kind === 'node'
     )
       setClipboard(structuredClone(selected))
   }
@@ -462,11 +509,7 @@ function WorkflowDesignerReady({
         node.id === added.id ? placeAddedNode(node, point, selected) : node,
       ),
     }
-    editor.commit(placed, {
-      nodeIds: [added.id],
-      edgeIds: [],
-      primary: { kind: 'node', id: added.id },
-    })
+    editor.commit(placed, { kind: 'node', id: added.id })
   }
   function dropLibraryNode(event: React.DragEvent) {
     const type = event.dataTransfer.getData('application/x-flowtest-node')
@@ -499,7 +542,7 @@ function WorkflowDesignerReady({
           {
             key: 'copy',
             label: '复制节点',
-            disabled: !canCopyNode(selected, editor.selection.nodeIds.length),
+            disabled: !canCopyNode(selected),
             run: copySelectedNode,
           },
           {
@@ -531,14 +574,6 @@ function WorkflowDesignerReady({
       {editor.message && (
         <Alert closable onClose={() => editor.notify(null)} title={editor.message} type="info" />
       )}
-      <WorkflowDiagnostics
-        localDraft={canvasEditable}
-        issues={analyzeGraph(definition)}
-        onLocate={(issue) => {
-          if (issue.nodeId) void selectObject('node', issue.nodeId)
-          else if (issue.edgeId) void selectObject('edge', issue.edgeId)
-        }}
-      />
       <WorkflowShortcutHelp open={shortcutHelp} onClose={() => setShortcutHelp(false)} />
       <DesignerModeToolbar mode={mode}>
         <DesignerToolbar
@@ -584,7 +619,7 @@ function WorkflowDesignerReady({
           onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
           onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
           onAddNode={addPaletteNode}
-          canCopy={canCopyNode(selected, editor.selection.nodeIds.length)}
+          canCopy={canCopyNode(selected)}
           canPaste={Boolean(clipboard)}
           canUndo={history.past.length > 0}
           canRedo={history.future.length > 0}
@@ -593,23 +628,27 @@ function WorkflowDesignerReady({
           onUndo={undo}
           onRedo={redo}
           onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
+          focusActions={focusActions}
+          focusMode={focusMode}
+          allowFocus={surface === 'workspace'}
+          onFocus={() => setFocusMode((value) => !value)}
+          onHelp={() => setShortcutHelp(true)}
+          onFitView={() =>
+            void flowRef.current?.fitView({ duration: 200, padding: 0.18, maxZoom: 1 })
+          }
         />
       </DesignerModeToolbar>
-      <ViewActions
-        surface={surface}
-        focusMode={focusMode}
-        onFocus={() => setFocusMode((value) => !value)}
-        onHelp={() => setShortcutHelp(true)}
-      />
       <WorkflowInspectorShell
         key={workflowLayoutKey(userId, projectId)}
         visible={showInspector(editor.selection, focusMode)}
         preferenceKey={workflowLayoutKey(userId, projectId)}
+        title={inspectorTitle(Boolean(selectedEdge), runtimeMode)}
         onClose={() => void clearSelection()}
         canvas={
           <div
             ref={canvasRef}
             className="workflow-canvas"
+            data-testid="workflow-canvas-stage"
             aria-label="工作流画布"
             tabIndex={0}
             onDrop={dropLibraryNode}
@@ -624,25 +663,27 @@ function WorkflowDesignerReady({
               if (!event.currentTarget.contains(event.relatedTarget)) editor.cancelDrag()
             }}
           >
-            <ReactFlow<CanvasNode, Edge>
+            <ReactFlow<CanvasNode, CanvasEdge>
               fitView
+              fitViewOptions={{ maxZoom: 1, padding: 0.18 }}
               onInit={(instance) => {
                 flowRef.current = instance
               }}
-              multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+              multiSelectionKeyCode={null}
               deleteKeyCode={null}
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               nodesDraggable={canvasEditable}
               nodesConnectable={canvasEditable}
               edgesReconnectable={canvasEditable}
-              onNodeClick={(event, node) => {
-                void selectObject('node', node.id, event.shiftKey || event.metaKey || event.ctrlKey)
+              onNodeClick={(_event, node) => {
+                void selectObject('node', node.id)
                 canvasRef.current?.focus()
               }}
-              onEdgeClick={(event, edge) => {
-                void selectObject('edge', edge.id, event.shiftKey || event.metaKey || event.ctrlKey)
+              onEdgeClick={(_event, edge) => {
+                void selectObject('edge', edge.id)
                 canvasRef.current?.focus()
               }}
               onNodeContextMenu={(event, node) => {
@@ -658,11 +699,7 @@ function WorkflowDesignerReady({
                 canvasRef.current?.focus()
               }}
               onNodeDragStart={editor.beginDrag}
-              onSelectionDragStart={editor.beginDrag}
               onNodeDragStop={(_event, _node, moved) =>
-                editor.endDrag(moved.map((node) => ({ id: node.id, position: node.position })))
-              }
-              onSelectionDragStop={(_event, moved) =>
                 editor.endDrag(moved.map((node) => ({ id: node.id, position: node.position })))
               }
               onNodesChange={(changes) => {
@@ -673,8 +710,6 @@ function WorkflowDesignerReady({
                     new Set(definition.nodes.map((node) => node.id)),
                   ),
                 )
-                if (!draftSession.dirtyNodeEditorKeys(scope).length)
-                  editor.selectionChanges('node', changes)
                 const updates = changes.flatMap((change) =>
                   change.type === 'position' && change.position
                     ? [{ id: change.id, position: change.position }]
@@ -685,10 +720,6 @@ function WorkflowDesignerReady({
                   updates,
                   change?.type === 'position' ? change.dragging : undefined,
                 )
-              }}
-              onEdgesChange={(changes) => {
-                if (!draftSession.dirtyNodeEditorKeys(scope).length)
-                  editor.selectionChanges('edge', changes)
               }}
               onConnect={(connection) =>
                 editor.accept(
@@ -716,8 +747,18 @@ function WorkflowDesignerReady({
               }
             >
               <Background gap={20} size={1} />
-              <MiniMap pannable zoomable />
-              <Controls />
+              <Panel position="top-left" className="workflow-canvas-diagnostics">
+                <WorkflowDiagnostics
+                  localDraft={canvasEditable}
+                  issues={diagnostics}
+                  onLocate={(issue) => {
+                    if (issue.nodeId) void selectObject('node', issue.nodeId)
+                    else if (issue.edgeId) void selectObject('edge', issue.edgeId)
+                  }}
+                />
+              </Panel>
+              <MiniMap pannable zoomable position="bottom-left" />
+              <Controls position="bottom-right" showFitView={false} showInteractive={false} />
             </ReactFlow>
           </div>
         }
@@ -787,6 +828,12 @@ function DesignerModeToolbar({
       </Space>
     </div>
   )
+}
+
+function inspectorTitle(hasEdge: boolean, runtimeMode?: 'run' | 'history'): string {
+  if (hasEdge) return '连线配置'
+  if (runtimeMode) return '运行详情'
+  return '节点配置'
 }
 
 function displayNodeStatus(
@@ -993,6 +1040,12 @@ function DesignerToolbar({
   onUndo,
   onRedo,
   onAutoLayout,
+  focusActions,
+  focusMode,
+  allowFocus,
+  onFocus,
+  onHelp,
+  onFitView,
 }: {
   projectId?: string | null
   runtimeMode?: 'run' | 'history'
@@ -1037,12 +1090,21 @@ function DesignerToolbar({
   onUndo: () => void
   onRedo: () => void
   onAutoLayout: () => void
+  focusActions?: ReactNode
+  focusMode: boolean
+  allowFocus: boolean
+  onFocus: () => void
+  onHelp: () => void
+  onFitView: () => void
 }) {
   const [apiPickerOpen, setApiPickerOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   if (runtimeMode) {
     return (
-      <div className="workflow-toolbar workflow-runtime-toolbar">
+      <div
+        className="workflow-toolbar workflow-runtime-toolbar"
+        data-testid={focusMode ? 'workflow-focus-toolbar' : 'workflow-canvas-toolbar'}
+      >
         <Space wrap>
           <Tag color={runtimeMode === 'history' ? 'gold' : 'processing'}>
             {runtimeMode === 'history' ? '历史快照 · 只读' : '实时运行视图'}
@@ -1051,33 +1113,31 @@ function DesignerToolbar({
             点击节点查看输入、映射后的真实请求、响应和每次重试。
           </Typography.Text>
         </Space>
+        <Space>
+          <Button icon={<AimOutlined />} onClick={onFitView}>
+            适应画布
+          </Button>
+          <Button icon={<QuestionCircleOutlined />} onClick={onHelp} aria-label="快捷键帮助" />
+          <FocusModeButton enabled={allowFocus} active={focusMode} onClick={onFocus} />
+        </Space>
       </div>
     )
   }
   return (
-    <div className="workflow-toolbar">
-      <Space wrap>
+    <div
+      className="workflow-toolbar"
+      data-testid={focusMode ? 'workflow-focus-toolbar' : 'workflow-canvas-toolbar'}
+    >
+      <Space className="workflow-toolbar-primary" wrap>
+        {focusMode && focusActions}
         <Button
+          type="primary"
           icon={<PlusOutlined />}
           disabled={!editable}
           onClick={() => setLibraryOpen(true)}
           data-workflow-add
         >
           添加节点
-        </Button>
-        <Button
-          icon={<CopyOutlined />}
-          disabled={isControlDisabled(editable, canCopy)}
-          onClick={onCopy}
-        >
-          复制
-        </Button>
-        <Button
-          icon={<SnippetsOutlined />}
-          disabled={isControlDisabled(editable, canPaste)}
-          onClick={onPaste}
-        >
-          粘贴
         </Button>
         <Button
           icon={<UndoOutlined />}
@@ -1096,299 +1156,79 @@ function DesignerToolbar({
         <Button icon={<ApartmentOutlined />} disabled={!editable} onClick={onAutoLayout}>
           自动布局
         </Button>
+        <Button icon={<AimOutlined />} onClick={onFitView}>
+          适应画布
+        </Button>
       </Space>
-      <Typography.Text type="secondary">
-        拖动节点调整位置，从节点右侧连接到下一节点。
-      </Typography.Text>
+      <Space className="workflow-toolbar-secondary">
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              {
+                key: 'copy',
+                icon: <CopyOutlined />,
+                label: '复制节点',
+                disabled: isControlDisabled(editable, canCopy),
+              },
+              {
+                key: 'paste',
+                icon: <SnippetsOutlined />,
+                label: '粘贴节点',
+                disabled: isControlDisabled(editable, canPaste),
+              },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'copy') onCopy()
+              if (key === 'paste') onPaste()
+            },
+          }}
+        >
+          <Button icon={<MoreOutlined />} aria-label="画布编辑操作">
+            编辑
+          </Button>
+        </Dropdown>
+        <Button icon={<QuestionCircleOutlined />} onClick={onHelp} aria-label="快捷键帮助" />
+        <FocusModeButton enabled={allowFocus} active={focusMode} onClick={onFocus} />
+      </Space>
       <WorkflowNodeLibrary
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
-        unavailable={libraryUnavailableReasons({
+        items={createNodeLibraryItems({
+          editable,
+          projectId,
+          apiSelection,
+          apiSelectionOverride,
+          apis,
+          graphqlSelection,
+          graphqlSchemas,
+          grpcSelection,
+          grpcDescriptors,
+          kafkaSelection,
+          kafkaSources,
+          websocketSelection,
+          websocketSources,
+          subflowSelection,
+          subflows,
           hasArtifacts,
           hasDataset,
           hasSqlCredential,
           hasRedisCredential,
-          graphqlCount: graphqlSchemas.length,
-          grpcCount: grpcDescriptors.length,
-          kafkaCount: kafkaSources.length,
-          websocketCount: websocketSources.length,
-          subflowCount: subflows.length,
+          onOpenApiPicker: () => setApiPickerOpen(true),
+          onApiSelection,
+          onGraphqlSelection,
+          onGrpcSelection,
+          onKafkaSelection,
+          onWebsocketSelection,
+          onSubflowSelection,
+          onAddApi,
+          onAddGraphql,
+          onAddGrpc,
+          onAddKafkaProduce,
+          onAddKafkaConsume,
+          onAddWebsocketExchange,
+          onAddNode,
         })}
-        groups={[
-          {
-            name: '接口请求',
-            keywords: 'HTTP API 接口 请求',
-            content: (
-              <>
-                {' '}
-                <Select
-                  aria-label="待添加接口"
-                  value={apiSelection}
-                  disabled={!editable}
-                  placeholder="选择接口"
-                  className="workflow-api-select"
-                  options={apiOptions(apis, apiSelectionOverride).map((api) => ({
-                    label: api.name,
-                    value: api.id,
-                  }))}
-                  onChange={onApiSelection}
-                />
-                <Button disabled={!editable || !projectId} onClick={() => setApiPickerOpen(true)}>
-                  搜索接口
-                </Button>
-                <Button
-                  icon={<PlusOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(apiSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'api')}
-                  onClick={onAddApi}
-                >
-                  添加接口节点
-                </Button>
-              </>
-            ),
-          },
-          {
-            name: '协议与事件',
-            keywords: 'GraphQL gRPC Kafka WebSocket 协议 消息',
-            content: (
-              <>
-                {' '}
-                <Select
-                  aria-label="待添加 GraphQL Schema"
-                  value={graphqlSelection}
-                  disabled={!editable}
-                  placeholder="选择 GraphQL Schema"
-                  className="workflow-api-select"
-                  options={graphqlSchemas.map((schema) => ({
-                    label: `${schema.name} · v${schema.version}`,
-                    value: schema.id,
-                  }))}
-                  onChange={onGraphqlSelection}
-                />
-                <Button
-                  icon={<ApiOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(graphqlSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'graphql')}
-                  onClick={onAddGraphql}
-                >
-                  GraphQL
-                </Button>
-                <Select
-                  aria-label="待添加 gRPC Descriptor"
-                  value={grpcSelection}
-                  disabled={!editable}
-                  placeholder="选择 gRPC Descriptor"
-                  className="workflow-api-select"
-                  options={grpcDescriptors.map((descriptor) => ({
-                    label: `${descriptor.name} · v${descriptor.version}`,
-                    value: descriptor.id,
-                  }))}
-                  onChange={onGrpcSelection}
-                />
-                <Button
-                  icon={<ApiOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(grpcSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'grpc')}
-                  onClick={onAddGrpc}
-                >
-                  gRPC
-                </Button>
-                <Select
-                  aria-label="待添加 Kafka 事件源"
-                  value={kafkaSelection}
-                  disabled={!editable}
-                  placeholder="选择 Kafka 事件源"
-                  className="workflow-api-select"
-                  options={kafkaSources.map((source) => ({
-                    label: `${source.name} · v${source.version}`,
-                    value: source.id,
-                  }))}
-                  onChange={onKafkaSelection}
-                />
-                <Button
-                  icon={<DatabaseOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(kafkaSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'kafka.produce')}
-                  onClick={onAddKafkaProduce}
-                >
-                  Kafka Produce
-                </Button>
-                <Button
-                  icon={<DatabaseOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(kafkaSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'kafka.consume')}
-                  onClick={onAddKafkaConsume}
-                >
-                  Kafka Consume
-                </Button>
-                <Select
-                  aria-label="待添加 WebSocket 事件源"
-                  value={websocketSelection}
-                  disabled={!editable}
-                  placeholder="选择 WebSocket 事件源"
-                  className="workflow-api-select"
-                  options={websocketSources.map((source) => ({
-                    label: `${source.name} · v${source.version}`,
-                    value: source.id,
-                  }))}
-                  onChange={onWebsocketSelection}
-                />
-                <Button
-                  icon={<ApiOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(websocketSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'websocket.exchange')}
-                  onClick={onAddWebsocketExchange}
-                >
-                  WebSocket Exchange
-                </Button>
-              </>
-            ),
-          },
-          {
-            name: '控制与校验',
-            keywords: '提取 断言 条件 延时 extract assert condition delay',
-            content: (
-              <>
-                {' '}
-                <Button
-                  icon={<ExportOutlined />}
-                  disabled={!editable}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'extract')}
-                  onClick={() => onAddNode('extract')}
-                >
-                  提取
-                </Button>
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  disabled={!editable}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'assert')}
-                  onClick={() => onAddNode('assert')}
-                >
-                  断言
-                </Button>
-                <Button
-                  icon={<BranchesOutlined />}
-                  disabled={!editable}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'condition')}
-                  onClick={() => onAddNode('condition')}
-                >
-                  条件
-                </Button>
-                <Button
-                  icon={<ClockCircleOutlined />}
-                  disabled={!editable}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'delay')}
-                  onClick={() => onAddNode('delay')}
-                >
-                  延时
-                </Button>
-              </>
-            ),
-          },
-          {
-            name: '数据与存储',
-            keywords: '数据集 SQL Redis dataset',
-            content: (
-              <>
-                {' '}
-                <Button
-                  icon={<DatabaseOutlined />}
-                  disabled={isDatasetDisabled(editable, hasDataset, hasArtifacts)}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'dataset')}
-                  onClick={() => onAddNode('dataset')}
-                >
-                  数据集
-                </Button>
-                <Button
-                  icon={<DatabaseOutlined />}
-                  disabled={isDataNodeDisabled(editable, hasSqlCredential)}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'sql')}
-                  onClick={() => onAddNode('sql')}
-                >
-                  只读 SQL
-                </Button>
-                <Button
-                  icon={<DatabaseOutlined />}
-                  disabled={isDataNodeDisabled(editable, hasRedisCredential)}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'redis')}
-                  onClick={() => onAddNode('redis')}
-                >
-                  Redis 读取
-                </Button>
-              </>
-            ),
-          },
-          {
-            name: '流程复用',
-            keywords: '子流程 ForEach subflow for_each',
-            content: (
-              <>
-                {' '}
-                <Select
-                  aria-label="待添加子流程"
-                  value={subflowSelection}
-                  disabled={!editable}
-                  placeholder="选择已发布流程"
-                  className="workflow-api-select"
-                  options={subflows.map((workflow) => ({
-                    label: `${workflow.name} · v${workflow.current_version}`,
-                    value: workflow.id,
-                  }))}
-                  onChange={onSubflowSelection}
-                />
-                <Button
-                  icon={<ApartmentOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(subflowSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'subflow')}
-                  onClick={() => onAddNode('subflow')}
-                >
-                  子流程
-                </Button>
-                <Button
-                  icon={<RetweetOutlined />}
-                  disabled={isControlDisabled(editable, Boolean(subflowSelection))}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'for_each')}
-                  onClick={() => onAddNode('for_each')}
-                >
-                  ForEach
-                </Button>
-              </>
-            ),
-          },
-          {
-            name: '结束',
-            keywords: '结束 end',
-            content: (
-              <>
-                {' '}
-                <Button
-                  icon={<FlagOutlined />}
-                  disabled={!editable}
-                  draggable={editable}
-                  onDragStart={(event) => dragLibraryNode(event, 'end')}
-                  onClick={() => onAddNode('end')}
-                >
-                  添加结束节点
-                </Button>
-              </>
-            ),
-          },
-        ]}
       />
       <ApiPicker
         open={apiPickerOpen}
@@ -1401,6 +1241,234 @@ function DesignerToolbar({
         }}
       />
     </div>
+  )
+}
+
+type NodeLibraryInput = {
+  editable: boolean
+  projectId?: string | null
+  apiSelection?: string
+  apiSelectionOverride?: ApiDefinition
+  apis: ApiDefinition[]
+  graphqlSelection?: string
+  graphqlSchemas: SchemaArtifact[]
+  grpcSelection?: string
+  grpcDescriptors: SchemaArtifact[]
+  kafkaSelection?: string
+  kafkaSources: EventSource[]
+  websocketSelection?: string
+  websocketSources: EventSource[]
+  subflowSelection?: string
+  subflows: Workflow[]
+  hasArtifacts: boolean
+  hasDataset: boolean
+  hasSqlCredential: boolean
+  hasRedisCredential: boolean
+  onOpenApiPicker: () => void
+  onApiSelection: (value: string) => void
+  onGraphqlSelection: (value: string) => void
+  onGrpcSelection: (value: string) => void
+  onKafkaSelection: (value: string) => void
+  onWebsocketSelection: (value: string) => void
+  onSubflowSelection: (value: string) => void
+  onAddApi: () => void
+  onAddGraphql: () => void
+  onAddGrpc: () => void
+  onAddKafkaProduce: () => void
+  onAddKafkaConsume: () => void
+  onAddWebsocketExchange: () => void
+  onAddNode: (type: PaletteNodeType) => void
+}
+
+function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
+  const reason = (available: boolean, message: string) =>
+    input.editable ? (available ? undefined : message) : '当前模式只读'
+  const item = (
+    id: NodeRegistryKey,
+    onAdd: () => void,
+    unavailableReason?: string,
+    resourceControl?: ReactNode,
+  ): NodeLibraryItem => ({
+    ...nodeRegistryItem(id),
+    disabled: Boolean(unavailableReason),
+    unavailableReason,
+    resourceControl,
+    onAdd,
+    onDragStart: (event) => dragLibraryNode(event, id),
+  })
+  const select = (
+    label: string,
+    value: string | undefined,
+    options: Array<{ label: string; value: string }>,
+    onChange: (value: string) => void,
+  ) => (
+    <Select
+      aria-label={label}
+      value={value}
+      disabled={!input.editable}
+      placeholder="选择资源"
+      options={options}
+      onChange={onChange}
+    />
+  )
+  const subflowControl = select(
+    '待添加子流程',
+    input.subflowSelection,
+    input.subflows.map((workflow) => ({
+      label: `${workflow.name} · v${workflow.current_version}`,
+      value: workflow.id,
+    })),
+    input.onSubflowSelection,
+  )
+  return [
+    item('delay', () => input.onAddNode('delay'), reason(true, '')),
+    item('end', () => input.onAddNode('end'), reason(true, '')),
+    item(
+      'api',
+      input.onAddApi,
+      reason(
+        Boolean(input.projectId && input.apiSelection),
+        input.projectId ? '需要已发布接口' : '需要先选择项目',
+      ),
+      <Space.Compact block>
+        {select(
+          '待添加接口',
+          input.apiSelection,
+          apiOptions(input.apis, input.apiSelectionOverride).map((api) => ({
+            label: api.name,
+            value: api.id,
+          })),
+          input.onApiSelection,
+        )}
+        <Button
+          aria-label="搜索接口"
+          disabled={!input.editable || !input.projectId}
+          onClick={input.onOpenApiPicker}
+        >
+          搜索
+        </Button>
+      </Space.Compact>,
+    ),
+    item(
+      'graphql',
+      input.onAddGraphql,
+      reason(Boolean(input.graphqlSelection), '需要 GraphQL Schema'),
+      select(
+        '待添加 GraphQL Schema',
+        input.graphqlSelection,
+        input.graphqlSchemas.map((schema) => ({
+          label: `${schema.name} · v${schema.version}`,
+          value: schema.id,
+        })),
+        input.onGraphqlSelection,
+      ),
+    ),
+    item(
+      'grpc',
+      input.onAddGrpc,
+      reason(Boolean(input.grpcSelection), '需要 gRPC Descriptor'),
+      select(
+        '待添加 gRPC Descriptor',
+        input.grpcSelection,
+        input.grpcDescriptors.map((descriptor) => ({
+          label: `${descriptor.name} · v${descriptor.version}`,
+          value: descriptor.id,
+        })),
+        input.onGrpcSelection,
+      ),
+    ),
+    item(
+      'kafka.produce',
+      input.onAddKafkaProduce,
+      reason(Boolean(input.kafkaSelection), '需要 Kafka 事件源'),
+      select(
+        '待添加 Kafka Produce 事件源',
+        input.kafkaSelection,
+        input.kafkaSources.map((source) => ({
+          label: `${source.name} · v${source.version}`,
+          value: source.id,
+        })),
+        input.onKafkaSelection,
+      ),
+    ),
+    item(
+      'kafka.consume',
+      input.onAddKafkaConsume,
+      reason(Boolean(input.kafkaSelection), '需要 Kafka 事件源'),
+      select(
+        '待添加 Kafka Consume 事件源',
+        input.kafkaSelection,
+        input.kafkaSources.map((source) => ({
+          label: `${source.name} · v${source.version}`,
+          value: source.id,
+        })),
+        input.onKafkaSelection,
+      ),
+    ),
+    item(
+      'websocket.exchange',
+      input.onAddWebsocketExchange,
+      reason(Boolean(input.websocketSelection), '需要 WebSocket 事件源'),
+      select(
+        '待添加 WebSocket 事件源',
+        input.websocketSelection,
+        input.websocketSources.map((source) => ({
+          label: `${source.name} · v${source.version}`,
+          value: source.id,
+        })),
+        input.onWebsocketSelection,
+      ),
+    ),
+    item('extract', () => input.onAddNode('extract'), reason(true, '')),
+    item('assert', () => input.onAddNode('assert'), reason(true, '')),
+    item('condition', () => input.onAddNode('condition'), reason(true, '')),
+    item(
+      'dataset',
+      () => input.onAddNode('dataset'),
+      reason(
+        input.hasArtifacts && !input.hasDataset,
+        input.hasDataset ? '流程已包含一个数据集节点' : '需要已上传数据集',
+      ),
+    ),
+    item('sql', () => input.onAddNode('sql'), reason(input.hasSqlCredential, '需要数据库凭据')),
+    item(
+      'redis',
+      () => input.onAddNode('redis'),
+      reason(input.hasRedisCredential, '需要 Redis 凭据'),
+    ),
+    item(
+      'subflow',
+      () => input.onAddNode('subflow'),
+      reason(Boolean(input.subflowSelection), '需要已发布子流程'),
+      subflowControl,
+    ),
+    item(
+      'for_each',
+      () => input.onAddNode('for_each'),
+      reason(Boolean(input.subflowSelection), '需要已发布子流程'),
+      subflowControl,
+    ),
+  ]
+}
+
+function FocusModeButton({
+  enabled,
+  active,
+  onClick,
+}: {
+  enabled: boolean
+  active: boolean
+  onClick: () => void
+}) {
+  if (!enabled) return null
+  return (
+    <Button
+      aria-label={active ? '退出专注模式' : '专注模式'}
+      icon={active ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+      onClick={onClick}
+    >
+      {active ? '退出专注模式' : '专注模式'}
+    </Button>
   )
 }
 
@@ -1565,31 +1633,82 @@ function apiOptions(apis: ApiDefinition[], selected?: ApiDefinition): ApiDefinit
   return [selected, ...apis]
 }
 
-function WorkflowNodeCard({ data }: NodeProps<CanvasNode>) {
+function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
   const terminal = data.nodeType === 'end'
   const start = data.nodeType === 'start'
   return (
-    <div className={`flow-node flow-node-${data.nodeType} is-${data.status}`}>
-      {!start && <Handle type="target" position={Position.Left} />}
-      <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
-      <span>
-        <strong>{data.label}</strong>
-        <small>{nodeTypeLabel(data.nodeType)}</small>
-      </span>
-      <span className="flow-node-status">
-        {statusLabel(data.status)}
-        {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
-      </span>
-      {!terminal &&
-        (data.nodeType === 'condition' ? (
-          <>
-            <Handle type="source" id="true" position={Position.Right} style={{ top: '30%' }} />
-            <Handle type="source" id="false" position={Position.Right} style={{ top: '75%' }} />
-          </>
-        ) : (
-          <Handle type="source" id="out" position={Position.Right} />
-        ))}
-    </div>
+    <>
+      <WorkflowNodeActions
+        visible={Boolean(selected)}
+        editable={Boolean(data.canDelete)}
+        canCopy={Boolean(data.canCopy)}
+        onConfigure={data.onConfigure ?? (() => undefined)}
+        onCopy={data.onCopy ?? (() => undefined)}
+        onDelete={data.onDelete ?? (() => undefined)}
+      />
+      <div className={`flow-node flow-node-${data.nodeType} is-${data.status}`}>
+        {!start && <Handle type="target" position={Position.Left} />}
+        <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
+        <span>
+          <strong>{data.label}</strong>
+          <small>{nodeTypeLabel(data.nodeType)}</small>
+        </span>
+        <span className="flow-node-status">
+          {statusLabel(data.status)}
+          {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
+        </span>
+        {!terminal &&
+          (data.nodeType === 'condition' ? (
+            <>
+              <Handle type="source" id="true" position={Position.Right} style={{ top: '30%' }} />
+              <Handle type="source" id="false" position={Position.Right} style={{ top: '75%' }} />
+            </>
+          ) : (
+            <Handle type="source" id="out" position={Position.Right} />
+          ))}
+      </div>
+    </>
+  )
+}
+
+function WorkflowCanvasEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  label,
+  selected,
+  data,
+}: EdgeProps<CanvasEdge>) {
+  const [path, centerX, centerY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  })
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} label={label} />
+      {data && (
+        <WorkflowEdgeActions
+          edgeId={id}
+          x={centerX}
+          y={centerY}
+          visible={Boolean(selected)}
+          branch={data.branch}
+          editable={data.editable}
+          onConfigure={data.onConfigure}
+          onDelete={data.onDelete}
+        />
+      )}
+    </>
   )
 }
 
@@ -1609,6 +1728,11 @@ function toCanvasNode(
       nodeType: resolveEffectiveNodeType(node),
       status,
       runtimeLabel: runtimeLabel(runtime),
+      canCopy: false,
+      canDelete: false,
+      onConfigure: () => undefined,
+      onCopy: () => undefined,
+      onDelete: () => undefined,
     },
   }
 }
@@ -1631,16 +1755,23 @@ function formatNodeDuration(value: number): string {
 function toCanvasEdge(
   edge: WorkflowDefinition['edges'][number],
   status?: ProposalGraphStatus,
-): Edge {
+): CanvasEdge {
   const color = proposalEdgeColor(status)
   return {
     id: edge.id,
+    type: 'workflowEdge',
     source: edge.source,
     target: edge.target,
     markerEnd: { type: MarkerType.ArrowClosed },
     label: edge.condition ? (edge.condition === 'true' ? '是' : '否') : undefined,
     animated: status === 'rewired',
     style: color ? { stroke: color, strokeWidth: 3 } : undefined,
+    data: {
+      branch: edge.condition,
+      editable: false,
+      onConfigure: () => undefined,
+      onDelete: () => undefined,
+    },
   }
 }
 
@@ -1721,16 +1852,8 @@ const nodeIcons: Partial<Record<WorkflowNode['type'], ReactNode>> = {
   redis: <DatabaseOutlined />,
 }
 
-function isDataNodeDisabled(editable: boolean, hasCredential: boolean): boolean {
-  return !editable || !hasCredential
-}
-
 function isControlDisabled(editable: boolean, available: boolean): boolean {
   return !editable || !available
-}
-
-function isDatasetDisabled(editable: boolean, hasDataset: boolean, hasArtifacts: boolean): boolean {
-  return !editable || hasDataset || !hasArtifacts
 }
 
 function statusLabel(status: string): string {
@@ -1750,15 +1873,12 @@ function statusLabel(status: string): string {
   )
 }
 
-function primaryNodeId(selection: import('./editor/editor-types').EditorSelection): string | null {
-  return selection.primary?.kind === 'node' ? selection.primary.id : null
+function primaryNodeId(selection: WorkflowSelection): string | null {
+  return selection?.kind === 'node' ? selection.id : null
 }
-function primaryEdge(
-  definition: WorkflowDefinition,
-  selection: import('./editor/editor-types').EditorSelection,
-) {
-  return selection.primary?.kind === 'edge'
-    ? definition.edges.find((edge) => edge.id === selection.primary?.id)
+function primaryEdge(definition: WorkflowDefinition, selection: WorkflowSelection) {
+  return selection?.kind === 'edge'
+    ? definition.edges.find((edge) => edge.id === selection.id)
     : undefined
 }
 type DesignerHotkeyInput = {
@@ -1791,13 +1911,11 @@ function writableHotkeys(input: DesignerHotkeyInput) {
   }
 }
 function useDesignerHotkeys(input: DesignerHotkeyInput) {
-  const { editor, selected } = input
+  const { selected } = input
   return useCanvasHotkeys(
     {
       ...writableHotkeys(input),
-      copy: canCopyNode(selected, editor.selection.nodeIds.length)
-        ? input.copySelectedNode
-        : undefined,
+      copy: canCopyNode(selected) ? input.copySelectedNode : undefined,
       add: input.canvasEditable
         ? () =>
             input.canvasRef.current
@@ -1805,14 +1923,6 @@ function useDesignerHotkeys(input: DesignerHotkeyInput) {
               ?.querySelector<HTMLButtonElement>('[data-workflow-add]')
               ?.click()
         : undefined,
-      selectAll: async () => {
-        if (!(await input.finishSelectionChange())) return
-        editor.select({
-          nodeIds: editor.definition.nodes.map((node) => node.id),
-          edgeIds: editor.definition.edges.map((edge) => edge.id),
-          primary: null,
-        })
-      },
       configure: input.configureInspector,
       focus:
         input.surface === 'workspace' ? () => input.setFocusMode((value) => !value) : undefined,
@@ -1822,40 +1932,81 @@ function useDesignerHotkeys(input: DesignerHotkeyInput) {
     input.confirming || input.shortcutHelp,
   )
 }
-function canCopyNode(node: WorkflowNode | null, count: number): boolean {
-  return Boolean(node && resolveEffectiveNodeType(node) !== 'start' && count === 1)
+function canCopyNode(node: WorkflowNode | null): boolean {
+  return Boolean(node && resolveEffectiveNodeType(node) !== 'start')
 }
 function escapeCanvas(input: DesignerHotkeyInput) {
   if (input.editor.dragging) input.editor.cancelDrag()
-  else if (input.editor.selection.nodeIds.length || input.editor.selection.edgeIds.length)
-    void input.clearSelection()
+  else if (input.editor.selection) void input.clearSelection()
   else input.setFocusMode(false)
 }
 
 function canMutateGraph(editable: boolean, mode: string, runtimeMode?: string): boolean {
   return editable && mode === 'edit' && runtimeMode === undefined
 }
-function ViewActions({
-  surface,
-  focusMode,
-  onFocus,
-  onHelp,
-}: {
-  surface: string
-  focusMode: boolean
-  onFocus: () => void
-  onHelp: () => void
-}) {
-  return (
-    <Space className="workflow-view-actions">
-      <Button onClick={onHelp}>快捷键帮助</Button>
-      {surface === 'workspace' && (
-        <Button onClick={onFocus}>{focusMode ? '退出专注模式' : '专注模式'}</Button>
-      )}
-    </Space>
-  )
+
+function useCanvasAutoFrame(
+  canvasRef: React.RefObject<HTMLDivElement | null>,
+  flowRef: React.RefObject<ReactFlowInstance<CanvasNode, CanvasEdge> | null>,
+  definition: WorkflowDefinition,
+  selection: WorkflowSelection,
+) {
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frameCanvas(flowRef.current, definition, selection)
+      })
+    })
+    observer.observe(canvas)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [canvasRef, definition, flowRef, selection])
 }
 
+function frameCanvas(
+  instance: ReactFlowInstance<CanvasNode, CanvasEdge> | null,
+  definition: WorkflowDefinition,
+  selection: WorkflowSelection,
+): void {
+  if (!instance) return
+  const center = selectionCenter(definition, selection)
+  if (!center) {
+    void instance.fitView({ duration: 0, padding: 0.18, maxZoom: 1 })
+    return
+  }
+  const zoom = Math.min(1, Math.max(0.85, instance.getViewport().zoom))
+  void instance.setCenter(center.x, center.y, { duration: 0, zoom })
+}
+
+function selectionCenter(
+  definition: WorkflowDefinition,
+  selection: WorkflowSelection,
+): { x: number; y: number } | null {
+  if (!selection) return null
+  if (selection.kind === 'node') {
+    const node = definition.nodes.find((candidate) => candidate.id === selection.id)
+    return node
+      ? {
+          x: node.position.x + NODE_INITIAL_WIDTH / 2,
+          y: node.position.y + NODE_INITIAL_HEIGHT / 2,
+        }
+      : null
+  }
+  const edge = definition.edges.find((candidate) => candidate.id === selection.id)
+  const source = definition.nodes.find((candidate) => candidate.id === edge?.source)
+  const target = definition.nodes.find((candidate) => candidate.id === edge?.target)
+  if (!source || !target) return null
+  return {
+    x: (source.position.x + target.position.x + NODE_INITIAL_WIDTH) / 2,
+    y: (source.position.y + target.position.y + NODE_INITIAL_HEIGHT) / 2,
+  }
+}
 function editorUserId(store: { user: { id: string } | null }): string {
   return store.user?.id ?? 'anonymous'
 }
@@ -1863,11 +2014,8 @@ function editorProjectId(projectId?: string | null): string {
   return projectId ?? 'embedded'
 }
 
-function hasSelection(selection: {
-  nodeIds: readonly string[]
-  edgeIds: readonly string[]
-}): boolean {
-  return selection.nodeIds.length + selection.edgeIds.length > 0
+function hasSelection(selection: WorkflowSelection): boolean {
+  return selection !== null
 }
 function isKafkaSource(source: { kind: string }): boolean {
   return source.kind === 'kafka'
@@ -1884,7 +2032,7 @@ function dragLibraryNode(event: React.DragEvent, type: string) {
 
 function canvasCenter(
   canvas: HTMLDivElement | null,
-  flow: ReactFlowInstance<CanvasNode, Edge> | null,
+  flow: ReactFlowInstance<CanvasNode, CanvasEdge> | null,
 ): { x: number; y: number } {
   if (!canvas || !flow) return { x: 320, y: 160 }
   const rect = canvas.getBoundingClientRect()
@@ -1916,11 +2064,18 @@ function recoverNodeSelection(
   const key = session.dirtyNodeEditorKeys(scope)[0]
   const draft = session.nodeEditors.get(key)
   if (!draft || !definition.nodes.some((node) => node.id === draft.nodeId)) return emptySelection()
-  return {
-    nodeIds: [draft.nodeId],
-    edgeIds: [],
-    primary: { kind: 'node' as const, id: draft.nodeId },
-  }
+  return { kind: 'node' as const, id: draft.nodeId }
+}
+
+function canDeleteNode(definition: WorkflowDefinition, node: WorkflowNode): boolean {
+  const type = resolveEffectiveNodeType(node)
+  if (type === 'start') return false
+  if (type !== 'end' || node.phase === 'cleanup') return true
+  return (
+    definition.nodes.filter(
+      (candidate) => candidate.phase !== 'cleanup' && resolveEffectiveNodeType(candidate) === 'end',
+    ).length > 1
+  )
 }
 
 function placeAddedNode(
@@ -1972,35 +2127,6 @@ function datasetIssue(definition: WorkflowDefinition, artifacts: Artifact[]): st
     return '流程只能包含一个数据集节点'
   return artifacts.length ? null : '请先上传数据集文件'
 }
-function libraryUnavailableReasons(input: {
-  hasArtifacts: boolean
-  hasDataset: boolean
-  hasSqlCredential: boolean
-  hasRedisCredential: boolean
-  graphqlCount: number
-  grpcCount: number
-  kafkaCount: number
-  websocketCount: number
-  subflowCount: number
-}): string[] {
-  return [
-    [input.hasArtifacts, '数据集需要先上传文件'],
-    [!input.hasDataset, '流程已包含数据集'],
-    [input.hasSqlCredential, 'SQL 需要数据库凭据'],
-    [input.hasRedisCredential, 'Redis 需要对应凭据'],
-    [input.graphqlCount, 'GraphQL 需要 Schema'],
-    [input.grpcCount, 'gRPC 需要 Descriptor'],
-    [input.kafkaCount, 'Kafka 需要事件源'],
-    [input.websocketCount, 'WebSocket 需要事件源'],
-    [input.subflowCount, '流程复用需要已发布子流程'],
-  ]
-    .filter(([available]) => !available)
-    .map(([, reason]) => String(reason))
-}
-
-function showInspector(
-  selection: import('./editor/editor-types').EditorSelection,
-  focused: boolean,
-): boolean {
+function showInspector(selection: WorkflowSelection, focused: boolean): boolean {
   return hasSelection(selection) && !focused
 }

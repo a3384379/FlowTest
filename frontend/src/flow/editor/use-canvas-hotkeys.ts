@@ -6,7 +6,6 @@ export type CanvasCommands = {
   paste?: () => void
   undo?: () => void
   redo?: () => void
-  selectAll?: () => void
   configure?: () => void
   add?: () => void
   focus?: () => void
@@ -27,11 +26,9 @@ function commandName(event: KeyboardEvent): keyof CanvasCommands | undefined {
   const key = event.key.toLowerCase()
   if (event.ctrlKey || event.metaKey) {
     if (key === 'z') return event.shiftKey ? 'redo' : 'undo'
-    return ({ c: 'copy', v: 'paste', a: 'selectAll', y: 'redo' } as const)[
-      key as 'c' | 'v' | 'a' | 'y'
-    ]
+    return ({ c: 'copy', v: 'paste', y: 'redo' } as const)[key as 'c' | 'v' | 'y']
   }
-  if (key === 'a' && event.shiftKey) return 'add'
+  if (key === 'tab' && !event.shiftKey) return 'add'
   return (
     {
       delete: 'delete',
@@ -48,6 +45,7 @@ export function useCanvasHotkeys(commands: CanvasCommands, blocked: boolean) {
     if (ignoreShortcut(event, blocked)) return
     if (!event.currentTarget.contains(event.target as Node) || isInputTarget(event.target)) return
     const name = commandName(event)
+    if (name === 'add' && document.activeElement !== event.currentTarget) return
     const command = name && commands[name]
     if (!command || event.repeat) return
     event.preventDefault()

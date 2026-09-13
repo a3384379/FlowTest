@@ -23,7 +23,7 @@ export default function WorkflowEdgeInspector({
   const supportsMapping = supportsRequestMapping(target)
   return (
     <aside className="workflow-inspector">
-      <Typography.Title level={5}>连线配置</Typography.Title>
+      <Typography.Title level={5}>连接关系</Typography.Title>
       <Space orientation="vertical" className="full-width">
         <Typography.Text>源节点：{source?.name ?? edge.source}</Typography.Text>
         <Typography.Text type="secondary">{edge.source}</Typography.Text>
