@@ -408,8 +408,28 @@
   min-width: 0;
 }
 
+.workflow-workspace-title .workflow-page-title {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0;
+  padding-right: 11px;
+  color: #172033;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.workflow-workspace-title .workflow-page-title::after {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  width: 1px;
+  height: 16px;
+  background: var(--workflow-border);
+  content: '';
+}
+
 .workflow-workspace-name {
-  max-width: 250px;
+  max-width: 190px;
   overflow: hidden;
   color: #172033;
   font-weight: 700;

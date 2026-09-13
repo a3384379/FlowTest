@@ -112,6 +112,7 @@ describe('WorkflowsPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
+    expect(await screen.findByRole('heading', { name: '流程编排', level: 1 })).toBeVisible()
     expect((await screen.findAllByText(workflow.name))[0]).toBeVisible()
     expect(screen.getByText('已发布 v1')).toBeVisible()
     expect(screen.getByLabelText('工作流画布')).toBeVisible()

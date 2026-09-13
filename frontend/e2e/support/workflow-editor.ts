@@ -79,6 +79,7 @@ export async function seedEditor(
     definition: prepared,
   })
   await page.goto(`${root}/workflows`)
+  await expect(page.getByRole('heading', { name: '流程编排', exact: true })).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(prepared.nodes.length)
   await expect(page.locator('.react-flow__edge')).toHaveCount(prepared.edges.length)
   return { projectId: project.id, workflow, headers, root }
@@ -137,31 +138,22 @@ async function nextAnimationFrame(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
 }
 export async function reconnectEdgeBetween(page: Page, source: Locator, target: Locator) {
+  await source.waitFor({ state: 'visible' })
+  await target.waitFor({ state: 'visible' })
+  await page.waitForTimeout(250)
+  expect(await isCenterHitTarget(source), '重连端点的中心点必须可命中').toBe(true)
+  expect(await isCenterHitTarget(target), '重连目标的中心点必须可命中').toBe(true)
   const from = await source.boundingBox()
   const to = await target.boundingBox()
   expect(from).not.toBeNull()
   expect(to).not.toBeNull()
   const start = { x: from!.x + from!.width / 2, y: from!.y + from!.height / 2 }
   const end = { x: to!.x + to!.width / 2, y: to!.y + to!.height / 2 }
-  await source.evaluate(
-    (element, points) => {
-      const mouse = (type: string, x: number, y: number, buttons: number) =>
-        new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          button: 0,
-          buttons,
-          clientX: x,
-          clientY: y,
-        })
-      element.dispatchEvent(mouse('mousedown', points.start.x, points.start.y, 1))
-      const dropTarget = document.elementFromPoint(points.end.x, points.end.y)
-      dropTarget?.dispatchEvent(mouse('mousemove', points.end.x, points.end.y, 1))
-      dropTarget?.dispatchEvent(mouse('mouseup', points.end.x, points.end.y, 0))
-    },
-    { start, end },
-  )
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(end.x, end.y, { steps: 30 })
+  await page.mouse.up()
+  await nextAnimationFrame(page)
 }
 export async function canvasKey(page: Page, key: string) {
   await page.getByLabel('工作流画布', { exact: true }).focus()

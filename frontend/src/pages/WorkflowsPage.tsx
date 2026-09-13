@@ -830,6 +830,9 @@ function workspaceTitle(state: WorkflowState) {
   if (state.workspaceMode === 'history') {
     return (
       <div className="workflow-workspace-title">
+        <Typography.Title level={1} className="workflow-page-title">
+          流程编排
+        </Typography.Title>
         <span className="workflow-workspace-name">{workflow?.name ?? '历史执行快照'}</span>
         <Space size={4} wrap>
           <Tag icon={<LockOutlined />} color="gold">
@@ -841,6 +844,9 @@ function workspaceTitle(state: WorkflowState) {
   }
   return (
     <div className="workflow-workspace-title">
+      <Typography.Title level={1} className="workflow-page-title">
+        流程编排
+      </Typography.Title>
       <span className="workflow-workspace-name">{workflow?.name ?? '流程工作区'}</span>
       {workflow && <DraftMetadata state={state} workflow={workflow} />}
     </div>
