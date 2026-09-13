@@ -50,6 +50,24 @@ export default function WorkflowNodeEditSession({
   const requestApply = useRef<(() => Promise<boolean>) | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modal, holder] = Modal.useModal()
+  useEffect(() => {
+    if (latest.current.dirty || jsonEqual(latest.current.baseNode, node)) return
+    const clean = {
+      ...latest.current,
+      baseNode: structuredClone(node),
+      draftNode: structuredClone(node),
+      rawFields: {},
+      requestDraft: null,
+      generation: session.nextGeneration(),
+    }
+    latest.current = clean
+    session.clearNodeEditor(key)
+    queueMicrotask(() => {
+      if (latest.current !== clean) return
+      setDraft(clean)
+      setError(null)
+    })
+  }, [node, session, key])
   function update(next: WorkflowNodeEditorDraft) {
     latest.current = next
     session.updateNodeEditor(key, next)

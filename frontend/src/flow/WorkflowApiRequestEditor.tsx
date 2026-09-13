@@ -1,4 +1,6 @@
 import WorkflowRequestDrawer from './WorkflowRequestDrawer'
+import axios from 'axios'
+import { apiErrorMessage } from '../lib/api'
 import {
   BulkDraftContext,
   useBulkDraft,
@@ -291,8 +293,8 @@ function RequestEditor({
         useBodyOverride: overrides.body !== undefined,
       })
       setPreview(withFileMetadata(result, artifacts))
-    } catch {
-      setError('预览失败，请检查请求字段、JSON 格式与环境配置。')
+    } catch (error) {
+      setError(previewFailureMessage(error))
     } finally {
       setPreviewing(false)
     }
@@ -415,6 +417,14 @@ function RequestEditor({
       </Modal>
     </>
   )
+}
+
+function previewFailureMessage(error: unknown): string {
+  if (!axios.isAxiosError<{ error?: { trace_id?: unknown } }>(error))
+    return '预览失败，请检查请求字段、JSON 格式与环境配置。'
+  const traceId = error.response?.data?.error?.trace_id
+  const message = apiErrorMessage(error)
+  return typeof traceId === 'string' ? `${message}（追踪 ID：${traceId}）` : message
 }
 
 function RequestSection({

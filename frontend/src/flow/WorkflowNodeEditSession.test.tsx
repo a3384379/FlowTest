@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { DraftContext, DraftSession } from '../features/drafts/draft-session'
@@ -20,6 +20,7 @@ function Harness({
   const node = definition.nodes[1]
   return (
     <DraftContext.Provider value={session}>
+      <button onClick={() => setDefinition(external)}>撤销节点修改</button>
       <WorkflowNodeEditSession
         scope="test:"
         node={node}
@@ -69,6 +70,22 @@ function Harness({
   )
 }
 describe('node edit transactions', () => {
+  it('rebases a clean form after undo and permits a subsequent edit', async () => {
+    const changed = vi.fn()
+    render(<Harness session={new DraftSession()} changed={changed} />)
+    fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: '修改名称' } })
+    fireEvent.change(screen.getByLabelText(/请求 JSON/), { target: { value: '{"updated":true}' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '撤销节点修改' }))
+    await waitFor(() =>
+      expect(screen.getByLabelText('节点名称')).toHaveValue(workflowDefinition.nodes[1].name),
+    )
+    expect(screen.getByLabelText(/请求 JSON/)).toHaveValue('{}')
+    fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: '再次编辑' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    expect(changed).toHaveBeenCalledTimes(2)
+    expect(changed.mock.lastCall?.[0].nodes[1].name).toBe('再次编辑')
+  })
   it('keeps field edits off the graph until Apply and commits once', async () => {
     const session = new DraftSession()
     const changed = vi.fn()
@@ -88,6 +105,9 @@ describe('node edit transactions', () => {
     const view = render(<Harness session={session} changed={changed} />)
     fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: '会话名称' } })
     fireEvent.change(screen.getByLabelText(/请求 JSON/), { target: { value: '{"unfinished":' } })
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'JSON 格式错误：请检查引号、逗号与括号是否完整。',
+    )
     fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
     expect(changed).not.toHaveBeenCalled()
     expect(screen.getByText(/请检查节点名称与 JSON/)).toBeVisible()

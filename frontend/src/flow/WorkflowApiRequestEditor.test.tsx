@@ -179,6 +179,23 @@ describe('WorkflowApiRequestEditor', () => {
     })
   })
 
+  it('preserves the preview server error message and trace ID', async () => {
+    vi.mocked(getApiDetail).mockResolvedValue({
+      ...detail,
+      version: { ...detail.version, body_kind: 'multipart' },
+    })
+    vi.mocked(previewApi).mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        data: { error: { message: '无权预览此接口', trace_id: 'preview-trace-403' } },
+      },
+    })
+    renderEditor(vi.fn())
+    fireEvent.click(screen.getByRole('button', { name: /配置节点请求/ }))
+    await screen.findByText('继承接口模板 v3')
+    fireEvent.click(screen.getByRole('button', { name: /预览模板请求/ }))
+    expect(await screen.findByText(/无权预览此接口.*preview-trace-403/)).toBeVisible()
+  })
   it('upgrades a pinned node to the latest interface version without dropping overrides', async () => {
     const user = userEvent.setup()
     const onUpdate = vi.fn()

@@ -66,6 +66,11 @@ test('HIST/KEY/PAL：拖动单事务、输入焦点保护和节点库新增', as
   await name.press('Backspace')
   await expect(page.locator('.react-flow__node')).toHaveCount(3)
   await page.getByRole('button', { name: '应用节点配置', exact: true }).click()
+  await canvasKey(page, 'ControlOrMeta+z')
+  await expect(name).toHaveValue('健康检查')
+  await name.fill('撤销后继续编辑')
+  await page.getByRole('button', { name: '应用节点配置', exact: true }).click()
+  await expect(page.getByText('节点内容已从外部更新', { exact: false })).toHaveCount(0)
   await closeInspector(page)
   await page.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
   await page

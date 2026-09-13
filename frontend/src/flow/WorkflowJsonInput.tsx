@@ -24,8 +24,8 @@ export default function WorkflowJsonInput({
     let parsed: unknown
     try {
       parsed = JSON.parse(text)
-    } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'JSON 格式不正确'
+    } catch {
+      error = '请检查引号、逗号与括号是否完整。'
     }
     const next = { text, error }
     setLocal(next)
