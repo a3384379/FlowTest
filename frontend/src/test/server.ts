@@ -4,6 +4,13 @@ import { setupServer } from 'msw/node'
 import { project } from './fixtures'
 
 export const server = setupServer(
+  http.get('/api/v1/projects/:projectId/permissions', () =>
+    HttpResponse.json({
+      effective_role: 'owner',
+      capabilities: ['read', 'edit', 'execute'],
+      matrix: { owner: [], editor: [], viewer: [] },
+    }),
+  ),
   http.get('/api/v1/projects/:projectId', ({ params }) => {
     if (params.projectId === project.id) return HttpResponse.json(project)
     return HttpResponse.json(

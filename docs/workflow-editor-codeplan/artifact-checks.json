@@ -1,0 +1,181 @@
+{
+  "artifact_check_status": "completed",
+  "relative_links_checked": 49,
+  "matrix_cases": 96,
+  "source_files": 20,
+  "fixture_checks": [
+    {
+      "file": "01-linear.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "02-conditional-branches.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "03-mapped-edge.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "04-extended-request.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "05-cleanup-phase.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "06-json-parse-mapping.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "07-disconnected-local-draft.json",
+      "independent_structural_errors": [
+        "main unreachable from start",
+        "main without path to end"
+      ],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    },
+    {
+      "file": "08-capability-start.json",
+      "independent_structural_errors": [],
+      "matches_documented_expectation": true,
+      "application_validation": "NOT_RUN"
+    }
+  ],
+  "images": [
+    {
+      "path": "assets/00-current.png",
+      "size": [
+        2047,
+        1153
+      ]
+    },
+    {
+      "path": "assets/01-workspace.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/02-focus.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/03-palette.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/04-fullscreen-editor.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/05-edge-inspector.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/06-shortcuts.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/07-run-view.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "assets/08-version-diff.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/01-现状参考-原始问题界面.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/02-方案总览-主编排界面.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/03-方案-节点库展开.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/04-方案-快捷键与画布焦点.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/05-方案-节点全屏配置.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/06-方案-连线配置与删除.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/07-方案-运行调试视图.png",
+      "size": [
+        1672,
+        941
+      ]
+    },
+    {
+      "path": "reference/08-方案-历史版本Diff.png",
+      "size": [
+        1672,
+        941
+      ]
+    }
+  ],
+  "application_tests": "NOT_RUN"
+}

@@ -1,3 +1,7 @@
+import { useState } from 'react'
+import { DraftContext, DraftSession } from '../features/drafts/draft-session'
+import WorkflowNodeEditSession from './WorkflowNodeEditSession'
+import { workflowDefinition } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -70,6 +74,36 @@ describe('WorkflowApiRequestEditor', () => {
     })
   })
 
+  it('DATA01 preserves independent request policies when applying request fields', async () => {
+    vi.mocked(getApiDetail).mockResolvedValue(detail)
+    const onUpdate = vi.fn()
+    const policies = {
+      auth_mode: 'disabled',
+      auth_disabled: true,
+      replace_headers: true,
+      suppressed_headers: ['Authorization'],
+      suppressed_query_parameters: ['debug'],
+      suppressed_cookies: ['session'],
+    }
+    renderEditor(onUpdate, detail.definition, {
+      ...node,
+      config: {
+        ...node.config,
+        polling: { expression: 'body.ready', expected: true },
+        request_overrides: { body: bodyOverride, ...policies },
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /配置节点请求/ }))
+    await screen.findByText('继承接口模板 v3')
+    fireEvent.click(screen.getByRole('button', { name: '保存节点配置' }))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    expect(onUpdate.mock.calls[0][0].config.request_overrides).toMatchObject(policies)
+    expect(onUpdate.mock.calls[0][0].config.polling).toEqual({
+      expression: 'body.ready',
+      expected: true,
+    })
+  })
+
   it('shows inherited Body values as read-only and preserves an unsaved custom draft', async () => {
     const user = userEvent.setup()
     const inheritedNode: WorkflowNode = {
@@ -113,7 +147,10 @@ describe('WorkflowApiRequestEditor', () => {
 
   it('previews the effective request with resolved file metadata', async () => {
     const user = userEvent.setup()
-    vi.mocked(getApiDetail).mockResolvedValue(detail)
+    vi.mocked(getApiDetail).mockResolvedValue({
+      ...detail,
+      version: { ...detail.version, body_kind: 'multipart' },
+    })
     vi.mocked(previewApi).mockResolvedValue({
       method: 'POST',
       url: 'https://api.example.com/upload?source=template',
@@ -127,12 +164,14 @@ describe('WorkflowApiRequestEditor', () => {
 
     await user.click(screen.getByRole('button', { name: /配置节点请求/ }))
     await screen.findByText('继承接口模板 v3')
-    await user.click(screen.getByRole('button', { name: /预览最终请求/ }))
+    await user.click(screen.getByRole('button', { name: /预览模板请求/ }))
 
     expect(await screen.findByText(/file_previews/)).toBeInTheDocument()
     expect(screen.getAllByText(/fixture\.json/)).toHaveLength(2)
     expect(previewApi).toHaveBeenCalledWith('project-1', detail.definition.id, 'environment-1', {
       version: 3,
+      serviceOverride: '',
+      endpointVariant: '',
       queryParametersOverride: undefined,
       headersOverride: undefined,
       bodyOverride: bodyOverride.value,
@@ -174,6 +213,39 @@ describe('WorkflowApiRequestEditor', () => {
     expect(screen.getByText('版本待固定')).toBeVisible()
     expect(screen.getByText('全部继承接口模板')).toBeVisible()
     expect(screen.getByRole('button', { name: /配置节点请求/ })).toBeDisabled()
+  })
+
+  it('FORM11 restores invalid request text, section mode, and active tab from the shared session', async () => {
+    const user = userEvent.setup()
+    const session = new DraftSession()
+    const changed = vi.fn()
+    vi.mocked(getApiDetail).mockResolvedValue({
+      ...detail,
+      version: { ...detail.version, body_kind: 'json', body: { initial: true } },
+    })
+    const view = render(<RequestSessionHarness session={session} changed={changed} />)
+    await user.click(screen.getByRole('button', { name: /配置节点请求/ }))
+    await screen.findByText('继承接口模板 v3')
+    await user.click(screen.getByRole('tab', { name: 'Body' }))
+    expect(session.unsafe.size).toBe(0)
+    await user.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+    fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+      target: { value: '{"unfinished":' },
+    })
+    await user.click(screen.getByRole('button', { name: '保存节点配置' }))
+    expect(changed).not.toHaveBeenCalled()
+    expect(session.unsafe.size).toBe(1)
+    view.unmount()
+    render(<RequestSessionHarness session={session} changed={changed} />)
+    await user.click(screen.getByRole('button', { name: /配置节点请求/ }))
+    expect(await screen.findByRole('textbox', { name: 'JSON Body' })).toHaveValue('{"unfinished":')
+    expect(screen.getByRole('tab', { name: /Body/ })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+      target: { value: '{"ready":true}' },
+    })
+    await user.click(screen.getByRole('button', { name: '保存节点配置' }))
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+    expect(session.unsafe.size).toBe(0)
   })
 
   it('reports a missing pinned interface version', async () => {
@@ -266,4 +338,48 @@ const node: WorkflowNode = {
       body: bodyOverride,
     },
   },
+}
+
+function RequestSessionHarness({
+  session,
+  changed,
+}: {
+  session: DraftSession
+  changed: () => void
+}) {
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  )
+  const [definition, setDefinition] = useState<import('../lib/api').WorkflowDefinition>({
+    ...workflowDefinition,
+    nodes: [{ ...node, config: { ...node.config, request_overrides: {} } }],
+  })
+  return (
+    <QueryClientProvider client={queryClient}>
+      <DraftContext.Provider value={session}>
+        <WorkflowNodeEditSession
+          scope="request-session:"
+          node={definition.nodes[0]}
+          definition={definition}
+          editable
+          onChange={(next) => {
+            setDefinition(next)
+            changed()
+          }}
+        >
+          {(draft, update) => (
+            <WorkflowApiRequestEditor
+              node={draft}
+              projectId="project-1"
+              environmentId="environment-1"
+              api={detail.definition}
+              artifacts={[artifact]}
+              editable
+              onUpdate={(updated) => update({ ...definition, nodes: [updated] })}
+            />
+          )}
+        </WorkflowNodeEditSession>
+      </DraftContext.Provider>
+    </QueryClientProvider>
+  )
 }

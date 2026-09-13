@@ -505,7 +505,7 @@ export type WorkflowNode = {
 
 export type WorkflowFieldMapping = {
   source: { node_id: string; path: string }
-  transform: { kind: 'identity' | 'template'; template: string }
+  transform: { kind: 'identity' | 'template' | 'json_parse'; template: string }
   target: {
     node_id: string
     location: 'query' | 'header' | 'body' | 'variable'
@@ -521,7 +521,16 @@ export type WorkflowEdge = {
   mappings: WorkflowFieldMapping[]
 }
 
+export type WorkflowRuntimeInputDefinition = {
+  name: string
+  value_type: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array'
+  required: boolean
+  nullable: boolean
+  description: string
+}
+
 export type WorkflowDefinition = {
+  runtime_inputs?: WorkflowRuntimeInputDefinition[]
   schema_version: string
   variables: Record<string, string>
   nodes: WorkflowNode[]

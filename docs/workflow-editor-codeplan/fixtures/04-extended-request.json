@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "开始",
+      "position": {
+        "x": 0,
+        "y": 80
+      },
+      "config": {}
+    },
+    {
+      "id": "api",
+      "type": "api",
+      "name": "查询测试对象",
+      "position": {
+        "x": 240,
+        "y": 80
+      },
+      "config": {
+        "api_definition_id": "00000000-0000-4000-8000-000000000001",
+        "api_version": 3,
+        "request_overrides": {
+          "headers": {},
+          "body": {
+            "kind": "json",
+            "value": {
+              "filter": "before"
+            }
+          },
+          "replace_headers": true,
+          "auth_mode": "disabled",
+          "auth_disabled": true,
+          "suppressed_headers": [
+            "Authorization"
+          ],
+          "suppressed_query_parameters": [
+            "debug"
+          ],
+          "suppressed_cookies": [
+            "session"
+          ]
+        },
+        "max_retries": 0,
+        "retry_on": [
+          "network_error",
+          "5xx"
+        ],
+        "polling": {
+          "expression": "body.ready",
+          "operator": "equals",
+          "expected": true,
+          "terminal_failure_values": [
+            false
+          ],
+          "max_attempts": 2,
+          "interval_seconds": 0,
+          "timeout_seconds": 30
+        },
+        "expected_statuses": [
+          200,
+          401
+        ]
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "结束",
+      "position": {
+        "x": 480,
+        "y": 80
+      },
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "s-a",
+      "source": "start",
+      "target": "api",
+      "condition": null,
+      "mappings": []
+    },
+    {
+      "id": "a-e",
+      "source": "api",
+      "target": "end",
+      "condition": null,
+      "mappings": []
+    }
+  ],
+  "settings": {
+    "fail_fast": true,
+    "concurrency": 20,
+    "default_timeout_seconds": 30
+  },
+  "runtime_inputs": [
+    {
+      "name": "expected_code",
+      "value_type": "integer",
+      "required": true,
+      "nullable": false,
+      "description": "测试数据：动态期望码；UI 编辑应保留声明"
+    }
+  ]
+}

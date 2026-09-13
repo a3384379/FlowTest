@@ -1,5 +1,6 @@
+import WorkflowWorkspaceShell from '../flow/WorkflowWorkspaceShell'
+import { workflowLayoutKey } from '../flow/editor/layout-preferences'
 import {
-  ApartmentOutlined,
   BugOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
@@ -17,8 +18,10 @@ import {
   Button,
   Card,
   Empty,
+  Input,
   Modal,
   Popconfirm,
+  Popover,
   Segmented,
   Select,
   Space,
@@ -74,7 +77,7 @@ export default function WorkflowsPage() {
   }
 
   return (
-    <>
+    <div className="workflow-workspace-page">
       <WorkflowHeading
         state={state}
         onCreate={() => setCreateOpen(true)}
@@ -97,19 +100,22 @@ export default function WorkflowsPage() {
         onCloseAll={() => tabs.requestCloseTabs(tabs.workflowIds)}
       />
       <WorkflowWorkspace state={state} onSelectWorkflow={tabs.activateWorkflow} />
-      <RunConsoleCard state={state} />
-      <DebugResultCard result={state.debugResult} />
-      <Card title="工作流执行历史" className="workflow-result-card">
-        <ExecutionTable
-          items={(state.executions.data?.items ?? []).filter(
-            (item) => item.workflow_id === state.workflowId,
-          )}
-          selectedId={state.historyExecutionId}
-          loading={state.historyLoading}
-          onView={state.showHistory}
-          onRepair={setRepairExecution}
-        />
-      </Card>
+      <details className="workflow-bottom-panel" open={showExecutionPanels(state)}>
+        <summary>执行结果与历史</summary>
+        <RunConsoleCard state={state} />
+        <DebugResultCard result={state.debugResult} />
+        <Card title="工作流执行历史" className="workflow-result-card">
+          <ExecutionTable
+            items={(state.executions.data?.items ?? []).filter(
+              (item) => item.workflow_id === state.workflowId,
+            )}
+            selectedId={state.historyExecutionId}
+            loading={state.historyLoading}
+            onView={state.showHistory}
+            onRepair={setRepairExecution}
+          />
+        </Card>
+      </details>
       <VersionDiffDialog state={state} />
       <CreateWorkflowDialog
         open={createOpen}
@@ -145,7 +151,7 @@ export default function WorkflowsPage() {
         onClose={() => setRepairExecution(undefined)}
       />
       <WorkflowTabCloseModal tabs={tabs} />
-    </>
+    </div>
   )
 }
 
@@ -533,17 +539,23 @@ function WorkflowWorkspace({
   state: WorkflowState
   onSelectWorkflow: (workflowId: string) => void
 }) {
+  const userId = useAuthStore((store) => store.user?.id)
   return (
-    <div className="workflow-grid">
-      <Card title="工作流" loading={state.workflows.isLoading}>
-        <WorkflowTable
-          items={state.workflows.data?.items ?? []}
-          selectedId={state.workflowId}
-          onSelect={onSelectWorkflow}
-          deleting={state.deleting}
-          onDelete={(id) => void state.deleteWorkflow(id)}
-        />
-      </Card>
+    <WorkflowWorkspaceShell
+      key={workflowLayoutKey(userId, state.projectId)}
+      preferenceKey={workflowLayoutKey(userId, state.projectId)}
+      list={
+        <Card className="workflow-list-card" title="工作流" loading={state.workflows.isLoading}>
+          <WorkflowTable
+            items={state.workflows.data?.items ?? []}
+            selectedId={state.workflowId}
+            onSelect={onSelectWorkflow}
+            deleting={state.deleting}
+            onDelete={(id) => void state.deleteWorkflow(id)}
+          />
+        </Card>
+      }
+    >
       <Card
         title={workspaceTitle(state)}
         loading={state.workspaceMode === 'history' && state.historyLoading}
@@ -559,7 +571,7 @@ function WorkflowWorkspace({
       >
         <DraftEditor state={state} />
       </Card>
-    </div>
+    </WorkflowWorkspaceShell>
   )
 }
 
@@ -607,11 +619,12 @@ function workspaceTitle(state: WorkflowState) {
 }
 
 function DraftActions({ state }: { state: WorkflowState }) {
+  const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
     <Space wrap>
       <Button
         icon={<SaveOutlined />}
-        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
+        disabled={disabled}
         loading={state.saving}
         onClick={() => void state.saveDraft()}
       >
@@ -619,11 +632,11 @@ function DraftActions({ state }: { state: WorkflowState }) {
       </Button>
       <Button
         icon={<CloudUploadOutlined />}
-        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
+        disabled={disabled}
         loading={state.publishing}
         onClick={() => void state.publish()}
       >
-        发布版本
+        发布服务器草稿
       </Button>
       <Button
         type="primary"
@@ -632,32 +645,42 @@ function DraftActions({ state }: { state: WorkflowState }) {
         loading={state.executing || Boolean(state.activeExecutionId)}
         onClick={() => void state.execute()}
       >
-        运行
+        运行已发布版本
       </Button>
-      <Select
-        aria-label="调试断点"
-        className="workflow-breakpoint-select"
-        value={state.breakpointNodeId}
-        disabled={!state.selectedWorkflow || Boolean(state.activeExecutionId)}
-        options={state.breakpointNodes.map((node) => ({ value: node.id, label: node.name }))}
-        onChange={state.setBreakpointSelection}
-      />
-      <Button
-        icon={<BugOutlined />}
-        disabled={!canExecute(state) || !state.breakpointNodeId}
-        loading={state.debugging}
-        onClick={() => void state.debugToBreakpoint()}
+      <Popover
+        title="调试与版本"
+        trigger="click"
+        content={
+          <Space orientation="vertical" align="start">
+            <Select
+              aria-label="调试断点"
+              className="workflow-breakpoint-select"
+              value={state.breakpointNodeId}
+              disabled={disabled}
+              options={state.breakpointNodes.map((node) => ({ value: node.id, label: node.name }))}
+              onChange={state.setBreakpointSelection}
+            />
+            <Button
+              icon={<BugOutlined />}
+              disabled={!canExecute(state) || !state.breakpointNodeId}
+              loading={state.debugging}
+              onClick={() => void state.debugToBreakpoint()}
+            >
+              调试至断点
+            </Button>
+            <Button
+              icon={<DiffOutlined />}
+              disabled={(state.selectedWorkflow?.current_version ?? 0) < 2}
+              loading={state.comparing}
+              onClick={() => void state.compareLatestVersions()}
+            >
+              版本 Diff
+            </Button>
+          </Space>
+        }
       >
-        调试至断点
-      </Button>
-      <Button
-        icon={<DiffOutlined />}
-        disabled={(state.selectedWorkflow?.current_version ?? 0) < 2}
-        loading={state.comparing}
-        onClick={() => void state.compareLatestVersions()}
-      >
-        版本 Diff
-      </Button>
+        <Button icon={<MoreOutlined />}>更多</Button>
+      </Popover>
     </Space>
   )
 }
@@ -672,6 +695,8 @@ function DraftEditor({ state }: { state: WorkflowState }) {
       <DraftMetadata state={state} workflow={workflow} />
       <WorkflowDesigner
         key={`${workflow.id}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
+        surface="workspace"
+        workflowId={workflow.id}
         projectId={state.projectId}
         environmentId={state.environmentId}
         definition={state.designerDefinition}
@@ -683,7 +708,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         grpcDescriptors={resources.grpcDescriptors}
         eventSources={resources.eventSources}
         statuses={state.nodeStatuses}
-        editable={state.workspaceMode === 'draft' && !state.activeExecutionId}
+        editable={state.canEdit && state.workspaceMode === 'draft' && !state.activeExecutionId}
         runtimeMode={state.workspaceMode === 'draft' ? undefined : state.workspaceMode}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
@@ -779,7 +804,9 @@ function canExecute(state: WorkflowState): boolean {
       state.environmentId,
       state.workflowId,
       state.selectedWorkflow?.current_version,
-    ].every(Boolean) && !state.activeExecutionId
+    ].every(Boolean) &&
+    state.canEdit &&
+    !state.activeExecutionId
   )
 }
 
@@ -796,51 +823,57 @@ function WorkflowTable({
   deleting: boolean
   onDelete: (id: string) => void
 }) {
+  const [query, setQuery] = useState('')
+  const visible = items.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()))
   return (
-    <Table
-      rowKey="id"
-      size="small"
-      pagination={false}
-      dataSource={items}
-      locale={{ emptyText: '暂无工作流' }}
-      rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
-      onRow={(record) => ({ onClick: () => onSelect(record.id) })}
-      columns={[
-        { title: '名称', dataIndex: 'name' },
-        {
-          title: '发布版本',
-          dataIndex: 'current_version',
-          width: 100,
-          render: (version: number | null) => (version ? <Tag color="green">v{version}</Tag> : '-'),
-        },
-        {
-          title: '',
-          width: 100,
-          render: (_value, record) => (
-            <Space>
-              <ApartmentOutlined className="table-action-icon" />
-              <Popconfirm
-                title="删除工作流？"
-                description="历史执行和快照会保留，未保存的本地草稿会清理。"
-                okText="删除"
-                cancelText="取消"
-                onConfirm={() => onDelete(record.id)}
-              >
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  loading={deleting && record.id === selectedId}
-                  aria-label={`删除工作流 ${record.name}`}
-                  onClick={(event) => event.stopPropagation()}
-                />
-              </Popconfirm>
-            </Space>
-          ),
-        },
-      ]}
-    />
+    <div className="workflow-compact-list">
+      <Input.Search
+        aria-label="搜索工作流"
+        placeholder="搜索工作流"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {visible.length === 0 && <Empty description="暂无工作流" />}
+      {visible.map((record) => (
+        <div
+          key={record.id}
+          className={
+            record.id === selectedId ? 'workflow-list-item selected-row' : 'workflow-list-item'
+          }
+        >
+          <Button
+            type="text"
+            className="workflow-list-select"
+            onClick={() => onSelect(record.id)}
+            title={record.name}
+            aria-pressed={record.id === selectedId}
+          >
+            <span>{record.name}</span>
+          </Button>
+          <Space>
+            <Tag color={record.current_version ? 'green' : 'default'}>
+              {record.current_version ? `v${record.current_version}` : '草稿'}
+            </Tag>
+            <Popconfirm
+              title="删除工作流？"
+              description="历史执行和快照会保留，未保存的本地草稿会清理。"
+              okText="删除"
+              cancelText="取消"
+              onConfirm={() => onDelete(record.id)}
+            >
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                loading={deleting && record.id === selectedId}
+                aria-label={`删除工作流 ${record.name}`}
+              />
+            </Popconfirm>
+          </Space>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -1088,4 +1121,10 @@ function StatusTag({ status }: { status: string }) {
 
 function options(items?: Array<{ id: string; name: string }>) {
   return items?.map((item) => ({ value: item.id, label: item.name }))
+}
+
+function showExecutionPanels(state: WorkflowState): boolean {
+  return (
+    state.workspaceMode === 'run' || (state.workspaceMode === 'draft' && Boolean(state.debugResult))
+  )
 }

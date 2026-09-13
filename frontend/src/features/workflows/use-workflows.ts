@@ -1,3 +1,6 @@
+import { getProjectPermission } from '../projects/project-service'
+import { analyzeGraph } from '../../flow/editor/graph-analysis'
+import { nodeEditorScope } from '../../flow/editor/editor-identity'
 import { useDraftSession } from '../drafts/draft-session'
 import { useEnvironmentSelection } from '../projects/environment-selection'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -61,11 +64,17 @@ export type WorkflowDraftEdit = {
 }
 
 export function useWorkflows(initialWorkflowId?: string) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const token = useAuthStore((store) => store.token)
   const userId = useAuthStore((store) => store.user?.id)
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
+  const permissions = useQuery({
+    queryKey: ['project-permissions', projectId],
+    queryFn: () => getProjectPermission(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const canEdit = permissions.data?.capabilities.includes('edit') ?? false
   const [workflowSelection, setWorkflowSelection] = useRouteScopedSelection(
     projectId,
     initialWorkflowId ?? null,
@@ -163,9 +172,20 @@ export function useWorkflows(initialWorkflowId?: string) {
     [draftSession, draftScope, scopedMemory, workflowId],
   )
   const activeWorkflowIdRef = useRef<string | null>(workflowId)
+  const publicationKey = JSON.stringify([
+    userId,
+    projectId,
+    workflowId,
+    selectedWorkflow?.draft_revision,
+    canEdit,
+  ])
+  const publicationKeyRef = useRef(publicationKey)
   useEffect(() => {
     activeWorkflowIdRef.current = workflowId
   }, [workflowId])
+  useEffect(() => {
+    publicationKeyRef.current = publicationKey
+  }, [publicationKey])
   const selectedWorkflowId = selectedWorkflow?.id
   const draftKey = useMemo(
     () => workflowDraftIdentity(userId, projectId, workflowId),
@@ -266,11 +286,17 @@ export function useWorkflows(initialWorkflowId?: string) {
       ),
   })
   const publishMutation = useMutation({
-    mutationFn: () => publishWorkflow(requiredId(projectId), requiredId(workflowId)),
+    mutationFn: (target: { projectId: string; workflowId: string }) =>
+      publishWorkflow(target.projectId, target.workflowId),
   })
   const executeMutation = useMutation({
     mutationFn: () =>
-      executeWorkflow(requiredId(projectId), requiredId(workflowId), requiredId(environmentId)),
+      executeWorkflow(
+        requiredId(projectId),
+        requiredId(workflowId),
+        requiredId(environmentId),
+        requiredVersion(selectedWorkflow?.current_version),
+      ),
   })
   const debugMutation = useMutation({
     mutationFn: () =>
@@ -349,7 +375,21 @@ export function useWorkflows(initialWorkflowId?: string) {
     })
   }
 
+  function hasPendingNodeEditor(targetWorkflowId: string | null): boolean {
+    if (!targetWorkflowId) return false
+    const scope = nodeEditorScope(userId ?? 'anonymous', projectId ?? 'embedded', targetWorkflowId)
+    if (!draftSession.dirtyNodeEditorKeys(scope).length) return false
+    void message.warning('有尚未应用的节点配置，请先返回节点应用或丢弃修改。')
+    return true
+  }
+  function validForSave(definition: WorkflowDefinition): boolean {
+    const issues = analyzeGraph(definition)
+    if (!issues.length) return true
+    void message.error(`流程结构未完成：${issues[0].message}。修改已保留在本地。`)
+    return false
+  }
   async function saveDraft() {
+    if (!canEdit || hasPendingNodeEditor(workflowId) || !validForSave(draftDefinition)) return
     const expectedRevision = draftEdit?.baseRevision ?? selectedWorkflow?.draft_revision
     if (!expectedRevision) return
     const editVersionAtStart = draftVersionRef.current
@@ -402,17 +442,33 @@ export function useWorkflows(initialWorkflowId?: string) {
   }
 
   async function publish() {
+    if (!canEdit || hasPendingNodeEditor(workflowId)) return
+    const confirmedKey = publicationKeyRef.current
+    const target = { projectId: requiredId(projectId), workflowId: requiredId(workflowId) }
+    const approved = await modal.confirm({
+      title: '发布服务器草稿？',
+      content: '发布仅使用服务器已保存的草稿。本地修改不会自动保存或包含在此次发布中。',
+      okText: '发布服务器草稿',
+      cancelText: '取消',
+    })
+    if (!approved) return
+    if (publicationKeyRef.current !== confirmedKey) {
+      void message.warning('工作流或权限已变化，本次发布已取消，请重新确认。')
+      return
+    }
+    if (hasPendingNodeEditor(target.workflowId)) return
     await runMutation(message.error, async () => {
-      const published = await publishMutation.mutateAsync()
+      const published = await publishMutation.mutateAsync(target)
       await refreshWorkflows()
       void message.success(`工作流 v${published.version} 已发布`)
     })
   }
 
   async function execute() {
+    if (!canEdit || hasPendingNodeEditor(workflowId)) return
     await runMutation(message.error, async () => {
       const execution = await executeMutation.mutateAsync()
-      const runningDefinition = snapshotDefinition(execution.snapshot) ?? draftDefinition
+      const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
       setLastResult(null)
       setActiveExecution(execution)
       setExecutionDefinition(runningDefinition)
@@ -511,23 +567,23 @@ export function useWorkflows(initialWorkflowId?: string) {
     setHistoryExecutionId(null)
   }
 
+  function canSaveTarget(targetWorkflowId: string): boolean {
+    return canEdit && !hasPendingNodeEditor(targetWorkflowId)
+  }
   async function saveWorkflowDraftFor(targetWorkflowId: string): Promise<void> {
+    if (!canSaveTarget(targetWorkflowId)) {
+      throw new Error('工作流暂不能保存，请先处理未应用配置或编辑权限。')
+    }
     if (!projectId || !userId) return
     const targetWorkflow = workflows.data?.items.find((item) => item.id === targetWorkflowId)
     const targetKey = workflowDraftKey(userId, projectId, targetWorkflowId)
     const memoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
     const storedDraft = readWorkflowDraft(targetKey)
-    const targetDraft =
-      memoryDraft ??
-      (storedDraft
-        ? {
-            workflowId: targetWorkflowId,
-            definition: storedDraft.content,
-            baseRevision: storedDraft.baseRevision,
-            editVersion: storedDraft.editVersion,
-          }
-        : null)
+    const targetDraft = memoryDraft ?? restoreWorkflowEdit(storedDraft, targetWorkflowId)
     if (!targetWorkflow || !targetDraft) return
+    if (!validForSave(targetDraft.definition)) {
+      throw new Error('流程结构未完成，页签保持打开。')
+    }
     const generationAtStart = draftGenerationRef.current.get(targetWorkflowId) ?? 0
     await runMutation(message.error, async () => {
       const saved = await updateWorkflowDraft(
@@ -538,7 +594,7 @@ export function useWorkflows(initialWorkflowId?: string) {
       )
       if ((draftGenerationRef.current.get(targetWorkflowId) ?? 0) !== generationAtStart) return
       const latestMemoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
-      if (latestMemoryDraft && latestMemoryDraft.editVersion !== targetDraft.editVersion) {
+      if (isNewerDraft(latestMemoryDraft, targetDraft.editVersion)) {
         const rebased = { ...latestMemoryDraft, baseRevision: saved.draft_revision }
         memoryDraftsRef.current.set(targetWorkflowId, rebased)
         setMemoryDraftIds([...memoryDraftsRef.current.keys()])
@@ -582,6 +638,9 @@ export function useWorkflows(initialWorkflowId?: string) {
   }
 
   function clearMemoryDraft(targetWorkflowId: string) {
+    const scope = nodeEditorScope(userId ?? 'anonymous', projectId ?? 'embedded', targetWorkflowId)
+    for (const key of draftSession.nodeEditors.keys())
+      if (key.startsWith(scope)) draftSession.clearNodeEditor(key)
     memoryDraftsRef.current.delete(targetWorkflowId)
     setMemoryDraftIds([...memoryDraftsRef.current.keys()])
     if (activeWorkflowIdRef.current === targetWorkflowId) {
@@ -675,6 +734,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     closeVersionDiff: () => setVersionDiff(null),
     addWorkflow,
     deleteWorkflow: removeWorkflow,
+    canEdit,
     saveDraft,
     saveWorkflowDraft: saveWorkflowDraftFor,
     discardWorkflowDraft,
@@ -797,7 +857,7 @@ function historicalWorkspaceView(input: WorkspaceViewInput) {
   const detail = input.historyDetail
   if (!detail) {
     return {
-      definition: input.draftDefinition,
+      definition: emptyDefinition(),
       execution: null,
       nodes: [],
       children: [],
@@ -807,7 +867,7 @@ function historicalWorkspaceView(input: WorkspaceViewInput) {
   }
   const nodes = detail.nodes
   return {
-    definition: snapshotDefinition(detail.execution.snapshot) ?? input.draftDefinition,
+    definition: snapshotDefinition(detail.execution.snapshot) ?? emptyDefinition(),
     execution: detail.execution,
     nodes,
     children: detail.children,
@@ -819,7 +879,7 @@ function historicalWorkspaceView(input: WorkspaceViewInput) {
 function runningWorkspaceView(input: WorkspaceViewInput) {
   const nodes = orderedLiveNodes(input.executionDefinition, input.liveNodes)
   return {
-    definition: input.executionDefinition ?? input.draftDefinition,
+    definition: input.executionDefinition ?? emptyDefinition(),
     execution: input.activeExecution,
     nodes,
     children: input.lastResult?.children ?? [],
@@ -967,4 +1027,25 @@ async function runMutation(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function isNewerDraft(
+  draft: WorkflowDraftEdit | undefined,
+  version: number,
+): draft is WorkflowDraftEdit {
+  return Boolean(draft && draft.editVersion !== version)
+}
+
+function restoreWorkflowEdit(
+  stored: ReturnType<typeof readWorkflowDraft>,
+  workflowId: string,
+): WorkflowDraftEdit | null {
+  return stored
+    ? {
+        workflowId,
+        definition: stored.content,
+        baseRevision: stored.baseRevision,
+        editVersion: stored.editVersion,
+      }
+    : null
 }

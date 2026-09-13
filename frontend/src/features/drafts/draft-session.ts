@@ -1,3 +1,4 @@
+import type { WorkflowNodeEditorDraft } from '../../flow/editor/node-edit-session'
 import { createContext, useContext, useState } from 'react'
 import type { WorkbenchFields } from '../api-console/APIWorkbench'
 import type { WorkflowDraftEdit } from '../workflows/use-workflows'
@@ -9,6 +10,22 @@ type ApiDraft = {
   baseVersion: number
 }
 export class DraftSession {
+  readonly nodeEditors = new Map<string, WorkflowNodeEditorDraft>()
+  readonly nodeEditorActions = new Map<string, () => Promise<boolean>>()
+  updateNodeEditor(key: string, draft: WorkflowNodeEditorDraft) {
+    this.nodeEditors.set(key, draft)
+    this.markUnsafe(`node-editor:${key}`, draft.dirty)
+  }
+  clearNodeEditor(key: string) {
+    this.nodeEditors.delete(key)
+    this.markUnsafe(`node-editor:${key}`, false)
+  }
+  dirtyNodeEditorKeys(scope: string): string[] {
+    return [...this.nodeEditors]
+      .filter(([key, draft]) => key.startsWith(scope) && draft.dirty)
+      .map(([key]) => key)
+  }
+
   readonly apis = new Map<string, ApiDraft>()
   readonly workflows = new Map<
     string,

@@ -46,7 +46,7 @@ function DraftNavigationGuard({ unsafe }: { unsafe: boolean }) {
       onOk={() => blocker.proceed?.()}
       onCancel={() => blocker.reset?.()}
     >
-      当前浏览器无法保存草稿。切换后草稿会保留在本次会话，返回原项目和资源可继续编辑；请勿刷新或关闭浏览器。
+      尚未应用的节点配置或未持久化草稿仅保留在本次会话。切换后返回原项目和资源可继续编辑；刷新、关闭浏览器或退出登录会丢失这些输入。
     </Modal>
   )
 }
