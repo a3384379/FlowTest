@@ -61,8 +61,8 @@ jobs:
           docker build --target runner-runtime -t flowtest-runner:ci backend
           docker build -t flowtest-frontend:ci frontend
           docker build -t flowtest-mock-target:ci mock-target
-          docker pull cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33
-          docker tag cgr.dev/chainguard/nginx@sha256:fe96e6c379821c0461f006a5545a872d9c3ea1942d5c46623d40bfa37c829c33 flowtest-environment-fixture:ci
+          docker pull docker.io/nginxinc/nginx-unprivileged@sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce
+          docker tag docker.io/nginxinc/nginx-unprivileged@sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce flowtest-environment-fixture:ci
       - name: Scan backend image
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
