@@ -15,6 +15,7 @@ from app.importers.contracts import ImportedOperation, ImportSourceType, sanitiz
 from app.importers.excel import ExcelImportError, parse_excel
 from app.importers.http_formats import HttpFormatError, parse_bruno, parse_curl, parse_har
 from app.importers.openapi import parse_openapi
+from app.importers.openapi_normalization import OpenAPIResourceError
 from app.importers.postman import parse_postman
 
 
@@ -78,7 +79,10 @@ def _parse_mapping_operations(
     document: Mapping[str, object],
 ) -> tuple[ImportedOperation, ...]:
     if source_type in {ImportSourceType.OPENAPI3, ImportSourceType.SWAGGER2}:
-        return parse_openapi(document, source_type)
+        try:
+            return parse_openapi(document, source_type)
+        except OpenAPIResourceError as error:
+            raise ImportDocumentError(str(error)) from error
     if source_type is ImportSourceType.POSTMAN:
         return parse_postman(document)
     try:
@@ -122,23 +126,33 @@ def _load_document_or_none(
 
 
 def _load_document(content: bytes) -> Mapping[str, object]:
+    if len(content) > 32 * 1024 * 1024:
+        raise ImportDocumentError("文档超过 32 MiB 解析预算")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise ImportDocumentError("导入文件必须使用 UTF-8 编码") from error
     try:
         loaded = json.loads(text)
+    except RecursionError as error:
+        raise ImportDocumentError("文档超过解析深度预算") from error
     except json.JSONDecodeError:
         try:
             loaded = yaml.safe_load(text)
-        except yaml.YAMLError as error:
+        except (yaml.YAMLError, RecursionError) as error:
             raise ImportDocumentError("导入文件不是有效的 JSON 或 YAML") from error
     if not isinstance(loaded, Mapping):
         raise ImportDocumentError("导入文档根节点必须是对象")
+    _check_source_budget(loaded)
     return _string_key_mapping(loaded)
 
 
 def _detect_source_type(document: Mapping[str, object]) -> ImportSourceType:
+    if str(document.get("swaggerVersion", document.get("swagger", ""))).startswith("1."):
+        raise ImportDocumentError(
+            "Legacy Swagger 1.x is not currently supported; "
+            "please convert to Swagger 2.0 or OpenAPI 3.x."
+        )
     openapi = document.get("openapi")
     if isinstance(openapi, str) and openapi.startswith("3."):
         return ImportSourceType.OPENAPI3
@@ -161,3 +175,17 @@ def _string_key_mapping(value: Mapping[object, object]) -> Mapping[str, object]:
     if not all(isinstance(key, str) for key in value):
         raise ImportDocumentError("导入文档对象键必须是字符串")
     return {str(key): item for key, item in value.items()}
+
+
+def _check_source_budget(value: object) -> None:
+    pending: list[tuple[object, int]] = [(value, 0)]
+    nodes = 0
+    while pending:
+        current, depth = pending.pop()
+        nodes += 1
+        if nodes > 200_000 or depth > 96:
+            raise ImportDocumentError("文档超过 200000 节点或 96 层嵌套预算 (包括 YAML 循环别名)")
+        if isinstance(current, dict):
+            pending.extend((child, depth + 1) for child in current.values())
+        elif isinstance(current, list):
+            pending.extend((child, depth + 1) for child in current)

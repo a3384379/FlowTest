@@ -7,6 +7,7 @@ from enum import StrEnum
 from app.core.redaction import redaction_enabled
 from app.domain.api_assets import APIVersionSpec, AuthKind, BodyKind, HttpMethod, JsonValue
 from app.domain.test_engineering import OperationContract
+from app.importers.openapi_normalization import ImportDiagnostic
 
 SENSITIVE_IMPORT_NAMES = frozenset(
     {
@@ -58,6 +59,7 @@ class ImportedOperation:
     request: APIVersionSpec
     target_base_url: str | None = None
     canonical_contract: OperationContract | None = None
+    diagnostics: tuple[ImportDiagnostic, ...] = ()
 
     @property
     def import_key(self) -> str:

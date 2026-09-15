@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from app.importers.contracts import ImportChange, ImportSourceKind, ImportSourceType
+from app.importers.openapi_normalization import ImportDiagnostic
 
 
 class ImportItemResponse(BaseModel):
@@ -16,6 +17,7 @@ class ImportItemResponse(BaseModel):
     definition_id: UUID | None
     version: int
     server_url: str | None = None
+    diagnostics: list[ImportDiagnostic] = Field(default_factory=list)
 
 
 class ImportRunResponse(BaseModel):
