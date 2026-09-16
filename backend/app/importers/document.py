@@ -15,6 +15,7 @@ from app.importers.contracts import ImportedOperation, ImportSourceType, sanitiz
 from app.importers.excel import ExcelImportError, parse_excel
 from app.importers.http_formats import HttpFormatError, parse_bruno, parse_curl, parse_har
 from app.importers.openapi import parse_openapi
+from app.importers.openapi_dialects import OpenAPIVersionError, source_dialect
 from app.importers.openapi_normalization import OpenAPIResourceError
 from app.importers.postman import parse_postman
 
@@ -28,11 +29,12 @@ def parse_import_document(
     requested_type: ImportSourceType = ImportSourceType.AUTO,
     *,
     policy: RedactionPolicy | None = None,
+    document_url: str | None = None,
 ) -> tuple[ImportSourceType, tuple[ImportedOperation, ...]]:
     policy = policy or get_redaction_policy()
     token = set_redaction_policy(policy)
     try:
-        return _parse_import_document(content, requested_type, policy)
+        return _parse_import_document(content, requested_type, policy, document_url)
     finally:
         reset_redaction_policy(token)
 
@@ -41,6 +43,7 @@ def _parse_import_document(
     content: bytes,
     requested_type: ImportSourceType,
     policy: RedactionPolicy,
+    document_url: str | None,
 ) -> tuple[ImportSourceType, tuple[ImportedOperation, ...]]:
     if requested_type is ImportSourceType.EXCEL or (
         requested_type is ImportSourceType.AUTO and content.startswith(b"PK")
@@ -54,8 +57,9 @@ def _parse_import_document(
     source_type = (
         _detect_source_type(document) if requested_type is ImportSourceType.AUTO else requested_type
     )
+    _validate_openapi_format(document, source_type)
     return source_type, _non_empty(
-        _parse_mapping_operations(source_type, content, document), policy
+        _parse_mapping_operations(source_type, content, document, document_url), policy
     )
 
 
@@ -77,10 +81,11 @@ def _parse_mapping_operations(
     source_type: ImportSourceType,
     content: bytes,
     document: Mapping[str, object],
+    document_url: str | None = None,
 ) -> tuple[ImportedOperation, ...]:
     if source_type in {ImportSourceType.OPENAPI3, ImportSourceType.SWAGGER2}:
         try:
-            return parse_openapi(document, source_type)
+            return parse_openapi(document, source_type, document_url=document_url)
         except OpenAPIResourceError as error:
             raise ImportDocumentError(str(error)) from error
     if source_type is ImportSourceType.POSTMAN:
@@ -148,16 +153,8 @@ def _load_document(content: bytes) -> Mapping[str, object]:
 
 
 def _detect_source_type(document: Mapping[str, object]) -> ImportSourceType:
-    if str(document.get("swaggerVersion", document.get("swagger", ""))).startswith("1."):
-        raise ImportDocumentError(
-            "Legacy Swagger 1.x is not currently supported; "
-            "please convert to Swagger 2.0 or OpenAPI 3.x."
-        )
-    openapi = document.get("openapi")
-    if isinstance(openapi, str) and openapi.startswith("3."):
-        return ImportSourceType.OPENAPI3
-    if document.get("swagger") == "2.0":
-        return ImportSourceType.SWAGGER2
+    if any(key in document for key in ("openapi", "swagger", "swaggerVersion")):
+        return _openapi_format(document)
     info = document.get("info")
     if isinstance(info, Mapping) and "schema" in info and "item" in document:
         return ImportSourceType.POSTMAN
@@ -189,3 +186,19 @@ def _check_source_budget(value: object) -> None:
             pending.extend((child, depth + 1) for child in current.values())
         elif isinstance(current, list):
             pending.extend((child, depth + 1) for child in current)
+
+
+def _openapi_format(document: Mapping[str, object]) -> ImportSourceType:
+    try:
+        dialect = source_dialect(document)
+    except OpenAPIVersionError as error:
+        raise ImportDocumentError(str(error)) from error
+    return ImportSourceType.SWAGGER2 if dialect == "SWAGGER_2_0" else ImportSourceType.OPENAPI3
+
+
+def _validate_openapi_format(document: Mapping[str, object], selected: ImportSourceType) -> None:
+    is_openapi = selected in {ImportSourceType.SWAGGER2, ImportSourceType.OPENAPI3} or any(
+        key in document for key in ("swagger", "swaggerVersion", "openapi")
+    )
+    if is_openapi and _openapi_format(document) != selected:
+        raise ImportDocumentError("选择的导入格式与文档规范版本不一致")

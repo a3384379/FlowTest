@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlsplit
 from pydantic import BaseModel, JsonValue
 
 from app.core.redaction import redaction_enabled
+from app.domain.parameter_identity import parameter_identity
 
 _SCHEMA_KEYS = frozenset(
     {
@@ -179,7 +180,7 @@ def semantic_contract_fingerprint(payload: Mapping[str, object]) -> str:
         "auth": {key: auth.get(key) for key in ("required", "kind", "location", "name")},
         "parameters": sorted(
             parameters,
-            key=lambda item: (str(item.get("location")), str(item.get("name")).lower()),
+            key=lambda item: parameter_identity(str(item.get("location")), str(item.get("name"))),
         ),
         "request_body": semantic_request,
         "responses": responses,

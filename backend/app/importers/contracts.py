@@ -85,13 +85,24 @@ class ImportedOperation:
             "auth_config": _json_string_mapping(self.request.auth_config),
             "target_base_url": self.target_base_url,
             "canonical_contract": (
-                self.canonical_contract.model_dump(mode="json", by_alias=True)
+                _fingerprint_contract_payload(self.canonical_contract)
                 if self.canonical_contract is not None
                 else None
             ),
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _fingerprint_contract_payload(contract: OperationContract) -> dict[str, JsonValue]:
+    payload = contract.model_dump(mode="json", by_alias=True)
+    payload["warnings"] = [
+        warning
+        for warning in contract.warnings
+        if not re.fullmatch(r"[A-Z][A-Z_]+", warning)
+        and not warning.startswith("import_base_path=")
+    ]
+    return payload
 
 
 def _json_string_mapping(values: dict[str, str]) -> dict[str, JsonValue]:

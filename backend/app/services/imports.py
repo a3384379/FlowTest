@@ -123,7 +123,10 @@ class ImportService:
         source = _file_source(source_name)
         try:
             detected_type, operations = parse_import_document(
-                content, source_type, policy=get_redaction_policy()
+                content,
+                source_type,
+                policy=get_redaction_policy(),
+                document_url=source.document_url,
             )
         except CanonicalSchemaValidationError as error:
             raise _canonical_contract_error(error) from error
@@ -414,7 +417,10 @@ class ImportService:
     ) -> ImportPreviewSummary:
         try:
             detected_type, operations = parse_import_document(
-                content, source_type, policy=get_redaction_policy()
+                content,
+                source_type,
+                policy=get_redaction_policy(),
+                document_url=source.document_url,
             )
         except CanonicalSchemaValidationError as error:
             raise _canonical_contract_error(error) from error
@@ -604,6 +610,7 @@ class ImportService:
         _, operations = parse_import_document(
             content,
             ImportSourceType(run.source_type),
+            document_url=run.document_url,
             policy=get_redaction_policy(),
         )
         source = ImportSourceIdentity(
@@ -958,6 +965,8 @@ class ImportService:
                     status_code=409,
                     details={"endpoint_id": str(endpoint.id)},
                 )
+            if allow_existing_change is None:
+                return
             endpoint.base_url = server_url.rstrip("/")
             endpoint.revision += 1
         await self._session.flush()

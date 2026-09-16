@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.domain.api_assets import TEMPLATE_PATTERN, build_variables, render_template
+from app.domain.import_execution import imported_execution_path
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.request_targets import ResolvedRequestTarget
 from app.domain.scopes import HeaderScope, ResolvedValue
@@ -136,7 +137,12 @@ class RequestTargetResolver:
         )
         try:
             resolved_base_url = render_template(base_url, variables).rstrip("/")
-            resolved_path = render_template(path, variables).lstrip("/")
+            path = imported_execution_path(
+                resolved_base_url,
+                render_template(path, variables),
+                version.canonical_contract or {},
+            )
+            resolved_path = path.lstrip("/")
             headers = self._render_headers(
                 {
                     HeaderScope.SYSTEM: SYSTEM_HEADERS,
@@ -172,7 +178,7 @@ class RequestTargetResolver:
             endpoint_revision=revision,
             base_url=resolved_base_url,
             path=resolved_path,
-            effective_url=join_service_path(resolved_base_url, render_template(path, variables)),
+            effective_url=join_service_path(resolved_base_url, path),
             headers=headers,
             variables=variables,
             secret_refs=allowed_secret_refs,

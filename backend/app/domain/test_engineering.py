@@ -23,6 +23,7 @@ from app.domain.evidence import (
     EvidenceFinding,
     EvidenceSourceType,
 )
+from app.domain.parameter_identity import parameter_identity
 from app.domain.test_design import (
     CoverageEntry,
     CoverageModel,
@@ -115,7 +116,7 @@ class OperationContract(BaseModel):
     def validate_responses(self) -> OperationContract:
         if any(re.fullmatch(r"[1-5][0-9]{2}|default", status) is None for status in self.responses):
             raise ValueError("contract response keys must be HTTP status codes or default")
-        parameter_keys = [(item.location, item.name.lower()) for item in self.parameters]
+        parameter_keys = [parameter_identity(item.location, item.name) for item in self.parameters]
         if len(parameter_keys) != len(set(parameter_keys)):
             raise ValueError("contract parameter locations and names must be unique")
         if any(item.location == "path" and not item.required for item in self.parameters):
@@ -189,6 +190,20 @@ class TestEngineeringEngine:
         }
         if any(scenario.requires_review for scenario in scenarios):
             review_requirements.add("scenario_precondition_review")
+        if contract.completeness != "complete":
+            review_requirements.add("partial_contract")
+            warnings.append("源契约存在未表达约束, 覆盖率仅针对已表达部分; 必须人工补充审核")
+            coverage.entries = [
+                *coverage.entries[:499],
+                CoverageEntry(
+                    target_ref="operation://" + contract.operation,
+                    dimension="schema",
+                    requirement="补充源契约未表达的约束",
+                    covered=False,
+                    reason="partial Canonical Contract",
+                    priority="high",
+                ),
+            ]
         if contract.completeness == "redacted_partial":
             review_requirements.add("redacted_contract_test_data")
         if consistency_issues:
