@@ -290,7 +290,9 @@ def _preview_response(
         change: sum(_change_value(item.change) == change.value for item in results)
         for change in ImportChange
     }
-    requires_review = bool(counts[ImportChange.CHANGED] or counts[ImportChange.DELETED])
+    requires_review = bool(counts[ImportChange.CHANGED] or counts[ImportChange.DELETED]) or any(
+        diagnostic.semantic_loss for item in results for diagnostic in item.diagnostics
+    )
     warnings = (
         ["MCP 仅自动提交纯新增接口；更新或删除已有接口必须转人工审核，不接受客户端布尔确认。"]
         if requires_review
@@ -327,11 +329,7 @@ def _preview_response(
         trace_id=get_trace_id(),
         next_action=(
             "review_required"
-            if any(
-                _change_value(item.change)
-                in {ImportChange.CHANGED.value, ImportChange.DELETED.value}
-                for item in results
-            )
+            if requires_review
             else "commit"
             if any(_change_value(item.change) == ImportChange.ADDED.value for item in results)
             else "none"
@@ -349,6 +347,7 @@ def _item_from_result(item: ImportItemResult) -> MCPContractImportItem:
         definition_id=item.definition_id,
         version=item.version,
         server_url=item.server_url,
+        diagnostics=list(item.diagnostics),
     )
 
 

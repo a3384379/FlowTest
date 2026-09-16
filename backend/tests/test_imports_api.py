@@ -954,3 +954,75 @@ async def test_compatibility_diagnostics_survive_preview_and_read(
     assert len(payload["results"]) == 8
     assert payload["results"][0]["diagnostics"][0]["keyword"] == "description"
     assert payload["results"][0]["diagnostics"][0]["source_path"].startswith("#/definitions/")
+
+
+@pytest.mark.asyncio
+async def test_import_runtime_arrays_and_base_path_use_selected_environment(import_client):
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    environment = await import_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={"name": "Mock", "base_url": "http://mock.invalid/gateway/v2"},
+    )
+    assert environment.status_code == 201, environment.text
+    doc = {
+        "swagger": "2.0",
+        "info": {"version": "1"},
+        "basePath": "/v2",
+        "paths": {
+            "/items": {
+                "get": {
+                    "parameters": [
+                        {
+                            "name": "ids",
+                            "in": "query",
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "collectionFormat": "multi",
+                        }
+                    ]
+                }
+            }
+        },
+    }
+    result = await _upload_document(import_client, headers, project_id, json.dumps(doc).encode())
+    assert result.status_code == 201, result.text
+    definition_id = result.json()["results"][0]["definition_id"]
+    preview = await import_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={
+            "environment_id": environment.json()["id"],
+            "runtime_variables": {"ids": '["a","b"]'},
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["url"] == "http://mock.invalid/gateway/v2/items?ids=a&ids=b"
+
+
+@pytest.mark.asyncio
+async def test_partial_security_blocks_unconfigured_preview(import_client):
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    environment = await import_client.post(
+        f"/api/v1/projects/{project_id}/environments",
+        headers=headers,
+        json={"name": "Mock", "base_url": "http://mock.invalid"},
+    )
+    doc = {
+        "openapi": "3.2.0",
+        "info": {"version": "1"},
+        "paths": {"/items": {"get": {"security": [{"oauth": []}]}}},
+        "components": {"securitySchemes": {"oauth": {"type": "oauth2", "flows": {}}}},
+    }
+    result = await _upload_document(import_client, headers, project_id, json.dumps(doc).encode())
+    assert result.status_code == 201, result.text
+    definition_id = result.json()["results"][0]["definition_id"]
+    preview = await import_client.post(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}/preview",
+        headers=headers,
+        json={"environment_id": environment.json()["id"]},
+    )
+    assert preview.status_code == 422, preview.text
+    assert "认证" in preview.json()["error"]["message"]

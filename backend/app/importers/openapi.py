@@ -2,6 +2,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Literal, cast
+from urllib.parse import urljoin, urlsplit
 
 from pydantic import ValidationError
 
@@ -15,6 +16,7 @@ from app.domain.api_assets import (
 )
 from app.domain.canonical_contracts import sanitize_contract_payload
 from app.domain.canonical_schemas import CanonicalSchemaValidationError
+from app.domain.parameter_identity import parameter_identity
 from app.domain.test_engineering import (
     ContractAuth,
     ContractParameter,
@@ -35,16 +37,19 @@ HTTP_METHODS = {method.value.lower(): method for method in HttpMethod}
 
 
 def parse_openapi(
-    document: Mapping[str, object], source_type: ImportSourceType
+    document: Mapping[str, object],
+    source_type: ImportSourceType,
+    *,
+    document_url: str | None = None,
 ) -> tuple[ImportedOperation, ...]:
     paths = _mapping(document.get("paths"))
     schemes = _security_schemes(document, source_type)
     base_path = _swagger_base_path(document, source_type)
-    target_base_url = _server_url(document, source_type)
     default_security = _sequence(document.get("security"))
     operations: list[ImportedOperation] = []
     for raw_path, path_value in paths.items():
-        path_item = _mapping(path_value)
+        path_normalizer = SourceNormalizer(document, "", raw_path, None)
+        path_item, _, _ = path_normalizer.resolve(path_value, pointer("#/paths", raw_path), "$")
         common_parameters = _sequence(path_item.get("parameters"))
         for method_name, method in HTTP_METHODS.items():
             raw_operation = path_item.get(method_name)
@@ -53,9 +58,26 @@ def parse_openapi(
             normalizer = SourceNormalizer(
                 document, method.value, raw_path, _text(raw_operation.get("operationId")) or None
             )
+            for diagnostic in path_normalizer.diagnostics:
+                normalizer.diagnostics.append(
+                    replace(diagnostic, method=method.value, operation_id=normalizer.operation_id)
+                )
+            normalizer.partial = path_normalizer.partial
             operation = OperationAdapter(
                 normalizer, pointer("#/paths", raw_path) + "/" + method_name
             ).prepare(dict(raw_operation), common_parameters)
+            target_base_url = _server_url(
+                {
+                    **document,
+                    "servers": operation.get(
+                        "servers", path_item.get("servers", document.get("servers"))
+                    ),
+                },
+                source_type,
+                document_url=document_url,
+                normalizer=normalizer,
+            )
+            _security_diagnostics(operation, schemes, default_security, normalizer)
             parameters = _sequence(operation.get("parameters"))
             request = _operation_request(
                 method=method,
@@ -66,6 +88,8 @@ def parse_openapi(
                 default_security=default_security,
                 source_type=source_type,
             )
+            if any(d.code == "SECURITY_REQUIRES_CONFIGURATION" for d in normalizer.diagnostics):
+                request = replace(request, auth_kind=AuthKind.NONE, auth_config={})
             name = _operation_name(operation, method, raw_path)
             description = _text(operation.get("description")) or _text(operation.get("summary"))
             contract = _operation_contract(
@@ -79,6 +103,11 @@ def parse_openapi(
                 operation_name=name,
                 normalizer=normalizer,
             )
+            contract.warnings = sorted(
+                {*contract.warnings, *(d.code for d in normalizer.diagnostics)}
+            )[:49]
+            if base_path:
+                contract.warnings.append("import_base_path=" + base_path)
             operations.append(
                 ImportedOperation(
                     name=name,
@@ -117,6 +146,9 @@ def _operation_request(
         elif location == "header":
             headers[name] = imported_value(name, value)
     body_kind, body = _body(operation, parameters, source_type)
+    content_type = _request_content_type(operation, parameters, source_type)
+    if content_type and body_kind not in {BodyKind.NONE, BodyKind.MULTIPART}:
+        headers["Content-Type"] = content_type
     auth_kind, auth_config = _auth(operation, schemes, default_security)
     return replace(
         request,
@@ -243,7 +275,9 @@ def _contract_parameters(
         )
     unique: dict[tuple[str, str], ContractParameter] = {}
     for contract_parameter in result:
-        unique[(contract_parameter.location, contract_parameter.name.lower())] = contract_parameter
+        unique[parameter_identity(contract_parameter.location, contract_parameter.name)] = (
+            contract_parameter
+        )
     return list(unique.values())
 
 
@@ -259,7 +293,7 @@ def _contract_request_body(
         for media_type in sorted(content, key=lambda value: ("json" not in value, value)):
             media = _mapping(content[media_type])
             schema = _resolved_schema(document, media.get("schema"))
-            if "schema" in media:
+            if media_type:
                 return ContractRequestBody(
                     required=request_body.get("required") is True,
                     content_type=media_type,
@@ -307,15 +341,14 @@ def _contract_responses(
         if source_type is ImportSourceType.OPENAPI3:
             content = _mapping(response.get("content"))
             for media_type in sorted(content, key=lambda value: ("json" not in value, value)):
-                content_type = content_type or media_type
-                candidate = _resolved_schema(document, _mapping(content[media_type]).get("schema"))
-                if candidate:
-                    schema = candidate
-                    content_type = media_type
-                    break
+                content_type = media_type
+                media = _mapping(content[media_type])
+                if "schema" in media:
+                    schema = _resolved_schema(document, media["schema"])
+                break
         else:
             candidate = _resolved_schema(document, response.get("schema"))
-            schema = candidate or None
+            schema = candidate if "schema" in response else None
             produces = _sequence(operation.get("produces")) or _sequence(document.get("produces"))
             content_type = _text(produces[0]) if produces else None
         result[status] = ContractResponse(
@@ -420,7 +453,7 @@ def _body(
 def _openapi3_body(operation: Mapping[str, object]) -> tuple[BodyKind, JsonValue]:
     request_body = _mapping(operation.get("requestBody"))
     content = _mapping(request_body.get("content"))
-    for media_type, raw_media in content.items():
+    for media_type, raw_media in list(content.items())[:1]:
         media = _mapping(raw_media)
         example = _example(media)
         if media_type == "application/json" or media_type.endswith("+json"):
@@ -428,7 +461,13 @@ def _openapi3_body(operation: Mapping[str, object]) -> tuple[BodyKind, JsonValue
         if media_type == "application/x-www-form-urlencoded":
             return BodyKind.FORM, example if isinstance(example, dict) else {}
         if media_type == "multipart/form-data":
-            return BodyKind.MULTIPART, {"fields": {}, "files": []}
+            properties = _mapping(_mapping(media.get("schema")).get("properties"))
+            fields = {
+                name: value
+                for name, value in _mapping(example).items()
+                if _mapping(properties.get(name)).get("format") != "binary"
+            }
+            return BodyKind.MULTIPART, {"fields": cast(dict[str, JsonValue], fields), "files": []}
         if media_type.startswith("text/"):
             return BodyKind.RAW, example if isinstance(example, str) else ""
     return BodyKind.NONE, None
@@ -437,13 +476,16 @@ def _openapi3_body(operation: Mapping[str, object]) -> tuple[BodyKind, JsonValue
 def _swagger_body(
     operation: Mapping[str, object], parameters: list[object]
 ) -> tuple[BodyKind, JsonValue]:
-    consumes = _sequence(operation.get("consumes"))
+    content_type = _swagger_content_type(operation, parameters)
     form_values: dict[str, JsonValue] = {}
     has_file = False
     for raw_parameter in parameters:
         parameter = _mapping(raw_parameter)
         if parameter.get("in") == "body":
-            return BodyKind.JSON, _example(parameter)
+            media_type = _swagger_content_type(operation, parameters)
+            return _openapi3_body(
+                {"requestBody": {"content": {media_type: {"example": _example(parameter)}}}}
+            )
         if parameter.get("in") == "formData":
             name = _text(parameter.get("name"))
             if not name:
@@ -451,7 +493,7 @@ def _swagger_body(
             has_file = has_file or _mapping(parameter.get("schema")).get("format") == "binary"
             if _mapping(parameter.get("schema")).get("format") != "binary":
                 form_values[name] = _parameter_value(parameter, name)
-    if has_file or "multipart/form-data" in consumes:
+    if has_file or content_type == "multipart/form-data":
         return BodyKind.MULTIPART, {"fields": form_values, "files": []}
     if form_values:
         return BodyKind.FORM, form_values
@@ -501,6 +543,11 @@ def _auth(
 def _example(value: Mapping[str, object]) -> JsonValue:
     if "example" in value:
         return _json_value(value.get("example"))
+    examples = _mapping(value.get("examples"))
+    if examples:
+        example = _mapping(examples[sorted(examples)[0]])
+        if "value" in example:
+            return _json_value(example["value"])
     schema = _mapping(value.get("schema"))
     if "example" in schema:
         return _json_value(schema.get("example"))
@@ -543,27 +590,36 @@ def _swagger_base_path(document: Mapping[str, object], source_type: ImportSource
     return value.rstrip("/") if value and value != "/" else ""
 
 
-def _server_url(document: Mapping[str, object], source_type: ImportSourceType) -> str | None:
+def _server_url(
+    document: Mapping[str, object],
+    source_type: ImportSourceType,
+    *,
+    document_url: str | None = None,
+    normalizer: SourceNormalizer | None = None,
+) -> str | None:
     if source_type is ImportSourceType.OPENAPI3:
-        servers = _sequence(document.get("servers"))
-        if not servers:
-            return None
-        server = _mapping(servers[0])
-        url = _text(server.get("url"))
-        variables = _mapping(server.get("variables"))
-        for name, raw_variable in variables.items():
-            variable = _mapping(raw_variable)
-            default = _text(variable.get("default"))
-            if default:
-                url = url.replace("{" + name + "}", default)
-        return url.rstrip("/") or None
+        return _openapi_server(document, document_url)
     if source_type is not ImportSourceType.SWAGGER2:
         return None
     host = _text(document.get("host"))
     if not host:
         return None
     schemes = _sequence(document.get("schemes"))
-    scheme = _text(schemes[0]) if schemes else "https"
+    scheme = _text(schemes[0]) if schemes else urlsplit(document_url or "").scheme
+    if not schemes and normalizer is not None:
+        normalizer.warn(
+            "#/schemes",
+            "$.server",
+            "schemes",
+            "SERVER_SCHEME_FROM_SOURCE"
+            if scheme in {"http", "https"}
+            else "SERVER_REQUIRES_CONFIGURATION",
+            "协议取自文档下载地址, 执行时以用户环境为准"
+            if scheme in {"http", "https"}
+            else "未猜测协议, 请选择执行环境",
+        )
+    if scheme not in {"http", "https"}:
+        return None
     return f"{scheme}://{host}{_swagger_base_path(document, source_type)}".rstrip("/")
 
 
@@ -617,3 +673,59 @@ def _query_values(
         )
         encoded = [separator.join(encoded)]
     return [QueryParameterSpec(name=name, value=imported_value(name, value)) for value in encoded]
+
+
+def _request_content_type(
+    operation: Mapping[str, object], parameters: list[object], source_type: ImportSourceType
+) -> str | None:
+    if source_type is ImportSourceType.SWAGGER2:
+        return _swagger_content_type(operation, parameters)
+    content = _mapping(_mapping(operation.get("requestBody")).get("content"))
+    return next(iter(content), None)
+
+
+def _security_diagnostics(
+    operation: Mapping[str, object],
+    schemes: Mapping[str, object],
+    default: list[object],
+    normalizer: SourceNormalizer,
+) -> None:
+    security = _sequence(operation.get("security")) if "security" in operation else default
+    if not security:
+        return
+    requirement = _mapping(security[0])
+    unsupported = len(security) > 1 or len(requirement) > 1
+    for name in requirement:
+        scheme = _mapping(schemes.get(name))
+        supported = scheme.get("type") in {"basic", "apiKey"} or (
+            scheme.get("type") == "http" and scheme.get("scheme") in {"basic", "bearer"}
+        )
+        unsupported |= not supported
+    if unsupported:
+        normalizer.warn(
+            pointer("#/paths", normalizer.endpoint) + "/security",
+            "$.auth",
+            "security",
+            "SECURITY_REQUIRES_CONFIGURATION",
+            "认证组合或协议需人工配置; 不代表已实现完整认证",
+            loss=True,
+        )
+
+
+def _openapi_server(document: Mapping[str, object], document_url: str | None) -> str | None:
+    servers = _sequence(document.get("servers"))
+    if not servers:
+        return None
+    server = _mapping(servers[0])
+    url = _text(server.get("url"))
+    variables = _mapping(server.get("variables"))
+    for name, raw_variable in variables.items():
+        variable = _mapping(raw_variable)
+        default = _text(variable.get("default"))
+        if default:
+            url = url.replace("{" + name + "}", default)
+    if "{" in url or "}" in url:
+        return None
+    if not urlsplit(url).scheme:
+        url = urljoin(document_url, url) if document_url else ""
+    return url.rstrip("/") or None

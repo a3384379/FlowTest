@@ -30,6 +30,7 @@ test('Swagger 兼容导入生成八个 Diff 并显示 definition 诊断', async 
   const result = await preview.json()
   expect(result.results).toHaveLength(8)
   await page.getByText(/已兼容导入，发现/).click()
+  await page.getByText('查看来源、兼容性处理和语义损失').first().click()
   await expect(
     page.getByText(/JscpcoChargeRentBillItemDataFeeStandardDto\/properties/),
   ).toBeVisible()

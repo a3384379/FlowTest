@@ -16,7 +16,9 @@ from pydantic import (
 )
 
 from app.domain.api_assets import HttpMethod
+from app.domain.parameter_identity import parameter_identity
 from app.importers.contracts import ImportSourceType
+from app.importers.openapi_normalization import ImportDiagnostic
 
 MCP_CONTRACT_IMPORT_SCOPE = "mcp:contract:import"
 MCP_CONTRACT_IMPORT_SCHEMA_VERSION: Literal["s61-mcp-contract-import-v1"] = (
@@ -106,7 +108,7 @@ class MCPContractOperation(BaseModel):
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "MCPContractOperation":
-        names = [(item.location, item.name.lower()) for item in self.parameters]
+        names = [parameter_identity(item.location, item.name) for item in self.parameters]
         if len(names) != len(set(names)):
             raise ValueError("同一接口不能包含重复位置和参数名称")
         path_names = {
@@ -240,6 +242,7 @@ class MCPContractImportItem(BaseModel):
     definition_id: UUID | None = None
     version: int = Field(ge=0)
     server_url: str | None = None
+    diagnostics: list[ImportDiagnostic] = Field(default_factory=list, max_length=500)
 
 
 class MCPPreviewContractImportResponse(BaseModel):

@@ -23,6 +23,7 @@ from app.domain.api_assets import (
     render_json,
     render_template,
 )
+from app.domain.import_execution import render_import_query
 from app.domain.sandbox_preview import EnvironmentClassification
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope
 from app.domain.test_engineering import (
@@ -575,14 +576,16 @@ class APIAssetService:
                     for item in api_version.query_parameters
                 )
             )
-            query = [
-                (
-                    render_template(item.name, variables),
-                    render_template(item.value, variables),
-                )
-                for item in query_parameters
-                if item.enabled
-            ]
+            query = render_import_query(
+                query_parameters, variables, api_version.canonical_contract or {}
+            )
+            if (
+                effective_auth_mode != "disabled"
+                and api_version.auth_kind == AuthKind.NONE
+                and "SECURITY_REQUIRES_CONFIGURATION"
+                in (api_version.canonical_contract or {}).get("warnings", [])
+            ):
+                raise ValueError("导入的认证协议或组合未完整表达, 请配置认证后执行")
             api_headers = (
                 {}
                 if headers_override is None

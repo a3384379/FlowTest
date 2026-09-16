@@ -388,9 +388,13 @@ function ImportResult({
               <Typography.Text strong>
                 {item.method} {item.endpoint} · {item.keyword}
               </Typography.Text>
-              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                {JSON.stringify(item, null, 2)}
-              </pre>
+              <div>{item.normalized_as}</div>
+              <details>
+                <summary>查看来源、兼容性处理和语义损失</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {JSON.stringify(item, null, 2)}
+                </pre>
+              </details>
             </div>
           ))}
         </details>

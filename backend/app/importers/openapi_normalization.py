@@ -11,6 +11,7 @@ from urllib.parse import unquote
 
 from app.domain.api_assets import JsonValue
 from app.domain.canonical_schemas import CanonicalSchemaValidator
+from app.importers.openapi_dialects import source_dialect
 
 SCHEMA_KEYS = frozenset(
     [
@@ -72,6 +73,7 @@ class ImportDiagnostic:
     normalized_as: str
     suggested_fix: str = "请核对源文档与导入后的契约; 未表达的约束需人工补充。"
     value_preview: str | None = None
+    semantic_loss: bool = False
 
     def as_json(self) -> dict[str, JsonValue]:
         from dataclasses import asdict
@@ -100,14 +102,15 @@ class SourceNormalizer:
     diagnostics: list[ImportDiagnostic] = field(default_factory=list)
     nodes: int = 0
     partial: bool = False
+    repair_legacy_refs: bool = True
 
     @property
     def dialect(self) -> str:
-        if self.document.get("swagger") == "2.0":
-            return "SWAGGER_2_0"
-        return (
-            "OPENAPI_3_1" if str(self.document.get("openapi")).startswith("3.1.") else "OPENAPI_3_0"
-        )
+        return source_dialect(self.document)
+
+    @property
+    def modern_schema(self) -> bool:
+        return self.dialect in {"OPENAPI_3_1", "OPENAPI_3_2"}
 
     def warn(
         self,
@@ -144,6 +147,7 @@ class SourceNormalizer:
                     else "源文档已进行兼容性规范化。"
                 ),
                 normalized_as=normalized_as,
+                semantic_loss=loss,
             )
         )
 
@@ -182,6 +186,10 @@ class SourceNormalizer:
         current: object = self.document
         for part in unquote(reference[2:]).split("/"):
             current = mapping(current).get(part.replace("~1", "/").replace("~0", "~"))
+        if current is None:
+            repaired = self.legacy_reference(reference, source, canonical)
+            if repaired is not None:
+                current, reference = repaired
         if not isinstance(current, (dict, bool)):
             self.warn(
                 pointer(source, "$ref"),
@@ -198,7 +206,7 @@ class SourceNormalizer:
         siblings = {key: item for key, item in result.items() if key != "$ref"}
         if siblings:
             # Schema $ref siblings in 3.1 are conjunctions, never overwrites.
-            if self.dialect == "OPENAPI_3_1" and schema_reference:
+            if self.modern_schema and schema_reference:
                 return {"allOf": [resolved, siblings]}, source, refs
             self.warn(
                 source,
@@ -209,10 +217,25 @@ class SourceNormalizer:
             )
         return resolved, origin, refs
 
+    def legacy_reference(
+        self, reference: str, source: str, canonical: str
+    ) -> tuple[object, str] | None:
+        if not self.repair_legacy_refs or not reference.startswith("#/definitions/"):
+            return None
+        name = unquote(reference.removeprefix("#/definitions/"))
+        definitions = mapping(self.document.get("definitions"))
+        if "/" not in name or name not in definitions:
+            return None
+        repaired = pointer("#/definitions", name)
+        self.warn(
+            pointer(source, "$ref"), canonical, "$ref", "LEGACY_REF_ESCAPING_REPAIRED", repaired
+        )
+        return definitions[name], repaired
+
     def unresolved_siblings(
         self, schema: dict[str, object], schema_reference: bool
     ) -> dict[str, object]:
-        if self.dialect == "OPENAPI_3_1" and schema_reference:
+        if self.modern_schema and schema_reference:
             return {key: value for key, value in schema.items() if key != "$ref"}
         return {}
 
@@ -357,7 +380,7 @@ class SourceNormalizer:
             ("maximum", "exclusiveMaximum"),
         ]:
             flag = result.get(exclusive)
-            if isinstance(flag, bool) and self.dialect != "OPENAPI_3_1":
+            if isinstance(flag, bool) and not self.modern_schema:
                 result.pop(exclusive)
                 if flag and isinstance(result.get(inclusive), (int, float)):
                     result[exclusive] = result.pop(inclusive)
