@@ -698,7 +698,8 @@ def _security_diagnostics(
     for name in requirement:
         scheme = _mapping(schemes.get(name))
         supported = scheme.get("type") in {"basic", "apiKey"} or (
-            scheme.get("type") == "http" and scheme.get("scheme") in {"basic", "bearer"}
+            scheme.get("type") == "http"
+            and _text(scheme.get("scheme")).lower() in {"basic", "bearer"}
         )
         unsupported |= not supported
     if unsupported:

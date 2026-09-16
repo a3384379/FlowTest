@@ -61,11 +61,11 @@ Playwright 使用独立 `flowtest-openapi-semantic` Compose 项目及新建数�
 ## 已完成验证
 
 - Ruff 格式及 lint、mypy 通过。
-- 最终导入专项回归：164 passed，包含现有 Postman/HAR/cURL/Bruno/Excel 和脱敏边界相关测试。
+- 最终导入专项回归：167 passed，包含 HTTP 认证 scheme 大小写、现有导入格式和脱敏边界相关测试。
 - 前端：84 个测试文件、385 项测试通过；行覆盖率 88.02%，分支覆盖率 80.54%。格式、lint、构建通过。
 - Playwright：2 passed（登录初始化与匿名 Swagger 导入）；八个接口进入 Diff，诊断可展开。
 - 后端全量：1445 passed、7 skipped，覆盖率 90.68%；最后新增的多 consumes 表单回归包含在上述
-  164 项专项结果中。GitHub 最新提交全量检查仍是合并的必要条件。
+  167 项专项结果中。GitHub 最新提交全量检查仍是合并的必要条件。
 
 ## 尚未验证或完整支持
 

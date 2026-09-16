@@ -353,3 +353,16 @@ def test_swagger_form_media_matches_contract_with_multiple_consumes():
         operation.canonical_contract.request_body.content_type
         == "application/x-www-form-urlencoded"
     )
+
+
+@pytest.mark.parametrize(
+    "scheme,kind", [("Bearer", "bearer"), ("Basic", "basic"), ("bEaReR", "bearer")]
+)
+def test_http_auth_scheme_is_case_insensitive(scheme, kind):
+    document = spec(operation={"security": [{"Auth": []}]})
+    document["components"] = {"securitySchemes": {"Auth": {"type": "http", "scheme": scheme}}}
+    operation = load(document)[0]
+    assert operation.request.auth_kind.value == kind
+    assert operation.canonical_contract.auth.kind == kind
+    assert operation.request.auth_config
+    assert not any(item.code == "SECURITY_REQUIRES_CONFIGURATION" for item in operation.diagnostics)
