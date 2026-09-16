@@ -355,10 +355,10 @@
 .workflow-workbench-header {
   min-height: 56px;
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) auto minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto max-content;
   align-items: center;
-  gap: 16px;
-  padding: 8px 14px 8px 64px;
+  gap: 12px;
+  padding: 8px 14px 8px 76px;
   border-bottom: 1px solid var(--workflow-border);
   background: rgb(255 255 255 / 96%);
 }
@@ -429,6 +429,8 @@
 }
 
 .workflow-workspace-name {
+  flex: 0 1 190px;
+  min-width: 0;
   max-width: 190px;
   overflow: hidden;
   color: #172033;
@@ -440,6 +442,11 @@
 .workflow-workspace-title .workflow-meta {
   margin: 0;
   flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.workflow-workspace-title > .ant-space {
+  flex-shrink: 0;
 }
 
 .workflow-workspace-title .ant-tag {
@@ -1172,6 +1179,19 @@
   border: 1px solid #e5eaf2;
   border-radius: 10px;
   overflow: hidden;
+}
+
+@media (max-width: 1440px) {
+  .workflow-workbench-header-right .ant-btn[aria-label='打开执行历史'],
+  .workflow-workbench-header-right .ant-btn[aria-label='工作流更多操作'] {
+    width: 36px;
+    padding-inline: 8px;
+  }
+
+  .workflow-workbench-header-right .ant-btn[aria-label='打开执行历史'] > .ant-btn-icon + span,
+  .workflow-workbench-header-right .ant-btn[aria-label='工作流更多操作'] > .ant-btn-icon + span {
+    display: none;
+  }
 }
 
 @media (max-width: 1280px) {

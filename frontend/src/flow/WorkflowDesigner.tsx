@@ -225,7 +225,7 @@ function WorkflowDesignerReady({
   const selectedEdge = primaryEdge(definition, editor.selection)
   const canvasRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null)
-  useCanvasAutoFrame(canvasRef, flowRef, definition, editor.selection)
+  useCanvasAutoFrame(canvasRef, flowRef, definition, editor.selection, scope)
   const dropPosition = useRef<{ x: number; y: number } | null>(null)
   const [dimensions, setDimensions] = useState<CanvasDimensions>(() => new Map())
   const [focusMode, setFocusMode] = useState(false)
@@ -903,6 +903,7 @@ function DesignerInspector({
     <WorkflowNodeEditSession
       key={`${scope}${selected.id}`}
       scope={scope}
+      projectId={projectId}
       node={selected}
       definition={definition}
       editable={editable}
@@ -1950,15 +1951,36 @@ function useCanvasAutoFrame(
   flowRef: React.RefObject<ReactFlowInstance<CanvasNode, CanvasEdge> | null>,
   definition: WorkflowDefinition,
   selection: WorkflowSelection,
+  scope: string,
 ) {
+  const latest = useRef({ definition, selection })
+  useEffect(() => {
+    latest.current = { definition, selection }
+  }, [definition, selection])
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     let frame = 0
+    let size: { width: number; height: number } | null = null
     const observer = new ResizeObserver(() => {
+      const nextSize = { width: canvas.clientWidth, height: canvas.clientHeight }
+      if (!nextSize.width || !nextSize.height) return
+      const initial = size === null
+      if (!initial && size?.width === nextSize.width && size?.height === nextSize.height) return
+      size = nextSize
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        frameCanvas(flowRef.current, definition, selection)
+        const instance = flowRef.current
+        if (!instance) return
+        if (initial) void instance.fitView({ duration: 0, padding: 0.18, maxZoom: 1 })
+        else
+          keepSelectionVisible(
+            instance,
+            latest.current.definition,
+            latest.current.selection,
+            nextSize,
+            selectionToolbarSize(canvas),
+          )
       })
     })
     observer.observe(canvas)
@@ -1966,22 +1988,44 @@ function useCanvasAutoFrame(
       cancelAnimationFrame(frame)
       observer.disconnect()
     }
-  }, [canvasRef, definition, flowRef, selection])
+  }, [canvasRef, flowRef, scope])
 }
 
-function frameCanvas(
-  instance: ReactFlowInstance<CanvasNode, CanvasEdge> | null,
+function keepSelectionVisible(
+  instance: ReactFlowInstance<CanvasNode, CanvasEdge>,
   definition: WorkflowDefinition,
   selection: WorkflowSelection,
+  size: { width: number; height: number },
+  toolbar: { width: number; height: number },
 ): void {
-  if (!instance) return
   const center = selectionCenter(definition, selection)
-  if (!center) {
-    void instance.fitView({ duration: 0, padding: 0.18, maxZoom: 1 })
-    return
-  }
-  const zoom = Math.min(1, Math.max(0.85, instance.getViewport().zoom))
-  void instance.setCenter(center.x, center.y, { duration: 0, zoom })
+  if (!center) return
+  const viewport = instance.getViewport()
+  const x = center.x * viewport.zoom + viewport.x
+  const y = center.y * viewport.zoom + viewport.y
+  const extent = selectionViewportExtent(selection, viewport.zoom, toolbar)
+  const insetX = Math.min(size.width / 2, extent.width + 24)
+  const insetY = Math.min(size.height / 2, extent.height + 24)
+  if (x >= insetX && x <= size.width - insetX && y >= insetY && y <= size.height - insetY) return
+  void instance.setCenter(center.x, center.y, { duration: 0, zoom: viewport.zoom })
+}
+
+function selectionToolbarSize(canvas: HTMLDivElement): { width: number; height: number } {
+  const toolbar = canvas.querySelector('.workflow-selection-toolbar')
+  return toolbar?.getBoundingClientRect() ?? { width: 0, height: 0 }
+}
+
+function selectionViewportExtent(
+  selection: WorkflowSelection,
+  zoom: number,
+  toolbar: { width: number; height: number },
+): { width: number; height: number } {
+  if (selection?.kind === 'node')
+    return {
+      width: Math.max((NODE_INITIAL_WIDTH * zoom) / 2, toolbar.width / 2),
+      height: (NODE_INITIAL_HEIGHT * zoom) / 2 + toolbar.height + 12,
+    }
+  return { width: toolbar.width / 2, height: toolbar.height / 2 + 44 }
 }
 
 function selectionCenter(

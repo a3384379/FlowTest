@@ -8,9 +8,15 @@ import {
   type RawFieldDraft,
   type WorkflowNodeEditorDraft,
   type WorkflowRequestEditorDraft,
+  type WorkflowRequestIdentity,
 } from './editor/node-edit-session'
 import { jsonEqual } from './editor/editor-types'
-import { applyRequestEditorDraft } from './editor/request-overrides'
+import {
+  applyRequestEditorDraft,
+  requestIdentityMatches,
+  sameRequestTarget,
+  canApplyRequestTarget,
+} from './editor/request-overrides'
 
 function nodeContent(node: WorkflowNode): Omit<WorkflowNode, 'position'> {
   const { position: _position, ...content } = node
@@ -19,6 +25,7 @@ function nodeContent(node: WorkflowNode): Omit<WorkflowNode, 'position'> {
 }
 export default function WorkflowNodeEditSession({
   scope,
+  projectId = '',
   node,
   definition,
   editable,
@@ -26,6 +33,7 @@ export default function WorkflowNodeEditSession({
   children,
 }: {
   scope: string
+  projectId?: string | null
   node: WorkflowNode
   definition: WorkflowDefinition
   editable: boolean
@@ -45,6 +53,7 @@ export default function WorkflowNodeEditSession({
         rawFields: {},
         activeTab: 'params',
         requestDraft: null,
+        requestDirty: false,
       },
   )
   const latest = useRef(draft)
@@ -59,6 +68,7 @@ export default function WorkflowNodeEditSession({
       draftNode: structuredClone(node),
       rawFields: {},
       requestDraft: null,
+      requestDirty: false,
       generation: session.nextGeneration(),
     }
     latest.current = clean
@@ -82,10 +92,23 @@ export default function WorkflowNodeEditSession({
     })
   }
   function setRequest(value: WorkflowRequestEditorDraft, dirty = true) {
-    update({ ...latest.current, dirty: latest.current.dirty || dirty, requestDraft: value })
+    if (!isRequestCurrent(value.identity)) return
+    update({
+      ...latest.current,
+      dirty: latest.current.dirty || dirty,
+      requestDraft: value,
+      requestDirty: latest.current.requestDirty || dirty,
+    })
+  }
+  function isRequestCurrent(identity: WorkflowRequestIdentity): boolean {
+    return requestIdentityMatches(latest.current.draftNode, identity, projectId ?? '')
   }
   function apply(replacement = latest.current.draftNode): boolean {
     if (!editable) return false
+    if (!canApplyRequestTarget(latest.current.draftNode, replacement)) {
+      setError('请求目标已变更，请重新载入请求配置。')
+      return false
+    }
     const current = definition.nodes.find((item) => item.id === node.id)
     if (!current || !jsonEqual(nodeContent(current), nodeContent(latest.current.baseNode))) {
       setError('节点内容已从外部更新，请保留输入并重新载入后处理冲突。')
@@ -112,6 +135,7 @@ export default function WorkflowNodeEditSession({
       dirty: false,
       rawFields: {},
       requestDraft: null,
+      requestDirty: false,
     }
     latest.current = clean
     setDraft(clean)
@@ -155,14 +179,42 @@ export default function WorkflowNodeEditSession({
       dirty: false,
       rawFields: {},
       requestDraft: null,
+      requestDirty: false,
       generation: session.nextGeneration(),
+    })
+    setError(null)
+  }
+  const switching = useRef(false)
+  async function updateNode(updated: WorkflowNode) {
+    if (switching.current || !editable) return
+    const previous = latest.current
+    const targetChanged = !sameRequestTarget(previous.draftNode, updated)
+    if (targetChanged && previous.requestDirty) {
+      switching.current = true
+      const confirmed = await modal.confirm({
+        title: '切换请求目标？',
+        content: '接口或版本将发生变化。未应用的请求输入将被丢弃，已应用的配置按新目标重新载入。',
+        okText: '丢弃请求草稿并切换',
+        cancelText: '取消切换',
+      })
+      switching.current = false
+      if (!confirmed || latest.current !== previous) return
+    }
+    if (targetChanged) requestApply.current = null
+    update({
+      ...latest.current,
+      draftNode: updated,
+      dirty: true,
+      ...(targetChanged
+        ? { requestDraft: null, requestDirty: false, generation: session.nextGeneration() }
+        : {}),
     })
     setError(null)
   }
   function updateDefinition(next: WorkflowDefinition) {
     const updated = next.nodes.find((item) => item.id === node.id)
-    if (updated && !jsonEqual(updated, node))
-      update({ ...latest.current, draftNode: updated, dirty: true })
+    const current = definition.nodes.find((item) => item.id === node.id)
+    if (updated && !jsonEqual(updated, current)) void updateNode(updated)
     if (!jsonEqual(next.edges, definition.edges)) onChange({ ...definition, edges: next.edges })
   }
   return (
@@ -171,6 +223,7 @@ export default function WorkflowNodeEditSession({
         draft,
         setRaw,
         setRequest,
+        isRequestCurrent,
         apply,
         registerRequestApply: (value) => {
           requestApply.current = value

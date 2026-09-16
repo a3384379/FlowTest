@@ -4,7 +4,45 @@ import type {
   RequestEditorFields,
   RequestModes,
   WorkflowRequestEditorDraft,
+  WorkflowRequestIdentity,
 } from './node-edit-session'
+import { editorNode, restoreEditedNode } from './graph-analysis'
+import { jsonEqual } from './editor-types'
+
+export function requestTarget(node: WorkflowNode) {
+  const { api_definition_id, api_version } = editorNode(node).config
+  return {
+    apiDefinitionId: typeof api_definition_id === 'string' ? api_definition_id : undefined,
+    apiVersion: typeof api_version === 'number' ? api_version : undefined,
+  }
+}
+
+export function canApplyRequestTarget(original: WorkflowNode, edited: WorkflowNode): boolean {
+  const before = requestTarget(original)
+  const after = requestTarget(edited)
+  return (
+    before.apiDefinitionId === after.apiDefinitionId &&
+    (before.apiVersion === undefined || before.apiVersion === after.apiVersion)
+  )
+}
+
+export function requestIdentityMatches(
+  node: WorkflowNode,
+  identity: WorkflowRequestIdentity,
+  projectId = identity.projectId,
+): boolean {
+  const target = requestTarget(node)
+  return (
+    identity.projectId === projectId &&
+    identity.nodeId === node.id &&
+    identity.apiDefinitionId === target.apiDefinitionId &&
+    (target.apiVersion === undefined || identity.apiVersion === target.apiVersion)
+  )
+}
+
+export function sameRequestTarget(left: WorkflowNode, right: WorkflowNode): boolean {
+  return jsonEqual(requestTarget(left), requestTarget(right))
+}
 
 type SectionEdit<T> = { mode: 'inherit' } | { mode: 'custom'; value: T }
 export type RequestSectionEdits = {
@@ -34,14 +72,18 @@ export function applyRequestEditorDraft(
   node: WorkflowNode,
   draft: WorkflowRequestEditorDraft,
 ): WorkflowNode {
+  if (!requestIdentityMatches(node, draft.identity)) {
+    throw new Error('请求目标已变更，请重新载入请求配置')
+  }
   assertRequestDraftCanApply(draft)
+  const view = editorNode(node)
   const overrides = requestOverridesFromFields(draft.fields, draft.modes)
-  return {
-    ...node,
+  return restoreEditedNode(node, {
+    ...view,
     config: {
-      ...node.config,
-      api_version: draft.apiVersion,
-      request_overrides: applyOwnedRequestSections(node.config.request_overrides, {
+      ...view.config,
+      api_version: draft.identity.apiVersion,
+      request_overrides: applyOwnedRequestSections(view.config.request_overrides, {
         params:
           overrides.query_parameters === undefined
             ? { mode: 'inherit' }
@@ -56,7 +98,7 @@ export function applyRequestEditorDraft(
             : { mode: 'custom', value: overrides.body },
       }),
     },
-  }
+  })
 }
 
 function assertRequestDraftCanApply(draft: WorkflowRequestEditorDraft): void {

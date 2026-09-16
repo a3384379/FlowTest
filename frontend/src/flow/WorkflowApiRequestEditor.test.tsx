@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { ConfigProvider } from 'antd'
 import { DraftContext, DraftSession } from '../features/drafts/draft-session'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import { InspectorPresentationContext } from './editor/inspector-presentation'
 import { workflowDefinition } from '../test/fixtures'
+import { editorNode, restoreEditedNode } from './editor/graph-analysis'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -18,6 +20,242 @@ vi.mock('../features/api-console/api-service', () => ({
 }))
 
 describe('WorkflowApiRequestEditor', () => {
+  it.each(['api', 'capability'] as const)(
+    'F01: mounted and unmounted %s request forms produce identical persistent sections',
+    async (type) => {
+      vi.mocked(getApiDetail).mockResolvedValue({
+        ...detail,
+        version: { ...detail.version, body_kind: 'json', body: { initial: true } },
+      })
+      const apiNode = {
+        ...node,
+        config: {
+          ...node.config,
+          request_overrides: { auth_disabled: true, suppressed_headers: ['X'] },
+        },
+      }
+      const target: WorkflowNode =
+        type === 'api'
+          ? apiNode
+          : {
+              ...apiNode,
+              type: 'capability',
+              config: {},
+              configuration: apiNode.config,
+              capability_id: 'http.request',
+              capability_version: '2.0.0',
+              bindings: [],
+              phase: 'cleanup',
+              cleanup_for: ['start'],
+            }
+      const results: WorkflowNode[] = []
+      for (const unmount of [false, true]) {
+        const changed = vi.fn()
+        const view = render(
+          <RequestSessionHarness
+            session={new DraftSession()}
+            changed={changed}
+            startFullscreen
+            initialNode={target}
+          />,
+        )
+        await screen.findByText('继承接口模板 v3')
+        for (const section of ['Params', 'Headers', 'Body']) {
+          fireEvent.click(screen.getByRole('tab', { name: section }))
+          fireEvent.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+        }
+        fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+          target: { value: '{"preserved":true}' },
+        })
+        if (unmount) {
+          fireEvent.click(screen.getByRole('button', { name: '还原配置测试' }))
+          await waitFor(() => expect(screen.queryByText('继承接口模板 v3')).not.toBeInTheDocument())
+        }
+        fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+        await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+        results.push(changed.mock.calls[0][0].nodes[0])
+        view.unmount()
+      }
+      expect(results[1]).toEqual(results[0])
+      expect(results[1].type).toBe(type)
+      const config = type === 'capability' ? results[1].configuration : results[1].config
+      expect(config?.request_overrides).toMatchObject({
+        auth_disabled: true,
+        suppressed_headers: ['X'],
+        body: { kind: 'json', value: { preserved: true } },
+        headers: detail.version.headers,
+        query_parameters: detail.version.query_parameters,
+      })
+      if (type === 'capability')
+        expect(results[1]).toMatchObject({
+          config: {},
+          bindings: [],
+          capability_id: 'http.request',
+          capability_version: '2.0.0',
+          phase: 'cleanup',
+          cleanup_for: ['start'],
+        })
+    },
+  )
+
+  it.each([false, true])(
+    'F02: confirms an API switch with pending input (unmounted=%s)',
+    async (unmount) => {
+      vi.mocked(getApiDetail).mockImplementation(async (_project, id) => ({
+        definition: { ...detail.definition, id, current_version: id === 'api-1' ? 12 : 2 },
+        version: {
+          ...detail.version,
+          api_definition_id: id,
+          version: id === 'api-1' ? 12 : 2,
+          body_kind: 'json',
+          body: { api: id },
+        },
+      }))
+      const changed = vi.fn()
+      render(
+        <RequestSessionHarness
+          session={new DraftSession()}
+          changed={changed}
+          startFullscreen
+          initialNode={{ ...node, config: { api_definition_id: 'api-1', api_version: 12 } }}
+        />,
+      )
+      await screen.findByText('继承接口模板 v12')
+      fireEvent.click(screen.getByRole('tab', { name: 'Body' }))
+      fireEvent.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+      fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+        target: { value: '{"pending":"A"}' },
+      })
+      if (unmount) fireEvent.click(screen.getByRole('button', { name: '还原配置测试' }))
+      fireEvent.click(screen.getByRole('button', { name: '切换接口测试' }))
+      const confirmation = await screen.findByRole('dialog', { name: '切换请求目标？' })
+      await userEvent.click(within(confirmation).getByRole('button', { name: '取消切换' }))
+      await waitFor(() => expect(confirmation).not.toBeInTheDocument())
+      expect(screen.getByText('固定 v12')).toBeInTheDocument()
+      if (!unmount) {
+        expect(screen.getByRole('textbox', { name: 'JSON Body' })).toHaveValue('{"pending":"A"}')
+        expect(screen.getByRole('tab', { name: /Body/ })).toHaveAttribute('aria-selected', 'true')
+      }
+      fireEvent.click(screen.getByRole('button', { name: '切换接口测试' }))
+      await userEvent.click(
+        within(await screen.findByRole('dialog', { name: '切换请求目标？' })).getByRole('button', {
+          name: '丢弃请求草稿并切换',
+        }),
+      )
+      await screen.findByText('固定 v2')
+      if (!unmount) await screen.findByText('继承接口模板 v2')
+      fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+      expect(changed.mock.calls[0][0].nodes[0].config).toMatchObject({
+        api_definition_id: 'api-2',
+        api_version: 2,
+        request_overrides: {},
+      })
+    },
+  )
+  it.each([false, true])(
+    'F02: rebases a version upgrade without old pending input (unmounted=%s)',
+    async (unmount) => {
+      vi.mocked(getApiDetail).mockImplementation(async (_project, id, version) => ({
+        ...detail,
+        version: {
+          ...detail.version,
+          api_definition_id: id,
+          version: version ?? 3,
+          body_kind: 'json',
+          body: { template: version },
+        },
+      }))
+      const session = new DraftSession()
+      const changed = vi.fn()
+      render(
+        <RequestSessionHarness
+          session={session}
+          changed={changed}
+          startFullscreen
+          initialNode={{
+            ...node,
+            config: {
+              api_definition_id: 'api-1',
+              api_version: 1,
+              request_overrides: {
+                headers: { 'X-Applied': 'kept' },
+                auth_disabled: true,
+                suppressed_cookies: ['sid'],
+              },
+            },
+          }}
+        />,
+      )
+      await screen.findByText('继承接口模板 v1')
+      fireEvent.click(screen.getByRole('tab', { name: 'Body' }))
+      fireEvent.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+      fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+        target: { value: '{"pending":' },
+      })
+      if (unmount) fireEvent.click(screen.getByRole('button', { name: '还原配置测试' }))
+      await userEvent.click(screen.getByRole('button', { name: /更新至接口最新 v3/ }))
+      await userEvent.click(
+        within(await screen.findByRole('dialog', { name: '切换请求目标？' })).getByRole('button', {
+          name: '取消切换',
+        }),
+      )
+      expect([...session.nodeEditors.values()][0].requestDraft).toMatchObject({
+        identity: { apiVersion: 1, apiDefinitionId: 'api-1' },
+        activeTab: 'body',
+        fields: { body_text: '{"pending":' },
+      })
+      await userEvent.click(screen.getByRole('button', { name: /更新至接口最新 v3/ }))
+      await userEvent.click(
+        within(await screen.findByRole('dialog', { name: '切换请求目标？' })).getByRole('button', {
+          name: '丢弃请求草稿并切换',
+        }),
+      )
+      await screen.findByText('固定 v3')
+      if (!unmount) await screen.findByText('继承接口模板 v3')
+      await userEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+      expect(changed.mock.calls[0][0].nodes[0].config).toMatchObject({
+        api_version: 3,
+        request_overrides: {
+          headers: { 'X-Applied': 'kept' },
+          auth_disabled: true,
+          suppressed_cookies: ['sid'],
+        },
+      })
+      expect(changed.mock.calls[0][0].nodes[0].config.request_overrides.body).toBeUndefined()
+    },
+  )
+  it('F02: late API A query results cannot hydrate the switched API B editor', async () => {
+    let resolveA!: (value: ApiDetail) => void
+    const pendingA = new Promise<ApiDetail>((resolve) => {
+      resolveA = resolve
+    })
+    vi.mocked(getApiDetail).mockImplementation((_project, id) =>
+      id === 'api-1'
+        ? pendingA
+        : Promise.resolve({
+            ...detail,
+            version: {
+              ...detail.version,
+              api_definition_id: id,
+              version: 2,
+              body_kind: 'json',
+              body: { owner: 'B' },
+            },
+          }),
+    )
+    render(<RequestSessionHarness session={new DraftSession()} changed={vi.fn()} startFullscreen />)
+    await waitFor(() => expect(getApiDetail).toHaveBeenCalledWith('project-1', 'api-1', 3))
+    await userEvent.click(screen.getByRole('button', { name: '切换接口测试' }))
+    await screen.findByText('继承接口模板 v2')
+    resolveA({ ...detail, version: { ...detail.version, body_kind: 'json', body: { owner: 'A' } } })
+    await userEvent.click(screen.getByRole('tab', { name: 'Body' }))
+    expect(screen.getByRole('textbox', { name: 'JSON Body' })).toHaveValue(
+      JSON.stringify({ owner: 'B' }, null, 2),
+    )
+    expect(screen.queryByText('继承接口模板 v3')).not.toBeInTheDocument()
+  })
   it('inherits each request section and only persists node-level overrides', async () => {
     const user = userEvent.setup()
     vi.mocked(getApiDetail).mockResolvedValue(detail)
@@ -389,17 +627,19 @@ function RequestSessionHarness({
   session,
   changed,
   startFullscreen = false,
+  initialNode = { ...node, config: { ...node.config, request_overrides: {} } },
 }: {
   session: DraftSession
   changed: (value: import('../lib/api').WorkflowDefinition) => void
   startFullscreen?: boolean
+  initialNode?: WorkflowNode
 }) {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   )
   const [definition, setDefinition] = useState<import('../lib/api').WorkflowDefinition>({
     ...workflowDefinition,
-    nodes: [{ ...node, config: { ...node.config, request_overrides: {} } }],
+    nodes: [initialNode],
   })
   const [presentation, setPresentation] = useState<'quick' | 'fullscreen'>(
     startFullscreen ? 'fullscreen' : 'quick',
@@ -407,31 +647,58 @@ function RequestSessionHarness({
   return (
     <QueryClientProvider client={queryClient}>
       <DraftContext.Provider value={session}>
-        {startFullscreen && <button onClick={() => setPresentation('quick')}>还原配置测试</button>}
-        <WorkflowNodeEditSession
-          scope="request-session:"
-          node={definition.nodes[0]}
-          definition={definition}
-          editable
-          onChange={(next) => {
-            setDefinition(next)
-            changed(next)
-          }}
-        >
-          {(draft, update) => (
-            <InspectorPresentationContext.Provider value={presentation}>
-              <WorkflowApiRequestEditor
-                node={draft}
-                projectId="project-1"
-                environmentId="environment-1"
-                api={detail.definition}
-                artifacts={[artifact]}
-                editable
-                onUpdate={(updated) => update({ ...definition, nodes: [updated] })}
-              />
-            </InspectorPresentationContext.Provider>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          {startFullscreen && (
+            <button onClick={() => setPresentation('quick')}>还原配置测试</button>
           )}
-        </WorkflowNodeEditSession>
+          <WorkflowNodeEditSession
+            scope="request-session:"
+            projectId="project-1"
+            node={definition.nodes[0]}
+            definition={definition}
+            editable
+            onChange={(next) => {
+              setDefinition(next)
+              changed(next)
+            }}
+          >
+            {(draft, update) => (
+              <InspectorPresentationContext.Provider value={presentation}>
+                <button
+                  onClick={() =>
+                    update({
+                      ...definition,
+                      nodes: [
+                        restoreEditedNode(draft, {
+                          ...editorNode(draft),
+                          config: {
+                            ...editorNode(draft).config,
+                            api_definition_id: 'api-2',
+                            api_version: 2,
+                            request_overrides: {},
+                          },
+                        }),
+                      ],
+                    })
+                  }
+                >
+                  切换接口测试
+                </button>
+                <WorkflowApiRequestEditor
+                  node={editorNode(draft)}
+                  projectId="project-1"
+                  environmentId="environment-1"
+                  api={detail.definition}
+                  artifacts={[artifact]}
+                  editable
+                  onUpdate={(updated) =>
+                    update({ ...definition, nodes: [restoreEditedNode(draft, updated)] })
+                  }
+                />
+              </InspectorPresentationContext.Provider>
+            )}
+          </WorkflowNodeEditSession>
+        </ConfigProvider>
       </DraftContext.Provider>
     </QueryClientProvider>
   )

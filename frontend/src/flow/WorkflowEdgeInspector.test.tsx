@@ -30,9 +30,12 @@ describe('edge configuration', () => {
       />,
     )
     fireEvent.change(screen.getByLabelText('映射源表达式'), { target: { value: 'body.user.id' } })
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.blur(screen.getByLabelText('映射源表达式'))
     expect(update.mock.calls[0][0].mappings[0].transform).toEqual(mapped.mappings[0].transform)
     expect(update.mock.calls[0][0].id).toBe(mapped.id)
     fireEvent.change(screen.getByLabelText('映射目标字段'), { target: { value: 'user_id' } })
+    fireEvent.blur(screen.getByLabelText('映射目标字段'))
     await user.click(screen.getByRole('button', { name: '添加映射' }))
     expect(update.mock.calls.at(-1)![0].mappings).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: '删除映射' }))
