@@ -213,7 +213,8 @@ export default function WorkflowNodeEditSession({
   }
   function updateDefinition(next: WorkflowDefinition) {
     const updated = next.nodes.find((item) => item.id === node.id)
-    if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
+    const current = definition.nodes.find((item) => item.id === node.id)
+    if (updated && !jsonEqual(updated, current)) void updateNode(updated)
     if (!jsonEqual(next.edges, definition.edges)) onChange({ ...definition, edges: next.edges })
   }
   return (

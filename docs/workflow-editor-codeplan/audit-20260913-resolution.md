@@ -103,3 +103,7 @@ Intentional deviations: 真实 DOM 基线不机械比对概念图；Linux 基线
 新增成功 / 失败证据上传属于 CI 治理文件变更。`scripts/required_gate.py` 的 `enforce_trusted_governance` 明确拒绝普通 `pull_request_target` 中修改这些文件，要求“CI 治理文件只能通过受控 Bootstrap 流程更新”。因此 `.github/workflows/compose-ci.yml` 的留存补丁需要通过既有受控 Bootstrap 路径发布，不能由普通业务 PR 绕过门禁；该补丁保留在本地，不纳入本次普通业务 PR；远端生效与下载验证保持 NOT RUN。未修改分支保护规则，也未使用 bypass。
 
 工作区原有 `deploy/ruoyi/compose.yaml` 修改保持原样，不属于本轮整改。
+
+## GitHub 合并前审查修复
+
+PR #103 首轮远程适用门禁全部通过，Compose 非 S29 浏览器验收 49 项通过。随后审查发现边更新可能用持久化节点覆盖未应用草稿，因此未立即合并。新增映射编辑 / 添加 / 删除三项组件回归，旧代码均实际失败；`updateDefinition` 现在比较新节点与当前持久化节点，仅真正的节点更新进入草稿更新。仅修改映射时保留未应用名称、JSON 配置及草稿状态；应用时保留已经提交的边更新。修复后对最终 Head 重新执行一次 `ci:milestone` 门禁，旧 Head 的 CI 结果不作为最终合并依据。

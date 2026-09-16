@@ -33,6 +33,40 @@ function Harness({
       >
         {(draft, update) => (
           <>
+            {(['edit', 'add', 'delete'] as const).map((operation) => (
+              <button
+                key={operation}
+                onClick={() =>
+                  update({
+                    ...definition,
+                    edges: definition.edges.map((edge, index) =>
+                      index === 0
+                        ? {
+                            ...edge,
+                            mappings:
+                              operation === 'delete'
+                                ? []
+                                : [
+                                    ...(operation === 'add' ? edge.mappings : []),
+                                    {
+                                      transform: { kind: 'identity' as const, template: '' },
+                                      source: { node_id: edge.source, path: operation },
+                                      target: {
+                                        node_id: edge.target,
+                                        location: 'body',
+                                        key: 'value',
+                                      },
+                                    },
+                                  ],
+                          }
+                        : edge,
+                    ),
+                  })
+                }
+              >
+                {operation} mapping
+              </button>
+            ))}
             <input
               aria-label="节点名称"
               value={draft.name}
@@ -70,6 +104,51 @@ function Harness({
   )
 }
 describe('node edit transactions', () => {
+  it.each(['edit', 'add', 'delete'] as const)(
+    'preserves unapplied node fields during %s mapping',
+    async (operation) => {
+      const changed = vi.fn()
+      render(
+        <Harness
+          session={new DraftSession()}
+          changed={changed}
+          external={{
+            ...workflowDefinition,
+            edges: workflowDefinition.edges.map((edge, index) =>
+              index === 0
+                ? {
+                    ...edge,
+                    mappings: [
+                      {
+                        transform: { kind: 'identity' as const, template: '' },
+                        source: { node_id: edge.source, path: 'body' },
+                        target: { node_id: edge.target, location: 'body', key: 'value' },
+                      },
+                    ],
+                  }
+                : edge,
+            ),
+          }}
+        />,
+      )
+      fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: '未应用名称' } })
+      fireEvent.change(screen.getByLabelText(/请求 JSON/), {
+        target: { value: '{"pending":true}' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: `${operation} mapping` }))
+      expect(screen.getByLabelText('节点名称')).toHaveValue('未应用名称')
+      expect(screen.getByLabelText(/请求 JSON/)).toHaveValue('{"pending":true}')
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(changed.mock.calls[0][0].nodes).toEqual(workflowDefinition.nodes)
+      fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(2))
+      expect(changed.mock.calls[1][0].nodes[1]).toMatchObject({
+        name: '未应用名称',
+        config: { payload: { pending: true } },
+      })
+      expect(changed.mock.calls[1][0].edges).toEqual(changed.mock.calls[0][0].edges)
+    },
+  )
   it('rebases a clean form after undo and permits a subsequent edit', async () => {
     const changed = vi.fn()
     render(<Harness session={new DraftSession()} changed={changed} />)
