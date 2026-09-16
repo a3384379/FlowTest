@@ -326,7 +326,7 @@ async def test_openapi_import_persists_complete_canonical_contract(
 
 
 @pytest.mark.asyncio
-async def test_invalid_canonical_keyword_value_returns_structured_422(
+async def test_invalid_source_keyword_returns_partial_import_diagnostic(
     import_client: AsyncClient,
 ) -> None:
     headers = await _login_headers(import_client)
@@ -362,16 +362,13 @@ async def test_invalid_canonical_keyword_value_returns_structured_422(
         source_type="openapi3",
     )
 
-    assert response.status_code == 422, response.text
-    error = response.json()["error"]
-    assert error["code"] == "CANONICAL_CONTRACT_INVALID"
-    assert error["details"]["issues"] == [
-        {
-            "path": "$.request_body.schema",
-            "keyword": "type",
-            "reason": "type must be a supported JSON Schema primitive",
-        }
-    ]
+    assert response.status_code == 201, response.text
+    diagnostic = response.json()["results"][0]["diagnostics"][0]
+    assert diagnostic["code"] == "SOURCE_CONSTRAINT_NOT_REPRESENTED"
+    assert diagnostic["keyword"] == "type"
+    assert diagnostic["canonical_path"] == "$.request_body.schema.type"
+    assert diagnostic["severity"] == "WARNING"
+    assert "Bearer invalid-contract-value" not in response.text
 
 
 @pytest.mark.asyncio
@@ -940,3 +937,20 @@ def _excel_document() -> bytes:
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_compatibility_diagnostics_survive_preview_and_read(
+    import_client: AsyncClient,
+) -> None:
+    from pathlib import Path
+
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    fixture = Path(__file__).parent / "fixtures/importers/swagger2-compatibility.yaml"
+    preview = await _preview_document(import_client, headers, project_id, fixture.read_bytes())
+    assert preview.status_code == 201, preview.text
+    payload = preview.json()
+    assert len(payload["results"]) == 8
+    assert payload["results"][0]["diagnostics"][0]["keyword"] == "description"
+    assert payload["results"][0]["diagnostics"][0]["source_path"].startswith("#/definitions/")

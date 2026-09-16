@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import EncryptedValue, SecretBox, secret_box
 from app.core.errors import AppError
 from app.core.redaction import get_redaction_policy
-from app.domain.api_assets import APIVersionSpec
+from app.domain.api_assets import APIVersionSpec, JsonValue
 from app.domain.canonical_schemas import CanonicalSchemaValidationError
 from app.domain.test_engineering import OperationContract, fingerprint_contract
 from app.importers.contracts import (
@@ -23,6 +23,7 @@ from app.importers.contracts import (
     ImportSourceType,
 )
 from app.importers.document import ImportDocumentError, parse_import_document
+from app.importers.openapi_normalization import ImportDiagnostic
 from app.importers.sources import ImportDocumentFetcher, ImportUrlDiscovery
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
@@ -46,9 +47,10 @@ class ImportItemResult:
     definition_id: UUID | None
     version: int
     server_url: str | None = None
+    diagnostics: tuple[ImportDiagnostic, ...] = ()
 
-    def as_json(self) -> dict[str, str | int | None]:
-        result = {
+    def as_json(self) -> dict[str, JsonValue]:
+        result: dict[str, JsonValue] = {
             "import_key": self.import_key,
             "name": self.name,
             "method": self.method,
@@ -59,6 +61,8 @@ class ImportItemResult:
         }
         if self.server_url is not None:
             result["server_url"] = self.server_url
+        if self.diagnostics:
+            result["diagnostics"] = [item.as_json() for item in self.diagnostics]
         return result
 
 
@@ -790,6 +794,7 @@ class ImportService:
                         definition_id=None,
                         version=0,
                         server_url=operation.target_base_url,
+                        diagnostics=operation.diagnostics,
                     )
                 )
                 continue
@@ -1207,6 +1212,7 @@ def _result(
         definition_id=definition.id,
         version=version,
         server_url=operation.target_base_url,
+        diagnostics=operation.diagnostics,
     )
 
 

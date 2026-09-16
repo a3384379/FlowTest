@@ -157,7 +157,25 @@ export type Artifact = {
 
 export type ImportChange = 'added' | 'changed' | 'deleted' | 'unchanged'
 
+export type ImportDiagnostic = {
+  source_version: string
+  source_dialect: string
+  method: string
+  endpoint: string
+  operation_id: string | null
+  source_path: string
+  canonical_path: string
+  keyword: string
+  severity: 'FATAL' | 'WARNING' | 'INFO'
+  code: string
+  message: string
+  normalized_as: string
+  suggested_fix: string
+  value_preview: string | null
+}
+
 export type ImportItem = {
+  diagnostics?: ImportDiagnostic[]
   import_key: string
   name: string
   method: string

@@ -3,6 +3,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Literal, cast
 
+from pydantic import ValidationError
+
 from app.domain.api_assets import (
     APIVersionSpec,
     AuthKind,
@@ -12,6 +14,7 @@ from app.domain.api_assets import (
     QueryParameterSpec,
 )
 from app.domain.canonical_contracts import sanitize_contract_payload
+from app.domain.canonical_schemas import CanonicalSchemaValidationError
 from app.domain.test_engineering import (
     ContractAuth,
     ContractParameter,
@@ -25,6 +28,8 @@ from app.importers.contracts import (
     empty_request,
     imported_value,
 )
+from app.importers.openapi_adapter import OperationAdapter
+from app.importers.openapi_normalization import SourceNormalizer, pointer
 
 HTTP_METHODS = {method.value.lower(): method for method in HttpMethod}
 
@@ -45,34 +50,43 @@ def parse_openapi(
             raw_operation = path_item.get(method_name)
             if not isinstance(raw_operation, Mapping):
                 continue
-            operation = _mapping(raw_operation)
+            normalizer = SourceNormalizer(
+                document, method.value, raw_path, _text(raw_operation.get("operationId")) or None
+            )
+            operation = OperationAdapter(
+                normalizer, pointer("#/paths", raw_path) + "/" + method_name
+            ).prepare(dict(raw_operation), common_parameters)
+            parameters = _sequence(operation.get("parameters"))
             request = _operation_request(
                 method=method,
                 path=f"{base_path}{raw_path}",
                 operation=operation,
-                parameters=common_parameters + _sequence(operation.get("parameters")),
+                parameters=parameters,
                 schemes=schemes,
                 default_security=default_security,
                 source_type=source_type,
             )
             name = _operation_name(operation, method, raw_path)
             description = _text(operation.get("description")) or _text(operation.get("summary"))
+            contract = _operation_contract(
+                document=document,
+                operation=operation,
+                parameters=parameters,
+                request=request,
+                schemes=schemes,
+                default_security=default_security,
+                source_type=source_type,
+                operation_name=name,
+                normalizer=normalizer,
+            )
             operations.append(
                 ImportedOperation(
                     name=name,
                     description=description,
                     request=request,
                     target_base_url=target_base_url,
-                    canonical_contract=_operation_contract(
-                        document=document,
-                        operation=operation,
-                        parameters=common_parameters + _sequence(operation.get("parameters")),
-                        request=request,
-                        schemes=schemes,
-                        default_security=default_security,
-                        source_type=source_type,
-                        operation_name=name,
-                    ),
+                    diagnostics=tuple(normalizer.diagnostics),
+                    canonical_contract=contract,
                 )
             )
     return tuple(operations)
@@ -99,7 +113,7 @@ def _operation_request(
             continue
         value = _parameter_value(parameter, name)
         if location == "query":
-            query.append(QueryParameterSpec(name=name, value=imported_value(name, value)))
+            query.extend(_query_values(parameter, name, value))
         elif location == "header":
             headers[name] = imported_value(name, value)
     body_kind, body = _body(operation, parameters, source_type)
@@ -125,6 +139,48 @@ def _operation_contract(
     default_security: list[object],
     source_type: ImportSourceType,
     operation_name: str,
+    normalizer: SourceNormalizer,
+) -> OperationContract:
+    try:
+        return _build_operation_contract(
+            document=document,
+            operation=operation,
+            parameters=parameters,
+            request=request,
+            schemes=schemes,
+            default_security=default_security,
+            source_type=source_type,
+            operation_name=operation_name,
+            partial=normalizer.partial,
+        )
+    except (ValidationError, CanonicalSchemaValidationError):
+        normalizer.warn(
+            pointer("#/paths", normalizer.endpoint),
+            "$",
+            "$contract",
+            "OPERATION_CONTRACT_PARTIAL",
+            "接口契约字段无法满足内部约束, 仅保留方法和路径; 请修正源接口定义",
+            loss=True,
+        )
+        return OperationContract(
+            operation=_contract_operation_name(operation_name),
+            method=request.method.value,
+            path=request.path,
+            completeness="partial",
+        )
+
+
+def _build_operation_contract(
+    *,
+    document: Mapping[str, object],
+    operation: Mapping[str, object],
+    parameters: list[object],
+    request: APIVersionSpec,
+    schemes: Mapping[str, object],
+    default_security: list[object],
+    source_type: ImportSourceType,
+    operation_name: str,
+    partial: bool = False,
 ) -> OperationContract:
     contract_parameters = _contract_parameters(document, parameters, source_type)
     request_body = _contract_request_body(document, operation, parameters, source_type)
@@ -150,7 +206,7 @@ def _operation_contract(
         },
         "source_ref": f"openapi://{_contract_operation_name(operation_name)}",
         "revision": revision,
-        "completeness": "complete",
+        "completeness": "partial" if partial else "complete",
     }
     return OperationContract.model_validate(sanitize_contract_payload(raw).payload)
 
@@ -203,7 +259,7 @@ def _contract_request_body(
         for media_type in sorted(content, key=lambda value: ("json" not in value, value)):
             media = _mapping(content[media_type])
             schema = _resolved_schema(document, media.get("schema"))
-            if schema:
+            if "schema" in media:
                 return ContractRequestBody(
                     required=request_body.get("required") is True,
                     content_type=media_type,
@@ -216,7 +272,23 @@ def _contract_request_body(
             return ContractRequestBody(
                 required=parameter.get("required") is True,
                 schema=_resolved_schema(document, parameter.get("schema")),
+                content_type=_swagger_content_type(operation, parameters),
             )
+    form = [_mapping(item) for item in parameters if _mapping(item).get("in") == "formData"]
+    if form:
+        properties = {
+            str(item["name"]): _swagger_parameter_schema(document, item)
+            for item in form
+            if item.get("name")
+        }
+        required = [
+            str(item["name"]) for item in form if item.get("name") and item.get("required") is True
+        ]
+        return ContractRequestBody(
+            required=bool(required),
+            content_type=_swagger_content_type(operation, parameters),
+            schema={"type": "object", "properties": properties, "required": required},
+        )
     return None
 
 
@@ -305,29 +377,7 @@ def _contract_auth(
 def _swagger_parameter_schema(
     document: Mapping[str, object], parameter: Mapping[str, object]
 ) -> dict[str, JsonValue]:
-    schema: dict[str, JsonValue] = {}
-    for key in (
-        "type",
-        "format",
-        "enum",
-        "minimum",
-        "maximum",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
-        "multipleOf",
-        "minLength",
-        "maxLength",
-        "pattern",
-        "minItems",
-        "maxItems",
-        "uniqueItems",
-        "items",
-    ):
-        if key in parameter:
-            schema[key] = _json_value(parameter[key])
-    if "items" in schema:
-        schema["items"] = _resolved_schema(document, parameter.get("items"))
-    return _normalize_exclusive_boundaries(schema)
+    return _resolved_schema(document, parameter.get("schema"))
 
 
 def _resolved_mapping(document: Mapping[str, object], value: object) -> Mapping[str, object]:
@@ -345,49 +395,9 @@ def _resolved_mapping(document: Mapping[str, object], value: object) -> Mapping[
     return resolved
 
 
-def _resolved_schema(
-    document: Mapping[str, object], value: object, *, depth: int = 0
-) -> dict[str, JsonValue]:
-    if depth > 12:
-        return {}
-    schema = _resolved_mapping(document, value)
-    result: dict[str, JsonValue] = {}
-    for key, item in schema.items():
-        if key == "$ref":
-            continue
-        if key == "properties" and isinstance(item, Mapping):
-            result[key] = {
-                str(name): _resolved_schema(document, child, depth=depth + 1)
-                for name, child in item.items()
-            }
-        elif key in {"items", "not"}:
-            result[key] = _resolved_schema(document, item, depth=depth + 1)
-        elif key in {"oneOf", "anyOf", "allOf"}:
-            result[key] = [
-                _resolved_schema(document, child, depth=depth + 1) for child in _sequence(item)
-            ]
-        elif key == "additionalProperties" and isinstance(item, Mapping):
-            result[key] = _resolved_schema(document, item, depth=depth + 1)
-        else:
-            result[key] = _json_value(item)
-    return _normalize_exclusive_boundaries(result)
-
-
-def _normalize_exclusive_boundaries(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    result = dict(schema)
-    for inclusive_key, exclusive_key in (
-        ("minimum", "exclusiveMinimum"),
-        ("maximum", "exclusiveMaximum"),
-    ):
-        exclusive = result.get(exclusive_key)
-        inclusive = result.get(inclusive_key)
-        if not isinstance(exclusive, bool):
-            continue
-        result.pop(exclusive_key, None)
-        if exclusive and isinstance(inclusive, (int, float)) and not isinstance(inclusive, bool):
-            result.pop(inclusive_key, None)
-            result[exclusive_key] = inclusive
-    return result
+def _resolved_schema(document: Mapping[str, object], value: object) -> dict[str, JsonValue]:
+    # OperationAdapter has normalized every source schema before construction.
+    return cast(dict[str, JsonValue], dict(_mapping(value)))
 
 
 def _contract_operation_name(value: str) -> str:
@@ -438,8 +448,8 @@ def _swagger_body(
             name = _text(parameter.get("name"))
             if not name:
                 continue
-            has_file = has_file or parameter.get("type") == "file"
-            if not has_file:
+            has_file = has_file or _mapping(parameter.get("schema")).get("format") == "binary"
+            if _mapping(parameter.get("schema")).get("format") != "binary":
                 form_values[name] = _parameter_value(parameter, name)
     if has_file or "multipart/form-data" in consumes:
         return BodyKind.MULTIPART, {"fields": form_values, "files": []}
@@ -577,3 +587,33 @@ def _text(value: object) -> str:
 
 def _json_value(value: object) -> JsonValue:
     return cast(JsonValue, value)
+
+
+def _swagger_content_type(operation: Mapping[str, object], parameters: list[object]) -> str:
+    consumes = _sequence(operation.get("consumes"))
+    form = [_mapping(item) for item in parameters if _mapping(item).get("in") == "formData"]
+    preferred = "application/json"
+    if form:
+        has_file = any(_mapping(item.get("schema")).get("format") == "binary" for item in form)
+        preferred = "multipart/form-data" if has_file else "application/x-www-form-urlencoded"
+    if preferred in consumes:
+        return preferred
+    return str(consumes[0]) if consumes else preferred
+
+
+def _query_values(
+    parameter: Mapping[str, object], name: str, fallback: str
+) -> list[QueryParameterSpec]:
+    schema = _mapping(parameter.get("schema"))
+    values = parameter.get("example", parameter.get("default", schema.get("default")))
+    if not isinstance(values, list):
+        return [QueryParameterSpec(name=name, value=imported_value(name, fallback))]
+    encoded = [str(value) for value in values]
+    style = parameter.get("style") or "form"
+    explode = parameter.get("explode", style == "form")
+    if explode is not True:
+        separator = {"spaceDelimited": " ", "pipeDelimited": "|", "tabDelimited": "\t"}.get(
+            str(parameter.get("style")), ","
+        )
+        encoded = [separator.join(encoded)]
+    return [QueryParameterSpec(name=name, value=imported_value(name, value)) for value in encoded]

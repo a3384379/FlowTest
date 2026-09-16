@@ -339,6 +339,7 @@ function ImportResult({
 }) {
   const [search, setSearch] = useState('')
   const [changeFilter, setChangeFilter] = useState<ImportChange | 'all'>('all')
+  const diagnostics = result.results.flatMap((item) => item.diagnostics ?? [])
   const filteredResults = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
     return result.results.filter((item) => {
@@ -379,6 +380,21 @@ function ImportResult({
           ) : null}
         </div>
       ) : null}
+      {diagnostics.length > 0 && (
+        <details>
+          <summary>已兼容导入，发现 {diagnostics.length} 个文档兼容性警告</summary>
+          {diagnostics.map((item, index) => (
+            <div key={index}>
+              <Typography.Text strong>
+                {item.method} {item.endpoint} · {item.keyword}
+              </Typography.Text>
+              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                {JSON.stringify(item, null, 2)}
+              </pre>
+            </div>
+          ))}
+        </details>
+      )}
       <Space size="large" className="import-statistics">
         <Statistic title="新增" value={result.added} styles={{ content: { color: '#16a34a' } }} />
         <Statistic title="变更" value={result.changed} styles={{ content: { color: '#2563eb' } }} />

@@ -1,0 +1,60 @@
+swagger: '2.0'
+info: {title: 匿名兼容回归, version: '1'}
+definitions:
+  PercentRecordBatchNewDto:
+    type: object
+    properties:
+      itemDataList:
+        type: array
+        items: {$ref: '#/definitions/JscpcoChargeRentBillItemDataFeeStandardDto'}
+  JscpcoChargeRentBillItemDataFeeStandardDto:
+    type: object
+    properties:
+      assetFeeTypeName:
+        type: string
+        description: "费用类型\n第二行说明"
+  JscpcoChargeRentBillItemData:
+    type: object
+    properties:
+      assetFeeTypeName:
+        type: string
+        description: "费用类型\r\n第二行\t说明"
+paths:
+  /percent/approve/createPercentRecord:
+    post:
+      parameters:
+        - in: body
+          name: body
+          schema: {$ref: '#/definitions/PercentRecordBatchNewDto'}
+  /repair/updateItemData:
+    post:
+      parameters:
+        - in: body
+          name: body
+          schema: {$ref: '#/definitions/JscpcoChargeRentBillItemData'}
+  /file/upload:
+    post:
+      parameters:
+        - {in: formData, name: file, required: true, type: file}
+        - {in: formData, name: name, type: string}
+        - {in: formData, name: description, type: string}
+  /parseFormula/addDetailProcessRuleRecord:
+    post:
+      parameters:
+        - {in: query, name: ids, type: array, items: {type: string}, collectionFormat: multi}
+  /parseFormula/parseBatchFormulaData:
+    post:
+      parameters:
+        - {in: query, name: ids, type: array, items: {type: string}, collectionFormat: multi}
+  /parseFormula/parsePayItemBatchFormulaData:
+    post:
+      parameters:
+        - {in: query, name: ids, type: array, items: {type: string}, collectionFormat: multi}
+  /buildingFeeType/queryBuildingFeeTypeDetailsByRoomIds:
+    post:
+      parameters:
+        - {in: path, name: roomIds, type: string}
+  /temporaryBill/temporaryBill/park/refund:
+    get:
+      parameters:
+        - {in: body, name: body, schema: {type: object}}
