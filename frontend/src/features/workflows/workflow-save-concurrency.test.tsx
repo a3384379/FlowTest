@@ -79,6 +79,7 @@ function Editor() {
             rawFields: {},
             activeTab: 'params',
             requestDraft: null,
+            requestDirty: false,
           })
         }}
       >

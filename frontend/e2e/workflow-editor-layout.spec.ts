@@ -20,6 +20,16 @@ for (const viewport of viewports) {
 
     await expect(workbench).toBeVisible()
     await expect(canvas).toBeVisible()
+    const header = page.getByTestId('workflow-workbench-header')
+    const title = await requiredBox(header.locator('.workflow-workbench-header-left'))
+    const modes = await requiredBox(header.locator('.workflow-workbench-header-center'))
+    const actions = await requiredBox(header.locator('.workflow-workbench-header-right'))
+    const toggle = await requiredBox(
+      page.getByRole('button', { name: '切换工作流列表', exact: true }),
+    )
+    expect(toggle.x + toggle.width + 6).toBeLessThanOrEqual(title.x)
+    expect(title.x + title.width).toBeLessThanOrEqual(modes.x)
+    expect(modes.x + modes.width).toBeLessThanOrEqual(actions.x)
     expect((await requiredBox(canvas)).height).toBeGreaterThanOrEqual(viewport.minimumCanvasHeight)
     expect((await requiredBox(toolbar)).height).toBeLessThanOrEqual(56)
     await expectPageWithoutOverflow(page, viewport)
@@ -38,6 +48,17 @@ for (const viewport of viewports) {
     await page.locator('.react-flow__node[data-id=api]').click()
     const inspector = page.getByTestId('workflow-inspector')
     await expect(inspector).toBeVisible()
+    await expect
+      .poll(async () => {
+        const stage = await requiredBox(canvas)
+        const node = await requiredBox(page.locator('.react-flow__node[data-id=api]'))
+        const actions = await requiredBox(page.getByLabel('节点快捷操作', { exact: true }))
+        return (
+          Math.max(node.x + node.width, actions.x + actions.width) <= stage.x + stage.width - 12 &&
+          Math.min(node.x, actions.x) >= stage.x + 12
+        )
+      })
+      .toBeTruthy()
     const canvasShare = (await requiredBox(canvas)).width / (await requiredBox(editorMain)).width
     expect(canvasShare).toBeGreaterThanOrEqual(0.52)
     expect((await requiredBox(inspector)).width).toBeGreaterThanOrEqual(320)

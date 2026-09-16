@@ -12,6 +12,7 @@ import {
   applyRequestEditorDraft,
   extraRequestPolicies,
   requestOverridesFromFields,
+  requestIdentityMatches,
   type RequestOverrides,
 } from './editor/request-overrides'
 import { EyeOutlined, SettingOutlined } from '@ant-design/icons'
@@ -164,7 +165,20 @@ function RequestEditorLoader({
     )
   }
   if (!detail.data) return null
-  return <RequestEditor {...props} detail={detail.data.version} onClose={onClose} />
+  const version = detail.data.version
+  if (
+    version.api_definition_id !== apiId ||
+    (pinnedVersion !== undefined && version.version !== pinnedVersion)
+  )
+    return null
+  return (
+    <RequestEditor
+      key={`${props.projectId}/${props.node.id}/${apiId}/${version.version}`}
+      {...props}
+      detail={version}
+      onClose={onClose}
+    />
+  )
 }
 
 function RequestInheritanceSummary({ node, version }: { node: WorkflowNode; version?: number }) {
@@ -199,7 +213,8 @@ function RequestEditor({
   onClose,
 }: EditorProps & { detail: ApiVersion; onClose: () => void }) {
   const session = useNodeEditContext()
-  const restored = session?.draft.requestDraft
+  const identity = requestIdentity(projectId, node, detail)
+  const restored = restoreRequestDraft(node, session?.draft.requestDraft, identity.projectId)
   const [form] = Form.useForm<RequestEditorFields>()
   const inherited = useMemo(() => requestOverrides(node), [node])
   const [modes, setModes] = useState(() => restored?.modes ?? sectionModes(inherited))
@@ -221,7 +236,7 @@ function RequestEditor({
   function remember(nextModes = modes, tab = activeTab, dirty = true) {
     session?.setRequest(
       {
-        apiVersion: detail.version,
+        identity,
         fields: form.getFieldsValue(true),
         modes: nextModes,
         customDrafts: customDrafts.current,
@@ -263,8 +278,12 @@ function RequestEditor({
     if (!editable) return false
     try {
       await effectiveOverrides()
+      if (session && !session.isRequestCurrent(identity)) {
+        setError('请求目标已变更，请重新载入请求配置。')
+        return false
+      }
       const next = applyRequestEditorDraft(node, {
-        apiVersion: detail.version,
+        identity,
         fields: form.getFieldsValue(true),
         modes,
         customDrafts: customDrafts.current,
@@ -425,6 +444,26 @@ function RequestEditor({
       </Modal>
     </>
   )
+}
+
+function requestIdentity(
+  projectId: string | null | undefined,
+  node: WorkflowNode,
+  detail: ApiVersion,
+) {
+  return {
+    projectId: projectId ?? '',
+    nodeId: node.id,
+    apiDefinitionId: detail.api_definition_id,
+    apiVersion: detail.version,
+  }
+}
+function restoreRequestDraft(
+  node: WorkflowNode,
+  saved: import('./editor/node-edit-session').WorkflowRequestEditorDraft | null | undefined,
+  projectId: string,
+) {
+  return saved && requestIdentityMatches(node, saved.identity, projectId) ? saved : null
 }
 
 function previewFailureMessage(error: unknown): string {
