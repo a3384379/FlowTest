@@ -15,12 +15,18 @@ export type RequestModes = {
   body: 'inherit' | 'custom'
 }
 export type WorkflowRequestEditorDraft = {
-  apiVersion: number
+  identity: WorkflowRequestIdentity
   fields: RequestEditorFields
   modes: RequestModes
   customDrafts: Partial<Record<keyof RequestModes, Partial<RequestEditorFields>>>
   activeTab: string
   bulkDrafts?: Record<string, BulkDraft>
+}
+export type WorkflowRequestIdentity = {
+  projectId: string
+  nodeId: string
+  apiDefinitionId: string
+  apiVersion: number
 }
 export type RawFieldDraft = { text: string; error: string | null }
 export type WorkflowNodeEditorDraft = {
@@ -32,11 +38,13 @@ export type WorkflowNodeEditorDraft = {
   rawFields: Record<string, RawFieldDraft>
   activeTab: string
   requestDraft: WorkflowRequestEditorDraft | null
+  requestDirty: boolean
 }
 export type NodeEditContextValue = {
   draft: WorkflowNodeEditorDraft
   setRaw: (key: string, value: RawFieldDraft) => void
   setRequest: (value: WorkflowRequestEditorDraft, dirty?: boolean) => void
+  isRequestCurrent: (identity: WorkflowRequestIdentity) => boolean
   apply: (replacement?: WorkflowNode) => boolean
   registerRequestApply: (apply: (() => Promise<boolean>) | null) => void
 }

@@ -171,6 +171,15 @@ export async function publishAndRun(page: Page) {
     .getByRole('dialog', { name: '发布服务器草稿？', exact: true })
     .getByRole('button', { name: '发布服务器草稿', exact: true })
     .click()
+  await expect(page.getByRole('dialog', { name: '发布服务器草稿？', exact: true })).toBeHidden()
+  await expect(page.getByText(/^已发布 v\d+$/).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '运行已发布版本', exact: true })).toBeEnabled()
+  const started = page.waitForResponse(
+    (response) =>
+      /\/workflows\/[^/]+\/executions$/.test(response.url()) &&
+      response.request().method() === 'POST',
+  )
   await page.getByRole('button', { name: '运行已发布版本', exact: true }).click()
+  expect((await started).ok()).toBeTruthy()
   await expect(page.getByText('工作流执行通过').last()).toBeVisible({ timeout: 30000 })
 }
