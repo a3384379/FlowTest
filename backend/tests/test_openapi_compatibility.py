@@ -492,3 +492,56 @@ def test_acyclic_schema_beyond_old_twelve_level_limit():
     for _ in range(16):
         result = result["properties"]["child"]
     assert result == {"type": "string", "description": "leaf"}
+
+
+@pytest.mark.parametrize("reference", ["https://example.test/base.json", "#/missing"])
+def test_openapi31_unresolved_ref_retains_local_siblings(reference):
+    operation = parse({"$ref": reference, "type": "string", "maxLength": 10})
+    assert operation.canonical_contract.request_body.schema_ == {"type": "string", "maxLength": 10}
+    assert operation.canonical_contract.completeness == "partial"
+    assert any(d.keyword == "$ref" for d in operation.diagnostics)
+
+
+def test_openapi31_cyclic_ref_retains_siblings():
+    operation = parse(
+        {"$ref": "#/components/schemas/Base", "maxLength": 10},
+        components={"schemas": {"Base": {"$ref": "#/components/schemas/Base", "type": "string"}}},
+    )
+    schema = operation.canonical_contract.request_body.schema_
+    assert schema == {"allOf": [{"type": "string"}, {"maxLength": 10}]}
+    assert operation.canonical_contract.completeness == "partial"
+
+
+@pytest.mark.parametrize("version", ["3.0.3", "3.1.0"])
+@pytest.mark.parametrize(
+    "serialization,expected",
+    [
+        ({}, ["1", "2"]),
+        ({"style": "form"}, ["1", "2"]),
+        ({"explode": False}, ["1,2"]),
+        ({"style": "form", "explode": False}, ["1,2"]),
+        ({"style": "spaceDelimited"}, ["1 2"]),
+        ({"style": "pipeDelimited"}, ["1|2"]),
+    ],
+)
+def test_openapi_query_array_default_serialization(version, serialization, expected):
+    document = {
+        "openapi": version,
+        "paths": {
+            "/array": {
+                "get": {
+                    "parameters": [
+                        {
+                            "in": "query",
+                            "name": "ids",
+                            "schema": {"type": "array", "items": {"type": "integer"}},
+                            "example": [1, 2],
+                            **serialization,
+                        }
+                    ]
+                }
+            }
+        },
+    }
+    operation = parse_import_document(json.dumps(document).encode())[1][0]
+    assert [q.value for q in operation.request.query_parameters] == expected

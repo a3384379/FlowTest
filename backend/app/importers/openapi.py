@@ -609,7 +609,9 @@ def _query_values(
     if not isinstance(values, list):
         return [QueryParameterSpec(name=name, value=imported_value(name, fallback))]
     encoded = [str(value) for value in values]
-    if parameter.get("explode") is not True:
+    style = parameter.get("style") or "form"
+    explode = parameter.get("explode", style == "form")
+    if explode is not True:
         separator = {"spaceDelimited": " ", "pipeDelimited": "|", "tabDelimited": "\t"}.get(
             str(parameter.get("style")), ","
         )

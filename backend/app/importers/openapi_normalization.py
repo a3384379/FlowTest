@@ -168,7 +168,7 @@ class SourceNormalizer:
                 "递归引用截断; 引用位置保留在 source_path",
                 loss=True,
             )
-            return {}, source, stack
+            return self.unresolved_siblings(result, schema_reference), source, stack
         if not reference.startswith("#/"):
             self.warn(
                 pointer(source, "$ref"),
@@ -178,7 +178,7 @@ class SourceNormalizer:
                 "未联网解析; 请在源文档中将此引用内联",
                 loss=True,
             )
-            return {}, source, stack
+            return self.unresolved_siblings(result, schema_reference), source, stack
         current: object = self.document
         for part in unquote(reference[2:]).split("/"):
             current = mapping(current).get(part.replace("~1", "/").replace("~0", "~"))
@@ -191,7 +191,7 @@ class SourceNormalizer:
                 "未找到内部引用; 保留其他可识别字段",
                 loss=True,
             )
-            return {}, source, stack
+            return self.unresolved_siblings(result, schema_reference), source, stack
         resolved, origin, refs = self.resolve(
             current, reference, canonical, (*stack, reference), schema_reference
         )
@@ -208,6 +208,13 @@ class SourceNormalizer:
                 "按 2.0/3.0 Reference Object 语义忽略同级字段",
             )
         return resolved, origin, refs
+
+    def unresolved_siblings(
+        self, schema: dict[str, object], schema_reference: bool
+    ) -> dict[str, object]:
+        if self.dialect == "OPENAPI_3_1" and schema_reference:
+            return {key: value for key, value in schema.items() if key != "$ref"}
+        return {}
 
     def schema(
         self,
