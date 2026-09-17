@@ -40,7 +40,7 @@ export default function ShellSidebar({
       <nav className="shell-navigation-scroll" aria-label="功能导航">
         <ConfigProvider theme={{ components: { Menu: { darkItemSelectedBg: '#1677ff' } } }}>
           <Menu
-            key={state.collapsed ? 'collapsed-menu' : 'expanded-menu'}
+            key={`menu:${state.collapsed}`}
             aria-label="功能菜单"
             theme="dark"
             mode="inline"

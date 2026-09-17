@@ -66,7 +66,7 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 
 本地使用独立 `flowtest-grouped-navigation` Compose 项目、独立数据卷和 13020/18020 端口，加载本分支前端构建与后端代码，未修改原有运行栈。浏览器使用 Chromium；截图数据由测试生成。
 
-### 已执行检查
+### 首轮本地全量检查
 
 - 后端 `uv run --no-sync ruff format --check .`：564 个文件符合格式。
 - 后端 `uv run --no-sync ruff check .`：通过。
@@ -96,6 +96,8 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 本地本轮没有启动执行 worker，未在此命令重复两项发布/执行场景；完整执行与业务场景由 GitHub Compose CI 验证。不会把未执行的本地场景算作通过。
 
 ### 审阅与构建补充
+
+首轮全量统计对应初始菜单实现；复审后 9 个相关测试文件 58 个测试通过，侧栏模式隔离后 7 个组件测试与 8 个专项浏览器场景通过。最终提交的完整门禁记录见 [PR #105](https://github.com/a3384379/FlowTest/pull/105)。
 
 - 总览首次加载恢复合法的展开分类偏好，无偏好仍默认收起。具体业务页路由优先于缓存；从其他页面进入总览仍按路由规则关闭分类。补充了刷新与收起/展开恢复单测。
 - Menu 两种模式使用各自实例，隔离 Ant Design 模式切换后的迟到关闭事件。只有导航 Menu 随模式切换，业务页的 React key 和实例保持不变；多尺寸未应用输入/DOM 实例验收继续通过。
