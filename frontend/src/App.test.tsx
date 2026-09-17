@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -25,6 +25,61 @@ describe('App authentication', () => {
   })
 
   afterEach(() => vi.restoreAllMocks())
+
+  it.each([true, false])(
+    'preserves every existing navigation URL for admin=%s',
+    async (isAdmin) => {
+      authenticateExistingUser()
+      useAuthStore.setState({ user: { ...user, is_system_admin: isAdmin } })
+      renderApp(`/projects/${project.id}/dashboard`)
+      await screen.findByRole('heading', { name: '质量指挥中心' })
+      const navigation = within(document.querySelector('.sidebar') as HTMLElement)
+      const sections = {
+        dashboard: '质量总览',
+        settings: '项目管理',
+        services: '服务目录',
+        'request-targets': '请求目标',
+        apis: '接口管理',
+        protocols: '多协议工作台',
+        assets: '测试资产',
+        workflows: '流程编排',
+        data: '数据与 Mock',
+        tasks: '任务执行',
+        performance: '性能实验室',
+        environments: '环境实验室',
+        contracts: '契约中心',
+        'test-engineering': '测试工程',
+        contexts: '上下文检查器',
+        impact: '影响分析',
+        'change-regression': '变更回归',
+        quality: '质量中心',
+        release: '发布门禁',
+        ai: 'AI 助手',
+        'ai-changes': 'AI 变更集',
+        'mcp-changes': 'MCP 变更集',
+        reports: '测试报告',
+        organization: '组织治理',
+        fabric: '分布式执行面',
+        platform: '平台管理',
+      }
+      const globalPaths: Record<string, string> = {
+        organization: '/organization',
+        fabric: '/execution-fabric',
+        platform: '/platform',
+      }
+      for (const [section, label] of Object.entries(sections)) {
+        if (!isAdmin && ['fabric', 'platform'].includes(section)) {
+          expect(navigation.queryByRole('link', { name: label })).not.toBeInTheDocument()
+          continue
+        }
+        expect(navigation.getByRole('link', { name: label, exact: true })).toHaveAttribute(
+          'href',
+          globalPaths[section] ?? `/projects/${project.id}/${section}`,
+        )
+      }
+      expect(navigation.getAllByRole('link')).toHaveLength(isAdmin ? 26 : 24)
+    },
+  )
 
   it('logs in, shows the lazy dashboard, and logs out', async () => {
     server.use(
