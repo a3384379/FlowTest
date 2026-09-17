@@ -11,6 +11,24 @@ import ProjectProvider from './ProjectProvider'
 import { useProjectContext } from './use-project-context'
 
 describe('ProjectProvider', () => {
+  it.each(['/organization', '/platform', '/execution-fabric'])(
+    'selects a project from %s without constructing a project-scoped global route',
+    async (route) => {
+      renderProvider(route)
+      await screen.findByText('全部项目')
+      await userEvent.setup().click(screen.getByRole('button', { name: '选择项目' }))
+      expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.id}/dashboard`)
+      expect(screen.getByTestId('global-path')).toHaveTextContent('/organization')
+    },
+  )
+
+  it('preserves the business section when selecting a project', async () => {
+    renderProvider('/reports')
+    await screen.findByText('全部项目')
+    await userEvent.setup().click(screen.getByRole('button', { name: '选择项目' }))
+    expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.id}/reports`)
+  })
+
   it('selects and clears the project through the URL', async () => {
     const browser = userEvent.setup()
     renderProvider('/dashboard')
@@ -23,6 +41,15 @@ describe('ProjectProvider', () => {
 
     await browser.click(screen.getByRole('button', { name: '清除项目' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
+  })
+
+  it('switches between accessible projects while preserving the business section', async () => {
+    const otherProject = { ...project, id: '00000000-0000-4000-8000-000000000088', name: '项目 B' }
+    renderProvider(`/projects/${otherProject.id}/reports`, otherProject)
+    await waitFor(() => expect(screen.getByTestId('current-project')).toHaveTextContent('项目 B'))
+    await userEvent.setup().click(screen.getByRole('button', { name: '选择项目' }))
+    expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.id}/reports`)
+    expect(screen.getByTestId('current-project')).toHaveTextContent(project.name)
   })
 
   it('redirects an inaccessible project deep link to the global dashboard', async () => {
@@ -65,6 +92,7 @@ function ContextProbe() {
       <span data-testid="project-options">
         {context.projects.data?.items.map((item) => item.name).join(',')}
       </span>
+      <span data-testid="global-path">{context.pathFor('organization')}</span>
       <span data-testid="reports-path">{context.pathFor('reports')}</span>
       <button type="button" onClick={() => context.selectProject(project.id)}>
         选择项目

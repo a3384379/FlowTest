@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -6,7 +7,7 @@ test('S22 能力版本、安全边界与平台深链接主路径', async ({ page
   await page.goto('/')
   await authenticate(page)
 
-  await page.getByRole('link', { name: '平台管理' }).click()
+  await navigateMenu(page, '平台管理')
   await expect(page).toHaveURL(/\/platform$/)
   await expect(page.getByRole('heading', { name: '能力与插件中心' })).toBeVisible()
   const httpCapability = page.getByRole('row').filter({ hasText: 'http.request' })

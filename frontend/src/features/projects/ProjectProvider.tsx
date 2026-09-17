@@ -3,7 +3,13 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { matchPath, useLocation, useNavigate } from 'react-router-dom'
 
 import { ProjectContext, type ProjectContextValue } from './project-context'
-import { globalPath, projectPath, sectionFromPath } from './project-routing'
+import {
+  globalPath,
+  isGlobalAdministrationSection,
+  projectPath,
+  projectSelectionPath,
+  sectionFromPath,
+} from './project-routing'
 import { getManagedProject, listManagedProjects } from './project-service'
 
 export default function ProjectProvider({ children }: { children: ReactNode }) {
@@ -38,10 +44,12 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
       currentProject,
       section,
       selectProject: (nextProjectId) => {
-        navigate(nextProjectId ? projectPath(nextProjectId, section) : '/dashboard')
+        navigate(projectSelectionPath(nextProjectId, section))
       },
       pathFor: (nextSection) =>
-        projectId ? projectPath(projectId, nextSection) : globalPath(nextSection),
+        projectId && !isGlobalAdministrationSection(nextSection)
+          ? projectPath(projectId, nextSection)
+          : globalPath(nextSection),
     }),
     [availableProjects, currentProject, navigate, projectId, section],
   )

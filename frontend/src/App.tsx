@@ -1,34 +1,10 @@
 import { DraftSessionProvider } from './features/drafts/DraftSessionProvider'
-import {
-  ApiOutlined,
-  AppstoreOutlined,
-  AuditOutlined,
-  ApartmentOutlined,
-  BarChartOutlined,
-  BranchesOutlined,
-  CodeOutlined,
-  CloudServerOutlined,
-  DashboardOutlined,
-  DatabaseOutlined,
-  FolderOpenOutlined,
-  FundProjectionScreenOutlined,
-  FileSearchOutlined,
-  ExperimentOutlined,
-  LogoutOutlined,
-  ScheduleOutlined,
-  SafetyCertificateOutlined,
-  ToolOutlined,
-  RobotOutlined,
-  ShareAltOutlined,
-  TeamOutlined,
-  UserOutlined,
-} from '@ant-design/icons'
+import { LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import {
   Avatar,
   Breadcrumb,
   Button,
   Layout,
-  Menu,
   Select,
   Space,
   Spin,
@@ -36,7 +12,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 
 import LoginPage from './features/auth/LoginPage'
@@ -44,8 +20,14 @@ import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
 import ProjectEmptyState from './features/projects/ProjectEmptyState'
-import { projectPath, type ProjectSection } from './features/projects/project-routing'
+import {
+  isGlobalAdministrationSection,
+  projectPath,
+  type ProjectSection,
+} from './features/projects/project-routing'
 import { useProjectContext } from './features/projects/use-project-context'
+import { groupForSection, sectionLabels } from './features/navigation/navigation-config'
+import ShellSidebar from './features/navigation/ShellSidebar'
 import GlobalSearch from './features/search/GlobalSearch'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
@@ -75,36 +57,7 @@ const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage')
 const RequestTargetsPage = lazy(() => import('./pages/RequestTargetsPage'))
 const OrganizationGovernancePage = lazy(() => import('./pages/OrganizationGovernancePage'))
 
-const { Header, Content, Sider } = Layout
-
-const sectionLabels: Record<ProjectSection, string> = {
-  dashboard: '质量总览',
-  settings: '项目管理',
-  services: '服务目录',
-  'request-targets': '请求目标',
-  apis: '接口管理',
-  protocols: '多协议工作台',
-  assets: '测试资产',
-  workflows: '流程编排',
-  data: '数据与 Mock',
-  tasks: '任务执行',
-  performance: '性能实验室',
-  environments: '环境实验室',
-  contracts: '契约中心',
-  'test-engineering': '测试工程',
-  contexts: '上下文检查器',
-  impact: '影响分析',
-  'change-regression': '变更回归',
-  quality: '质量中心',
-  release: '发布门禁',
-  ai: 'AI 助手',
-  'ai-changes': 'AI 变更集',
-  'mcp-changes': 'MCP 变更集',
-  reports: '测试报告',
-  platform: '平台管理',
-  fabric: '分布式执行面',
-  organization: '组织治理',
-}
+const { Header, Content } = Layout
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -137,22 +90,19 @@ function AuthenticatedShell() {
   const isGlobalAdministration = isGlobalAdministrationSection(section)
   return (
     <Layout className="app-shell">
-      <Sider width={224} theme="dark" className="sidebar">
-        <div className="brand">
-          <ApiOutlined />
-          <span>FlowTest</span>
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[section]}
-          items={shellNavigationItems(Boolean(user?.is_system_admin), pathFor)}
-        />
-      </Sider>
+      <ShellSidebar
+        key={authenticatedUserId(user)}
+        userId={authenticatedUserId(user)}
+        isSystemAdmin={Boolean(user?.is_system_admin)}
+        section={section}
+        pathFor={pathFor}
+      />
       <Layout>
         <Header className="topbar">
-          <Space>
-            <Typography.Text strong>接口自动化测试平台</Typography.Text>
+          <Space className="shell-topbar-left">
+            <Typography.Text strong className="shell-platform-title">
+              接口自动化测试平台
+            </Typography.Text>
             <GlobalSearch />
             <Select
               aria-label="全局项目"
@@ -168,10 +118,10 @@ function AuthenticatedShell() {
               }))}
             />
           </Space>
-          <Space>
+          <Space className="shell-topbar-account">
             <Tag color="blue">LOCAL</Tag>
             <Avatar size="small" icon={<UserOutlined />} />
-            <Typography.Text>{user?.display_name}</Typography.Text>
+            <Typography.Text className="shell-user-name">{user?.display_name}</Typography.Text>
             <Button type="text" icon={<LogoutOutlined />} onClick={() => void logout()}>
               退出
             </Button>
@@ -202,50 +152,6 @@ function AuthenticatedShell() {
 
 function authenticatedUserId(user: { id: string } | null | undefined): string {
   return user?.id ?? 'anonymous'
-}
-
-function shellNavigationItems(
-  isSystemAdmin: boolean,
-  pathFor: (section: ProjectSection) => string,
-) {
-  const projectItems = (Object.keys(sectionLabels) as ProjectSection[])
-    .filter((section) => !['organization', 'fabric', 'platform'].includes(section))
-    .map((section) => navigationItem(section, navigationIcon(section), pathFor(section)))
-  const globalItems = [navigationItem('organization', <TeamOutlined />, '/organization')]
-  if (isSystemAdmin) {
-    globalItems.push(navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'))
-    globalItems.push(navigationItem('platform', <ToolOutlined />, '/platform'))
-  }
-  return [...projectItems, ...globalItems]
-}
-
-function navigationIcon(section: ProjectSection): ReactNode {
-  const icons: Partial<Record<ProjectSection, ReactNode>> = {
-    dashboard: <DashboardOutlined />,
-    settings: <FolderOpenOutlined />,
-    services: <AppstoreOutlined />,
-    'request-targets': <ShareAltOutlined />,
-    apis: <ApiOutlined />,
-    protocols: <CodeOutlined />,
-    assets: <FundProjectionScreenOutlined />,
-    workflows: <ApartmentOutlined />,
-    data: <DatabaseOutlined />,
-    tasks: <ScheduleOutlined />,
-    performance: <ExperimentOutlined />,
-    environments: <CloudServerOutlined />,
-    contracts: <ShareAltOutlined />,
-    'test-engineering': <ExperimentOutlined />,
-    contexts: <FileSearchOutlined />,
-    impact: <FileSearchOutlined />,
-    'change-regression': <BranchesOutlined />,
-    quality: <SafetyCertificateOutlined />,
-    release: <SafetyCertificateOutlined />,
-    ai: <RobotOutlined />,
-    'ai-changes': <RobotOutlined />,
-    'mcp-changes': <AuditOutlined />,
-    reports: <BarChartOutlined />,
-  }
-  return icons[section] ?? <AppstoreOutlined />
 }
 
 function ProjectWorkspaceTabs(props: {
@@ -356,10 +262,6 @@ function isNoProjectView(projectCount: number | undefined, projectId: string | n
   return projectCount === 0 && projectId === null
 }
 
-function isGlobalAdministrationSection(section: ProjectSection): boolean {
-  return section === 'platform' || section === 'fabric' || section === 'organization'
-}
-
 function ApplicationRoutes() {
   return (
     <Routes>
@@ -442,13 +344,12 @@ function ProjectIndexRedirect() {
   return <Navigate to={projectId ? projectPath(projectId, 'dashboard') : '/dashboard'} replace />
 }
 
-function navigationItem(section: ProjectSection, icon: ReactNode, path: string) {
-  return { key: section, icon, label: <Link to={path}>{sectionLabels[section]}</Link> }
-}
-
 function breadcrumbItems(projectName: string | null, section: ProjectSection) {
   const items = [{ title: <Link to="/dashboard">FlowTest</Link> }]
-  if (projectName) items.push({ title: <span>{projectName}</span> })
+  if (projectName && !isGlobalAdministrationSection(section))
+    items.push({ title: <span>{projectName}</span> })
+  const group = groupForSection(section)
+  if (group) items.push({ title: <span>{group.label}</span> })
   items.push({ title: <span>{sectionLabels[section]}</span> })
   return items
 }

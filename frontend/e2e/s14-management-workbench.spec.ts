@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { administratorEmail, authenticate } from './support/auth'
@@ -26,7 +27,7 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }, tes
   await renameApi(page, apiName, renamedApiName)
   await editApiVersion(page, renamedApiName)
 
-  await page.getByRole('link', { name: '项目管理' }).click()
+  await navigateMenu(page, '项目管理')
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
   await manageFolder(page, folderName, renamedFolder)
   await updateProjectConfiguration(page, suffix)

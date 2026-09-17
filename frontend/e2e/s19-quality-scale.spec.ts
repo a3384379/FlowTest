@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -30,7 +31,7 @@ test('S19 质量门禁与 Cron 计划配置主路径', async ({ page }) => {
     page.getByRole('main').getByText(project.title, { exact: true }).first(),
   ).toBeVisible()
 
-  await page.getByRole('link', { name: '质量中心' }).click()
+  await navigateMenu(page, '质量中心')
   await expect(page).toHaveURL(/\/quality$/)
   await expect(page.getByRole('heading', { name: '质量中心' })).toBeVisible()
 
@@ -46,7 +47,7 @@ test('S19 质量门禁与 Cron 计划配置主路径', async ({ page }) => {
   expect((await created).status()).toBe(201)
   await expect(page.getByRole('row').filter({ hasText: `S19 Gate ${suffix}` })).toContainText('95%')
 
-  await page.getByRole('link', { name: '任务执行' }).click()
+  await navigateMenu(page, '任务执行')
   await page.getByRole('button', { name: /新建计划/ }).click()
   const planDialog = page.getByRole('dialog', { name: '新建测试计划' })
   const scheduleMode = planDialog.getByLabel('调度方式')

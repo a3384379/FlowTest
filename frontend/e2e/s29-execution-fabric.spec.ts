@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -7,7 +8,7 @@ test('S29 Worker 故障转移在执行面显示递增 Fence、唯一终态与 Dr
   await page.context().clearCookies()
   await page.goto('/')
   await authenticate(page)
-  await page.getByRole('link', { name: '分布式执行面' }).click()
+  await navigateMenu(page, '分布式执行面')
 
   await expect(page.getByRole('heading', { name: '分布式执行面' })).toBeVisible()
   await expect(page.getByText('PostgreSQL 是任务、Lease 与 Fence 的唯一真相源')).toBeVisible()

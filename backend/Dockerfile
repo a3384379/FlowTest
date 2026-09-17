@@ -83,6 +83,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         golang.org/x/sync@v0.22.0 \
         golang.org/x/text@v0.41.0 \
         google.golang.org/grpc@v1.83.2; \
+    go mod download all; \
     go mod vendor; \
     make \
         VERSION=v2.3.3 \

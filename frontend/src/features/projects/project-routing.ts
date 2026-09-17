@@ -72,3 +72,13 @@ function isProjectSection(value: string | undefined): value is ProjectSection {
     'organization',
   ].includes(value ?? '')
 }
+
+export function isGlobalAdministrationSection(section: ProjectSection): boolean {
+  return section === 'organization' || section === 'fabric' || section === 'platform'
+}
+
+export function projectSelectionPath(projectId: string | null, section: ProjectSection): string {
+  return projectId
+    ? projectPath(projectId, isGlobalAdministrationSection(section) ? 'dashboard' : section)
+    : '/dashboard'
+}
