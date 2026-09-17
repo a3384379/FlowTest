@@ -93,7 +93,7 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 
 `FLOWTEST_E2E_BASE_URL=http://localhost:13020 pnpm exec playwright test e2e/grouped-navigation.spec.ts e2e/workflow-editor-layout.spec.ts e2e/workflow-editor-interactions.spec.ts --project=chromium --grep-invert 'FORM/LIFE|ACC/FORM/PAL'`：16 passed，包括认证 Setup、6 个导航专项、6 个编辑交互和3 个工作区尺寸检查。路由往返后非法 JSON 请求会话保留、输入焦点保护、拖动与撤销、连线操作、全屏请求还原以及三个尺寸的画布几何检查均通过。
 
-本地本轮没有启动执行 worker，未在此命令重复两项发布/执行场景；完整执行与业务场景由 GitHub Compose CI 验证。不会把未执行的本地场景算作通过。
+首轮本地命令没有启动执行 worker，因此没有重复两项发布/执行场景。后续视觉验收单独启动隔离 Celery worker 和 mock-target，覆盖真实发布、执行与历史快照；完整业务场景仍由 GitHub Compose CI 验证。
 
 ### 审阅与构建补充
 
@@ -103,6 +103,14 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 - Menu 两种模式使用各自实例，隔离 Ant Design 模式切换后的迟到关闭事件。只有导航 Menu 随模式切换，业务页的 React key 和实例保持不变；多尺寸未应用输入/DOM 实例验收继续通过。
 - 首轮远程 Compose 在 containerd vendoring 阶段缺少 OpenTelemetry `go.sum` 校验条目，尚未执行浏览器验收。`backend/Dockerfile` 增加 `go mod download all`，补齐既有模块图的校验信息，原 containerd commit、Go 与 gRPC 版本声明保持不变。
 - 定向 containerd 构建通过，三个 binary 都通过原 `go version -m` gRPC v1.83.2 校验。本地 Docker Hub 元数据请求未完成，因此验证使用同一 SHA256 digest 的本地已下载 Go 镜像临时别名；提交的 Dockerfile 仍使用原 pinned digest。验证命令 `docker build -f /private/tmp/flowtest-nav-build-definition/Dockerfile --target containerd-builder -t flowtest-nav-containerd-builder backend`。
+
+### 最终视觉回归补充
+
+远程浏览器验收发现 V1 主路径还有三处旧的平铺菜单点击，已统一改用可见父分类/叶菜单 helper。原 Linux 截图包含旧侧栏，因此更新本次菜单外观涉及的基线，保留原 `maxDiffPixelRatio: 0.003`、动态字段 mask、画布几何和横向溢出断言。全屏配置、添加节点和专注模式没有菜单变化，其基线保留。
+
+使用 Playwright v1.62.1 Noble Linux Chromium、localhost 入口和独立 Compose 项目运行 `pnpm exec playwright test e2e/workflow-editor-visual.spec.ts --project=chromium --update-snapshots`，随后取消更新模式再跑同一命令。每轮包含认证 Setup 与三种分辨率，各分辨率覆盖九种真实状态。生成后人工查看侧栏、画布、运行与历史快照；临时数据库、worker、截图 runner 与原本地部署隔离。GitHub Ubuntu runner 的最终比较仍以 PR 最新提交门禁为准。
+
+最终本地前端全量为 88 个测试文件、421 个测试通过，分支覆盖率 80.74%；后端 1449 passed、7 skipped。远程前端首轮出现原有多协议测试销毁后的 React 异步异常，421 个断言均通过；同一提交重跑正常成功，本地该页面 17 个测试亦通过。没有忽略未处理异常或放宽测试配置。
 
 ## 修改文件
 
@@ -115,6 +123,7 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 - `frontend/src/styles.css`：固定品牌/底栏、独立滚动、窄屏顶栏与 Drawer 配色。
 - `frontend/e2e/grouped-navigation.spec.ts`、`support/navigation.ts`：真实父/叶菜单路径与多尺寸验收。
 - `frontend/e2e/s14-management-workbench.spec.ts`、`s15-test-assets.spec.ts`、`s17-data-mock.spec.ts`、`s18-contract-automation.spec.ts`、`s19-quality-scale.spec.ts`、`s21-ai-review.spec.ts`、`s22-capability-sdk.spec.ts`、`s29-execution-fabric.spec.ts`、`s30-failure-intelligence.spec.ts`、`s31-release-gate.spec.ts`、`v1-acceptance.spec.ts`、`workflow-editor-interactions.spec.ts`：按可见父分类选择原页面。
+- `frontend/e2e/workflow-editor-visual.spec.ts-snapshots/*-chromium-linux.png`：人工核对后的菜单外观基线，保留工作流像素门禁。
 - `backend/Dockerfile`：必要的 containerd 构建校验信息补齐，独立构建修复提交。
 - 本文与 `docs/navigation/navigation-{1366,1440,1920,mobile}.png`：旧→新映射与实际页面证据。
 

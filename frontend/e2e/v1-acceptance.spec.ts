@@ -45,12 +45,12 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   await expect(page.getByLabel('允许私网 CIDR（每行一个）')).toHaveValue('172.16.0.0/12')
   await expect(page.getByText('api.created').first()).toBeVisible()
 
-  await page.getByText('质量总览', { exact: true }).click()
+  await navigateMenu(page, '质量总览')
   await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
   await expect(page.getByRole('heading', { name: '质量指挥中心' })).toBeVisible()
   await expect(page.getByText(/^当前查看：S11 V1 Pilot /)).toBeVisible()
 
-  await page.getByText('测试报告', { exact: true }).click()
+  await navigateMenu(page, '测试报告')
   await expect(page.getByRole('heading', { name: '测试报告' })).toBeVisible()
   const businessExecution = page.getByRole('row', { name: /V1 登录下单流程/ })
   await expect(businessExecution).toContainText('8/8 通过')
@@ -69,7 +69,7 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
     ['流程编排', '流程编排'],
     ['任务执行', '任务执行'],
   ] as const) {
-    await page.getByText(menu, { exact: true }).click()
+    await navigateMenu(page, menu)
     await expect(page.getByRole('heading', { name: heading })).toBeVisible()
   }
 })
