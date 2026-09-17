@@ -43,6 +43,15 @@ describe('ProjectProvider', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
   })
 
+  it('switches between accessible projects while preserving the business section', async () => {
+    const otherProject = { ...project, id: '00000000-0000-4000-8000-000000000088', name: '项目 B' }
+    renderProvider(`/projects/${otherProject.id}/reports`, otherProject)
+    await waitFor(() => expect(screen.getByTestId('current-project')).toHaveTextContent('项目 B'))
+    await userEvent.setup().click(screen.getByRole('button', { name: '选择项目' }))
+    expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.id}/reports`)
+    expect(screen.getByTestId('current-project')).toHaveTextContent(project.name)
+  })
+
   it('redirects an inaccessible project deep link to the global dashboard', async () => {
     renderProvider('/projects/missing/apis')
 

@@ -67,17 +67,33 @@ describe('App authentication', () => {
         fabric: '/execution-fabric',
         platform: '/platform',
       }
+      const seen = new Set<string>()
+      const browser = userEvent.setup()
+      const groups: Record<string, string[]> = {
+        项目与接口: ['apis', 'services', 'request-targets', 'protocols', 'settings'],
+        测试设计: ['workflows', 'assets', 'data', 'contracts', 'test-engineering'],
+        执行与环境: ['tasks', 'environments', 'performance'],
+        质量分析: ['reports', 'impact', 'change-regression', 'quality', 'release'],
+        'AI 与集成': ['ai', 'contexts', 'ai-changes', 'mcp-changes'],
+        系统管理: ['organization', 'fabric', 'platform'],
+      }
       for (const [section, label] of Object.entries(sections)) {
+        const group = Object.keys(groups).find((name) => groups[name].includes(section))
+        if (group) {
+          const parent = navigation.getByRole('menuitem', { name: group })
+          if (parent.getAttribute('aria-expanded') !== 'true') await browser.click(parent)
+        }
         if (!isAdmin && ['fabric', 'platform'].includes(section)) {
           expect(navigation.queryByRole('link', { name: label })).not.toBeInTheDocument()
           continue
         }
-        expect(navigation.getByRole('link', { name: label, exact: true })).toHaveAttribute(
+        seen.add(section)
+        expect(navigation.getByRole('link', { name: label })).toHaveAttribute(
           'href',
           globalPaths[section] ?? `/projects/${project.id}/${section}`,
         )
       }
-      expect(navigation.getAllByRole('link')).toHaveLength(isAdmin ? 26 : 24)
+      expect(seen.size).toBe(isAdmin ? 26 : 24)
     },
   )
 
@@ -118,6 +134,7 @@ describe('App authentication', () => {
     expect(close).toBeInstanceOf(HTMLElement)
     fireEvent.click(close as HTMLElement)
     expect(screen.queryByRole('tab', { name: '接口管理' })).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('menuitem', { name: '项目与接口' }))
     await browser.click(screen.getByRole('link', { name: '接口管理' }))
     expect(await screen.findByRole('tab', { name: '接口管理' })).toBeVisible()
     await browser.click(screen.getByRole('tab', { name: '质量总览' }))
@@ -214,6 +231,7 @@ describe('App authentication', () => {
 
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect((await screen.findAllByText(project.name)).length).toBeGreaterThanOrEqual(2)
+    await userEvent.setup().click(screen.getByRole('menuitem', { name: '项目与接口' }))
     expect(screen.getByRole('link', { name: '接口管理' })).toHaveAttribute(
       'href',
       `/projects/${project.id}/apis`,

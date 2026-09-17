@@ -1,28 +1,21 @@
 import {
   ApiOutlined,
-  AppstoreOutlined,
-  AuditOutlined,
   ApartmentOutlined,
   BarChartOutlined,
-  BranchesOutlined,
-  CodeOutlined,
-  CloudServerOutlined,
   DashboardOutlined,
-  DatabaseOutlined,
-  FolderOpenOutlined,
-  FundProjectionScreenOutlined,
-  FileSearchOutlined,
-  ExperimentOutlined,
-  ScheduleOutlined,
-  SafetyCertificateOutlined,
-  ToolOutlined,
   RobotOutlined,
-  ShareAltOutlined,
-  TeamOutlined,
+  ScheduleOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
+
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import type { ProjectSection } from '../projects/project-routing'
+import {
+  globalPath,
+  isGlobalAdministrationSection,
+  type ProjectSection,
+} from '../projects/project-routing'
 
 export const sectionLabels: Record<ProjectSection, string> = {
   dashboard: '质量总览',
@@ -51,54 +44,6 @@ export const sectionLabels: Record<ProjectSection, string> = {
   platform: '平台管理',
   fabric: '分布式执行面',
   organization: '组织治理',
-}
-
-export function shellNavigationItems(
-  isSystemAdmin: boolean,
-  pathFor: (section: ProjectSection) => string,
-) {
-  const projectItems = (Object.keys(sectionLabels) as ProjectSection[])
-    .filter((section) => !['organization', 'fabric', 'platform'].includes(section))
-    .map((section) => navigationItem(section, navigationIcon(section), pathFor(section)))
-  const globalItems = [navigationItem('organization', <TeamOutlined />, '/organization')]
-  if (isSystemAdmin) {
-    globalItems.push(navigationItem('fabric', <CloudServerOutlined />, '/execution-fabric'))
-    globalItems.push(navigationItem('platform', <ToolOutlined />, '/platform'))
-  }
-  return [...projectItems, ...globalItems]
-}
-
-function navigationIcon(section: ProjectSection): ReactNode {
-  const icons: Partial<Record<ProjectSection, ReactNode>> = {
-    dashboard: <DashboardOutlined />,
-    settings: <FolderOpenOutlined />,
-    services: <AppstoreOutlined />,
-    'request-targets': <ShareAltOutlined />,
-    apis: <ApiOutlined />,
-    protocols: <CodeOutlined />,
-    assets: <FundProjectionScreenOutlined />,
-    workflows: <ApartmentOutlined />,
-    data: <DatabaseOutlined />,
-    tasks: <ScheduleOutlined />,
-    performance: <ExperimentOutlined />,
-    environments: <CloudServerOutlined />,
-    contracts: <ShareAltOutlined />,
-    'test-engineering': <ExperimentOutlined />,
-    contexts: <FileSearchOutlined />,
-    impact: <FileSearchOutlined />,
-    'change-regression': <BranchesOutlined />,
-    quality: <SafetyCertificateOutlined />,
-    release: <SafetyCertificateOutlined />,
-    ai: <RobotOutlined />,
-    'ai-changes': <RobotOutlined />,
-    'mcp-changes': <AuditOutlined />,
-    reports: <BarChartOutlined />,
-  }
-  return icons[section] ?? <AppstoreOutlined />
-}
-
-function navigationItem(section: ProjectSection, icon: ReactNode, path: string) {
-  return { key: section, icon, label: <Link to={path}>{sectionLabels[section]}</Link> }
 }
 
 export const navigationGroups = [
@@ -157,4 +102,55 @@ export function visibleSections(isSystemAdmin: boolean): ProjectSection[] {
   return (Object.keys(sectionLabels) as ProjectSection[]).filter(
     (section) => isSystemAdmin || (section !== 'fabric' && section !== 'platform'),
   )
+}
+
+export function navigationPath(
+  section: ProjectSection,
+  pathFor: (section: ProjectSection) => string,
+): string {
+  return isGlobalAdministrationSection(section) ? globalPath(section) : pathFor(section)
+}
+
+export function shellNavigationItems(
+  isSystemAdmin: boolean,
+  activeSection: ProjectSection,
+  pathFor: (section: ProjectSection) => string,
+): MenuProps['items'] {
+  const allowed = visibleSections(isSystemAdmin)
+  const leaf = (section: ProjectSection) => ({
+    key: section,
+    'aria-label': sectionLabels[section],
+    label: (
+      <Link
+        to={navigationPath(section, pathFor)}
+        aria-current={activeSection === section ? 'page' : undefined}
+      >
+        {sectionLabels[section]}
+      </Link>
+    ),
+  })
+  const groups = navigationGroups.flatMap((group) => {
+    const sections = group.sections.filter((section) => allowed.includes(section))
+    if (!sections.length) return []
+    return [
+      {
+        key: group.key,
+        icon: (
+          <span aria-hidden="true" title={group.label}>
+            {group.icon}
+          </span>
+        ),
+        label: group.label,
+        className:
+          group.key === groupForSection(activeSection)?.key ? 'navigation-active-group' : undefined,
+        children: sections.map(leaf),
+      },
+    ]
+  })
+  return [
+    { ...leaf('dashboard'), icon: <DashboardOutlined aria-hidden="true" /> },
+    ...groups.slice(0, 5),
+    { type: 'divider', key: 'nav:global-divider', className: 'navigation-global-divider' },
+    ...groups.slice(5),
+  ]
 }

@@ -114,6 +114,10 @@ test('S31 质量指挥中心展示真实历史判断并保持证据深链', asyn
     'href',
     `/projects/${project.id}/impact`,
   )
+  await page
+    .getByRole('navigation', { name: '功能导航' })
+    .getByRole('menuitem', { name: '质量分析', exact: true })
+    .click()
   await expect(page.getByRole('link', { name: '发布门禁' }).first()).toHaveAttribute(
     'href',
     `/projects/${project.id}/release`,

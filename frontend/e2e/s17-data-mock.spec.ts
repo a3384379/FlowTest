@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -13,7 +14,7 @@ test('S17 Credential、只读节点拒绝与规则化 Mock 主路径', async ({ 
   const accessToken = await accessTokenFromSession(page.request)
   const project = await firstProject(page.request, accessToken)
 
-  await page.getByRole('link', { name: '数据与 Mock' }).click()
+  await navigateMenu(page, '数据与 Mock')
   await expect(page.getByRole('heading', { name: '数据与 Mock' })).toBeVisible()
   const credential = await createCredential(page, suffix)
   await rejectUnsafeSqlWorkflow(page.request, accessToken, project.id, credential.id, suffix)

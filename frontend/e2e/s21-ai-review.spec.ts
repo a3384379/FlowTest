@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -8,7 +9,7 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
 
   await page.goto('/')
   await authenticate(page)
-  await page.getByRole('link', { name: 'AI 助手' }).click()
+  await navigateMenu(page, 'AI 助手')
   await expect(page).toHaveURL(/\/ai$/)
   await expect(page.getByRole('heading', { name: 'AI 助手' })).toBeVisible()
   await expect(page.getByText(/AI 不会读取 Secret、自动发布或自动执行/)).toBeVisible()

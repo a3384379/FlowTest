@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 type Identified = { id: string }
@@ -29,7 +30,7 @@ test('S30 发布风险证据经 AI 变更集逐项审核后只生成草稿', asy
   await expect(page.getByText('发布风险分析已完成')).toBeVisible()
   await expect(page.getByText('证据指纹')).toBeVisible()
 
-  await page.getByRole('link', { name: 'AI 变更集' }).click()
+  await navigateMenu(page, 'AI 变更集')
   await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/ai-changes$`))
   await expect(page.getByRole('heading', { name: 'AI 测试资产变更审核' })).toBeVisible()
   await expect(page.getByText(/AI 只生成草稿/)).toBeVisible()

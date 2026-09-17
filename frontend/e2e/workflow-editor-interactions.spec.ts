@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 import {
   canvasKey,
@@ -324,10 +325,10 @@ test('FORM/KEY/LIFE：无效 JSON 保留、顶栏写保护及路由往返恢复�
   await drawer.getByRole('button', { name: '关闭', exact: true }).click()
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(page.getByText(/有尚未应用的节点配置/).last()).toBeVisible()
-  await page.getByRole('menuitem', { name: '接口管理' }).click()
+  await navigateMenu(page, '接口管理')
   await page.getByRole('button', { name: '保留草稿并切换', exact: true }).click()
   await expect(page.locator('.workflow-workspace-page')).toHaveCount(0)
-  await page.getByRole('menuitem', { name: '流程编排' }).click()
+  await navigateMenu(page, '流程编排')
   await page.getByRole('button', { name: '保留草稿并切换', exact: true }).click()
   await page.locator('.react-flow__node[data-id=api]').click()
   await page.getByRole('button', { name: 'setting 配置节点请求', exact: true }).click()

@@ -1,11 +1,10 @@
 import { DraftSessionProvider } from './features/drafts/DraftSessionProvider'
-import { ApiOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
+import { LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import {
   Avatar,
   Breadcrumb,
   Button,
   Layout,
-  Menu,
   Select,
   Space,
   Spin,
@@ -21,9 +20,14 @@ import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
 import ProjectEmptyState from './features/projects/ProjectEmptyState'
-import { projectPath, type ProjectSection } from './features/projects/project-routing'
+import {
+  isGlobalAdministrationSection,
+  projectPath,
+  type ProjectSection,
+} from './features/projects/project-routing'
 import { useProjectContext } from './features/projects/use-project-context'
-import { sectionLabels, shellNavigationItems } from './features/navigation/navigation-config'
+import { groupForSection, sectionLabels } from './features/navigation/navigation-config'
+import ShellSidebar from './features/navigation/ShellSidebar'
 import GlobalSearch from './features/search/GlobalSearch'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
@@ -53,7 +57,7 @@ const ProtocolWorkbenchPage = lazy(() => import('./pages/ProtocolWorkbenchPage')
 const RequestTargetsPage = lazy(() => import('./pages/RequestTargetsPage'))
 const OrganizationGovernancePage = lazy(() => import('./pages/OrganizationGovernancePage'))
 
-const { Header, Content, Sider } = Layout
+const { Header, Content } = Layout
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
@@ -86,22 +90,19 @@ function AuthenticatedShell() {
   const isGlobalAdministration = isGlobalAdministrationSection(section)
   return (
     <Layout className="app-shell">
-      <Sider width={224} theme="dark" className="sidebar">
-        <div className="brand">
-          <ApiOutlined />
-          <span>FlowTest</span>
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[section]}
-          items={shellNavigationItems(Boolean(user?.is_system_admin), pathFor)}
-        />
-      </Sider>
+      <ShellSidebar
+        key={authenticatedUserId(user)}
+        userId={authenticatedUserId(user)}
+        isSystemAdmin={Boolean(user?.is_system_admin)}
+        section={section}
+        pathFor={pathFor}
+      />
       <Layout>
         <Header className="topbar">
-          <Space>
-            <Typography.Text strong>接口自动化测试平台</Typography.Text>
+          <Space className="shell-topbar-left">
+            <Typography.Text strong className="shell-platform-title">
+              接口自动化测试平台
+            </Typography.Text>
             <GlobalSearch />
             <Select
               aria-label="全局项目"
@@ -117,10 +118,10 @@ function AuthenticatedShell() {
               }))}
             />
           </Space>
-          <Space>
+          <Space className="shell-topbar-account">
             <Tag color="blue">LOCAL</Tag>
             <Avatar size="small" icon={<UserOutlined />} />
-            <Typography.Text>{user?.display_name}</Typography.Text>
+            <Typography.Text className="shell-user-name">{user?.display_name}</Typography.Text>
             <Button type="text" icon={<LogoutOutlined />} onClick={() => void logout()}>
               退出
             </Button>
@@ -261,10 +262,6 @@ function isNoProjectView(projectCount: number | undefined, projectId: string | n
   return projectCount === 0 && projectId === null
 }
 
-function isGlobalAdministrationSection(section: ProjectSection): boolean {
-  return section === 'platform' || section === 'fabric' || section === 'organization'
-}
-
 function ApplicationRoutes() {
   return (
     <Routes>
@@ -349,7 +346,10 @@ function ProjectIndexRedirect() {
 
 function breadcrumbItems(projectName: string | null, section: ProjectSection) {
   const items = [{ title: <Link to="/dashboard">FlowTest</Link> }]
-  if (projectName) items.push({ title: <span>{projectName}</span> })
+  if (projectName && !isGlobalAdministrationSection(section))
+    items.push({ title: <span>{projectName}</span> })
+  const group = groupForSection(section)
+  if (group) items.push({ title: <span>{group.label}</span> })
   items.push({ title: <span>{sectionLabels[section]}</span> })
   return items
 }

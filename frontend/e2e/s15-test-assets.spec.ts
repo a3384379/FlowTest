@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import {
   expect,
   test,
@@ -24,7 +25,7 @@ test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async (
   await createSecondaryEnvironment(page, firstEnvironmentName)
   await createSecondaryEnvironment(page, secondEnvironmentName)
   await createPublishedWorkflow(page, workflowName)
-  await page.getByRole('link', { name: '测试资产' }).click()
+  await navigateMenu(page, '测试资产')
   await expect(page.getByRole('heading', { name: '测试资产' })).toBeVisible()
 
   await createCase(page, caseName, workflowName, firstEnvironmentName)
@@ -130,7 +131,7 @@ async function publishCaseTwiceAndReviewDiff(
 }
 
 async function createSecondaryEnvironment(page: Page, name: string) {
-  await page.getByRole('link', { name: '接口管理' }).click()
+  await navigateMenu(page, '接口管理')
   await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
   await page.getByRole('button', { name: '新建环境' }).click()
   const dialog = page.getByRole('dialog', { name: '新建环境' })
@@ -161,7 +162,7 @@ async function createAndPublishSuite(page: Page, caseName: string, suiteName: st
 }
 
 async function createSuitePlan(page: Page, suiteName: string, planName: string) {
-  await page.getByRole('link', { name: '任务执行' }).click()
+  await navigateMenu(page, '任务执行')
   await expect(page.getByRole('heading', { name: '任务执行' })).toBeVisible()
   await page.getByRole('button', { name: '新建计划' }).click()
   const dialog = page.getByRole('dialog', { name: '新建测试计划' })

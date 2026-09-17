@@ -1,3 +1,4 @@
+import { navigateMenu } from './support/navigation'
 import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
@@ -28,7 +29,7 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
     page.getByRole('main').getByText(pilotProject.title, { exact: true }).first(),
   ).toBeVisible()
 
-  await page.getByRole('link', { name: '项目管理' }).click()
+  await navigateMenu(page, '项目管理')
   await expect(page.getByRole('heading', { name: '项目治理' })).toBeVisible()
   await expect(page).toHaveURL((url) => url.pathname === governancePath && url.search === '')
   const governanceUrl = page.url()
