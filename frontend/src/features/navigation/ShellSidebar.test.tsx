@@ -72,6 +72,26 @@ describe('grouped shell navigation', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())
 
+  it('restores a manually expanded dashboard group on reload while an unconfigured dashboard stays closed', async () => {
+    const browser = userEvent.setup()
+    const view = renderWorkspace('/dashboard')
+    const group = screen.getByRole('menuitem', { name: '质量分析' })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    await browser.click(group)
+    view.unmount()
+    renderWorkspace('/dashboard')
+    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
+    await browser.click(screen.getByRole('button', { name: '展开侧栏' }))
+    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  })
+
   it('keeps URL, local draft and manually closed active group stable across ordinary renders', async () => {
     const browser = userEvent.setup()
     localStorage.setItem(
@@ -91,7 +111,10 @@ describe('grouped shell navigation', () => {
     expect(screen.getByLabelText('本地草稿')).toHaveValue('普通 render')
     await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
     await browser.click(screen.getByRole('button', { name: '展开侧栏' }))
-    expect(group).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('menuitem', { name: '测试设计' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     expect(screen.getByLabelText('本地草稿')).toHaveValue('普通 render')
   })
 

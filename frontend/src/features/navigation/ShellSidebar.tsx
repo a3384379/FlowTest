@@ -30,6 +30,7 @@ export default function ShellSidebar({
     if (target && !clickedLink) navigate(navigationPath(target, pathFor))
   }
   const drawerTrigger = useRef<HTMLButtonElement>(null)
+  // Each Menu mode owns its popup lifecycle; the workspace keeps the same instance.
   const navigation = (
     <div className={`shell-sidebar-body${state.collapsed ? ' shell-sidebar-collapsed' : ''}`}>
       <div className="brand">
@@ -39,6 +40,7 @@ export default function ShellSidebar({
       <nav className="shell-navigation-scroll" aria-label="功能导航">
         <ConfigProvider theme={{ components: { Menu: { darkItemSelectedBg: '#1677ff' } } }}>
           <Menu
+            key={state.collapsed ? 'collapsed-menu' : 'expanded-menu'}
             aria-label="功能菜单"
             theme="dark"
             mode="inline"

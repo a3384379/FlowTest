@@ -38,11 +38,12 @@ export function useNavigationState(
   const route = `${location.pathname}:${isSystemAdmin}`
   const [state, setState] = useState(() => {
     const preference = readNavigationPreference(userId)
+    const routeKeys = currentGroup(section)
     return {
       route,
       viewport,
       collapsedPreference: preference.collapsed,
-      openKeys: currentGroup(section),
+      openKeys: routeKeys.length ? routeKeys : preference.openKeys,
       popupKeys: [] as NavigationGroupKey[],
       drawerOpen: false,
     }
@@ -71,7 +72,8 @@ export function useNavigationState(
 
   function toggleCollapsed(): void {
     const next = !collapsed
-    const openKeys = currentGroup(section)
+    const routeKeys = currentGroup(section)
+    const openKeys = routeKeys.length ? routeKeys : state.openKeys
     setState({ ...state, collapsedPreference: next, openKeys, popupKeys: [] })
     writeNavigationPreference(userId, { collapsed: next, openKeys })
   }

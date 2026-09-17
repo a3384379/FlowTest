@@ -42,14 +42,14 @@
 ## 交互与状态边界
 
 - 分类 key 使用 `nav:*`，与业务 section 分离。点击分类只控制展开，不触发 Link、WorkspaceTabs 或业务导航。直接打开/刷新深链、切换 Tab、前进后退和项目切换时，由 pathname 同步分类；query/hash 变化不会重置分类。
-- 用户主动关闭当前分类后，普通 render 不会立即重新展开。总览首次进入不展开任何分类；路由优先于过期缓存。
+- 用户主动关闭当前分类后，普通 render 不会立即重新展开。总览没有已存偏好时不展开分类；初次加载恢复合法已存分类；路由优先于过期缓存。
 - 展开 224px、收起 72px。收起时使用可点击及键盘操作的子菜单浮层，popup openKeys 与展开状态分离；恢复展开时打开当前页面分类。品牌和底部按钮固定在侧栏内部，菜单独立滚动。
 - `<992px` 使用 Drawer；选择叶子、Escape 或遮罩关闭后恢复导航按钮焦点。992–1279px 无偏好时默认收起，≥1280px 默认展开。响应式变化不回写用户桌面折叠偏好。
 - 偏好存于 `flowtest:navigation:v1:${userId}`，只接受布尔折叠值及合法分类 key。损坏 JSON、未知 key、浏览器禁止读写均安全降级。角色变化重新同步路由并过滤叶子；用户切换重新初始化侧栏。
 - 面包屑：项目页 `FlowTest → 项目 → 分类 → 页面`；全局页 `FlowTest → 系统管理 → 页面`；总览不伪造分类。分类文字不导航。
 - 全局 organization/platform/fabric 页选择项目，直接进入新项目 dashboard。业务页选择项目保留 section；清除项目回到 `/dashboard`。`pathFor` 为全局管理页面始终生成全局路径。
 
-DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、WorkspaceTabs 的 userId+projectId 存储 key 均保持不变。侧栏状态不进入页面 key；未保存编辑不会因为展开/收起导航而卸载。全局搜索仍搜索项目与资产，不宣称支持菜单搜索。没有后端、数据库、脱敏策略或业务编辑器改造。
+DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、WorkspaceTabs 的 userId+projectId 存储 key 均保持不变。侧栏状态不进入页面 key；未保存编辑不会因为展开/收起导航而卸载。全局搜索仍搜索项目与资产，不宣称支持菜单搜索。没有后端业务、数据库、脱敏策略或业务编辑器改造。
 
 ## 验收方式
 
@@ -75,7 +75,7 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 - 前端 `pnpm format:check`、`pnpm lint`、`pnpm build`：通过。
 - 前端 `pnpm test:coverage`：88 个测试文件、420 个测试通过；语句 85.70%、分支 80.78%、函数 84.89%、行 87.93%。
 
-- `FLOWTEST_E2E_BASE_URL=http://localhost:13020 pnpm exec playwright test e2e/grouped-navigation.spec.ts --project=chromium`：6 个专项场景及认证 Setup 全部通过（7 passed）；另运行 `--grep 'menu scroll'` 验证 420px 高度下菜单独立滚动、品牌/底部按钮不移动且工作区不滚动（专项及 Setup 2 passed）。涵盖未保存节点输入、编辑器 DOM 实例保留和折叠总览图标的键盘导航。
+- `FLOWTEST_E2E_BASE_URL=http://localhost:13020 pnpm exec playwright test e2e/grouped-navigation.spec.ts --project=chromium`：最终 7 个专项场景及认证 Setup 全部通过（8 passed），其中窄屏额外验证 320px 顶栏控件可达；前期另运行 `--grep 'menu scroll'` 验证 420px 高度下菜单独立滚动、品牌/底部按钮不移动且工作区不滚动（专项及 Setup 2 passed）。涵盖未保存节点输入、编辑器 DOM 实例保留和折叠总览图标的键盘导航。
 
 ### 实际页面截图
 
@@ -95,6 +95,13 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 
 本地本轮没有启动执行 worker，未在此命令重复两项发布/执行场景；完整执行与业务场景由 GitHub Compose CI 验证。不会把未执行的本地场景算作通过。
 
+### 审阅与构建补充
+
+- 总览首次加载恢复合法的展开分类偏好，无偏好仍默认收起。具体业务页路由优先于缓存；从其他页面进入总览仍按路由规则关闭分类。补充了刷新与收起/展开恢复单测。
+- Menu 两种模式使用各自实例，隔离 Ant Design 模式切换后的迟到关闭事件。只有导航 Menu 随模式切换，业务页的 React key 和实例保持不变；多尺寸未应用输入/DOM 实例验收继续通过。
+- 首轮远程 Compose 在 containerd vendoring 阶段缺少 OpenTelemetry `go.sum` 校验条目，尚未执行浏览器验收。`backend/Dockerfile` 增加 `go mod download all`，补齐既有模块图的校验信息，原 containerd commit、Go 与 gRPC 版本声明保持不变。
+- 定向 containerd 构建通过，三个 binary 都通过原 `go version -m` gRPC v1.83.2 校验。本地 Docker Hub 元数据请求未完成，因此验证使用同一 SHA256 digest 的本地已下载 Go 镜像临时别名；提交的 Dockerfile 仍使用原 pinned digest。验证命令 `docker build -f /private/tmp/flowtest-nav-build-definition/Dockerfile --target containerd-builder -t flowtest-nav-containerd-builder backend`。
+
 ## 修改文件
 
 - `frontend/src/App.tsx`、`App.test.tsx`：接入侧栏与分类面包屑，更新原导航表征测试。
@@ -106,6 +113,7 @@ DraftSessionProvider 的用户 key、ApplicationRoutes 的项目/全局 key、Wo
 - `frontend/src/styles.css`：固定品牌/底栏、独立滚动、窄屏顶栏与 Drawer 配色。
 - `frontend/e2e/grouped-navigation.spec.ts`、`support/navigation.ts`：真实父/叶菜单路径与多尺寸验收。
 - `frontend/e2e/s14-management-workbench.spec.ts`、`s15-test-assets.spec.ts`、`s17-data-mock.spec.ts`、`s18-contract-automation.spec.ts`、`s19-quality-scale.spec.ts`、`s21-ai-review.spec.ts`、`s22-capability-sdk.spec.ts`、`s29-execution-fabric.spec.ts`、`s30-failure-intelligence.spec.ts`、`s31-release-gate.spec.ts`、`v1-acceptance.spec.ts`、`workflow-editor-interactions.spec.ts`：按可见父分类选择原页面。
+- `backend/Dockerfile`：必要的 containerd 构建校验信息补齐，独立构建修复提交。
 - 本文与 `docs/navigation/navigation-{1366,1440,1920,mobile}.png`：旧→新映射与实际页面证据。
 
 ## 已知边界
