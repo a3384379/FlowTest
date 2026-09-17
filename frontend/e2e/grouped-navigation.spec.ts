@@ -60,6 +60,54 @@ for (const viewport of [
   })
 }
 
+for (const viewport of [
+  { width: 1366, height: 768 },
+  { width: 1920, height: 1080 },
+]) {
+  test(`workflow → services keeps sidebar fixed on every animation frame (${viewport.width})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await seedEditor(page)
+    await expect(page.getByTestId('workflow-workbench')).toBeVisible()
+    const navigation = page.getByRole('navigation', { name: '功能导航' })
+    await navigation.getByRole('menuitem', { name: '项目与接口', exact: true }).click()
+    const service = navigation.getByRole('link', { name: '服务目录', exact: true })
+    await expect(service).toBeVisible()
+    const [samples] = await Promise.all([
+      page.evaluate(
+        () =>
+          new Promise<{ height: number; footerBottom: number; services: boolean }[]>((resolve) => {
+            const frames: { height: number; footerBottom: number; services: boolean }[] = []
+            const started = performance.now()
+            function sample() {
+              const sidebar = document.querySelector('.sidebar')!
+              const footer = document.querySelector('.shell-sidebar-footer')!
+              frames.push({
+                services: location.pathname.endsWith('/services'),
+                height: sidebar.getBoundingClientRect().height,
+                footerBottom: footer.getBoundingClientRect().bottom,
+              })
+              if (performance.now() - started < 900) requestAnimationFrame(sample)
+              else resolve(frames)
+            }
+            requestAnimationFrame(sample)
+          }),
+      ),
+      service.click(),
+    ])
+    await expect(page.getByRole('heading', { name: '服务目录', exact: true })).toBeVisible()
+    expect(samples.length).toBeGreaterThan(5)
+    expect(samples.some((sample) => sample.services)).toBe(true)
+    for (const sample of samples) {
+      expect(sample.height).toBeCloseTo(viewport.height, 0)
+      expect(sample.footerBottom).toBeCloseTo(viewport.height, 0)
+    }
+    await page.getByRole('tab', { name: '流程编排', exact: true }).click()
+    await expect(page.getByTestId('workflow-workbench')).toBeVisible()
+  })
+}
+
 test('N06/N08：collapsed popup supports keyboard selection, Escape, tabs and browser history', async ({
   page,
 }) => {
