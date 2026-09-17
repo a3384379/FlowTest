@@ -285,10 +285,6 @@
 .app-shell:has(.workflow-workspace-page) > .ant-layout {
   min-height: 0;
 }
-.app-shell:has(.workflow-workspace-page) > .sidebar {
-  height: 100%;
-  overflow-y: auto;
-}
 .content:has(.workflow-workspace-page) {
   flex: 1 1 0;
 }
