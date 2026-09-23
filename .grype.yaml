@@ -11,3 +11,8 @@ ignore:
     package: { name: python, version: 3.13.15, type: binary }
   - vulnerability: CVE-2026-15308
     package: { name: python, version: 3.13.15, type: binary }
+  # The Dockerfile applies python/cpython@b8f23e307097552eaea2604383a12ab280520d0d
+  # and runs its regression test before installation. Grype still identifies
+  # the patched runtime by its unchanged 3.13.15 version string.
+  - vulnerability: CVE-2026-82049
+    package: { name: python, version: 3.13.15, type: binary }

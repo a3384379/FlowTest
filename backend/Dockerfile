@@ -128,6 +128,8 @@ RUN set -eux; \
 
 FROM debian:trixie-slim AS python-runtime
 
+COPY patches/cpython-3.13-cve-2026-82049.patch /tmp/cpython-3.13-cve-2026-82049.patch
+
 ENV PATH="/usr/local/bin:$PATH" \
     PYTHON_VERSION="3.13.15" \
     PYTHON_SHA256="1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76"
@@ -156,6 +158,7 @@ RUN set -eux; \
         libssl-dev \
         make \
         netbase \
+        patch \
         tk-dev \
         tzdata \
         uuid-dev \
@@ -176,6 +179,9 @@ RUN set -eux; \
     mkdir -p /usr/src/python; \
     tar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \
     rm python.tar.xz; \
+    patch --directory=/usr/src/python --strip=1 \
+        < /tmp/cpython-3.13-cve-2026-82049.patch; \
+    rm /tmp/cpython-3.13-cve-2026-82049.patch; \
     cd /usr/src/python; \
     build_arch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
     ./configure \
@@ -186,6 +192,7 @@ RUN set -eux; \
         --enable-shared \
         --with-ensurepip; \
     make -j "$(nproc)"; \
+    LD_LIBRARY_PATH=. ./python -m test -m test_sneaky_hardlink_relocation test_tarfile; \
     make install; \
     cd /; \
     rm -rf /usr/src/python; \
