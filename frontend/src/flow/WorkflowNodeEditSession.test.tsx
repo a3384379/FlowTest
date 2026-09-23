@@ -6,6 +6,7 @@ import { workflowDefinition } from '../test/fixtures'
 import type { WorkflowDefinition } from '../lib/api'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import WorkflowJsonInput from './WorkflowJsonInput'
+import { editorNode, restoreEditedNode } from './editor/graph-analysis'
 
 function Harness({
   session,
@@ -37,31 +38,34 @@ function Harness({
               <button
                 key={operation}
                 onClick={() =>
-                  update({
-                    ...definition,
-                    edges: definition.edges.map((edge, index) =>
-                      index === 0
-                        ? {
-                            ...edge,
-                            mappings:
-                              operation === 'delete'
-                                ? []
-                                : [
-                                    ...(operation === 'add' ? edge.mappings : []),
-                                    {
-                                      transform: { kind: 'identity' as const, template: '' },
-                                      source: { node_id: edge.source, path: operation },
-                                      target: {
-                                        node_id: edge.target,
-                                        location: 'body',
-                                        key: 'value',
+                  update(
+                    {
+                      ...definition,
+                      edges: definition.edges.map((edge, index) =>
+                        index === 0
+                          ? {
+                              ...edge,
+                              mappings:
+                                operation === 'delete'
+                                  ? []
+                                  : [
+                                      ...(operation === 'add' ? edge.mappings : []),
+                                      {
+                                        transform: { kind: 'identity' as const, template: '' },
+                                        source: { node_id: edge.source, path: operation },
+                                        target: {
+                                          node_id: edge.target,
+                                          location: 'body',
+                                          key: 'value',
+                                        },
                                       },
-                                    },
-                                  ],
-                          }
-                        : edge,
-                    ),
-                  })
+                                    ],
+                            }
+                          : edge,
+                      ),
+                    },
+                    'edges',
+                  )
                 }
               >
                 {operation} mapping
@@ -71,29 +75,43 @@ function Harness({
               aria-label="节点名称"
               value={draft.name}
               onChange={(event) =>
-                update({
-                  ...definition,
-                  nodes: definition.nodes.map((item) =>
-                    item.id === draft.id ? { ...draft, name: event.target.value } : item,
-                  ),
-                })
+                update(
+                  {
+                    ...definition,
+                    nodes: definition.nodes.map((item) =>
+                      item.id === draft.id
+                        ? restoreEditedNode(draft, {
+                            ...editorNode(draft),
+                            name: event.target.value,
+                          })
+                        : item,
+                    ),
+                  },
+                  'node',
+                )
               }
             />
             <label>
               请求 JSON
               <WorkflowJsonInput
                 fieldKey="payload"
-                value={draft.config.payload ?? {}}
+                value={editorNode(draft).config.payload ?? {}}
                 editable
                 onChange={(payload) =>
-                  update({
-                    ...definition,
-                    nodes: definition.nodes.map((item) =>
-                      item.id === draft.id
-                        ? { ...draft, config: { ...draft.config, payload } }
-                        : item,
-                    ),
-                  })
+                  update(
+                    {
+                      ...definition,
+                      nodes: definition.nodes.map((item) =>
+                        item.id === draft.id
+                          ? restoreEditedNode(draft, {
+                              ...editorNode(draft),
+                              config: { ...editorNode(draft).config, payload },
+                            })
+                          : item,
+                      ),
+                    },
+                    'node',
+                  )
                 }
               />
             </label>
@@ -104,6 +122,44 @@ function Harness({
   )
 }
 describe('node edit transactions', () => {
+  it.each(['api', 'capability'] as const)(
+    'keeps the last input when a %s node name returns to its applied value',
+    (type) => {
+      const base = workflowDefinition.nodes[1]
+      const original =
+        type === 'api'
+          ? base
+          : {
+              ...base,
+              type: 'capability' as const,
+              capability_id: 'http.request',
+              capability_version: '2.0.0',
+              configuration: base.config,
+              config: { legacy: true },
+            }
+      const initial = {
+        ...workflowDefinition,
+        nodes: workflowDefinition.nodes.map((item) => (item.id === base.id ? original : item)),
+      }
+      const session = new DraftSession()
+      const changed = vi.fn()
+      render(<Harness session={session} changed={changed} external={initial} />)
+
+      fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: '等待2' } })
+      fireEvent.change(screen.getByLabelText('节点名称'), { target: { value: base.name } })
+
+      expect(screen.getByLabelText('节点名称')).toHaveValue(base.name)
+      expect([...session.nodeEditors.values()][0].draftNode.name).toBe(base.name)
+      expect(session.unsafe.size).toBe(0)
+      expect(screen.getByRole('button', { name: '丢弃修改' })).toBeDisabled()
+      fireEvent.change(screen.getByLabelText(/请求 JSON/), {
+        target: { value: '{"saved":true}' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(changed.mock.calls[0][0].nodes[1]).toMatchObject({ name: base.name, type })
+    },
+  )
   it.each(['edit', 'add', 'delete'] as const)(
     'preserves unapplied node fields during %s mapping',
     async (operation) => {
@@ -149,6 +205,22 @@ describe('node edit transactions', () => {
       expect(changed.mock.calls[1][0].edges).toEqual(changed.mock.calls[0][0].edges)
     },
   )
+  it('retains an unfinished JSON input when an edge changes', () => {
+    const session = new DraftSession()
+    const changed = vi.fn()
+    render(<Harness session={session} changed={changed} />)
+    fireEvent.change(screen.getByLabelText(/请求 JSON/), { target: { value: '{"pending":' } })
+    fireEvent.click(screen.getByRole('button', { name: 'add mapping' }))
+
+    expect(screen.getByLabelText(/请求 JSON/)).toHaveValue('{"pending":')
+    expect([...session.nodeEditors.values()][0].rawFields.payload).toMatchObject({
+      text: '{"pending":',
+      error: '请检查引号、逗号与括号是否完整。',
+    })
+    expect(changed).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
   it('rebases a clean form after undo and permits a subsequent edit', async () => {
     const changed = vi.fn()
     render(<Harness session={new DraftSession()} changed={changed} />)

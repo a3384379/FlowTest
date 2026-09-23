@@ -36,6 +36,7 @@ import {
 } from '../features/service-targets/service-target-service'
 import WorkflowApiRequestEditor from './WorkflowApiRequestEditor'
 import { useInspectorPresentation } from './editor/inspector-presentation'
+import type { WorkflowNodeEditKind } from './editor/node-edit-session'
 
 type InspectorProps = {
   projectId?: string | null
@@ -50,7 +51,7 @@ type InspectorProps = {
   grpcDescriptors?: SchemaArtifact[]
   eventSources?: EventSource[]
   editable: boolean
-  onChange: (definition: WorkflowDefinition) => void
+  onChange: (definition: WorkflowDefinition, kind: WorkflowNodeEditKind) => void
   onDelete: () => void
 }
 
@@ -74,7 +75,7 @@ export default function WorkflowNodeInspector({
   if (!originalNode) return <EmptyInspector />
   const node = editorNode(originalNode)
   const updateNode = (updated: WorkflowNode) =>
-    onChange(replaceNode(definition, restoreEditedNode(originalNode, updated)))
+    onChange(replaceNode(definition, restoreEditedNode(originalNode, updated)), 'node')
   return (
     <aside
       className={`workflow-inspector workflow-node-configuration${presentation === 'fullscreen' ? ' is-fullscreen' : ''}`}
@@ -110,7 +111,7 @@ export default function WorkflowNodeInspector({
             node={node}
             definition={definition}
             editable={editable}
-            onChange={onChange}
+            onChange={(next) => onChange(next, 'edges')}
           />
         )}
       </div>

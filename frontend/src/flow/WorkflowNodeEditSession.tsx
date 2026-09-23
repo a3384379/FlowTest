@@ -9,6 +9,7 @@ import {
   type WorkflowNodeEditorDraft,
   type WorkflowRequestEditorDraft,
   type WorkflowRequestIdentity,
+  type WorkflowNodeEditKind,
 } from './editor/node-edit-session'
 import { jsonEqual } from './editor/editor-types'
 import {
@@ -22,6 +23,17 @@ function nodeContent(node: WorkflowNode): Omit<WorkflowNode, 'position'> {
   const { position: _position, ...content } = node
   void _position
   return content
+}
+function hasPendingNodeEdits(
+  draft: WorkflowNodeEditorDraft,
+  updated: WorkflowNode,
+  targetChanged: boolean,
+): boolean {
+  return (
+    !jsonEqual(nodeContent(updated), nodeContent(draft.baseNode)) ||
+    Object.keys(draft.rawFields).length > 0 ||
+    (!targetChanged && draft.requestDirty)
+  )
 }
 export default function WorkflowNodeEditSession({
   scope,
@@ -38,7 +50,10 @@ export default function WorkflowNodeEditSession({
   definition: WorkflowDefinition
   editable: boolean
   onChange: (definition: WorkflowDefinition) => void
-  children: (node: WorkflowNode, update: (definition: WorkflowDefinition) => void) => ReactNode
+  children: (
+    node: WorkflowNode,
+    update: (definition: WorkflowDefinition, kind: WorkflowNodeEditKind) => void,
+  ) => ReactNode
 }) {
   const session = useDraftSession()
   const key = `${scope}${encodeURIComponent(node.id)}`
@@ -204,18 +219,20 @@ export default function WorkflowNodeEditSession({
     update({
       ...latest.current,
       draftNode: updated,
-      dirty: true,
+      dirty: hasPendingNodeEdits(previous, updated, targetChanged),
       ...(targetChanged
         ? { requestDraft: null, requestDirty: false, generation: session.nextGeneration() }
         : {}),
     })
     setError(null)
   }
-  function updateDefinition(next: WorkflowDefinition) {
-    const updated = next.nodes.find((item) => item.id === node.id)
-    const current = definition.nodes.find((item) => item.id === node.id)
-    if (updated && !jsonEqual(updated, current)) void updateNode(updated)
-    if (!jsonEqual(next.edges, definition.edges)) onChange({ ...definition, edges: next.edges })
+  function updateDefinition(next: WorkflowDefinition, kind: WorkflowNodeEditKind) {
+    if (kind === 'node') {
+      const updated = next.nodes.find((item) => item.id === node.id)
+      if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
+    } else if (!jsonEqual(next.edges, definition.edges)) {
+      onChange({ ...definition, edges: next.edges })
+    }
   }
   return (
     <NodeEditContext.Provider
@@ -261,9 +278,12 @@ function SessionContent({
   node,
   onChange,
 }: {
-  render: (node: WorkflowNode, update: (definition: WorkflowDefinition) => void) => ReactNode
+  render: (
+    node: WorkflowNode,
+    update: (definition: WorkflowDefinition, kind: WorkflowNodeEditKind) => void,
+  ) => ReactNode
   node: WorkflowNode
-  onChange: (definition: WorkflowDefinition) => void
+  onChange: (definition: WorkflowDefinition, kind: WorkflowNodeEditKind) => void
 }) {
   return render(node, onChange)
 }

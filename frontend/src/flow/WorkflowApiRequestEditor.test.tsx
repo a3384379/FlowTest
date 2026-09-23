@@ -504,6 +504,51 @@ describe('WorkflowApiRequestEditor', () => {
     expect(session.unsafe.size).toBe(0)
   })
 
+  it('keeps an unfinished request draft when only an edge changes', async () => {
+    const user = userEvent.setup()
+    const session = new DraftSession()
+    const changed = vi.fn()
+    vi.mocked(getApiDetail).mockResolvedValue({
+      ...detail,
+      version: { ...detail.version, body_kind: 'json', body: { initial: true } },
+    })
+    render(<RequestSessionHarness session={session} changed={changed} startFullscreen />)
+    await screen.findByText('继承接口模板 v3')
+    await user.click(screen.getByRole('tab', { name: 'Body' }))
+    await user.click(within(screen.getByRole('tabpanel')).getByText('节点自定义'))
+    fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+      target: { value: '{"pending":' },
+    })
+
+    await user.click(screen.getByRole('button', { name: '切换节点名称测试' }))
+    await user.click(screen.getByRole('button', { name: '切换节点名称测试' }))
+    expect([...session.nodeEditors.values()][0].requestDirty).toBe(true)
+    expect(session.unsafe.size).toBe(1)
+
+    await user.click(screen.getByRole('button', { name: '修改连线测试' }))
+    expect(screen.getByRole('textbox', { name: 'JSON Body' })).toHaveValue('{"pending":')
+    expect([...session.nodeEditors.values()][0].requestDraft).toMatchObject({
+      activeTab: 'body',
+      fields: { body_text: '{"pending":' },
+    })
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(changed.mock.calls[0][0].nodes[0]).toEqual({
+      ...node,
+      config: { ...node.config, request_overrides: {} },
+    })
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'JSON Body' }), {
+      target: { value: '{"ready":true}' },
+    })
+    await user.click(screen.getByRole('button', { name: '保存节点配置' }))
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(2))
+    expect(changed.mock.calls[1][0].edges).toEqual(changed.mock.calls[0][0].edges)
+    expect(changed.mock.calls[1][0].nodes[0].config.request_overrides.body).toEqual({
+      kind: 'json',
+      value: { ready: true },
+    })
+  })
+
   it('applies request edits after restoring the fullscreen inspector to quick mode', async () => {
     const user = userEvent.setup()
     const session = new DraftSession()
@@ -666,20 +711,63 @@ function RequestSessionHarness({
               <InspectorPresentationContext.Provider value={presentation}>
                 <button
                   onClick={() =>
-                    update({
-                      ...definition,
-                      nodes: [
-                        restoreEditedNode(draft, {
-                          ...editorNode(draft),
-                          config: {
-                            ...editorNode(draft).config,
-                            api_definition_id: 'api-2',
-                            api_version: 2,
-                            request_overrides: {},
+                    update(
+                      {
+                        ...definition,
+                        nodes: [
+                          restoreEditedNode(draft, {
+                            ...editorNode(draft),
+                            name: draft.name === node.name ? '临时名称' : node.name,
+                          }),
+                        ],
+                      },
+                      'node',
+                    )
+                  }
+                >
+                  切换节点名称测试
+                </button>
+                <button
+                  onClick={() =>
+                    update(
+                      {
+                        ...definition,
+                        edges: [
+                          ...definition.edges,
+                          {
+                            id: 'audit-edge',
+                            source: 'start',
+                            target: draft.id,
+                            condition: null,
+                            mappings: [],
                           },
-                        }),
-                      ],
-                    })
+                        ],
+                      },
+                      'edges',
+                    )
+                  }
+                >
+                  修改连线测试
+                </button>
+                <button
+                  onClick={() =>
+                    update(
+                      {
+                        ...definition,
+                        nodes: [
+                          restoreEditedNode(draft, {
+                            ...editorNode(draft),
+                            config: {
+                              ...editorNode(draft).config,
+                              api_definition_id: 'api-2',
+                              api_version: 2,
+                              request_overrides: {},
+                            },
+                          }),
+                        ],
+                      },
+                      'node',
+                    )
                   }
                 >
                   切换接口测试
@@ -692,7 +780,7 @@ function RequestSessionHarness({
                   artifacts={[artifact]}
                   editable
                   onUpdate={(updated) =>
-                    update({ ...definition, nodes: [restoreEditedNode(draft, updated)] })
+                    update({ ...definition, nodes: [restoreEditedNode(draft, updated)] }, 'node')
                   }
                 />
               </InspectorPresentationContext.Provider>
