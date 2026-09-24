@@ -3,7 +3,8 @@ x-flowtest-environment: &flowtest-environment
   FLOWTEST_DEBUG: "true"
   FLOWTEST_SECRET_KEY: ${FLOWTEST_UPGRADE_SECRET_KEY:-upgrade-rehearsal-only-change-me-now}
   FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: admin@flowtest.dev
-  FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: admin123456
+  # This rehearsal preserves the V2 account and its historical 12+ character password.
+  FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: FlowTest-Change-Me-123!
   FLOWTEST_SECURE_COOKIES: "false"
   FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_UPGRADE_DATA_ENCRYPTION_KEY:-Zmxvd3Rlc3QtdXBncmFkZS1yZWhlYXJzYWwta2V5LTM=}
   FLOWTEST_DATA_ENCRYPTION_KEYRING: '${FLOWTEST_UPGRADE_DATA_ENCRYPTION_KEYRING:-{}}'
