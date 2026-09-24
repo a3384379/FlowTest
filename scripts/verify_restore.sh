@@ -36,7 +36,8 @@ wait_for_postgres() {
 wait_for_minio() {
   local _attempt
   for _attempt in $(seq 1 60); do
-    if docker exec "${minio_container}" curl -fsS http://localhost:9000/minio/health/live \
+    if docker exec "${minio_container}" bash -ec \
+      'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /minio/health/live HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3; IFS= read -r status <&3; [[ "$status" == *" 200 "* ]]' \
       >/dev/null 2>&1; then
       return 0
     fi
@@ -61,10 +62,10 @@ docker run -d --name "${postgres_container}" --network "${network}" \
   -e POSTGRES_USER=flowtest -e POSTGRES_PASSWORD=restore-verification \
   -e POSTGRES_DB=flowtest -v "${postgres_volume}:/var/lib/postgresql/data" \
   postgres:17.6-alpine >/dev/null
-docker run -d --name "${minio_container}" --network "${network}" \
+docker run -d --name "${minio_container}" --network "${network}" --user 0:0 \
   -e MINIO_ROOT_USER=flowtest -e MINIO_ROOT_PASSWORD=restore-verification \
   -v "${minio_volume}:/data" \
-  quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
+  cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data >/dev/null
 
 wait_for_postgres
 wait_for_minio

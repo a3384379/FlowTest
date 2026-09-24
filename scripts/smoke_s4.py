@@ -27,7 +27,7 @@ class SmokeConfig:
         return cls(
             api_url=os.getenv("FLOWTEST_SMOKE_API_URL", "http://localhost:8000/api/v1"),
             email=os.getenv("FLOWTEST_SMOKE_ADMIN_EMAIL", "admin@flowtest.dev"),
-            password=os.getenv("FLOWTEST_SMOKE_ADMIN_PASSWORD", "FlowTest-Change-Me-123!"),
+            password=os.getenv("FLOWTEST_SMOKE_ADMIN_PASSWORD", "admin123456"),
             target_url=os.getenv("FLOWTEST_SMOKE_TARGET_URL", "http://mock-target:8080"),
         )
 

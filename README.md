@@ -56,10 +56,10 @@ cd FlowTest
 ./deploy/compact/verify.sh
 ```
 
-首次启动会构建或下载镜像，并在 `deploy/compact/.env` 生成权限为 `0600` 的随机管理员密码和服务密钥；
+首次启动会构建或下载镜像，并在 `deploy/compact/.env` 写入默认管理员密码和随机服务密钥；
 该文件已被 Git 忽略，不得提交、上传或发到聊天/工单。启动完成后访问 <http://localhost:3000>，
-管理员可使用 `admin@flowtest.dev` 或账号别名 `admin` 登录。Windows 公司电脑请在 WSL2 中执行上述命令，并启用 Docker Desktop
-的 WSL 集成。
+新安装默认使用 `admin/admin123456` 登录，无需首次改密。Windows 公司电脑请在 WSL2 中执行上述
+命令，并启用 Docker Desktop 的 WSL 集成。
 
 详细的系统要求、首次登录、启停、内网开放、备份、升级及完全离线安装步骤见
 [公司电脑 Compact 快速部署](docs/operations/compact-company-quickstart.md)。GitHub 源码压缩包不包含
@@ -96,10 +96,11 @@ docker compose up --build
 - gRPC/Reflection 目标服务：`localhost:50051`
 - MinIO Console：<http://localhost:9001>
 
-登录账号字段同时接受管理员邮箱和 `admin` 别名；别名会解析到
-`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`。Full/Compact 的密码由 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 配置，
-并按安装档位执行首次改密策略；Standalone 新包固定使用 `admin/admin` 且不强制首次改密。所有新建或
-主动修改的密码最低为 8 位；生产部署不得沿用示例值。
+任何环境中新安装的 Full、Compact 和 Standalone 均可使用 `admin/admin123456`，首次登录不强制修改密码。
+`admin` 别名解析到 `FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`（默认 `admin@flowtest.dev`）；
+`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 可覆盖默认密码。已有数据库中的账号和密码不会因升级而重置，
+已有 `.env` 也不会被启动脚本覆盖。所有新建或主动修改的密码最低为 8 位；
+其他生产配置校验保持不变；如需修改默认密码，可自行在 `.env` 中覆盖。
 
 S1 已提供 `/api/v1/auth`、`/api/v1/users`、`/api/v1/projects`、项目成员和任意层级目录接口。
 Refresh Token 仅通过 HttpOnly Cookie 轮换，Access Token 有效期默认 15 分钟。

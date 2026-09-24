@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     access_token_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_days: int = Field(default=7, ge=1, le=30)
     bootstrap_admin_email: str = "admin@flowtest.dev"
-    bootstrap_admin_password: str = "FlowTest-Change-Me-123!"  # noqa: S105
+    bootstrap_admin_password: str = "admin123456"  # noqa: S105
     secure_cookies: bool = False
     data_encryption_key: str = "Zmxvd3Rlc3QtbG9jYWwtZW5jcnlwdGlvbi1rZXktMzI="
     data_encryption_keyring: dict[str, str] = Field(default_factory=dict)
@@ -281,7 +281,7 @@ class Settings(BaseSettings):
         if self.runtime_profile is not RuntimeProfile.STANDALONE:
             unsafe = unsafe or self.s3_secret_key == "flowtest-local-secret"  # noqa: S105
         if unsafe or not self.secure_cookies:
-            raise ValueError("生产环境必须替换默认密钥、管理员密码并启用安全 Cookie")
+            raise ValueError("生产环境必须替换示例密钥、旧版管理员密码并启用安全 Cookie")
         if self.feature_oidc_enabled:
             oidc_urls = (
                 self.oidc_issuer_url,

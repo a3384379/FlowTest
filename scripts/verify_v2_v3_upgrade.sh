@@ -81,6 +81,7 @@ verify_phase() {
     --volume "${temporary_root}:/state:rw" \
     --workdir /tmp/scripts \
     --env "FLOWTEST_SMOKE_API_URL=http://${api_service}:8000/api/v1" \
+    --env "FLOWTEST_SMOKE_ADMIN_PASSWORD=FlowTest-Change-Me-123!" \
     current-api python verify_v2_v3_data.py verify \
     --state /state/state.json --phase "${phase}"
   storage_transfer verify
