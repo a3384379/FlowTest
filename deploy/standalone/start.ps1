@@ -27,15 +27,11 @@ function Ensure-EnvFile {
         "FLOWTEST_SECRET_KEY=$(New-Secret 32)"
     )
     $content = $content.Replace(
-        "FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD=replace-on-first-start",
-        "FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD=admin"
-    )
-    $content = $content.Replace(
         "FLOWTEST_DATA_ENCRYPTION_KEY=replace-on-first-start",
         "FLOWTEST_DATA_ENCRYPTION_KEY=$(New-Secret 32)"
     )
     Set-Content -Path $EnvFile -Value $content -Encoding UTF8 -NoNewline
-    Write-Host "已创建 .env；Standalone 初始账号为 admin，密码为 admin。"
+    Write-Host "已创建 .env；Standalone 初始账号为 admin，密码为 admin123456。"
 }
 
 function Find-Python {

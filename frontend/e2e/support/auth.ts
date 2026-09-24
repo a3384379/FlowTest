@@ -2,8 +2,7 @@ import { expect, type Page, type Response } from '@playwright/test'
 
 export const administratorEmail = process.env.FLOWTEST_E2E_ADMIN_EMAIL ?? 'admin@flowtest.dev'
 export const activePassword = process.env.FLOWTEST_E2E_ACTIVE_PASSWORD ?? 'FlowTest-E2E-Admin-123!'
-export const bootstrapPassword =
-  process.env.FLOWTEST_E2E_BOOTSTRAP_PASSWORD ?? 'FlowTest-Change-Me-123!'
+export const bootstrapPassword = process.env.FLOWTEST_E2E_BOOTSTRAP_PASSWORD ?? 'admin123456'
 export const authenticationStatePath = '.playwright/.auth/administrator.json'
 
 export async function authenticate(page: Page): Promise<void> {

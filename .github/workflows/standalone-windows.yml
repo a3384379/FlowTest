@@ -9,8 +9,6 @@ on:
       - "frontend/**"
       - "deploy/standalone/**"
       - "scripts/storage_transfer.py"
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

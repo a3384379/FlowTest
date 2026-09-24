@@ -118,7 +118,7 @@ if (Test-Path -LiteralPath $envFile) {
         }
     }
 } else {
-    Add-PreflightWarning("尚未找到 .env；首次 start.ps1 会生成随机密钥，并使用 Standalone 初始账号 admin/admin")
+    Add-PreflightWarning("尚未找到 .env；首次 start.ps1 会生成随机密钥，并使用 Standalone 初始账号 admin/admin123456")
 }
 
 $drive = New-Object -TypeName System.IO.DriveInfo -ArgumentList ([System.IO.Path]::GetPathRoot($Root))

@@ -12,17 +12,6 @@ on:
       - "scripts/storage_transfer.py"
       - "scripts/verify_v2_v3_data.py"
       - "scripts/verify_v2_v3_upgrade.sh"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/upgrade-ci.yml"
-      - "backend/**"
-      - "deploy/upgrade/**"
-      - "mock-target/**"
-      - "scripts/smoke_s11.py"
-      - "scripts/storage_transfer.py"
-      - "scripts/verify_v2_v3_data.py"
-      - "scripts/verify_v2_v3_upgrade.sh"
   workflow_dispatch:
 
 concurrency:

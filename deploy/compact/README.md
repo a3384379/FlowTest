@@ -31,12 +31,13 @@ cd FlowTest
 ./deploy/compact/verify.sh
 ```
 
-脚本首次运行会生成 `deploy/compact/.env`，权限为 `0600`，其中包含随机管理员密码和随机服务密钥；
-已有文件绝不会被覆盖。启动完成后访问 <http://localhost:3000>，管理员邮箱默认为
-`admin@flowtest.dev`。登录页面的账号字段同时接受邮箱和 `admin` 别名；`admin` 会解析到配置的
-`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`。密码仍以本机 `.env` 中的
-`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 为准，Compact 首次登录后需要修改密码。不要复制密码到聊天、工单
-或部署日志。登录后如果账号没有项目，质量总览和项目管理页会显示“创建第一个项目”入口。
+脚本首次运行会生成权限为 `0600` 的 `deploy/compact/.env`，默认管理员账号和密码为
+`admin/admin123456`，其余服务密钥随机生成；已有文件绝不会被覆盖。启动后访问
+<http://localhost:3000>，首次登录不强制改密。`admin` 别名解析到配置的
+`FLOWTEST_BOOTSTRAP_ADMIN_EMAIL`（默认 `admin@flowtest.dev`）；可在启动前修改 `.env` 中的
+`FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD`。已有数据库账号不会被启动脚本重置。不要把 `.env` 上传到
+聊天、工单或部署日志。若账号没有项目，质量总览和项目管理页会
+显示“创建第一个项目”入口。
 源码构建使用独立 `compose.build.yaml`；当同目录存在 `images.env` 时，`start.sh` 会自动改为
 不构建、不拉取的镜像部署模式。
 

@@ -160,6 +160,14 @@ GATE_SPECS = (
     ),
 )
 
+LIGHT_GATE_SPEC = GateSpec(
+    key="quick",
+    label="Quick CI",
+    workflow_path=".github/workflows/quick-ci.yml",
+    checks=("quick",),
+    always_required=True,
+)
+
 CI_GOVERNANCE_PATHS = frozenset(
     {spec.workflow_path for spec in GATE_SPECS}
     | {
@@ -168,6 +176,7 @@ CI_GOVERNANCE_PATHS = frozenset(
     }
 )
 CI_GOVERNANCE_PREFIXES = (".github/workflows/",)
+LIGHT_ALLOWED_EXACT_PATHS = frozenset({"README.md", ".github/PULL_REQUEST_TEMPLATE.md"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,7 +243,11 @@ class GitHubClient:
             return json.load(response)
 
 
-def build_gate_plan(paths: Iterable[str]) -> GatePlan:
+def build_gate_plan(paths: Iterable[str], *, mode: str = "full") -> GatePlan:
+    if mode == "light":
+        return GatePlan(required=(LIGHT_GATE_SPEC,), no_op=GATE_SPECS)
+    if mode != "full":
+        raise RequiredGateError(f"未知 CI 模式：{mode}")
     normalized = _normalized_paths(paths)
     required = tuple(spec for spec in GATE_SPECS if spec.required_for(normalized))
     no_op = tuple(spec for spec in GATE_SPECS if spec not in required)
@@ -252,6 +265,23 @@ def enforce_trusted_governance(paths: Iterable[str], event_name: str) -> None:
     if modified:
         raise RequiredGateError(
             "CI 治理文件只能通过受控 Bootstrap 流程更新: " + ", ".join(modified)
+        )
+
+
+def enforce_light_scope(paths: Iterable[str], mode: str) -> None:
+    if mode != "light":
+        return
+    normalized = _normalized_paths(paths)
+    disallowed = sorted(
+        path
+        for path in normalized
+        if path not in LIGHT_ALLOWED_EXACT_PATHS
+        and not (path.startswith("docs/") and path.endswith(".md"))
+    )
+    if not normalized or disallowed:
+        raise RequiredGateError(
+            "ci:light 只适用于 README、PR 模板和 docs/ 下的 Markdown 文档；"
+            "其他文件请使用 ci:milestone：" + ", ".join(disallowed)
         )
 
 
@@ -390,6 +420,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--paths-file", type=Path, required=True)
     parser.add_argument("--event-name", default=os.getenv("GITHUB_EVENT_NAME", ""))
+    parser.add_argument("--mode", choices=("full", "light"), default="full")
     parser.add_argument("--timeout-seconds", type=int, default=5400)
     parser.add_argument("--poll-seconds", type=int, default=30)
     return parser.parse_args()
@@ -402,13 +433,14 @@ def main() -> int:
         print("Required Gate 缺少 GITHUB_REPOSITORY 或 GITHUB_TOKEN", flush=True)
         return 2
     paths = args.paths_file.read_text(encoding="utf-8").splitlines()
-    plan = build_gate_plan(paths)
+    plan = build_gate_plan(paths, mode=args.mode)
     _write_step_summary(plan, status="等待子门禁")
     required = ", ".join(spec.label for spec in plan.required)
     no_op = ", ".join(spec.label for spec in plan.no_op) or "无"
     print(f"必需子门禁：{required}；No-op Success：{no_op}", flush=True)
     try:
         enforce_trusted_governance(paths, args.event_name)
+        enforce_light_scope(paths, args.mode)
         wait_for_required_checks(
             client=GitHubClient(repository=args.repository, token=token),
             plan=plan,

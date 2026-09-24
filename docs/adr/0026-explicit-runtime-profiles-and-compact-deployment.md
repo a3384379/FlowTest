@@ -3,6 +3,9 @@
 状态：Accepted
 日期：2026-08-19
 
+第 7 项的随机管理员密码决策已由 [ADR 0055](0055-unified-default-administrator-login.md) 替代；
+其他部署拓扑和密钥生成规则不变。
+
 ## 背景
 
 Full Compose 为容量、安全和多执行面验收同时启动 PostgreSQL、Redis、MinIO、Redpanda、多类 Worker、

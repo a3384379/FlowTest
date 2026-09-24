@@ -238,7 +238,7 @@ async def bootstrap_administrator(session: AsyncSession) -> None:
         password_hash=password_service.hash(settings.bootstrap_admin_password),
         is_active=True,
         is_system_admin=True,
-        requires_password_change=settings.runtime_profile is not RuntimeProfile.STANDALONE,
+        requires_password_change=False,
     )
     users.add(administrator)
     await session.commit()

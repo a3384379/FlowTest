@@ -90,7 +90,7 @@ publish_image FLOWTEST_POSTGRES_IMAGE postgres \
 publish_image FLOWTEST_REDIS_IMAGE redis \
   "${FLOWTEST_REDIS_IMAGE:-redis:8.2.1-alpine}"
 publish_image FLOWTEST_MINIO_IMAGE minio \
-  "${FLOWTEST_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z}"
+  "${FLOWTEST_MINIO_IMAGE:-cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1}"
 
 chmod 0644 "${temporary_output}"
 mv "${temporary_output}" "${output_environment}"
