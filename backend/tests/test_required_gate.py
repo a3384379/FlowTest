@@ -53,6 +53,25 @@ def test_required_gate_marks_irrelevant_checks_as_no_op() -> None:
     }
 
 
+def test_light_gate_requires_only_quick_ci() -> None:
+    plan = required_gate.build_gate_plan(["backend/app/services/projects.py"], mode="light")
+
+    assert _keys(plan) == {"quick"}
+    assert {spec.key for spec in plan.no_op} == {
+        "backend",
+        "frontend",
+        "security",
+        "compose",
+        "standalone",
+        "upgrade",
+    }
+
+
+def test_required_gate_rejects_unknown_mode() -> None:
+    with pytest.raises(required_gate.RequiredGateError, match="未知 CI 模式"):
+        required_gate.build_gate_plan([], mode="skip")
+
+
 def test_required_gate_selects_backend_dependent_checks() -> None:
     plan = required_gate.build_gate_plan(["backend/app/services/projects.py"])
 
@@ -219,6 +238,7 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
 
     assert "pull_request_target" in workflow["on"]
     assert "pull_request" not in workflow["on"]
+    assert "push" not in workflow["on"]
     assert workflow["on"]["pull_request_target"]["types"] == ["labeled"]
     assert workflow["concurrency"]["cancel-in-progress"] == "true"
     assert workflow["permissions"]["statuses"] == "write"
@@ -226,7 +246,8 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
     controller = workflow["jobs"]["controller"]
     assert controller["if"] == (
         "${{ github.event_name != 'pull_request_target' "
-        "|| github.event.label.name == 'ci:milestone' }}"
+        "|| github.event.label.name == 'ci:milestone' "
+        "|| github.event.label.name == 'ci:light' }}"
     )
     assert controller["name"] == "Required Gate Controller"
     checkout = next(step for step in controller["steps"] if "uses" in step)
@@ -256,6 +277,22 @@ def test_required_gate_controller_runs_trusted_base_code() -> None:
     assert complete_status["if"] == "always()"
     assert ".base.sha, .head.sha" in complete_status["run"]
     assert '"${BASE_SHA} ${HEAD_SHA}"' in complete_status["run"]
+    assert "${FLOWTEST_GATE_MODE}" in complete_status["run"]
+
+
+def test_quick_ci_runs_only_for_light_label() -> None:
+    workflow = yaml.load(
+        (WORKSPACE_ROOT / ".github/workflows/quick-ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+
+    assert workflow["on"]["pull_request"]["types"] == ["labeled"]
+    assert "push" not in workflow["on"]
+    assert workflow["jobs"]["quick"]["if"] == (
+        "${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:light' }}"
+    )
+    quick_steps = workflow["jobs"]["quick"]["steps"]
+    assert any("git diff --check" in step.get("run", "") for step in quick_steps)
 
 
 @pytest.mark.parametrize(
@@ -279,6 +316,7 @@ def test_pull_request_ci_runs_only_for_milestone_label(
     )
 
     assert workflow["on"]["pull_request"]["types"] == ["labeled"]
+    assert "push" not in workflow["on"]
     assert workflow["concurrency"]["cancel-in-progress"] == "true"
     expected_condition = (
         "${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:milestone' }}"

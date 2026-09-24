@@ -3,8 +3,6 @@ name: Required Gate Controller
 on:
   pull_request_target:
     types: [labeled]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +17,7 @@ permissions:
 
 jobs:
   controller:
-    if: ${{ github.event_name != 'pull_request_target' || github.event.label.name == 'ci:milestone' }}
+    if: ${{ github.event_name != 'pull_request_target' || github.event.label.name == 'ci:milestone' || github.event.label.name == 'ci:light' }}
     name: Required Gate Controller
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -41,6 +39,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
+      - name: Resolve current CI mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mode='full'
+          if [[ -n "${PR_NUMBER}" ]]; then
+            mode="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq 'if ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
+          fi
+          if [[ "${mode}" == 'invalid' ]]; then
+            echo '当前 PR 缺少 CI 模式标签' >&2
+            exit 1
+          fi
+          echo "FLOWTEST_GATE_MODE=${mode}" >>"${GITHUB_ENV}"
       - name: Resolve changed paths from trusted metadata
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -76,6 +89,7 @@ jobs:
           --sha "${FLOWTEST_GATE_SHA}"
           --paths-file "${FLOWTEST_GATE_PATHS_FILE}"
           --event-name "${GITHUB_EVENT_NAME}"
+          --mode "${FLOWTEST_GATE_MODE}"
       - name: Complete trusted Required Gate status
         if: always()
         env:
@@ -95,6 +109,12 @@ jobs:
             if [[ "${current_refs}" != "${BASE_SHA} ${HEAD_SHA}" ]]; then
               metadata_current='false'
               description='PR 基线或 Head 已变更'
+            fi
+            current_mode="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq 'if ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
+            if [[ "${current_mode}" != "${FLOWTEST_GATE_MODE}" ]]; then
+              metadata_current='false'
+              description='PR 的 CI 模式标签已变更'
             fi
           fi
           if [[ "${GATE_OUTCOME}" == 'success' && "${metadata_current}" == 'true' ]]; then
