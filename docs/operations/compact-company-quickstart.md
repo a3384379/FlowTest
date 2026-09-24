@@ -51,12 +51,13 @@ cd FlowTest
 `start.sh` 会执行安装前检查、首次构建、数据库迁移和 Readiness 验证。首次运行时间取决于公司网络和
 Docker 镜像缓存。成功标准是 `verify.sh` 输出 6 个服务运行中，数据库、Redis 和对象存储均就绪。
 
-首次启动会创建 `deploy/compact/.env`，权限为 `0600`，并写入随机管理员密码、JWT 密钥、
+首次启动会创建 `deploy/compact/.env`，权限为 `0600`，并写入默认管理员密码、随机 JWT 密钥、
 AES-256-GCM 数据加密密钥、数据库和对象存储凭据。脚本拒绝覆盖已有 `.env`；该文件已被 Git 忽略，
 但仍应限制为部署管理员可读并纳入公司 Secret 托管，不得提交 Git、上传网盘或粘贴到工单。
 
-浏览器访问 <http://localhost:3000>，使用管理员邮箱 `admin@flowtest.dev`（或账号别名 `admin`）和本机
-`.env` 中的 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD` 登录，随后立即修改密码。若登录账号没有项目，进入
+浏览器访问 <http://localhost:3000>，新安装使用 `admin/admin123456` 登录，无需首次改密。
+已有 `.env` 和数据库账号不会因升级被覆盖；可在 `.env` 中修改 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD`。
+若登录账号没有项目，进入
 质量总览即可看到“创建第一个项目”按钮；创建后会自动切换到新项目。
 
 ## 日常启停和检查
@@ -137,7 +138,7 @@ cd flowtest-compact-*/
 
 - `verify.sh` 通过，且恰好 6 个服务处于运行状态。
 - <http://localhost:3000> 可登录，`/api/v1/ready` 返回正常。
-- 已修改初始管理员密码，`.env` 仅部署管理员可读并已独立托管。
+- `.env` 仅部署管理员可读并已独立托管；管理员密码可按需要自行修改。
 - 未向 Git 提交 `.env`、`images.env`、离线镜像包、诊断目录或业务备份。
 - 需要跨主机访问时已启用公司 TLS、受控内网地址和 Secure Cookie。
 - 首次录入业务数据前已验证备份目录、恢复责任人与升级维护窗口。

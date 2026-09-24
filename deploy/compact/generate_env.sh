@@ -15,7 +15,6 @@ fi
 
 umask 077
 secret_key="$(openssl rand -hex 32)"
-admin_password="$(openssl rand -hex 16)"
 data_encryption_key="$(openssl rand -base64 32 | tr -d '\n')"
 postgres_password="$(openssl rand -hex 24)"
 minio_password="$(openssl rand -hex 24)"
@@ -29,7 +28,7 @@ FLOWTEST_S3_PORT=9000
 FLOWTEST_PUBLIC_ORIGIN=http://localhost:3000
 FLOWTEST_SECURE_COOKIES=false
 FLOWTEST_BOOTSTRAP_ADMIN_EMAIL=admin@flowtest.dev
-FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD=${admin_password}
+FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD=admin123456
 FLOWTEST_SECRET_KEY=${secret_key}
 FLOWTEST_DATA_ENCRYPTION_KEY=${data_encryption_key}
 FLOWTEST_DATA_ENCRYPTION_KEYRING={}

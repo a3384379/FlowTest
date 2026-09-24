@@ -24,7 +24,7 @@ def test_fixed_role_capability_matrix() -> None:
     assert not ProjectRole.VIEWER.allows(ProjectCapability.EXECUTE)
 
 
-def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
+def test_production_requires_secrets_and_secure_cookies() -> None:
     with pytest.raises(ValidationError, match="生产环境"):
         Settings(_env_file=None, environment="production")
 
@@ -49,6 +49,16 @@ def test_production_rejects_local_credentials_and_insecure_cookies() -> None:
             s3_secret_key="production-object-storage-secret",
             secure_cookies=True,
         )
+
+    configured_default_admin = Settings(
+        _env_file=None,
+        environment="production",
+        secret_key="production-signing-key-with-more-than-32-bytes",
+        data_encryption_key="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+        s3_secret_key="production-object-storage-secret",
+        secure_cookies=True,
+    )
+    assert configured_default_admin.bootstrap_admin_password == "admin123456"
 
 
 def test_data_encryption_keyring_validates_references_and_key_material() -> None:

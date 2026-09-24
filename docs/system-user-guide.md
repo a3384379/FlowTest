@@ -54,8 +54,8 @@
 
 ### 2.2 登录
 
-- Full/Compact：使用 `admin@flowtest.dev` 或别名 `admin`，密码读取部署目录 `.env` 中的 `FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD`。首次登录后按页面要求修改密码。
-- Standalone 默认包：使用 `admin/admin`。如果不再仅限本机回环访问，应立即修改密码。
+- Full/Compact/Standalone 新安装：默认使用 `admin/admin123456`，首次登录不强制改密。管理员邮箱默认为 `admin@flowtest.dev`，可在 `.env` 中覆盖；已有数据库账号密码不会被升级重置。
+- 此默认账号和密码适用于所有环境；可通过 `.env` 自行覆盖。其他生产配置规则不变。
 - 企业环境可由管理员配置 OIDC；OIDC 首次登录用户不会自动获得项目访问权限，仍需加入组织和项目。
 
 ### 2.3 第一次完成可运行闭环
