@@ -72,6 +72,27 @@ def test_required_gate_rejects_unknown_mode() -> None:
         required_gate.build_gate_plan([], mode="skip")
 
 
+def test_light_gate_accepts_documentation_only() -> None:
+    required_gate.enforce_light_scope(
+        ["README.md", "docs/operations/deployment.md", ".github/PULL_REQUEST_TEMPLATE.md"],
+        "light",
+    )
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["backend/app/services/auth.py"],
+        ["docs/ci-milestone.md", "frontend/src/App.tsx"],
+        ["docs/assets/diagram.png"],
+        [],
+    ],
+)
+def test_light_gate_rejects_runtime_or_non_document_paths(paths: list[str]) -> None:
+    with pytest.raises(required_gate.RequiredGateError, match="ci:light 只适用于"):
+        required_gate.enforce_light_scope(paths, "light")
+
+
 def test_required_gate_selects_backend_dependent_checks() -> None:
     plan = required_gate.build_gate_plan(["backend/app/services/projects.py"])
 

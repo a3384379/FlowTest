@@ -4,10 +4,10 @@ FlowTest 的 PR 通过 GitHub 标签选择一次远程检查。普通提交不�
 
 | 标签 | 用途 | PR 合并门禁 |
 | --- | --- | --- |
-| `ci:light` | 文档、文案或已完成定向验证的小改动 | Quick CI：检查差异空白错误；涉及 Python 时编译检查语法。不会运行功能测试、构建、容器或安全扫描。 |
+| `ci:light` | 仅 `README.md`、PR 模板和 `docs/` 下的 Markdown 文档 | Quick CI：检查差异空白错误。不会运行功能测试、构建、容器或安全扫描；其他路径的 PR 会被 Required Gate 拒绝。 |
 | `ci:milestone` | 功能、依赖、部署或需要完整回归的改动 | 按路径运行 Backend、Frontend、Security、Compose、Windows、Upgrade，并由 Required Gate 汇总。 |
 
-两个标签同时存在时，`ci:milestone` 优先。CI 工作流自身的修改仍须经受控 Bootstrap 合并，不能用轻量标签绕过。`main` 合并后不再重复运行同一组完整 CI；需要补跑时使用各工作流的 `workflow_dispatch`。
+两个标签同时存在时门禁失败；先移除旧标签再添加新标签。CI 工作流自身的修改仍须经受控 Bootstrap 合并，不能用轻量标签绕过。`main` 合并后不再重复运行同一组完整 CI；需要补跑时使用各工作流的 `workflow_dispatch`。
 
 ## 使用流程
 

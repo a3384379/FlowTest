@@ -176,6 +176,7 @@ CI_GOVERNANCE_PATHS = frozenset(
     }
 )
 CI_GOVERNANCE_PREFIXES = (".github/workflows/",)
+LIGHT_ALLOWED_EXACT_PATHS = frozenset({"README.md", ".github/PULL_REQUEST_TEMPLATE.md"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +265,23 @@ def enforce_trusted_governance(paths: Iterable[str], event_name: str) -> None:
     if modified:
         raise RequiredGateError(
             "CI 治理文件只能通过受控 Bootstrap 流程更新: " + ", ".join(modified)
+        )
+
+
+def enforce_light_scope(paths: Iterable[str], mode: str) -> None:
+    if mode != "light":
+        return
+    normalized = _normalized_paths(paths)
+    disallowed = sorted(
+        path
+        for path in normalized
+        if path not in LIGHT_ALLOWED_EXACT_PATHS
+        and not (path.startswith("docs/") and path.endswith(".md"))
+    )
+    if not normalized or disallowed:
+        raise RequiredGateError(
+            "ci:light 只适用于 README、PR 模板和 docs/ 下的 Markdown 文档；"
+            "其他文件请使用 ci:milestone：" + ", ".join(disallowed)
         )
 
 
@@ -422,6 +440,7 @@ def main() -> int:
     print(f"必需子门禁：{required}；No-op Success：{no_op}", flush=True)
     try:
         enforce_trusted_governance(paths, args.event_name)
+        enforce_light_scope(paths, args.mode)
         wait_for_required_checks(
             client=GitHubClient(repository=args.repository, token=token),
             plan=plan,

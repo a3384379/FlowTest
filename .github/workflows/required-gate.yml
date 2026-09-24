@@ -47,7 +47,7 @@ jobs:
           mode='full'
           if [[ -n "${PR_NUMBER}" ]]; then
             mode="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-              --jq 'if ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
+              --jq 'if (([.labels[].name] | index("ci:milestone")) and ([.labels[].name] | index("ci:light"))) then "invalid" elif ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
           fi
           if [[ "${mode}" == 'invalid' ]]; then
             echo '当前 PR 缺少 CI 模式标签' >&2
@@ -111,7 +111,7 @@ jobs:
               description='PR 基线或 Head 已变更'
             fi
             current_mode="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-              --jq 'if ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
+              --jq 'if (([.labels[].name] | index("ci:milestone")) and ([.labels[].name] | index("ci:light"))) then "invalid" elif ([.labels[].name] | index("ci:milestone")) then "full" elif ([.labels[].name] | index("ci:light")) then "light" else "invalid" end')"
             if [[ "${current_mode}" != "${FLOWTEST_GATE_MODE}" ]]; then
               metadata_current='false'
               description='PR 的 CI 模式标签已变更'
