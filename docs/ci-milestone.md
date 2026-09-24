@@ -16,4 +16,6 @@ FlowTest 的 PR 通过 GitHub 标签选择一次远程检查。普通提交不�
 3. 等待当前 PR Head 的 `Required Gate` 成功，再合并。
 4. 如果门禁后又修改了代码，先移除再重新添加所选标签，使最新 Head 获得新的检查结果。改变模式时先移除旧标签，再添加新标签。
 
+在 GitHub PR 右侧的 **Labels** 中选择标签即可开启对应检查；命令行也可使用 `gh pr edit <PR号> --add-label ci:light`。切换到完整模式时先移除 `ci:light`，再添加 `ci:milestone`。
+
 所有工作流按 PR 设置并发组。新的门禁启动时，会取消同一 PR 上仍在运行的旧门禁，避免重复占用 Runner。GitHub 对 `labeled` 事件会创建其他工作流的跳过记录，但只有所选模式的检查会实际执行。
