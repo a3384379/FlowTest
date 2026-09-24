@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_workflow_coordinator
@@ -19,6 +19,7 @@ from app.main import app
 from app.models import Base
 from app.models.access import User
 from app.models.durable_execution import ExecutionCheckpoint
+from app.models.workflows import WorkflowExecution
 from app.services.execution_events import ExecutionEvent
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 
@@ -479,6 +480,128 @@ async def test_schema4_resume_keeps_unknown_post_outcome_and_does_not_resend(
     api_checkpoint = next(item for item in checkpoints.json() if item["node_id"] == "api")
     assert api_checkpoint["attempt"] == 1
     assert api_checkpoint["status"] == "failed"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_schema4_resume_uses_checkpointed_collection_instead_of_refetching(
+    workflow_client: AsyncClient, tmp_path: Path
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = _workflow_definition(api_id)
+    definition["schema_version"] = "4.0"
+    definition["run_policy"] = {"request_budget": 4}
+    definition["nodes"].insert(
+        2,
+        {
+            "id": "loop",
+            "type": "capability",
+            "name": "冻结集合",
+            "position": {"x": 200, "y": 0},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+                "collection": {
+                    "kind": "node_output",
+                    "node_id": "api",
+                    "path": ["body", "items"],
+                },
+                "body": {"kind": "inline", "region_id": "body"},
+                "policy": {"max_iterations": 4, "timeout_seconds": 30},
+            },
+            "bindings": [],
+        },
+    )
+    definition["edges"] = [
+        {"id": "start-api", "source": "start", "target": "api"},
+        {"id": "api-loop", "source": "api", "target": "loop"},
+        {"id": "loop-end", "source": "loop", "target": "end"},
+    ]
+    definition["regions"] = [
+        {
+            "id": "body",
+            "owner_node_id": "loop",
+            "role": "body",
+            "nodes": [
+                {
+                    "id": "step",
+                    "type": "delay",
+                    "name": "等待",
+                    "position": {"x": 0, "y": 0},
+                    "config": {"seconds": 0},
+                }
+            ],
+            "edges": [],
+            "entry_node_id": "step",
+            "exit_node_ids": ["step"],
+        }
+    ]
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "冻结输入恢复", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[
+            Response(200, json={"items": ["first", "second"]}),
+            Response(200, json={"items": ["changed", "again", "extra"]}),
+        ]
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["id"]
+    first = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert first["execution"]["status"] == "passed"
+    assert len(target.calls) == 1
+
+    # Recreate a process loss after the collection source and both iterations committed.
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'workflow.db'}")
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            loop = await session.scalar(
+                select(ExecutionCheckpoint).where(
+                    ExecutionCheckpoint.execution_id == UUID(execution_id),
+                    ExecutionCheckpoint.node_id == "loop",
+                )
+            )
+            execution = await session.get(WorkflowExecution, UUID(execution_id))
+            assert loop is not None and execution is not None
+            loop.status = "running"
+            loop.result = {"status": "running", "request_attempts": 0}
+            execution.status = "failed"
+            await session.execute(
+                delete(ExecutionCheckpoint).where(
+                    ExecutionCheckpoint.execution_id == UUID(execution_id),
+                    ExecutionCheckpoint.node_id == "end",
+                )
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    resumed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers=headers,
+    )
+    assert resumed.status_code == 202, resumed.text
+    detail = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert detail["execution"]["status"] == "passed"
+    loop_node = next(node for node in detail["nodes"] if node["node_id"] == "loop")
+    assert loop_node["output"]["input_count"] == 2
+    assert [item["input_index"] for item in loop_node["output"]["items"]] == [0, 1]
+    assert len(target.calls) == 1
 
 
 @respx.mock
