@@ -746,40 +746,35 @@ async def test_team_grants_and_direct_membership_precedence(client: AsyncClient)
     assert hidden.status_code == 404
 
 
+@pytest.mark.parametrize("runtime_profile", list(RuntimeProfile))
 @pytest.mark.asyncio
-async def test_bootstrap_administrator_is_idempotent() -> None:
+async def test_bootstrap_administrator_uses_default_login_without_forced_change(
+    runtime_profile: RuntimeProfile, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "runtime_profile", runtime_profile)
+    monkeypatch.setattr(settings, "bootstrap_admin_password", "admin123456")
     test_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
     async with test_engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     async with session_maker() as session:
-        await bootstrap_administrator(session)
         await bootstrap_administrator(session)
         total = await session.scalar(select(func.count()).select_from(User))
         administrator = await session.scalar(select(User))
-    assert total == 1
-    assert administrator is not None
-    assert administrator.is_system_admin
-    assert administrator.requires_password_change
-    await test_engine.dispose()
+        assert total == 1
+        assert administrator is not None
+        assert administrator.is_system_admin
+        assert not administrator.requires_password_change
+        assert password_service.verify(administrator.password_hash, "admin123456")
 
-
-@pytest.mark.asyncio
-async def test_standalone_bootstrap_uses_simple_password_without_forced_change(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "runtime_profile", RuntimeProfile.STANDALONE)
-    monkeypatch.setattr(settings, "bootstrap_admin_password", "admin")
-    test_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
-    async with test_engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with session_maker() as session:
+        # Upgrading an existing database must not reset a user's password or flag.
+        administrator.password_hash = password_service.hash("existing-password-123!")
+        administrator.requires_password_change = True
+        await session.commit()
         await bootstrap_administrator(session)
-        administrator = await session.scalar(select(User))
-    assert administrator is not None
-    assert not administrator.requires_password_change
-    assert password_service.verify(administrator.password_hash, "admin")
+        assert await session.scalar(select(func.count()).select_from(User)) == 1
+        assert password_service.verify(administrator.password_hash, "existing-password-123!")
+        assert administrator.requires_password_change
     await test_engine.dispose()
 
 

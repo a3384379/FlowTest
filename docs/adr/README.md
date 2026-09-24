@@ -56,3 +56,4 @@
 52. MCP 零接入连接、身份与 Scope 契约
 53. MCP 组织级项目初始化与测试目标边界
 54. S62 分析准备、Test Plan 建议与 Preview 控制
+55. Full/Compact/Standalone 统一默认管理员登录
