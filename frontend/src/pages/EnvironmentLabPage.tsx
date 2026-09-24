@@ -549,7 +549,7 @@ function TemplateDialog({
 }
 
 const fixtureImage =
-  'docker.io/nginxinc/nginx-unprivileged@sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce'
+  'docker.io/nginxinc/nginx-unprivileged@sha256:123fb7283ffb4788e260d4e980005a978995fefedcdbb04d268077a19b84576d'
 
 function templateFormValues(base?: EnvironmentTemplateVersion): TemplateForm {
   return base ? versionFormValues(base) : defaultTemplateFormValues
