@@ -587,6 +587,12 @@ class WorkflowService:
                 message="请在数据集子执行上重放节点",
                 status_code=422,
             )
+        if plan.definition.schema_version == "4.0":
+            raise AppError(
+                code="CONTROL_REPLAY_REQUIRES_DERIVED_RUN",
+                message="控制流运行需要按冻结输入创建派生运行, 不能重放原运行中的节点",
+                status_code=409,
+            )
         scope = _upstream_node_ids(plan.definition, node_id, include_target=True)
         result = await self._run_scoped(
             project_id=project_id,

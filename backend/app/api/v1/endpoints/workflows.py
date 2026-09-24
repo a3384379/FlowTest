@@ -444,6 +444,33 @@ async def list_execution_checkpoints(
 
 
 @router.get(
+    "/workflow-executions/{execution_id}/instances",
+    response_model=Page[ExecutionCheckpointResponse],
+)
+async def list_control_instances(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[ExecutionCheckpointResponse]:
+    items, total = await DurableExecutionService(session).list_instance_checkpoints(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[ExecutionCheckpointResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
     "/workflow-executions/{execution_id}/instances/{instance_id}",
     response_model=ExecutionCheckpointResponse,
 )

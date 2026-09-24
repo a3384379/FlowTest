@@ -1,6 +1,11 @@
 import { Alert, Button, Input, InputNumber, Space, Typography } from 'antd'
 import { useState } from 'react'
 import type { WorkflowNode, WorkflowRegion } from '../lib/api'
+import {
+  appendRegionDelay,
+  appendRegionSignal,
+  canAppendRegionSignal,
+} from './editor/control-blocks'
 import WorkflowJsonInput from './WorkflowJsonInput'
 
 type Props = {
@@ -56,6 +61,7 @@ export default function WorkflowControlFields({
         <RegionEditor
           key={`${region.id}:${JSON.stringify(region)}`}
           region={region}
+          owner={node}
           editable={editable}
           onUpdate={onRegionUpdate}
         />
@@ -66,10 +72,12 @@ export default function WorkflowControlFields({
 
 function RegionEditor({
   region,
+  owner,
   editable,
   onUpdate,
 }: {
   region: WorkflowRegion
+  owner: WorkflowNode
   editable: boolean
   onUpdate: (region: WorkflowRegion) => void
 }) {
@@ -96,6 +104,16 @@ function RegionEditor({
       <Typography.Paragraph type="secondary">
         {region.nodes.length} 个步骤。区域节点和连线属于流程定义，单次执行的轮次不会复制画布节点。
       </Typography.Paragraph>
+      <RegionStepList
+        region={region}
+        owner={owner}
+        editable={editable && !dirty}
+        onUpdate={onUpdate}
+      />
+      {dirty && (
+        <Typography.Text type="secondary">先应用或丢弃区域 JSON 草稿，再编辑步骤。</Typography.Text>
+      )}
+      <Typography.Text strong>高级：区域定义 JSON</Typography.Text>
       <Input.TextArea
         aria-label={`${region.role} 区域定义`}
         className="code-input"
@@ -125,6 +143,80 @@ function RegionEditor({
         </Button>
       </Space>
       {error && <Alert type="error" title={error} />}
+    </div>
+  )
+}
+
+function RegionStepList({
+  region,
+  owner,
+  editable,
+  onUpdate,
+}: {
+  region: WorkflowRegion
+  owner: WorkflowNode
+  editable: boolean
+  onUpdate: (region: WorkflowRegion) => void
+}) {
+  return (
+    <div aria-label={`${region.role} 区域步骤`}>
+      {region.nodes.map((node) => (
+        <div className="workflow-control-region-step" key={node.id}>
+          <Typography.Text>
+            {node.name} · {node.type}
+          </Typography.Text>
+          {node.type === 'delay' && (
+            <InputNumber
+              aria-label={`${node.name} 等待秒数`}
+              min={0}
+              max={300}
+              step={0.1}
+              disabled={!editable}
+              value={typeof node.config.seconds === 'number' ? node.config.seconds : 0}
+              onChange={(seconds) => {
+                if (seconds === null) return
+                onUpdate({
+                  ...region,
+                  nodes: region.nodes.map((item) =>
+                    item.id === node.id ? { ...item, config: { ...item.config, seconds } } : item,
+                  ),
+                })
+              }}
+            />
+          )}
+        </div>
+      ))}
+      <Button
+        disabled={!editable || (region.nodes.length > 0 && region.exit_node_ids.length !== 1)}
+        onClick={() => {
+          const next = appendRegionDelay(region)
+          if (next) onUpdate(next)
+        }}
+      >
+        添加等待步骤
+      </Button>
+      {canAppendRegionSignal(region, owner) && (
+        <Space>
+          <Button
+            disabled={!editable}
+            onClick={() => {
+              const next = appendRegionSignal(region, owner, 'break')
+              if (next) onUpdate(next)
+            }}
+          >
+            添加退出循环
+          </Button>
+          <Button
+            disabled={!editable}
+            onClick={() => {
+              const next = appendRegionSignal(region, owner, 'continue')
+              if (next) onUpdate(next)
+            }}
+          >
+            添加继续下一轮
+          </Button>
+        </Space>
+      )}
     </div>
   )
 }

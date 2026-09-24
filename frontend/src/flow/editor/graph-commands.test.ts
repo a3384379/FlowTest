@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { WorkflowDefinition } from '../../lib/api'
 import { analyzeGraph, editorNode, restoreEditedNode } from './graph-analysis'
-import { addControlBlock } from './control-blocks'
+import { addControlBlock, appendRegionDelay, appendRegionSignal } from './control-blocks'
 import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
   applyDeletion,
@@ -29,6 +29,41 @@ const nodeSelection = (id: string) => ({ kind: 'node' as const, id })
 const edgeSelection = (id: string) => ({ kind: 'edge' as const, id })
 
 describe('workflow graph commands', () => {
+  it('extends a serial control region without changing its entry boundary', () => {
+    const region = addControlBlock(graph(linear), 'foreach').regions![0]
+    const expanded = appendRegionDelay(region)!
+    expect(expanded.entry_node_id).toBe(region.entry_node_id)
+    expect(expanded.nodes).toHaveLength(2)
+    expect(expanded.edges).toEqual([
+      expect.objectContaining({
+        source: region.exit_node_ids[0],
+        target: expanded.exit_node_ids[0],
+      }),
+    ])
+    expect(expanded.nodes.at(-1)?.config.seconds).toBe(0)
+  })
+  it('adds loop signals only to a serial loop body', () => {
+    const definition = addControlBlock(graph(linear), 'foreach')
+    const owner = definition.nodes.at(-1)!
+    const body = definition.regions![0]
+    const updated = appendRegionSignal(body, owner, 'break')!
+    expect(updated.nodes.at(-1)).toEqual(
+      expect.objectContaining({ capability_id: 'flow.control.break', configuration: {} }),
+    )
+    expect(updated.edges.at(-1)).toEqual(
+      expect.objectContaining({ source: body.exit_node_ids[0], target: updated.exit_node_ids[0] }),
+    )
+    expect(
+      appendRegionSignal(
+        body,
+        { ...owner, configuration: { ...owner.configuration, policy: { concurrency: 2 } } },
+        'continue',
+      ),
+    ).toBeNull()
+    expect(
+      appendRegionSignal(body, { ...owner, capability_id: 'flow.control.group' }, 'break'),
+    ).toBeNull()
+  })
   it('inserts a control block into a selected edge as one connected graph change', () => {
     const definition = addControlBlock(
       {

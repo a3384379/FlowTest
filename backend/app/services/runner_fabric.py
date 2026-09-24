@@ -57,6 +57,7 @@ from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, Wor
 REGISTRATION_TOKEN_PREFIX = "ftrreg_"  # noqa: S105
 RUNNER_TOKEN_PREFIX = "ftrun_"  # noqa: S105
 WORKFLOW_CAPABILITY = "flow.workflow"
+STRUCTURED_CONTROL_CAPABILITY = "flow.workflow.schema4"
 
 
 class RunnerFabricService:
@@ -140,6 +141,14 @@ class RunnerFabricService:
         pool.heartbeat_timeout_seconds = heartbeat_seconds
         if payload.enabled is not None:
             pool.enabled = payload.enabled
+        if payload.capabilities is not None:
+            if WORKFLOW_CAPABILITY not in payload.capabilities:
+                raise AppError(
+                    code="RUNNER_POOL_CAPABILITY_INVALID",
+                    message="Runner Pool 必须保留工作流执行能力",
+                    status_code=422,
+                )
+            pool.capabilities = sorted(set(payload.capabilities))
         self._audit.record(
             actor_user_id=actor.id,
             project_id=None,
@@ -310,7 +319,7 @@ class RunnerFabricService:
             project_id=plan.project_id,
             required_runner_type=_plan_runner_type(plan).value,
             required_labels=[],
-            required_capabilities=[WORKFLOW_CAPABILITY],
+            required_capabilities=_required_capabilities(plan),
             status="queued",
             priority=5,
             attempts=0,
@@ -1037,6 +1046,18 @@ def _task_matches(task: RunnerTask, runner: Runner) -> bool:
     ).issubset(set(runner.capabilities))
 
 
+def _required_capabilities(plan: WorkflowExecutionPlan) -> list[str]:
+    definitions = (
+        tuple(child.definition for child in plan.children)
+        if isinstance(plan, WorkflowBatchPlan)
+        else (plan.definition,)
+    )
+    required = [WORKFLOW_CAPABILITY]
+    if any(definition.schema_version == "4.0" for definition in definitions):
+        required.append(STRUCTURED_CONTROL_CAPABILITY)
+    return required
+
+
 def _plan_runner_type(plan: WorkflowExecutionPlan) -> RunnerType:
     definitions = (
         tuple(child.definition for child in plan.children)
@@ -1045,7 +1066,10 @@ def _plan_runner_type(plan: WorkflowExecutionPlan) -> RunnerType:
     )
     types: list[RunnerType] = []
     for definition in definitions:
-        for node in definition.nodes:
+        for node in [
+            *definition.nodes,
+            *(node for region in definition.regions for node in region.nodes),
+        ]:
             invocation = legacy_node_adapter.compile(node)
             manifest = builtin_capability_registry.get(
                 invocation.capability_id, invocation.capability_version

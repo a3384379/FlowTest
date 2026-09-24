@@ -372,6 +372,20 @@ class DurableExecutionService:
             )
         return checkpoint
 
+    async def list_instance_checkpoints(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_nested_checkpoints(
+            execution_id, NESTED_CHECKPOINT_PREFIX, page=page, page_size=page_size
+        )
+
     async def _require_readable_execution(
         self, actor: User, project_id: UUID, execution_id: UUID
     ) -> None:

@@ -12,6 +12,8 @@ Use this reference whenever the skill is invoked. The quick path is the default;
 
 Use the deep path below only when the user explicitly asks for evidence, full coverage, source/database analysis, or an audit.
 
+For ordinary generation, select at most three representative cases and keep the flow serial unless its real behavior requires another structure. Existing API IDs and pinned versions take priority over copied assets. The current proposal tools emit FlowSpec, which has no lossless schema 4.0 region representation. A requested inline ForEach, IF/Switch, condition loop, parallel branch, or Try/Finally therefore stops with `CONTROL_FLOW_PROPOSAL_UNSUPPORTED`; do not replace it with repeated flat nodes or an unrelated legacy node.
+
 | Stage | FlowTest MCP operations | Required result |
 | --- | --- | --- |
 | Select project | `list_projects`, `inspect_project`, `discover_services`, `inspect_contract` | One authorized project, one explicit business-flow objective, one non-production target |

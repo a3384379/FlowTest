@@ -676,6 +676,14 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.workflow-control-region-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .workflow-config-section-heading {
   margin-bottom: 14px;
 }

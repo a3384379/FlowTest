@@ -9,6 +9,12 @@ are only known at run time in `inputs`; a required input without a default yield
 draft with `readiness=needs_input`. No Context, Evidence, database MCP, dry-run round trip, or
 execution is required. Inspect the returned proposal and stop at Visual Review.
 
+Keep the ordinary proposal to one to three representative cases. If the request is for three
+data-driven cases with an inline ForEach, the current FlowSpec proposal tool cannot carry the
+region, even though the Workflow Designer can save it. Report `CONTROL_FLOW_PROPOSAL_UNSUPPORTED`
+and hand off the exact intended case inputs for manual review in the Designer. Do not submit
+three copied flat steps and describe them as equivalent to a loop.
+
 For related flows, use separate idempotency keys and a shared `task_ref`. Pass the first
 flow's declared output into the second flow as an explicit input/binding; never search historical
 executions for an object to delete or reverse.

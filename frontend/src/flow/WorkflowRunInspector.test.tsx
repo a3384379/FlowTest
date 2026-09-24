@@ -51,6 +51,37 @@ describe('WorkflowRunInspector', () => {
     expect(screen.getByText('CASE_FAIL')).toBeVisible()
   })
 
+  it('pages loop choices without losing their original input indices', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 21,
+            completed_count: 21,
+            items: Array.from({ length: 21 }, (_, input_index) => ({
+              input_index,
+              status: 'passed',
+              test_verdict: 'passed',
+              nodes: [{ node_id: `case-${input_index}`, status: 'passed' }],
+            })),
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByTitle('2'))
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(screen.getByText('第 21 项 · passed'))
+    expect(screen.getByText('case-20 · passed')).toBeVisible()
+  })
+
   it('shows redacted request, response, timing, and retry snapshots', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

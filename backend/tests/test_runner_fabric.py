@@ -805,6 +805,43 @@ async def test_runner_lease_carries_project_outbound_policy_toggle(
         assert lease.task.outbound_policy_enabled is False
 
 
+@pytest.mark.asyncio
+async def test_schema4_task_requires_explicit_runner_capability(
+    fabric_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        old_token = await _register_runner(service, actor, pool.id, "runner-v3")
+        schema4 = replace(
+            plan,
+            definition=plan.definition.model_copy(update={"schema_version": "4.0"}),
+        )
+        task = await service.enqueue(schema4)
+        assert task.required_capabilities == ["flow.workflow", "flow.workflow.schema4"]
+        assert await service.claim(runner_token=old_token) is None
+
+        await service.update_pool(
+            actor=actor,
+            pool_id=pool.id,
+            payload=RunnerPoolUpdate(capabilities=["flow.workflow", "flow.workflow.schema4"]),
+        )
+        _registration, token = await service.create_registration_token(
+            actor=actor, pool_id=pool.id, expires_in_seconds=300
+        )
+        registered = await service.register(
+            registration_token=token,
+            payload=_runner_payload("runner-v4", "runner-v4-capable-instance").model_copy(
+                update={"capabilities": ["flow.workflow", "flow.workflow.schema4"]}
+            ),
+        )
+        lease = await service.claim(runner_token=registered.token)
+        assert lease is not None
+        assert lease.task.task_id == task.id
+
+
 def test_runner_profile_and_production_transport_are_strict() -> None:
     assert normalize_labels(["ARM64", "zone.cn"]) == ("arm64", "zone.cn")
     with pytest.raises(ValueError, match="unique"):

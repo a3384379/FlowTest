@@ -185,17 +185,22 @@ export function addControlBlock(
   return {
     ...definition,
     schema_version: '4.0',
-    run_policy: {
-      request_budget: definition.run_policy?.request_budget ?? 1000,
-      max_runtime_seconds: definition.run_policy?.max_runtime_seconds ?? 300,
-      cleanup_request_budget: definition.run_policy?.cleanup_request_budget ?? null,
-      force_cancel_skips_cleanup: definition.run_policy?.force_cancel_skips_cleanup ?? true,
-      ...(kind === 'try'
-        ? { cleanup_request_budget: definition.run_policy?.cleanup_request_budget ?? 10 }
-        : {}),
-    },
+    run_policy: controlRunPolicy(definition, kind),
     nodes: [...definition.nodes, node],
     regions: [...(definition.regions ?? []), ...regions],
+  }
+}
+
+function controlRunPolicy(
+  definition: WorkflowDefinition,
+  kind: ControlBlockKind,
+): NonNullable<WorkflowDefinition['run_policy']> {
+  const current = definition.run_policy
+  return {
+    request_budget: current?.request_budget ?? 1000,
+    max_runtime_seconds: current?.max_runtime_seconds ?? 300,
+    cleanup_request_budget: current?.cleanup_request_budget ?? (kind === 'try' ? 10 : null),
+    force_cancel_skips_cleanup: current?.force_cancel_skips_cleanup ?? true,
   }
 }
 
@@ -214,6 +219,89 @@ export function descendantRegions(
     }
   }
   return found
+}
+
+export function appendRegionDelay(region: WorkflowRegion): WorkflowRegion | null {
+  return appendRegionStep(region, newDelayStep)
+}
+
+export function appendRegionSignal(
+  region: WorkflowRegion,
+  owner: WorkflowNode,
+  signal: 'break' | 'continue',
+): WorkflowRegion | null {
+  if (!canAppendRegionSignal(region, owner)) return null
+  return appendRegionStep(region, (previous) => ({
+    id: `step-${crypto.randomUUID()}`,
+    type: 'capability',
+    name: signal === 'break' ? '退出当前循环' : '继续下一轮',
+    position: previous ? { x: previous.position.x + 220, y: previous.position.y } : { x: 0, y: 0 },
+    config: {},
+    capability_id: `flow.control.${signal}`,
+    capability_version: '1.0.0',
+    configuration: {},
+    bindings: [],
+  }))
+}
+
+export function canAppendRegionSignal(region: WorkflowRegion, owner: WorkflowNode): boolean {
+  const serialLoops = new Set([
+    'flow.control.foreach',
+    'flow.control.repeat',
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+  ])
+  if (
+    region.owner_node_id !== owner.id ||
+    region.role !== 'body' ||
+    !owner.capability_id ||
+    !serialLoops.has(owner.capability_id)
+  )
+    return false
+  const policy = owner.configuration?.policy
+  if (policy && typeof policy === 'object' && 'concurrency' in policy && policy.concurrency !== 1)
+    return false
+  return true
+}
+
+function appendRegionStep(
+  region: WorkflowRegion,
+  create: (previous?: WorkflowNode) => WorkflowNode,
+): WorkflowRegion | null {
+  if (region.nodes.length === 0) {
+    const step = create()
+    return { ...region, nodes: [step], entry_node_id: step.id, exit_node_ids: [step.id] }
+  }
+  if (region.exit_node_ids.length !== 1) return null
+  const previous = region.nodes.find((node) => node.id === region.exit_node_ids[0])
+  if (!previous) return null
+  const step = create(previous)
+  return {
+    ...region,
+    nodes: [...region.nodes, step],
+    edges: [
+      ...region.edges,
+      {
+        id: `edge-${crypto.randomUUID()}`,
+        source: previous.id,
+        target: step.id,
+        condition: null,
+        mappings: [],
+      },
+    ],
+    exit_node_ids: [step.id],
+  }
+}
+
+function newDelayStep(previous?: WorkflowNode): WorkflowNode {
+  return {
+    id: `step-${crypto.randomUUID()}`,
+    type: 'delay',
+    name: '等待 0 秒',
+    position: previous ? { x: previous.position.x + 220, y: previous.position.y } : { x: 0, y: 0 },
+    config: { seconds: 0 },
+  }
 }
 
 function remapReferences(value: unknown, ids: Map<string, string>): unknown {

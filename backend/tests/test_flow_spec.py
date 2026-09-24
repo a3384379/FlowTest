@@ -292,6 +292,73 @@ def test_flowspec_dependency_sugar_is_stable_and_loss_is_blocked() -> None:
 
 
 @pytest.mark.asyncio
+async def test_flowspec_export_refuses_to_drop_control_regions(
+    flow_spec_client: AsyncClient,
+) -> None:
+    login = await flow_spec_client.post(
+        "/api/v1/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    project = await flow_spec_client.post(
+        "/api/v1/projects", headers=headers, json={"name": "Control export project"}
+    )
+    project_id = project.json()["id"]
+    definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 100},
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "group",
+                "type": "capability",
+                "name": "步骤组",
+                "position": {"x": 240, "y": 0},
+                "capability_id": "flow.control.group",
+                "capability_version": "1.0.0",
+                "configuration": {"body": {"kind": "inline", "region_id": "body"}, "inputs": {}},
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 480, "y": 0}},
+        ],
+        "edges": [
+            {"id": "s-g", "source": "start", "target": "group"},
+            {"id": "g-e", "source": "group", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "group",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "step",
+                        "type": "delay",
+                        "name": "等待",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"seconds": 0},
+                    }
+                ],
+                "edges": [],
+                "entry_node_id": "step",
+                "exit_node_ids": ["step"],
+            }
+        ],
+    }
+    created = await flow_spec_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "保真导出检查", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    exported = await flow_spec_client.get(
+        f"/api/v1/projects/{project_id}/flow-specs/workflows/{created.json()['id']}/export",
+        headers=headers,
+    )
+    assert exported.status_code == 422, exported.text
+    assert exported.json()["error"]["code"] == "FLOWSPEC_CONTROL_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
 async def test_flowspec_export_review_apply_and_roundtrip(flow_spec_client: AsyncClient) -> None:
     token_response = await flow_spec_client.post(
         "/api/v1/auth/login",

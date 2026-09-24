@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
@@ -100,6 +100,29 @@ class DurableExecutionRepository:
             if current is None or row.attempt > current.attempt:
                 latest[row.node_id] = row
         return sorted(latest.values(), key=lambda item: item.node_id)
+
+    async def list_nested_checkpoints(
+        self, execution_id: UUID, prefix: str, *, page: int, page_size: int
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        predicate = (
+            ExecutionCheckpoint.execution_id == execution_id,
+            ExecutionCheckpoint.node_id.startswith(prefix, autoescape=True),
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(ExecutionCheckpoint).where(*predicate)
+        )
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ExecutionCheckpoint)
+                    .where(*predicate)
+                    .order_by(ExecutionCheckpoint.node_id, ExecutionCheckpoint.attempt)
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+        )
+        return rows, int(total or 0)
 
     async def list_checkpoints_for_executions(
         self, execution_ids: Sequence[UUID]

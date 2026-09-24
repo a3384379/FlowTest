@@ -517,6 +517,35 @@ async def test_parallel_is_bounded_and_merges_in_definition_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parallel_branches_cannot_mutate_sibling_json_inputs() -> None:
+    payload = _parallel_definition()
+    payload["nodes"][1]["configuration"]["inputs"] = {
+        "payload": {"kind": "variable", "scope": "runtime", "path": ["payload"]}
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+    first_done = asyncio.Event()
+
+    class IsolatedExecutor(BranchExecutor):
+        async def execute(self, node, context: ExecutionContext):
+            if node.id == "first_region_step":
+                context.input_variables["payload"]["nested"]["flag"] = True
+                first_done.set()
+                return {"branch": "first"}
+            if node.id == "second_region_step":
+                await first_done.wait()
+                assert "flag" not in context.input_variables["payload"]["nested"]
+                return {"branch": "second"}
+            return await super().execute(node, context)
+
+    source = {"payload": {"nested": {"value": 1}}}
+    result = await WorkflowScheduler(IsolatedExecutor(definition)).run(
+        definition, context=ExecutionContext(runtime_variables=source)
+    )
+    assert result.status == "passed", result.records[1].output
+    assert source == {"payload": {"nested": {"value": 1}}}
+
+
+@pytest.mark.asyncio
 async def test_parallel_stop_on_error_does_not_start_later_branch() -> None:
     definition = WorkflowDefinition.model_validate(_parallel_definition("stop_on_error"))
 
@@ -590,6 +619,101 @@ async def test_concurrent_foreach_stop_does_not_start_later_item() -> None:
     assert result.status == "failed"
     assert summary["not_started_count"] == 1
     assert (2, 3) not in executor.calls
+
+
+@pytest.mark.asyncio
+async def test_concurrent_foreach_inputs_do_not_share_mutable_objects() -> None:
+    payload = _definition()
+    payload["nodes"][1]["configuration"]["policy"]["concurrency"] = 2
+    payload["nodes"][1]["configuration"]["inputs"] = {
+        "shared": {"kind": "variable", "scope": "runtime", "path": ["shared"]}
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+    changed = asyncio.Event()
+
+    class IsolatedExecutor(BranchExecutor):
+        async def execute(self, node, context: ExecutionContext):
+            if node.id == "step" and context.loop_variables["index"] == 0:
+                context.input_variables["shared"]["nested"]["flag"] = True
+                changed.set()
+            elif node.id == "step":
+                await changed.wait()
+                assert "flag" not in context.input_variables["shared"]["nested"]
+            return await super().execute(node, context)
+
+    source = {"cases": [1, 2], "shared": {"nested": {"value": 1}}}
+    result = await WorkflowScheduler(IsolatedExecutor(definition)).run(
+        definition, context=ExecutionContext(runtime_variables=source)
+    )
+    assert result.status == "passed", result.records[1].output
+    assert source["shared"] == {"nested": {"value": 1}}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_foreach_with_nested_parallel_shares_leaf_limit() -> None:
+    payload = _definition()
+    payload["settings"] = {"concurrency": 1}
+    payload["nodes"][1]["configuration"]["policy"]["concurrency"] = 2
+    payload["regions"][0]["nodes"] = [
+        _node(
+            "nested_parallel",
+            "flow.control.parallel",
+            {
+                "branches": [
+                    {"id": name, "label": name, "body": {"kind": "inline", "region_id": name}}
+                    for name in ("a", "b")
+                ],
+                "policy": {"concurrency": 2, "timeout_seconds": 30},
+            },
+        )
+    ]
+    payload["regions"][0]["entry_node_id"] = "nested_parallel"
+    payload["regions"][0]["exit_node_ids"] = ["nested_parallel"]
+    payload["regions"].extend(
+        {
+            "id": name,
+            "owner_node_id": "nested_parallel",
+            "role": f"branch:{name}",
+            "nodes": [_node(f"{name}_step", "custom.test")],
+            "edges": [],
+            "entry_node_id": f"{name}_step",
+            "exit_node_ids": [f"{name}_step"],
+        }
+        for name in ("a", "b")
+    )
+    definition = WorkflowDefinition.model_validate(payload)
+
+    class NestedExecutor(BranchExecutor):
+        def __init__(self, definition: WorkflowDefinition) -> None:
+            super().__init__(definition)
+            self.active = 0
+            self.peak = 0
+
+        async def execute(self, node, context: ExecutionContext):
+            if node.id in {"a_step", "b_step"}:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                try:
+                    await asyncio.sleep(0.005)
+                    self.visited.append(f"{context.loop_variables['index']}:{node.id}")
+                    return {"branch": node.id}
+                finally:
+                    self.active -= 1
+            return await super().execute(node, context)
+
+    executor = NestedExecutor(definition)
+    result = await asyncio.wait_for(
+        WorkflowScheduler(executor).run(
+            definition, context=ExecutionContext(runtime_variables={"cases": [1, 2]})
+        ),
+        timeout=2,
+    )
+    assert result.status == "passed", [
+        (record.node_id, record.error_code, record.error_message, record.output)
+        for record in result.records
+    ]
+    assert executor.peak == 1
+    assert sorted(executor.visited) == ["0:a_step", "0:b_step", "1:a_step", "1:b_step"]
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,9 @@ class RunnerPoolCreate(BaseModel):
     runtime: Literal["docker", "kubernetes"] = "docker"
     network_zone: str = Field(default="default", min_length=1, max_length=100)
     labels: list[str] = Field(default_factory=list, max_length=50)
-    capabilities: list[str] = Field(default_factory=lambda: ["flow.workflow"], max_length=100)
+    capabilities: list[str] = Field(
+        default_factory=lambda: ["flow.workflow", "flow.workflow.schema4"], max_length=100
+    )
     max_concurrency: int = Field(default=20, ge=1, le=500)
     lease_timeout_seconds: int = Field(default=30, ge=10, le=300)
     heartbeat_timeout_seconds: int = Field(default=90, ge=15, le=600)
@@ -38,6 +40,7 @@ class RunnerPoolUpdate(BaseModel):
     lease_timeout_seconds: int | None = Field(default=None, ge=10, le=300)
     heartbeat_timeout_seconds: int | None = Field(default=None, ge=15, le=600)
     enabled: bool | None = None
+    capabilities: list[str] | None = Field(default=None, max_length=100)
 
 
 class RunnerResponse(BaseModel):
@@ -304,7 +307,9 @@ class RunnerAgentConfiguration(BaseModel):
     agent_version: str = Field(min_length=1, max_length=64)
     architecture: str = Field(min_length=1, max_length=32)
     labels: list[str] = Field(default_factory=list, max_length=50)
-    capabilities: list[str] = Field(default_factory=lambda: ["flow.workflow"], max_length=100)
+    capabilities: list[str] = Field(
+        default_factory=lambda: ["flow.workflow", "flow.workflow.schema4"], max_length=100
+    )
     max_concurrency: int = Field(default=1, ge=1, le=500)
     poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
     production: bool = False

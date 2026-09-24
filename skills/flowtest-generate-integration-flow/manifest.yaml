@@ -99,6 +99,7 @@ human_approval:
     - "successful proposal creation"
     - "successful sandbox preview"
 stop_conditions:
+  - "the requested schema 4.0 control region cannot be represented by the current FlowSpec proposal contract"
   - "required MCP version, tool, scope, project authorization, or feature flag is missing"
   - "the target environment is production or its classification is unknown"
   - "the Context revision or proposal revision is stale"
@@ -109,6 +110,8 @@ stop_conditions:
   - "an explicitly requested execution cannot prove required cleanup, or an attempted cleanup action fails"
   - "the requested change would hide or weaken a product defect"
 security_rules:
+  - "generate one to three representative serial cases by default; do not invent parallel, retry, polling, or exception blocks"
+  - "never flatten a requested inline control region into a FlowSpec proposal and claim semantic equivalence"
   - "keep tenant, organization, project, Context, and approval identities aligned"
   - "pin every repository, contract, schema, and Context revision"
   - "quick proposals use only declared inputs and existing API IDs; deep mode uses typed bounded evidence and secret references"

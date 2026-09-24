@@ -236,7 +236,10 @@ def configuration_from_environment() -> RunnerAgentConfiguration:
         agent_version=os.environ.get("FLOWTEST_RUNNER_AGENT_VERSION", "3.0.0-beta.3"),
         architecture=os.environ.get("FLOWTEST_RUNNER_ARCHITECTURE", platform.machine()),
         labels=_csv_environment("FLOWTEST_RUNNER_LABELS"),
-        capabilities=_csv_environment("FLOWTEST_RUNNER_CAPABILITIES", default=["flow.workflow"]),
+        capabilities=_csv_environment(
+            "FLOWTEST_RUNNER_CAPABILITIES",
+            default=["flow.workflow", "flow.workflow.schema4"],
+        ),
         max_concurrency=int(os.environ.get("FLOWTEST_RUNNER_MAX_CONCURRENCY", "1")),
         poll_seconds=float(os.environ.get("FLOWTEST_RUNNER_POLL_SECONDS", "1")),
         production=os.environ.get("FLOWTEST_ENVIRONMENT", "local") == "production",

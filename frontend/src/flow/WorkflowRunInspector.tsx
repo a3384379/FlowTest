@@ -1,5 +1,5 @@
 import { ClockCircleOutlined, LockOutlined } from '@ant-design/icons'
-import { Alert, Descriptions, Empty, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Alert, Descriptions, Empty, Pagination, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { useState } from 'react'
 
 import type {
@@ -103,7 +103,10 @@ function controlIterations(output: unknown): ControlIteration[] | null {
 function ControlIterations({ output }: { output: unknown }) {
   const items = controlIterations(output)
   const [selected, setSelected] = useState<number | undefined>(undefined)
+  const [page, setPage] = useState(1)
   if (!items) return null
+  const pageSize = 20
+  const visibleItems = items.slice((page - 1) * pageSize, page * pageSize)
   const detail = items.find((item) => item.input_index === selected)
   const summary = output as Record<string, unknown>
   return (
@@ -117,12 +120,25 @@ function ControlIterations({ output }: { output: unknown }) {
         aria-label="选择循环轮次"
         placeholder="选择轮次查看节点结果"
         value={selected}
-        options={items.map((item) => ({
+        options={visibleItems.map((item) => ({
           value: item.input_index,
           label: `第 ${item.input_index + 1} 项 · ${item.test_verdict ?? item.status}`,
         }))}
         onChange={setSelected}
       />
+      {items.length > pageSize && (
+        <Pagination
+          aria-label="循环轮次分页"
+          current={page}
+          pageSize={pageSize}
+          total={items.length}
+          showSizeChanger={false}
+          onChange={(nextPage) => {
+            setPage(nextPage)
+            setSelected(undefined)
+          }}
+        />
+      )}
       {detail?.nodes.map((item) => (
         <div key={`${item.node_id}:${item.instance_id ?? ''}`}>
           <Typography.Text>

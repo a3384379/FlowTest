@@ -169,6 +169,23 @@ async def test_inline_control_block_publishes_runs_and_exposes_scoped_instance(
     assert scoped.status_code == 200, scoped.text
     assert scoped.json()["node_id"] == instance_id
     assert scoped.json()["status"] == "passed"
+    paged = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/instances",
+        headers=headers,
+        params={"page": 2, "page_size": 1},
+    )
+    assert paged.status_code == 200, paged.text
+    assert paged.json()["total"] == 3
+    assert len(paged.json()["items"]) == 1
+    assert paged.json()["items"][0]["node_id"] in {
+        item["nodes"][0]["instance_id"] for item in loop["output"]["items"]
+    }
+    replayed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/nodes/loop/replay",
+        headers=headers,
+    )
+    assert replayed.status_code == 409, replayed.text
+    assert replayed.json()["error"]["code"] == "CONTROL_REPLAY_REQUIRES_DERIVED_RUN"
 
 
 @respx.mock

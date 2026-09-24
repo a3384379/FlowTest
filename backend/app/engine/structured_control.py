@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import replace
 from typing import Protocol, cast, runtime_checkable
 
@@ -321,7 +322,7 @@ class StructuredControlRunner:
                     code="LOOP_MIN_ITEMS_NOT_MET",
                     message=f"循环节点 {node.name} 的集合未达到最小项数",
                 )
-            items = collection
+            items = deepcopy(collection)
         else:
             items = list(range(config.count))
         if len(items) > config.policy.max_iterations:
@@ -596,10 +597,13 @@ class StructuredControlRunner:
     @staticmethod
     def _child_context(parent: ExecutionContext, scope: tuple[str, ...]) -> ExecutionContext:
         return ExecutionContext(
-            workflow_variables=dict(parent.workflow_variables),
-            dataset_variables=dict(parent.dataset_variables),
-            runtime_variables=dict(parent.runtime_variables),
-            error_variables=dict(parent.error_variables),
+            workflow_variables=deepcopy(parent.workflow_variables),
+            dataset_variables=deepcopy(parent.dataset_variables),
+            runtime_variables=deepcopy(parent.runtime_variables),
+            input_variables=deepcopy(parent.input_variables),
+            loop_variables=deepcopy(parent.loop_variables),
+            state_variables=deepcopy(parent.state_variables),
+            error_variables=deepcopy(parent.error_variables),
             request_budget=parent.request_budget,
             cleanup_budget=parent.cleanup_budget,
             node_instance_budget=parent.node_instance_budget,
@@ -622,7 +626,7 @@ class StructuredControlRunner:
         }
         outputs = cast(dict[str, JsonValue], parent.snapshot()["node_outputs"])
         for node_id, output in outputs.items():
-            selector.record_output(node_id, output)
+            selector.record_output(node_id, deepcopy(output))
         return selector
 
     @staticmethod
@@ -636,19 +640,22 @@ class StructuredControlRunner:
             name: resolve_value(source, child if _is_loop_source(source) else parent)
             for name, source in inputs.items()
         }
-        child.input_variables = bound
-        return {
-            **bound,
-            **{
-                name: resolve_value(
-                    source,
-                    child
-                    if isinstance(source, VariableValueSource) and source.scope in {"loop", "input"}
-                    else parent,
-                )
-                for name, source in region_inputs.items()
-            },
-        }
+        child.input_variables = deepcopy(bound)
+        return deepcopy(
+            {
+                **bound,
+                **{
+                    name: resolve_value(
+                        source,
+                        child
+                        if isinstance(source, VariableValueSource)
+                        and source.scope in {"loop", "input"}
+                        else parent,
+                    )
+                    for name, source in region_inputs.items()
+                },
+            }
+        )
 
     async def _run_condition_loop(
         self, node: WorkflowNode, config: ConditionLoopConfig, parent: ExecutionContext
@@ -658,9 +665,11 @@ class StructuredControlRunner:
                 code="CONTROL_BODY_UNAVAILABLE", message="当前执行器不支持该控制体来源"
             )
         region = self._regions[config.body.region_id]
-        state = {name: resolve_value(source, parent) for name, source in config.state.items()}
+        state = {
+            name: deepcopy(resolve_value(source, parent)) for name, source in config.state.items()
+        }
         selector = self._selector_context(config.inputs, parent)
-        frozen_inputs = dict(selector.input_variables)
+        frozen_inputs = deepcopy(selector.input_variables)
         iterations: list[dict[str, JsonValue]] = []
         token = parent.cancellation or CancellationToken()
         for index in range(config.policy.max_iterations + 1):
@@ -669,7 +678,7 @@ class StructuredControlRunner:
                     status=NodeStatus.CANCELLED,
                     output=_condition_loop_output(iterations, state, "cancelled"),
                 )
-            selector.state_variables = dict(state)
+            selector.state_variables = deepcopy(state)
             if node.capability_id == "flow.control.while":
                 should_continue, trace = evaluate_condition(config.condition, selector)
                 if not should_continue:
@@ -685,7 +694,7 @@ class StructuredControlRunner:
             scope = (*parent.checkpoint_scope, "region", region.id, "iteration", str(index))
             child = self._child_context(parent, scope)
             child.loop_variables = {"index": index, "iteration": index + 1}
-            child.state_variables = dict(state)
+            child.state_variables = deepcopy(state)
             child.input_variables = self._condition_region_inputs(
                 frozen_inputs, region.inputs, parent, child
             )
@@ -732,20 +741,22 @@ class StructuredControlRunner:
         parent: ExecutionContext,
         child: ExecutionContext,
     ) -> dict[str, JsonValue]:
-        child.input_variables = dict(frozen)
-        return {
-            **frozen,
-            **{
-                name: resolve_value(
-                    source,
-                    child
-                    if isinstance(source, VariableValueSource)
-                    and source.scope in {"input", "loop", "state", "error"}
-                    else parent,
-                )
-                for name, source in region_inputs.items()
-            },
-        }
+        child.input_variables = deepcopy(frozen)
+        return deepcopy(
+            {
+                **frozen,
+                **{
+                    name: resolve_value(
+                        source,
+                        child
+                        if isinstance(source, VariableValueSource)
+                        and source.scope in {"input", "loop", "state", "error"}
+                        else parent,
+                    )
+                    for name, source in region_inputs.items()
+                },
+            }
+        )
 
     @staticmethod
     def _updated_state(
@@ -757,7 +768,7 @@ class StructuredControlRunner:
             name: _state_update_value(current[name], update, context)
             for name, update in updates.items()
         }
-        return {**current, **pending}
+        return deepcopy({**current, **pending})
 
     async def _run_loop(
         self,
@@ -838,7 +849,7 @@ class StructuredControlRunner:
             loop_values["item"] = item
         child = self._child_context(parent, scope)
         child.cancellation = token
-        child.loop_variables = loop_values
+        child.loop_variables = deepcopy(loop_values)
         child.checkpoint_phase = parent.checkpoint_phase or node.phase
         child.input_variables = self._loop_inputs(config.inputs, region.inputs, parent, child)
         scoped_executor = (
