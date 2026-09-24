@@ -21,7 +21,7 @@ from app.domain.durable_execution import (
 from app.domain.sandbox_preview import WorkflowRunPurpose
 from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
-from app.engine.scheduler import NodeRunRecord
+from app.engine.scheduler import NESTED_CHECKPOINT_PREFIX, NodeRunRecord
 from app.models.access import User
 from app.models.durable_execution import ExecutionCheckpoint, ExecutionCommand
 from app.models.workflows import WorkflowExecution
@@ -343,6 +343,38 @@ class DurableExecutionService:
     async def list_checkpoints(
         self, *, actor: User, project_id: UUID, execution_id: UUID
     ) -> list[ExecutionCheckpoint]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_checkpoints(execution_id)
+
+    async def get_instance_checkpoint(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        instance_id: str,
+    ) -> ExecutionCheckpoint:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        if not instance_id.startswith(NESTED_CHECKPOINT_PREFIX):
+            raise AppError(
+                code="WORKFLOW_INSTANCE_NOT_FOUND",
+                message="控制节点实例不存在",
+                status_code=404,
+            )
+        checkpoint = await self._repository.latest_checkpoint(
+            execution_id=execution_id, node_id=instance_id
+        )
+        if checkpoint is None:
+            raise AppError(
+                code="WORKFLOW_INSTANCE_NOT_FOUND",
+                message="控制节点实例不存在",
+                status_code=404,
+            )
+        return checkpoint
+
+    async def _require_readable_execution(
+        self, actor: User, project_id: UUID, execution_id: UUID
+    ) -> None:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._session.scalar(
             select(WorkflowExecution).where(
@@ -354,7 +386,6 @@ class DurableExecutionService:
             raise AppError(
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
             )
-        return await self._repository.list_checkpoints(execution_id)
 
     async def list_commands(
         self, *, actor: User, project_id: UUID, execution_id: UUID

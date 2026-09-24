@@ -372,6 +372,7 @@ def _change_set_workflow_definition() -> dict[str, object]:
                 "mappings": [],
             }
         ],
+        "regions": [],
         "settings": {
             "fail_fast": True,
             "concurrency": 20,

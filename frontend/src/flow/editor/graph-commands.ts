@@ -1,4 +1,5 @@
 import type { WorkflowDefinition, WorkflowNode } from '../../lib/api'
+import { descendantRegions } from './control-blocks'
 import {
   adjacency,
   diagnostic,
@@ -30,11 +31,16 @@ function retainedReferences(node: WorkflowNode, deleted: Set<string>): EditDiagn
   const issues = references.map((id) =>
     diagnostic('NODE_REFERENCE', `“${node.name}”仍引用节点 ${id}，请先修改来源或清理范围`, node.id),
   )
+  issues.push(...controlReferenceIssues(node, deleted))
   if (deleted.size && node.bindings?.length)
     issues.push(
       diagnostic('BINDING_REVIEW', `“${node.name}”含表达式绑定，删除前请先明确处理其引用`, node.id),
     )
-  if (deleted.size && resolveEffectiveNodeType(node) === 'capability')
+  if (
+    deleted.size &&
+    resolveEffectiveNodeType(node) === 'capability' &&
+    !node.capability_id?.startsWith('flow.control.')
+  )
     issues.push(
       diagnostic(
         'CAPABILITY_REVIEW',
@@ -43,6 +49,23 @@ function retainedReferences(node: WorkflowNode, deleted: Set<string>): EditDiagn
       ),
     )
   return issues
+}
+
+function controlReferenceIssues(node: WorkflowNode, deleted: Set<string>): EditDiagnostic[] {
+  if (!node.capability_id?.startsWith('flow.control.')) return []
+  if (!referencedNodeIds(node.configuration).some((id) => deleted.has(id))) return []
+  return [diagnostic('NODE_REFERENCE', `“${node.name}”的控制配置仍引用待删除节点`, node.id)]
+}
+
+function referencedNodeIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(referencedNodeIds)
+  if (!value || typeof value !== 'object') return []
+  return Object.entries(value).flatMap(([key, item]) =>
+    (key === 'node_id' || key === 'source_node_id' || key === 'target_node_id') &&
+    typeof item === 'string'
+      ? [item]
+      : referencedNodeIds(item),
+  )
 }
 export function planDeletion(
   definition: WorkflowDefinition,
@@ -87,6 +110,9 @@ export function planDeletion(
 export function applyDeletion(definition: WorkflowDefinition, plan: DeletionPlan): GraphEditResult {
   if (plan.references.length) return { kind: 'blocked', diagnostics: plan.references }
   if (!plan.deleteNodeIds.length && !plan.deleteEdgeIds.length) return { kind: 'unchanged' }
+  const removedRegions = new Set(
+    descendantRegions(definition, [...plan.deleteNodeIds]).map((region) => region.id),
+  )
   return {
     kind: 'changed',
     diagnostics: [],
@@ -94,6 +120,7 @@ export function applyDeletion(definition: WorkflowDefinition, plan: DeletionPlan
       ...definition,
       nodes: definition.nodes.filter((node) => !plan.deleteNodeIds.includes(node.id)),
       edges: definition.edges.filter((edge) => !plan.deleteEdgeIds.includes(edge.id)),
+      regions: (definition.regions ?? []).filter((region) => !removedRegions.has(region.id)),
     },
   }
 }

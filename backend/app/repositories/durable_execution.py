@@ -61,6 +61,22 @@ class DurableExecutionRepository:
         )
         return cast(ExecutionCheckpoint | None, await self._one(statement, lock=lock))
 
+    async def latest_checkpoint(
+        self, *, execution_id: UUID, node_id: str
+    ) -> ExecutionCheckpoint | None:
+        return cast(
+            ExecutionCheckpoint | None,
+            await self._session.scalar(
+                select(ExecutionCheckpoint)
+                .where(
+                    ExecutionCheckpoint.execution_id == execution_id,
+                    ExecutionCheckpoint.node_id == node_id,
+                )
+                .order_by(ExecutionCheckpoint.attempt.desc())
+                .limit(1)
+            ),
+        )
+
     async def list_checkpoints(
         self, execution_id: UUID, *, resumable_only: bool = False
     ) -> list[ExecutionCheckpoint]:

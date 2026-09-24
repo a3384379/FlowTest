@@ -31,6 +31,36 @@ describe('WorkflowDesigner', () => {
     vi.clearAllMocks()
   })
 
+  it('adds an inline control block with versioned regions as one editor change', async () => {
+    const onChange = vi.fn()
+    const browser = userEvent.setup()
+    render(
+      <WorkflowDesigner
+        definition={workflowDefinition}
+        apis={[]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: '集合遍历' } })
+    await browser.click(screen.getByRole('button', { name: 'plus 添加集合遍历' }))
+    expect(onChange).toHaveBeenCalledOnce()
+    const next = onChange.mock.calls[0][0] as WorkflowDefinition
+    const added = next.nodes.at(-1)!
+    expect(next.schema_version).toBe('4.0')
+    expect(added.capability_id).toBe('flow.control.foreach')
+    expect(next.regions).toContainEqual(
+      expect.objectContaining({
+        owner_node_id: added.id,
+        role: 'body',
+      }),
+    )
+  })
+
   it('loads a selected API by ID when it is outside the current search page', async () => {
     const selected: ApiDefinition = { ...apiDefinition, name: '第 200 个接口' }
     vi.mocked(listApis).mockResolvedValue({ items: [], total: 250, page: 1, page_size: 20 })

@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     NodeType,
     WorkflowNode,
@@ -24,8 +25,14 @@ def node_type_consumes_request(node_type: NodeType) -> bool:
     return node_type in {NodeType.API, NodeType.SQL, NodeType.REDIS, NodeType.CAPABILITY}
 
 
+def node_consumes_request(node: WorkflowNode) -> bool:
+    return node.capability_id not in CONTROL_CONFIG_MODELS and node_type_consumes_request(
+        node.effective_type
+    )
+
+
 def preview_node_request_attempts(node: WorkflowNode) -> int:
-    if not node_type_consumes_request(node.effective_type):
+    if not node_consumes_request(node):
         return 0
     config = parse_node_config(node)
     polling = (

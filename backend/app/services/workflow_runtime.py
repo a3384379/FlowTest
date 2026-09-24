@@ -2,12 +2,13 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import cast
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -25,6 +26,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     FieldMapping,
     ForEachNodeConfig,
@@ -59,7 +61,7 @@ from app.engine.protocol_nodes import (
     PreparedProtocolNode,
     resolve_protocol_config,
 )
-from app.engine.request_accounting import node_type_consumes_request, resumed_request_attempts
+from app.engine.request_accounting import node_consumes_request, resumed_request_attempts
 from app.engine.request_accounting import (
     preview_node_request_attempts as _preview_node_request_attempts,
 )
@@ -82,6 +84,7 @@ from app.engine.scheduler import (
     WorkflowRunResult,
     WorkflowScheduler,
 )
+from app.engine.structured_control import StructuredControlRunner, control_placeholder
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.data_nodes import (
     DataNodeRunner,
@@ -137,8 +140,11 @@ class WorkflowNodeExecutor:
         data_runner: DataNodeRunner | None = None,
         protocol_nodes: dict[str, PreparedProtocolNode] | None = None,
         event_nodes: dict[str, PreparedEventNode] | None = None,
+        branch_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        owns_client: bool = False,
     ) -> None:
         self._client = client
+        self._definition = definition
         self._requests = requests
         self._mappings = _mappings_by_target(definition)
         self._network_policy = network_policy
@@ -147,6 +153,9 @@ class WorkflowNodeExecutor:
         self._outbound_guard = outbound_guard
         self._protocol_nodes = protocol_nodes or {}
         self._event_nodes = event_nodes or {}
+        self._branch_client_factory = branch_client_factory
+        self._owns_client = owns_client
+        self._provided_data_runner = data_runner
         self._protocol_runner = ProtocolRunner(
             client,
             network_policy,
@@ -183,17 +192,47 @@ class WorkflowNodeExecutor:
             ]
         )
 
-    async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+    async def execute(
+        self, node: WorkflowNode, context: ExecutionContext
+    ) -> NodeResult | JsonValue:
         return await self._handlers.execute(node, context)
 
     async def close(self) -> None:
         await self._event_runner.close_all()
+        if self._owns_client:
+            await self._client.aclose()
+
+    def fork_branch(self) -> "WorkflowNodeExecutor":
+        client = (
+            self._branch_client_factory()
+            if self._branch_client_factory is not None
+            else httpx.AsyncClient(
+                follow_redirects=False,
+                cookies=httpx.Cookies(self._client.cookies),
+            )
+        )
+        return WorkflowNodeExecutor(
+            client,
+            self._requests,
+            self._definition,
+            self._network_policy,
+            subflows=self._subflows,
+            outbound_guard=self._outbound_guard,
+            data_nodes=self._data_nodes,
+            data_runner=self._provided_data_runner,
+            protocol_nodes=self._protocol_nodes,
+            event_nodes=self._event_nodes,
+            branch_client_factory=self._branch_client_factory,
+            owns_client=True,
+        )
 
     async def _execute_capability(
         self,
         node: WorkflowNode,
         context: ExecutionContext,
-    ) -> JsonValue:
+    ) -> NodeResult | JsonValue:
+        if node.capability_id in CONTROL_CONFIG_MODELS:
+            return await StructuredControlRunner(self._definition, self).execute(node, context)
         if node.capability_id in {"graphql.request", "grpc.call"}:
             return await self._execute_protocol(node, context)
         if node.capability_id and node.capability_id.startswith(("kafka.", "websocket.")):
@@ -284,18 +323,20 @@ class WorkflowNodeExecutor:
                 code="INVALID_API_CONFIG", message=f"节点 {node.name} 的 API 配置无效"
             )
         prepared = self._requests[node.id]
+        base_request = _apply_control_templates(prepared.request, node.id, context)
+        redacted_base = _apply_control_templates(prepared.redacted_request, node.id, context)
         try:
             resolved_mappings = resolve_field_mappings(
                 self._mappings.get(node.id, ()),
                 context,
             )
             request, mapping_trace = _apply_mappings(
-                prepared.request,
+                base_request,
                 resolved_mappings,
                 context,
             )
             redacted_request = _apply_redacted_mappings(
-                prepared.redacted_request,
+                redacted_base,
                 resolved_mappings,
             )
         except MappingResolutionError as error:
@@ -663,7 +704,7 @@ class WorkflowNodeExecutor:
             )
             if nested_node is None:
                 return
-            consumes_request = node_type_consumes_request(nested_node.effective_type)
+            consumes_request = node_consumes_request(nested_node)
             should_checkpoint = update.status.is_terminal or (
                 consumes_request and update.status is NodeStatus.RUNNING and update.request_reserved
             )
@@ -695,6 +736,7 @@ class WorkflowNodeExecutor:
                 context=ExecutionContext(
                     workflow_variables=dict(prepared.definition.variables),
                     runtime_variables=runtime_variables,
+                    allow_return=True,
                     status_callback=status_callback,
                     checkpoint_scope=checkpoint_scope,
                     checkpoint_phase=checkpoint_phase,
@@ -842,6 +884,7 @@ def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dic
         "workflow_version": prepared.workflow_version,
         "fingerprint": prepared.fingerprint,
         "status": result.status.value,
+        "return": result.return_output,
         "nodes": [
             {
                 "node_id": record.node_id,
@@ -995,10 +1038,73 @@ def _mappings_by_target(
     definition: WorkflowDefinition,
 ) -> dict[str, tuple[FieldMapping, ...]]:
     grouped: dict[str, list[FieldMapping]] = {}
-    for edge in definition.edges:
+    for edge in (
+        *definition.edges,
+        *(edge for region in definition.regions for edge in region.edges),
+    ):
         if edge.mappings:
             grouped.setdefault(edge.target, []).extend(edge.mappings)
     return {node_id: tuple(items) for node_id, items in grouped.items()}
+
+
+def _apply_control_templates(
+    request: PreparedRequest, node_id: str, context: ExecutionContext
+) -> PreparedRequest:
+    variables = {
+        control_placeholder(node_id, name): value
+        for name, value in context.resolved_variables().items()
+        if name.startswith(("input.", "loop.", "state.", "error."))
+    }
+    url = request.url
+    for marker, value in variables.items():
+        url = url.replace(marker, quote(_string_value(value), safe=""))
+    rendered = replace(
+        request,
+        url=url,
+        headers=tuple(
+            replace(header, value=_render_control_text(header.value, variables))
+            for header in request.headers
+        ),
+        body=_render_control_value(request.body, variables),
+        variables=tuple(
+            replace(item, value=_render_control_text(item.value, variables))
+            for item in request.variables
+        ),
+    )
+    if _contains_unresolved_control_marker(rendered):
+        raise NodeExecutionError(
+            code="CONTROL_INPUT_MISSING",
+            message="控制区域请求引用了未绑定的输入",
+        )
+    return rendered
+
+
+def _contains_unresolved_control_marker(request: PreparedRequest) -> bool:
+    marker = re.compile(r"__FLOWTEST_CONTROL_[0-9a-f]{24}__")
+    return bool(
+        marker.search(request.url)
+        or any(marker.search(header.value) for header in request.headers)
+        or any(marker.search(item.value) for item in request.variables)
+        or marker.search(json.dumps(request.body, ensure_ascii=False))
+    )
+
+
+def _render_control_value(value: JsonValue, variables: dict[str, JsonValue]) -> JsonValue:
+    if isinstance(value, dict):
+        return {name: _render_control_value(item, variables) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_render_control_value(item, variables) for item in value]
+    if not isinstance(value, str):
+        return value
+    if value in variables:
+        return variables[value]
+    return _render_control_text(value, variables)
+
+
+def _render_control_text(value: str, variables: dict[str, JsonValue]) -> str:
+    for marker, replacement in variables.items():
+        value = value.replace(marker, _string_value(replacement))
+    return value
 
 
 def _apply_mappings(

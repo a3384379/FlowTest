@@ -445,6 +445,7 @@ def _workflow_definition_schema() -> dict[str, JsonValue]:
             "runtime_inputs": {"type": "array", "maxItems": 1000, "items": runtime_input},
             "nodes": {"type": "array", "minItems": 2, "maxItems": 1000, "items": node},
             "edges": {"type": "array", "maxItems": 5000, "items": edge},
+            "regions": {"type": "array", "maxItems": 0},
             "settings": settings,
             "run_policy": run_policy,
         }

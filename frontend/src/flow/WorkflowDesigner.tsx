@@ -9,6 +9,7 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { useDraftSession } from '../features/drafts/draft-session'
 import { nodeEditorScope } from './editor/editor-identity'
 import { nodeRegistryItem, type NodeRegistryKey } from './editor/node-registry'
+import { addControlBlock, type ControlBlockKind } from './editor/control-blocks'
 import './workflow-editor.css'
 import WorkflowEdgeInspector from './WorkflowEdgeInspector'
 import WorkflowShortcutHelp from './WorkflowShortcutHelp'
@@ -105,6 +106,7 @@ import {
   addProtocolNode,
   addTypedNode,
   autoLayoutWorkflow,
+  insertNodeOnEdge,
   pasteNode,
   type PaletteNodeType,
 } from './workflow-graph'
@@ -470,6 +472,10 @@ function WorkflowDesignerReady({
     )
   }
 
+  function addSelectedControlBlock(kind: ControlBlockKind) {
+    addCreatedNode(addControlBlock(editor.latest.current.definition, kind))
+  }
+
   function copySelectedNode() {
     if (
       selected &&
@@ -509,6 +515,15 @@ function WorkflowDesignerReady({
         node.id === added.id ? placeAddedNode(node, point, selected) : node,
       ),
     }
+    if (added.capability_id?.startsWith('flow.control.') && editor.selection?.kind === 'edge') {
+      const connected = insertNodeOnEdge(placed, added.id, editor.selection.id)
+      if (!connected) {
+        editor.notify('当前连线包含字段映射，无法直接插入控制块')
+        return
+      }
+      editor.commit(connected, { kind: 'node', id: added.id })
+      return
+    }
     editor.commit(placed, { kind: 'node', id: added.id })
   }
   function dropLibraryNode(event: React.DragEvent) {
@@ -524,6 +539,17 @@ function WorkflowDesignerReady({
       'kafka.produce': () => addSelectedEvent('kafka.produce'),
       'kafka.consume': () => addSelectedEvent('kafka.consume'),
       'websocket.exchange': () => addSelectedEvent('websocket.exchange'),
+      'control.foreach': () => addSelectedControlBlock('foreach'),
+      'control.repeat': () => addSelectedControlBlock('repeat'),
+      'control.if': () => addSelectedControlBlock('if'),
+      'control.switch': () => addSelectedControlBlock('switch'),
+      'control.while': () => addSelectedControlBlock('while'),
+      'control.do_while': () => addSelectedControlBlock('do_while'),
+      'control.until': () => addSelectedControlBlock('until'),
+      'control.parallel': () => addSelectedControlBlock('parallel'),
+      'control.try': () => addSelectedControlBlock('try'),
+      'control.group': () => addSelectedControlBlock('group'),
+      'control.fail': () => addSelectedControlBlock('fail'),
     }
     if (actions[type]) actions[type]()
     else if (isPaletteType(type)) addPaletteNode(type)
@@ -619,6 +645,7 @@ function WorkflowDesignerReady({
           onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
           onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
           onAddNode={addPaletteNode}
+          onAddControlBlock={addSelectedControlBlock}
           canCopy={canCopyNode(selected)}
           canPaste={Boolean(clipboard)}
           canUndo={history.past.length > 0}
@@ -1032,6 +1059,7 @@ function DesignerToolbar({
   onAddKafkaConsume,
   onAddWebsocketExchange,
   onAddNode,
+  onAddControlBlock,
   canCopy,
   canPaste,
   canUndo,
@@ -1082,6 +1110,7 @@ function DesignerToolbar({
   onAddKafkaConsume: () => void
   onAddWebsocketExchange: () => void
   onAddNode: (type: PaletteNodeType) => void
+  onAddControlBlock: (kind: ControlBlockKind) => void
   canCopy: boolean
   canPaste: boolean
   canUndo: boolean
@@ -1229,6 +1258,7 @@ function DesignerToolbar({
           onAddKafkaConsume,
           onAddWebsocketExchange,
           onAddNode,
+          onAddControlBlock,
         })}
       />
       <ApiPicker
@@ -1279,6 +1309,7 @@ type NodeLibraryInput = {
   onAddKafkaConsume: () => void
   onAddWebsocketExchange: () => void
   onAddNode: (type: PaletteNodeType) => void
+  onAddControlBlock: (kind: ControlBlockKind) => void
 }
 
 function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
@@ -1423,6 +1454,17 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
     item('extract', () => input.onAddNode('extract'), reason(true, '')),
     item('assert', () => input.onAddNode('assert'), reason(true, '')),
     item('condition', () => input.onAddNode('condition'), reason(true, '')),
+    item('control.if', () => input.onAddControlBlock('if'), reason(true, '')),
+    item('control.switch', () => input.onAddControlBlock('switch'), reason(true, '')),
+    item('control.foreach', () => input.onAddControlBlock('foreach'), reason(true, '')),
+    item('control.repeat', () => input.onAddControlBlock('repeat'), reason(true, '')),
+    item('control.while', () => input.onAddControlBlock('while'), reason(true, '')),
+    item('control.do_while', () => input.onAddControlBlock('do_while'), reason(true, '')),
+    item('control.until', () => input.onAddControlBlock('until'), reason(true, '')),
+    item('control.parallel', () => input.onAddControlBlock('parallel'), reason(true, '')),
+    item('control.try', () => input.onAddControlBlock('try'), reason(true, '')),
+    item('control.group', () => input.onAddControlBlock('group'), reason(true, '')),
+    item('control.fail', () => input.onAddControlBlock('fail'), reason(true, '')),
     item(
       'dataset',
       () => input.onAddNode('dataset'),

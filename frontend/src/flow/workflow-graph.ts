@@ -1,4 +1,5 @@
 import { effectiveConfig, resolveEffectiveNodeType } from './editor/graph-analysis'
+import { copyControlRegions } from './editor/control-blocks'
 import { addEdge, type Connection, type Edge } from '@xyflow/react'
 
 import type { Credential, WorkflowDefinition, WorkflowNode } from '../lib/api'
@@ -26,6 +27,29 @@ export function connectNodes(
       { id, source: connection.source, target: connection.target, condition, mappings: [] },
     ],
   }
+}
+
+export function insertNodeOnEdge(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  edgeId: string,
+): WorkflowDefinition | null {
+  const edge = definition.edges.find((candidate) => candidate.id === edgeId)
+  const added = definition.nodes.find((node) => node.id === nodeId)
+  if (!edge || !added || edge.mappings.length > 0) return null
+  const source = definition.nodes.find((node) => node.id === edge.source)
+  const target = definition.nodes.find((node) => node.id === edge.target)
+  if (!source || !target) return null
+  let nextId = `${edge.id}-${nodeId}`
+  while (definition.edges.some((candidate) => candidate.id === nextId)) nextId += '-copy'
+  return autoLayoutWorkflow({
+    ...definition,
+    edges: [
+      ...definition.edges.filter((candidate) => candidate.id !== edgeId),
+      { ...edge, target: nodeId },
+      { id: nextId, source: nodeId, target: edge.target, condition: null, mappings: [] },
+    ],
+  })
 }
 
 export function addApiNode(
@@ -324,8 +348,10 @@ export function pasteNode(
   copied: WorkflowNode,
 ): WorkflowDefinition {
   const id = uniqueNodeId(definition, `${copied.type}-copy`)
+  const copiedRegions = copyControlRegions(definition, copied.id, id)
   return {
     ...definition,
+    regions: [...(definition.regions ?? []), ...copiedRegions.regions],
     nodes: [
       ...definition.nodes,
       {
@@ -334,7 +360,9 @@ export function pasteNode(
         name: `${copied.name.slice(0, 197)} 副本`,
         position: { x: copied.position.x + 40, y: copied.position.y + 40 },
         config: structuredClone(copied.config),
-        configuration: copied.configuration ? structuredClone(copied.configuration) : undefined,
+        configuration:
+          copiedRegions.configuration ??
+          (copied.configuration ? structuredClone(copied.configuration) : undefined),
         bindings: copied.bindings ? structuredClone(copied.bindings) : undefined,
       },
     ],

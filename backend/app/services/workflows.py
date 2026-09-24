@@ -50,22 +50,32 @@ from app.domain.sandbox_preview import (
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     ApiNodeMultipartBody,
     AssertNodeConfig,
     CleanupRunWhen,
+    ConditionLoopConfig,
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
     ForEachNodeConfig,
+    InlineControlBody,
     MappingTargetLocation,
+    NodeOutputValueSource,
     NodeType,
     RedisNodeConfig,
     SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowNode,
     WorkflowPhase,
+    WorkflowRegion,
+    condition_sources,
+    control_bodies,
+    control_external_sources,
+    parse_control_config,
     parse_node_config,
 )
 from app.engine.event_nodes import (
@@ -1353,7 +1363,11 @@ class WorkflowService:
         definition: WorkflowDefinition,
     ) -> None:
         unsupported = sorted(
-            {node.type.value for node in definition.nodes if node.type not in SUPPORTED_NODE_TYPES}
+            {
+                node.type.value
+                for node in definition.all_nodes()
+                if node.type not in SUPPORTED_NODE_TYPES
+            }
         )
         if unsupported:
             raise AppError(
@@ -1363,9 +1377,15 @@ class WorkflowService:
                 details={"node_types": unsupported},
             )
         for node in definition.nodes:
-            await self._validate_publishable_node(project_id, definition, node)
+            await self._validate_node_or_control(project_id, definition, node)
+        for region in definition.regions:
+            for node in region.nodes:
+                await self._validate_node_or_control(project_id, definition, node, region=region)
         self._validate_websocket_session_graph(definition)
-        for edge in definition.edges:
+        for edge in (
+            *definition.edges,
+            *(edge for region in definition.regions for edge in region.edges),
+        ):
             for mapping in edge.mappings:
                 self._validate_jmespath(mapping.source.path, edge.id)
         if any(node.effective_type is NodeType.DATASET for node in definition.nodes):
@@ -1376,11 +1396,24 @@ class WorkflowService:
             workflow_path=(workflow_id,),
         )
 
+    async def _validate_node_or_control(
+        self,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+        region: WorkflowRegion | None = None,
+    ) -> None:
+        if node.capability_id in CONTROL_CONFIG_MODELS:
+            self._validate_structured_control(definition, node, region)
+            return
+        await self._validate_publishable_node(project_id, definition, node, region=region)
+
     async def _validate_publishable_node(
         self,
         project_id: UUID,
         definition: WorkflowDefinition,
         node: WorkflowNode,
+        region: WorkflowRegion | None = None,
     ) -> None:
         try:
             if node.type is NodeType.CAPABILITY:
@@ -1426,9 +1459,58 @@ class WorkflowService:
                 details={"node_id": node.id},
             ) from error
         await self._validate_resource_node(project_id, node, config)
-        self._validate_control_node(definition, node, config)
+        self._validate_control_node(definition, node, config, region=region)
         if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
             await self._load_subflow_version(project_id, config)
+
+    def _validate_structured_control(
+        self,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+        region: WorkflowRegion | None,
+    ) -> None:
+        config = parse_control_config(node)
+        builtin_capability_registry.require(node.capability_id or "", node.capability_version or "")
+        for role, body in control_bodies(config):
+            if not isinstance(body, InlineControlBody):
+                raise AppError(
+                    code="CONTROL_BODY_UNSUPPORTED",
+                    message="当前版本仅支持内联控制区域。固定流程引用体尚不可发布",
+                    status_code=422,
+                    details={"node_id": node.id, "role": role},
+                )
+        inline_regions = [item for item in definition.regions if item.owner_node_id == node.id]
+        internal_ids = {item.id for item in inline_regions[0].nodes} if inline_regions else set()
+        post_sources = (
+            condition_sources(config.condition)
+            if isinstance(config, ConditionLoopConfig)
+            and node.capability_id in {"flow.control.do_while", "flow.control.until"}
+            else []
+        )
+        for source in control_external_sources(config):
+            if isinstance(source, NodeOutputValueSource):
+                if source in post_sources and source.node_id in internal_ids:
+                    continue
+                self._validate_control_source(
+                    definition,
+                    {item.id for item in (region.nodes if region else definition.nodes)},
+                    node.id,
+                    source.node_id,
+                    region=region,
+                )
+        for item in inline_regions:
+            for source in item.inputs.values():
+                if isinstance(source, NodeOutputValueSource):
+                    self._validate_control_source(
+                        definition,
+                        {
+                            candidate.id
+                            for candidate in (region.nodes if region else definition.nodes)
+                        },
+                        node.id,
+                        source.node_id,
+                        region=region,
+                    )
 
     async def _validate_protocol_node(
         self,
@@ -1646,29 +1728,34 @@ class WorkflowService:
         definition: WorkflowDefinition,
         node: WorkflowNode,
         config: object,
+        *,
+        region: WorkflowRegion | None = None,
     ) -> None:
         if isinstance(config, (ExtractNodeConfig, AssertNodeConfig, ConditionNodeConfig)):
             self._validate_control_source(
                 definition,
-                {node.id for node in definition.nodes},
+                {item.id for item in (region.nodes if region else definition.nodes)},
                 node.id,
                 config.source_node_id,
+                region=region,
             )
             self._validate_jmespath(config.expression, node.id)
             if isinstance(config, AssertNodeConfig) and config.expected_source_node_id is not None:
                 self._validate_control_source(
                     definition,
-                    {item.id for item in definition.nodes},
+                    {item.id for item in (region.nodes if region else definition.nodes)},
                     node.id,
                     config.expected_source_node_id,
+                    region=region,
                 )
                 self._validate_jmespath(cast(str, config.expected_expression), node.id)
         if isinstance(config, ForEachNodeConfig):
             self._validate_control_source(
                 definition,
-                {item.id for item in definition.nodes},
+                {item.id for item in (region.nodes if region else definition.nodes)},
                 node.id,
                 config.source_node_id,
+                region=region,
             )
             try:
                 validate_safe_expression(config.expression)
@@ -1783,8 +1870,13 @@ class WorkflowService:
         node_ids: set[str],
         node_id: str,
         source_node_id: str,
+        *,
+        region: WorkflowRegion | None = None,
     ) -> None:
-        if source_node_id not in node_ids or not _is_upstream(definition, source_node_id, node_id):
+        edges = region.edges if region is not None else definition.edges
+        if source_node_id not in node_ids or not _is_upstream_edges(
+            node_ids, edges, source_node_id, node_id
+        ):
             raise AppError(
                 code="INVALID_NODE_SOURCE",
                 message="控制节点的数据源必须是其上游节点",
@@ -2748,7 +2840,10 @@ def _remaining_preview_request_budget(
         return None
     attempts: dict[str, int] = {}
     for record in records:
-        if node_type_consumes_request(record.node_type):
+        if (
+            node_type_consumes_request(record.node_type)
+            and record.result.control_capability_id is None
+        ):
             attempts[record.node_id] = max(
                 attempts.get(record.node_id, 0), resumed_request_attempts(record)
             )
@@ -2823,9 +2918,11 @@ def _contains_workflow_id(value: object, needle: str) -> bool:
     return False
 
 
-def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str) -> bool:
-    outgoing: dict[str, set[str]] = {node.id: set() for node in definition.nodes}
-    for edge in definition.edges:
+def _is_upstream_edges(
+    node_ids: set[str], edges: list[WorkflowEdge], source_id: str, target_id: str
+) -> bool:
+    outgoing: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    for edge in edges:
         outgoing[edge.source].add(edge.target)
     pending = [source_id]
     visited: set[str] = set()

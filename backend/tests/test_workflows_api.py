@@ -88,6 +88,89 @@ class MemoryObjectStorage:
         self.objects.pop(key, None)
 
 
+@pytest.mark.asyncio
+async def test_inline_control_block_publishes_runs_and_exposes_scoped_instance(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 10, "max_runtime_seconds": 30},
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "loop",
+                "type": "capability",
+                "name": "集合遍历",
+                "position": {"x": 200, "y": 0},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                    "collection": {"kind": "literal", "value": [1, 2, 3]},
+                    "body": {"kind": "inline", "region_id": "body"},
+                    "policy": {"max_iterations": 3, "timeout_seconds": 30},
+                },
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 400, "y": 0}},
+        ],
+        "edges": [
+            {"id": "s-l", "source": "start", "target": "loop"},
+            {"id": "l-e", "source": "loop", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "loop",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "wait",
+                        "type": "delay",
+                        "name": "等待",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"seconds": 0},
+                    }
+                ],
+                "edges": [],
+                "entry_node_id": "wait",
+                "exit_node_ids": ["wait"],
+            }
+        ],
+    }
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "内联集合遍历", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["id"]
+    detail = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert detail["execution"]["status"] == "passed"
+    loop = next(node for node in detail["nodes"] if node["node_id"] == "loop")
+    assert loop["output"]["completed_count"] == 3
+    instance_id = loop["output"]["items"][1]["nodes"][0]["instance_id"]
+    scoped = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/instances/{instance_id}",
+        headers=headers,
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["node_id"] == instance_id
+    assert scoped.json()["status"] == "passed"
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncClient) -> None:

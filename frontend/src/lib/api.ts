@@ -547,12 +547,25 @@ export type WorkflowRuntimeInputDefinition = {
   description: string
 }
 
+export type WorkflowRegion = {
+  id: string
+  owner_node_id: string
+  role: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  entry_node_id: string | null
+  exit_node_ids: string[]
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+}
+
 export type WorkflowDefinition = {
   runtime_inputs?: WorkflowRuntimeInputDefinition[]
   schema_version: string
   variables: Record<string, string>
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  regions?: WorkflowRegion[]
   settings: {
     fail_fast: boolean
     concurrency: number

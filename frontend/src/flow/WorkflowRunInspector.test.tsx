@@ -7,6 +7,50 @@ import { workflowDefinition } from '../test/fixtures'
 import type { WorkflowNodeExecution } from '../lib/api'
 
 describe('WorkflowRunInspector', () => {
+  it('shows the selected loop item and its actual failed node', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 3,
+            completed_count: 2,
+            failed_count: 1,
+            termination_reason: 'failed',
+            items: [
+              { input_index: 0, status: 'passed', test_verdict: 'passed', nodes: [] },
+              {
+                input_index: 1,
+                status: 'failed',
+                test_verdict: 'failed',
+                nodes: [
+                  {
+                    node_id: 'check',
+                    status: 'failed',
+                    error_code: 'CASE_FAIL',
+                    error_message: '第二项失败',
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    expect(screen.getByRole('region', { name: '循环执行详情' })).toHaveTextContent('已完成 2/3')
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(screen.getByText('第 2 项 · failed'))
+    expect(screen.getByText('第二项失败')).toBeVisible()
+    expect(screen.getByText('CASE_FAIL')).toBeVisible()
+  })
+
   it('shows redacted request, response, timing, and retry snapshots', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

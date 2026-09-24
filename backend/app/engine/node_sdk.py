@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from pydantic import JsonValue
 
 from app.engine.contracts import NodeType, WorkflowNode
+from app.engine.results import NodeResult
 from app.engine.scheduler import ExecutionContext, NodeExecutionError
 
-NodeHandler = Callable[[WorkflowNode, ExecutionContext], Awaitable[JsonValue]]
+NodeHandler = Callable[[WorkflowNode, ExecutionContext], Awaitable[NodeResult | JsonValue]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,9 @@ class NodeHandlerRegistry:
     def supported_types(self) -> frozenset[NodeType]:
         return frozenset(self._handlers)
 
-    async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+    async def execute(
+        self, node: WorkflowNode, context: ExecutionContext
+    ) -> NodeResult | JsonValue:
         handler = self._handlers.get(node.type)
         if handler is None:
             raise NodeExecutionError(

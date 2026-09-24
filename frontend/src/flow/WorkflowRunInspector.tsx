@@ -59,6 +59,7 @@ function RuntimeNodeDetail({
         <SnapshotTag mode={mode} />
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
+      <ControlIterations output={execution?.output} />
       <ObservationPicker observations={observations} selected={observation} onChange={setAttempt} />
       <RuntimeTabs
         input={input}
@@ -70,6 +71,69 @@ function RuntimeNodeDetail({
         请求、响应和变量按本次执行策略展示；开启脱敏时，敏感值会显示为占位符。
       </Typography.Paragraph>
     </aside>
+  )
+}
+
+type ControlIteration = {
+  input_index: number
+  status: string
+  test_verdict: string
+  nodes: Array<{
+    node_id: string
+    instance_id?: string
+    status: string
+    error_code?: string | null
+    error_message?: string | null
+  }>
+}
+
+function controlIterations(output: unknown): ControlIteration[] | null {
+  if (typeof output !== 'object' || output === null || !('items' in output)) return null
+  const items = output.items
+  if (!Array.isArray(items)) return null
+  return items.filter(
+    (item): item is ControlIteration =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof item.input_index === 'number' &&
+      Array.isArray(item.nodes),
+  )
+}
+
+function ControlIterations({ output }: { output: unknown }) {
+  const items = controlIterations(output)
+  const [selected, setSelected] = useState<number | undefined>(undefined)
+  if (!items) return null
+  const detail = items.find((item) => item.input_index === selected)
+  const summary = output as Record<string, unknown>
+  return (
+    <section aria-label="循环执行详情" className="workflow-control-iterations">
+      <Typography.Text strong>
+        已完成 {String(summary.completed_count ?? items.length)}/
+        {String(summary.input_count ?? items.length)}， 失败 {String(summary.failed_count ?? 0)}
+        ，退出原因：{String(summary.termination_reason ?? '未知')}
+      </Typography.Text>
+      <Select
+        aria-label="选择循环轮次"
+        placeholder="选择轮次查看节点结果"
+        value={selected}
+        options={items.map((item) => ({
+          value: item.input_index,
+          label: `第 ${item.input_index + 1} 项 · ${item.test_verdict ?? item.status}`,
+        }))}
+        onChange={setSelected}
+      />
+      {detail?.nodes.map((item) => (
+        <div key={`${item.node_id}:${item.instance_id ?? ''}`}>
+          <Typography.Text>
+            {item.node_id} · {item.status}
+          </Typography.Text>
+          {item.error_message && (
+            <Alert type="error" title={item.error_message} description={item.error_code} />
+          )}
+        </div>
+      ))}
+    </section>
   )
 }
 

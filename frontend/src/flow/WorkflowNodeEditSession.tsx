@@ -230,7 +230,13 @@ export default function WorkflowNodeEditSession({
     if (kind === 'node') {
       const updated = next.nodes.find((item) => item.id === node.id)
       if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
-    } else if (!jsonEqual(next.edges, definition.edges)) {
+    } else if (kind === 'regions' && !jsonEqual(next.regions, definition.regions)) {
+      if (latest.current.dirty) {
+        setError('请先应用或丢弃当前节点配置，再修改内部区域。')
+        return
+      }
+      onChange({ ...definition, regions: next.regions })
+    } else if (kind === 'edges' && !jsonEqual(next.edges, definition.edges)) {
       onChange({ ...definition, edges: next.edges })
     }
   }

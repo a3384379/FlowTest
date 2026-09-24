@@ -443,6 +443,26 @@ async def list_execution_checkpoints(
     return [ExecutionCheckpointResponse.model_validate(item) for item in checkpoints]
 
 
+@router.get(
+    "/workflow-executions/{execution_id}/instances/{instance_id}",
+    response_model=ExecutionCheckpointResponse,
+)
+async def get_control_instance(
+    project_id: UUID,
+    execution_id: UUID,
+    instance_id: str,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ExecutionCheckpointResponse:
+    checkpoint = await DurableExecutionService(session).get_instance_checkpoint(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        instance_id=instance_id,
+    )
+    return ExecutionCheckpointResponse.model_validate(checkpoint)
+
+
 @router.post(
     "/workflow-executions/{execution_id}/cancel",
     response_model=WorkflowExecutionResponse,

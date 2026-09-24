@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { WorkflowDefinition } from '../../lib/api'
 import { analyzeGraph, editorNode, restoreEditedNode } from './graph-analysis'
+import { addControlBlock } from './control-blocks'
+import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
   applyDeletion,
   applyNodePositions,
@@ -27,6 +29,75 @@ const nodeSelection = (id: string) => ({ kind: 'node' as const, id })
 const edgeSelection = (id: string) => ({ kind: 'edge' as const, id })
 
 describe('workflow graph commands', () => {
+  it('inserts a control block into a selected edge as one connected graph change', () => {
+    const definition = addControlBlock(
+      {
+        ...graph(linear),
+        run_policy: {
+          request_budget: null,
+          max_runtime_seconds: null,
+          cleanup_request_budget: null,
+          force_cancel_skips_cleanup: false,
+        },
+      },
+      'foreach',
+    )
+    expect(definition.run_policy?.request_budget).toBe(1000)
+    const node = definition.nodes.at(-1)!
+    const connected = insertNodeOnEdge(definition, node.id, 'a-e')
+    expect(connected?.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'a-e', source: 'api', target: node.id }),
+        expect.objectContaining({ source: node.id, target: 'end', condition: null }),
+      ]),
+    )
+    expect(connected?.nodes.find((item) => item.id === node.id)?.position.x).toBe(480)
+    const mappedDefinition = addControlBlock(graph(mapped), 'foreach')
+    expect(insertNodeOnEdge(mappedDefinition, mappedDefinition.nodes.at(-1)!.id, 'a-b')).toBeNull()
+  })
+  it('copies and deletes a control block with every owned region atomically', () => {
+    const definition = addControlBlock(graph(linear), 'if')
+    const source = definition.nodes.at(-1)!
+    const copied = pasteNode(definition, source)
+    const duplicate = copied.nodes.at(-1)!
+    expect(copied.regions).toHaveLength(4)
+    expect(
+      new Set(copied.regions?.flatMap((region) => region.nodes.map((node) => node.id))).size,
+    ).toBe(4)
+    expect(duplicate.configuration?.true_body).toEqual({
+      kind: 'inline',
+      region_id: copied.regions?.find(
+        (region) => region.owner_node_id === duplicate.id && region.role === 'true',
+      )?.id,
+    })
+    const removed = applyDeletion(copied, planDeletion(copied, nodeSelection(source.id)))
+    expect(removed.kind).toBe('changed')
+    if (removed.kind !== 'changed') return
+    expect(removed.definition.regions).toHaveLength(2)
+    expect(
+      removed.definition.regions?.every((region) => region.owner_node_id === duplicate.id),
+    ).toBe(true)
+  })
+  it('regenerates copied Switch branch IDs and their region roles', () => {
+    const original = addControlBlock(graph(linear), 'switch')
+    const copied = pasteNode(original, original.nodes.at(-1)!)
+    const node = copied.nodes.at(-1)!
+    const branches = node.configuration?.branches as Array<{
+      id: string
+      body: { region_id: string }
+    }>
+    expect(branches.map((branch) => branch.id)).not.toEqual(['first', 'second'])
+    for (const branch of branches) {
+      expect(copied.regions).toContainEqual(
+        expect.objectContaining({
+          owner_node_id: node.id,
+          role: `case:${branch.id}`,
+          id: branch.body.region_id,
+        }),
+      )
+    }
+  })
+
   it('DEL01/04 deletes and retains a recoverable complete mapped edge without mutating input', () => {
     const definition = graph(mapped)
     const original = structuredClone(definition)
