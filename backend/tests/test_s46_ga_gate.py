@@ -103,6 +103,7 @@ async def test_mcp_red_team_surface_has_no_uncontrolled_mutation_tools() -> None
         "flowtest.compile_integration_flowspec",
         "flowtest.diagnose_failure",
         "flowtest.diff_flowspec",
+        "flowtest.discover_control_capabilities",
         "flowtest.discover_services",
         "flowtest.ensure_project",
         "flowtest.ensure_service_target",

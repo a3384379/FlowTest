@@ -401,6 +401,13 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
     )
     assert detail.status_code == 200
     assert detail.json()["schema_hash"] == first["schema_hash"]
+    control = await capability_client.get(
+        "/api/v1/capabilities/flow.control.foreach/versions/1.0.0",
+        headers=user_headers,
+    )
+    assert control.status_code == 200
+    assert control.json()["enabled"] is True
+    assert "configuration_schema" in control.json()["manifest"]
     missing = await capability_client.get(
         "/api/v1/capabilities/grpc.unary/versions/3.0.0",
         headers=user_headers,

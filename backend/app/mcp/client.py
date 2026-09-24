@@ -119,6 +119,13 @@ class MCPReadGatewayClient:
             resource_uri=resource_uri,
         )
 
+    async def discover_control_capabilities(self, *, token: str | None = None) -> MCPReadEnvelope:
+        return await self._get(
+            "/api/v1/mcp/read/control-capabilities",
+            token=token,
+            resource_uri=None,
+        )
+
     async def inspect_connection(
         self, request: MCPConnectionRequest, *, token: str | None = None
     ) -> MCPConnectionResponse:

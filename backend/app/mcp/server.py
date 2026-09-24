@@ -66,7 +66,7 @@ from app.schemas.test_contexts import (
 )
 
 MCP_INSTRUCTIONS = (
-    "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
+    "FlowTest MCP 提供只读项目、服务、契约、控制能力、工作流草稿和执行证据，并允许提交"
     "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
     "确定性 Integration Plan 与"
     "只进入待审核状态的 Flow Draft、Repair、关联现有 Change Regression 的 Maintenance，"
@@ -577,6 +577,18 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_compile_integration_tool(server, client)
     _register_diagnose_failure_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
+
+    @server.tool(
+        name="flowtest.discover_control_capabilities",
+        description="读取可执行控制能力及配置 Schema、内联支持和预算边界。",
+        structured_output=True,
+    )
+    async def discover_control_capabilities(
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.discover_control_capabilities(token=_request_token(ctx, client))
+        )
 
     @server.tool(
         name="flowtest.discover_services",

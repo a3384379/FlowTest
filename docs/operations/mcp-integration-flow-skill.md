@@ -44,6 +44,10 @@ Skill 的 `manifest.yaml` 是机器可读契约；`SKILL.md` 是 Agent 入口；
 Quick 不要求 Test Context、Evidence、Integration Plan 或外部 Database MCP，不调用外部代码/数据库服务，
 不执行真实接口。缺少运行时实参时创建 `readiness=needs_input` 的草稿，并在执行前阻止缺失输入。
 
+`flowtest.discover_control_capabilities` 可只读查询 schema `4.0` 的控制能力、配置 schema、内联支持、
+引用限制、嵌套深度和请求预算要求。当前 Quick/Deep 的 FlowSpec 提案入口仍不能无损表达内联控制区域；
+查询到能力不表示 `propose_simple_flow` 或 `propose_flow_draft` 已能生成控制块。
+
 ## Deep 流程（用户明确要求时）
 
 ```text

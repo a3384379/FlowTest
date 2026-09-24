@@ -9,6 +9,7 @@ from app.domain.assertions import ComparisonOperator
 from app.domain.capabilities import CapabilityId, SemanticVersion
 
 VariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
+CONTROL_MAX_REGION_DEPTH = 4
 
 
 class RuntimeInputDefinition(BaseModel):
@@ -1058,7 +1059,7 @@ class WorkflowDefinition(BaseModel):
             while current in owner_by_node:
                 current = owner_by_node[current]
                 depth += 1
-                if current in seen or depth >= 5:
+                if current in seen or depth > CONTROL_MAX_REGION_DEPTH:
                     raise ValueError("Control region nesting exceeds the supported depth")
                 seen.add(current)
 
