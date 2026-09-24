@@ -15,7 +15,7 @@ from smoke_s4 import APIClient, SmokeConfig, _change_password
 
 FIXTURE_IMAGE = (
     "docker.io/nginxinc/nginx-unprivileged@sha256:"
-    "442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce"
+    "123fb7283ffb4788e260d4e980005a978995fefedcdbb04d268077a19b84576d"
 )
 
 
