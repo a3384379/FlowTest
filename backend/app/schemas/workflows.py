@@ -5,7 +5,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.domain.sandbox_preview import WorkflowRunPurpose
-from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowPhase, WorkflowRunStatus
+from app.engine.contracts import (
+    NodeStatus,
+    WorkflowDefinition,
+    WorkflowNode,
+    WorkflowPhase,
+    WorkflowRegion,
+    WorkflowRunStatus,
+)
 
 RuntimeVariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
@@ -23,6 +30,17 @@ class WorkflowDraftUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None
     definition: WorkflowDefinition | None = None
+
+
+class WorkflowControlBlockInsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    edge_id: str = Field(min_length=1, max_length=128)
+    node: WorkflowNode
+    regions: list[WorkflowRegion] = Field(default_factory=list, max_length=500)
+    request_budget: int | None = Field(default=None, ge=1, le=10_000)
+    cleanup_request_budget: int | None = Field(default=None, ge=1, le=1000)
 
 
 class WorkflowResponse(BaseModel):

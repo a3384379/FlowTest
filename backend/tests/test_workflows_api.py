@@ -92,6 +92,105 @@ class MemoryObjectStorage:
 
 
 @pytest.mark.asyncio
+async def test_atomic_control_block_insert_rejects_stale_and_invalid_edits(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, _environment_id, _api_id = await _create_assets(workflow_client, headers)
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={
+            "name": "原子控制块",
+            "definition": {
+                "nodes": [
+                    {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+                    {"id": "end", "type": "end", "name": "结束", "position": {"x": 400, "y": 0}},
+                ],
+                "edges": [{"id": "s-e", "source": "start", "target": "end"}],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    path = f"/api/v1/projects/{project_id}/workflows/{workflow_id}/control-blocks"
+    payload = {
+        "expected_revision": 1,
+        "edge_id": "s-e",
+        "request_budget": 20,
+        "node": {
+            "id": "group",
+            "type": "capability",
+            "name": "步骤组",
+            "position": {"x": 200, "y": 0},
+            "capability_id": "flow.control.group",
+            "capability_version": "1.0.0",
+            "configuration": {"body": {"kind": "inline", "region_id": "body"}},
+            "bindings": [],
+        },
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "group",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "wait",
+                        "type": "delay",
+                        "name": "等待",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"seconds": 0},
+                    }
+                ],
+                "entry_node_id": "wait",
+                "exit_node_ids": ["wait"],
+            }
+        ],
+    }
+    missing_budget = await workflow_client.post(
+        path, headers=headers, json={**payload, "request_budget": None}
+    )
+    assert missing_budget.status_code == 422
+    assert missing_budget.json()["error"]["code"] == "CONTROL_BLOCK_INSERT_INVALID"
+    assert (
+        await workflow_client.get(path.removesuffix("/control-blocks"), headers=headers)
+    ).json()["draft_revision"] == 1
+    wrong_owner = {
+        **payload,
+        "regions": [{**payload["regions"][0], "owner_node_id": "other"}],
+    }
+    invalid = await workflow_client.post(path, headers=headers, json=wrong_owner)
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "CONTROL_BLOCK_INSERT_INVALID"
+    assert (
+        await workflow_client.get(path.removesuffix("/control-blocks"), headers=headers)
+    ).json()["draft_revision"] == 1
+
+    inserted = await workflow_client.post(path, headers=headers, json=payload)
+    assert inserted.status_code == 200, inserted.text
+    draft = inserted.json()
+    assert draft["draft_revision"] == 2
+    assert draft["draft_definition"]["schema_version"] == "4.0"
+    assert draft["draft_definition"]["run_policy"]["request_budget"] == 20
+    assert [edge["source"] for edge in draft["draft_definition"]["edges"]] == [
+        "start",
+        "group",
+    ]
+    assert draft["draft_definition"]["regions"][0]["owner_node_id"] == "group"
+
+    stale = await workflow_client.post(path, headers=headers, json=payload)
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "WORKFLOW_DRAFT_CONFLICT"
+    assert (
+        await workflow_client.get(path.removesuffix("/control-blocks"), headers=headers)
+    ).json()["draft_revision"] == 2
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+
+
+@pytest.mark.asyncio
 async def test_inline_control_block_publishes_runs_and_exposes_scoped_instance(
     workflow_client: AsyncClient,
 ) -> None:

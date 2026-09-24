@@ -16,6 +16,7 @@ from app.schemas.durable_execution import (
 )
 from app.schemas.workflows import (
     WorkflowCancelRequest,
+    WorkflowControlBlockInsert,
     WorkflowCreate,
     WorkflowDebugNodeResponse,
     WorkflowDebugRequest,
@@ -110,6 +111,28 @@ async def update_workflow_draft(
         folder_id=payload.folder_id,
         change_folder="folder_id" in payload.model_fields_set,
         definition=payload.definition,
+    )
+    return WorkflowResponse.model_validate(workflow)
+
+
+@router.post("/workflows/{workflow_id}/control-blocks", response_model=WorkflowResponse)
+async def insert_workflow_control_block(
+    project_id: UUID,
+    workflow_id: UUID,
+    payload: WorkflowControlBlockInsert,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowResponse:
+    workflow = await WorkflowService(session).insert_control_block(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+        expected_revision=payload.expected_revision,
+        edge_id=payload.edge_id,
+        node=payload.node,
+        regions=payload.regions,
+        request_budget=payload.request_budget,
+        cleanup_request_budget=payload.cleanup_request_budget,
     )
     return WorkflowResponse.model_validate(workflow)
 

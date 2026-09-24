@@ -26,6 +26,7 @@ from app.core.redaction import (
     set_redaction_policy,
 )
 from app.domain.api_assets import BodyKind
+from app.domain.control_block_edits import ControlBlockEditError, insert_control_block
 from app.domain.data_nodes import (
     CredentialKind,
     DataNodeValidationError,
@@ -435,6 +436,56 @@ class WorkflowService:
         else:
             await self._session.flush()
         return workflow
+
+    async def insert_control_block(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        expected_revision: int,
+        edge_id: str,
+        node: WorkflowNode,
+        regions: list[WorkflowRegion],
+        request_budget: int | None,
+        cleanup_request_budget: int | None,
+    ) -> Workflow:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
+        if workflow.draft_revision != expected_revision:
+            raise AppError(
+                code="WORKFLOW_DRAFT_CONFLICT",
+                message="草稿已被其他操作更新, 请刷新后重试",
+                status_code=409,
+                details={"current_revision": workflow.draft_revision},
+            )
+        try:
+            definition = insert_control_block(
+                self._load_definition(workflow.draft_definition),
+                edge_id=edge_id,
+                node=node,
+                regions=regions,
+                request_budget=request_budget,
+                cleanup_request_budget=cleanup_request_budget,
+            )
+        except ControlBlockEditError as error:
+            raise AppError(
+                code="CONTROL_BLOCK_INSERT_INVALID",
+                message=str(error),
+                status_code=422,
+            ) from error
+        await self._validate_publishable(project_id, workflow_id, definition)
+        return await self.update_draft(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            expected_revision=expected_revision,
+            name=None,
+            description=None,
+            folder_id=None,
+            change_folder=False,
+            definition=definition,
+        )
 
     async def publish(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> WorkflowVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
