@@ -225,6 +225,26 @@ export function appendRegionDelay(region: WorkflowRegion): WorkflowRegion | null
   return appendRegionStep(region, newDelayStep)
 }
 
+export function appendRegionApi(
+  region: WorkflowRegion,
+  apiId: string,
+  apiVersion: number,
+): WorkflowRegion | null {
+  return appendRegionStep(region, (previous) => ({
+    id: `step-${crypto.randomUUID()}`,
+    type: 'api',
+    name: '接口请求',
+    position: previous ? { x: previous.position.x + 220, y: previous.position.y } : { x: 0, y: 0 },
+    config: {
+      api_definition_id: apiId,
+      api_version: apiVersion,
+      request_overrides: {},
+      max_retries: 0,
+      retry_on: ['network_error', '5xx'],
+    },
+  }))
+}
+
 export function appendRegionSignal(
   region: WorkflowRegion,
   owner: WorkflowNode,

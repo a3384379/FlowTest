@@ -1,5 +1,5 @@
-import type { WorkflowDefinition, WorkflowNode } from '../../lib/api'
-import { descendantRegions } from './control-blocks'
+import type { WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../../lib/api'
+import { addControlBlock, descendantRegions } from './control-blocks'
 import {
   adjacency,
   diagnostic,
@@ -123,6 +123,211 @@ export function applyDeletion(definition: WorkflowDefinition, plan: DeletionPlan
       regions: (definition.regions ?? []).filter((region) => !removedRegions.has(region.id)),
     },
   }
+}
+
+export function wrapMainNode(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  kind: 'group' | 'foreach',
+): GraphEditResult {
+  const node = definition.nodes.find((item) => item.id === nodeId)
+  if (!node) return { kind: 'unchanged' }
+  const incoming = definition.edges.filter((edge) => edge.target === nodeId)
+  const outgoing = definition.edges.filter((edge) => edge.source === nodeId)
+  const issues = wrapIssues(definition, node, incoming, outgoing)
+  if (issues.length) return { kind: 'blocked', diagnostics: issues }
+
+  const expanded = addControlBlock(definition, kind)
+  const owner = expanded.nodes.at(-1)!
+  const region = expanded.regions!.find((item) => item.owner_node_id === owner.id)!
+  const wrapped = { ...node, position: { x: 0, y: 0 } }
+  return {
+    kind: 'changed',
+    diagnostics: [],
+    definition: {
+      ...expanded,
+      nodes: expanded.nodes
+        .filter((item) => item.id !== nodeId)
+        .map((item) => (item.id === owner.id ? { ...item, position: node.position } : item)),
+      edges: expanded.edges.map((edge) => ({
+        ...edge,
+        source: edge.source === nodeId ? owner.id : edge.source,
+        target: edge.target === nodeId ? owner.id : edge.target,
+      })),
+      regions: expanded.regions!.map((item) =>
+        item.id === region.id
+          ? { ...item, nodes: [wrapped], entry_node_id: nodeId, exit_node_ids: [nodeId] }
+          : item,
+      ),
+    },
+  }
+}
+
+export function unwrapSingleNode(definition: WorkflowDefinition, ownerId: string): GraphEditResult {
+  const owner = definition.nodes.find((node) => node.id === ownerId)
+  if (!owner) return { kind: 'unchanged' }
+  const region = definition.regions?.find((item) => item.owner_node_id === ownerId)
+  const issues = unwrapIssues(definition, owner, region)
+  if (issues.length) return { kind: 'blocked', diagnostics: issues }
+  const child = region!.nodes[0]
+  return {
+    kind: 'changed',
+    diagnostics: [],
+    definition: {
+      ...definition,
+      nodes: definition.nodes.map((node) =>
+        node.id === ownerId ? { ...child, position: owner.position } : node,
+      ),
+      edges: definition.edges.map((edge) => ({
+        ...edge,
+        source: edge.source === ownerId ? child.id : edge.source,
+        target: edge.target === ownerId ? child.id : edge.target,
+      })),
+      regions: definition.regions?.filter((item) => item.id !== region!.id),
+    },
+  }
+}
+
+function unwrapIssues(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion | undefined,
+): EditDiagnostic[] {
+  if (
+    !['flow.control.group', 'flow.control.foreach', 'flow.control.repeat'].includes(
+      owner.capability_id ?? '',
+    ) ||
+    !region ||
+    region.nodes.length !== 1 ||
+    region.edges.length > 0
+  )
+    return [diagnostic('UNWRAP_STRUCTURE', '仅支持拆解单步骤的步骤组或循环', owner.id)]
+  return [...unwrapRegionIssues(definition, owner, region), ...unwrapGraphIssues(definition, owner)]
+}
+
+function unwrapRegionIssues(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion,
+): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (
+    descendantRegions(
+      definition,
+      region.nodes.map((node) => node.id),
+    ).length
+  )
+    issues.push(diagnostic('UNWRAP_NESTED', '区域内仍有嵌套控制块，不能直接拆解', owner.id))
+  if (hasEntries(region.inputs) || hasEntries(owner.configuration?.inputs))
+    issues.push(diagnostic('UNWRAP_INPUTS', '区域使用显式输入，请先处理输入绑定', owner.id))
+  const collect = owner.configuration?.collect
+  if (hasEntries(region.outputs) || hasEntries(collect))
+    issues.push(diagnostic('UNWRAP_OUTPUTS', '控制块声明了输出汇总，请先处理这些输出', owner.id))
+  return issues
+}
+
+function hasEntries(value: unknown): boolean {
+  return !!value && typeof value === 'object' && Object.keys(value).length > 0
+}
+
+function unwrapGraphIssues(definition: WorkflowDefinition, owner: WorkflowNode): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (
+    definition.edges.some(
+      (edge) => (edge.source === owner.id || edge.target === owner.id) && edge.mappings.length > 0,
+    )
+  )
+    issues.push(diagnostic('UNWRAP_MAPPING', '控制块连线含字段映射，请先处理映射', owner.id))
+  if (
+    definition.nodes.some(
+      (node) =>
+        node.id !== owner.id &&
+        (referencedNodeIds(effectiveConfig(node)).includes(owner.id) ||
+          node.cleanup_for?.includes(owner.id) ||
+          node.bindings?.some((binding) => binding.expression.includes(owner.id))),
+    )
+  )
+    issues.push(diagnostic('UNWRAP_REFERENCE', '其他节点仍引用控制块，请先处理引用', owner.id))
+  return issues
+}
+
+function wrapIssues(
+  definition: WorkflowDefinition,
+  node: WorkflowNode,
+  incoming: WorkflowDefinition['edges'],
+  outgoing: WorkflowDefinition['edges'],
+): EditDiagnostic[] {
+  return [
+    ...wrapNodeIssues(node),
+    ...wrapBoundaryIssues(node, incoming, outgoing),
+    ...wrapReferenceIssues(definition, node),
+  ]
+}
+
+function wrapNodeIssues(node: WorkflowNode): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (unsupportedWrapType(node))
+    issues.push(diagnostic('WRAP_NODE_UNSUPPORTED', `“${node.name}”当前不能直接包装`, node.id))
+  if (referencedNodeIds(effectiveConfig(node)).length || node.bindings?.length)
+    issues.push(
+      diagnostic('WRAP_INPUT_REFERENCE', `“${node.name}”引用区域外节点，请先声明区域输入`, node.id),
+    )
+  return issues
+}
+
+function unsupportedWrapType(node: WorkflowNode): boolean {
+  return Boolean(
+    node.phase === 'cleanup' ||
+    node.capability_id ||
+    ['start', 'end', 'condition', 'dataset', 'for_each', 'subflow'].includes(
+      resolveEffectiveNodeType(node),
+    ),
+  )
+}
+
+function wrapBoundaryIssues(
+  node: WorkflowNode,
+  incoming: WorkflowDefinition['edges'],
+  outgoing: WorkflowDefinition['edges'],
+): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (incoming.length !== 1 || outgoing.length !== 1)
+    issues.push(
+      diagnostic(
+        'WRAP_BOUNDARY',
+        `“${node.name}”需要恰好一条入边和一条出边；当前入边 ${incoming.length} 条、出边 ${outgoing.length} 条`,
+        node.id,
+      ),
+    )
+  for (const edge of [...incoming, ...outgoing])
+    if (edge.mappings.length)
+      issues.push(
+        diagnostic(
+          'WRAP_MAPPING',
+          `连线 ${edge.id} 含字段映射，请先显式改为区域输入/输出`,
+          node.id,
+          edge.id,
+        ),
+      )
+  return issues
+}
+
+function wrapReferenceIssues(definition: WorkflowDefinition, node: WorkflowNode): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  for (const other of definition.nodes.filter((item) => item.id !== node.id))
+    if (
+      referencedNodeIds(effectiveConfig(other)).includes(node.id) ||
+      other.cleanup_for?.includes(node.id) ||
+      other.bindings?.some((binding) => binding.expression.includes(node.id))
+    )
+      issues.push(
+        diagnostic(
+          'WRAP_OUTPUT_REFERENCE',
+          `“${other.name}”仍引用 ${node.name}，请先声明区域输出`,
+          other.id,
+        ),
+      )
+  return issues
 }
 export function connectGraphNodes(
   definition: WorkflowDefinition,

@@ -211,6 +211,7 @@ function InspectorNodeFields({
         node={node}
         regions={(definition.regions ?? []).filter((region) => region.owner_node_id === node.id)}
         editable={editable}
+        apis={apis}
         onUpdate={onUpdate}
         onRegionUpdate={onRegionUpdate}
       />

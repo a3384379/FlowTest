@@ -27,6 +27,8 @@ import {
   planDeletion,
   reconnectGraphEdge,
   swapBranches,
+  unwrapSingleNode,
+  wrapMainNode,
 } from './editor/graph-commands'
 import { analyzeGraph, resolveEffectiveNodeType } from './editor/graph-analysis'
 import {
@@ -476,6 +478,64 @@ function WorkflowDesignerReady({
     addCreatedNode(addControlBlock(editor.latest.current.definition, kind))
   }
 
+  function wrapSelectedNode(kind: 'group' | 'foreach') {
+    if (!canvasEditable) return
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const before = editor.latest.current.definition
+    const selection = editor.latest.current.selection
+    if (selection?.kind !== 'node') return
+    const result = wrapMainNode(before, selection.id, kind)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    const owner = result.definition.nodes.find(
+      (node) => !before.nodes.some((item) => item.id === node.id),
+    )
+    if (owner) editor.commit(result.definition, { kind: 'node', id: owner.id })
+  }
+
+  function unwrapSelectedNode() {
+    if (!canvasEditable) return
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const before = editor.latest.current.definition
+    const selection = editor.latest.current.selection
+    if (selection?.kind !== 'node') return
+    const result = unwrapSingleNode(before, selection.id)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    void confirmUnwrap(before, selection.id, result.definition)
+  }
+
+  async function confirmUnwrap(
+    before: WorkflowDefinition,
+    ownerId: string,
+    next: WorkflowDefinition,
+  ) {
+    const approved = await modal.confirm({
+      title: '拆解控制块？',
+      content: '拆解会移除循环或步骤组的执行语义，只保留区域中的单个步骤。确认后可撤销。',
+      okText: '确认拆解',
+      cancelText: '取消',
+    })
+    if (
+      !approved ||
+      !jsonEqual(before, editor.latest.current.definition) ||
+      !jsonEqual({ kind: 'node', id: ownerId }, editor.latest.current.selection)
+    )
+      return
+    const childId = before.regions?.find((region) => region.owner_node_id === ownerId)?.nodes[0]?.id
+    if (childId) editor.commit(next, { kind: 'node', id: childId })
+  }
+
   function copySelectedNode() {
     if (
       selected &&
@@ -652,6 +712,11 @@ function WorkflowDesignerReady({
           canRedo={history.future.length > 0}
           onCopy={copySelectedNode}
           onPaste={pasteCopiedNode}
+          canWrap={Boolean(selected)}
+          canUnwrap={canUnwrapNode(selected)}
+          onWrapGroup={() => wrapSelectedNode('group')}
+          onWrapForEach={() => wrapSelectedNode('foreach')}
+          onUnwrap={() => void unwrapSelectedNode()}
           onUndo={undo}
           onRedo={redo}
           onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
@@ -1062,10 +1127,15 @@ function DesignerToolbar({
   onAddControlBlock,
   canCopy,
   canPaste,
+  canWrap,
+  canUnwrap,
   canUndo,
   canRedo,
   onCopy,
   onPaste,
+  onWrapGroup,
+  onWrapForEach,
+  onUnwrap,
   onUndo,
   onRedo,
   onAutoLayout,
@@ -1113,10 +1183,15 @@ function DesignerToolbar({
   onAddControlBlock: (kind: ControlBlockKind) => void
   canCopy: boolean
   canPaste: boolean
+  canWrap: boolean
+  canUnwrap: boolean
   canUndo: boolean
   canRedo: boolean
   onCopy: () => void
   onPaste: () => void
+  onWrapGroup: () => void
+  onWrapForEach: () => void
+  onUnwrap: () => void
   onUndo: () => void
   onRedo: () => void
   onAutoLayout: () => void
@@ -1207,10 +1282,28 @@ function DesignerToolbar({
                 label: '粘贴节点',
                 disabled: isControlDisabled(editable, canPaste),
               },
+              {
+                key: 'wrap-group',
+                label: '包装为步骤组',
+                disabled: isControlDisabled(editable, canWrap),
+              },
+              {
+                key: 'wrap-foreach',
+                label: '包装为集合遍历',
+                disabled: isControlDisabled(editable, canWrap),
+              },
+              {
+                key: 'unwrap',
+                label: '拆解单步骤控制块',
+                disabled: isControlDisabled(editable, canUnwrap),
+              },
             ],
             onClick: ({ key }) => {
               if (key === 'copy') onCopy()
               if (key === 'paste') onPaste()
+              if (key === 'wrap-group') onWrapGroup()
+              if (key === 'wrap-foreach') onWrapForEach()
+              if (key === 'unwrap') onUnwrap()
             },
           }}
         >
@@ -1897,6 +1990,10 @@ const nodeIcons: Partial<Record<WorkflowNode['type'], ReactNode>> = {
 
 function isControlDisabled(editable: boolean, available: boolean): boolean {
   return !editable || !available
+}
+
+function canUnwrapNode(node: WorkflowNode | null): boolean {
+  return node?.capability_id?.startsWith('flow.control.') ?? false
 }
 
 function statusLabel(status: string): string {

@@ -1,7 +1,8 @@
-import { Alert, Button, Input, InputNumber, Space, Typography } from 'antd'
+import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { useState } from 'react'
-import type { WorkflowNode, WorkflowRegion } from '../lib/api'
+import type { ApiDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import {
+  appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
   canAppendRegionSignal,
@@ -12,6 +13,7 @@ type Props = {
   node: WorkflowNode
   regions: WorkflowRegion[]
   editable: boolean
+  apis?: ApiDefinition[]
   onUpdate: (node: WorkflowNode) => void
   onRegionUpdate: (region: WorkflowRegion) => void
 }
@@ -20,6 +22,7 @@ export default function WorkflowControlFields({
   node,
   regions,
   editable,
+  apis = [],
   onUpdate,
   onRegionUpdate,
 }: Props) {
@@ -59,10 +62,11 @@ export default function WorkflowControlFields({
       </Typography.Paragraph>
       {regions.map((region) => (
         <RegionEditor
-          key={`${region.id}:${JSON.stringify(region)}`}
+          key={region.id}
           region={region}
           owner={node}
           editable={editable}
+          apis={apis}
           onUpdate={onRegionUpdate}
         />
       ))}
@@ -74,17 +78,25 @@ function RegionEditor({
   region,
   owner,
   editable,
+  apis,
   onUpdate,
 }: {
   region: WorkflowRegion
   owner: WorkflowNode
   editable: boolean
+  apis: ApiDefinition[]
   onUpdate: (region: WorkflowRegion) => void
 }) {
-  const [text, setText] = useState(() => JSON.stringify(region, null, 2))
+  const currentText = JSON.stringify(region, null, 2)
+  const [text, setText] = useState(currentText)
+  const [baseText, setBaseText] = useState(currentText)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
   function apply() {
+    if (baseText !== currentText) {
+      setError('区域已从其他编辑更新。请先复制草稿，再丢弃并重新编辑。')
+      return
+    }
     try {
       const parsed: unknown = JSON.parse(text)
       if (!validRegionDraft(parsed, region)) {
@@ -108,6 +120,7 @@ function RegionEditor({
         region={region}
         owner={owner}
         editable={editable && !dirty}
+        apis={apis}
         onUpdate={onUpdate}
       />
       {dirty && (
@@ -119,9 +132,10 @@ function RegionEditor({
         className="code-input"
         rows={8}
         disabled={!editable}
-        value={text}
+        value={dirty ? text : currentText}
         status={error ? 'error' : undefined}
         onChange={(event) => {
+          if (!dirty) setBaseText(currentText)
           setText(event.target.value)
           setDirty(true)
           setError(null)
@@ -134,7 +148,8 @@ function RegionEditor({
         <Button
           disabled={!editable || !dirty}
           onClick={() => {
-            setText(JSON.stringify(region, null, 2))
+            setText(currentText)
+            setBaseText(currentText)
             setDirty(false)
             setError(null)
           }}
@@ -151,13 +166,19 @@ function RegionStepList({
   region,
   owner,
   editable,
+  apis,
   onUpdate,
 }: {
   region: WorkflowRegion
   owner: WorkflowNode
   editable: boolean
+  apis: ApiDefinition[]
   onUpdate: (region: WorkflowRegion) => void
 }) {
+  const availableApis = apis.filter((api) => api.is_active)
+  const [selectedApiId, setSelectedApiId] = useState<string | undefined>()
+  const activeApiId = selectedApiId ?? availableApis[0]?.id
+  const canAppend = region.nodes.length === 0 || region.exit_node_ids.length === 1
   return (
     <div aria-label={`${region.role} 区域步骤`}>
       {region.nodes.map((node) => (
@@ -184,10 +205,19 @@ function RegionStepList({
               }}
             />
           )}
+          {node.type === 'api' && (
+            <RegionApiFields
+              node={node}
+              region={region}
+              apis={apis}
+              editable={editable}
+              onUpdate={onUpdate}
+            />
+          )}
         </div>
       ))}
       <Button
-        disabled={!editable || (region.nodes.length > 0 && region.exit_node_ids.length !== 1)}
+        disabled={!editable || !canAppend}
         onClick={() => {
           const next = appendRegionDelay(region)
           if (next) onUpdate(next)
@@ -195,6 +225,29 @@ function RegionStepList({
       >
         添加等待步骤
       </Button>
+      {availableApis.length > 0 && (
+        <Space>
+          <Select
+            aria-label={`${region.role} 待添加接口`}
+            value={activeApiId}
+            disabled={!editable || !canAppend}
+            options={availableApis.map((api) => ({ value: api.id, label: api.name }))}
+            onChange={setSelectedApiId}
+            style={{ minWidth: 180 }}
+          />
+          <Button
+            disabled={!editable || !canAppend || !activeApiId}
+            onClick={() => {
+              const api = availableApis.find((item) => item.id === activeApiId)
+              if (!api) return
+              const next = appendRegionApi(region, api.id, api.current_version)
+              if (next) onUpdate(next)
+            }}
+          >
+            添加接口步骤
+          </Button>
+        </Space>
+      )}
       {canAppendRegionSignal(region, owner) && (
         <Space>
           <Button
@@ -218,6 +271,53 @@ function RegionStepList({
         </Space>
       )}
     </div>
+  )
+}
+
+function RegionApiFields({
+  node,
+  region,
+  apis,
+  editable,
+  onUpdate,
+}: {
+  node: WorkflowNode
+  region: WorkflowRegion
+  apis: ApiDefinition[]
+  editable: boolean
+  onUpdate: (region: WorkflowRegion) => void
+}) {
+  const selectedId = node.config.api_definition_id
+  const options = apis.map((api) => ({ value: api.id, label: api.name }))
+  if (typeof selectedId === 'string' && !apis.some((api) => api.id === selectedId))
+    options.push({ value: selectedId, label: `已引用接口 ${selectedId}` })
+  return (
+    <Select
+      aria-label={`${node.name} 接口`}
+      value={typeof selectedId === 'string' ? selectedId : undefined}
+      disabled={!editable}
+      options={options}
+      onChange={(apiId: string) => {
+        const api = apis.find((item) => item.id === apiId)
+        if (!api) return
+        onUpdate({
+          ...region,
+          nodes: region.nodes.map((item) =>
+            item.id === node.id
+              ? {
+                  ...item,
+                  config: {
+                    ...item.config,
+                    api_definition_id: api.id,
+                    api_version: api.current_version,
+                  },
+                }
+              : item,
+          ),
+        })
+      }}
+      style={{ minWidth: 180 }}
+    />
   )
 }
 

@@ -29,6 +29,90 @@ it('adds a serial step through the control region panel', async () => {
   expect(onRegionUpdate.mock.calls[0][0].nodes).toHaveLength(2)
 })
 
+it('adds an API step with a frozen API version to the inline region', async () => {
+  const definition = addControlBlock(workflowDefinition, 'foreach')
+  const region = definition.regions![0]
+  const api = {
+    id: 'aa200000-0000-4000-8000-000000000001',
+    project_id: 'project',
+    folder_id: null,
+    name: '查询订单',
+    description: '',
+    current_version: 7,
+    is_active: true,
+  }
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      apis={[api]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '添加接口步骤' }))
+  expect(onRegionUpdate).toHaveBeenCalledOnce()
+  const updated = onRegionUpdate.mock.calls[0][0]
+  expect(updated.nodes.at(-1)).toEqual(
+    expect.objectContaining({
+      type: 'api',
+      config: expect.objectContaining({ api_definition_id: api.id, api_version: 7 }),
+    }),
+  )
+  expect(updated.edges).toEqual([
+    expect.objectContaining({ source: region.exit_node_ids[0], target: updated.exit_node_ids[0] }),
+  ])
+})
+
+it('updates an inline API reference and version through the region panel', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const first = {
+    id: 'aa200000-0000-4000-8000-000000000001',
+    project_id: 'project',
+    folder_id: null,
+    name: '旧接口',
+    description: '',
+    current_version: 2,
+    is_active: true,
+  }
+  const next = {
+    ...first,
+    id: 'aa200000-0000-4000-8000-000000000002',
+    name: '新接口',
+    current_version: 5,
+  }
+  const region = {
+    ...definition.regions![0],
+    nodes: [
+      {
+        ...definition.regions![0].nodes[0],
+        type: 'api' as const,
+        name: '接口请求',
+        config: { api_definition_id: first.id, api_version: first.current_version },
+      },
+    ],
+  }
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      apis={[first, next]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: '接口请求 接口' }))
+  await userEvent.click(screen.getByText('新接口'))
+  expect(onRegionUpdate.mock.calls[0][0].nodes[0].config).toEqual({
+    api_definition_id: next.id,
+    api_version: 5,
+  })
+})
+
 it('adds a break step through the serial loop panel', async () => {
   const definition = addControlBlock(workflowDefinition, 'repeat')
   const onRegionUpdate = vi.fn()
@@ -66,4 +150,40 @@ it('keeps an unfinished region JSON draft while visual actions are disabled', as
   expect(screen.getByRole('button', { name: '添加退出循环' })).toBeDisabled()
   expect(onRegionUpdate).not.toHaveBeenCalled()
   expect(editor).toHaveValue(`${JSON.stringify(region, null, 2)}x`)
+})
+
+it('does not apply an old region JSON draft over a newer region revision', async () => {
+  const definition = addControlBlock(workflowDefinition, 'foreach')
+  const region = definition.regions![0]
+  const onRegionUpdate = vi.fn()
+  const node = definition.nodes.at(-1)!
+  const view = render(
+    <WorkflowControlFields
+      node={node}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  const editor = screen.getByRole('textbox', { name: 'body 区域定义' })
+  await userEvent.type(editor, 'x')
+  view.rerender(
+    <WorkflowControlFields
+      node={node}
+      regions={[{ ...region, outputs: { value: { kind: 'literal', value: 2 } } }]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  expect(editor).toHaveValue(`${JSON.stringify(region, null, 2)}x`)
+  await userEvent.click(screen.getByRole('button', { name: '应用区域' }))
+  expect(onRegionUpdate).not.toHaveBeenCalled()
+  expect(screen.getByText(/区域已从其他编辑更新/)).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: /丢\s*弃/ }))
+  expect(editor).toHaveValue(
+    JSON.stringify({ ...region, outputs: { value: { kind: 'literal', value: 2 } } }, null, 2),
+  )
+  expect(screen.getByRole('button', { name: '添加等待步骤' })).toBeEnabled()
 })

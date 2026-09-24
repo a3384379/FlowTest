@@ -4,7 +4,12 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { WorkflowDefinition } from '../../lib/api'
 import { analyzeGraph, editorNode, restoreEditedNode } from './graph-analysis'
-import { addControlBlock, appendRegionDelay, appendRegionSignal } from './control-blocks'
+import {
+  addControlBlock,
+  appendRegionApi,
+  appendRegionDelay,
+  appendRegionSignal,
+} from './control-blocks'
 import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
   applyDeletion,
@@ -13,6 +18,8 @@ import {
   planDeletion,
   reconnectGraphEdge,
   swapBranches,
+  unwrapSingleNode,
+  wrapMainNode,
 } from './graph-commands'
 
 function fixture(name: string): unknown {
@@ -42,6 +49,19 @@ describe('workflow graph commands', () => {
     ])
     expect(expanded.nodes.at(-1)?.config.seconds).toBe(0)
   })
+  it('starts an empty inline region with one versioned API step and rejects ambiguous exits', () => {
+    const region = addControlBlock(graph(linear), 'group').regions![0]
+    const empty = { ...region, nodes: [], edges: [], entry_node_id: null, exit_node_ids: [] }
+    const apiId = 'aa200000-0000-4000-8000-000000000001'
+    const created = appendRegionApi(empty, apiId, 3)!
+    expect(created.nodes).toHaveLength(1)
+    expect(created.entry_node_id).toBe(created.nodes[0].id)
+    expect(created.exit_node_ids).toEqual([created.nodes[0].id])
+    expect(created.nodes[0].config).toEqual(
+      expect.objectContaining({ api_definition_id: apiId, api_version: 3 }),
+    )
+    expect(appendRegionApi({ ...region, exit_node_ids: [] }, apiId, 3)).toBeNull()
+  })
   it('adds loop signals only to a serial loop body', () => {
     const definition = addControlBlock(graph(linear), 'foreach')
     const owner = definition.nodes.at(-1)!
@@ -63,6 +83,79 @@ describe('workflow graph commands', () => {
     expect(
       appendRegionSignal(body, { ...owner, capability_id: 'flow.control.group' }, 'break'),
     ).toBeNull()
+  })
+  it('wraps one isolated main node atomically and keeps undo inputs intact', () => {
+    const original = graph(linear)
+    const result = wrapMainNode(original, 'api', 'foreach')
+    expect(result.kind).toBe('changed')
+    if (result.kind !== 'changed') return
+    const wrapped = result.definition
+    const owner = wrapped.nodes.find((node) => node.capability_id === 'flow.control.foreach')!
+    const body = wrapped.regions!.find((region) => region.owner_node_id === owner.id)!
+    expect(wrapped.nodes.some((node) => node.id === 'api')).toBe(false)
+    expect(body.nodes).toEqual([expect.objectContaining({ id: 'api', type: 'api' })])
+    expect(body.entry_node_id).toBe('api')
+    expect(body.exit_node_ids).toEqual(['api'])
+    expect(wrapped.edges).toEqual([
+      expect.objectContaining({ id: 's-a', source: 'start', target: owner.id }),
+      expect.objectContaining({ id: 'a-e', source: owner.id, target: 'end' }),
+    ])
+    expect(original.nodes.some((node) => node.id === 'api')).toBe(true)
+    expect(analyzeGraph(wrapped)).toEqual([])
+  })
+
+  it('rejects wrapping a mapped or externally referenced node with specific diagnostics', () => {
+    const mappedResult = wrapMainNode(graph(mapped), 'api', 'group')
+    expect(mappedResult.kind).toBe('blocked')
+    if (mappedResult.kind === 'blocked')
+      expect(mappedResult.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'WRAP_MAPPING' })]),
+      )
+    const referenced = graph(linear)
+    referenced.nodes[2].config.source_node_id = 'api'
+    const referencedResult = wrapMainNode(referenced, 'api', 'group')
+    expect(referencedResult.kind).toBe('blocked')
+    if (referencedResult.kind === 'blocked')
+      expect(referencedResult.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'WRAP_OUTPUT_REFERENCE' })]),
+      )
+  })
+  it('unwraps a single step only when no region bindings or dependent references remain', () => {
+    const result = wrapMainNode(graph(linear), 'api', 'group')
+    expect(result.kind).toBe('changed')
+    if (result.kind !== 'changed') return
+    const owner = result.definition.nodes.find(
+      (node) => node.capability_id === 'flow.control.group',
+    )!
+    const unwrapped = unwrapSingleNode(result.definition, owner.id)
+    expect(unwrapped.kind).toBe('changed')
+    if (unwrapped.kind !== 'changed') return
+    expect(unwrapped.definition.nodes.map((node) => node.id).sort()).toEqual([
+      'api',
+      'end',
+      'start',
+    ])
+    expect(unwrapped.definition.edges).toEqual(graph(linear).edges)
+    expect(unwrapped.definition.regions).toEqual([])
+
+    const bound = structuredClone(result.definition)
+    bound.regions![0].inputs = { value: { kind: 'literal', value: 1 } }
+    const blocked = unwrapSingleNode(bound, owner.id)
+    expect(blocked.kind).toBe('blocked')
+    if (blocked.kind === 'blocked')
+      expect(blocked.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'UNWRAP_INPUTS' })]),
+      )
+    const configured = structuredClone(result.definition)
+    configured.nodes.find((node) => node.id === owner.id)!.configuration!.inputs = {
+      value: { kind: 'literal', value: 1 },
+    }
+    const configBlocked = unwrapSingleNode(configured, owner.id)
+    expect(configBlocked.kind).toBe('blocked')
+    if (configBlocked.kind === 'blocked')
+      expect(configBlocked.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'UNWRAP_INPUTS' })]),
+      )
   })
   it('inserts a control block into a selected edge as one connected graph change', () => {
     const definition = addControlBlock(
