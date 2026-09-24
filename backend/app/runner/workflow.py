@@ -31,7 +31,7 @@ from app.runner.results import (
     RunnerWorkflowResult,
 )
 from app.schemas.runner_fabric import RunnerCheckpointResume
-from app.services.workflow_runtime import WorkflowNodeExecutor
+from app.services.workflow_runtime import WorkflowNodeExecutor, retry_safe_request_nodes
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowRunPlan
 
 RunnerProgressCallback = Callable[[UUID, NodeStatusUpdate], Awaitable[None]]
@@ -223,6 +223,9 @@ class RemoteWorkflowExecutor:
                 workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
                 dataset_variables=plan.prepared.dataset_variables,
                 runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+                retry_safe_node_ids=retry_safe_request_nodes(
+                    plan.definition, plan.prepared.requests
+                ),
             )
             resume_records = tuple(_resume_record(item) for item in resume_checkpoints)
             resume_attempts = {
@@ -274,6 +277,7 @@ class RemoteWorkflowExecutor:
             main_status=result.main_status,
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
+            unknown_outcome=result.unknown_outcome,
         )
 
 

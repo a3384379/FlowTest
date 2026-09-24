@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -7,7 +8,13 @@ from pydantic import ValidationError
 
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.network import OutboundNetworkPolicy
-from app.engine.contracts import ConditionExpression, WorkflowDefinition
+from app.engine.contracts import (
+    ConditionExpression,
+    NodeStatus,
+    NodeType,
+    WorkflowDefinition,
+    WorkflowPhase,
+)
 from app.engine.control_conditions import evaluate_condition
 from app.engine.control_nodes import execute_control_node
 from app.engine.results import NodeResult
@@ -15,10 +22,15 @@ from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
     NodeExecutionError,
+    NodeRunRecord,
     RequestBudget,
     WorkflowScheduler,
 )
-from app.engine.structured_control import StructuredControlRunner, control_placeholder
+from app.engine.structured_control import (
+    StructuredControlRunner,
+    _instance_id,
+    control_placeholder,
+)
 from app.services.api_assets import PreparedRequest
 from app.services.workflow_runtime import (
     PreparedWorkflowRequest,
@@ -894,6 +906,48 @@ async def test_foreach_failure_policy_keeps_failed_verdict(on_error: str, expect
 
 
 @pytest.mark.asyncio
+async def test_foreach_does_not_continue_collect_after_unknown_write_outcome() -> None:
+    payload = _definition()
+    payload["nodes"][1]["configuration"]["policy"]["on_error"] = "continue_collect"
+    payload["regions"][0]["nodes"][0] = {
+        "id": "step",
+        "type": "api",
+        "name": "写入",
+        "position": {"x": 0, "y": 0},
+        "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+    now = datetime.now(UTC)
+    instance_id = _instance_id(("region", "body", "iteration", "0"), "step")
+    reserved = NodeRunRecord(
+        node_id=instance_id,
+        node_type=NodeType.API,
+        name="写入",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED, request_attempts=1),
+        error_code=None,
+        error_message=None,
+        started_at=now,
+        completed_at=now,
+        input_hash="a" * 64,
+    )
+    context = ExecutionContext(runtime_variables={"cases": [1, 2, 3]})
+    context.nested_checkpoint_records[instance_id] = reserved
+    executor = CountingExecutor(definition)
+    result = await WorkflowScheduler(executor).run(
+        definition, context=context, resume_records=(reserved,)
+    )
+
+    loop = next(record for record in result.records if record.node_id == "loop")
+    assert executor.calls == []
+    assert loop.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert loop.output["started_count"] == 1
+    assert result.status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_inline_api_uses_each_iteration_input_in_request() -> None:
     payload = _definition()
     payload["nodes"][1]["configuration"]["inputs"] = {
@@ -1025,6 +1079,112 @@ async def test_try_catch_finally_preserves_declared_verdict(
     assert executor.visited == ["catch_region_step", "finally_region_step"]
     assert result.records[1].output["original_error"]["code"] == "CASE_FAIL"
     assert result.records[1].output["catch_id"] == "known"
+
+
+@pytest.mark.asyncio
+async def test_try_unknown_write_skips_catch_but_runs_finally() -> None:
+    payload = _try_definition(fail_try=False)
+    payload["nodes"][1]["configuration"]["catches"][0]["error_codes"] = [
+        "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    ]
+    payload["regions"][0]["nodes"][0] = {
+        "id": "try_region_step",
+        "type": "api",
+        "name": "写入",
+        "position": {"x": 0, "y": 0},
+        "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+    now = datetime.now(UTC)
+    instance_id = _instance_id(("region", "try_region", "try"), "try_region_step")
+    reserved = NodeRunRecord(
+        node_id=instance_id,
+        node_type=NodeType.API,
+        name="写入",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED, request_attempts=1),
+        error_code=None,
+        error_message=None,
+        started_at=now,
+        completed_at=now,
+        input_hash="a" * 64,
+    )
+    context = ExecutionContext()
+    context.nested_checkpoint_records[instance_id] = reserved
+    executor = BranchExecutor(definition)
+    result = await WorkflowScheduler(executor).run(
+        definition, context=context, resume_records=(reserved,)
+    )
+    assert executor.visited == ["finally_region_step"]
+    assert result.records[1].error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert result.status == "failed"
+
+    unknown = context.nested_checkpoint_records[instance_id]
+    assert unknown.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    again = await WorkflowScheduler(BranchExecutor(definition)).run(
+        definition,
+        resume_records=(*result.records, unknown),
+    )
+    assert again.status == "failed"
+    assert again.records[1].error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+
+    missing_parent = await WorkflowScheduler(BranchExecutor(definition)).run(
+        definition,
+        resume_records=(unknown,),
+    )
+    assert missing_parent.status == "failed"
+    assert missing_parent.unknown_outcome
+
+
+@pytest.mark.asyncio
+async def test_try_unknown_finally_write_is_reported_as_unknown() -> None:
+    payload = _try_definition(fail_try=False)
+    payload["regions"][2]["nodes"][0] = {
+        "id": "finally_region_step",
+        "type": "api",
+        "name": "清理写入",
+        "position": {"x": 0, "y": 0},
+        "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+    }
+    definition = WorkflowDefinition.model_validate(payload)
+    now = datetime.now(UTC)
+    instance_id = _instance_id(("region", "finally_region", "finally"), "finally_region_step")
+    reserved = NodeRunRecord(
+        node_id=instance_id,
+        node_type=NodeType.API,
+        name="清理写入",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED, request_attempts=1),
+        error_code=None,
+        error_message=None,
+        started_at=now,
+        completed_at=now,
+        input_hash="b" * 64,
+        phase=WorkflowPhase.CLEANUP,
+    )
+    context = ExecutionContext()
+    context.nested_checkpoint_records[instance_id] = reserved
+    executor = BranchExecutor(definition)
+    result = await WorkflowScheduler(executor).run(
+        definition, context=context, resume_records=(reserved,)
+    )
+    assert executor.visited == ["try_region_step"]
+    assert result.records[1].error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert result.status == "failed"
+
+    unknown = context.nested_checkpoint_records[instance_id]
+    second_executor = BranchExecutor(definition)
+    missing_parent = await WorkflowScheduler(second_executor).run(
+        definition,
+        resume_records=(unknown,),
+    )
+    assert missing_parent.status == "failed"
+    assert missing_parent.unknown_outcome
+    assert second_executor.visited == []
 
 
 @pytest.mark.asyncio

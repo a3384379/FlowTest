@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_workflow_coordinator
@@ -17,6 +18,7 @@ from app.core.storage import StoredObject
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.durable_execution import ExecutionCheckpoint
 from app.services.execution_events import ExecutionEvent
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 
@@ -398,6 +400,85 @@ async def test_failed_workflow_resume_reuses_checkpoints_and_command_idempotency
     api_checkpoints = [item for item in checkpoints.json() if item["node_id"] == "api"]
     assert [item["attempt"] for item in api_checkpoints] == [1, 2]
     assert [item["status"] for item in api_checkpoints] == ["failed", "passed"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_schema4_resume_keeps_unknown_post_outcome_and_does_not_resend(
+    workflow_client: AsyncClient, tmp_path: Path
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    post_version = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis/{api_id}/versions",
+        headers=headers,
+        json={"method": "POST", "path": "/users/v2", "body_kind": "none"},
+    )
+    assert post_version.status_code == 201, post_version.text
+    definition = _workflow_definition(api_id)
+    definition["schema_version"] = "4.0"
+    definition["run_policy"] = {"request_budget": 4}
+    definition["nodes"][1]["config"]["api_version"] = 2
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "未知写入恢复", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions",
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    target = respx.post("http://workflow.example.com/users/v2").mock(
+        return_value=Response(500, json={"error": "unavailable"})
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["id"]
+    first = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert first["execution"]["status"] == "failed"
+    assert len(target.calls) == 1
+
+    # Recreate the durable state left by a worker lost after its request reservation.
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'workflow.db'}")
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            checkpoint = await session.scalar(
+                select(ExecutionCheckpoint).where(
+                    ExecutionCheckpoint.execution_id == UUID(execution_id),
+                    ExecutionCheckpoint.node_id == "api",
+                )
+            )
+            assert checkpoint is not None
+            checkpoint.status = "running"
+            checkpoint.result = {"status": "running", "request_attempts": 1}
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    resumed = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/resume",
+        headers=headers,
+    )
+    assert resumed.status_code == 202, resumed.text
+    detail = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert detail["execution"]["status"] == "failed"
+    assert detail["execution"]["error_code"] == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert detail["nodes"][1]["error_code"] == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert len(target.calls) == 1
+    checkpoints = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/checkpoints",
+        headers=headers,
+    )
+    api_checkpoint = next(item for item in checkpoints.json() if item["node_id"] == "api")
+    assert api_checkpoint["attempt"] == 1
+    assert api_checkpoint["status"] == "failed"
 
 
 @respx.mock

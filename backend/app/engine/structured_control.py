@@ -77,6 +77,19 @@ class StructuredControlRunner:
         self._regions = {region.id: region for region in definition.regions}
 
     async def execute(self, node: WorkflowNode, context: ExecutionContext) -> NodeResult:
+        result = await self._execute_control(node, context)
+        phase = context.checkpoint_phase or node.phase
+        if _has_unknown_nested_outcome(context, phase) or _has_unknown_nested_outcome(
+            context, WorkflowPhase.CLEANUP
+        ):
+            return NodeResult.failed(
+                code="SIDE_EFFECT_OUTCOME_UNKNOWN",
+                message="外部写操作结果未知, 需先查证或明确处理",
+                output=result.output,
+            )
+        return result
+
+    async def _execute_control(self, node: WorkflowNode, context: ExecutionContext) -> NodeResult:
         config = parse_control_config(node)
         if isinstance(config, ControlSignalConfig):
             signal = "break" if node.capability_id == "flow.control.break" else "continue"
@@ -143,6 +156,10 @@ class StructuredControlRunner:
                     summary = await task
                     index = cast(int, summary["definition_index"])
                     results[index] = summary
+                    if _has_unknown_nested_outcome(parent, parent.checkpoint_phase or node.phase):
+                        stopped = True
+                        for running_token in active.values():
+                            running_token.cancel()
                     stopped = (
                         stopped
                         or self._stop_parallel_on_failure(config, summary, active)
@@ -208,6 +225,9 @@ class StructuredControlRunner:
         while (
             not stopped
             and not root_token.cancelled
+            and not _has_unknown_nested_outcome(
+                parent, parent.checkpoint_phase or WorkflowPhase.MAIN
+            )
             and next_index < len(config.branches)
             and len(active) < config.policy.concurrency
         ):
@@ -496,7 +516,11 @@ class StructuredControlRunner:
                 original_error = _first_region_error(try_result)
             except NodeExecutionError as error:
                 original_error = {"code": error.code, "message": error.message}
-            arm = _matching_catch(config.catches, original_error)
+            arm = (
+                None
+                if _has_unknown_nested_outcome(parent, WorkflowPhase.MAIN)
+                else _matching_catch(config.catches, original_error)
+            )
             if arm is not None:
                 catch_id = arm.id
                 try:
@@ -608,6 +632,7 @@ class StructuredControlRunner:
             cleanup_budget=parent.cleanup_budget,
             node_instance_budget=parent.node_instance_budget,
             leaf_semaphore=parent.leaf_semaphore,
+            retry_safe_node_ids=parent.retry_safe_node_ids,
             status_callback=parent.status_callback,
             checkpoint_scope=scope,
             checkpoint_phase=parent.checkpoint_phase,
@@ -789,6 +814,8 @@ class StructuredControlRunner:
                 node, config, items, region, parent, token, index, item, isolate=False
             )
             iterations.append(summary)
+            if _has_unknown_nested_outcome(parent, parent.checkpoint_phase or node.phase):
+                break
             if result.status is not WorkflowRunStatus.PASSED and config.policy.on_error == "stop":
                 break
             if result.control_signal in {"break", "return"}:
@@ -927,7 +954,9 @@ class StructuredControlRunner:
                     active.pop(task)
                     summary = await task
                     results[cast(int, summary["input_index"])] = summary
-                    if summary["status"] == "failed" and config.policy.on_error == "stop":
+                    if _has_unknown_nested_outcome(
+                        parent, parent.checkpoint_phase or node.phase
+                    ) or (summary["status"] == "failed" and config.policy.on_error == "stop"):
                         stopped = True
                         for token in active.values():
                             token.cancel()
@@ -976,6 +1005,7 @@ class StructuredControlRunner:
         while (
             not stopped
             and not root_token.cancelled
+            and not _has_unknown_nested_outcome(parent, parent.checkpoint_phase or node.phase)
             and next_index < len(items)
             and len(active) < config.policy.concurrency
         ):
@@ -1106,6 +1136,13 @@ def _first_region_error(result: WorkflowRunResult) -> dict[str, JsonValue] | Non
                 "message": record.error_message or "控制区域执行失败",
             }
     return None
+
+
+def _has_unknown_nested_outcome(context: ExecutionContext, phase: WorkflowPhase) -> bool:
+    return any(
+        record.phase is phase and record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+        for record in context.nested_checkpoint_records.values()
+    )
 
 
 def _matching_catch(catches: list[TryCatch], error: dict[str, JsonValue] | None) -> TryCatch | None:

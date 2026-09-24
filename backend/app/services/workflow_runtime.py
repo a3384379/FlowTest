@@ -19,7 +19,7 @@ from pydantic import JsonValue
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import redact
-from app.domain.api_assets import BodyKind
+from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.assertions import compare_values
 from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
@@ -111,6 +111,23 @@ class PreparedWorkflowRequest:
     redacted_request: PreparedRequest
     body_kind: BodyKind
     multipart: PreparedMultipart | None
+
+
+def retry_safe_request_nodes(
+    definition: WorkflowDefinition,
+    requests: dict[str, PreparedWorkflowRequest],
+) -> frozenset[str]:
+    safe = {
+        node_id
+        for node_id, prepared in requests.items()
+        if prepared.request.method is HttpMethod.GET
+    }
+    safe.update(
+        node.id
+        for node in definition.all_nodes()
+        if node.effective_type in {NodeType.SQL, NodeType.REDIS}
+    )
+    return frozenset(safe)
 
 
 @dataclass(frozen=True, slots=True)
@@ -736,6 +753,9 @@ class WorkflowNodeExecutor:
                 context=ExecutionContext(
                     workflow_variables=dict(prepared.definition.variables),
                     runtime_variables=runtime_variables,
+                    retry_safe_node_ids=retry_safe_request_nodes(
+                        prepared.definition, prepared.requests
+                    ),
                     allow_return=True,
                     status_callback=status_callback,
                     checkpoint_scope=checkpoint_scope,

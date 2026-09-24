@@ -37,6 +37,7 @@ from app.services.workflow_runtime import (
     _nested_checkpoint_id,
     _nested_scope,
     _preview_node_request_attempts,
+    retry_safe_request_nodes,
 )
 from app.services.workflows import WorkflowService
 
@@ -54,6 +55,18 @@ class ControlExecutor:
 class AllowOutbound:
     async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
         return None
+
+
+def test_only_prepared_read_requests_allow_automatic_unknown_outcome_retry() -> None:
+    definition = _wrapper_workflow(
+        WorkflowNode.model_validate(_node("request", "api", _api_config()))
+    )
+    get_request = PreparedRequest(HttpMethod.GET, "https://example.test/read", (), None, ())
+    post_request = PreparedRequest(HttpMethod.POST, "https://example.test/write", (), None, ())
+    get_prepared = PreparedWorkflowRequest(get_request, get_request, BodyKind.NONE, None)
+    post_prepared = PreparedWorkflowRequest(post_request, post_request, BodyKind.NONE, None)
+    assert retry_safe_request_nodes(definition, {"request": get_prepared}) == frozenset({"request"})
+    assert retry_safe_request_nodes(definition, {"request": post_prepared}) == frozenset()
 
 
 @pytest.mark.asyncio

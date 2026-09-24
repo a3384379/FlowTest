@@ -91,6 +91,7 @@ class WorkflowRunResult:
     cleanup_report: CleanupReport | None = None
     control_signal: Literal["break", "continue", "return"] | None = None
     return_output: dict[str, JsonValue] | None = None
+    unknown_outcome: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +156,7 @@ class ExecutionContext:
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
     request_attempts: dict[str, int] = field(default_factory=dict, repr=False)
+    retry_safe_node_ids: frozenset[str] = field(default_factory=frozenset, repr=False)
     request_reservers: dict[str, Callable[[], Awaitable[None]]] = field(
         default_factory=dict, repr=False
     )
@@ -449,6 +451,7 @@ class WorkflowScheduler:
                 main_status=main.status,
                 control_signal=main.control_signal,
                 return_output=main.return_output,
+                unknown_outcome=main.unknown_outcome,
             )
         return await self._run_cleanup(
             definition,
@@ -575,6 +578,7 @@ class WorkflowScheduler:
         run_context = context
         token = cancellation
         nodes = {node.id: node for node in nodes_for_phase}
+        phase = nodes_for_phase[0].phase if nodes_for_phase else WorkflowPhase.MAIN
         incoming = _incoming_edges(nodes_for_phase, edges_for_phase)
         statuses = dict.fromkeys(nodes, NodeStatus.PENDING)
         records: dict[str, NodeRunRecord] = {}
@@ -611,13 +615,19 @@ class WorkflowScheduler:
             resume_records,
             preserve_terminal=preserve_terminal_records,
         )
+        if definition.schema_version == "4.0":
+            _restore_uncertain_requests(nodes, statuses, records, run_context, resume_records)
 
         await _notify_status_changes(
             nodes, statuses, records, notified, run_context, on_node_status
         )
 
         while len(records) < len(nodes):
-            if _phase_cancelled(token, force_only=cancellation_force_only):
+            if _phase_cancelled(token, force_only=cancellation_force_only) or _has_unknown_outcome(
+                records,
+                run_context.nested_checkpoint_records,
+                run_context.checkpoint_phase or phase,
+            ):
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
                 await _notify_status_changes(
@@ -696,13 +706,16 @@ class WorkflowScheduler:
                 break
 
         ordered = tuple(records[node.id] for node in nodes_for_phase)
-        status = _workflow_status(ordered)
+        status, unknown_outcome = _phase_status(
+            ordered, records, run_context.nested_checkpoint_records, phase
+        )
         return WorkflowRunResult(
             status=status,
             records=ordered,
             context=run_context.snapshot(),
             control_signal=control_signal,
             return_output=return_output,
+            unknown_outcome=unknown_outcome,
             main_status=(
                 status
                 if nodes_for_phase and nodes_for_phase[0].phase is WorkflowPhase.MAIN
@@ -1060,7 +1073,11 @@ def _cleanup_report(
     required = tuple(record.node_id for record in failures if not record.best_effort)
     warnings = tuple(
         CleanupWarning(
-            code="BEST_EFFORT_CLEANUP_FAILED",
+            code=(
+                "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                if record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                else "BEST_EFFORT_CLEANUP_FAILED"
+            ),
             node_id=record.node_id,
             message=record.error_message or "Best-effort 清理失败",
         )
@@ -1093,9 +1110,19 @@ def _combined_result(
     report: CleanupReport,
 ) -> WorkflowRunResult:
     records = {record.node_id: record for record in (*main.records, *cleanup_records)}
-    cleanup_status = _cleanup_run_status(cleanup_records, report)
     status = main.status
-    if main.status is WorkflowRunStatus.PASSED and report.required_failures:
+    unknown_cleanup = any(
+        record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN" for record in cleanup_records
+    ) or any(
+        record.phase is WorkflowPhase.CLEANUP and record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+        for record in context.nested_checkpoint_records.values()
+    )
+    cleanup_status = (
+        WorkflowRunStatus.FAILED
+        if unknown_cleanup
+        else _cleanup_run_status(cleanup_records, report)
+    )
+    if main.status is WorkflowRunStatus.PASSED and (report.required_failures or unknown_cleanup):
         status = WorkflowRunStatus.FAILED
     return WorkflowRunResult(
         status=status,
@@ -1106,6 +1133,7 @@ def _combined_result(
         cleanup_report=report,
         control_signal=main.control_signal,
         return_output=main.return_output,
+        unknown_outcome=main.unknown_outcome or unknown_cleanup,
     )
 
 
@@ -1432,6 +1460,65 @@ def _restore_records(
         records[record.node_id] = record
         if record.status is NodeStatus.PASSED:
             context.record_output(record.node_id, record.output)
+
+
+def _restore_uncertain_requests(
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    context: ExecutionContext,
+    resume_records: tuple[NodeRunRecord, ...],
+) -> None:
+    latest = {record.node_id: record for record in resume_records}
+    for node_id, previous in latest.items():
+        node = nodes.get(node_id)
+        if node is None:
+            continue
+        if previous.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN":
+            statuses[node_id] = NodeStatus.FAILED
+            records[node_id] = previous
+            continue
+        if not node_consumes_request(node):
+            continue
+        if (
+            previous.status is not NodeStatus.RUNNING
+            or previous.attempts < 1
+            or node_id in context.retry_safe_node_ids
+        ):
+            continue
+        message = "请求已预留但外部结果未知, 需先查证或明确处理后才能继续"
+        records[node_id] = _failed_record(
+            node,
+            previous.attempts,
+            previous.started_at or datetime.now(UTC),
+            NodeExecutionError(code="SIDE_EFFECT_OUTCOME_UNKNOWN", message=message),
+            input_hash=previous.input_hash,
+        )
+        statuses[node_id] = NodeStatus.FAILED
+
+
+def _has_unknown_outcome(
+    records: dict[str, NodeRunRecord],
+    nested_records: dict[str, NodeRunRecord],
+    phase: WorkflowPhase,
+) -> bool:
+    return any(
+        record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN" for record in records.values()
+    ) or any(
+        (record.phase is phase or phase is WorkflowPhase.MAIN)
+        and record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+        for record in nested_records.values()
+    )
+
+
+def _phase_status(
+    ordered: tuple[NodeRunRecord, ...],
+    records: dict[str, NodeRunRecord],
+    nested_records: dict[str, NodeRunRecord],
+    phase: WorkflowPhase,
+) -> tuple[WorkflowRunStatus, bool]:
+    unknown = _has_unknown_outcome(records, nested_records, phase)
+    return (WorkflowRunStatus.FAILED if unknown else _workflow_status(ordered), unknown)
 
 
 def _failed_record(

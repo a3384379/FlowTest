@@ -44,7 +44,7 @@ from app.runner.agent import (
     configuration_from_environment,
 )
 from app.runner.client import RunnerControlPlaneClient
-from app.runner.results import RunnerExecutionResult
+from app.runner.results import RunnerExecutionResult, RunnerWorkflowResult
 from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
@@ -79,6 +79,19 @@ def test_pool_advisory_lock_key_is_stable_and_signed() -> None:
 
     assert _advisory_lock_key(identifier, 0) == -1
     assert _advisory_lock_key(identifier, 1) != _advisory_lock_key(identifier, 2)
+
+
+def test_runner_result_preserves_nested_unknown_outcome() -> None:
+    domain = WorkflowRunResult(
+        status=WorkflowRunStatus.FAILED,
+        records=(),
+        context={},
+        unknown_outcome=True,
+    )
+    wire = RunnerWorkflowResult.from_domain(domain).model_dump_json()
+    restored = RunnerWorkflowResult.model_validate_json(wire).to_domain()
+    assert restored.status is WorkflowRunStatus.FAILED
+    assert restored.unknown_outcome
 
 
 @dataclass(slots=True)

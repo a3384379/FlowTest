@@ -74,6 +74,7 @@ class RunnerWorkflowResult(BaseModel):
     main_status: WorkflowRunStatus | None = None
     cleanup_status: WorkflowRunStatus | None = None
     cleanup_report: CleanupReport | None = None
+    unknown_outcome: bool = False
 
     @model_validator(mode="after")
     def require_terminal_status(self) -> "RunnerWorkflowResult":
@@ -90,6 +91,7 @@ class RunnerWorkflowResult(BaseModel):
             main_status=result.main_status,
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
+            unknown_outcome=result.unknown_outcome,
         )
 
     def to_domain(self) -> WorkflowRunResult:
@@ -100,6 +102,7 @@ class RunnerWorkflowResult(BaseModel):
             main_status=self.main_status,
             cleanup_status=self.cleanup_status,
             cleanup_report=self.cleanup_report,
+            unknown_outcome=self.unknown_outcome,
         )
 
 

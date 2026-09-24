@@ -134,7 +134,11 @@ from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
-from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
+from app.services.workflow_runtime import (
+    PreparedSubflow,
+    WorkflowNodeExecutor,
+    retry_safe_request_nodes,
+)
 from app.services.workflow_snapshots import (
     PreparedExecution,
     PreparedWorkflow,
@@ -905,6 +909,7 @@ class WorkflowService:
             workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
             dataset_variables=plan.prepared.dataset_variables,
             runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+            retry_safe_node_ids=retry_safe_request_nodes(plan.definition, plan.prepared.requests),
         )
         for checkpoint in checkpoints:
             context.restore_checkpoint(
@@ -1054,13 +1059,20 @@ class WorkflowService:
                 record
                 for record in result.records
                 if record.status.value == "failed"
-                and (record.phase.value == "main" or not record.best_effort)
+                and (
+                    record.phase.value == "main"
+                    or not record.best_effort
+                    or record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                )
             ),
             None,
         )
         if failed is not None:
             execution.error_code = failed.error_code
             execution.error_message = failed.error_message
+        elif result.unknown_outcome:
+            execution.error_code = "SIDE_EFFECT_OUTCOME_UNKNOWN"
+            execution.error_message = "内联请求的外部结果未知, 需先查证或明确处理"
         self._audit.record(
             actor_user_id=plan.actor_id,
             project_id=plan.project_id,
@@ -1140,6 +1152,7 @@ class WorkflowService:
             main_status=result.main_status,
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
+            unknown_outcome=result.unknown_outcome,
         )
 
     async def load_execution_for_run(self, execution_id: UUID) -> WorkflowExecution:
