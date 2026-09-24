@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { workflowDefinition } from '../test/fixtures'
-import { addControlBlock } from './editor/control-blocks'
+import { addControlBlock, appendRegionDelay } from './editor/control-blocks'
 import WorkflowControlFields from './WorkflowControlFields'
 
 it('adds a serial step through the control region panel', async () => {
@@ -27,6 +27,129 @@ it('adds a serial step through the control region panel', async () => {
     }),
   )
   expect(onRegionUpdate.mock.calls[0][0].nodes).toHaveLength(2)
+})
+
+it('opens the region canvas with its persisted entry, exit, and node', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = appendRegionDelay(definition.regions![0])!
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  expect(within(dialog).getByText('入口 · 等待 0 秒')).toBeInTheDocument()
+  expect(within(dialog).getByText('等待 0 秒 · 出口')).toBeInTheDocument()
+})
+
+it('inserts a step after a selected region node from the canvas toolbar', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = definition.regions![0]
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  const insert = within(dialog).getByRole('button', { name: '在后面插入等待' })
+  expect(insert).toBeDisabled()
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${region.entry_node_id}`))
+  expect(insert).toBeEnabled()
+  await userEvent.click(insert)
+  expect(onRegionUpdate).toHaveBeenCalledOnce()
+  const next = onRegionUpdate.mock.calls[0][0]
+  expect(next.nodes).toHaveLength(2)
+  expect(next.edges).toEqual([
+    expect.objectContaining({ source: region.entry_node_id, target: next.exit_node_ids[0] }),
+  ])
+})
+
+it('inserts a versioned API from the canvas and excludes inactive APIs', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = definition.regions![0]
+  const activeApi = {
+    id: 'aa200000-0000-4000-8000-000000000001',
+    project_id: 'project',
+    folder_id: null,
+    name: '活动接口',
+    description: '',
+    current_version: 4,
+    is_active: true,
+  }
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      apis={[activeApi, { ...activeApi, id: 'inactive', name: '停用接口', is_active: false }]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog')
+  expect(within(dialog).queryByText('停用接口')).not.toBeInTheDocument()
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${region.entry_node_id}`))
+  await userEvent.click(within(dialog).getByRole('button', { name: '在后面插入接口' }))
+  expect(onRegionUpdate.mock.calls[0][0].nodes.at(-1)).toEqual(
+    expect.objectContaining({
+      type: 'api',
+      config: expect.objectContaining({ api_definition_id: activeApi.id, api_version: 4 }),
+    }),
+  )
+})
+
+it('reports a mapped or conditional edge instead of inserting into it', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = appendRegionDelay(definition.regions![0])!
+  region.edges[0].condition = 'true'
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${region.entry_node_id}`))
+  await userEvent.click(within(dialog).getByRole('button', { name: '在后面插入等待' }))
+  expect(within(dialog).getByRole('alert')).toHaveTextContent('无法安全插入')
+  expect(onRegionUpdate).not.toHaveBeenCalled()
+})
+
+it('keeps the region canvas read-only when its workflow cannot be edited', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = definition.regions![0]
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable={false}
+      onUpdate={vi.fn()}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${region.entry_node_id}`))
+  expect(within(dialog).getByRole('button', { name: '在后面插入等待' })).toBeDisabled()
+  expect(within(dialog).queryByRole('button', { name: '在后面插入接口' })).toBeNull()
 })
 
 it('adds an API step with a frozen API version to the inline region', async () => {

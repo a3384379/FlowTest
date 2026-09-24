@@ -684,6 +684,17 @@
   margin-bottom: 8px;
 }
 
+.workflow-region-canvas {
+  height: min(62vh, 560px);
+  min-height: 360px;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+}
+
+.workflow-region-canvas-toolbar {
+  margin-bottom: 12px;
+}
+
 .workflow-config-section-heading {
   margin-bottom: 14px;
 }

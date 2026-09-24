@@ -230,7 +230,29 @@ export function appendRegionApi(
   apiId: string,
   apiVersion: number,
 ): WorkflowRegion | null {
-  return appendRegionStep(region, (previous) => ({
+  return appendRegionStep(region, (previous) => newApiStep(apiId, apiVersion, previous))
+}
+
+export function insertRegionDelayAfter(
+  region: WorkflowRegion,
+  afterId: string,
+): WorkflowRegion | null {
+  return insertRegionStepAfter(region, afterId, newDelayStep)
+}
+
+export function insertRegionApiAfter(
+  region: WorkflowRegion,
+  afterId: string,
+  apiId: string,
+  apiVersion: number,
+): WorkflowRegion | null {
+  return insertRegionStepAfter(region, afterId, (previous) =>
+    newApiStep(apiId, apiVersion, previous),
+  )
+}
+
+function newApiStep(apiId: string, apiVersion: number, previous?: WorkflowNode): WorkflowNode {
+  return {
     id: `step-${crypto.randomUUID()}`,
     type: 'api',
     name: '接口请求',
@@ -242,7 +264,7 @@ export function appendRegionApi(
       max_retries: 0,
       retry_on: ['network_error', '5xx'],
     },
-  }))
+  }
 }
 
 export function appendRegionSignal(
@@ -311,6 +333,51 @@ function appendRegionStep(
       },
     ],
     exit_node_ids: [step.id],
+  }
+}
+
+function insertRegionStepAfter(
+  region: WorkflowRegion,
+  afterId: string,
+  create: (previous: WorkflowNode) => WorkflowNode,
+): WorkflowRegion | null {
+  const index = region.nodes.findIndex((node) => node.id === afterId)
+  if (index < 0) return null
+  const outgoing = region.edges.filter((edge) => edge.source === afterId)
+  if (outgoing.length > 1 || outgoing.some((edge) => edge.condition || edge.mappings.length))
+    return null
+  if (outgoing.length === 0 && !region.exit_node_ids.includes(afterId)) return null
+  if (outgoing.length > 0 && region.exit_node_ids.includes(afterId)) return null
+  const previous = region.nodes[index]
+  const step = create(previous)
+  return {
+    ...region,
+    nodes: [
+      ...region.nodes.slice(0, index + 1),
+      step,
+      ...region.nodes
+        .slice(index + 1)
+        .map((node) =>
+          node.position.x > previous.position.x
+            ? { ...node, position: { ...node.position, x: node.position.x + 220 } }
+            : node,
+        ),
+    ],
+    edges: [
+      ...region.edges.map((edge) =>
+        edge.source === afterId ? { ...edge, source: step.id } : edge,
+      ),
+      {
+        id: `edge-${crypto.randomUUID()}`,
+        source: afterId,
+        target: step.id,
+        condition: null,
+        mappings: [],
+      },
+    ],
+    exit_node_ids: outgoing.length
+      ? region.exit_node_ids
+      : region.exit_node_ids.map((id) => (id === afterId ? step.id : id)),
   }
 }
 

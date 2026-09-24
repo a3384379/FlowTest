@@ -8,6 +8,7 @@ import {
   canAppendRegionSignal,
 } from './editor/control-blocks'
 import WorkflowJsonInput from './WorkflowJsonInput'
+import WorkflowRegionCanvasModal from './WorkflowRegionCanvasModal'
 
 type Props = {
   node: WorkflowNode
@@ -92,6 +93,7 @@ function RegionEditor({
   const [baseText, setBaseText] = useState(currentText)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [canvasOpen, setCanvasOpen] = useState(false)
   function apply() {
     if (baseText !== currentText) {
       setError('区域已从其他编辑更新。请先复制草稿，再丢弃并重新编辑。')
@@ -116,6 +118,15 @@ function RegionEditor({
       <Typography.Paragraph type="secondary">
         {region.nodes.length} 个步骤。区域节点和连线属于流程定义，单次执行的轮次不会复制画布节点。
       </Typography.Paragraph>
+      <Button onClick={() => setCanvasOpen(true)}>打开区域画布</Button>
+      <WorkflowRegionCanvasModal
+        open={canvasOpen}
+        region={region}
+        apis={apis}
+        editable={editable && !dirty}
+        onClose={() => setCanvasOpen(false)}
+        onUpdate={onUpdate}
+      />
       <RegionStepList
         region={region}
         owner={owner}

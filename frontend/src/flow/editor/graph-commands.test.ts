@@ -9,6 +9,8 @@ import {
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
+  insertRegionApiAfter,
+  insertRegionDelayAfter,
 } from './control-blocks'
 import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
@@ -61,6 +63,32 @@ describe('workflow graph commands', () => {
       expect.objectContaining({ api_definition_id: apiId, api_version: 3 }),
     )
     expect(appendRegionApi({ ...region, exit_node_ids: [] }, apiId, 3)).toBeNull()
+  })
+  it('inserts an API between existing region steps without changing the entry or exit', () => {
+    const first = addControlBlock(graph(linear), 'group').regions![0]
+    const serial = appendRegionDelay(first)!
+    const apiId = 'aa200000-0000-4000-8000-000000000001'
+    const inserted = insertRegionApiAfter(serial, serial.entry_node_id!, apiId, 4)!
+    const newNode = inserted.nodes[1]
+    expect(newNode.config).toEqual(
+      expect.objectContaining({ api_definition_id: apiId, api_version: 4 }),
+    )
+    expect(inserted.entry_node_id).toBe(serial.entry_node_id)
+    expect(inserted.exit_node_ids).toEqual(serial.exit_node_ids)
+    expect(newNode.position.x).toBe(serial.nodes[0].position.x + 220)
+    expect(inserted.nodes[2].position.x).toBe(serial.nodes[1].position.x + 220)
+    expect(inserted.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: serial.entry_node_id, target: newNode.id }),
+        expect.objectContaining({ source: newNode.id, target: serial.exit_node_ids[0] }),
+      ]),
+    )
+    expect(serial.nodes).toHaveLength(2)
+    const mappedRegion = structuredClone(serial)
+    mappedRegion.edges[0].mappings = graph(mapped).edges[1].mappings
+    expect(insertRegionDelayAfter(mappedRegion, serial.entry_node_id!)).toBeNull()
+    const atExit = insertRegionDelayAfter(serial, serial.exit_node_ids[0])!
+    expect(atExit.exit_node_ids).toEqual([atExit.nodes.at(-1)!.id])
   })
   it('adds loop signals only to a serial loop body', () => {
     const definition = addControlBlock(graph(linear), 'foreach')
