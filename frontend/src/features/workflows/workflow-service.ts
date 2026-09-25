@@ -3,6 +3,7 @@ import {
   type ApiDefinition,
   type Artifact,
   type Environment,
+  type ExecutionCheckpoint,
   type Page,
   type Project,
   type Workflow,
@@ -10,6 +11,8 @@ import {
   type WorkflowDebugResult,
   type WorkflowExecution,
   type WorkflowExecutionDetail,
+  type WorkflowControlRecordDetail,
+  type WorkflowControlRecordSummary,
   type WorkflowVersion,
   type WorkflowVersionDiff,
 } from '../../lib/api'
@@ -180,9 +183,59 @@ export async function executeWorkflow(
 export async function getWorkflowExecution(
   projectId: string,
   executionId: string,
+  compactControl = false,
 ): Promise<WorkflowExecutionDetail> {
   const response = await apiClient.get<WorkflowExecutionDetail>(
     `/projects/${projectId}/workflow-executions/${executionId}`,
+    { params: { compact_control: compactControl } },
+  )
+  return response.data
+}
+
+export async function listWorkflowControlRecords(
+  projectId: string,
+  executionId: string,
+  nodeId: string,
+  kind: 'iteration' | 'branch',
+  page: number,
+  testVerdict?: 'failed',
+): Promise<Page<WorkflowControlRecordSummary>> {
+  const response = await apiClient.get<Page<WorkflowControlRecordSummary>>(
+    `/projects/${projectId}/workflow-executions/${executionId}/control-records`,
+    {
+      params: {
+        node_id: nodeId,
+        kind,
+        page,
+        page_size: 20,
+        ...(testVerdict ? { test_verdict: testVerdict } : {}),
+      },
+    },
+  )
+  return response.data
+}
+
+export async function getWorkflowControlRecord(
+  projectId: string,
+  executionId: string,
+  nodeId: string,
+  kind: 'iteration' | 'branch',
+  ordinal: number,
+): Promise<WorkflowControlRecordDetail> {
+  const response = await apiClient.get<WorkflowControlRecordDetail>(
+    `/projects/${projectId}/workflow-executions/${executionId}/control-records/${kind}/${ordinal}`,
+    { params: { node_id: nodeId } },
+  )
+  return response.data
+}
+
+export async function getWorkflowInstance(
+  projectId: string,
+  executionId: string,
+  instanceId: string,
+): Promise<ExecutionCheckpoint> {
+  const response = await apiClient.get<ExecutionCheckpoint>(
+    `/projects/${projectId}/workflow-executions/${executionId}/instances/${encodeURIComponent(instanceId)}`,
   )
   return response.data
 }

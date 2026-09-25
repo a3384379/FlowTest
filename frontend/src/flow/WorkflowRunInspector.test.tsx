@@ -1,12 +1,127 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
 import WorkflowRunInspector from './WorkflowRunInspector'
 import { workflowDefinition } from '../test/fixtures'
 import type { WorkflowNodeExecution } from '../lib/api'
+import { server } from '../test/server'
 
 describe('WorkflowRunInspector', () => {
+  it('shows parallel branch status separately from its test verdict', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            join: 'all',
+            started_count: 1,
+            failed_count: 1,
+            branches: [
+              {
+                definition_index: 0,
+                status: 'passed',
+                test_verdict: 'failed',
+                nodes: [{ node_id: 'assertion', status: 'failed', error_message: '断言未通过' }],
+              },
+            ],
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByLabelText('选择并行分支'))
+    await browser.click(screen.getByText('分支 1 · failed'))
+    expect(screen.getByText('assertion · failed')).toBeVisible()
+    expect(screen.getByText('断言未通过')).toBeVisible()
+  })
+
+  it('loads one report page and an exact persisted instance on demand', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    const projectId = 'project-1'
+    const executionId = 'execution-1'
+    const nodeId = 'api'
+    const reportPath = `/api/v1/projects/${projectId}/workflow-executions/${executionId}`
+    const requestedPages: number[] = []
+    server.use(
+      http.get(`${reportPath}/control-records`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        requestedPages.push(page)
+        return HttpResponse.json({
+          items: [{ ordinal: page === 2 ? 20 : 0, status: 'failed', test_verdict: 'failed' }],
+          total: 21,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.get(`${reportPath}/control-records/iteration/20`, () =>
+        HttpResponse.json({
+          kind: 'iteration',
+          ordinal: 20,
+          status: 'failed',
+          test_verdict: 'failed',
+          payload: {
+            input_index: 20,
+            status: 'failed',
+            test_verdict: 'failed',
+            nodes: [
+              { node_id: 'check', instance_id: '__nested_request__:example', status: 'failed' },
+            ],
+          },
+        }),
+      ),
+      http.get(`${reportPath}/instances/__nested_request__:example`, () =>
+        HttpResponse.json({
+          node_id: '__nested_request__:example',
+          node_name: '校验',
+          status: 'failed',
+          output: { actual: 409 },
+          result: { error_code: 'CASE_FAIL', observations: [{ response: { status_code: 409 } }] },
+        }),
+      ),
+    )
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        projectId={projectId}
+        executionId={executionId}
+        node={workflowDefinition.nodes.find((node) => node.id === nodeId) ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 21,
+            completed_count: 21,
+            failed_count: 21,
+            termination_reason: 'completed',
+            report_kind: 'iteration',
+            report_paged: true,
+            record_count: 21,
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await screen.findByRole('region', { name: '循环执行详情' })
+    await browser.click(screen.getByTitle('2'))
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(await screen.findByText('第 21 项 · failed'))
+    expect(await screen.findByText('check · failed')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '查看实例详情' }))
+    expect(await screen.findByText(/"actual": 409/)).toBeVisible()
+    expect(screen.getByText(/"status_code": 409/)).toBeVisible()
+    expect(requestedPages).toEqual([1, 2])
+  })
+
   it('shows the selected loop item and its actual failed node', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

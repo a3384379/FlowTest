@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, status
@@ -8,6 +8,7 @@ from app.composition import build_workflow_service
 from app.domain.durable_execution import ExecutionCommandType
 from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+from app.repositories.workflows import WorkflowExecutionReport, WorkflowNodeExecutionReport
 from app.schemas.common import Page
 from app.schemas.durable_execution import (
     ExecutionCheckpointResponse,
@@ -17,6 +18,8 @@ from app.schemas.durable_execution import (
 from app.schemas.workflows import (
     WorkflowCancelRequest,
     WorkflowControlBlockInsert,
+    WorkflowControlRecordDetailResponse,
+    WorkflowControlRecordSummaryResponse,
     WorkflowCreate,
     WorkflowDebugNodeResponse,
     WorkflowDebugRequest,
@@ -487,13 +490,75 @@ async def get_workflow_execution(
     execution_id: UUID,
     session: SessionDependency,
     current_user: CurrentUser,
+    compact_control: bool = False,
 ) -> WorkflowExecutionDetailResponse:
-    execution, nodes, children = await WorkflowService(session).get_execution(
+    service = WorkflowService(session)
+    if compact_control:
+        execution, nodes, children = await service.get_execution_report(
+            actor=current_user, project_id=project_id, execution_id=execution_id
+        )
+        return _execution_detail(execution, nodes, children)
+    full_execution, full_nodes, full_children = await service.get_execution(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return _execution_detail(full_execution, full_nodes, full_children)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/control-records",
+    response_model=Page[WorkflowControlRecordSummaryResponse],
+)
+async def list_control_records(
+    project_id: UUID,
+    execution_id: UUID,
+    node_id: str,
+    kind: Literal["iteration", "branch"],
+    session: SessionDependency,
+    current_user: CurrentUser,
+    test_verdict: Literal["passed", "failed", "not_run"] | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[WorkflowControlRecordSummaryResponse]:
+    items, total = await WorkflowService(session).list_control_records(
         actor=current_user,
         project_id=project_id,
         execution_id=execution_id,
+        node_id=node_id,
+        kind=kind,
+        test_verdict=test_verdict,
+        page=page,
+        page_size=page_size,
     )
-    return _execution_detail(execution, nodes, children)
+    return Page(
+        items=[WorkflowControlRecordSummaryResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/control-records/{kind}/{ordinal}",
+    response_model=WorkflowControlRecordDetailResponse,
+)
+async def get_control_record(
+    project_id: UUID,
+    execution_id: UUID,
+    kind: Literal["iteration", "branch"],
+    ordinal: int,
+    node_id: str,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowControlRecordDetailResponse:
+    record = await WorkflowService(session).get_control_record(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        node_id=node_id,
+        kind=kind,
+        ordinal=ordinal,
+    )
+    return WorkflowControlRecordDetailResponse.model_validate(record)
 
 
 @router.get(
@@ -618,9 +683,9 @@ async def replay_workflow_node(
 
 
 def _execution_detail(
-    execution: WorkflowExecution,
-    nodes: list[WorkflowNodeExecution],
-    children: list[WorkflowExecution],
+    execution: WorkflowExecution | WorkflowExecutionReport,
+    nodes: list[WorkflowNodeExecution] | list[WorkflowNodeExecutionReport],
+    children: list[WorkflowExecution] | list[WorkflowExecutionReport],
 ) -> WorkflowExecutionDetailResponse:
     return WorkflowExecutionDetailResponse(
         execution=WorkflowExecutionResponse.model_validate(execution),

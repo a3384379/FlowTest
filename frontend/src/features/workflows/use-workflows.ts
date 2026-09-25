@@ -264,7 +264,8 @@ export function useWorkflows(initialWorkflowId?: string) {
   })
   const historyExecution = useQuery({
     queryKey: ['workflow-execution', projectId, historyExecutionId],
-    queryFn: () => getWorkflowExecution(requiredId(projectId), requiredId(historyExecutionId)),
+    queryFn: () =>
+      getWorkflowExecution(requiredId(projectId), requiredId(historyExecutionId), true),
     enabled: canLoadHistory(projectId, historyExecutionId, workspaceMode),
   })
   const createMutation = useMutation({
@@ -551,7 +552,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     if (completingExecutionId.current === executionId) return false
     completingExecutionId.current = executionId
     try {
-      const result = await getWorkflowExecution(requiredId(projectId), executionId)
+      const result = await getWorkflowExecution(requiredId(projectId), executionId, true)
       if (['queued', 'running'].includes(result.execution.status)) return false
       completedExecutionId.current = executionId
       setLastResult(result)

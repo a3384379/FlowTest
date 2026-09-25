@@ -25,6 +25,7 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Popconfirm,
   Popover,
   Segmented,
@@ -36,7 +37,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -46,11 +47,14 @@ import FlowSpecReviewDialog, {
 } from '../features/workflows/FlowSpecReviewDialog'
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
+import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
 import {
   apiErrorMessage,
+  type Page,
+  type WorkflowControlRecordSummary,
   type Workflow,
   type WorkflowExecution,
   type WorkflowNodeExecution,
@@ -493,7 +497,7 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
   )
 }
 
-type FailedLoopOption = { nodeId: string; name: string; indices: number[] }
+type FailedLoopOption = { nodeId: string; name: string; indices: number[]; paged: boolean }
 
 function canOfferFailedItemRerun(
   state: WorkflowState,
@@ -529,22 +533,58 @@ function rerunSubmitDisabled(
 }
 
 function failedLoopOptions(nodes: WorkflowNodeExecution[]): FailedLoopOption[] {
-  return nodes.flatMap((node) => {
+  return nodes.flatMap((node): FailedLoopOption[] => {
     const output = node.output
-    if (!isRecord(output) || !Array.isArray(output.items)) return []
+    if (!isRecord(output)) return []
+    if (output.report_paged === true && output.report_kind === 'iteration') {
+      return typeof output.failed_count === 'number' && output.failed_count > 0
+        ? [{ nodeId: node.node_id, name: node.name, indices: [], paged: true }]
+        : []
+    }
+    if (!Array.isArray(output.items)) return []
     const indices = output.items.flatMap((item: unknown) =>
       isRecord(item) && item.test_verdict === 'failed' && typeof item.input_index === 'number'
         ? [item.input_index]
         : [],
     )
-    return indices.length ? [{ nodeId: node.node_id, name: node.name, indices }] : []
+    return indices.length ? [{ nodeId: node.node_id, name: node.name, indices, paged: false }] : []
   })
 }
 
 function FailedItemRerunAction({ state }: { state: WorkflowState }) {
   const loops = failedLoopOptions(state.runtimeNodes)
   const [open, setOpen] = useState(false)
-  const [loopNodeId, setLoopNodeId] = useState<string | null>(null)
+  const source = state.runtimeExecution
+  if (!canOfferFailedItemRerun(state, source, loops)) return null
+  return (
+    <>
+      <Button icon={<RedoOutlined />} onClick={() => setOpen(true)}>
+        派生重跑失败项
+      </Button>
+      {open && (
+        <FailedItemRerunDialog
+          state={state}
+          source={source}
+          loops={loops}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+function FailedItemRerunDialog({
+  state,
+  source,
+  loops,
+  onClose,
+}: {
+  state: WorkflowState
+  source: WorkflowExecution
+  loops: FailedLoopOption[]
+  onClose: () => void
+}) {
+  const [loopNodeId, setLoopNodeId] = useState<string | null>(loops[0].nodeId)
   const [indices, setIndices] = useState<number[]>([])
   const [resourceStatus, setResourceStatus] = useState<
     'unverified' | 'confirmed_valid' | 'expired'
@@ -552,103 +592,243 @@ function FailedItemRerunAction({ state }: { state: WorkflowState }) {
   const [writeStrategy, setWriteStrategy] = useState<'reject' | 'verified_safe_to_retry'>('reject')
   const [note, setNote] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const source = state.runtimeExecution
+  const [failedPageNumber, setFailedPageNumber] = useState(1)
   const selectedLoop = loops.find((loop) => loop.nodeId === loopNodeId)
-  if (!canOfferFailedItemRerun(state, source, loops)) return null
+  const { failedPage, failedPageError } = useFailedRecordPage(
+    state.projectId,
+    source.id,
+    selectedLoop,
+    failedPageNumber,
+  )
+  return (
+    <Modal
+      title="派生重跑失败项"
+      open
+      okText="创建派生运行"
+      okButtonProps={{
+        disabled: rerunSubmitDisabled(loopNodeId, indices, resourceStatus, writeStrategy, note),
+        loading: state.rerunningFailedItems,
+      }}
+      onCancel={onClose}
+      onOk={async () => {
+        setSubmitError(null)
+        try {
+          await state.rerunFailedItems(source.id, {
+            loop_node_id: loopNodeId ?? '',
+            input_indices: indices,
+            upstream_resource_status: resourceStatus,
+            write_retry_strategy: writeStrategy,
+            ...(note.trim() ? { verification_note: note.trim() } : {}),
+          })
+          onClose()
+        } catch (error) {
+          setSubmitError(apiErrorMessage(error))
+        }
+      }}
+    >
+      <Space orientation="vertical" className="workflow-more-content">
+        {submitError && <Alert type="error" showIcon title={submitError} />}
+        <Alert
+          type="info"
+          showIcon
+          title="原报告保留，使用原冻结输入和已成功步骤的输出。请先确认外部资源状态。"
+        />
+        <FailedItemSelection
+          loops={loops}
+          loopNodeId={loopNodeId}
+          indices={indices}
+          selectedLoop={selectedLoop}
+          failedPage={failedPage}
+          failedPageError={failedPageError}
+          failedPageNumber={failedPageNumber}
+          onLoopChange={(value) => {
+            setLoopNodeId(value)
+            setIndices([])
+            setFailedPageNumber(1)
+          }}
+          onIndicesChange={setIndices}
+          onPageChange={setFailedPageNumber}
+        />
+        <FailedItemVerificationFields
+          resourceStatus={resourceStatus}
+          writeStrategy={writeStrategy}
+          note={note}
+          onResourceStatusChange={setResourceStatus}
+          onWriteStrategyChange={setWriteStrategy}
+          onNoteChange={setNote}
+        />
+      </Space>
+    </Modal>
+  )
+}
+
+function useFailedRecordPage(
+  projectId: string | null,
+  executionId: string,
+  selectedLoop: FailedLoopOption | undefined,
+  page: number,
+) {
+  const [response, setResponse] = useState<{
+    key: string
+    value?: Page<WorkflowControlRecordSummary>
+    error?: string
+  } | null>(null)
+  const nodeId = selectedLoop?.nodeId
+  const paged = selectedLoop?.paged
+  const key = `${projectId}:${executionId}:${nodeId}:${page}`
+  useEffect(() => {
+    if (!paged || !projectId || !nodeId) return
+    let active = true
+    void listWorkflowControlRecords(projectId, executionId, nodeId, 'iteration', page, 'failed')
+      .then((value) => {
+        if (active) setResponse({ key, value })
+      })
+      .catch((reason: unknown) => {
+        if (active) setResponse({ key, error: apiErrorMessage(reason) })
+      })
+    return () => {
+      active = false
+    }
+  }, [paged, projectId, executionId, nodeId, page, key])
+  return {
+    failedPage: response?.key === key ? response.value : undefined,
+    failedPageError: response?.key === key ? response.error : undefined,
+  }
+}
+
+function FailedItemSelection({
+  loops,
+  loopNodeId,
+  indices,
+  selectedLoop,
+  failedPage,
+  failedPageError,
+  failedPageNumber,
+  onLoopChange,
+  onIndicesChange,
+  onPageChange,
+}: {
+  loops: FailedLoopOption[]
+  loopNodeId: string | null
+  indices: number[]
+  selectedLoop: FailedLoopOption | undefined
+  failedPage: Page<WorkflowControlRecordSummary> | undefined
+  failedPageError: string | undefined
+  failedPageNumber: number
+  onLoopChange: (value: string) => void
+  onIndicesChange: (value: number[]) => void
+  onPageChange: (value: number) => void
+}) {
+  const options = failedInputOptions(selectedLoop, indices, failedPage)
   return (
     <>
-      <Button
-        icon={<RedoOutlined />}
-        onClick={() => {
-          setLoopNodeId(loops[0].nodeId)
-          setIndices([])
-          setResourceStatus('unverified')
-          setWriteStrategy('reject')
-          setNote('')
-          setSubmitError(null)
-          setOpen(true)
-        }}
-      >
-        派生重跑失败项
-      </Button>
-      <Modal
-        title="派生重跑失败项"
-        open={open}
-        okText="创建派生运行"
-        okButtonProps={{
-          disabled: rerunSubmitDisabled(loopNodeId, indices, resourceStatus, writeStrategy, note),
-          loading: state.rerunningFailedItems,
-        }}
-        onCancel={() => setOpen(false)}
-        onOk={async () => {
-          setSubmitError(null)
-          try {
-            await state.rerunFailedItems(source.id, {
-              loop_node_id: loopNodeId ?? '',
-              input_indices: indices,
-              upstream_resource_status: resourceStatus,
-              write_retry_strategy: writeStrategy,
-              ...(note.trim() ? { verification_note: note.trim() } : {}),
-            })
-            setOpen(false)
-          } catch (error) {
-            setSubmitError(apiErrorMessage(error))
-          }
-        }}
-      >
-        <Space orientation="vertical" className="workflow-more-content">
-          {submitError && <Alert type="error" showIcon title={submitError} />}
-          <Alert
-            type="info"
-            showIcon
-            title="原报告保留，使用原冻结输入和已成功步骤的输出。请先确认外部资源状态。"
-          />
-          <Select
-            aria-label="选择失败循环"
-            value={loopNodeId}
-            options={loops.map((loop) => ({ value: loop.nodeId, label: loop.name }))}
-            onChange={(value) => {
-              setLoopNodeId(value)
-              setIndices([])
-            }}
-          />
-          <Select
-            mode="multiple"
-            aria-label="选择失败轮次"
-            value={indices}
-            options={selectedLoop?.indices.map((index) => ({
-              value: index,
-              label: `第 ${index + 1} 项（input_index ${index}）`,
-            }))}
-            onChange={setIndices}
-          />
-          <Select
-            aria-label="上游资源状态"
-            value={resourceStatus}
-            options={[
-              { value: 'unverified', label: '尚未查证' },
-              { value: 'confirmed_valid', label: '已确认资源仍有效' },
-              { value: 'expired', label: '资源已过期，暂停重跑' },
-            ]}
-            onChange={setResourceStatus}
-          />
-          <Select
-            aria-label="失败写操作策略"
-            value={writeStrategy}
-            options={[
-              { value: 'reject', label: '不重试失败写操作' },
-              { value: 'verified_safe_to_retry', label: '查证后允许重试失败写操作' },
-            ]}
-            onChange={setWriteStrategy}
-          />
-          <Input.TextArea
-            aria-label="外部状态查证说明"
-            placeholder="如确认了资源有效或写操作可安全重试，请写明查证依据（至少 8 字）"
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </Space>
-      </Modal>
+      <Select
+        aria-label="选择失败循环"
+        value={loopNodeId}
+        options={loops.map((loop) => ({ value: loop.nodeId, label: loop.name }))}
+        onChange={onLoopChange}
+      />
+      {failedPageError && <Alert type="error" title={failedPageError} />}
+      {selectedLoop?.paged && failedPage?.total === 0 && (
+        <Alert type="error" title="执行摘要显示失败轮次，但持久化记录缺失" />
+      )}
+      <Select
+        mode="multiple"
+        aria-label="选择失败轮次"
+        value={indices}
+        options={options}
+        onChange={onIndicesChange}
+      />
+      <FailedItemPagination
+        selectedLoop={selectedLoop}
+        failedPage={failedPage}
+        failedPageNumber={failedPageNumber}
+        onPageChange={onPageChange}
+      />
+    </>
+  )
+}
+
+function failedInputOptions(
+  selectedLoop: FailedLoopOption | undefined,
+  indices: number[],
+  failedPage: Page<WorkflowControlRecordSummary> | undefined,
+) {
+  return [
+    ...new Set([
+      ...(selectedLoop?.indices ?? []),
+      ...indices,
+      ...(failedPage?.items.map((item) => item.ordinal) ?? []),
+    ]),
+  ].map((index) => ({ value: index, label: `第 ${index + 1} 项（input_index ${index}）` }))
+}
+
+function FailedItemPagination({
+  selectedLoop,
+  failedPage,
+  failedPageNumber,
+  onPageChange,
+}: {
+  selectedLoop: FailedLoopOption | undefined
+  failedPage: Page<WorkflowControlRecordSummary> | undefined
+  failedPageNumber: number
+  onPageChange: (value: number) => void
+}) {
+  if (!selectedLoop?.paged || (failedPage?.total ?? 0) <= 20) return null
+  return (
+    <Pagination
+      aria-label="失败轮次分页"
+      current={failedPageNumber}
+      total={failedPage?.total ?? 0}
+      pageSize={20}
+      showSizeChanger={false}
+      onChange={onPageChange}
+    />
+  )
+}
+
+function FailedItemVerificationFields({
+  resourceStatus,
+  writeStrategy,
+  note,
+  onResourceStatusChange,
+  onWriteStrategyChange,
+  onNoteChange,
+}: {
+  resourceStatus: 'unverified' | 'confirmed_valid' | 'expired'
+  writeStrategy: 'reject' | 'verified_safe_to_retry'
+  note: string
+  onResourceStatusChange: (value: 'unverified' | 'confirmed_valid' | 'expired') => void
+  onWriteStrategyChange: (value: 'reject' | 'verified_safe_to_retry') => void
+  onNoteChange: (value: string) => void
+}) {
+  return (
+    <>
+      <Select
+        aria-label="上游资源状态"
+        value={resourceStatus}
+        options={[
+          { value: 'unverified', label: '尚未查证' },
+          { value: 'confirmed_valid', label: '已确认资源仍有效' },
+          { value: 'expired', label: '资源已过期，暂停重跑' },
+        ]}
+        onChange={onResourceStatusChange}
+      />
+      <Select
+        aria-label="失败写操作策略"
+        value={writeStrategy}
+        options={[
+          { value: 'reject', label: '不重试失败写操作' },
+          { value: 'verified_safe_to_retry', label: '查证后允许重试失败写操作' },
+        ]}
+        onChange={onWriteStrategyChange}
+      />
+      <Input.TextArea
+        aria-label="外部状态查证说明"
+        placeholder="如确认了资源有效或写操作可安全重试，请写明查证依据（至少 8 字）"
+        value={note}
+        onChange={(event) => onNoteChange(event.target.value)}
+      />
     </>
   )
 }
@@ -1081,6 +1261,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         statuses={state.nodeStatuses}
         editable={state.canEdit && state.workspaceMode === 'draft' && !state.activeExecutionId}
         runtimeMode={state.workspaceMode === 'draft' ? undefined : state.workspaceMode}
+        runtimeExecutionId={state.runtimeExecution?.id}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
         focusActions={<FocusDraftActions state={state} />}

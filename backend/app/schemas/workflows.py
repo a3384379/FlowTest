@@ -194,6 +194,19 @@ class WorkflowExecutionDetailResponse(BaseModel):
     children: list[WorkflowExecutionResponse] = Field(default_factory=list)
 
 
+class WorkflowControlRecordSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ordinal: int
+    status: str
+    test_verdict: str
+
+
+class WorkflowControlRecordDetailResponse(WorkflowControlRecordSummaryResponse):
+    kind: str
+    payload: dict[str, JsonValue]
+
+
 class WorkflowDebugNodeResponse(BaseModel):
     node_id: str
     node_type: str

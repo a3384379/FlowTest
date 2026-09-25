@@ -836,6 +836,8 @@ export type ExecutionCheckpoint = {
   best_effort: boolean
   attempt: number
   status: WorkflowNodeExecution['status']
+  output: unknown
+  result: Record<string, unknown>
   started_at: string | null
   finished_at: string
 }
@@ -1134,6 +1136,17 @@ export type WorkflowExecutionDetail = {
   execution: WorkflowExecution
   nodes: WorkflowNodeExecution[]
   children: WorkflowExecution[]
+}
+
+export type WorkflowControlRecordSummary = {
+  ordinal: number
+  status: string
+  test_verdict: string
+}
+
+export type WorkflowControlRecordDetail = WorkflowControlRecordSummary & {
+  kind: 'iteration' | 'branch'
+  payload: Record<string, unknown>
 }
 
 export type TestPlanItem = {

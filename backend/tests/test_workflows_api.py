@@ -19,7 +19,7 @@ from app.main import app
 from app.models import Base
 from app.models.access import User
 from app.models.durable_execution import ExecutionCheckpoint
-from app.models.workflows import WorkflowExecution
+from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.services.execution_events import ExecutionEvent
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 
@@ -294,6 +294,7 @@ async def test_inline_control_block_publishes_runs_and_exposes_scoped_instance(
 @pytest.mark.asyncio
 async def test_failed_item_rerun_uses_original_frozen_collection_and_keeps_source(
     workflow_client: AsyncClient,
+    tmp_path: Path,
 ) -> None:
     headers = await _login_headers(workflow_client)
     project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
@@ -400,6 +401,55 @@ async def test_failed_item_rerun_uses_original_frozen_collection_and_keeps_sourc
     assert source_loop["output"]["failed_count"] == 3
     assert len(target.calls) == 1
     assert len(create_target.calls) == 3
+    report_path = f"/api/v1/projects/{project_id}/workflow-executions/{source_id}"
+    compact = await workflow_client.get(
+        report_path, headers=headers, params={"compact_control": "true"}
+    )
+    assert compact.status_code == 200, compact.text
+    compact_loop = next(node for node in compact.json()["nodes"] if node["node_id"] == "loop")
+    assert compact_loop["output"]["record_count"] == 3
+    assert compact_loop["output"]["failed_count"] == 3
+    assert "items" not in compact_loop["output"]
+    assert "items" not in compact_loop["result"]["output"]
+    assert "items" not in compact.json()["execution"]["context"]["node_outputs"]["loop"]
+    page = await workflow_client.get(
+        f"{report_path}/control-records",
+        headers=headers,
+        params={"node_id": "loop", "kind": "iteration", "page": 2, "page_size": 1},
+    )
+    assert page.status_code == 200, page.text
+    assert page.json()["total"] == 3
+    assert page.json()["items"] == [{"ordinal": 1, "status": "failed", "test_verdict": "failed"}]
+    failed_page = await workflow_client.get(
+        f"{report_path}/control-records",
+        headers=headers,
+        params={"node_id": "loop", "kind": "iteration", "test_verdict": "failed"},
+    )
+    assert failed_page.status_code == 200, failed_page.text
+    assert failed_page.json()["total"] == 3
+    exact = await workflow_client.get(
+        f"{report_path}/control-records/iteration/1",
+        headers=headers,
+        params={"node_id": "loop"},
+    )
+    assert exact.status_code == 200, exact.text
+    assert exact.json()["payload"]["input_index"] == 1
+    foreign_project = await workflow_client.get(
+        f"/api/v1/projects/{UUID(int=0)}/workflow-executions/{source_id}/control-records/iteration/1",
+        headers=headers,
+        params={"node_id": "loop"},
+    )
+    assert foreign_project.status_code in {403, 404}
+    missing = await workflow_client.get(
+        f"{report_path}/control-records/iteration/99",
+        headers=headers,
+        params={"node_id": "loop"},
+    )
+    assert missing.status_code == 404
+    instance_id = source_loop["output"]["items"][1]["nodes"][0]["instance_id"]
+    instance = await workflow_client.get(f"{report_path}/instances/{instance_id}", headers=headers)
+    assert instance.status_code == 200, instance.text
+    assert instance.json()["node_id"] == instance_id
 
     invalid_index = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun",
@@ -435,6 +485,13 @@ async def test_failed_item_rerun_uses_original_frozen_collection_and_keeps_sourc
     derived_loop = next(node for node in derived["nodes"] if node["node_id"] == "loop")
     assert [item["input_index"] for item in derived_loop["output"]["items"]] == [1]
     assert derived_loop["output"]["input_count"] == 3
+    derived_page = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{derived_id}/control-records",
+        headers=headers,
+        params={"node_id": "loop", "kind": "iteration"},
+    )
+    assert derived_page.status_code == 200, derived_page.text
+    assert [item["ordinal"] for item in derived_page.json()["items"]] == [1]
     assert len(target.calls) == 1
     assert len(create_target.calls) == 3
     unchanged = await workflow_client.get(
@@ -442,6 +499,30 @@ async def test_failed_item_rerun_uses_original_frozen_collection_and_keeps_sourc
     )
     original_loop = next(node for node in unchanged.json()["nodes"] if node["node_id"] == "loop")
     assert len(original_loop["output"]["items"]) == 3
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'workflow.db'}")
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            legacy_execution = await session.get(WorkflowExecution, UUID(source_id))
+            assert legacy_execution is not None
+            legacy_execution.context_summary = None
+            legacy_loop = await session.scalar(
+                select(WorkflowNodeExecution).where(
+                    WorkflowNodeExecution.workflow_execution_id == UUID(source_id),
+                    WorkflowNodeExecution.node_id == "loop",
+                )
+            )
+            assert legacy_loop is not None
+            legacy_loop.output_summary = None
+            legacy_loop.result_summary = None
+            await session.commit()
+    finally:
+        await engine.dispose()
+    legacy = await workflow_client.get(
+        report_path, headers=headers, params={"compact_control": "true"}
+    )
+    assert legacy.status_code == 200, legacy.text
+    legacy_loop_report = next(node for node in legacy.json()["nodes"] if node["node_id"] == "loop")
+    assert [item["input_index"] for item in legacy_loop_report["output"]["items"]] == [0, 1, 2]
 
 
 @respx.mock

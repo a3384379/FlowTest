@@ -27,6 +27,7 @@ from app.core.redaction import (
 )
 from app.domain.api_assets import BodyKind
 from app.domain.control_block_edits import ControlBlockEditError, insert_control_block
+from app.domain.control_reports import summarize_execution_context
 from app.domain.data_nodes import (
     CredentialKind,
     DataNodeValidationError,
@@ -115,6 +116,7 @@ from app.models.runner_fabric import RunnerTask
 from app.models.tasking import TestPlanItem
 from app.models.workflows import (
     Workflow,
+    WorkflowControlRecord,
     WorkflowExecution,
     WorkflowNodeExecution,
     WorkflowVersion,
@@ -123,7 +125,12 @@ from app.observability.tracing import TracingNodeExecutor, workflow_span
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.data_sources import DataSourceRepository
 from app.repositories.durable_execution import DurableExecutionRepository
-from app.repositories.workflows import WorkflowRepository
+from app.repositories.workflows import (
+    WorkflowControlRecordSummary,
+    WorkflowExecutionReport,
+    WorkflowNodeExecutionReport,
+    WorkflowRepository,
+)
 from app.runner.results import (
     RunnerBatchExecutionResult,
     RunnerExecutionResult,
@@ -1514,6 +1521,7 @@ class WorkflowService:
             redact(asdict(result.cleanup_report)) if result.cleanup_report is not None else {},
         )
         execution.context = cast(dict[str, JsonValue], redact(result.context))
+        execution.context_summary = summarize_execution_context(execution.context)
         execution.completed_at = datetime.now(UTC)
         if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
             execution.preview_evidence = _preview_run_evidence(execution, plan, result)
@@ -1770,16 +1778,79 @@ class WorkflowService:
 
     async def get_execution(
         self, *, actor: User, project_id: UUID, execution_id: UUID
-    ) -> tuple[
-        WorkflowExecution,
-        list[WorkflowNodeExecution],
-        list[WorkflowExecution],
-    ]:
+    ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution], list[WorkflowExecution]]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._get_execution(project_id, execution_id)
         nodes = await self._workflows.list_node_executions(execution.id)
         children = await self._workflows.list_child_executions(execution.id)
         return execution, nodes, children
+
+    async def get_execution_report(
+        self, *, actor: User, project_id: UUID, execution_id: UUID
+    ) -> tuple[
+        WorkflowExecutionReport,
+        list[WorkflowNodeExecutionReport],
+        list[WorkflowExecutionReport],
+    ]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        execution = await self._workflows.get_execution_report(
+            project_id=project_id, execution_id=execution_id
+        )
+        if execution is None:
+            raise AppError(
+                code="WORKFLOW_EXECUTION_NOT_FOUND",
+                message="工作流执行不存在",
+                status_code=404,
+            )
+        nodes = await self._workflows.list_node_execution_reports(execution.id)
+        children = await self._workflows.list_child_execution_reports(execution.id)
+        return execution, nodes, children
+
+    async def list_control_records(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        node_id: str,
+        kind: str,
+        test_verdict: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[WorkflowControlRecordSummary], int]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._get_execution(project_id, execution_id)
+        return await self._workflows.list_control_records(
+            execution_id=execution_id,
+            node_id=node_id,
+            kind=kind,
+            test_verdict=test_verdict,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    async def get_control_record(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        node_id: str,
+        kind: str,
+        ordinal: int,
+    ) -> WorkflowControlRecord:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._get_execution(project_id, execution_id)
+        record = await self._workflows.get_control_record(
+            execution_id=execution_id, node_id=node_id, kind=kind, ordinal=ordinal
+        )
+        if record is None:
+            raise AppError(
+                code="WORKFLOW_CONTROL_RECORD_NOT_FOUND",
+                message="控制执行记录不存在",
+                status_code=404,
+            )
+        return record
 
     async def complete_batch(self, execution_id: UUID) -> WorkflowExecution:
         execution = await self.load_execution_for_run(execution_id)

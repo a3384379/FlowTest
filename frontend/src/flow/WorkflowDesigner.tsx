@@ -132,6 +132,7 @@ type DesignerProps = {
   proposalNodeStatuses?: Record<string, ProposalGraphStatus>
   proposalEdgeStatuses?: Record<string, ProposalGraphStatus>
   runtimeMode?: 'run' | 'history'
+  runtimeExecutionId?: string
   runtimeNodes?: WorkflowNodeExecution[]
   runtimeContext?: Record<string, unknown>
   focusActions?: ReactNode
@@ -210,6 +211,7 @@ function WorkflowDesignerReady({
   proposalNodeStatuses = {},
   proposalEdgeStatuses = {},
   runtimeMode,
+  runtimeExecutionId,
   runtimeNodes,
   runtimeContext,
   focusActions,
@@ -879,6 +881,7 @@ function WorkflowDesignerReady({
             projectId={projectId}
             environmentId={environmentId}
             runtimeMode={runtimeMode}
+            runtimeExecutionId={runtimeExecutionId}
             runtimeNodes={runtimeNodes}
             runtimeContext={runtimeContext}
             runtimeByNode={runtimeByNode}
@@ -941,6 +944,7 @@ function DesignerInspector({
   projectId,
   environmentId,
   runtimeMode,
+  runtimeExecutionId,
   runtimeNodes,
   runtimeContext,
   runtimeByNode,
@@ -961,6 +965,7 @@ function DesignerInspector({
   projectId?: string | null
   environmentId?: string | null
   runtimeMode?: 'run' | 'history'
+  runtimeExecutionId?: string
   runtimeNodes: WorkflowNodeExecution[]
   runtimeContext: Record<string, unknown>
   runtimeByNode: Map<string, WorkflowNodeExecution>
@@ -982,6 +987,8 @@ function DesignerInspector({
     return (
       <WorkflowRunInspector
         mode={runtimeMode}
+        projectId={projectId ?? undefined}
+        executionId={runtimeExecutionId}
         node={selected}
         definition={definition}
         execution={selected ? runtimeByNode.get(selected.id) : undefined}

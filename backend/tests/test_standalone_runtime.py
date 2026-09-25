@@ -542,6 +542,46 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_standalone_schema_adds_control_report_columns_to_existing_runs(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'older-control.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text("CREATE TABLE workflow_executions (id CHAR(32) PRIMARY KEY)")
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE workflow_node_executions (id CHAR(32) PRIMARY KEY)"
+            )
+        )
+        await standalone_schema._ensure_control_report_columns(connection)
+        await standalone_schema._ensure_control_report_columns(connection)
+        execution_columns = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA table_info(workflow_executions)")
+                )
+            ).all()
+        }
+        node_columns = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA table_info(workflow_node_executions)")
+                )
+            ).all()
+        }
+    await test_engine.dispose()
+    assert {
+        "derived_from_execution_id",
+        "rerun_loop_node_id",
+        "rerun_input_indices",
+        "context_summary",
+    } <= execution_columns
+    assert {"output_summary", "result_summary"} <= node_columns
+
+
+@pytest.mark.asyncio
 async def test_standalone_schema_upgrades_s55_preview_contract(tmp_path) -> None:
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's55-schema.db'}")
     execution_id = uuid4().hex

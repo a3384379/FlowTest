@@ -71,7 +71,13 @@ from app.models.test_assets import (
 )
 from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
 from app.models.test_design import ChangeSetApproval, TestDesign
-from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
+from app.models.workflows import (
+    Workflow,
+    WorkflowControlRecord,
+    WorkflowExecution,
+    WorkflowNodeExecution,
+    WorkflowVersion,
+)
 
 __all__ = [
     "AIChangeItem",
@@ -167,6 +173,7 @@ __all__ = [
     "TestSuiteVersionItem",
     "User",
     "Workflow",
+    "WorkflowControlRecord",
     "WorkflowExecution",
     "WorkflowNodeExecution",
     "WorkflowVersion",

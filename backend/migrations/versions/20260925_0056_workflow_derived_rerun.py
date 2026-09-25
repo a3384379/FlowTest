@@ -15,7 +15,9 @@ def upgrade() -> None:
     with op.batch_alter_table("workflow_executions") as batch:
         batch.add_column(sa.Column("derived_from_execution_id", sa.Uuid(), nullable=True))
         batch.add_column(sa.Column("rerun_loop_node_id", sa.String(length=128), nullable=True))
-        batch.add_column(sa.Column("rerun_input_indices", sa.JSON(), nullable=True))
+        batch.add_column(
+            sa.Column("rerun_input_indices", sa.JSON(none_as_null=True), nullable=True)
+        )
         batch.create_foreign_key(
             op.f("fk_workflow_executions_derived_from_execution_id_workflow_executions"),
             "workflow_executions",
