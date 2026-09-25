@@ -172,7 +172,8 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
                         },
                     }
                 ],
-                "edges": [],
+                "edges": [{"id": "request-end", "source": "request", "target": "end"}],
+                "run_policy": {"request_budget": 20},
             },
             draft_revision=2,
             current_version=1,
@@ -609,6 +610,8 @@ async def test_mcp_read_gateway_is_tenant_scoped_and_redacted(mcp_context: dict[
     )
     assert draft.status_code == 200, draft.text
     assert draft.json()["data"]["nodes"][0]["kind"] == "api"
+    assert draft.json()["data"]["edges"][0]["id"] == "request-end"
+    assert draft.json()["data"]["request_budget"] == 20
     assert "workflow-secret" not in draft.text
 
     evidence = await client.get(
@@ -804,6 +807,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.prepare_change_regression",
             "flowtest.preview_contract_import",
             "flowtest.preview_flow_proposal",
+            "flowtest.propose_control_block",
             "flowtest.propose_flow_draft",
             "flowtest.propose_maintenance",
             "flowtest.propose_repair",

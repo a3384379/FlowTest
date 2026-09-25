@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0-rc.1 — 2026-09-25
+
+- Added an optional native control-block proposal path for existing workflows, with revision-bound human review and no automatic draft edit, publish, or execution.
+- Kept Quick FlowSpec as the default for ordinary serial flows and documented the separate MCP ChangeSet review page for control blocks.
+
 ## 1.2.0 — 2026-09-09
 
 - Added `flowtest.propose_simple_flow` as the default quick, idempotent, review-only proposal path.

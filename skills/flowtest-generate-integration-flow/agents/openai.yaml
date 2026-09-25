@@ -1,6 +1,6 @@
 interface:
   display_name: "FlowTest 集成流程生成"
   short_description: "默认用已有接口快速生成可审核的 FlowTest 流程提案"
-  default_prompt: "Use $flowtest-generate-integration-flow to create a quick review-only flow proposal from existing API IDs and a selected test environment; use deep evidence analysis only when explicitly requested."
+  default_prompt: "Use $flowtest-generate-integration-flow for a quick review-only flow proposal from existing API IDs; when asked for inline control in an existing workflow, propose one native control block for human review. Use deep evidence analysis only when explicitly requested."
 policy:
   allow_implicit_invocation: true

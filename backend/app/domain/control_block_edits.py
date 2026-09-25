@@ -1,6 +1,7 @@
 """Atomic graph edit for inserting one inline control block."""
 
-from uuid import uuid4
+import json
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 
@@ -73,7 +74,10 @@ def insert_control_block(
     ):
         raise ControlBlockEditError("插入控制块不能修改已有的清理请求预算")
 
-    new_edge = WorkflowEdge(id=f"edge-{uuid4()}", source=node.id, target=edge.target)
+    edge_key = json.dumps([edge.id, node.id], ensure_ascii=False, separators=(",", ":"))
+    new_edge = WorkflowEdge(
+        id=f"edge-{uuid5(NAMESPACE_URL, edge_key)}", source=node.id, target=edge.target
+    )
     policy = definition.run_policy.model_copy(
         update={
             "request_budget": definition.run_policy.request_budget or request_budget,

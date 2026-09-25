@@ -1,12 +1,13 @@
 import { AuditOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, App, Button, Card, Flex, Space, Tag, Typography } from 'antd'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import {
   approveMCPChangeSet,
   getMCPChangeSet,
   reviewMCPChangeItem,
+  type MCPChangeItem,
 } from '../features/mcp/mcp-change-set-service'
 import { apiErrorMessage } from '../lib/api'
 
@@ -51,6 +52,11 @@ export default function MCPChangeSetsPage() {
     try {
       await review.mutateAsync({ itemId, decision })
       await refresh()
+      if (
+        decision === 'accept' &&
+        data?.items.some((item) => item.id === itemId && item.item_type === 'workflow')
+      )
+        await queryClient.invalidateQueries({ queryKey: ['workflows', data.project_id] })
       void message.success(decision === 'accept' ? '变更项已接受并物化' : '变更项已拒绝')
     } catch (error) {
       void message.error(apiErrorMessage(error))
@@ -64,7 +70,7 @@ export default function MCPChangeSetsPage() {
         <div>
           <Typography.Title level={2}>MCP 受控变更审核</Typography.Title>
           <Typography.Text type="secondary">
-            按资源发现返回的精确 ChangeSet ID 审核 Test Design、TestCase 与 TestPlan 更新。
+            按精确 ChangeSet ID 审核工作流控制块、Test Design、TestCase 与 TestPlan 更新。
           </Typography.Text>
         </div>
       </div>
@@ -138,6 +144,14 @@ export default function MCPChangeSetsPage() {
                   )
                 }
               >
+                {item.item_type === 'workflow' ? (
+                  <ControlBlockReviewSummary
+                    item={item}
+                    workflowId={data.workflow_id ?? item.target_resource_id ?? null}
+                    baseRevision={data.base_revision ?? null}
+                    projectId={data.project_id}
+                  />
+                ) : null}
                 <pre className="code-preview">{JSON.stringify(item.proposed_content, null, 2)}</pre>
               </Card>
             ))}
@@ -146,6 +160,51 @@ export default function MCPChangeSetsPage() {
       </Card>
     </Flex>
   )
+}
+
+function ControlBlockReviewSummary({
+  item,
+  workflowId,
+  baseRevision,
+  projectId,
+}: {
+  item: MCPChangeItem
+  workflowId: string | null
+  baseRevision: number | null
+  projectId: string
+}) {
+  const edit = item.proposed_content as ControlBlockEdit
+  return (
+    <Flex vertical gap={8}>
+      <Alert
+        showIcon
+        type="info"
+        title="人工接受后才会写入工作流草稿；不会发布或执行"
+        description={`基线修订号 ${baseRevision ?? '未知'}；若草稿已变化，服务端会整体拒绝。`}
+      />
+      <Space wrap>
+        <Tag color="blue">{edit.node.capability_id}</Tag>
+        <Typography.Text strong>{edit.node.name}</Typography.Text>
+        <Typography.Text>插入连线：{edit.edge_id}</Typography.Text>
+        <Typography.Text>内联区域：{edit.regions.length}</Typography.Text>
+        {workflowId ? (
+          <Link to={`/projects/${projectId}/workflows?focus=${workflowId}`}>查看目标工作流</Link>
+        ) : null}
+      </Space>
+      {edit.regions.map((region) => (
+        <Typography.Text key={region.id}>
+          区域 {region.role}：{region.nodes.map((child) => child.name).join(' → ') || '空区域'}
+        </Typography.Text>
+      ))}
+      <Typography.Text type="secondary">原始结构供逐字段核对：</Typography.Text>
+    </Flex>
+  )
+}
+
+type ControlBlockEdit = {
+  edge_id: string
+  node: { name: string; capability_id: string }
+  regions: { id: string; role: string; nodes: { name: string }[] }[]
 }
 
 function required(value: string | null): string {

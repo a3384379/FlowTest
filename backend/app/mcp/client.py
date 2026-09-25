@@ -39,6 +39,10 @@ from app.schemas.mcp_contract_import import (
     MCPPreviewContractImportRequest,
     MCPPreviewContractImportResponse,
 )
+from app.schemas.mcp_control_blocks import (
+    MCPControlBlockProposalRequest,
+    MCPControlBlockProposalResponse,
+)
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
@@ -607,6 +611,21 @@ class MCPReadGatewayClient:
             additional_headers={"Idempotency-Key": idempotency_key},
         )
         return _validate_response(response, SimpleFlowProposalResponse)
+
+    async def propose_control_block(
+        self,
+        payload: MCPControlBlockProposalRequest | Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> MCPControlBlockProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/control-block-proposals",
+            payload=_model_payload(payload),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, MCPControlBlockProposalResponse)
 
     async def inspect_flow_proposal(
         self,

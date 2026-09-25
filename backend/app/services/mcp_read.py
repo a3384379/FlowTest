@@ -860,11 +860,16 @@ def _workflow_summary(workflow: Workflow) -> dict[str, JsonValue]:
     edges = definition.get("edges", [])
     node_values = nodes if isinstance(nodes, list) else []
     edge_values = edges if isinstance(edges, list) else []
+    run_policy = definition.get("run_policy")
+    budget = run_policy if isinstance(run_policy, dict) else {}
     return {
         "id": str(workflow.id),
         "project_id": str(workflow.project_id),
         "name": workflow.name,
         "draft_revision": workflow.draft_revision,
+        "schema_version": _safe_scalar(definition.get("schema_version"), "1.0"),
+        "request_budget": budget.get("request_budget"),
+        "cleanup_request_budget": budget.get("cleanup_request_budget"),
         "current_version": workflow.current_version,
         "draft_fingerprint": _fingerprint(definition),
         "nodes": [_node_summary(node) for node in node_values if isinstance(node, dict)],
@@ -887,6 +892,7 @@ def _node_summary(node: dict[str, Any]) -> dict[str, JsonValue]:
 
 def _edge_summary(edge: dict[str, Any]) -> dict[str, JsonValue]:
     return {
+        "id": _safe_scalar(edge.get("id"), ""),
         "source": _safe_scalar(edge.get("source", edge.get("from")), ""),
         "target": _safe_scalar(edge.get("target", edge.get("to")), ""),
     }

@@ -1,6 +1,6 @@
 # Workflow contract
 
-Use this reference whenever the skill is invoked. The quick path is the default; deep stages are an explicit branch. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
+Use this reference whenever the skill is invoked. The Quick FlowSpec path is the default; native control insertion and deep evidence stages are explicit branches. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
 
 ## Quick path (default)
 
@@ -12,7 +12,16 @@ Use this reference whenever the skill is invoked. The quick path is the default;
 
 Use the deep path below only when the user explicitly asks for evidence, full coverage, source/database analysis, or an audit.
 
-For ordinary generation, select at most three representative cases and keep the flow serial unless its real behavior requires another structure. Existing API IDs and pinned versions take priority over copied assets. The current proposal tools emit FlowSpec, which has no lossless schema 4.0 region representation. A requested inline ForEach, IF/Switch, condition loop, parallel branch, or Try/Finally therefore stops with `CONTROL_FLOW_PROPOSAL_UNSUPPORTED`; do not replace it with repeated flat nodes or an unrelated legacy node.
+For ordinary generation, select at most three representative cases and keep the flow serial unless its real behavior requires another structure. Existing API IDs and pinned versions take priority over copied assets. FlowSpec has no lossless schema 4.0 region representation. When the user requests an inline ForEach, IF/Switch, condition loop, parallel branch, or Try/Finally in an existing workflow, use the native control-block proposal path below. Do not replace it with repeated flat nodes or an unrelated legacy node.
+
+## Native control-block proposal (only when requested)
+
+1. Use `inspect_flow` to read the target workflow ID, project ID, current `draft_revision`, main edge ID, schema version, and budget. Use `discover_control_capabilities` to confirm the requested kind and version are executable with inline regions.
+2. Follow [control-blocks.md](control-blocks.md) to construct one control node and its regions. Supply the exact `expected_revision`, the chosen unmapped main edge ID, and an explicit main request budget when upgrading to schema 4.0. Use existing pinned API assets for body steps.
+3. Call `propose_control_block` once with a distinct idempotency key. It validates the entire candidate but writes only a pending MCP ChangeSet. Preserve `proposal_id`, `item_id`, `base_revision`, and `review_url`; the target draft is unchanged.
+4. Stop at the returned human MCP ChangeSet review page. The agent must never call the accept/reject route. A human acceptance rechecks the revision, atomically inserts the block into the draft, and still does not publish or execute it.
+
+If there is no existing authorized workflow, no safe main edge, a stale revision, or a capability the runtime cannot execute, return the exact blocker. A new workflow can first be proposed through Quick FlowSpec and applied by a human; only then can a native control block be proposed against its current draft.
 
 | Stage | FlowTest MCP operations | Required result |
 | --- | --- | --- |

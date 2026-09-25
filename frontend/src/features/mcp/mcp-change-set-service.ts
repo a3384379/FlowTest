@@ -3,9 +3,10 @@ import { apiClient } from '../../lib/api'
 export type MCPChangeItem = {
   id: string
   position: number
-  item_type: 'test_design' | 'test_case' | 'test_plan_update'
+  item_type: 'test_design' | 'test_case' | 'test_plan_update' | 'workflow'
   action: 'create' | 'update'
   title: string
+  target_resource_id?: string | null
   proposed_content: Record<string, unknown>
   review_status: 'pending' | 'accepted' | 'rejected'
   review_note: string
@@ -19,6 +20,8 @@ export type MCPChangeSet = {
   id: string
   project_id: string
   title: string
+  workflow_id?: string | null
+  base_revision?: number | null
   status: 'draft' | 'partially_reviewed' | 'accepted' | 'rejected'
   source_type: 'mcp'
   source_ref: string | null

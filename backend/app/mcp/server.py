@@ -53,6 +53,7 @@ from app.schemas.mcp_contract_import import (
     MCPCommitContractImportRequest,
     MCPPreviewContractImportRequest,
 )
+from app.schemas.mcp_control_blocks import MCPControlBlockProposalRequest
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
@@ -725,6 +726,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_preview_contract_import_tool(server, client)
     _register_preview_flow_proposal_tool(server, client)
     _register_propose_simple_flow_tool(server, client)
+    _register_propose_control_block_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
     _register_propose_maintenance_tool(server, client)
     _register_propose_repair_tool(server, client)
@@ -933,6 +935,31 @@ def _register_propose_simple_flow_tool(server: MCPServer, client: MCPReadGateway
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.propose_simple_flow(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_propose_control_block_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_control_block",
+        description=(
+            "Stage one native schema 4 control block and its inline regions as a single "
+            "pending workflow ChangeSet. Requires the target draft revision and an unmapped "
+            "main edge. A human must review and accept; this tool never saves the workflow, "
+            "publishes, previews, or executes it."
+        ),
+        structured_output=True,
+    )
+    async def propose_control_block(
+        request: MCPControlBlockProposalRequest,
+        idempotency_key: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_control_block(
                 request,
                 idempotency_key=idempotency_key,
                 token=_request_token(ctx, client),

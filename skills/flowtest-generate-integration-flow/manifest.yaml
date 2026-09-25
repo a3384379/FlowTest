@@ -1,6 +1,6 @@
 schema_version: "flowtest-skill-manifest-v1"
 name: "flowtest-generate-integration-flow"
-version: "1.1.0-rc.1"
+version: "1.3.0-rc.1"
 minimum_mcp_version: "s61-mcp-connection-v1"
 default_mode: "quick"
 quick_tools:
@@ -47,6 +47,9 @@ optional_tools:
   - "flowtest.explain_compiler_diagnostics"
   - "flowtest.validate_flowspec"
   - "flowtest.propose_flow_draft"
+  - "flowtest.discover_control_capabilities"
+  - "flowtest.inspect_flow"
+  - "flowtest.propose_control_block"
   - "flowtest.inspect_connection"
   - "flowtest.check_service_target"
   - "flowtest.inspect_entity_mapping"
@@ -99,7 +102,8 @@ human_approval:
     - "successful proposal creation"
     - "successful sandbox preview"
 stop_conditions:
-  - "the requested schema 4.0 control region cannot be represented by the current FlowSpec proposal contract"
+  - "a requested inline control block has no existing authorized target workflow or no safe main edge"
+  - "the requested control capability or schema 4.0 inline structure is not supported by the current runtime"
   - "required MCP version, tool, scope, project authorization, or feature flag is missing"
   - "the target environment is production or its classification is unknown"
   - "the Context revision or proposal revision is stale"

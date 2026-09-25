@@ -47,6 +47,7 @@
     "flowtest.prepare_change_regression",
     "flowtest.preview_contract_import",
     "flowtest.preview_flow_proposal",
+    "flowtest.propose_control_block",
     "flowtest.propose_flow_draft",
     "flowtest.propose_maintenance",
     "flowtest.propose_repair",

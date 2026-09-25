@@ -138,6 +138,7 @@ async def test_mcp_red_team_surface_has_no_uncontrolled_mutation_tools() -> None
         "flowtest.prepare_change_regression",
         "flowtest.preview_contract_import",
         "flowtest.preview_flow_proposal",
+        "flowtest.propose_control_block",
         "flowtest.propose_flow_draft",
         "flowtest.propose_maintenance",
         "flowtest.propose_repair",
