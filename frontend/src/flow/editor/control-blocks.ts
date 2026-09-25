@@ -219,13 +219,11 @@ export function addSwitchBranch(
       ? { match: { kind: 'literal', value: branchId } }
       : { condition: { ...condition(), left: { kind: 'literal', value: false } } }),
   }
-  return {
-    ...replaceControlConfiguration(definition, nodeId, {
-      ...config,
-      branches: [...branches, branch],
-    }),
-    regions: [...(definition.regions ?? []), branchRegion],
-  }
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...config,
+    branches: [...branches, branch],
+  })
+  return { ...updated, regions: [...(updated.regions ?? []), branchRegion] }
 }
 
 export function removeSwitchBranch(
@@ -244,13 +242,11 @@ export function removeSwitchBranch(
   )
   if (!owned) return null
   const removedIds = regionTreeIds(definition, owned)
-  return {
-    ...replaceControlConfiguration(definition, nodeId, {
-      ...config,
-      branches: branches.filter((current) => asRecord(current)?.id !== branchId),
-    }),
-    regions: definition.regions?.filter((item) => !removedIds.has(item.id)),
-  }
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...config,
+    branches: branches.filter((current) => asRecord(current)?.id !== branchId),
+  })
+  return { ...updated, regions: updated.regions?.filter((item) => !removedIds.has(item.id)) }
 }
 
 export function setSwitchDefaultBehavior(
@@ -268,13 +264,69 @@ export function setSwitchDefaultBehavior(
   if (current.behavior === 'run' && !existing && asRecord(current.body)?.kind === 'inline')
     return null
   const created = behavior === 'run' ? region(nodeId, 'default') : null
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...config,
+    default: { behavior, body: created ? body(created) : null },
+  })
+  return { ...updated, regions: updatedDefaultRegions(updated, existing, created) }
+}
+
+export function insertNestedControlBlock(
+  definition: WorkflowDefinition,
+  regionId: string,
+  afterId: string,
+  kind: ControlBlockKind,
+): WorkflowDefinition | null {
+  const parent = definition.regions?.find((item) => item.id === regionId)
+  if (!parent || nestedControlDepth(definition, parent) > 4) return null
+  const created = addControlBlock(definition, kind)
+  const node = created.nodes.at(-1)!
+  const updated = insertRegionStepAfter(parent, afterId, (previous) => ({
+    ...node,
+    position: { x: previous.position.x + 220, y: previous.position.y },
+  }))
+  if (!updated) return null
   return {
-    ...replaceControlConfiguration(definition, nodeId, {
-      ...config,
-      default: { behavior, body: created ? body(created) : null },
-    }),
-    regions: updatedDefaultRegions(definition, existing, created),
+    ...created,
+    nodes: definition.nodes,
+    regions: created.regions?.map((item) => (item.id === regionId ? updated : item)),
   }
+}
+
+export function removeNestedControlBlock(
+  definition: WorkflowDefinition,
+  regionId: string,
+  nodeId: string,
+): WorkflowDefinition | null {
+  const parent = definition.regions?.find((item) => item.id === regionId)
+  const node = parent?.nodes.find((item) => item.id === nodeId)
+  if (!parent || !node?.capability_id?.startsWith('flow.control.')) return null
+  const links = regionRemovalLinks(parent, nodeId)
+  if (!links || regionRemovalHasReferences(parent, nodeId, links)) return null
+  const updated = withoutRegionStep(parent, nodeId, links)
+  const descendants = new Set(descendantRegions(definition, [nodeId]).map((item) => item.id))
+  return {
+    ...definition,
+    regions: definition.regions
+      ?.filter((item) => !descendants.has(item.id))
+      .map((item) => (item.id === regionId ? updated : item)),
+  }
+}
+
+function nestedControlDepth(definition: WorkflowDefinition, parent: WorkflowRegion): number {
+  let depth = 1
+  let ownerId = parent.owner_node_id
+  const seen = new Set<string>()
+  while (!seen.has(ownerId)) {
+    seen.add(ownerId)
+    const containing = definition.regions?.find((item) =>
+      item.nodes.some((node) => node.id === ownerId),
+    )
+    if (!containing) return depth
+    ownerId = containing.owner_node_id
+    depth += 1
+  }
+  return 5
 }
 
 function updatedDefaultRegions(
@@ -290,7 +342,9 @@ function updatedDefaultRegions(
 }
 
 function switchContext(definition: WorkflowDefinition, nodeId: string) {
-  const node = definition.nodes.find((item) => item.id === nodeId)
+  const node =
+    definition.nodes.find((item) => item.id === nodeId) ??
+    definition.regions?.flatMap((region) => region.nodes).find((item) => item.id === nodeId)
   const config = node?.configuration
   if (node?.capability_id !== 'flow.control.switch' || !Array.isArray(config?.branches)) return null
   return { config, branches: config.branches as unknown[] }
@@ -304,6 +358,10 @@ function replaceControlConfiguration(
   return {
     ...definition,
     nodes: definition.nodes.map((node) => (node.id === nodeId ? { ...node, configuration } : node)),
+    regions: definition.regions?.map((region) => ({
+      ...region,
+      nodes: region.nodes.map((node) => (node.id === nodeId ? { ...node, configuration } : node)),
+    })),
   }
 }
 

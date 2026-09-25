@@ -1,33 +1,43 @@
 import { Alert, Button, Modal, Popconfirm, Select, Space, Typography } from 'antd'
-import { useState } from 'react'
-import type { ApiDefinition, WorkflowRegion } from '../lib/api'
+import { useState, type ReactNode } from 'react'
+import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import {
+  insertNestedControlBlock,
   insertRegionApiAfter,
   insertRegionDelayAfter,
   moveRegionStep,
+  removeNestedControlBlock,
   removeRegionStep,
+  type ControlBlockKind,
 } from './editor/control-blocks'
 import WorkflowRegionCanvas from './WorkflowRegionCanvas'
 
 type Props = {
   open: boolean
   region: WorkflowRegion
+  definition?: WorkflowDefinition
   apis: ApiDefinition[]
   editable: boolean
   onClose: () => void
   onUpdate: (region: WorkflowRegion) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
+  renderNestedControl?: (node: WorkflowNode, region: WorkflowRegion) => ReactNode
 }
 
 export default function WorkflowRegionCanvasModal({
   open,
   region,
+  definition,
   apis,
   editable,
   onClose,
   onUpdate,
+  onStructureChange,
+  renderNestedControl,
 }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedApiId, setSelectedApiId] = useState<string | undefined>()
+  const [controlKind, setControlKind] = useState<ControlBlockKind>('group')
   const [error, setError] = useState<string | null>(null)
   const selectedNode = region.nodes.find((node) => node.id === selectedNodeId)
   const availableApis = apis.filter((api) => api.is_active)
@@ -45,6 +55,17 @@ export default function WorkflowRegionCanvasModal({
   }
   function applyDeletion() {
     if (!selectedNodeId) return
+    if (selectedNode?.capability_id?.startsWith('flow.control.')) {
+      const next = definition && removeNestedControlBlock(definition, region.id, selectedNodeId)
+      if (!next) {
+        setError('该嵌套控制块仍有条件连线、字段映射或节点引用，不能安全删除。')
+        return
+      }
+      onStructureChange?.(next)
+      setSelectedNodeId(null)
+      setError(null)
+      return
+    }
     const next = removeRegionStep(region, selectedNodeId)
     if (!next) {
       setError('该步骤不能安全删除：请检查区域边界、条件连线、字段映射或剩余节点引用。')
@@ -62,6 +83,16 @@ export default function WorkflowRegionCanvasModal({
       return
     }
     onUpdate(next)
+    setError(null)
+  }
+  function applyNestedInsertion() {
+    if (!selectedNodeId || !definition) return
+    const next = insertNestedControlBlock(definition, region.id, selectedNodeId, controlKind)
+    if (!next) {
+      setError('不能在此处插入控制块：请检查区域深度、出口和条件或字段映射连线。')
+      return
+    }
+    onStructureChange?.(next)
     setError(null)
   }
   return (
@@ -84,6 +115,10 @@ export default function WorkflowRegionCanvasModal({
         activeApiId={activeApiId}
         onSelectApi={setSelectedApiId}
         onInsert={applyInsertion}
+        controlKind={controlKind}
+        onSelectControlKind={setControlKind}
+        canInsertControl={Boolean(definition && onStructureChange)}
+        onInsertControl={applyNestedInsertion}
         onMove={applyMove}
         onRemove={applyDeletion}
       />
@@ -96,7 +131,85 @@ export default function WorkflowRegionCanvasModal({
         onSelectNode={setSelectedNodeId}
         onUpdate={onUpdate}
       />
+      <NestedControlConfiguration
+        node={selectedNode}
+        region={region}
+        renderNestedControl={renderNestedControl}
+      />
+      <NestedRegionNavigation
+        open={open}
+        ownerId={selectedNodeId}
+        definition={definition}
+        apis={apis}
+        editable={editable}
+        onUpdate={onUpdate}
+        onStructureChange={onStructureChange}
+        renderNestedControl={renderNestedControl}
+      />
     </Modal>
+  )
+}
+
+function NestedControlConfiguration({
+  node,
+  region,
+  renderNestedControl,
+}: {
+  node?: WorkflowNode
+  region: WorkflowRegion
+  renderNestedControl?: (node: WorkflowNode, region: WorkflowRegion) => ReactNode
+}) {
+  if (!node?.capability_id?.startsWith('flow.control.')) return null
+  return renderNestedControl?.(node, region)
+}
+
+function NestedRegionNavigation({
+  open,
+  ownerId,
+  definition,
+  apis,
+  editable,
+  onUpdate,
+  onStructureChange,
+  renderNestedControl,
+}: {
+  open: boolean
+  ownerId: string | null
+  definition?: WorkflowDefinition
+  apis: ApiDefinition[]
+  editable: boolean
+  onUpdate: (region: WorkflowRegion) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
+  renderNestedControl?: (node: WorkflowNode, region: WorkflowRegion) => ReactNode
+}) {
+  const [openChildId, setOpenChildId] = useState<string | null>(null)
+  const childRegions = definition?.regions?.filter((item) => item.owner_node_id === ownerId) ?? []
+  const openChild = childRegions.find((item) => item.id === openChildId)
+  if (!open || !ownerId || childRegions.length === 0) return null
+  return (
+    <>
+      <Space wrap>
+        <Typography.Text>嵌套控制区域</Typography.Text>
+        {childRegions.map((child) => (
+          <Button key={child.id} onClick={() => setOpenChildId(child.id)}>
+            打开嵌套 {child.role} 区域
+          </Button>
+        ))}
+      </Space>
+      {openChild && (
+        <WorkflowRegionCanvasModal
+          open
+          region={openChild}
+          definition={definition}
+          apis={apis}
+          editable={editable}
+          onClose={() => setOpenChildId(null)}
+          onUpdate={onUpdate}
+          onStructureChange={onStructureChange}
+          renderNestedControl={renderNestedControl}
+        />
+      )}
+    </>
   )
 }
 
@@ -109,6 +222,10 @@ function CanvasToolbar({
   activeApiId,
   onSelectApi,
   onInsert,
+  controlKind,
+  onSelectControlKind,
+  canInsertControl,
+  onInsertControl,
   onMove,
   onRemove,
 }: {
@@ -120,6 +237,10 @@ function CanvasToolbar({
   activeApiId?: string
   onSelectApi: (id: string) => void
   onInsert: (region: WorkflowRegion | null) => void
+  controlKind: ControlBlockKind
+  onSelectControlKind: (kind: ControlBlockKind) => void
+  canInsertControl: boolean
+  onInsertControl: () => void
   onMove: (direction: -1 | 1) => void
   onRemove: () => void
 }) {
@@ -137,6 +258,15 @@ function CanvasToolbar({
       >
         在后面插入等待
       </Button>
+      <NestedControlButtons
+        role={region.role}
+        editable={editable}
+        selectedNodeId={selectedNodeId}
+        available={canInsertControl}
+        controlKind={controlKind}
+        onSelectControlKind={onSelectControlKind}
+        onInsertControl={onInsertControl}
+      />
       {availableApis.length > 0 && (
         <>
           <Select
@@ -172,6 +302,57 @@ function CanvasToolbar({
     </Space>
   )
 }
+
+function NestedControlButtons({
+  role,
+  editable,
+  selectedNodeId,
+  available,
+  controlKind,
+  onSelectControlKind,
+  onInsertControl,
+}: {
+  role: string
+  editable: boolean
+  selectedNodeId: string | null
+  available: boolean
+  controlKind: ControlBlockKind
+  onSelectControlKind: (kind: ControlBlockKind) => void
+  onInsertControl: () => void
+}) {
+  if (!available) return null
+  const disabled = !editable || !selectedNodeId
+  return (
+    <>
+      <Select
+        aria-label={`${role} 待插入控制块`}
+        value={controlKind}
+        disabled={disabled}
+        options={nestedControlOptions}
+        onChange={onSelectControlKind}
+        style={{ minWidth: 160 }}
+      />
+      <Button disabled={disabled} onClick={onInsertControl}>
+        在后面插入控制块
+      </Button>
+    </>
+  )
+}
+
+const nestedControlOptions: { value: ControlBlockKind; label: string }[] = [
+  { value: 'group', label: '步骤组' },
+  { value: 'if', label: '条件判断' },
+  { value: 'switch', label: '多分支判断' },
+  { value: 'foreach', label: '集合遍历' },
+  { value: 'repeat', label: '重复次数' },
+  { value: 'while', label: '条件循环' },
+  { value: 'do_while', label: '先执行后判断' },
+  { value: 'until', label: '直到满足条件' },
+  { value: 'parallel', label: '并行执行' },
+  { value: 'try', label: '异常处理' },
+  { value: 'fail', label: '主动失败' },
+  { value: 'return', label: '返回调用方' },
+]
 
 function MoveButtons({
   editable,

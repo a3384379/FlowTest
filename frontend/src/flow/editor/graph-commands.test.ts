@@ -12,6 +12,8 @@ import {
   appendRegionSignal,
   insertRegionApiAfter,
   insertRegionDelayAfter,
+  insertNestedControlBlock,
+  removeNestedControlBlock,
   removeSwitchBranch,
   setSwitchDefaultBehavior,
 } from './control-blocks'
@@ -78,6 +80,59 @@ describe('workflow graph commands', () => {
       'default',
     )
   })
+
+  it('inserts and removes a nested control with its descendant regions atomically', () => {
+    const base = addControlBlock(graph(linear), 'group')
+    const region = base.regions![0]
+    const inserted = insertNestedControlBlock(base, region.id, region.entry_node_id!, 'if')!
+    expect(inserted.nodes).toEqual(base.nodes)
+    const parent = inserted.regions!.find((item) => item.id === region.id)!
+    const nested = parent.nodes.at(-1)!
+    expect(parent.edges).toEqual([
+      expect.objectContaining({ source: region.entry_node_id, target: nested.id }),
+    ])
+    expect(inserted.regions?.filter((item) => item.owner_node_id === nested.id)).toHaveLength(2)
+    const removed = removeNestedControlBlock(inserted, region.id, nested.id)!
+    expect(removed.regions).toEqual(base.regions)
+    expect(removed.nodes).toEqual(base.nodes)
+  })
+
+  it('rejects nested controls beyond the supported four-region depth', () => {
+    let definition = addControlBlock(graph(linear), 'group')
+    let target = definition.regions![0]
+    for (let depth = 1; depth <= 4; depth += 1) {
+      definition = insertNestedControlBlock(definition, target.id, target.entry_node_id!, 'group')!
+      const nested = definition.regions!.find((item) => item.id === target.id)!.nodes.at(-1)!
+      target = definition.regions!.find((item) => item.owner_node_id === nested.id)!
+    }
+    expect(
+      insertNestedControlBlock(definition, target.id, target.entry_node_id!, 'group'),
+    ).toBeNull()
+  })
+
+  it('updates a nested Switch and its owned branch regions together', () => {
+    const base = addControlBlock(graph(linear), 'group')
+    const body = base.regions![0]
+    const nested = insertNestedControlBlock(base, body.id, body.entry_node_id!, 'switch')!
+    const nodeId = nested.regions![0].nodes.at(-1)!.id
+    const withBranch = addSwitchBranch(nested, nodeId)!
+    const parentNode = withBranch.regions![0].nodes.at(-1)!
+    expect(parentNode.configuration?.branches).toHaveLength(3)
+    const newBranch = (parentNode.configuration?.branches as Array<{ id: string }>).at(-1)!
+    expect(withBranch.regions?.find((item) => item.role === `case:${newBranch.id}`)).toBeDefined()
+    const removed = removeSwitchBranch(withBranch, nodeId, newBranch.id)!
+    expect(removed.regions![0].nodes.at(-1)!.configuration?.branches).toHaveLength(2)
+    expect(removed.regions?.some((item) => item.role === `case:${newBranch.id}`)).toBe(false)
+    const skipped = setSwitchDefaultBehavior(removed, nodeId, 'skip')!
+    expect(skipped.regions![0].nodes.at(-1)!.configuration?.default).toEqual({
+      behavior: 'skip',
+      body: null,
+    })
+    expect(
+      skipped.regions?.some((item) => item.owner_node_id === nodeId && item.role === 'default'),
+    ).toBe(false)
+  })
+
   it('extends a serial control region without changing its entry boundary', () => {
     const region = addControlBlock(graph(linear), 'foreach').regions![0]
     const expanded = appendRegionDelay(region)!

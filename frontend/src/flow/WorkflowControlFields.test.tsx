@@ -1,13 +1,16 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import type { WorkflowRegion } from '../lib/api'
 import { workflowDefinition } from '../test/fixtures'
 import {
   addControlBlock,
   appendRegionDelay,
+  insertNestedControlBlock,
   moveRegionStep,
   removeRegionStep,
 } from './editor/control-blocks'
+import { NodeEditContext, type NodeEditContextValue } from './editor/node-edit-session'
 import WorkflowControlFields from './WorkflowControlFields'
 
 it('adds a serial step through the control region panel', async () => {
@@ -200,6 +203,125 @@ it('moves a linear region step while preserving node and edge identities', async
     [ids[1], ids[0]],
     [ids[0], ids[2]],
   ])
+})
+
+it('inserts a nested control from the region canvas as one definition change', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const region = definition.regions![0]
+  const onStructureChange = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onStructureChange={onStructureChange}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${region.entry_node_id}`))
+  await userEvent.click(within(dialog).getByRole('button', { name: '在后面插入控制块' }))
+  const next = onStructureChange.mock.calls[0][0]
+  expect(next.nodes).toEqual(definition.nodes)
+  expect(next.regions).toHaveLength(2)
+  expect(next.regions[0].nodes.at(-1)?.capability_id).toBe('flow.control.group')
+})
+
+it('opens a nested control region from its parent canvas', async () => {
+  const base = addControlBlock(workflowDefinition, 'group')
+  const parent = base.regions![0]
+  const definition = insertNestedControlBlock(base, parent.id, parent.entry_node_id!, 'if')!
+  const region = definition.regions!.find((item) => item.id === parent.id)!
+  const nested = region.nodes.at(-1)!
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onStructureChange={vi.fn()}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const parentCanvas = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(parentCanvas).getByTestId(`rf__node-${nested.id}`))
+  await userEvent.click(screen.getByRole('button', { name: '打开嵌套 true 区域' }))
+  expect(screen.getByText('true 区域画布').closest('[role="dialog"]')).toBeInTheDocument()
+})
+
+it('edits a nested control configuration through the parent region canvas', async () => {
+  const base = addControlBlock(workflowDefinition, 'group')
+  const parent = base.regions![0]
+  const definition = insertNestedControlBlock(base, parent.id, parent.entry_node_id!, 'repeat')!
+  const region = definition.regions!.find((item) => item.id === parent.id)!
+  const nested = region.nodes.at(-1)!
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onStructureChange={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const canvas = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(canvas).getByTestId(`rf__node-${nested.id}`))
+  const count = within(canvas).getByRole('spinbutton', { name: '重复次数' })
+  await userEvent.clear(count)
+  await userEvent.type(count, '5')
+  await userEvent.tab()
+  const updated = onRegionUpdate.mock.lastCall?.[0] as WorkflowRegion
+  expect(updated.nodes.find((item) => item.id === nested.id)?.configuration?.count).toBe(5)
+})
+
+it('keeps a nested condition value draft out of the outer node edit session', async () => {
+  const base = addControlBlock(workflowDefinition, 'group')
+  const parent = base.regions![0]
+  const definition = insertNestedControlBlock(base, parent.id, parent.entry_node_id!, 'if')!
+  const region = definition.regions!.find((item) => item.id === parent.id)!
+  const nested = region.nodes.at(-1)!
+  const onRegionUpdate = vi.fn()
+  const outerSetRaw = vi.fn()
+  const outerContext = {
+    draft: { rawFields: {} },
+    setRaw: outerSetRaw,
+    clearRaw: vi.fn(),
+  } as unknown as NodeEditContextValue
+  render(
+    <NodeEditContext.Provider value={outerContext}>
+      <WorkflowControlFields
+        node={definition.nodes.at(-1)!}
+        definition={definition}
+        regions={[region]}
+        editable
+        onUpdate={vi.fn()}
+        onStructureChange={vi.fn()}
+        onRegionUpdate={onRegionUpdate}
+      />
+    </NodeEditContext.Provider>,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const canvas = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(canvas).getByTestId(`rf__node-${nested.id}`))
+  await userEvent.clear(within(canvas).getByRole('textbox', { name: '判断条件 右侧 JSON 值' }))
+  await userEvent.type(
+    within(canvas).getByRole('textbox', { name: '判断条件 右侧 JSON 值' }),
+    'false',
+  )
+  await userEvent.click(within(canvas).getAllByRole('button', { name: '应用值' })[1])
+  expect(outerSetRaw).not.toHaveBeenCalled()
+  const updated = onRegionUpdate.mock.lastCall?.[0] as WorkflowRegion
+  const condition = updated.nodes.find((item) => item.id === nested.id)?.configuration?.condition
+  expect(condition).toEqual(expect.objectContaining({ right: { kind: 'literal', value: false } }))
 })
 
 it('refuses to move a region step across mapped edges or node dependencies', () => {

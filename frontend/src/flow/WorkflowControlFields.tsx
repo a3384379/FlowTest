@@ -11,6 +11,7 @@ import {
 } from 'antd'
 import { useState } from 'react'
 import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
+import { NodeEditContext } from './editor/node-edit-session'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
 import ControlConditionFields from './ControlConditionFields'
 import ControlConfigurationJson from './ControlConfigurationJson'
@@ -42,6 +43,7 @@ type Props = {
   onUpdate: (node: WorkflowNode) => void
   onStructureChange?: (definition: WorkflowDefinition) => void
   onRegionUpdate: (region: WorkflowRegion) => void
+  inline?: boolean
 }
 
 export default function WorkflowControlFields({
@@ -53,6 +55,7 @@ export default function WorkflowControlFields({
   onUpdate,
   onStructureChange,
   onRegionUpdate,
+  inline,
 }: Props) {
   const configuration = node.configuration ?? {}
   const [configDirty, setConfigDirty] = useState(false)
@@ -102,9 +105,7 @@ export default function WorkflowControlFields({
         onChange={updateConfiguration}
         onDirtyChange={setConfigDirty}
       />
-      <Typography.Paragraph type="secondary">
-        控制块的来源、条件和策略按版本化配置保存；修改后先应用节点配置。
-      </Typography.Paragraph>
+      <ControlEditHint inline={inline} />
       {configDirty && (
         <Typography.Text type="secondary">
           先修正或丢弃配置 JSON 草稿，再使用可视化状态编辑。
@@ -134,12 +135,24 @@ export default function WorkflowControlFields({
           key={region.id}
           region={region}
           owner={node}
+          definition={definition}
+          onStructureChange={onStructureChange}
           editable={editable}
           apis={apis}
           onUpdate={onRegionUpdate}
         />
       ))}
     </section>
+  )
+}
+
+function ControlEditHint({ inline }: { inline?: boolean }) {
+  return (
+    <Typography.Paragraph type="secondary">
+      {inline
+        ? '嵌套控制块的可视化配置直接更新流程草稿；JSON 修改需先应用，再保存工作流。'
+        : '控制块的来源、条件和策略按版本化配置保存；修改后先应用节点配置。'}
+    </Typography.Paragraph>
   )
 }
 
@@ -159,6 +172,7 @@ function RepeatCountFields({
     <label>
       重复次数
       <InputNumber
+        aria-label="重复次数"
         min={1}
         max={1000}
         disabled={!editable}
@@ -666,12 +680,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function RegionEditor({
   region,
   owner,
+  definition,
+  onStructureChange,
   editable,
   apis,
   onUpdate,
 }: {
   region: WorkflowRegion
   owner: WorkflowNode
+  definition?: WorkflowDefinition
+  onStructureChange?: (definition: WorkflowDefinition) => void
   editable: boolean
   apis: ApiDefinition[]
   onUpdate: (region: WorkflowRegion) => void
@@ -710,6 +728,19 @@ function RegionEditor({
       <WorkflowRegionCanvasModal
         open={canvasOpen}
         region={region}
+        definition={definition}
+        onStructureChange={onStructureChange}
+        renderNestedControl={(node, containing) => (
+          <NestedControlEditor
+            node={node}
+            containing={containing}
+            definition={definition}
+            apis={apis}
+            editable={editable && !dirty}
+            onRegionUpdate={onUpdate}
+            onStructureChange={onStructureChange}
+          />
+        )}
         apis={apis}
         editable={editable && !dirty}
         onClose={() => setCanvasOpen(false)}
@@ -758,6 +789,47 @@ function RegionEditor({
       </Space>
       {error && <Alert type="error" title={error} />}
     </div>
+  )
+}
+
+function NestedControlEditor({
+  node,
+  containing,
+  definition,
+  apis,
+  editable,
+  onRegionUpdate,
+  onStructureChange,
+}: {
+  node: WorkflowNode
+  containing: WorkflowRegion
+  definition?: WorkflowDefinition
+  apis: ApiDefinition[]
+  editable: boolean
+  onRegionUpdate: (region: WorkflowRegion) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
+}) {
+  if (!definition) return null
+  return (
+    <NodeEditContext.Provider value={null}>
+      <WorkflowControlFields
+        key={node.id}
+        node={node}
+        definition={definition}
+        regions={definition.regions?.filter((region) => region.owner_node_id === node.id) ?? []}
+        editable={editable}
+        inline
+        apis={apis}
+        onUpdate={(updated) =>
+          onRegionUpdate({
+            ...containing,
+            nodes: containing.nodes.map((item) => (item.id === node.id ? updated : item)),
+          })
+        }
+        onRegionUpdate={onRegionUpdate}
+        onStructureChange={onStructureChange}
+      />
+    </NodeEditContext.Provider>
   )
 }
 
