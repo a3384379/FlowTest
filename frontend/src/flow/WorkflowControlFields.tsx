@@ -1,13 +1,14 @@
 import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { useState } from 'react'
 import type { ApiDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
+import ConditionLoopStateFields from './ConditionLoopStateFields'
+import ControlConfigurationJson from './ControlConfigurationJson'
 import {
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
   canAppendRegionSignal,
 } from './editor/control-blocks'
-import WorkflowJsonInput from './WorkflowJsonInput'
 import WorkflowRegionCanvasModal from './WorkflowRegionCanvasModal'
 
 type Props = {
@@ -28,6 +29,8 @@ export default function WorkflowControlFields({
   onRegionUpdate,
 }: Props) {
   const configuration = node.configuration ?? {}
+  const [configDirty, setConfigDirty] = useState(false)
+  const configFieldsEditable = editable && !configDirty
   function updateConfiguration(value: Record<string, unknown>) {
     onUpdate({ ...node, configuration: value })
   }
@@ -47,7 +50,7 @@ export default function WorkflowControlFields({
           <InputNumber
             min={1}
             max={1000}
-            disabled={!editable}
+            disabled={!configFieldsEditable}
             value={typeof configuration.count === 'number' ? configuration.count : 3}
             onChange={(count) => {
               if (count !== null) updateConfiguration({ ...configuration, count })
@@ -55,19 +58,30 @@ export default function WorkflowControlFields({
           />
         </label>
       )}
-      <Typography.Text strong>配置 JSON</Typography.Text>
-      <WorkflowJsonInput
-        fieldKey={`control-config-${node.id}`}
+      <ControlConfigurationJson
+        nodeId={node.id}
         value={configuration}
         editable={editable}
-        onChange={(value) => {
-          if (value && typeof value === 'object' && !Array.isArray(value))
-            updateConfiguration(value as Record<string, unknown>)
-        }}
+        onChange={updateConfiguration}
+        onDirtyChange={setConfigDirty}
       />
       <Typography.Paragraph type="secondary">
         控制块的来源、条件和策略按版本化配置保存；修改后先应用节点配置。
       </Typography.Paragraph>
+      {configDirty && (
+        <Typography.Text type="secondary">
+          先修正或丢弃配置 JSON 草稿，再使用可视化状态编辑。
+        </Typography.Text>
+      )}
+      {['flow.control.while', 'flow.control.do_while', 'flow.control.until'].includes(
+        node.capability_id ?? '',
+      ) && (
+        <ConditionLoopStateFields
+          configuration={configuration}
+          editable={configFieldsEditable}
+          onChange={updateConfiguration}
+        />
+      )}
       {regions.map((region) => (
         <RegionEditor
           key={region.id}

@@ -388,9 +388,267 @@ it('does not apply an old region JSON draft over a newer region revision', async
   await userEvent.click(screen.getByRole('button', { name: '应用区域' }))
   expect(onRegionUpdate).not.toHaveBeenCalled()
   expect(screen.getByText(/区域已从其他编辑更新/)).toBeVisible()
-  await userEvent.click(screen.getByRole('button', { name: /丢\s*弃/ }))
+  await userEvent.click(screen.getByRole('button', { name: /^丢\s*弃$/ }))
   expect(editor).toHaveValue(
     JSON.stringify({ ...region, outputs: { value: { kind: 'literal', value: 2 } } }, null, 2),
   )
   expect(screen.getByRole('button', { name: '添加等待步骤' })).toBeEnabled()
+})
+
+it('adds a declared condition-loop state with a bounded per-round update', async () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.type(screen.getByRole('textbox', { name: '新状态名' }), 'page')
+  await userEvent.click(screen.getByRole('button', { name: '添加状态字段' }))
+  const updated = onUpdate.mock.calls[0][0]
+  expect(updated.configuration).toEqual({
+    ...node.configuration,
+    state: { page: { kind: 'literal', value: 0 } },
+    update: { page: { kind: 'add', value: { kind: 'literal', value: 1 } } },
+  })
+})
+
+it('edits one condition-loop state source without replacing the loop policy', async () => {
+  const definition = addControlBlock(workflowDefinition, 'until')
+  const node = definition.nodes.at(-1)!
+  const configured = {
+    ...node,
+    configuration: {
+      ...node.configuration,
+      state: { page: { kind: 'literal', value: 1 } },
+      update: { page: { kind: 'add', value: { kind: 'literal', value: 1 } } },
+    },
+  }
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={configured}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  fireEvent.change(screen.getByRole('textbox', { name: 'page 初始值 JSON 值' }), {
+    target: { value: '2' },
+  })
+  await userEvent.click(
+    within(screen.getByLabelText('page 初始值')).getByRole('button', { name: '应用值' }),
+  )
+  expect(onUpdate.mock.calls[0][0].configuration).toEqual({
+    ...configured.configuration,
+    state: { page: { kind: 'literal', value: 2 } },
+  })
+})
+
+it('configures a condition-loop state from a scoped variable path', async () => {
+  const definition = addControlBlock(workflowDefinition, 'do_while')
+  const node = {
+    ...definition.nodes.at(-1)!,
+    configuration: {
+      ...definition.nodes.at(-1)!.configuration,
+      state: { cursor: { kind: 'literal', value: null } },
+      update: {},
+    },
+  }
+  const onUpdate = vi.fn()
+  const props = {
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'cursor 初始值 来源类型' }))
+  await userEvent.click(screen.getByText('作用域变量'))
+  const changed = onUpdate.mock.calls.at(-1)![0]
+  expect(changed.configuration.state.cursor).toEqual({
+    kind: 'variable',
+    scope: 'state',
+    path: ['page'],
+  })
+  view.rerender(<WorkflowControlFields node={changed} {...props} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'cursor 初始值 路径 第 1 段' }), {
+    target: { value: 'nextCursor' },
+  })
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.state.cursor.path).toEqual(['nextCursor'])
+})
+
+it('protects an unfinished control configuration draft from a newer visual edit', async () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  const props = {
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+  fireEvent.change(editor, { target: { value: `${JSON.stringify(node.configuration, null, 2)}x` } })
+  expect(screen.getByRole('button', { name: '添加状态字段' })).toBeDisabled()
+  const newer = {
+    ...node,
+    configuration: { ...node.configuration, state: { page: { kind: 'literal', value: 1 } } },
+  }
+  view.rerender(<WorkflowControlFields node={newer} {...props} />)
+  await userEvent.click(screen.getByRole('button', { name: '应用配置' }))
+  expect(onUpdate).not.toHaveBeenCalled()
+  expect(screen.getByText(/配置已从其他编辑更新/)).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: '丢弃配置草稿' }))
+  expect(editor).toHaveValue(JSON.stringify(newer.configuration, null, 2))
+  expect(screen.getByRole('button', { name: '添加状态字段' })).toBeEnabled()
+})
+
+it('rejects invalid control JSON and restores visual editing after discard', async () => {
+  const definition = addControlBlock(workflowDefinition, 'repeat')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+  fireEvent.change(editor, { target: { value: '[' } })
+  expect(screen.getAllByRole('spinbutton')[0]).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: '应用配置' }))
+  expect(screen.getByText('控制块配置必须是有效的 JSON 对象。')).toBeVisible()
+  fireEvent.change(editor, { target: { value: '[]' } })
+  await userEvent.click(screen.getByRole('button', { name: '应用配置' }))
+  expect(screen.getByText('控制块配置必须是有效的 JSON 对象。')).toBeVisible()
+  expect(onUpdate).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: '丢弃配置草稿' }))
+  expect(editor).toHaveValue(JSON.stringify(node.configuration, null, 2))
+  expect(screen.getAllByRole('spinbutton')[0]).toBeEnabled()
+})
+
+it('validates condition-loop state names and removes a state with its update', async () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  const node = {
+    ...definition.nodes.at(-1)!,
+    configuration: {
+      ...definition.nodes.at(-1)!.configuration,
+      state: { page: { kind: 'literal', value: 0 } },
+      update: { page: { kind: 'add', value: { kind: 'literal', value: 1 } } },
+    },
+  }
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  const input = screen.getByRole('textbox', { name: '新状态名' })
+  await userEvent.type(input, 'page')
+  await userEvent.click(screen.getByRole('button', { name: '添加状态字段' }))
+  expect(screen.getByText(/状态名须唯一/)).toBeVisible()
+  await userEvent.clear(input)
+  await userEvent.type(input, '1bad')
+  await userEvent.click(screen.getByRole('button', { name: '添加状态字段' }))
+  expect(onUpdate).not.toHaveBeenCalled()
+  await userEvent.click(
+    within(screen.getByLabelText('状态 page')).getByRole('button', { name: '删除状态' }),
+  )
+  expect(onUpdate.mock.calls[0][0].configuration).toMatchObject({ state: {}, update: {} })
+})
+
+it('switches condition-loop update modes and warns on incompatible literal types', async () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  const base = definition.nodes.at(-1)!
+  const node = {
+    ...base,
+    configuration: {
+      ...base.configuration,
+      state: { items: { kind: 'literal', value: [] } },
+      update: {},
+    },
+  }
+  const onUpdate = vi.fn()
+  const props = {
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'items 更新方式' }))
+  await userEvent.click(screen.getByText('追加数组'))
+  const appended = onUpdate.mock.calls.at(-1)![0]
+  expect(appended.configuration.update.items).toEqual({
+    kind: 'append',
+    value: { kind: 'literal', value: null },
+  })
+  view.rerender(<WorkflowControlFields node={appended} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'items 更新方式' }))
+  await userEvent.click(screen.getByText('数值相加'))
+  const added = onUpdate.mock.calls.at(-1)![0]
+  expect(added.configuration.update.items).toEqual({
+    kind: 'add',
+    value: { kind: 'literal', value: 1 },
+  })
+  view.rerender(<WorkflowControlFields node={added} {...props} />)
+  expect(screen.getByText('数值相加要求初始状态是数字。')).toBeVisible()
+  await userEvent.click(screen.getByRole('combobox', { name: 'items 更新方式' }))
+  await userEvent.click(screen.getByText('不更新'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.update).toEqual({})
+})
+
+it('edits a node-output source with an array index and keeps other state fields', async () => {
+  const definition = addControlBlock(workflowDefinition, 'until')
+  const base = definition.nodes.at(-1)!
+  const node = {
+    ...base,
+    configuration: {
+      ...base.configuration,
+      state: { cursor: { kind: 'literal', value: null }, keep: { kind: 'literal', value: true } },
+      update: {},
+    },
+  }
+  const onUpdate = vi.fn()
+  const props = {
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'cursor 初始值 来源类型' }))
+  await userEvent.click(screen.getByText('节点输出'))
+  let changed = onUpdate.mock.calls.at(-1)![0]
+  view.rerender(<WorkflowControlFields node={changed} {...props} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'cursor 初始值 节点 ID' }), {
+    target: { value: 'fetch' },
+  })
+  changed = onUpdate.mock.calls.at(-1)![0]
+  view.rerender(<WorkflowControlFields node={changed} {...props} />)
+  await userEvent.click(screen.getByRole('button', { name: '添加路径段' }))
+  changed = onUpdate.mock.calls.at(-1)![0]
+  view.rerender(<WorkflowControlFields node={changed} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'cursor 初始值 路径 第 1 段类型' }))
+  await userEvent.click(screen.getByText('数组索引'))
+  changed = onUpdate.mock.calls.at(-1)![0]
+  expect(changed.configuration.state).toEqual({
+    cursor: { kind: 'node_output', node_id: 'fetch', path: [0] },
+    keep: { kind: 'literal', value: true },
+  })
 })

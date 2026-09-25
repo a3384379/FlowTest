@@ -106,6 +106,16 @@ export default function WorkflowNodeEditSession({
       rawFields: { ...latest.current.rawFields, [field]: value },
     })
   }
+  function clearRaw(field: string) {
+    const rawFields = { ...latest.current.rawFields }
+    delete rawFields[field]
+    const next = { ...latest.current, rawFields }
+    next.dirty = hasPendingNodeEdits(next, next.draftNode, false)
+    latest.current = next
+    if (next.dirty) session.updateNodeEditor(key, next)
+    else session.clearNodeEditor(key)
+    setDraft(next)
+  }
   function setRequest(value: WorkflowRequestEditorDraft, dirty = true) {
     if (!isRequestCurrent(value.identity)) return
     update({
@@ -245,6 +255,7 @@ export default function WorkflowNodeEditSession({
       value={{
         draft,
         setRaw,
+        clearRaw,
         setRequest,
         isRequestCurrent,
         apply,
