@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../../lib/api'
+import type { WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowRegion } from '../../lib/api'
 
 export type ControlBlockKind =
   | 'foreach'
@@ -258,6 +258,96 @@ export function insertRegionApiAfter(
 ): WorkflowRegion | null {
   return insertRegionStepAfter(region, afterId, (previous) =>
     newApiStep(apiId, apiVersion, previous),
+  )
+}
+
+export function removeRegionStep(region: WorkflowRegion, nodeId: string): WorkflowRegion | null {
+  const selected = region.nodes.find((node) => node.id === nodeId)
+  if (region.nodes.length <= 1 || !selected || selected.capability_id?.startsWith('flow.control.'))
+    return null
+  const links = regionRemovalLinks(region, nodeId)
+  if (!links || regionRemovalHasReferences(region, nodeId, links)) return null
+  return withoutRegionStep(region, nodeId, links)
+}
+
+type RemovalLinks = { incoming?: WorkflowEdge; outgoing?: WorkflowEdge }
+
+function regionRemovalLinks(region: WorkflowRegion, nodeId: string): RemovalLinks | null {
+  const incoming = region.edges.filter((edge) => edge.target === nodeId)
+  const outgoing = region.edges.filter((edge) => edge.source === nodeId)
+  if (incoming.length > 1 || outgoing.length > 1) return null
+  if (incoming.length + outgoing.length === 0) return null
+  if (invalidEntryBoundary(region, nodeId, incoming.length)) return null
+  if (invalidExitBoundary(region, nodeId, incoming.length, outgoing.length)) return null
+  return { incoming: incoming[0], outgoing: outgoing[0] }
+}
+
+function invalidEntryBoundary(region: WorkflowRegion, nodeId: string, incoming: number): boolean {
+  return incoming === 0 ? region.entry_node_id !== nodeId : region.entry_node_id === nodeId
+}
+
+function invalidExitBoundary(
+  region: WorkflowRegion,
+  nodeId: string,
+  incoming: number,
+  outgoing: number,
+): boolean {
+  const isExit = region.exit_node_ids.includes(nodeId)
+  if (outgoing === 0) return !isExit || incoming === 0
+  return isExit
+}
+
+function regionRemovalHasReferences(
+  region: WorkflowRegion,
+  nodeId: string,
+  links: RemovalLinks,
+): boolean {
+  if (unsafeRemovalEdge(links.incoming) || unsafeRemovalEdge(links.outgoing)) return true
+  if (region.edges.some((edge) => hasNodeReference(edge.mappings, nodeId))) return true
+  if (region.nodes.some((node) => node.id !== nodeId && nodeReferences(node, nodeId))) return true
+  return hasNodeReference(region.inputs, nodeId) || hasNodeReference(region.outputs, nodeId)
+}
+
+function unsafeRemovalEdge(edge: WorkflowEdge | undefined): boolean {
+  return Boolean(edge?.condition || edge?.mappings.length)
+}
+
+function nodeReferences(node: WorkflowNode, nodeId: string): boolean {
+  return (
+    hasNodeReference(node.config, nodeId) ||
+    hasNodeReference(node.configuration, nodeId) ||
+    Boolean(node.bindings?.length)
+  )
+}
+
+function withoutRegionStep(
+  region: WorkflowRegion,
+  nodeId: string,
+  links: RemovalLinks,
+): WorkflowRegion {
+  const nextId = links.outgoing?.target
+  const previousId = links.incoming?.source
+  const replacementEdge = links.incoming && nextId ? [{ ...links.incoming, target: nextId }] : []
+  return {
+    ...region,
+    nodes: region.nodes.filter((node) => node.id !== nodeId),
+    edges: region.edges
+      .filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+      .concat(replacementEdge),
+    entry_node_id: region.entry_node_id === nodeId ? (nextId ?? null) : region.entry_node_id,
+    exit_node_ids: region.exit_node_ids.map((id) => (id === nodeId ? (previousId ?? id) : id)),
+  }
+}
+
+function hasNodeReference(value: unknown, nodeId: string): boolean {
+  if (typeof value === 'string') return value.includes(nodeId)
+  if (Array.isArray(value)) return value.some((item) => hasNodeReference(item, nodeId))
+  if (!value || typeof value !== 'object') return false
+  return Object.entries(value).some(
+    ([key, item]) =>
+      ((key === 'node_id' || key === 'source_node_id' || key === 'target_node_id') &&
+        item === nodeId) ||
+      hasNodeReference(item, nodeId),
   )
 }
 

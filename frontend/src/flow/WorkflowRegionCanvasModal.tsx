@@ -1,7 +1,11 @@
-import { Alert, Button, Modal, Select, Space, Typography } from 'antd'
+import { Alert, Button, Modal, Popconfirm, Select, Space, Typography } from 'antd'
 import { useState } from 'react'
 import type { ApiDefinition, WorkflowRegion } from '../lib/api'
-import { insertRegionApiAfter, insertRegionDelayAfter } from './editor/control-blocks'
+import {
+  insertRegionApiAfter,
+  insertRegionDelayAfter,
+  removeRegionStep,
+} from './editor/control-blocks'
 import WorkflowRegionCanvas from './WorkflowRegionCanvas'
 
 type Props = {
@@ -38,6 +42,17 @@ export default function WorkflowRegionCanvasModal({
     )
     setError(null)
   }
+  function applyDeletion() {
+    if (!selectedNodeId) return
+    const next = removeRegionStep(region, selectedNodeId)
+    if (!next) {
+      setError('该步骤不能安全删除：请检查区域边界、条件连线、字段映射或剩余节点引用。')
+      return
+    }
+    onUpdate(next)
+    setSelectedNodeId(null)
+    setError(null)
+  }
   return (
     <Modal
       title={`${region.role} 区域画布`}
@@ -58,6 +73,7 @@ export default function WorkflowRegionCanvasModal({
         activeApiId={activeApiId}
         onSelectApi={setSelectedApiId}
         onInsert={applyInsertion}
+        onRemove={applyDeletion}
       />
       {error && <Alert type="error" title={error} />}
       <WorkflowRegionCanvas
@@ -81,6 +97,7 @@ function CanvasToolbar({
   activeApiId,
   onSelectApi,
   onInsert,
+  onRemove,
 }: {
   region: WorkflowRegion
   editable: boolean
@@ -90,6 +107,7 @@ function CanvasToolbar({
   activeApiId?: string
   onSelectApi: (id: string) => void
   onInsert: (region: WorkflowRegion | null) => void
+  onRemove: () => void
 }) {
   return (
     <Space wrap className="workflow-region-canvas-toolbar">
@@ -126,6 +144,16 @@ function CanvasToolbar({
           </Button>
         </>
       )}
+      <Popconfirm
+        title="删除区域步骤"
+        description="将删除所选步骤并安全重接线性连线；草稿可撤销。"
+        disabled={!editable || !selectedNodeId}
+        onConfirm={onRemove}
+      >
+        <Button danger disabled={!editable || !selectedNodeId}>
+          删除所选步骤
+        </Button>
+      </Popconfirm>
     </Space>
   )
 }

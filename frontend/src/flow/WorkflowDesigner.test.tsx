@@ -495,6 +495,7 @@ describe('WorkflowDesigner', () => {
       data: {
         label: node.name,
         nodeType: node.type,
+        typeLabel: node.type,
         status: '',
         runtimeLabel: '',
       },

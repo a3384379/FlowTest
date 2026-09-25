@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { workflowDefinition } from '../test/fixtures'
-import { addControlBlock, appendRegionDelay } from './editor/control-blocks'
+import { addControlBlock, appendRegionDelay, removeRegionStep } from './editor/control-blocks'
 import WorkflowControlFields from './WorkflowControlFields'
 
 it('adds a serial step through the control region panel', async () => {
@@ -131,6 +131,90 @@ it('reports a mapped or conditional edge instead of inserting into it', async ()
   await userEvent.click(within(dialog).getByRole('button', { name: '在后面插入等待' }))
   expect(within(dialog).getByRole('alert')).toHaveTextContent('无法安全插入')
   expect(onRegionUpdate).not.toHaveBeenCalled()
+})
+
+it('deletes a linear region step and reconnects its neighbors after confirmation', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const first = appendRegionDelay(definition.regions![0])!
+  const region = appendRegionDelay(first)!
+  const middleId = first.exit_node_ids[0]
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${middleId}`))
+  await userEvent.click(within(dialog).getByRole('button', { name: '删除所选步骤' }))
+  await userEvent.click(screen.getByRole('button', { name: 'OK' }))
+  const updated = onRegionUpdate.mock.calls[0][0]
+  expect(updated.nodes.map((node: { id: string }) => node.id)).toEqual([
+    region.entry_node_id,
+    region.exit_node_ids[0],
+  ])
+  expect(updated.edges).toEqual([
+    expect.objectContaining({ source: region.entry_node_id, target: region.exit_node_ids[0] }),
+  ])
+})
+
+it('preserves a region step when its edge or output still references it', () => {
+  const region = appendRegionDelay(addControlBlock(workflowDefinition, 'group').regions![0])!
+  const firstId = region.entry_node_id!
+  expect(
+    removeRegionStep(
+      {
+        ...region,
+        edges: [
+          {
+            ...region.edges[0],
+            mappings: [
+              {
+                source: { node_id: firstId, path: 'value' },
+                transform: { kind: 'identity', template: '' },
+                target: { node_id: region.exit_node_ids[0], location: 'variable', key: 'value' },
+              },
+            ],
+          },
+        ],
+      },
+      firstId,
+    ),
+  ).toBeNull()
+  expect(
+    removeRegionStep(
+      { ...region, outputs: { value: { kind: 'node_output', node_id: firstId, path: [] } } },
+      firstId,
+    ),
+  ).toBeNull()
+  expect(removeRegionStep(region, 'missing')).toBeNull()
+  expect(
+    removeRegionStep(
+      {
+        ...region,
+        nodes: region.nodes.map((node) =>
+          node.id === firstId ? node : { ...node, config: { source: `node_outputs.${firstId}` } },
+        ),
+      },
+      firstId,
+    ),
+  ).toBeNull()
+  expect(
+    removeRegionStep(
+      {
+        ...region,
+        nodes: region.nodes.map((node) =>
+          node.id === firstId ? { ...node, capability_id: 'flow.control.group' } : node,
+        ),
+      },
+      firstId,
+    ),
+  ).toBeNull()
 })
 
 it('keeps the region canvas read-only when its workflow cannot be edited', async () => {
