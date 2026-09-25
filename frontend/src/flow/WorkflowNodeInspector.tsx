@@ -209,6 +209,7 @@ function InspectorNodeFields({
     return (
       <WorkflowControlFields
         node={node}
+        definition={definition}
         regions={(definition.regions ?? []).filter((region) => region.owner_node_id === node.id)}
         editable={editable}
         apis={apis}

@@ -449,6 +449,66 @@ async def test_condition_loop_reports_limit_instead_of_passing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cursor_pagination_uses_current_page_to_advance_and_stop() -> None:
+    payload = _condition_loop_definition(
+        "while",
+        {
+            "kind": "compare",
+            "left": {"kind": "variable", "scope": "state", "path": ["hasNext"]},
+            "operator": "equals",
+            "right": {"kind": "literal", "value": True},
+        },
+        maximum=100,
+    )
+    config = payload["nodes"][1]["configuration"]
+    config["state"] = {
+        "cursor": {"kind": "literal", "value": ""},
+        "hasNext": {"kind": "literal", "value": True},
+    }
+    config["update"] = {
+        "cursor": {
+            "kind": "set",
+            "value": {"kind": "node_output", "node_id": "step", "path": ["body", "nextCursor"]},
+        },
+        "hasNext": {
+            "kind": "set",
+            "value": {"kind": "node_output", "node_id": "step", "path": ["body", "hasNext"]},
+        },
+    }
+    payload["regions"][0]["nodes"] = [_node("step", "custom.test")]
+    definition = WorkflowDefinition.model_validate(payload)
+
+    class CursorExecutor:
+        def __init__(self) -> None:
+            self.cursors: list[str] = []
+
+        async def execute(self, node, context: ExecutionContext):
+            if node.capability_id == "flow.control.while":
+                return await StructuredControlRunner(definition, self).execute(node, context)
+            if node.id != "step":
+                return await execute_control_node(node, context)
+            cursor = context.state_variables["cursor"]
+            assert isinstance(cursor, str)
+            self.cursors.append(cursor)
+            return {
+                "body": {
+                    "nextCursor": "second-page" if cursor == "" else "",
+                    "hasNext": cursor == "",
+                }
+            }
+
+    executor = CursorExecutor()
+    result = await WorkflowScheduler(executor).run(definition)
+    assert result.status == "passed", [
+        (record.node_id, record.error_code, record.error_message, record.output)
+        for record in result.records
+    ]
+    assert executor.cursors == ["", "second-page"]
+    assert result.records[1].output["termination_reason"] == "condition_false"
+    assert result.records[1].output["state"] == {"cursor": "", "hasNext": False}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("signal,expected,final_state", [("break", 1, 0), ("continue", 3, 3)])
 async def test_serial_control_signal_skips_remaining_body(
     signal: str, expected: int, final_state: int

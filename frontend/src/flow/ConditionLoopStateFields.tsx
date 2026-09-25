@@ -1,21 +1,31 @@
 import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'antd'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import type { WorkflowDefinition, WorkflowNode } from '../lib/api'
+import {
+  conditionStateSources,
+  type SourceChoice,
+  type ValueSource,
+} from './editor/control-source-browser'
 import { useNodeEditContext } from './editor/node-edit-session'
+import ControlSourcePicker from './ControlSourcePicker'
 
-type LiteralSource = { kind: 'literal'; value: unknown }
-type VariableSource = { kind: 'variable'; scope: string; path: Array<string | number> }
-type NodeOutputSource = { kind: 'node_output'; node_id: string; path: Array<string | number> }
-type ValueSource = LiteralSource | VariableSource | NodeOutputSource
+type LiteralSource = Extract<ValueSource, { kind: 'literal' }>
+type VariableSource = Extract<ValueSource, { kind: 'variable' }>
+type NodeOutputSource = Extract<ValueSource, { kind: 'node_output' }>
 type StateUpdate = { kind: 'set' | 'add' | 'append'; value: ValueSource }
 
 const namePattern = /^[A-Za-z_][A-Za-z0-9_.-]*$/
 const variableScopes = ['runtime', 'workflow', 'input', 'local', 'loop', 'state', 'error']
 
 export default function ConditionLoopStateFields({
+  definition,
+  node,
   configuration,
   editable,
   onChange,
 }: {
+  definition?: WorkflowDefinition
+  node?: WorkflowNode
   configuration: Record<string, unknown>
   editable: boolean
   onChange: (configuration: Record<string, unknown>) => void
@@ -24,6 +34,14 @@ export default function ConditionLoopStateFields({
   const updates = asRecord(configuration.update)
   const [newName, setNewName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const initialChoices = useMemo(
+    () => (definition && node ? conditionStateSources(definition, node, 'initial') : []),
+    [definition, node],
+  )
+  const updateChoices = useMemo(
+    () => (definition && node ? conditionStateSources(definition, node, 'update') : []),
+    [definition, node],
+  )
   if (!state || !updates) {
     return <Alert type="warning" title="状态配置无法可视化编辑，请检查配置 JSON。" />
   }
@@ -87,6 +105,7 @@ export default function ConditionLoopStateFields({
               <SourceFields
                 label={`${name} 初始值`}
                 source={source}
+                choices={initialChoices}
                 editable={editable}
                 onChange={(value) => setSource(name, value)}
               />
@@ -115,6 +134,7 @@ export default function ConditionLoopStateFields({
               <SourceFields
                 label={`${name} 更新值`}
                 source={update.value}
+                choices={updateChoices}
                 editable={editable}
                 onChange={(value) => setUpdate(name, { ...update, value })}
               />
@@ -146,16 +166,25 @@ export default function ConditionLoopStateFields({
 function SourceFields({
   label,
   source,
+  choices,
   editable,
   onChange,
 }: {
   label: string
   source: ValueSource
+  choices: SourceChoice[]
   editable: boolean
   onChange: (source: ValueSource) => void
 }) {
   return (
     <div aria-label={label}>
+      <ControlSourcePicker
+        label={`${label} 来源浏览器`}
+        source={source}
+        choices={choices}
+        editable={editable}
+        onChange={onChange}
+      />
       <Select
         aria-label={`${label} 来源类型`}
         disabled={!editable}

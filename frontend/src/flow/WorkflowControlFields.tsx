@@ -1,18 +1,25 @@
 import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { useState } from 'react'
-import type { ApiDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
+import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
 import ControlConfigurationJson from './ControlConfigurationJson'
+import ControlSourcePicker from './ControlSourcePicker'
 import {
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
   canAppendRegionSignal,
 } from './editor/control-blocks'
+import {
+  conditionStateSources,
+  type SourceChoice,
+  type ValueSource,
+} from './editor/control-source-browser'
 import WorkflowRegionCanvasModal from './WorkflowRegionCanvasModal'
 
 type Props = {
   node: WorkflowNode
+  definition?: WorkflowDefinition
   regions: WorkflowRegion[]
   editable: boolean
   apis?: ApiDefinition[]
@@ -22,6 +29,7 @@ type Props = {
 
 export default function WorkflowControlFields({
   node,
+  definition,
   regions,
   editable,
   apis = [],
@@ -44,19 +52,20 @@ export default function WorkflowControlFields({
           title="返回仅在当前工作流被子流程调用时有效；直接运行会以 RETURN_OUTSIDE_CALL 失败。"
         />
       )}
-      {node.capability_id === 'flow.control.repeat' && (
-        <label>
-          重复次数
-          <InputNumber
-            min={1}
-            max={1000}
-            disabled={!configFieldsEditable}
-            value={typeof configuration.count === 'number' ? configuration.count : 3}
-            onChange={(count) => {
-              if (count !== null) updateConfiguration({ ...configuration, count })
-            }}
-          />
-        </label>
+      <RepeatCountFields
+        node={node}
+        configuration={configuration}
+        editable={configFieldsEditable}
+        onChange={updateConfiguration}
+      />
+      {definition && (
+        <ControlSourceShortcuts
+          node={node}
+          configuration={configuration}
+          choices={conditionStateSources(definition, node, 'initial')}
+          editable={configFieldsEditable}
+          onChange={updateConfiguration}
+        />
       )}
       <ControlConfigurationJson
         nodeId={node.id}
@@ -77,6 +86,8 @@ export default function WorkflowControlFields({
         node.capability_id ?? '',
       ) && (
         <ConditionLoopStateFields
+          definition={definition}
+          node={node}
           configuration={configuration}
           editable={configFieldsEditable}
           onChange={updateConfiguration}
@@ -93,6 +104,153 @@ export default function WorkflowControlFields({
         />
       ))}
     </section>
+  )
+}
+
+function RepeatCountFields({
+  node,
+  configuration,
+  editable,
+  onChange,
+}: {
+  node: WorkflowNode
+  configuration: Record<string, unknown>
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  if (node.capability_id !== 'flow.control.repeat') return null
+  return (
+    <label>
+      重复次数
+      <InputNumber
+        min={1}
+        max={1000}
+        disabled={!editable}
+        value={typeof configuration.count === 'number' ? configuration.count : 3}
+        onChange={(count) => {
+          if (count !== null) onChange({ ...configuration, count })
+        }}
+      />
+    </label>
+  )
+}
+
+function ControlSourceShortcuts({
+  node,
+  configuration,
+  choices,
+  editable,
+  onChange,
+}: {
+  node: WorkflowNode
+  configuration: Record<string, unknown>
+  choices: SourceChoice[]
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  if (node.capability_id === 'flow.control.foreach') {
+    return (
+      <SourceShortcut
+        label="遍历集合来源"
+        value={configuration.collection}
+        choices={choices}
+        editable={editable}
+        onChange={(collection) => onChange({ ...configuration, collection })}
+      />
+    )
+  }
+  if (node.capability_id === 'flow.control.switch' && configuration.mode === 'value') {
+    return (
+      <SourceShortcut
+        label="多分支判断来源"
+        value={configuration.value}
+        choices={choices}
+        editable={editable}
+        onChange={(value) => onChange({ ...configuration, value })}
+      />
+    )
+  }
+  if (node.capability_id !== 'flow.control.if') return null
+  const condition = asRecord(configuration.condition)
+  if (!condition || condition.kind !== 'compare') return null
+  return (
+    <Space direction="vertical">
+      {(['left', 'right'] as const).map((operand) => (
+        <SourceShortcut
+          key={operand}
+          label={operand === 'left' ? '条件左侧来源' : '条件右侧来源'}
+          value={condition[operand]}
+          choices={choices}
+          editable={editable}
+          onChange={(source) =>
+            onChange({ ...configuration, condition: { ...condition, [operand]: source } })
+          }
+        />
+      ))}
+    </Space>
+  )
+}
+
+function SourceShortcut({
+  label,
+  value,
+  choices,
+  editable,
+  onChange,
+}: {
+  label: string
+  value: unknown
+  choices: SourceChoice[]
+  editable: boolean
+  onChange: (source: ValueSource) => void
+}) {
+  const source = asSource(value)
+  if (!source) return null
+  return (
+    <div>
+      <Typography.Text>{label}</Typography.Text>
+      <ControlSourcePicker
+        label={label}
+        source={source}
+        choices={choices}
+        editable={editable}
+        onChange={onChange}
+      />
+    </div>
+  )
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function asSource(value: unknown): ValueSource | null {
+  const source = asRecord(value)
+  if (!source) return null
+  if (source.kind === 'literal' && 'value' in source) {
+    return { kind: 'literal', value: source.value }
+  }
+  if (source.kind === 'variable' && typeof source.scope === 'string' && validPath(source.path)) {
+    return { kind: 'variable', scope: source.scope, path: source.path }
+  }
+  if (
+    source.kind === 'node_output' &&
+    typeof source.node_id === 'string' &&
+    validPath(source.path)
+  ) {
+    return { kind: 'node_output', node_id: source.node_id, path: source.path }
+  }
+  return null
+}
+
+function validPath(value: unknown): value is Array<string | number> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (segment) => typeof segment === 'string' || (Number.isInteger(segment) && segment >= 0),
+    )
   )
 }
 

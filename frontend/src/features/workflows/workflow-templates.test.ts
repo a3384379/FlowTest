@@ -46,6 +46,29 @@ describe('workflow creation templates', () => {
     })
   })
 
+  it('advances cursor and stop state from the current page output', () => {
+    const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), 'cursor_pagination')
+    const loop = definition.nodes.find((node) => node.type === 'capability')!
+    expect(loop.configuration?.state).toEqual({
+      cursor: { kind: 'literal', value: '' },
+      hasNext: { kind: 'literal', value: true },
+    })
+    expect(loop.configuration?.update).toEqual({
+      cursor: {
+        kind: 'set',
+        value: { kind: 'node_output', node_id: 'api', path: ['body', 'nextCursor'] },
+      },
+      hasNext: {
+        kind: 'set',
+        value: { kind: 'node_output', node_id: 'api', path: ['body', 'hasNext'] },
+      },
+    })
+    expect(loop.configuration?.policy).toMatchObject({ max_iterations: 100, timeout_seconds: 120 })
+    expect(definition.regions?.[0].nodes[0].config.request_overrides).toEqual({
+      query_parameters: [{ name: 'cursor', value: '{{state.cursor}}', enabled: true }],
+    })
+  })
+
   it('keeps polling separate from failure retries', () => {
     const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), 'async_poll')
     const request = definition.nodes.find((node) => node.id === 'api')!

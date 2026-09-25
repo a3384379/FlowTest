@@ -484,6 +484,117 @@ it('configures a condition-loop state from a scoped variable path', async () => 
   expect(onUpdate.mock.calls.at(-1)![0].configuration.state.cursor.path).toEqual(['nextCursor'])
 })
 
+it('selects a declared runtime input from the source browser', async () => {
+  const expanded = addControlBlock(workflowDefinition, 'while')
+  const base = expanded.nodes.at(-1)!
+  const node = {
+    ...base,
+    configuration: {
+      ...base.configuration,
+      state: { cursor: { kind: 'literal', value: null } },
+      update: {},
+    },
+  }
+  const definition = {
+    ...expanded,
+    runtime_inputs: [
+      {
+        name: 'caseId',
+        value_type: 'string' as const,
+        required: true,
+        nullable: false,
+        description: '',
+      },
+    ],
+  }
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: 'cursor 初始值 来源浏览器' }))
+  await userEvent.click(screen.getByText('运行输入 · caseId'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.state.cursor).toEqual({
+    kind: 'variable',
+    scope: 'runtime',
+    path: ['caseId'],
+  })
+})
+
+it('binds the ForEach collection to a declared runtime input', async () => {
+  const expanded = addControlBlock(workflowDefinition, 'foreach')
+  const definition = {
+    ...expanded,
+    runtime_inputs: [
+      {
+        name: 'cases',
+        value_type: 'array' as const,
+        required: true,
+        nullable: false,
+        description: '',
+      },
+    ],
+  }
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: '遍历集合来源' }))
+  await userEvent.click(screen.getByText('运行输入 · cases'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.collection).toEqual({
+    kind: 'variable',
+    scope: 'runtime',
+    path: ['cases'],
+  })
+})
+
+it('selects an IF operand without replacing the rest of its condition', async () => {
+  const expanded = addControlBlock(workflowDefinition, 'if')
+  const definition = {
+    ...expanded,
+    runtime_inputs: [
+      {
+        name: 'status',
+        value_type: 'string' as const,
+        required: true,
+        nullable: false,
+        description: '',
+      },
+    ],
+  }
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: '条件左侧来源' }))
+  await userEvent.click(screen.getByText('运行输入 · status'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.condition).toEqual({
+    ...(node.configuration!.condition as Record<string, unknown>),
+    left: { kind: 'variable', scope: 'runtime', path: ['status'] },
+  })
+})
+
 it('protects an unfinished control configuration draft from a newer visual edit', async () => {
   const definition = addControlBlock(workflowDefinition, 'while')
   const node = definition.nodes.at(-1)!
