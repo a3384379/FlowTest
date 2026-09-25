@@ -1025,6 +1025,9 @@ export type WorkflowExecution = {
   triggered_by_id: string
   parent_execution_id: string | null
   dataset_row_index: number | null
+  derived_from_execution_id?: string | null
+  rerun_loop_node_id?: string | null
+  rerun_input_indices?: number[] | null
   run_purpose?: 'standard' | 'preview'
   source_change_set_id?: string | null
   preview_approval_id?: string | null

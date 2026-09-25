@@ -292,6 +292,280 @@ async def test_inline_control_block_publishes_runs_and_exposes_scoped_instance(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_failed_item_rerun_uses_original_frozen_collection_and_keeps_source(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    created_api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "创建资源",
+            "request": {"method": "POST", "path": "/users/create", "body_kind": "none"},
+        },
+    )
+    assert created_api.status_code == 201, created_api.text
+    create_api_id = created_api.json()["definition"]["id"]
+    definition = _workflow_definition(api_id)
+    definition["schema_version"] = "4.0"
+    definition["run_policy"] = {"request_budget": 6}
+    definition["nodes"].insert(
+        2,
+        {
+            "id": "loop",
+            "type": "capability",
+            "name": "集合遍历",
+            "position": {"x": 200, "y": 0},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+                "collection": {"kind": "node_output", "node_id": "api", "path": ["body", "items"]},
+                "body": {"kind": "inline", "region_id": "body"},
+                "policy": {
+                    "max_iterations": 3,
+                    "timeout_seconds": 30,
+                    "on_error": "continue_collect",
+                },
+            },
+            "bindings": [],
+        },
+    )
+    definition["edges"] = [
+        {"id": "start-api", "source": "start", "target": "api"},
+        {"id": "api-loop", "source": "api", "target": "loop"},
+        {"id": "loop-end", "source": "loop", "target": "end"},
+    ]
+    definition["regions"] = [
+        {
+            "id": "body",
+            "owner_node_id": "loop",
+            "role": "body",
+            "nodes": [
+                {
+                    "id": "step",
+                    "type": "api",
+                    "name": "创建",
+                    "position": {"x": 0, "y": 0},
+                    "config": {"api_definition_id": create_api_id},
+                },
+                {
+                    "id": "check",
+                    "type": "assert",
+                    "name": "失败校验",
+                    "position": {"x": 100, "y": 0},
+                    "config": {
+                        "source_node_id": "step",
+                        "expression": "status_code",
+                        "operator": "equals",
+                        "expected": 200,
+                    },
+                },
+            ],
+            "edges": [{"id": "step-check", "source": "step", "target": "check"}],
+            "entry_node_id": "step",
+            "exit_node_ids": ["check"],
+        }
+    ]
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "失败轮次派生", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        side_effect=[
+            Response(200, json={"items": ["a", "b", "c"]}),
+            Response(200, json={"items": ["changed"]}),
+        ]
+    )
+    create_target = respx.post("http://workflow.example.com/users/create").mock(
+        return_value=Response(201, json={"id": "resource-1"})
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    source_id = started.json()["id"]
+    source = await _wait_for_completed_execution(workflow_client, headers, project_id, source_id)
+    source_loop = next(node for node in source["nodes"] if node["node_id"] == "loop")
+    assert [item["input_index"] for item in source_loop["output"]["items"]] == [0, 1, 2]
+    assert source_loop["output"]["failed_count"] == 3
+    assert len(target.calls) == 1
+    assert len(create_target.calls) == 3
+
+    invalid_index = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun",
+        headers=headers,
+        json={"loop_node_id": "loop", "input_indices": [99]},
+    )
+    assert invalid_index.status_code == 409, invalid_index.text
+    assert invalid_index.json()["error"]["code"] == "RERUN_INPUT_NOT_FAILED"
+
+    unverified = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun",
+        headers=headers,
+        json={"loop_node_id": "loop", "input_indices": [1]},
+    )
+    assert unverified.status_code == 409, unverified.text
+    assert unverified.json()["error"]["code"] == "RERUN_RESOURCE_VERIFICATION_REQUIRED"
+    rerun = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun",
+        headers=headers,
+        json={
+            "loop_node_id": "loop",
+            "input_indices": [1],
+            "upstream_resource_status": "confirmed_valid",
+            "verification_note": "已人工查证 resource-1 仍有效",
+        },
+    )
+    assert rerun.status_code == 202, rerun.text
+    derived_id = rerun.json()["id"]
+    assert derived_id != source_id
+    assert rerun.json()["derived_from_execution_id"] == source_id
+    assert rerun.json()["rerun_input_indices"] == [1]
+    derived = await _wait_for_completed_execution(workflow_client, headers, project_id, derived_id)
+    derived_loop = next(node for node in derived["nodes"] if node["node_id"] == "loop")
+    assert [item["input_index"] for item in derived_loop["output"]["items"]] == [1]
+    assert derived_loop["output"]["input_count"] == 3
+    assert len(target.calls) == 1
+    assert len(create_target.calls) == 3
+    unchanged = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}", headers=headers
+    )
+    original_loop = next(node for node in unchanged.json()["nodes"] if node["node_id"] == "loop")
+    assert len(original_loop["output"]["items"]) == 3
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_failed_item_rerun_requires_explicit_write_retry_strategy(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    created_api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={
+            "name": "提交资源",
+            "request": {"method": "POST", "path": "/resource", "body_kind": "none"},
+        },
+    )
+    assert created_api.status_code == 201, created_api.text
+    submit_api_id = created_api.json()["definition"]["id"]
+    definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 2},
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "loop",
+                "type": "capability",
+                "name": "提交集合",
+                "position": {"x": 100, "y": 0},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                    "collection": {"kind": "literal", "value": [1]},
+                    "body": {"kind": "inline", "region_id": "body"},
+                    "policy": {"max_iterations": 1, "timeout_seconds": 30},
+                },
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 200, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-loop", "source": "start", "target": "loop"},
+            {"id": "loop-end", "source": "loop", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "loop",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "submit",
+                        "type": "api",
+                        "name": "提交",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"api_definition_id": submit_api_id},
+                    }
+                ],
+                "edges": [],
+                "entry_node_id": "submit",
+                "exit_node_ids": ["submit"],
+            }
+        ],
+    }
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "失败写入派生", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    target = respx.post("http://workflow.example.com/resource").mock(
+        side_effect=[Response(503), Response(200)]
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    source_id = started.json()["id"]
+    source = await _wait_for_completed_execution(workflow_client, headers, project_id, source_id)
+    source_loop = next(node for node in source["nodes"] if node["node_id"] == "loop")
+    assert source_loop["output"]["items"][0]["test_verdict"] == "failed"
+    assert len(target.calls) == 1
+
+    path = f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun"
+    blocked = await workflow_client.post(
+        path, headers=headers, json={"loop_node_id": "loop", "input_indices": [0]}
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["error"]["code"] == "RERUN_WRITE_VERIFICATION_REQUIRED"
+    assert len(target.calls) == 1
+    retry_payload = {
+        "loop_node_id": "loop",
+        "input_indices": [0],
+        "write_retry_strategy": "verified_safe_to_retry",
+        "verification_note": "已查证第一次写入没有生效",
+    }
+    retry_headers = {**headers, "Idempotency-Key": "verified-write-rerun"}
+    allowed = await workflow_client.post(
+        path,
+        headers=retry_headers,
+        json=retry_payload,
+    )
+    assert allowed.status_code == 202, allowed.text
+    derived = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, allowed.json()["id"]
+    )
+    derived_loop = next(node for node in derived["nodes"] if node["node_id"] == "loop")
+    assert derived_loop["output"]["items"][0]["test_verdict"] == "passed"
+    assert len(target.calls) == 2
+    replayed = await workflow_client.post(path, headers=retry_headers, json=retry_payload)
+    assert replayed.status_code == 202, replayed.text
+    assert replayed.json()["id"] == allowed.json()["id"]
+    assert len(target.calls) == 2
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncClient) -> None:
     headers = await _login_headers(workflow_client)
     project_id, environment_id, api_id = await _create_assets(workflow_client, headers)

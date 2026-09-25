@@ -142,6 +142,27 @@ export async function replayWorkflowNode(
   return response.data
 }
 
+export type FailedItemRerunRequest = {
+  loop_node_id: string
+  input_indices: number[]
+  upstream_resource_status: 'unverified' | 'confirmed_valid' | 'expired'
+  write_retry_strategy: 'reject' | 'verified_safe_to_retry'
+  verification_note?: string
+}
+
+export async function rerunFailedWorkflowItems(
+  projectId: string,
+  executionId: string,
+  payload: FailedItemRerunRequest,
+): Promise<WorkflowExecution> {
+  const response = await apiClient.post<WorkflowExecution>(
+    `/projects/${projectId}/workflow-executions/${executionId}/failed-items/rerun`,
+    payload,
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+  )
+  return response.data
+}
+
 export async function executeWorkflow(
   projectId: string,
   workflowId: string,

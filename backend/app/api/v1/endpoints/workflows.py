@@ -25,6 +25,7 @@ from app.schemas.workflows import (
     WorkflowExecuteRequest,
     WorkflowExecutionDetailResponse,
     WorkflowExecutionResponse,
+    WorkflowFailedItemRerunRequest,
     WorkflowNodeExecutionResponse,
     WorkflowResponse,
     WorkflowVersionChangeResponse,
@@ -290,6 +291,67 @@ async def execute_workflow(
         project_id=project_id,
         actor_key=f"user:{current_user.id}",
         operation=f"workflow.execute:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return WorkflowExecutionResponse.model_validate(response)
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/failed-items/rerun",
+    response_model=WorkflowExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def rerun_failed_workflow_items(
+    project_id: UUID,
+    execution_id: UUID,
+    payload: WorkflowFailedItemRerunRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> WorkflowExecutionResponse:
+    async def start() -> WorkflowExecutionResponse:
+        execution, plan = await build_workflow_service(session).prepare_failed_item_rerun(
+            actor=current_user,
+            project_id=project_id,
+            source_execution_id=execution_id,
+            loop_node_id=payload.loop_node_id,
+            input_indices=payload.input_indices,
+            write_retry_strategy=payload.write_retry_strategy,
+            upstream_resource_status=payload.upstream_resource_status,
+            verification_note=payload.verification_note,
+        )
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "source_execution_id": str(execution_id),
+                "execution_id": str(execution.id),
+                **payload.model_dump(mode="json"),
+            },
+        )
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command.id)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command.id,
+                error_code="EXECUTION_COMMAND_DISPATCH_FAILED",
+                error_message="派生运行未能提交到执行运行时",
+            )
+            raise
+        return WorkflowExecutionResponse.model_validate(execution)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.rerun_failed_items:{execution_id}",
         request_payload=payload.model_dump(mode="json"),
         action=start,
     )

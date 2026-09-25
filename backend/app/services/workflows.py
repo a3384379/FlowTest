@@ -60,6 +60,7 @@ from app.engine.contracts import (
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
+    ForEachControlConfig,
     ForEachNodeConfig,
     InlineControlBody,
     MappingTargetLocation,
@@ -109,6 +110,7 @@ from app.engine.scheduler import (
 )
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
+from app.models.durable_execution import ExecutionCheckpoint
 from app.models.runner_fabric import RunnerTask
 from app.models.tasking import TestPlanItem
 from app.models.workflows import (
@@ -120,6 +122,7 @@ from app.models.workflows import (
 from app.observability.tracing import TracingNodeExecutor, workflow_span
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.data_sources import DataSourceRepository
+from app.repositories.durable_execution import DurableExecutionRepository
 from app.repositories.workflows import WorkflowRepository
 from app.runner.results import (
     RunnerBatchExecutionResult,
@@ -174,6 +177,9 @@ class WorkflowRunPlan:
     prepared: PreparedExecution
     runtime_variables: dict[str, str]
     request_budget: int | None = None
+    selected_node_ids: frozenset[str] | None = None
+    rerun_loop_node_id: str | None = None
+    rerun_input_indices: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +196,239 @@ class WorkflowBatchPlan:
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
+
+
+def _rerun_main_scope(definition: WorkflowDefinition, loop_node_id: str) -> set[str]:
+    if definition.schema_version != "4.0":
+        raise AppError(
+            code="RERUN_SCHEMA_UNSUPPORTED",
+            message="仅支持结构化控制流的失败项重跑",
+            status_code=409,
+        )
+    if any(node.phase is WorkflowPhase.CLEANUP for node in definition.nodes):
+        raise AppError(
+            code="RERUN_CLEANUP_SCOPE_UNSUPPORTED",
+            message="包含流程清理阶段的工作流尚不能安全派生轮次运行",
+            status_code=409,
+        )
+    target = next((node for node in definition.nodes if node.id == loop_node_id), None)
+    if target is None:
+        raise AppError(
+            code="RERUN_LOOP_NOT_FOUND", message="主流程中没有指定的循环节点", status_code=404
+        )
+    if target.phase is not WorkflowPhase.MAIN or target.capability_id != "flow.control.foreach":
+        raise AppError(
+            code="RERUN_LOOP_UNSUPPORTED", message="只能选择主流程中的内联 ForEach", status_code=409
+        )
+    scope = {loop_node_id}
+    while True:
+        incoming = {edge.source for edge in definition.edges if edge.target in scope}
+        expanded = scope | incoming
+        if expanded == scope:
+            return scope
+        scope = expanded
+
+
+def _failed_rerun_items(
+    loop_result: WorkflowNodeExecution | None,
+    input_indices: list[int],
+) -> list[dict[str, JsonValue]]:
+    output = loop_result.output if loop_result is not None else None
+    items = output.get("items") if isinstance(output, dict) else None
+    if not isinstance(items, list) or len(input_indices) != len(set(input_indices)):
+        raise AppError(
+            code="RERUN_SOURCE_ITEMS_UNAVAILABLE",
+            message="原运行缺少可验证的冻结轮次报告",
+            status_code=409,
+        )
+    all_indices = [item.get("input_index") for item in items if isinstance(item, dict)]
+    if (
+        len(all_indices) != len(items)
+        or any(type(index) is not int for index in all_indices)
+        or len(set(cast(list[int], all_indices))) != len(items)
+    ):
+        raise AppError(
+            code="RERUN_SOURCE_ITEMS_UNAVAILABLE",
+            message="原运行的轮次索引不完整或重复",
+            status_code=409,
+        )
+    indexed = {
+        item["input_index"]: item
+        for item in items
+        if isinstance(item, dict)
+        and type(item.get("input_index")) is int
+        and item.get("test_verdict") == "failed"
+    }
+    if any(index not in indexed for index in input_indices):
+        raise AppError(
+            code="RERUN_INPUT_NOT_FAILED",
+            message="只能选择原报告中明确失败的 input_index",
+            status_code=409,
+        )
+    return [cast(dict[str, JsonValue], indexed[index]) for index in input_indices]
+
+
+def _rerun_reused_checkpoints(
+    history: list[ExecutionCheckpoint],
+    upstream_node_ids: set[str],
+    selected: list[dict[str, JsonValue]],
+    region: WorkflowRegion,
+    source_plan: WorkflowRunPlan,
+    *,
+    write_retry_strategy: str,
+    upstream_resource_status: str,
+    verification_note: str | None,
+) -> list[ExecutionCheckpoint]:
+    latest: dict[str, ExecutionCheckpoint] = {}
+    for row in history:
+        if row.node_id not in latest or row.attempt > latest[row.node_id].attempt:
+            latest[row.node_id] = row
+    safe_ids = retry_safe_request_nodes(source_plan.definition, source_plan.prepared.requests)
+    all_nodes = {node.id: node for node in source_plan.definition.all_nodes()}
+    region_nodes = {node.id: node for node in region.nodes}
+    reused: list[ExecutionCheckpoint] = []
+    for node_id in upstream_node_ids:
+        upstream_row = latest.get(node_id)
+        if upstream_row is None or upstream_row.status != "passed":
+            raise AppError(
+                code="RERUN_UPSTREAM_CHECKPOINT_UNAVAILABLE",
+                message="原运行的上游输出不完整, 不能安全复用",
+                status_code=409,
+            )
+        reused.append(upstream_row)
+    for item in selected:
+        reused.extend(
+            _rerun_item_checkpoints(item, latest, region_nodes, safe_ids, write_retry_strategy)
+        )
+    reused_writes = any(
+        _rerun_node_may_write(all_nodes[row.node_id], safe_ids)
+        for row in reused
+        if row.node_id in all_nodes
+    ) or any(
+        _rerun_node_may_write(region_nodes[node_id], safe_ids)
+        for item in selected
+        for node_id in _passed_item_node_ids(item)
+    )
+    if upstream_resource_status == "expired" or (
+        reused_writes and upstream_resource_status != "confirmed_valid"
+    ):
+        raise AppError(
+            code="RERUN_RESOURCE_VERIFICATION_REQUIRED",
+            message="复用写操作的输出前需确认外部资源仍有效",
+            status_code=409,
+        )
+    if (
+        write_retry_strategy == "verified_safe_to_retry"
+        or upstream_resource_status == "confirmed_valid"
+    ) and not verification_note:
+        raise AppError(
+            code="RERUN_VERIFICATION_NOTE_REQUIRED",
+            message="请记录外部状态查证说明",
+            status_code=422,
+        )
+    return reused
+
+
+def _passed_item_node_ids(item: dict[str, JsonValue]) -> set[str]:
+    summaries = item.get("nodes")
+    if not isinstance(summaries, list):
+        return set()
+    passed: set[str] = set()
+    for summary in summaries:
+        if isinstance(summary, dict) and summary.get("status") == "passed":
+            node_id = summary.get("node_id")
+            if isinstance(node_id, str):
+                passed.add(node_id)
+    return passed
+
+
+def _rerun_item_checkpoints(
+    item: dict[str, JsonValue],
+    latest: dict[str, ExecutionCheckpoint],
+    region_nodes: dict[str, WorkflowNode],
+    safe_ids: frozenset[str],
+    write_retry_strategy: str,
+) -> list[ExecutionCheckpoint]:
+    summaries = item.get("nodes")
+    if not isinstance(summaries, list) or not summaries:
+        raise AppError(
+            code="RERUN_INSTANCE_RECORD_UNAVAILABLE",
+            message="失败轮次缺少实例记录, 无法判断写操作是否已发生",
+            status_code=409,
+        )
+    reused: list[ExecutionCheckpoint] = []
+    for summary in summaries:
+        if not isinstance(summary, dict):
+            raise AppError(
+                code="RERUN_INSTANCE_RECORD_UNAVAILABLE", message="实例记录无效", status_code=409
+            )
+        node_id = summary.get("node_id")
+        instance_id = summary.get("instance_id")
+        if (
+            not isinstance(node_id, str)
+            or node_id not in region_nodes
+            or not isinstance(instance_id, str)
+        ):
+            raise AppError(
+                code="RERUN_INSTANCE_RECORD_UNAVAILABLE", message="实例记录不完整", status_code=409
+            )
+        instance_row = latest.get(instance_id)
+        if summary.get("status") == "passed":
+            if instance_row is None or instance_row.status != "passed":
+                raise AppError(
+                    code="RERUN_INSTANCE_CHECKPOINT_UNAVAILABLE",
+                    message="成功步骤缺少可复用 checkpoint, 不能避免重复发送",
+                    status_code=409,
+                )
+            reused.append(instance_row)
+        elif (
+            _rerun_node_may_write(region_nodes[node_id], safe_ids)
+            and write_retry_strategy != "verified_safe_to_retry"
+        ):
+            raise AppError(
+                code="RERUN_WRITE_VERIFICATION_REQUIRED",
+                message="失败步骤可能产生外部写入, 需先查证再明确选择重试策略",
+                status_code=409,
+            )
+    return reused
+
+
+def _rerun_node_may_write(node: WorkflowNode, safe_ids: frozenset[str]) -> bool:
+    if node.id in safe_ids:
+        return False
+    return node.effective_type in {
+        NodeType.API,
+        NodeType.SUBFLOW,
+        NodeType.FOR_EACH,
+        NodeType.CAPABILITY,
+    }
+
+
+def _copy_rerun_checkpoint(row: ExecutionCheckpoint, execution_id: UUID) -> ExecutionCheckpoint:
+    now = datetime.now(UTC)
+    return ExecutionCheckpoint(
+        id=uuid4(),
+        project_id=row.project_id,
+        execution_id=execution_id,
+        node_id=row.node_id,
+        node_type=row.node_type,
+        node_name=row.node_name,
+        phase=row.phase,
+        best_effort=row.best_effort,
+        attempt=row.attempt,
+        input_hash=row.input_hash,
+        status=row.status,
+        output_digest=row.output_digest,
+        output=row.output,
+        result=row.result,
+        extracted_variables=row.extracted_variables,
+        started_at=now,
+        finished_at=now,
+        snapshot_revision=row.snapshot_revision,
+        fencing_token=0,
+        lease_id=None,
+        runner_id=None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,6 +1045,115 @@ class WorkflowService:
         await self._persist_execution_plan(execution, plan)
         return execution, plan
 
+    async def prepare_failed_item_rerun(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        source_execution_id: UUID,
+        loop_node_id: str,
+        input_indices: list[int],
+        write_retry_strategy: str,
+        upstream_resource_status: str,
+        verification_note: str | None,
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        source = await self._get_execution(project_id, source_execution_id)
+        if source.status in {"queued", "running"} or source.parent_execution_id is not None:
+            raise AppError(
+                code="RERUN_SOURCE_NOT_TERMINAL",
+                message="只能从已结束的单次运行创建派生运行",
+                status_code=409,
+            )
+        if (
+            source.run_purpose != WorkflowRunPurpose.STANDARD.value
+            or source.derived_from_execution_id
+        ):
+            raise AppError(
+                code="RERUN_SOURCE_UNSUPPORTED",
+                message="当前仅支持从原始正式运行派生失败轮次",
+                status_code=409,
+            )
+        source_plan = await self.load_execution_plan(source.id)
+        if not isinstance(source_plan, WorkflowRunPlan):
+            raise AppError(
+                code="RERUN_SOURCE_UNSUPPORTED",
+                message="数据集批量运行暂不支持失败轮次派生",
+                status_code=409,
+            )
+        definition = source_plan.definition
+        scope = _rerun_main_scope(definition, loop_node_id)
+        loop_node = next(node for node in definition.nodes if node.id == loop_node_id)
+        config = parse_control_config(loop_node)
+        if not isinstance(config, ForEachControlConfig) or not isinstance(
+            config.body, InlineControlBody
+        ):
+            raise AppError(
+                code="RERUN_LOOP_UNSUPPORTED",
+                message="当前只能按原冻结集合重跑内联 ForEach 的失败轮次",
+                status_code=409,
+            )
+        region = next(region for region in definition.regions if region.id == config.body.region_id)
+        if any(
+            node.capability_id and node.capability_id.startswith("flow.control.")
+            for node in region.nodes
+        ):
+            raise AppError(
+                code="RERUN_NESTED_CONTROL_UNSUPPORTED",
+                message="嵌套控制块的失败项重跑仍需实例级来源校验",
+                status_code=409,
+            )
+        source_nodes = await self._workflows.list_node_executions(source.id)
+        loop_result = next((node for node in source_nodes if node.node_id == loop_node_id), None)
+        selected = _failed_rerun_items(loop_result, input_indices)
+        history = await DurableExecutionRepository(self._session).list_checkpoints(source.id)
+        reused = _rerun_reused_checkpoints(
+            history,
+            scope - {loop_node_id},
+            selected,
+            region,
+            source_plan,
+            write_retry_strategy=write_retry_strategy,
+            upstream_resource_status=upstream_resource_status,
+            verification_note=verification_note,
+        )
+        await self._ensure_execution_capacity(project_id)
+        if source.workflow_id is None or source.workflow_version_id is None:
+            raise AppError(
+                code="RERUN_SOURCE_UNSUPPORTED", message="来源缺少发布版本", status_code=409
+            )
+        workflow = await self._get_workflow(project_id, source.workflow_id)
+        version = await self._session.get(WorkflowVersion, source.workflow_version_id)
+        if version is None:
+            raise AppError(
+                code="WORKFLOW_VERSION_NOT_FOUND", message="工作流版本不存在", status_code=404
+            )
+        execution = self._execution_model(
+            actor=actor,
+            project_id=project_id,
+            workflow=workflow,
+            version=version,
+            environment_id=source.environment_id,
+            snapshot=source_plan.prepared.snapshot,
+        )
+        execution.derived_from_execution_id = source.id
+        execution.rerun_loop_node_id = loop_node_id
+        execution.rerun_input_indices = sorted(input_indices)
+        self._workflows.add(execution)
+        await self._session.flush()
+        for checkpoint in reused:
+            self._session.add(_copy_rerun_checkpoint(checkpoint, execution.id))
+        plan = replace(
+            source_plan,
+            execution_id=execution.id,
+            actor_id=actor.id,
+            selected_node_ids=frozenset(scope),
+            rerun_loop_node_id=loop_node_id,
+            rerun_input_indices=tuple(sorted(input_indices)),
+        )
+        await self._persist_execution_plan(execution, plan)
+        return execution, plan
+
     async def prepare_preview_execution(
         self,
         *,
@@ -1000,8 +1348,9 @@ class WorkflowService:
             plan.request_budget,
             tuple(checkpoint_to_node_record(item) for item in checkpoint_history),
         )
-        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
-            execution.id
+        reset_retry_budget = (
+            await DurableExecutionService(self._session).reset_retry_budget(execution.id)
+            or plan.rerun_loop_node_id is not None
         )
         checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
         resume_attempts = {
@@ -1013,6 +1362,8 @@ class WorkflowService:
             dataset_variables=plan.prepared.dataset_variables,
             runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
             retry_safe_node_ids=retry_safe_request_nodes(plan.definition, plan.prepared.requests),
+            rerun_loop_node_id=plan.rerun_loop_node_id,
+            rerun_input_indices=frozenset(plan.rerun_input_indices),
         )
         for checkpoint in checkpoints:
             context.restore_checkpoint(
@@ -1053,6 +1404,7 @@ class WorkflowService:
                         resume_attempts=resume_attempts,
                         reset_retry_budget=reset_retry_budget,
                         shared_request_budget=shared_request_budget,
+                        selected_node_ids=plan.selected_node_ids,
                     )
             finally:
                 await node_executor.close()
@@ -2323,6 +2675,7 @@ class WorkflowService:
         resume_attempts: dict[str, int] | None = None,
         reset_retry_budget: bool = False,
         shared_request_budget: RequestBudget | None = None,
+        selected_node_ids: frozenset[str] | None = None,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
@@ -2339,6 +2692,7 @@ class WorkflowService:
                 resume_attempts=resume_attempts,
                 reset_retry_budget=reset_retry_budget,
                 shared_request_budget=shared_request_budget,
+                selected_node_ids=selected_node_ids,
             )
         )
         try:

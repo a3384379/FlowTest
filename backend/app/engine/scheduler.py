@@ -175,6 +175,8 @@ class ExecutionContext:
     reset_retry_budget: bool = field(default=False, repr=False)
     cancellation: "CancellationToken | None" = field(default=None, repr=False)
     allow_return: bool = False
+    rerun_loop_node_id: str | None = field(default=None, repr=False)
+    rerun_input_indices: frozenset[int] = field(default_factory=frozenset, repr=False)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")

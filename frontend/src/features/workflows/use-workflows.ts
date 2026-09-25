@@ -51,6 +51,8 @@ import {
   listWorkflows,
   publishWorkflow,
   replayWorkflowNode,
+  rerunFailedWorkflowItems,
+  type FailedItemRerunRequest,
   updateWorkflowDraft,
 } from './workflow-service'
 
@@ -328,6 +330,10 @@ export function useWorkflows(initialWorkflowId?: string) {
         nodeId,
       ),
   })
+  const rerunFailedItemsMutation = useMutation({
+    mutationFn: (input: { executionId: string; payload: FailedItemRerunRequest }) =>
+      rerunFailedWorkflowItems(requiredId(projectId), input.executionId, input.payload),
+  })
 
   useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
 
@@ -500,6 +506,21 @@ export function useWorkflows(initialWorkflowId?: string) {
       setDebugResult(await replayMutation.mutateAsync(nodeId))
       void message.success('节点重放完成')
     })
+  }
+
+  async function rerunFailedItems(executionId: string, payload: FailedItemRerunRequest) {
+    const execution = await rerunFailedItemsMutation.mutateAsync({ executionId, payload })
+    const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
+    setLastResult(null)
+    setActiveExecution(execution)
+    setExecutionDefinition(runningDefinition)
+    setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
+    completedExecutionId.current = null
+    setActiveExecutionId(execution.id)
+    setWorkspaceMode('run')
+    setHistoryExecutionId(null)
+    void watchExecution(execution.id)
+    void message.info('失败项派生运行已开始，原运行报告保留')
   }
 
   function handleExecutionEvent(event: ExecutionEvent) {
@@ -743,6 +764,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     debugToBreakpoint,
     compareLatestVersions,
     replayNode,
+    rerunFailedItems,
     creating: createMutation.isPending,
     deleting: deleteMutation.isPending,
     saving: saveMutation.isPending,
@@ -751,6 +773,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     debugging: debugMutation.isPending,
     comparing: diffMutation.isPending,
     replaying: replayMutation.isPending,
+    rerunningFailedItems: rerunFailedItemsMutation.isPending,
   }
 }
 

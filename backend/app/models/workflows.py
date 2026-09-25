@@ -84,6 +84,13 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="workflow_execution_dataset_child",
         ),
         CheckConstraint(
+            "(derived_from_execution_id IS NULL AND rerun_loop_node_id IS NULL "
+            "AND rerun_input_indices IS NULL) OR "
+            "(derived_from_execution_id IS NOT NULL AND rerun_loop_node_id IS NOT NULL "
+            "AND rerun_input_indices IS NOT NULL AND parent_execution_id IS NULL)",
+            name="workflow_execution_derived_run",
+        ),
+        CheckConstraint(
             "redaction_mode IN ('off', 'on')",
             name="redaction_mode",
         ),
@@ -119,6 +126,11 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("workflow_executions.id", ondelete="CASCADE"), index=True
     )
     dataset_row_index: Mapped[int | None] = mapped_column(Integer)
+    derived_from_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="RESTRICT"), index=True
+    )
+    rerun_loop_node_id: Mapped[str | None] = mapped_column(String(128))
+    rerun_input_indices: Mapped[list[int] | None] = mapped_column(JSON)
     run_purpose: Mapped[str] = mapped_column(
         String(16), default="standard", server_default="standard", index=True
     )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -109,6 +109,29 @@ class WorkflowDebugRequest(WorkflowExecuteRequest):
     breakpoint_node_id: str = Field(min_length=1, max_length=128)
 
 
+class WorkflowFailedItemRerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    loop_node_id: str = Field(min_length=1, max_length=128)
+    input_indices: list[int] = Field(min_length=1, max_length=1000)
+    write_retry_strategy: Literal["reject", "verified_safe_to_retry"] = "reject"
+    upstream_resource_status: Literal["unverified", "confirmed_valid", "expired"] = "unverified"
+    verification_note: str | None = Field(default=None, min_length=8, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "WorkflowFailedItemRerunRequest":
+        if any(index < 0 for index in self.input_indices):
+            raise ValueError("轮次索引不能小于零")
+        if len(set(self.input_indices)) != len(self.input_indices):
+            raise ValueError("轮次索引不能重复")
+        if (
+            self.write_retry_strategy == "verified_safe_to_retry"
+            or self.upstream_resource_status == "confirmed_valid"
+        ) and self.verification_note is None:
+            raise ValueError("确认外部状态时必须填写查证说明")
+        return self
+
+
 class WorkflowExecutionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -122,6 +145,9 @@ class WorkflowExecutionResponse(BaseModel):
     triggered_by_id: UUID
     parent_execution_id: UUID | None
     dataset_row_index: int | None
+    derived_from_execution_id: UUID | None = None
+    rerun_loop_node_id: str | None = None
+    rerun_input_indices: list[int] | None = None
     run_purpose: WorkflowRunPurpose
     source_change_set_id: UUID | None
     preview_approval_id: UUID | None

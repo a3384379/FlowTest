@@ -1,7 +1,7 @@
 import { useAuthStore } from '../features/auth/auth-store'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -168,6 +168,117 @@ describe('WorkflowsPage', () => {
     expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
     expect(screen.queryByRole('button', { name: /保存草稿/ })).not.toBeInTheDocument()
+  })
+
+  it('starts a derived run for selected failed input indices after resource verification', async () => {
+    const source = workflowExecutionDetail.execution
+    let submitted: unknown
+    let attempts = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflow-executions/${source.id}`, () =>
+        HttpResponse.json({
+          ...workflowExecutionDetail,
+          execution: {
+            ...source,
+            snapshot: { workflow: { version: 2, definition: workflowDefinition } },
+          },
+          nodes: [
+            ...workflowExecutionDetail.nodes,
+            {
+              id: '00000000-0000-4000-8000-000000000079',
+              node_id: 'loop',
+              node_type: 'capability',
+              name: '集合遍历',
+              phase: 'main',
+              status: 'passed',
+              attempts: 1,
+              output: {
+                input_count: 3,
+                failed_count: 2,
+                items: [
+                  { input_index: 0, test_verdict: 'failed', nodes: [] },
+                  { input_index: 1, test_verdict: 'failed', nodes: [] },
+                  { input_index: 2, test_verdict: 'passed', nodes: [] },
+                ],
+              },
+              error_code: null,
+              error_message: null,
+            },
+          ],
+        }),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/workflow-executions/${source.id}/failed-items/rerun`,
+        async ({ request }) => {
+          submitted = await request.json()
+          attempts += 1
+          if (attempts === 1) {
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'RERUN_NESTED_CONTROL_UNSUPPORTED',
+                  message: '嵌套控制块的失败项重跑仍需实例级来源校验',
+                  details: null,
+                  trace_id: 'rerun-e2e',
+                },
+              },
+              { status: 409 },
+            )
+          }
+          return HttpResponse.json(
+            {
+              ...workflowRunningExecution,
+              derived_from_execution_id: source.id,
+              rerun_loop_node_id: 'loop',
+              rerun_input_indices: [1],
+            },
+            { status: 202 },
+          )
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findAllByText(workflow.name)
+    await browser.click(screen.getByRole('button', { name: '打开执行历史' }))
+    await browser.click(screen.getByTestId('workflow-runtime-tab-history'))
+    await browser.click(screen.getByTestId(`workflow-history-${source.id}`))
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    await browser.click(screen.getByTestId('workflow-runtime-tab-run'))
+    await browser.click(await screen.findByRole('button', { name: /派生重跑失败项/ }))
+    const dialog = screen.getByRole('dialog', { name: '派生重跑失败项' })
+    expect(within(dialog).getByText(/原报告保留/)).toBeInTheDocument()
+    await browser.click(within(dialog).getByRole('combobox', { name: '选择失败轮次' }))
+    await browser.click(screen.getByText('第 2 项（input_index 1）'))
+    await browser.click(within(dialog).getByRole('combobox', { name: '上游资源状态' }))
+    await browser.click(screen.getByText('已确认资源仍有效'))
+    await browser.type(
+      within(dialog).getByRole('textbox', { name: '外部状态查证说明' }),
+      '已核对外部资源状态，当前仍有效',
+    )
+    const createRun = within(dialog).getByRole('button', { name: '创建派生运行' })
+    expect(createRun).toBeEnabled()
+    await browser.click(createRun)
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', { name: '派生重跑失败项' })).getByText(
+          '嵌套控制块的失败项重跑仍需实例级来源校验',
+        ),
+      ).toBeInTheDocument(),
+    )
+    const retryDialog = screen.getByRole('dialog', { name: '派生重跑失败项' })
+    expect(within(retryDialog).getByText('第 2 项（input_index 1）')).toBeInTheDocument()
+    await browser.click(within(retryDialog).getByRole('button', { name: '创建派生运行' }))
+    await waitFor(() =>
+      expect(submitted).toEqual({
+        loop_node_id: 'loop',
+        input_indices: [1],
+        upstream_resource_status: 'confirmed_valid',
+        write_retry_strategy: 'reject',
+        verification_note: '已核对外部资源状态，当前仍有效',
+      }),
+    )
+    expect(attempts).toBe(2)
   })
 
   it('compares the latest two immutable workflow versions', async () => {

@@ -49,7 +49,12 @@ import { useWorkflows } from '../features/workflows/use-workflows'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
-import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
+import {
+  apiErrorMessage,
+  type Workflow,
+  type WorkflowExecution,
+  type WorkflowNodeExecution,
+} from '../lib/api'
 
 export default function WorkflowsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -471,17 +476,180 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
       {state.runtimeChildren.length ? (
         <DatasetRunSummary items={state.runtimeChildren} />
       ) : (
-        <NodeTable
-          nodes={state.runtimeNodes}
-          replaying={state.replaying}
-          onReplay={
-            state.workspaceMode === 'run' && state.lastResult
-              ? (nodeId) => void state.replayNode(nodeId)
-              : undefined
-          }
-        />
+        <>
+          <NodeTable
+            nodes={state.runtimeNodes}
+            replaying={state.replaying}
+            onReplay={
+              state.workspaceMode === 'run' && state.lastResult
+                ? (nodeId) => void state.replayNode(nodeId)
+                : undefined
+            }
+          />
+          <FailedItemRerunAction state={state} />
+        </>
       )}
     </div>
+  )
+}
+
+type FailedLoopOption = { nodeId: string; name: string; indices: number[] }
+
+function canOfferFailedItemRerun(
+  state: WorkflowState,
+  source: WorkflowExecution | null,
+  loops: FailedLoopOption[],
+): source is WorkflowExecution {
+  return Boolean(
+    source &&
+    !source.derived_from_execution_id &&
+    source.run_purpose !== 'preview' &&
+    state.canEdit &&
+    loops.length > 0 &&
+    source.status !== 'queued' &&
+    source.status !== 'running',
+  )
+}
+
+function rerunSubmitDisabled(
+  loopNodeId: string | null,
+  indices: number[],
+  resourceStatus: string,
+  writeStrategy: string,
+  note: string,
+): boolean {
+  const requiresNote =
+    resourceStatus === 'confirmed_valid' || writeStrategy === 'verified_safe_to_retry'
+  return (
+    !loopNodeId ||
+    !indices.length ||
+    resourceStatus === 'expired' ||
+    (requiresNote && note.trim().length < 8)
+  )
+}
+
+function failedLoopOptions(nodes: WorkflowNodeExecution[]): FailedLoopOption[] {
+  return nodes.flatMap((node) => {
+    const output = node.output
+    if (!isRecord(output) || !Array.isArray(output.items)) return []
+    const indices = output.items.flatMap((item: unknown) =>
+      isRecord(item) && item.test_verdict === 'failed' && typeof item.input_index === 'number'
+        ? [item.input_index]
+        : [],
+    )
+    return indices.length ? [{ nodeId: node.node_id, name: node.name, indices }] : []
+  })
+}
+
+function FailedItemRerunAction({ state }: { state: WorkflowState }) {
+  const loops = failedLoopOptions(state.runtimeNodes)
+  const [open, setOpen] = useState(false)
+  const [loopNodeId, setLoopNodeId] = useState<string | null>(null)
+  const [indices, setIndices] = useState<number[]>([])
+  const [resourceStatus, setResourceStatus] = useState<
+    'unverified' | 'confirmed_valid' | 'expired'
+  >('unverified')
+  const [writeStrategy, setWriteStrategy] = useState<'reject' | 'verified_safe_to_retry'>('reject')
+  const [note, setNote] = useState('')
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const source = state.runtimeExecution
+  const selectedLoop = loops.find((loop) => loop.nodeId === loopNodeId)
+  if (!canOfferFailedItemRerun(state, source, loops)) return null
+  return (
+    <>
+      <Button
+        icon={<RedoOutlined />}
+        onClick={() => {
+          setLoopNodeId(loops[0].nodeId)
+          setIndices([])
+          setResourceStatus('unverified')
+          setWriteStrategy('reject')
+          setNote('')
+          setSubmitError(null)
+          setOpen(true)
+        }}
+      >
+        派生重跑失败项
+      </Button>
+      <Modal
+        title="派生重跑失败项"
+        open={open}
+        okText="创建派生运行"
+        okButtonProps={{
+          disabled: rerunSubmitDisabled(loopNodeId, indices, resourceStatus, writeStrategy, note),
+          loading: state.rerunningFailedItems,
+        }}
+        onCancel={() => setOpen(false)}
+        onOk={async () => {
+          setSubmitError(null)
+          try {
+            await state.rerunFailedItems(source.id, {
+              loop_node_id: loopNodeId ?? '',
+              input_indices: indices,
+              upstream_resource_status: resourceStatus,
+              write_retry_strategy: writeStrategy,
+              ...(note.trim() ? { verification_note: note.trim() } : {}),
+            })
+            setOpen(false)
+          } catch (error) {
+            setSubmitError(apiErrorMessage(error))
+          }
+        }}
+      >
+        <Space orientation="vertical" className="workflow-more-content">
+          {submitError && <Alert type="error" showIcon title={submitError} />}
+          <Alert
+            type="info"
+            showIcon
+            title="原报告保留，使用原冻结输入和已成功步骤的输出。请先确认外部资源状态。"
+          />
+          <Select
+            aria-label="选择失败循环"
+            value={loopNodeId}
+            options={loops.map((loop) => ({ value: loop.nodeId, label: loop.name }))}
+            onChange={(value) => {
+              setLoopNodeId(value)
+              setIndices([])
+            }}
+          />
+          <Select
+            mode="multiple"
+            aria-label="选择失败轮次"
+            value={indices}
+            options={selectedLoop?.indices.map((index) => ({
+              value: index,
+              label: `第 ${index + 1} 项（input_index ${index}）`,
+            }))}
+            onChange={setIndices}
+          />
+          <Select
+            aria-label="上游资源状态"
+            value={resourceStatus}
+            options={[
+              { value: 'unverified', label: '尚未查证' },
+              { value: 'confirmed_valid', label: '已确认资源仍有效' },
+              { value: 'expired', label: '资源已过期，暂停重跑' },
+            ]}
+            onChange={setResourceStatus}
+          />
+          <Select
+            aria-label="失败写操作策略"
+            value={writeStrategy}
+            options={[
+              { value: 'reject', label: '不重试失败写操作' },
+              { value: 'verified_safe_to_retry', label: '查证后允许重试失败写操作' },
+            ]}
+            onChange={setWriteStrategy}
+          />
+          <Input.TextArea
+            aria-label="外部状态查证说明"
+            placeholder="如确认了资源有效或写操作可安全重试，请写明查证依据（至少 8 字）"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </Space>
+      </Modal>
+    </>
   )
 }
 

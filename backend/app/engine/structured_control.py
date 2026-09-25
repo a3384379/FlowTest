@@ -640,6 +640,8 @@ class StructuredControlRunner:
             nested_checkpoint_records=parent.nested_checkpoint_records,
             cancellation=parent.cancellation,
             allow_return=parent.allow_return,
+            rerun_loop_node_id=parent.rerun_loop_node_id,
+            rerun_input_indices=parent.rerun_input_indices,
         )
 
     def _selector_context(
@@ -803,15 +805,30 @@ class StructuredControlRunner:
         region: WorkflowRegion,
         parent: ExecutionContext,
     ) -> NodeResult:
+        selected_indices = (
+            tuple(sorted(parent.rerun_input_indices))
+            if parent.rerun_loop_node_id == node.id and not parent.checkpoint_scope
+            else tuple(range(len(items)))
+        )
+        if any(index >= len(items) or index < 0 for index in selected_indices):
+            raise NodeExecutionError(
+                code="RERUN_INPUT_INDEX_INVALID", message="派生运行的冻结输入索引已失效"
+            )
+        if not selected_indices and parent.rerun_loop_node_id == node.id:
+            raise NodeExecutionError(
+                code="RERUN_INPUT_INDEX_INVALID", message="派生运行未选择失败轮次"
+            )
         if config.policy.concurrency > 1:
-            return await self._run_parallel_loop(node, config, items, region, parent)
+            return await self._run_parallel_loop(
+                node, config, items, region, parent, selected_indices
+            )
         iterations: list[dict[str, JsonValue]] = []
         token = parent.cancellation or CancellationToken()
-        for index, item in enumerate(items):
+        for index in selected_indices:
             if token.cancelled:
                 break
             summary, result = await self._run_iteration(
-                node, config, items, region, parent, token, index, item, isolate=False
+                node, config, items, region, parent, token, index, items[index], isolate=False
             )
             iterations.append(summary)
             if _has_unknown_nested_outcome(parent, parent.checkpoint_phase or node.phase):
@@ -828,12 +845,13 @@ class StructuredControlRunner:
                 result.control_signal
                 if iterations and result.control_signal in {"break", "return"}
                 else "failed"
-                if failed and len(iterations) < len(items)
+                if failed and len(iterations) < len(selected_indices)
                 else "completed"
             )
         )
         output: dict[str, JsonValue] = {
             "input_count": len(items),
+            "selected_count": len(selected_indices),
             "started_count": len(iterations),
             "completed_count": len(iterations),
             "passed_count": len(iterations) - failed,
@@ -928,6 +946,7 @@ class StructuredControlRunner:
         items: list[JsonValue],
         region: WorkflowRegion,
         parent: ExecutionContext,
+        selected_indices: tuple[int, ...],
     ) -> NodeResult:
         root_token = parent.cancellation or CancellationToken()
         active: dict[asyncio.Task[dict[str, JsonValue]], CancellationToken] = {}
@@ -935,7 +954,7 @@ class StructuredControlRunner:
         next_index = 0
         stopped = False
         try:
-            while next_index < len(items) or active:
+            while next_index < len(selected_indices) or active:
                 next_index = self._start_parallel_iterations(
                     node,
                     config,
@@ -945,6 +964,7 @@ class StructuredControlRunner:
                     root_token,
                     active,
                     next_index,
+                    selected_indices,
                     stopped=stopped,
                 )
                 if not active:
@@ -969,6 +989,7 @@ class StructuredControlRunner:
         failed = sum(item["status"] == "failed" for item in iterations)
         output: dict[str, JsonValue] = {
             "input_count": len(items),
+            "selected_count": len(selected_indices),
             "started_count": len(iterations),
             "completed_count": len(iterations),
             "passed_count": len(iterations) - failed,
@@ -999,6 +1020,7 @@ class StructuredControlRunner:
         root_token: CancellationToken,
         active: dict[asyncio.Task[dict[str, JsonValue]], CancellationToken],
         next_index: int,
+        selected_indices: tuple[int, ...],
         *,
         stopped: bool,
     ) -> int:
@@ -1006,7 +1028,7 @@ class StructuredControlRunner:
             not stopped
             and not root_token.cancelled
             and not _has_unknown_nested_outcome(parent, parent.checkpoint_phase or node.phase)
-            and next_index < len(items)
+            and next_index < len(selected_indices)
             and len(active) < config.policy.concurrency
         ):
             token = CancellationToken(root_token)
@@ -1018,7 +1040,7 @@ class StructuredControlRunner:
                     region,
                     parent,
                     token,
-                    next_index,
+                    selected_indices[next_index],
                 )
             )
             active[task] = token
