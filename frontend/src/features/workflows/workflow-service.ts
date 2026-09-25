@@ -16,6 +16,7 @@ import {
   type WorkflowVersion,
   type WorkflowVersionDiff,
 } from '../../lib/api'
+import { buildWorkflowTemplate, type WorkflowTemplateKind } from './workflow-templates'
 
 export async function listProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
@@ -67,12 +68,21 @@ export async function getWorkflow(projectId: string, workflowId: string): Promis
 
 export async function createWorkflow(
   projectId: string,
-  input: { name: string; description: string; apiId: string; apiVersion?: number },
+  input: {
+    name: string
+    description: string
+    apiId: string
+    apiVersion?: number
+    template?: WorkflowTemplateKind
+  },
 ): Promise<Workflow> {
   const response = await apiClient.post<Workflow>(`/projects/${projectId}/workflows`, {
     name: input.name,
     description: input.description,
-    definition: linearWorkflow(input.apiId, input.apiVersion),
+    definition: buildWorkflowTemplate(
+      linearWorkflow(input.apiId, input.apiVersion),
+      input.template,
+    ),
   })
   return response.data
 }

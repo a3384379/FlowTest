@@ -2,6 +2,7 @@ import { Form, Input, Modal, Select } from 'antd'
 
 import type { ApiDefinition } from '../../lib/api'
 import type { CreateWorkflowInput } from './use-workflows'
+import { WORKFLOW_TEMPLATES } from './workflow-templates'
 
 type Props = {
   open: boolean
@@ -30,6 +31,14 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
         </Form.Item>
         <Form.Item name="description" label="说明" initialValue="">
           <Input.TextArea maxLength={4000} rows={2} />
+        </Form.Item>
+        <Form.Item name="template" label="起始模板" initialValue="linear">
+          <Select
+            options={WORKFLOW_TEMPLATES.map(({ value, label, help }) => ({
+              value,
+              label: `${label} · ${help}`,
+            }))}
+          />
         </Form.Item>
         <Form.Item
           name="apiId"

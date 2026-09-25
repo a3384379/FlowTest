@@ -27,6 +27,7 @@ import {
   listGrpcDescriptors,
 } from '../protocols/protocol-service'
 import { useExecutionEvents } from './use-execution-events'
+import type { WorkflowTemplateKind } from './workflow-templates'
 import {
   clearWorkflowDrafts,
   readWorkflowDraft,
@@ -56,7 +57,12 @@ import {
   updateWorkflowDraft,
 } from './workflow-service'
 
-export type CreateWorkflowInput = { name: string; description: string; apiId: string }
+export type CreateWorkflowInput = {
+  name: string
+  description: string
+  apiId: string
+  template?: WorkflowTemplateKind
+}
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
 export type WorkflowDraftEdit = {
   workflowId: string
