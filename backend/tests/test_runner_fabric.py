@@ -68,7 +68,7 @@ from app.services.durable_execution import (
     checkpoint_to_runner_resume,
 )
 from app.services.execution_events import InProcessExecutionEventBus
-from app.services.outbound_limits import OutboundPermitDecision
+from app.services.outbound_limits import OutboundLimitPolicy, OutboundPermitDecision
 from app.services.runner_fabric import RunnerFabricService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_plan_codec import encode_execution_plan
@@ -832,10 +832,12 @@ async def test_runner_outbound_permits_require_current_lease_and_fencing(
 
     class RecordingLimiter:
         async def acquire(
-            self, *, policy: object, timeout_seconds: float, owner: str
+            self, *, policy: OutboundLimitPolicy, timeout_seconds: float, owner: str
         ) -> OutboundPermitDecision:
             assert timeout_seconds == 5
             assert owner == str(lease.lease_id)
+            assert policy.concurrency_limit == 1
+            assert policy.requests_per_minute is None
             permit_id = uuid4()
             permits.append(("acquire", permit_id))
             return OutboundPermitDecision(True, permit_id, 0)
@@ -861,6 +863,8 @@ async def test_runner_outbound_permits_require_current_lease_and_fencing(
         await service.enqueue(plan)
         lease = await service.claim(runner_token=token)
         assert lease is not None
+        project.outbound_concurrency_limit = 5
+        await session.commit()
 
         granted = await service.acquire_outbound_permit(
             runner_token=token,
@@ -1132,7 +1136,11 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
         "ftrun_runner-client-token-that-is-long-enough"
     )
     assert all(request.headers["authorization"].startswith("Bearer ftr") for request in calls)
-    assert [request.url.path.rsplit("/", 1)[-1] for request in calls if "outbound-permits" in request.url.path] == [
+    assert [
+        request.url.path.rsplit("/", 1)[-1]
+        for request in calls
+        if "outbound-permits" in request.url.path
+    ] == [
         "acquire",
         "release",
     ]

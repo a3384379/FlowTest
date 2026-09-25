@@ -1,6 +1,7 @@
 import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime
+from uuid import UUID
 
 import httpx
 import pytest
@@ -33,6 +34,7 @@ from app.engine.structured_control import (
 )
 from app.services.api_assets import PreparedRequest
 from app.services.workflow_runtime import (
+    PreparedSubflow,
     PreparedWorkflowRequest,
     WorkflowNodeExecutor,
     _apply_control_templates,
@@ -817,6 +819,108 @@ async def test_parallel_http_leaf_limit_and_cookie_isolation(root_concurrency: i
     assert result.status == "passed"
     assert peak == root_concurrency, events
     assert cookies == {"a": "session=a", "b": "session=b"}
+
+
+@pytest.mark.asyncio
+async def test_parallel_branches_call_subflows_without_holding_leaf_permits() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000321")
+    payload = _branch_definition(
+        "flow.control.parallel",
+        {
+            "branches": [
+                {"id": name, "label": name, "body": {"kind": "inline", "region_id": name}}
+                for name in ("a", "b")
+            ],
+            "policy": {"concurrency": 2, "timeout_seconds": 30},
+        },
+        [(f"branch:{name}", name) for name in ("a", "b")],
+    )
+    payload["settings"] = {"concurrency": 1}
+    for region in payload["regions"]:
+        name = region["id"]
+        region["nodes"] = [
+            {
+                "id": f"{name}_subflow",
+                "type": "subflow",
+                "name": f"{name}_subflow",
+                "position": {"x": 0, "y": 0},
+                "config": {"workflow_id": str(workflow_id), "workflow_version": 1},
+            }
+        ]
+        region["entry_node_id"] = f"{name}_subflow"
+        region["exit_node_ids"] = [f"{name}_subflow"]
+    definition = WorkflowDefinition.model_validate(payload)
+    api_config = {"api_definition_id": "00000000-0000-0000-0000-000000000001"}
+    child = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+                *[
+                    {
+                        "id": name,
+                        "type": "api",
+                        "name": name,
+                        "position": {"x": 0, "y": 0},
+                        "config": api_config,
+                    }
+                    for name in ("first", "second")
+                ],
+                {"id": "end", "type": "end", "name": "结束", "position": {"x": 0, "y": 0}},
+            ],
+            "edges": [
+                {"id": "s-f", "source": "start", "target": "first"},
+                {"id": "s-s", "source": "start", "target": "second"},
+                {"id": "f-e", "source": "first", "target": "end"},
+                {"id": "s-e", "source": "second", "target": "end"},
+            ],
+        }
+    )
+    request = PreparedRequest(HttpMethod.GET, "https://example.test/read", (), None, ())
+    prepared_request = PreparedWorkflowRequest(request, request, BodyKind.NONE, None)
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="e" * 64,
+        definition=child,
+        requests={"first": prepared_request, "second": prepared_request},
+        subflows={},
+        snapshot={},
+    )
+    active = 0
+    peak = 0
+    sent = 0
+
+    async def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal active, peak, sent
+        active += 1
+        sent += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.005)
+            return httpx.Response(200, json={"ok": True})
+        finally:
+            active -= 1
+
+    class AllowOutbound:
+        async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
+            return None
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            definition,
+            OutboundNetworkPolicy(),
+            subflows={f"{name}_subflow": prepared for name in ("a", "b")},
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+            branch_client_factory=lambda: httpx.AsyncClient(transport=transport),
+        )
+        result = await asyncio.wait_for(WorkflowScheduler(executor).run(definition), timeout=2)
+    assert result.status == "passed", result.records
+    assert sent == 4
+    assert peak == 1
 
 
 @pytest.mark.asyncio

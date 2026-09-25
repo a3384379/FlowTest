@@ -511,6 +511,9 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
             standalone_schema.text("CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY)")
         )
         await connection.execute(
+            standalone_schema.text("CREATE TABLE runner_leases (id VARCHAR(36) PRIMARY KEY)")
+        )
+        await connection.execute(
             standalone_schema.text(
                 "CREATE TABLE flowtest_standalone_meta "
                 "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
@@ -532,6 +535,9 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
         )
         await standalone_schema._ensure_incremental_columns(connection)
         columns = await connection.execute(standalone_schema.text("PRAGMA table_info(projects)"))
+        lease_columns = await connection.execute(
+            standalone_schema.text("PRAGMA table_info(runner_leases)")
+        )
         version = await connection.scalar(
             standalone_schema.text("SELECT version_num FROM alembic_version")
         )
@@ -542,6 +548,9 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
         "outbound_concurrency_limit",
         "outbound_requests_per_minute",
     } <= {str(row[1]) for row in columns.fetchall()}
+    assert {"outbound_concurrency_limit", "outbound_requests_per_minute"} <= {
+        str(row[1]) for row in lease_columns.fetchall()
+    }
     assert version == standalone_schema.BASELINE_REVISION
 
 

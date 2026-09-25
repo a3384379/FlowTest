@@ -51,7 +51,7 @@ from app.services.durable_execution import (
     checkpoint_to_runner_resume,
 )
 from app.services.organization_governance import OrganizationQuotaService
-from app.services.outbound_limits import project_outbound_limiter
+from app.services.outbound_limits import OutboundLimitPolicy, project_outbound_limiter
 from app.services.projects import ProjectService
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
@@ -381,6 +381,8 @@ class RunnerFabricService:
             task.project_id
         )
         lease = self._acquire(task=task, runner=runner, pool=pool, now=now)
+        lease.outbound_concurrency_limit = outbound_policy.concurrency_limit
+        lease.outbound_requests_per_minute = outbound_policy.requests_per_minute
         await self._repository.set_execution_family_status(task.execution_id, "running")
         await self._session.flush()
         task.last_lease_id = lease.id
@@ -431,13 +433,16 @@ class RunnerFabricService:
         fencing_token: int,
         timeout_seconds: float,
     ) -> RunnerAcquirePermitResponse:
-        _runner, _lease, task = await self._active_lease(
+        _runner, lease, task = await self._active_lease(
             runner_token=runner_token,
             lease_id=lease_id,
             fencing_token=fencing_token,
             now=datetime.now(UTC),
         )
-        policy = await ProjectService(self._session).load_runtime_outbound_policy(task.project_id)
+        policy = OutboundLimitPolicy(
+            concurrency_limit=lease.outbound_concurrency_limit,
+            requests_per_minute=lease.outbound_requests_per_minute,
+        )
         async with project_outbound_limiter(task.project_id) as limiter:
             decision = await limiter.acquire(
                 policy=policy,

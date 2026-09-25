@@ -73,6 +73,18 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_outbound_limit_tables(connection)
     await _add_column_if_missing(
         connection,
+        table="runner_leases",
+        column="outbound_concurrency_limit",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="runner_leases",
+        column="outbound_requests_per_minute",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
         table="projects",
         column="outbound_concurrency_limit",
         definition="INTEGER",
