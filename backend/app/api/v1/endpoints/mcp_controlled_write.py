@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request, status
 
 from app.api.dependencies import CurrentUser, MCPWriteCurrent, SessionDependency
 from app.domain.mcp_read import MCPCallType, MCPReadCall, input_schema_hash
+from app.schemas.mcp_control_blocks import MCPControlBlockPreviewResponse
 from app.schemas.mcp_controlled_write import MCPControlledWriteResponse
 from app.schemas.test_design import (
     MCPControlledWriteCreate,
@@ -49,6 +50,21 @@ async def get_change_set(
     current_user: CurrentUser,
 ) -> MCPControlledWriteEnvelope:
     return await MCPControlledWriteService(session).get_for_user(
+        actor=current_user, change_set_id=change_set_id
+    )
+
+
+@router.get(
+    "/change-sets/{change_set_id}/control-block-preview",
+    response_model=MCPControlBlockPreviewResponse,
+    response_model_exclude_none=True,
+)
+async def preview_control_block_change(
+    change_set_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> MCPControlBlockPreviewResponse:
+    return await MCPControlledWriteService(session).control_block_preview(
         actor=current_user, change_set_id=change_set_id
     )
 

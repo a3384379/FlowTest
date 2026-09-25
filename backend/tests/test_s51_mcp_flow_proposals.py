@@ -1477,6 +1477,11 @@ async def test_mcp_control_block_proposal_waits_for_human_review(
         json={},
     )
     assert machine_review.status_code == 401
+    machine_preview = await s51_context["client"].get(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/control-block-preview",
+        headers=s51_context["mcp_headers"],
+    )
+    assert machine_preview.status_code == 401
     assert proposal["review_url"] == (
         f"/projects/{s51_context['project_id']}/mcp-changes?focus={proposal['proposal_id']}"
     )
@@ -1488,6 +1493,34 @@ async def test_mcp_control_block_proposal_waits_for_human_review(
     assert review.json()["data"]["items"][0]["review_status"] == "pending"
     assert review.json()["data"]["workflow_id"] == str(s51_context["workflow_id"])
     assert review.json()["data"]["base_revision"] == 1
+    preview = await s51_context["client"].get(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/control-block-preview",
+        headers=s51_context["user_headers"],
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["base_revision"] == 1
+    assert [node["id"] for node in preview.json()["existing_definition"]["nodes"]] == [
+        "start",
+        "health",
+        "end",
+    ]
+    assert [node["id"] for node in preview.json()["proposed_definition"]["nodes"]] == [
+        "start",
+        "health",
+        "end",
+        "group",
+    ]
+    assert (
+        sha256(
+            json.dumps(
+                preview.json()["proposed_definition"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        == proposal["proposed_fingerprint"]
+    )
     accepted = await s51_context["client"].post(
         f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/items/"
         f"{proposal['item_id']}/accept",
@@ -1534,6 +1567,12 @@ async def test_mcp_control_block_proposal_rejects_stale_review(
         json={"expected_revision": 1, "description": "人工并发修改"},
     )
     assert updated.status_code == 200, updated.text
+    stale_preview = await s51_context["client"].get(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/control-block-preview",
+        headers=s51_context["user_headers"],
+    )
+    assert stale_preview.status_code == 409
+    assert stale_preview.json()["error"]["code"] == "WORKFLOW_DRAFT_CONFLICT"
     stale = await s51_context["client"].post(
         f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/items/"
         f"{proposal['item_id']}/accept",

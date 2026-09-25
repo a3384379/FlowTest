@@ -9,6 +9,7 @@ import {
   reviewMCPChangeItem,
   type MCPChangeItem,
 } from '../features/mcp/mcp-change-set-service'
+import ControlBlockGraphPreview from '../features/mcp/ControlBlockGraphPreview'
 import { apiErrorMessage } from '../lib/api'
 
 export default function MCPChangeSetsPage() {
@@ -146,6 +147,7 @@ export default function MCPChangeSetsPage() {
               >
                 {item.item_type === 'workflow' ? (
                   <ControlBlockReviewSummary
+                    changeSetId={data.id}
                     item={item}
                     workflowId={data.workflow_id ?? item.target_resource_id ?? null}
                     baseRevision={data.base_revision ?? null}
@@ -163,11 +165,13 @@ export default function MCPChangeSetsPage() {
 }
 
 function ControlBlockReviewSummary({
+  changeSetId,
   item,
   workflowId,
   baseRevision,
   projectId,
 }: {
+  changeSetId: string
   item: MCPChangeItem
   workflowId: string | null
   baseRevision: number | null
@@ -189,6 +193,13 @@ function ControlBlockReviewSummary({
         <Typography.Text>内联区域：{edit.regions.length}</Typography.Text>
         {workflowId ? (
           <Link to={`/projects/${projectId}/workflows?focus=${workflowId}`}>查看目标工作流</Link>
+        ) : null}
+        {workflowId && item.review_status === 'pending' ? (
+          <ControlBlockGraphPreview
+            changeSetId={changeSetId}
+            projectId={projectId}
+            workflowId={workflowId}
+          />
         ) : null}
       </Space>
       {edit.regions.map((region) => (

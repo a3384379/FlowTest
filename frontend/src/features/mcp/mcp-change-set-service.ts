@@ -1,4 +1,4 @@
-import { apiClient } from '../../lib/api'
+import { apiClient, type WorkflowDefinition } from '../../lib/api'
 
 export type MCPChangeItem = {
   id: string
@@ -53,8 +53,25 @@ type MCPChangeSetEnvelope = {
   trace_id: string
 }
 
+export type MCPControlBlockPreview = {
+  workflow_id: string
+  base_revision: number
+  existing_definition: WorkflowDefinition
+  proposed_definition: WorkflowDefinition
+}
+
 export async function getMCPChangeSet(changeSetId: string): Promise<MCPChangeSetEnvelope> {
   return (await apiClient.get<MCPChangeSetEnvelope>(`/mcp/write/change-sets/${changeSetId}`)).data
+}
+
+export async function getMCPControlBlockPreview(
+  changeSetId: string,
+): Promise<MCPControlBlockPreview> {
+  return (
+    await apiClient.get<MCPControlBlockPreview>(
+      `/mcp/write/change-sets/${changeSetId}/control-block-preview`,
+    )
+  ).data
 }
 
 export async function approveMCPChangeSet(

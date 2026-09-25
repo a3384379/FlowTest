@@ -1200,6 +1200,46 @@ async def test_try_finally_failure_is_visible_when_main_passed() -> None:
     assert executor.visited == ["try_region_step"]
 
 
+@pytest.mark.asyncio
+async def test_completed_inline_and_workflow_cleanup_are_not_repeated_after_parent_loss() -> None:
+    payload = _try_definition(fail_try=False)
+    payload["nodes"].append(
+        {
+            "id": "global_cleanup_step",
+            "type": "api",
+            "name": "流程清理",
+            "position": {"x": 0, "y": 200},
+            "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+            "phase": "cleanup",
+            "cleanup_for": ["loop"],
+        }
+    )
+    definition = WorkflowDefinition.model_validate(payload)
+    first_context = ExecutionContext()
+    first_executor = BranchExecutor(definition)
+    first = await WorkflowScheduler(first_executor).run(definition, context=first_context)
+
+    assert first.status == "passed"
+    assert first.main_status == "passed"
+    assert first.cleanup_status == "passed"
+    assert first_executor.visited == [
+        "try_region_step",
+        "finally_region_step",
+        "global_cleanup_step",
+    ]
+
+    retained = tuple(record for record in first.records if record.node_id != "loop") + tuple(
+        first_context.nested_checkpoint_records.values()
+    )
+    recovered_executor = BranchExecutor(definition)
+    recovered = await WorkflowScheduler(recovered_executor).run(definition, resume_records=retained)
+
+    assert recovered.status == "passed"
+    assert recovered.main_status == "passed"
+    assert recovered.cleanup_status == "passed"
+    assert recovered_executor.visited == []
+
+
 def test_try_requires_cleanup_budget() -> None:
     payload = _try_definition(fail_try=False)
     payload["run_policy"].pop("cleanup_request_budget")

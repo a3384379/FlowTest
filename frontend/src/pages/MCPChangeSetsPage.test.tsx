@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MCPChangeSet } from '../features/mcp/mcp-change-set-service'
 import ProjectTestProvider from '../test/ProjectTestProvider'
-import { project, user } from '../test/fixtures'
+import { project, user, workflowDefinition } from '../test/fixtures'
 import { server } from '../test/server'
 import MCPChangeSetsPage from './MCPChangeSetsPage'
 
@@ -78,6 +78,63 @@ describe('MCPChangeSetsPage', () => {
     }
     handlers(() => current)
     server.use(
+      http.get(`/api/v1/mcp/write/change-sets/${changeSetId}/control-block-preview`, () =>
+        HttpResponse.json({
+          workflow_id: workflowId,
+          base_revision: 3,
+          existing_definition: workflowDefinition,
+          proposed_definition: {
+            ...workflowDefinition,
+            schema_version: '4.0',
+            nodes: [
+              ...workflowDefinition.nodes,
+              {
+                id: 'repeat',
+                type: 'capability',
+                name: '重复检查',
+                position: { x: 160, y: 0 },
+                config: {},
+                capability_id: 'flow.control.repeat',
+                capability_version: '1.0.0',
+                configuration: { body: { kind: 'inline', region_id: 'body' }, count: 3 },
+              },
+            ],
+            edges: [
+              ...workflowDefinition.edges.map((edge) =>
+                edge.id === 'api-end' ? { ...edge, target: 'repeat' } : edge,
+              ),
+              {
+                id: 'repeat-end',
+                source: 'repeat',
+                target: 'end',
+                condition: null,
+                mappings: [],
+              },
+            ],
+            regions: [
+              {
+                id: 'body',
+                owner_node_id: 'repeat',
+                role: 'body',
+                nodes: [
+                  {
+                    id: 'wait',
+                    type: 'delay',
+                    name: '等待一秒',
+                    position: { x: 0, y: 0 },
+                    config: { seconds: 1 },
+                  },
+                ],
+                edges: [],
+                entry_node_id: 'wait',
+                exit_node_ids: ['wait'],
+                inputs: {},
+                outputs: {},
+              },
+            ],
+          },
+        }),
+      ),
       http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/accept`, () => {
         current = {
           ...current,
@@ -98,6 +155,13 @@ describe('MCPChangeSetsPage', () => {
       'href',
       `/projects/${project.id}/workflows?focus=${workflowId}`,
     )
+    await browser.click(screen.getByRole('button', { name: '查看图形差异' }))
+    expect(await screen.findByText('新增节点 1')).toBeInTheDocument()
+    expect(screen.getByText('重接连线 1')).toBeInTheDocument()
+    expect(screen.getByText('新增区域 1')).toBeInTheDocument()
+    expect(screen.getByText('原草稿')).toBeInTheDocument()
+    expect(screen.getByText('提案结果')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close', hidden: true }))
     await browser.click(screen.getByRole('button', { name: '接受并物化' }))
     expect(await screen.findByText('已接受')).toBeVisible()
   })

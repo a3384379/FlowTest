@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.engine.contracts import WorkflowDefinition
 from app.schemas.workflows import WorkflowControlBlockInsert
 
 CONTROL_PROPOSAL_SCHEMA = "flow-control-block-v1"
@@ -30,3 +31,12 @@ class MCPControlBlockProposalResponse(BaseModel):
     proposed_fingerprint: str
     review_url: str
     idempotency_replayed: bool = False
+
+
+class MCPControlBlockPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: UUID
+    base_revision: int
+    existing_definition: WorkflowDefinition
+    proposed_definition: WorkflowDefinition

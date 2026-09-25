@@ -27,11 +27,15 @@ from app.domain.test_design import (
     normalized_design,
     sensitive_paths,
 )
+from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.test_design import ChangeSetApproval, TestDesign
 from app.repositories.ai_change_sets import AIChangeSetRepository
-from app.schemas.mcp_control_blocks import CONTROL_PROPOSAL_SCHEMA
+from app.schemas.mcp_control_blocks import (
+    CONTROL_PROPOSAL_SCHEMA,
+    MCPControlBlockPreviewResponse,
+)
 from app.schemas.mcp_planning import MCPTestPlanUpdateContent
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.schemas.test_design import (
@@ -197,6 +201,55 @@ class MCPControlledWriteService:
             approval=approval,
             confidence=_governance_confidence(governance),
             warnings=_warnings_from_snapshot(change_set),
+        )
+
+    async def control_block_preview(
+        self, *, actor: User, change_set_id: UUID
+    ) -> MCPControlBlockPreviewResponse:
+        change_set = await self._get_change_set(change_set_id)
+        await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=False)
+        if change_set.source_snapshot.get("schema_version") != CONTROL_PROPOSAL_SCHEMA:
+            raise _not_found()
+        items = await self._change_sets.list_items(change_set.id)
+        if len(items) != 1 or items[0].item_type != "workflow":
+            raise AppError(
+                code="MCP_CHANGE_ITEM_INVALID",
+                message="控制块提案必须只包含一个工作流变更项",
+                status_code=409,
+            )
+        item = items[0]
+        if item.target_resource_id is None or (
+            change_set.source_snapshot.get("workflow_id") != str(item.target_resource_id)
+        ):
+            raise AppError(
+                code="MCP_CHANGE_ITEM_INVALID",
+                message="控制块提案的目标工作流无效",
+                status_code=409,
+            )
+        content = await self._validated_content(change_set, item, None)
+        edit = WorkflowControlBlockInsert.model_validate(content)
+        workflows = WorkflowService(self._session)
+        workflow = await workflows.get(
+            actor=actor,
+            project_id=change_set.project_id,
+            workflow_id=item.target_resource_id,
+        )
+        proposed = await workflows.preview_control_block_insert(
+            actor=actor,
+            project_id=change_set.project_id,
+            workflow_id=item.target_resource_id,
+            expected_revision=edit.expected_revision,
+            edge_id=edit.edge_id,
+            node=edit.node,
+            regions=edit.regions,
+            request_budget=edit.request_budget,
+            cleanup_request_budget=edit.cleanup_request_budget,
+        )
+        return MCPControlBlockPreviewResponse(
+            workflow_id=workflow.id,
+            base_revision=edit.expected_revision,
+            existing_definition=WorkflowDefinition.model_validate(workflow.draft_definition),
+            proposed_definition=proposed,
         )
 
     async def approve(
