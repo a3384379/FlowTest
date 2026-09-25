@@ -36,6 +36,9 @@ function Harness({
       >
         {(draft, update) => (
           <>
+            <button onClick={() => update(addControlBlock(definition, 'group'), 'structure')}>
+              添加控制结构
+            </button>
             {(['edit', 'add', 'delete'] as const).map((operation) => (
               <button
                 key={operation}
@@ -124,6 +127,19 @@ function Harness({
   )
 }
 describe('node edit transactions', () => {
+  it('blocks an atomic structure change until the selected node draft is applied', () => {
+    const changed = vi.fn()
+    render(<Harness session={new DraftSession()} changed={changed} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '节点名称' }), {
+      target: { value: '暂存名称' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加控制结构' }))
+    expect(changed).not.toHaveBeenCalled()
+    expect(screen.getByText(/请先应用或丢弃当前节点配置/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加控制结构' }))
+    expect(changed.mock.calls.at(-1)![0].regions).toHaveLength(1)
+  })
   it('clears an abandoned control JSON draft and retains only applied configuration edits', () => {
     const definition = addControlBlock(workflowDefinition, 'repeat')
     const node = definition.nodes.at(-1)!

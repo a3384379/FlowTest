@@ -1,4 +1,14 @@
-import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'antd'
+import {
+  Alert,
+  Button,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Typography,
+} from 'antd'
 import { useState } from 'react'
 import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
@@ -10,6 +20,9 @@ import {
   appendRegionDelay,
   appendRegionSignal,
   canAppendRegionSignal,
+  addSwitchBranch,
+  removeSwitchBranch,
+  setSwitchDefaultBehavior,
 } from './editor/control-blocks'
 import {
   conditionStateSources,
@@ -27,6 +40,7 @@ type Props = {
   editable: boolean
   apis?: ApiDefinition[]
   onUpdate: (node: WorkflowNode) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
   onRegionUpdate: (region: WorkflowRegion) => void
 }
 
@@ -37,6 +51,7 @@ export default function WorkflowControlFields({
   editable,
   apis = [],
   onUpdate,
+  onStructureChange,
   onRegionUpdate,
 }: Props) {
   const configuration = node.configuration ?? {}
@@ -56,6 +71,12 @@ export default function WorkflowControlFields({
         />
       )}
       <RepeatCountFields
+        node={node}
+        configuration={configuration}
+        editable={configFieldsEditable}
+        onChange={updateConfiguration}
+      />
+      <ControlPolicyFields
         node={node}
         configuration={configuration}
         editable={configFieldsEditable}
@@ -95,6 +116,7 @@ export default function WorkflowControlFields({
         configuration={configuration}
         editable={configFieldsEditable}
         onChange={updateConfiguration}
+        onStructureChange={onStructureChange}
       />
       {['flow.control.while', 'flow.control.do_while', 'flow.control.until'].includes(
         node.capability_id ?? '',
@@ -149,6 +171,142 @@ function RepeatCountFields({
   )
 }
 
+function ControlPolicyFields({
+  node,
+  configuration,
+  editable,
+  onChange,
+}: {
+  node: WorkflowNode
+  configuration: Record<string, unknown>
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  const kind = policyKind(node.capability_id)
+  if (!kind) return null
+  const policy = asRecord(configuration.policy) ?? {}
+  const change = (key: string, value: number | string) =>
+    onChange({ ...configuration, policy: { ...policy, [key]: value } })
+  return (
+    <section aria-label="控制执行策略">
+      <Typography.Title level={5}>执行策略</Typography.Title>
+      <Space wrap>
+        {policyNumbers(kind).map((field) => (
+          <PolicyNumber
+            key={field.key}
+            label={field.label}
+            value={policy[field.key]}
+            fallback={field.fallback}
+            max={field.max}
+            editable={editable}
+            onChange={(value) => change(field.key, value)}
+          />
+        ))}
+        {kind !== 'conditional' && (
+          <label>
+            出错策略
+            <Select
+              aria-label="出错策略"
+              disabled={!editable}
+              value={
+                typeof policy.on_error === 'string'
+                  ? policy.on_error
+                  : kind === 'parallel'
+                    ? 'stop_on_error'
+                    : 'stop'
+              }
+              options={policyErrorOptions(kind)}
+              onChange={(value: string) => change('on_error', value)}
+              style={{ minWidth: 180 }}
+            />
+          </label>
+        )}
+      </Space>
+    </section>
+  )
+}
+
+type PolicyKind = 'loop' | 'conditional' | 'parallel'
+type PolicyNumberField = { key: string; label: string; fallback: number; max: number }
+
+function policyKind(capabilityId: string | undefined): PolicyKind | null {
+  if (capabilityId === 'flow.control.foreach' || capabilityId === 'flow.control.repeat')
+    return 'loop'
+  if (capabilityId === 'flow.control.parallel') return 'parallel'
+  if (
+    ['flow.control.while', 'flow.control.do_while', 'flow.control.until'].includes(
+      capabilityId ?? '',
+    )
+  )
+    return 'conditional'
+  return null
+}
+
+function policyNumbers(kind: PolicyKind): PolicyNumberField[] {
+  const fields: PolicyNumberField[] = []
+  if (kind !== 'conditional')
+    fields.push({
+      key: 'concurrency',
+      label: '最大并发数',
+      fallback: kind === 'parallel' ? 2 : 1,
+      max: 20,
+    })
+  if (kind !== 'parallel')
+    fields.push({
+      key: 'max_iterations',
+      label: '最大迭代次数',
+      fallback: kind === 'conditional' ? 100 : 1000,
+      max: 1000,
+    })
+  fields.push({ key: 'timeout_seconds', label: '控制块超时秒数', fallback: 120, max: 3600 })
+  return fields
+}
+
+function policyErrorOptions(kind: PolicyKind) {
+  return kind === 'parallel'
+    ? [
+        { value: 'stop_on_error', label: '首个错误后停止' },
+        { value: 'collect_all', label: '收集所有分支结果' },
+      ]
+    : [
+        { value: 'stop', label: '首个错误后停止' },
+        { value: 'continue_collect', label: '继续并收集结果' },
+      ]
+}
+
+function PolicyNumber({
+  label,
+  value,
+  fallback,
+  max,
+  editable,
+  onChange,
+}: {
+  label: string
+  value: unknown
+  fallback: number
+  max: number
+  editable: boolean
+  onChange: (value: number) => void
+}) {
+  return (
+    <label>
+      {label}
+      <InputNumber
+        aria-label={label}
+        min={1}
+        max={max}
+        precision={0}
+        disabled={!editable}
+        value={typeof value === 'number' ? value : fallback}
+        onChange={(number) => {
+          if (number !== null) onChange(number)
+        }}
+      />
+    </label>
+  )
+}
+
 function ControlSourceShortcuts({
   node,
   configuration,
@@ -193,12 +351,14 @@ function ControlConditionSections({
   configuration,
   editable,
   onChange,
+  onStructureChange,
 }: {
   node: WorkflowNode
   definition?: WorkflowDefinition
   configuration: Record<string, unknown>
   editable: boolean
   onChange: (configuration: Record<string, unknown>) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
 }) {
   const conditionLoop = [
     'flow.control.while',
@@ -220,82 +380,250 @@ function ControlConditionSections({
   if (node.capability_id !== 'flow.control.switch') return null
   return (
     <SwitchBranchFields
+      node={node}
+      definition={definition}
       configuration={configuration}
       choices={choices}
       editable={editable}
       onChange={onChange}
+      onStructureChange={onStructureChange}
     />
   )
 }
 
 function SwitchBranchFields({
+  node,
+  definition,
   configuration,
   choices,
   editable,
   onChange,
+  onStructureChange,
 }: {
+  node: WorkflowNode
+  definition?: WorkflowDefinition
   configuration: Record<string, unknown>
   choices: SourceChoice[]
   editable: boolean
   onChange: (configuration: Record<string, unknown>) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
 }) {
+  const [modal, holder] = Modal.useModal()
   if (!Array.isArray(configuration.branches)) return null
+  const branches = configuration.branches as unknown[]
   const valueMode = switchToValue(configuration)
+  const applyStructure = (next: WorkflowDefinition | null) => {
+    if (next) onStructureChange?.(next)
+  }
+  async function changeDefaultBehavior(behavior: 'run' | 'skip' | 'fail') {
+    if (!definition || switchDefaultBehavior(configuration.default) === behavior) return
+    const confirmed = await modal.confirm({
+      title: '切换默认分支行为？',
+      content: '切换后默认区域及其中的步骤可能从草稿移除；此操作可通过撤销恢复。',
+      okText: '确定切换',
+      cancelText: '保留当前行为',
+    })
+    if (confirmed) applyStructure(setSwitchDefaultBehavior(definition, node.id, behavior))
+  }
   return (
-    <Space direction="vertical">
-      <Select
-        aria-label="多分支模式"
-        disabled={!editable}
-        value={configuration.mode === 'rules' ? 'rules' : 'value'}
-        options={[
-          {
-            label: '按值匹配',
-            value: 'value',
-            disabled: configuration.mode === 'rules' && !valueMode,
-          },
-          { label: '按条件匹配', value: 'rules' },
-        ]}
-        onChange={(mode: 'value' | 'rules') => {
-          const next = mode === 'rules' ? switchToRules(configuration) : valueMode
-          if (next) onChange(next)
-        }}
+    <>
+      {holder}
+      <Space direction="vertical">
+        <Select
+          aria-label="多分支模式"
+          disabled={!editable}
+          value={configuration.mode === 'rules' ? 'rules' : 'value'}
+          options={[
+            {
+              label: '按值匹配',
+              value: 'value',
+              disabled: configuration.mode === 'rules' && !valueMode,
+            },
+            { label: '按条件匹配', value: 'rules' },
+          ]}
+          onChange={(mode: 'value' | 'rules') => {
+            const next = mode === 'rules' ? switchToRules(configuration) : valueMode
+            if (next) onChange(next)
+          }}
+        />
+        {configuration.mode === 'rules' && !valueMode && (
+          <Typography.Text type="secondary">
+            当前条件不能无损转换为按值匹配；可在高级配置中编辑模式。
+          </Typography.Text>
+        )}
+        {definition && onStructureChange && (
+          <Space wrap>
+            <Button
+              disabled={!editable || branches.length >= 100}
+              onClick={() => applyStructure(addSwitchBranch(definition, node.id))}
+            >
+              添加分支
+            </Button>
+            <Select
+              aria-label="默认分支行为"
+              disabled={!editable}
+              value={switchDefaultBehavior(configuration.default)}
+              options={[
+                { value: 'run', label: '执行默认区域' },
+                { value: 'skip', label: '无匹配时跳过' },
+                { value: 'fail', label: '无匹配时失败' },
+              ]}
+              onChange={(behavior: 'run' | 'skip' | 'fail') => void changeDefaultBehavior(behavior)}
+              style={{ minWidth: 180 }}
+            />
+          </Space>
+        )}
+        {branches.map((raw, index) => {
+          const branch = asRecord(raw)
+          if (!branch) return null
+          return (
+            <SwitchBranchRow
+              key={String(branch.id ?? index)}
+              branch={branch}
+              index={index}
+              branches={branches}
+              configuration={configuration}
+              choices={choices}
+              editable={editable}
+              onChange={onChange}
+              onRemove={
+                definition && onStructureChange
+                  ? () => applyStructure(removeSwitchBranch(definition, node.id, String(branch.id)))
+                  : undefined
+              }
+            />
+          )
+        })}
+      </Space>
+    </>
+  )
+}
+
+function SwitchBranchRow({
+  branch,
+  index,
+  branches,
+  configuration,
+  choices,
+  editable,
+  onChange,
+  onRemove,
+}: {
+  branch: Record<string, unknown>
+  index: number
+  branches: unknown[]
+  configuration: Record<string, unknown>
+  choices: SourceChoice[]
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+  onRemove?: () => void
+}) {
+  const label = `分支 ${String(branch.label)}`
+  const update = (patch: Record<string, unknown>) =>
+    onChange({
+      ...configuration,
+      branches: branches.map((item, position) =>
+        position === index ? { ...branch, ...patch } : item,
+      ),
+    })
+  const move = (direction: -1 | 1) => {
+    const reordered = [...branches]
+    const target = index + direction
+    if (target < 0 || target >= reordered.length) return
+    ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
+    onChange({ ...configuration, branches: reordered })
+  }
+  return (
+    <div className="workflow-switch-branch">
+      <SwitchBranchHeader
+        key={`${String(branch.id)}:${String(branch.label)}`}
+        id={String(branch.id)}
+        label={String(branch.label)}
+        index={index}
+        total={branches.length}
+        editable={editable}
+        onRename={(name) => update({ label: name })}
+        onMove={move}
       />
-      {configuration.mode === 'rules' && !valueMode && (
-        <Typography.Text type="secondary">
-          当前条件不能无损转换为按值匹配；可在高级配置中编辑模式。
-        </Typography.Text>
+      {onRemove && (
+        <Popconfirm
+          title="删除分支及所属区域？"
+          description="该分支的区域与嵌套区域将从草稿移除；此操作可撤销。"
+          disabled={!editable || branches.length <= 1}
+          onConfirm={onRemove}
+        >
+          <Button danger disabled={!editable || branches.length <= 1}>
+            删除分支 {String(branch.label)}
+          </Button>
+        </Popconfirm>
       )}
-      {configuration.branches.map((raw, index) => {
-        const branch = asRecord(raw)
-        if (!branch) return null
-        const label = `分支 ${String(branch.label ?? branch.id ?? index + 1)}`
-        const update = (patch: Record<string, unknown>) =>
-          onChange({
-            ...configuration,
-            branches: (configuration.branches as unknown[]).map((item, position) =>
-              position === index ? { ...branch, ...patch } : item,
-            ),
-          })
-        return configuration.mode === 'rules' ? (
-          <ControlConditionFields
-            key={String(branch.id ?? index)}
-            label={`${label} 条件`}
-            value={branch.condition}
-            choices={choices}
-            editable={editable}
-            onChange={(condition) => update({ condition })}
-          />
-        ) : (
-          <SourceShortcut
-            key={String(branch.id ?? index)}
-            label={`${label} 匹配来源`}
-            value={branch.match}
-            choices={choices}
-            editable={editable}
-            onChange={(match) => update({ match })}
-          />
-        )
-      })}
+      {configuration.mode === 'rules' ? (
+        <ControlConditionFields
+          label={`${label} 条件`}
+          value={branch.condition}
+          choices={choices}
+          editable={editable}
+          onChange={(condition) => update({ condition })}
+        />
+      ) : (
+        <SourceShortcut
+          label={`${label} 匹配来源`}
+          value={branch.match}
+          choices={choices}
+          editable={editable}
+          onChange={(match) => update({ match })}
+        />
+      )}
+    </div>
+  )
+}
+
+function switchDefaultBehavior(value: unknown): 'run' | 'skip' | 'fail' | undefined {
+  const behavior = asRecord(value)?.behavior
+  if (behavior === 'run' || behavior === 'skip' || behavior === 'fail') return behavior
+  return undefined
+}
+
+function SwitchBranchHeader({
+  id,
+  label,
+  index,
+  total,
+  editable,
+  onRename,
+  onMove,
+}: {
+  id: string
+  label: string
+  index: number
+  total: number
+  editable: boolean
+  onRename: (label: string) => void
+  onMove: (direction: -1 | 1) => void
+}) {
+  const [draft, setDraft] = useState(label)
+  return (
+    <Space wrap>
+      <Input
+        aria-label={`分支 ${id} 名称`}
+        value={draft}
+        maxLength={200}
+        status={draft.trim() ? undefined : 'error'}
+        disabled={!editable}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          const name = draft.trim()
+          if (name && name !== label) onRename(name)
+          else setDraft(label)
+        }}
+        onPressEnter={(event) => event.currentTarget.blur()}
+      />
+      <Button disabled={!editable || index === 0} onClick={() => onMove(-1)}>
+        上移分支
+      </Button>
+      <Button disabled={!editable || index === total - 1} onClick={() => onMove(1)}>
+        下移分支
+      </Button>
     </Space>
   )
 }

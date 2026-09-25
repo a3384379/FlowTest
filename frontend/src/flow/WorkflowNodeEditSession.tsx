@@ -236,10 +236,19 @@ export default function WorkflowNodeEditSession({
     })
     setError(null)
   }
+  function updateStructure(next: WorkflowDefinition) {
+    if (latest.current.dirty) {
+      setError('请先应用或丢弃当前节点配置，再修改分支与区域。')
+      return
+    }
+    onChange(next)
+  }
   function updateDefinition(next: WorkflowDefinition, kind: WorkflowNodeEditKind) {
     if (kind === 'node') {
       const updated = next.nodes.find((item) => item.id === node.id)
       if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
+    } else if (kind === 'structure') {
+      updateStructure(next)
     } else if (kind === 'regions' && !jsonEqual(next.regions, definition.regions)) {
       if (latest.current.dirty) {
         setError('请先应用或丢弃当前节点配置，再修改内部区域。')

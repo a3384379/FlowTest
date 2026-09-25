@@ -29,7 +29,7 @@ export type WorkflowRequestIdentity = {
   apiVersion: number
 }
 export type RawFieldDraft = { text: string; error: string | null; baseText?: string }
-export type WorkflowNodeEditKind = 'node' | 'edges' | 'regions'
+export type WorkflowNodeEditKind = 'node' | 'edges' | 'regions' | 'structure'
 export type WorkflowNodeEditorDraft = {
   nodeId: string
   baseNode: WorkflowNode

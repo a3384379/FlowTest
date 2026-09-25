@@ -107,6 +107,7 @@ export default function WorkflowNodeInspector({
           environmentId={environmentId}
           editable={editable}
           onUpdate={updateNode}
+          onStructureChange={(next) => onChange(next, 'structure')}
           onRegionUpdate={(region) =>
             onChange(
               {
@@ -195,6 +196,7 @@ function InspectorNodeFields({
   eventSources,
   editable,
   onUpdate,
+  onStructureChange,
   onRegionUpdate,
 }: Omit<InspectorProps, 'node' | 'onChange' | 'onDelete'> & {
   node: WorkflowNode
@@ -203,6 +205,7 @@ function InspectorNodeFields({
   grpcDescriptors: SchemaArtifact[]
   eventSources: EventSource[]
   onUpdate: (node: WorkflowNode) => void
+  onStructureChange: (definition: WorkflowDefinition) => void
   onRegionUpdate: (region: WorkflowRegion) => void
 }) {
   if (node.type === 'capability' && node.capability_id?.startsWith('flow.control.')) {
@@ -214,6 +217,7 @@ function InspectorNodeFields({
         editable={editable}
         apis={apis}
         onUpdate={onUpdate}
+        onStructureChange={onStructureChange}
         onRegionUpdate={onRegionUpdate}
       />
     )

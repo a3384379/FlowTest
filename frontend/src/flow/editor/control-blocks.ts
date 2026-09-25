@@ -201,6 +201,139 @@ export function addControlBlock(
   }
 }
 
+export function addSwitchBranch(
+  definition: WorkflowDefinition,
+  nodeId: string,
+): WorkflowDefinition | null {
+  const context = switchContext(definition, nodeId)
+  if (!context || context.branches.length >= 100) return null
+  const { config, branches } = context
+  if (!['value', 'rules'].includes(String(config.mode))) return null
+  const branchId = `case-${crypto.randomUUID()}`
+  const branchRegion = region(nodeId, `case:${branchId}`)
+  const branch = {
+    id: branchId,
+    label: `分支 ${branches.length + 1}`,
+    body: body(branchRegion),
+    ...(config.mode === 'value'
+      ? { match: { kind: 'literal', value: branchId } }
+      : { condition: { ...condition(), left: { kind: 'literal', value: false } } }),
+  }
+  return {
+    ...replaceControlConfiguration(definition, nodeId, {
+      ...config,
+      branches: [...branches, branch],
+    }),
+    regions: [...(definition.regions ?? []), branchRegion],
+  }
+}
+
+export function removeSwitchBranch(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  branchId: string,
+): WorkflowDefinition | null {
+  const context = switchContext(definition, nodeId)
+  if (!context || context.branches.length <= 1) return null
+  const { config, branches } = context
+  const branch = branches.map(asRecord).find((item) => item?.id === branchId)
+  const bodyId = asRecord(branch?.body)?.region_id
+  const owned = definition.regions?.find(
+    (item) =>
+      item.id === bodyId && item.owner_node_id === nodeId && item.role === `case:${branchId}`,
+  )
+  if (!owned) return null
+  const removedIds = regionTreeIds(definition, owned)
+  return {
+    ...replaceControlConfiguration(definition, nodeId, {
+      ...config,
+      branches: branches.filter((current) => asRecord(current)?.id !== branchId),
+    }),
+    regions: definition.regions?.filter((item) => !removedIds.has(item.id)),
+  }
+}
+
+export function setSwitchDefaultBehavior(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  behavior: 'run' | 'skip' | 'fail',
+): WorkflowDefinition | null {
+  const context = switchContext(definition, nodeId)
+  if (!context) return null
+  const { config } = context
+  const current = asRecord(config.default)
+  if (!current) return null
+  if (current.behavior === behavior) return definition
+  const existing = ownedDefaultRegion(definition, nodeId, current)
+  if (current.behavior === 'run' && !existing && asRecord(current.body)?.kind === 'inline')
+    return null
+  const created = behavior === 'run' ? region(nodeId, 'default') : null
+  return {
+    ...replaceControlConfiguration(definition, nodeId, {
+      ...config,
+      default: { behavior, body: created ? body(created) : null },
+    }),
+    regions: updatedDefaultRegions(definition, existing, created),
+  }
+}
+
+function updatedDefaultRegions(
+  definition: WorkflowDefinition,
+  existing: WorkflowRegion | undefined,
+  created: WorkflowRegion | null,
+): WorkflowRegion[] {
+  const removedIds = existing ? regionTreeIds(definition, existing) : new Set<string>()
+  return [
+    ...(definition.regions ?? []).filter((item) => !removedIds.has(item.id)),
+    ...(created ? [created] : []),
+  ]
+}
+
+function switchContext(definition: WorkflowDefinition, nodeId: string) {
+  const node = definition.nodes.find((item) => item.id === nodeId)
+  const config = node?.configuration
+  if (node?.capability_id !== 'flow.control.switch' || !Array.isArray(config?.branches)) return null
+  return { config, branches: config.branches as unknown[] }
+}
+
+function replaceControlConfiguration(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  configuration: Record<string, unknown>,
+): WorkflowDefinition {
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => (node.id === nodeId ? { ...node, configuration } : node)),
+  }
+}
+
+function regionTreeIds(definition: WorkflowDefinition, root: WorkflowRegion): Set<string> {
+  return new Set([
+    root.id,
+    ...descendantRegions(
+      definition,
+      root.nodes.map((node) => node.id),
+    ).map((item) => item.id),
+  ])
+}
+
+function ownedDefaultRegion(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  current: Record<string, unknown>,
+): WorkflowRegion | undefined {
+  const regionId = asRecord(current.body)?.region_id
+  return definition.regions?.find(
+    (item) => item.id === regionId && item.owner_node_id === nodeId && item.role === 'default',
+  )
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
 function controlRunPolicy(
   definition: WorkflowDefinition,
   kind: ControlBlockKind,

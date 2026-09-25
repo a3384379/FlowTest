@@ -6,11 +6,14 @@ import type { WorkflowDefinition } from '../../lib/api'
 import { analyzeGraph, editorNode, restoreEditedNode } from './graph-analysis'
 import {
   addControlBlock,
+  addSwitchBranch,
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
   insertRegionApiAfter,
   insertRegionDelayAfter,
+  removeSwitchBranch,
+  setSwitchDefaultBehavior,
 } from './control-blocks'
 import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
@@ -38,6 +41,43 @@ const nodeSelection = (id: string) => ({ kind: 'node' as const, id })
 const edgeSelection = (id: string) => ({ kind: 'edge' as const, id })
 
 describe('workflow graph commands', () => {
+  it('adds and removes a Switch branch with its owned region in one definition update', () => {
+    const base = addControlBlock(graph(linear), 'switch')
+    const owner = base.nodes.at(-1)!
+    const added = addSwitchBranch(base, owner.id)!
+    const branches = added.nodes.at(-1)!.configuration!.branches as {
+      id: string
+      body: { region_id: string }
+    }[]
+    expect(branches).toHaveLength(3)
+    expect(added.regions).toHaveLength(4)
+    const newBranch = branches[2]
+    expect(added.regions?.find((item) => item.id === newBranch.body.region_id)).toMatchObject({
+      owner_node_id: owner.id,
+      role: `case:${newBranch.id}`,
+    })
+    const removed = removeSwitchBranch(added, owner.id, newBranch.id)!
+    expect(removed.nodes.at(-1)!.configuration!.branches).toEqual(owner.configuration!.branches)
+    expect(removed.regions).toEqual(base.regions)
+    expect(removeSwitchBranch(base, owner.id, 'missing')).toBeNull()
+  })
+
+  it('changes Switch default behavior without leaving an orphaned region', () => {
+    const base = addControlBlock(graph(linear), 'switch')
+    const owner = base.nodes.at(-1)!
+    const skipped = setSwitchDefaultBehavior(base, owner.id, 'skip')!
+    expect(skipped.nodes.at(-1)!.configuration!.default).toEqual({ behavior: 'skip', body: null })
+    expect(skipped.regions?.map((item) => item.role)).toEqual(['case:first', 'case:second'])
+    const restored = setSwitchDefaultBehavior(skipped, owner.id, 'run')!
+    const current = restored.nodes.at(-1)!.configuration!.default as {
+      behavior: string
+      body: { region_id: string }
+    }
+    expect(current.behavior).toBe('run')
+    expect(restored.regions?.find((item) => item.id === current.body.region_id)?.role).toBe(
+      'default',
+    )
+  })
   it('extends a serial control region without changing its entry boundary', () => {
     const region = addControlBlock(graph(linear), 'foreach').regions![0]
     const expanded = appendRegionDelay(region)!

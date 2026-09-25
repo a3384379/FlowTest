@@ -694,6 +694,128 @@ it('converts a Switch to rule conditions and edits one branch without changing i
   expect(edited.branches[1]).toEqual(switched.configuration.branches[1])
 })
 
+it('renames and reorders Switch branches without changing their IDs or region ownership', async () => {
+  const definition = addControlBlock(workflowDefinition, 'switch')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  const props = {
+    definition,
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  const name = screen.getByRole('textbox', { name: '分支 first 名称' })
+  await userEvent.clear(name)
+  await userEvent.type(name, '优先分支')
+  fireEvent.blur(name)
+  const renamed = onUpdate.mock.calls.at(-1)![0]
+  expect(renamed.configuration.branches[0]).toMatchObject({ id: 'first', label: '优先分支' })
+  view.rerender(<WorkflowControlFields node={renamed} {...props} />)
+  await userEvent.click(screen.getAllByRole('button', { name: '下移分支' })[0])
+  const moved = onUpdate.mock.calls.at(-1)![0]
+  expect(moved.configuration.branches.map((branch: { id: string }) => branch.id)).toEqual([
+    'second',
+    'first',
+  ])
+  expect(moved.configuration.branches[1]).toEqual(renamed.configuration.branches[0])
+  expect(definition.regions?.map((region) => region.role)).toEqual([
+    'case:first',
+    'case:second',
+    'default',
+  ])
+})
+
+it('offers atomic Switch branch creation and default behavior changes', async () => {
+  const definition = addControlBlock(workflowDefinition, 'switch')
+  const onStructureChange = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={vi.fn()}
+      onStructureChange={onStructureChange}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '添加分支' }))
+  expect(onStructureChange.mock.calls.at(-1)![0].regions).toHaveLength(4)
+  await userEvent.click(screen.getByRole('combobox', { name: '默认分支行为' }))
+  await userEvent.click(screen.getByText('无匹配时跳过'))
+  expect(onStructureChange).toHaveBeenCalledTimes(1)
+  await userEvent.click(screen.getByRole('button', { name: '确定切换' }))
+  const skipped = onStructureChange.mock.calls.at(-1)![0]
+  expect(skipped.nodes.at(-1)!.configuration.default).toEqual({ behavior: 'skip', body: null })
+  expect(skipped.regions.map((region: { role: string }) => region.role)).toEqual([
+    'case:first',
+    'case:second',
+  ])
+})
+
+it('edits ForEach execution limits while preserving other policy values', async () => {
+  const definition = addControlBlock(workflowDefinition, 'foreach')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  fireEvent.change(screen.getByRole('spinbutton', { name: '最大并发数' }), {
+    target: { value: '3' },
+  })
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.policy).toEqual({
+    ...(node.configuration!.policy as Record<string, unknown>),
+    concurrency: 3,
+  })
+  expect(screen.getByRole('spinbutton', { name: '最大迭代次数' })).toHaveValue('1000')
+})
+
+it('keeps condition loops serial while exposing their finite iteration limit', () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={definition.regions!}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  expect(screen.queryByRole('spinbutton', { name: '最大并发数' })).not.toBeInTheDocument()
+  expect(screen.getByRole('spinbutton', { name: '最大迭代次数' })).toHaveValue('3')
+  expect(screen.queryByRole('combobox', { name: '出错策略' })).not.toBeInTheDocument()
+})
+
+it('uses the parallel error policy choices without exposing loop iteration settings', async () => {
+  const definition = addControlBlock(workflowDefinition, 'parallel')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  expect(screen.queryByRole('spinbutton', { name: '最大迭代次数' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('combobox', { name: '出错策略' }))
+  await userEvent.click(screen.getByText('收集所有分支结果'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.policy).toEqual({
+    ...(node.configuration!.policy as Record<string, unknown>),
+    on_error: 'collect_all',
+  })
+})
+
 it('offers initialized loop state as a condition operand', async () => {
   const definition = addControlBlock(workflowDefinition, 'while')
   const base = definition.nodes.at(-1)!
