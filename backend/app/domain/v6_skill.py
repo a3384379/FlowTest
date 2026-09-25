@@ -42,6 +42,7 @@ SKILL_OPTIONAL_TOOLS = (
     "flowtest.discover_control_capabilities",
     "flowtest.inspect_flow",
     "flowtest.propose_control_block",
+    "flowtest.propose_control_workflow",
     "flowtest.inspect_connection",
     "flowtest.check_service_target",
     "flowtest.inspect_entity_mapping",

@@ -42,6 +42,8 @@ from app.schemas.mcp_contract_import import (
 from app.schemas.mcp_control_blocks import (
     MCPControlBlockProposalRequest,
     MCPControlBlockProposalResponse,
+    MCPControlWorkflowProposalRequest,
+    MCPControlWorkflowProposalResponse,
 )
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_planning import (
@@ -626,6 +628,21 @@ class MCPReadGatewayClient:
             additional_headers={"Idempotency-Key": idempotency_key},
         )
         return _validate_response(response, MCPControlBlockProposalResponse)
+
+    async def propose_control_workflow(
+        self,
+        payload: MCPControlWorkflowProposalRequest | Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> MCPControlWorkflowProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/control-workflow-proposals",
+            payload=_model_payload(payload),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, MCPControlWorkflowProposalResponse)
 
     async def inspect_flow_proposal(
         self,

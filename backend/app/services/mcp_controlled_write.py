@@ -34,7 +34,9 @@ from app.models.test_design import ChangeSetApproval, TestDesign
 from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.schemas.mcp_control_blocks import (
     CONTROL_PROPOSAL_SCHEMA,
+    CONTROL_WORKFLOW_PROPOSAL_SCHEMA,
     MCPControlBlockPreviewResponse,
+    MCPControlWorkflowDraft,
 )
 from app.schemas.mcp_planning import MCPTestPlanUpdateContent
 from app.schemas.test_assets import TestCaseDefinitionInput
@@ -433,6 +435,13 @@ class MCPControlledWriteService:
                 if edit.expected_revision != change_set.source_snapshot.get("base_revision"):
                     raise ValueError("控制块提案不能修改基线修订号")
                 return _json_object(edit.model_dump(mode="json", exclude_none=True))
+            if item.item_type == "workflow" and (
+                change_set.source_snapshot.get("schema_version") == CONTROL_WORKFLOW_PROPOSAL_SCHEMA
+            ):
+                if item.action != "create" or item.target_resource_id is not None:
+                    raise ValueError("新建工作流提案不能指定已有工作流")
+                draft = MCPControlWorkflowDraft.model_validate(candidate)
+                return _json_object(draft.model_dump(mode="json", exclude_none=True))
         except (TypeError, ValueError) as error:
             raise AppError(
                 code="MCP_CHANGE_CONTENT_INVALID",
@@ -538,6 +547,26 @@ class MCPControlledWriteService:
                 regions=edit.regions,
                 request_budget=edit.request_budget,
                 cleanup_request_budget=edit.cleanup_request_budget,
+                commit=False,
+            )
+            return "workflow", workflow.id
+        if item.item_type == "workflow" and (
+            change_set.source_snapshot.get("schema_version") == CONTROL_WORKFLOW_PROPOSAL_SCHEMA
+        ):
+            workflow_draft = MCPControlWorkflowDraft.model_validate(content)
+            workflows = WorkflowService(self._session)
+            await workflows.validate_proposed_definition(
+                actor=actor,
+                project_id=change_set.project_id,
+                definition=workflow_draft.definition,
+            )
+            workflow = await workflows.create(
+                actor=actor,
+                project_id=change_set.project_id,
+                name=workflow_draft.name,
+                description=workflow_draft.description,
+                folder_id=None,
+                definition=workflow_draft.definition,
                 commit=False,
             )
             return "workflow", workflow.id

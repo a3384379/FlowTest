@@ -808,6 +808,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.preview_contract_import",
             "flowtest.preview_flow_proposal",
             "flowtest.propose_control_block",
+            "flowtest.propose_control_workflow",
             "flowtest.propose_flow_draft",
             "flowtest.propose_maintenance",
             "flowtest.propose_repair",

@@ -1434,6 +1434,122 @@ def _control_block_proposal_payload(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _new_control_workflow_payload(context: dict[str, Any]) -> dict[str, Any]:
+    definition = _workflow_definition(context["definition_id"])
+    edit = _control_block_proposal_payload(context)["edit"]
+    definition["schema_version"] = "4.0"
+    definition["run_policy"] = {"request_budget": 20}
+    definition["nodes"].append(edit["node"])
+    definition["edges"][-1]["target"] = "group"
+    definition["edges"].append({"id": "group-end", "source": "group", "target": "end"})
+    definition["regions"] = edit["regions"]
+    return {
+        "project_id": str(context["project_id"]),
+        "name": "New reviewed control flow",
+        "description": "MCP draft proposal",
+        "definition": definition,
+    }
+
+
+@pytest.mark.asyncio
+async def test_mcp_new_control_workflow_requires_human_review(
+    s51_context: dict[str, Any],
+) -> None:
+    payload = _new_control_workflow_payload(s51_context)
+    token = s51_context["mcp_headers"]["Authorization"].removeprefix("Bearer ")
+    async with MCPReadGatewayClient(
+        base_url="http://test",
+        token=token,
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+    ) as gateway:
+        server = create_mcp_server(client=gateway)
+        result = await server.call_tool(
+            "flowtest.propose_control_workflow",
+            {"request": payload, "idempotency_key": "new-control-workflow-1"},
+        )
+        assert not result.is_error, result
+        proposal = result.structured_content
+        assert proposal["status"] == "draft"
+        replay = await server.call_tool(
+            "flowtest.propose_control_workflow",
+            {"request": payload, "idempotency_key": "new-control-workflow-1"},
+        )
+        assert replay.structured_content["proposal_id"] == proposal["proposal_id"]
+        assert replay.structured_content["idempotency_replayed"] is True
+
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(Workflow)) == 1
+        assert await session.scalar(select(func.count()).select_from(WorkflowExecution)) == 0
+        item = await session.get(AIChangeItem, UUID(proposal["item_id"]))
+        assert item is not None and item.action == "create" and item.review_status == "pending"
+        assert item.target_resource_id is None
+
+    machine_review = await s51_context["client"].post(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/items/"
+        f"{proposal['item_id']}/accept",
+        headers=s51_context["mcp_headers"],
+        json={},
+    )
+    assert machine_review.status_code == 401
+    accepted = await s51_context["client"].post(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/items/"
+        f"{proposal['item_id']}/accept",
+        headers=s51_context["user_headers"],
+        json={"note": "人工确认新建草稿"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    item_data = accepted.json()["data"]["items"][0]
+    assert item_data["review_status"] == "accepted"
+    assert item_data["materialized_resource_type"] == "workflow"
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(Workflow)) == 2
+        workflow = await session.get(Workflow, UUID(item_data["materialized_resource_id"]))
+        assert workflow is not None
+        assert workflow.draft_definition["schema_version"] == "4.0"
+        assert workflow.draft_revision == 1 and workflow.current_version is None
+        assert await session.scalar(select(func.count()).select_from(WorkflowExecution)) == 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_new_control_workflow_rejects_invalid_review_without_partial_write(
+    s51_context: dict[str, Any],
+) -> None:
+    client = s51_context["client"]
+    payload = _new_control_workflow_payload(s51_context)
+    malformed = deepcopy(payload)
+    malformed["definition"]["regions"][0]["owner_node_id"] = "missing-owner"
+    rejected = await client.post(
+        "/api/v1/mcp/flow/control-workflow-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "invalid-region"},
+        json=malformed,
+    )
+    assert rejected.status_code == 422
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(AIChangeSet)) == 0
+
+    proposed = await client.post(
+        "/api/v1/mcp/flow/control-workflow-proposals",
+        headers={**s51_context["mcp_headers"], "Idempotency-Key": "valid-region"},
+        json=payload,
+    )
+    assert proposed.status_code == 202, proposed.text
+    proposal = proposed.json()
+    edited = deepcopy(payload)
+    edited.pop("project_id")
+    edited["definition"]["run_policy"]["request_budget"] = None
+    review = await client.post(
+        f"/api/v1/mcp/write/change-sets/{proposal['proposal_id']}/items/"
+        f"{proposal['item_id']}/accept",
+        headers=s51_context["user_headers"],
+        json={"content": edited},
+    )
+    assert review.status_code == 422
+    async with s51_context["sessions"]() as session:
+        assert await session.scalar(select(func.count()).select_from(Workflow)) == 1
+        item = await session.get(AIChangeItem, UUID(proposal["item_id"]))
+        assert item is not None and item.review_status == "pending"
+
+
 @pytest.mark.asyncio
 async def test_mcp_control_block_proposal_waits_for_human_review(
     s51_context: dict[str, Any],

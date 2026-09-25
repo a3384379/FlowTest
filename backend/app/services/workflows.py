@@ -551,6 +551,14 @@ class WorkflowService:
             await self._session.refresh(workflow)
         return workflow
 
+    async def validate_proposed_definition(
+        self, *, actor: User, project_id: UUID, definition: WorkflowDefinition
+    ) -> None:
+        """Apply the same project-scoped checks used when publishing a workflow."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        await self._validate_publishable(project_id, uuid4(), definition)
+
     async def get(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._get_workflow(project_id, workflow_id)

@@ -1,6 +1,6 @@
 # Workflow contract
 
-Use this reference whenever the skill is invoked. The Quick FlowSpec path is the default; native control insertion and deep evidence stages are explicit branches. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
+Use this reference whenever the skill is invoked. The Quick FlowSpec path is the default; new native control workflows, insertion into an existing workflow, and deep evidence stages are explicit branches. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
 
 ## Quick path (default)
 
@@ -21,7 +21,7 @@ For ordinary generation, select at most three representative cases and keep the 
 3. Call `propose_control_block` once with a distinct idempotency key. It validates the entire candidate but writes only a pending MCP ChangeSet. Preserve `proposal_id`, `item_id`, `base_revision`, and `review_url`; the target draft is unchanged.
 4. Stop at the returned human MCP ChangeSet review page. The agent must never call the accept/reject route. A human acceptance rechecks the revision, atomically inserts the block into the draft, and still does not publish or execute it.
 
-If there is no existing authorized workflow, no safe main edge, a stale revision, or a capability the runtime cannot execute, return the exact blocker. A new workflow can first be proposed through Quick FlowSpec and applied by a human; only then can a native control block be proposed against its current draft.
+If there is no existing authorized workflow or safe main edge, use the separate `propose_control_workflow` path only when the user requested a new native control workflow. See [control-workflows.md](control-workflows.md). If the required tool, authorized project, pinned assets, or executable capability is missing, return the exact blocker.
 
 | Stage | FlowTest MCP operations | Required result |
 | --- | --- | --- |

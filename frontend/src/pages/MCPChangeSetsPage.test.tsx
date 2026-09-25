@@ -54,6 +54,90 @@ const changeSet: MCPChangeSet = {
 }
 
 describe('MCPChangeSetsPage', () => {
+  it('previews a new control workflow and links its reviewed draft', async () => {
+    const definition = {
+      ...workflowDefinition,
+      schema_version: '4.0',
+      nodes: [
+        ...workflowDefinition.nodes,
+        {
+          id: 'group',
+          type: 'capability' as const,
+          name: '步骤组',
+          position: { x: 300, y: 0 },
+          config: {},
+          capability_id: 'flow.control.group',
+          capability_version: '1.0.0',
+          configuration: { body: { kind: 'inline', region_id: 'body' } },
+        },
+      ],
+      regions: [
+        {
+          id: 'body',
+          owner_node_id: 'group',
+          role: 'body',
+          nodes: [
+            {
+              id: 'wait',
+              type: 'delay' as const,
+              name: '等待',
+              position: { x: 0, y: 0 },
+              config: { seconds: 1 },
+            },
+          ],
+          edges: [],
+          entry_node_id: 'wait',
+          exit_node_ids: ['wait'],
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    }
+    let current: MCPChangeSet = {
+      ...changeSet,
+      title: '新建控制流提案',
+      items: [
+        {
+          ...changeSet.items[0],
+          item_type: 'workflow',
+          action: 'create',
+          title: '新建控制流提案',
+          proposed_content: { name: '新建控制流提案', definition },
+        },
+      ],
+    }
+    handlers(() => current)
+    server.use(
+      http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/accept`, () => {
+        current = {
+          ...current,
+          status: 'accepted',
+          items: [
+            {
+              ...current.items[0],
+              review_status: 'accepted',
+              materialized_resource_id: '00000000-0000-4000-8000-000000009011',
+            },
+          ],
+        }
+        return HttpResponse.json(envelope(current))
+      }),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    const browser = userEvent.setup()
+
+    expect(await screen.findByText('flow.control.group')).toBeVisible()
+    expect(screen.getByText('区域 body：等待')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '查看提案图' }))
+    expect(await screen.findByText('主连线 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close', hidden: true }))
+    await browser.click(screen.getByRole('button', { name: '接受并物化' }))
+    expect(await screen.findByRole('link', { name: '查看已创建草稿' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=00000000-0000-4000-8000-000000009011`,
+    )
+  })
+
   it('shows a native control block before human acceptance', async () => {
     const workflowId = '00000000-0000-4000-8000-000000009010'
     let current: MCPChangeSet = {

@@ -50,6 +50,7 @@ optional_tools:
   - "flowtest.discover_control_capabilities"
   - "flowtest.inspect_flow"
   - "flowtest.propose_control_block"
+  - "flowtest.propose_control_workflow"
   - "flowtest.inspect_connection"
   - "flowtest.check_service_target"
   - "flowtest.inspect_entity_mapping"
@@ -102,7 +103,7 @@ human_approval:
     - "successful proposal creation"
     - "successful sandbox preview"
 stop_conditions:
-  - "a requested inline control block has no existing authorized target workflow or no safe main edge"
+  - "a requested insertion into an existing workflow has no authorized target or safe main edge"
   - "the requested control capability or schema 4.0 inline structure is not supported by the current runtime"
   - "required MCP version, tool, scope, project authorization, or feature flag is missing"
   - "the target environment is production or its classification is unknown"
