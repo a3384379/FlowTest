@@ -34,6 +34,13 @@ export default function WorkflowControlFields({
   return (
     <section className="workflow-config-section" aria-label="控制块配置">
       <Typography.Title level={5}>控制块</Typography.Title>
+      {node.capability_id === 'flow.control.return' && (
+        <Alert
+          type="warning"
+          showIcon
+          title="返回仅在当前工作流被子流程调用时有效；直接运行会以 RETURN_OUTSIDE_CALL 失败。"
+        />
+      )}
       {node.capability_id === 'flow.control.repeat' && (
         <label>
           重复次数

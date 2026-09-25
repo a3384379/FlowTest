@@ -61,6 +61,52 @@ describe('WorkflowDesigner', () => {
     )
   })
 
+  it('adds an explicit subflow return and labels control capabilities on the canvas', async () => {
+    const onChange = vi.fn()
+    const browser = userEvent.setup()
+    const definition = {
+      ...workflowDefinition,
+      nodes: [
+        ...workflowDefinition.nodes,
+        {
+          id: 'existing-control',
+          type: 'capability' as const,
+          name: '重复二十一轮',
+          position: { x: 500, y: 100 },
+          config: {},
+          capability_id: 'flow.control.repeat',
+          capability_version: '1.0.0',
+          configuration: { count: 21, body: { kind: 'inline', region_id: 'body' } },
+          bindings: [],
+        },
+      ],
+    }
+    render(
+      <WorkflowDesigner
+        definition={definition}
+        apis={[]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+    expect(screen.getByText('重复二十一轮')).toBeInTheDocument()
+    expect(screen.getByText('重复次数')).toBeInTheDocument()
+    await browser.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    fireEvent.change(screen.getByLabelText('搜索节点类型'), { target: { value: '返回调用方' } })
+    expect(screen.getByText('仅被子流程调用时结束当前调用；直接运行会失败')).toBeInTheDocument()
+    await browser.click(screen.getByRole('button', { name: 'plus 添加返回调用方' }))
+    const next = onChange.mock.calls[0][0] as WorkflowDefinition
+    expect(next.nodes.at(-1)).toEqual(
+      expect.objectContaining({
+        capability_id: 'flow.control.return',
+        configuration: { outputs: {} },
+      }),
+    )
+  })
+
   it('loads a selected API by ID when it is outside the current search page', async () => {
     const selected: ApiDefinition = { ...apiDefinition, name: '第 200 个接口' }
     vi.mocked(listApis).mockResolvedValue({ items: [], total: 250, page: 1, page_size: 20 })

@@ -34,6 +34,7 @@ export type NodeRegistryKey =
   | 'control.try'
   | 'control.group'
   | 'control.fail'
+  | 'control.return'
   | 'end'
 
 export type NodeIconKey = 'api' | 'control' | 'data' | 'flow' | 'timer' | 'end'
@@ -230,6 +231,14 @@ export const nodeRegistry: readonly NodeRegistryItem[] = [
     label: '主动失败',
     description: '用指定错误码结束当前路径',
     keywords: 'Fail 失败 结束',
+  },
+  {
+    id: 'control.return',
+    category: '控制与校验',
+    icon: 'end',
+    label: '返回调用方',
+    description: '仅被子流程调用时结束当前调用；直接运行会失败',
+    keywords: 'Return 返回 结束 输出',
   },
   {
     id: 'dataset',

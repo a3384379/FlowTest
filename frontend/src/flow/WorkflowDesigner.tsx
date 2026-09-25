@@ -9,7 +9,11 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { useDraftSession } from '../features/drafts/draft-session'
 import { nodeEditorScope } from './editor/editor-identity'
 import { nodeRegistryItem, type NodeRegistryKey } from './editor/node-registry'
-import { addControlBlock, type ControlBlockKind } from './editor/control-blocks'
+import {
+  addControlBlock,
+  controlCapabilityLabel,
+  type ControlBlockKind,
+} from './editor/control-blocks'
 import './workflow-editor.css'
 import WorkflowEdgeInspector from './WorkflowEdgeInspector'
 import WorkflowShortcutHelp from './WorkflowShortcutHelp'
@@ -144,6 +148,7 @@ export type ProposalGraphStatus = 'added' | 'modified' | 'removed' | 'rewired'
 type NodeData = Record<string, unknown> & {
   label: string
   nodeType: WorkflowNode['type']
+  typeLabel: string
   status: string
   runtimeLabel: string
   canCopy?: boolean
@@ -612,6 +617,7 @@ function WorkflowDesignerReady({
       'control.try': () => addSelectedControlBlock('try'),
       'control.group': () => addSelectedControlBlock('group'),
       'control.fail': () => addSelectedControlBlock('fail'),
+      'control.return': () => addSelectedControlBlock('return'),
     }
     if (actions[type]) actions[type]()
     else if (isPaletteType(type)) addPaletteNode(type)
@@ -1565,6 +1571,7 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
     item('control.try', () => input.onAddControlBlock('try'), reason(true, '')),
     item('control.group', () => input.onAddControlBlock('group'), reason(true, '')),
     item('control.fail', () => input.onAddControlBlock('fail'), reason(true, '')),
+    item('control.return', () => input.onAddControlBlock('return'), reason(true, '')),
     item(
       'dataset',
       () => input.onAddNode('dataset'),
@@ -1794,7 +1801,7 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
         <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
         <span>
           <strong>{data.label}</strong>
-          <small>{nodeTypeLabel(data.nodeType)}</small>
+          <small>{data.typeLabel}</small>
         </span>
         <span className="flow-node-status">
           {statusLabel(data.status)}
@@ -1869,6 +1876,8 @@ function toCanvasNode(
     data: {
       label: node.name,
       nodeType: resolveEffectiveNodeType(node),
+      typeLabel:
+        controlCapabilityLabel(node.capability_id) ?? nodeTypeLabel(resolveEffectiveNodeType(node)),
       status,
       runtimeLabel: runtimeLabel(runtime),
       canCopy: false,

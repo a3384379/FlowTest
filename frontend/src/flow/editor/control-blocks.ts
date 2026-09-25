@@ -12,6 +12,7 @@ export type ControlBlockKind =
   | 'try'
   | 'group'
   | 'fail'
+  | 'return'
 
 function region(ownerId: string, role: string): WorkflowRegion {
   const id = `region-${crypto.randomUUID()}`
@@ -95,6 +96,7 @@ function configuration(kind: ControlBlockKind, regions: WorkflowRegion[]): Recor
   }
   if (kind === 'group') return { body: body(regions[0]), inputs: {} }
   if (kind === 'fail') return { code: 'CASE_FAIL', message: '主动标记失败' }
+  if (kind === 'return') return { outputs: {} }
   return {
     mode: 'value',
     value: { kind: 'literal', value: 'first' },
@@ -149,6 +151,7 @@ const roles: Record<ControlBlockKind, string[]> = {
   try: ['try', 'catch:known', 'finally'],
   group: ['body'],
   fail: [],
+  return: [],
 }
 
 const labels: Record<ControlBlockKind, string> = {
@@ -163,6 +166,13 @@ const labels: Record<ControlBlockKind, string> = {
   try: '异常处理',
   group: '步骤组',
   fail: '主动失败',
+  return: '返回调用方',
+}
+
+export function controlCapabilityLabel(capabilityId: string | undefined): string | null {
+  if (!capabilityId?.startsWith('flow.control.')) return null
+  const kind = capabilityId.slice('flow.control.'.length) as ControlBlockKind
+  return labels[kind] ?? '控制块'
 }
 
 export function addControlBlock(
