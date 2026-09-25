@@ -270,6 +270,69 @@ export function removeRegionStep(region: WorkflowRegion, nodeId: string): Workfl
   return withoutRegionStep(region, nodeId, links)
 }
 
+export function moveRegionStep(
+  region: WorkflowRegion,
+  nodeId: string,
+  direction: -1 | 1,
+): WorkflowRegion | null {
+  const path = linearRegionPath(region)
+  if (
+    !path ||
+    region.nodes.some((node) => region.nodes.some((other) => nodeReferences(node, other.id)))
+  )
+    return null
+  const index = path.indexOf(nodeId)
+  const target = index + direction
+  if (index < 0 || target < 0 || target >= path.length) return null
+  const original = path.map((id) => region.nodes.find((node) => node.id === id)!)
+  const orderedEdges = path
+    .slice(0, -1)
+    .map((id) => region.edges.find((edge) => edge.source === id)!)
+  const moved = [...path]
+  ;[moved[index], moved[target]] = [moved[target], moved[index]]
+  return {
+    ...region,
+    nodes: moved.map((id, position) => ({
+      ...region.nodes.find((node) => node.id === id)!,
+      position: original[position].position,
+    })),
+    edges: orderedEdges.map((edge, position) => ({
+      ...edge,
+      source: moved[position],
+      target: moved[position + 1],
+    })),
+    entry_node_id: moved[0],
+    exit_node_ids: [moved.at(-1)!],
+  }
+}
+
+function linearRegionPath(region: WorkflowRegion): string[] | null {
+  if (!hasLinearRegionShape(region)) return null
+  const ids = new Set(region.nodes.map((node) => node.id))
+  const seen = new Set<string>()
+  const path: string[] = []
+  let current: string | null | undefined = region.entry_node_id
+  while (current && ids.has(current) && !seen.has(current)) {
+    seen.add(current)
+    path.push(current)
+    const outgoing = region.edges.filter((edge) => edge.source === current)
+    if (outgoing.length > 1) return null
+    current = outgoing[0]?.target
+  }
+  return path.length === region.nodes.length && path.at(-1) === region.exit_node_ids[0] && !current
+    ? path
+    : null
+}
+
+function hasLinearRegionShape(region: WorkflowRegion): boolean {
+  return Boolean(
+    region.entry_node_id &&
+    region.exit_node_ids.length === 1 &&
+    region.edges.length === region.nodes.length - 1 &&
+    region.edges.every((edge) => !edge.condition && edge.mappings.length === 0),
+  )
+}
+
 type RemovalLinks = { incoming?: WorkflowEdge; outgoing?: WorkflowEdge }
 
 function regionRemovalLinks(region: WorkflowRegion, nodeId: string): RemovalLinks | null {

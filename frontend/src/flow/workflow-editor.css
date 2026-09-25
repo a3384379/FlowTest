@@ -676,6 +676,20 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.workflow-control-condition {
+  min-width: 0;
+  max-width: 100%;
+  margin-block: 8px;
+  padding: 10px;
+  border-left: 2px solid #c7d8ee;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.workflow-control-condition > .ant-space {
+  max-width: 100%;
+}
+
 .workflow-control-region-step {
   display: flex;
   align-items: center;

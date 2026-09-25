@@ -5,6 +5,59 @@ export type ValueSource =
   | { kind: 'variable'; scope: string; path: Array<string | number> }
   | { kind: 'node_output'; node_id: string; path: Array<string | number> }
 
+const variableScopes = new Set(['runtime', 'workflow', 'input', 'local', 'loop', 'state', 'error'])
+
+export function parseValueSource(value: unknown): ValueSource | null {
+  const source = asRecord(value)
+  if (source.kind === 'literal') return parseLiteral(source)
+  if (source.kind === 'variable') return parseVariable(source)
+  if (source.kind === 'node_output') return parseNodeOutput(source)
+  return null
+}
+
+function parseLiteral(source: Record<string, unknown>): ValueSource | null {
+  return source.value !== undefined && onlyKeys(source, ['kind', 'value'])
+    ? { kind: 'literal', value: source.value }
+    : null
+}
+
+function parseVariable(source: Record<string, unknown>): ValueSource | null {
+  if (
+    typeof source.scope !== 'string' ||
+    !variableScopes.has(source.scope) ||
+    !validPath(source.path, true) ||
+    !onlyKeys(source, ['kind', 'scope', 'path'])
+  )
+    return null
+  return { kind: 'variable', scope: source.scope, path: source.path }
+}
+
+function parseNodeOutput(source: Record<string, unknown>): ValueSource | null {
+  if (
+    typeof source.node_id !== 'string' ||
+    source.node_id.length > 128 ||
+    !validPath(source.path, false) ||
+    !onlyKeys(source, ['kind', 'node_id', 'path'])
+  )
+    return null
+  return { kind: 'node_output', node_id: source.node_id, path: source.path }
+}
+
+function validPath(value: unknown, required: boolean): value is Array<string | number> {
+  return (
+    Array.isArray(value) &&
+    (!required || value.length > 0) &&
+    value.length <= 32 &&
+    value.every(
+      (segment) => typeof segment === 'string' || (Number.isInteger(segment) && segment >= 0),
+    )
+  )
+}
+
+function onlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key))
+}
+
 export type SourceChoice = {
   key: string
   label: string
@@ -15,7 +68,7 @@ export type SourceChoice = {
 export function conditionStateSources(
   definition: WorkflowDefinition,
   node: WorkflowNode,
-  phase: 'initial' | 'update',
+  phase: 'initial' | 'condition' | 'update',
 ): SourceChoice[] {
   const containing = definition.regions?.find((region) =>
     region.nodes.some((item) => item.id === node.id),
@@ -23,7 +76,7 @@ export function conditionStateSources(
   const body = definition.regions?.find(
     (region) => region.owner_node_id === node.id && region.role === 'body',
   )
-  const graph = phase === 'initial' ? containing : body
+  const graph = phase === 'update' ? body : containing
   return [
     ...baseVariableChoices(definition),
     ...scopedVariableChoices(node, containing, body, phase),
@@ -47,11 +100,15 @@ function scopedVariableChoices(
   node: WorkflowNode,
   containing: WorkflowRegion | undefined,
   body: WorkflowRegion | undefined,
-  phase: 'initial' | 'update',
+  phase: 'initial' | 'condition' | 'update',
 ): SourceChoice[] {
   const config = node.configuration ?? {}
   const inputs =
-    phase === 'initial' ? containing?.inputs : { ...asRecord(config.inputs), ...body?.inputs }
+    phase === 'update'
+      ? { ...asRecord(config.inputs), ...body?.inputs }
+      : phase === 'condition'
+        ? asRecord(config.inputs)
+        : containing?.inputs
   const choices = Object.keys(inputs ?? {}).map((name) =>
     variableChoice('input', name, `当前区域输入 · ${name}`),
   )
@@ -67,8 +124,12 @@ function scopedVariableChoices(
       ...Object.keys(asRecord(config.state)).map((name) =>
         variableChoice('state', name, `当前块状态 · ${name}`),
       ),
-      ...['index', 'iteration'].map((name) => variableChoice('loop', name, `当前轮次 · ${name}`)),
     )
+    if (phase === 'update') {
+      choices.push(
+        ...['index', 'iteration'].map((name) => variableChoice('loop', name, `当前轮次 · ${name}`)),
+      )
+    }
   }
   return choices
 }
@@ -78,7 +139,7 @@ function nodeOutputChoices(
   node: WorkflowNode,
   graph: WorkflowRegion | undefined,
   body: WorkflowRegion | undefined,
-  phase: 'initial' | 'update',
+  phase: 'initial' | 'condition' | 'update',
 ): SourceChoice[] {
   const scope = graphContext(definition, graph)
   const guaranteed = guaranteedOutputs(scope, node.id, body, phase)
@@ -99,24 +160,26 @@ function guaranteedOutputs(
   scope: ReturnType<typeof graphContext>,
   nodeId: string,
   body: WorkflowRegion | undefined,
-  phase: 'initial' | 'update',
+  phase: 'initial' | 'condition' | 'update',
 ): Set<string> {
-  return phase === 'initial'
-    ? guaranteedBefore(scope.nodes, scope.edges, scope.entry, nodeId)
-    : guaranteedBeforeAllExits(scope.nodes, scope.edges, scope.entry, body?.exit_node_ids ?? [])
+  return phase === 'update'
+    ? guaranteedBeforeAllExits(scope.nodes, scope.edges, scope.entry, body?.exit_node_ids ?? [])
+    : guaranteedBefore(scope.nodes, scope.edges, scope.entry, nodeId)
 }
 
 function outputChoice(
   candidate: WorkflowNode,
   available: boolean,
-  phase: 'initial' | 'update',
+  phase: 'initial' | 'condition' | 'update',
 ): SourceChoice {
   return {
     key: `output:${candidate.id}`,
     label: `节点输出 · ${candidate.name}`,
     source: available ? { kind: 'node_output', node_id: candidate.id, path: [] } : null,
     ...(!available
-      ? { reason: phase === 'initial' ? '该节点可能尚未执行' : '该节点不是每条区域路径的必经步骤' }
+      ? {
+          reason: phase === 'update' ? '该节点不是每条区域路径的必经步骤' : '该节点可能尚未执行',
+        }
       : {}),
   }
 }

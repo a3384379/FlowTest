@@ -4,6 +4,7 @@ import type { ApiDefinition, WorkflowRegion } from '../lib/api'
 import {
   insertRegionApiAfter,
   insertRegionDelayAfter,
+  moveRegionStep,
   removeRegionStep,
 } from './editor/control-blocks'
 import WorkflowRegionCanvas from './WorkflowRegionCanvas'
@@ -53,6 +54,16 @@ export default function WorkflowRegionCanvasModal({
     setSelectedNodeId(null)
     setError(null)
   }
+  function applyMove(direction: -1 | 1) {
+    if (!selectedNodeId) return
+    const next = moveRegionStep(region, selectedNodeId, direction)
+    if (!next) {
+      setError('只能重排无条件、无字段映射且没有节点引用的线性区域步骤。')
+      return
+    }
+    onUpdate(next)
+    setError(null)
+  }
   return (
     <Modal
       title={`${region.role} 区域画布`}
@@ -73,6 +84,7 @@ export default function WorkflowRegionCanvasModal({
         activeApiId={activeApiId}
         onSelectApi={setSelectedApiId}
         onInsert={applyInsertion}
+        onMove={applyMove}
         onRemove={applyDeletion}
       />
       {error && <Alert type="error" title={error} />}
@@ -97,6 +109,7 @@ function CanvasToolbar({
   activeApiId,
   onSelectApi,
   onInsert,
+  onMove,
   onRemove,
 }: {
   region: WorkflowRegion
@@ -107,6 +120,7 @@ function CanvasToolbar({
   activeApiId?: string
   onSelectApi: (id: string) => void
   onInsert: (region: WorkflowRegion | null) => void
+  onMove: (direction: -1 | 1) => void
   onRemove: () => void
 }) {
   return (
@@ -114,6 +128,7 @@ function CanvasToolbar({
       <Typography.Text>
         {selectedNodeName ? `已选中：${selectedNodeName}` : '选择步骤后可在其后插入节点'}
       </Typography.Text>
+      <MoveButtons editable={editable} selectedNodeId={selectedNodeId} onMove={onMove} />
       <Button
         disabled={!editable || !selectedNodeId}
         onClick={() => {
@@ -155,6 +170,28 @@ function CanvasToolbar({
         </Button>
       </Popconfirm>
     </Space>
+  )
+}
+
+function MoveButtons({
+  editable,
+  selectedNodeId,
+  onMove,
+}: {
+  editable: boolean
+  selectedNodeId: string | null
+  onMove: (direction: -1 | 1) => void
+}) {
+  const disabled = !editable || !selectedNodeId
+  return (
+    <>
+      <Button disabled={disabled} onClick={() => onMove(-1)}>
+        向前移动
+      </Button>
+      <Button disabled={disabled} onClick={() => onMove(1)}>
+        向后移动
+      </Button>
+    </>
   )
 }
 

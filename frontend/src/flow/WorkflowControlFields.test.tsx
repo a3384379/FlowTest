@@ -2,7 +2,12 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { workflowDefinition } from '../test/fixtures'
-import { addControlBlock, appendRegionDelay, removeRegionStep } from './editor/control-blocks'
+import {
+  addControlBlock,
+  appendRegionDelay,
+  moveRegionStep,
+  removeRegionStep,
+} from './editor/control-blocks'
 import WorkflowControlFields from './WorkflowControlFields'
 
 it('adds a serial step through the control region panel', async () => {
@@ -161,6 +166,68 @@ it('deletes a linear region step and reconnects its neighbors after confirmation
   expect(updated.edges).toEqual([
     expect.objectContaining({ source: region.entry_node_id, target: region.exit_node_ids[0] }),
   ])
+})
+
+it('moves a linear region step while preserving node and edge identities', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const first = appendRegionDelay(definition.regions![0])!
+  const region = appendRegionDelay(first)!
+  const ids = region.nodes.map((node) => node.id)
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${ids[1]}`))
+  await userEvent.click(within(dialog).getByRole('button', { name: '向前移动' }))
+  const moved = onRegionUpdate.mock.calls[0][0]
+  expect(moved.nodes.map((node: { id: string }) => node.id)).toEqual([ids[1], ids[0], ids[2]])
+  expect(moved.entry_node_id).toBe(ids[1])
+  expect(moved.exit_node_ids).toEqual([ids[2]])
+  expect(moved.edges.map((edge: { id: string }) => edge.id)).toEqual(
+    region.edges.map((edge) => edge.id),
+  )
+  expect(
+    moved.edges.map((edge: { source: string; target: string }) => [edge.source, edge.target]),
+  ).toEqual([
+    [ids[1], ids[0]],
+    [ids[0], ids[2]],
+  ])
+})
+
+it('refuses to move a region step across mapped edges or node dependencies', () => {
+  const first = appendRegionDelay(addControlBlock(workflowDefinition, 'group').regions![0])!
+  const region = appendRegionDelay(first)!
+  const firstId = region.entry_node_id!
+  expect(
+    moveRegionStep(
+      {
+        ...region,
+        edges: [{ ...region.edges[0], condition: 'true' }, ...region.edges.slice(1)],
+      },
+      firstId,
+      1,
+    ),
+  ).toBeNull()
+  expect(
+    moveRegionStep(
+      {
+        ...region,
+        nodes: region.nodes.map((node, index) =>
+          index === 1 ? { ...node, config: { source: firstId } } : node,
+        ),
+      },
+      firstId,
+      1,
+    ),
+  ).toBeNull()
 })
 
 it('preserves a region step when its edge or output still references it', () => {
@@ -587,11 +654,74 @@ it('selects an IF operand without replacing the rest of its condition', async ()
       onRegionUpdate={vi.fn()}
     />,
   )
-  await userEvent.click(screen.getByRole('combobox', { name: '条件左侧来源' }))
+  await userEvent.click(screen.getByRole('combobox', { name: '判断条件 左侧 来源浏览器' }))
   await userEvent.click(screen.getByText('运行输入 · status'))
   expect(onUpdate.mock.calls.at(-1)![0].configuration.condition).toEqual({
     ...(node.configuration!.condition as Record<string, unknown>),
     left: { kind: 'variable', scope: 'runtime', path: ['status'] },
+  })
+})
+
+it('converts a Switch to rule conditions and edits one branch without changing its identity', async () => {
+  const definition = addControlBlock(workflowDefinition, 'switch')
+  const node = definition.nodes.at(-1)!
+  const onUpdate = vi.fn()
+  const props = {
+    definition,
+    regions: definition.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: '多分支模式' }))
+  await userEvent.click(screen.getByText('按条件匹配'))
+  const switched = onUpdate.mock.calls.at(-1)![0]
+  expect(switched.configuration.branches[0]).toMatchObject({
+    id: 'first',
+    match: null,
+    condition: { kind: 'compare', operator: 'equals' },
+  })
+  view.rerender(<WorkflowControlFields node={switched} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: '分支 分支一 条件 运算符' }))
+  await userEvent.click(screen.getAllByText('不等于').at(-1)!)
+  const edited = onUpdate.mock.calls.at(-1)![0].configuration
+  expect(edited.branches[0]).toMatchObject({
+    id: 'first',
+    body: (node.configuration!.branches as { body: unknown }[])[0].body,
+    condition: { operator: 'not_equals' },
+  })
+  expect(edited.branches[1]).toEqual(switched.configuration.branches[1])
+})
+
+it('offers initialized loop state as a condition operand', async () => {
+  const definition = addControlBlock(workflowDefinition, 'while')
+  const base = definition.nodes.at(-1)!
+  const node = {
+    ...base,
+    configuration: {
+      ...base.configuration,
+      state: { cursor: { kind: 'literal', value: 0 } },
+      update: {},
+    },
+  }
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={node}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: '循环条件 左侧 来源浏览器' }))
+  await userEvent.click(screen.getByText('当前块状态 · cursor'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.condition.left).toEqual({
+    kind: 'variable',
+    scope: 'state',
+    path: ['cursor'],
   })
 })
 

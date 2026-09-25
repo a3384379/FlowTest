@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import type { WorkflowDefinition, WorkflowNode } from '../lib/api'
 import {
   conditionStateSources,
+  parseValueSource,
   type SourceChoice,
   type ValueSource,
 } from './editor/control-source-browser'
@@ -10,8 +11,6 @@ import { useNodeEditContext } from './editor/node-edit-session'
 import ControlSourcePicker from './ControlSourcePicker'
 
 type LiteralSource = Extract<ValueSource, { kind: 'literal' }>
-type VariableSource = Extract<ValueSource, { kind: 'variable' }>
-type NodeOutputSource = Extract<ValueSource, { kind: 'node_output' }>
 type StateUpdate = { kind: 'set' | 'add' | 'append'; value: ValueSource }
 
 const namePattern = /^[A-Za-z_][A-Za-z0-9_.-]*$/
@@ -80,7 +79,7 @@ export default function ConditionLoopStateFields({
         初始化值在循环前求值；更新值在每轮结束后从同一轮快照求值。只有声明的状态字段可更新。
       </Typography.Paragraph>
       {Object.entries(state).map(([name, raw]) => {
-        const source = asSource(raw)
+        const source = parseValueSource(raw)
         const update = asUpdate(updates[name])
         const typeWarning = stateTypeWarning(source, update)
         return (
@@ -163,7 +162,7 @@ export default function ConditionLoopStateFields({
   )
 }
 
-function SourceFields({
+export function SourceFields({
   label,
   source,
   choices,
@@ -443,56 +442,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function asSource(value: unknown): ValueSource | null {
-  const source = asRecord(value)
-  if (!source) return null
-  if (source.kind === 'literal') return asLiteralSource(source)
-  if (source.kind === 'variable') return asVariableSource(source)
-  if (source.kind === 'node_output') return asNodeOutputSource(source)
-  return null
-}
-
-function asLiteralSource(source: Record<string, unknown>): LiteralSource | null {
-  return source.value !== undefined && onlyKeys(source, ['kind', 'value'])
-    ? { kind: 'literal', value: source.value }
-    : null
-}
-
-function asVariableSource(source: Record<string, unknown>): VariableSource | null {
-  if (
-    !onlyKeys(source, ['kind', 'scope', 'path']) ||
-    typeof source.scope !== 'string' ||
-    !variableScopes.includes(source.scope) ||
-    !validPath(source.path, true)
-  )
-    return null
-  return { kind: 'variable', scope: source.scope, path: source.path }
-}
-
-function asNodeOutputSource(source: Record<string, unknown>): NodeOutputSource | null {
-  if (
-    !onlyKeys(source, ['kind', 'node_id', 'path']) ||
-    typeof source.node_id !== 'string' ||
-    !validPath(source.path, false)
-  )
-    return null
-  return { kind: 'node_output', node_id: source.node_id, path: source.path }
-}
-
-function validPath(value: unknown, required: boolean): value is Array<string | number> {
-  return (
-    Array.isArray(value) &&
-    (!required || value.length > 0) &&
-    value.length <= 32 &&
-    value.every(
-      (segment) => typeof segment === 'string' || (Number.isInteger(segment) && segment >= 0),
-    )
-  )
-}
-
 function asUpdate(value: unknown): StateUpdate | null {
   const update = asRecord(value)
-  const source = asSource(update?.value)
+  const source = parseValueSource(update?.value)
   if (
     !update ||
     !source ||

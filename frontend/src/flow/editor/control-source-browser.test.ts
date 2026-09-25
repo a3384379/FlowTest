@@ -104,6 +104,37 @@ describe('condition loop source browser', () => {
     ).toMatchObject({ kind: 'node_output' })
   })
 
+  it('offers initialized state and explicit control inputs to a loop condition', () => {
+    const base = example()
+    const owner = base.nodes.at(-1)!
+    const definition = {
+      ...base,
+      nodes: base.nodes.map((node) =>
+        node.id === owner.id
+          ? {
+              ...node,
+              configuration: {
+                ...node.configuration,
+                inputs: { requestId: { kind: 'variable', scope: 'runtime', path: ['caseId'] } },
+              },
+            }
+          : node,
+      ),
+    }
+    const choices = conditionStateSources(definition, definition.nodes.at(-1)!, 'condition')
+    expect(choices.find((choice) => choice.key === 'state:page')?.source).toEqual({
+      kind: 'variable',
+      scope: 'state',
+      path: ['page'],
+    })
+    expect(choices.find((choice) => choice.key === 'input:requestId')?.source).toMatchObject({
+      kind: 'variable',
+      scope: 'input',
+    })
+    expect(choices.find((choice) => choice.key === 'loop:index')).toBeUndefined()
+    expect(choices.find((choice) => choice.key === 'input:token')).toBeUndefined()
+  })
+
   it('explains when an upstream node can be skipped', () => {
     const definition = example()
     const owner = definition.nodes.at(-1)!

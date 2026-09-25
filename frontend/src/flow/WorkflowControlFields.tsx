@@ -2,6 +2,7 @@ import { Alert, Button, Input, InputNumber, Select, Space, Typography } from 'an
 import { useState } from 'react'
 import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
+import ControlConditionFields from './ControlConditionFields'
 import ControlConfigurationJson from './ControlConfigurationJson'
 import ControlSourcePicker from './ControlSourcePicker'
 import {
@@ -12,9 +13,11 @@ import {
 } from './editor/control-blocks'
 import {
   conditionStateSources,
+  parseValueSource,
   type SourceChoice,
   type ValueSource,
 } from './editor/control-source-browser'
+import { switchToRules, switchToValue } from './editor/control-switch'
 import WorkflowRegionCanvasModal from './WorkflowRegionCanvasModal'
 
 type Props = {
@@ -62,7 +65,11 @@ export default function WorkflowControlFields({
         <ControlSourceShortcuts
           node={node}
           configuration={configuration}
-          choices={conditionStateSources(definition, node, 'initial')}
+          choices={conditionStateSources(
+            definition,
+            node,
+            node.capability_id === 'flow.control.foreach' ? 'initial' : 'condition',
+          )}
           editable={configFieldsEditable}
           onChange={updateConfiguration}
         />
@@ -82,6 +89,13 @@ export default function WorkflowControlFields({
           先修正或丢弃配置 JSON 草稿，再使用可视化状态编辑。
         </Typography.Text>
       )}
+      <ControlConditionSections
+        node={node}
+        definition={definition}
+        configuration={configuration}
+        editable={configFieldsEditable}
+        onChange={updateConfiguration}
+      />
       {['flow.control.while', 'flow.control.do_while', 'flow.control.until'].includes(
         node.capability_id ?? '',
       ) && (
@@ -170,23 +184,118 @@ function ControlSourceShortcuts({
       />
     )
   }
-  if (node.capability_id !== 'flow.control.if') return null
-  const condition = asRecord(configuration.condition)
-  if (!condition || condition.kind !== 'compare') return null
+  return null
+}
+
+function ControlConditionSections({
+  node,
+  definition,
+  configuration,
+  editable,
+  onChange,
+}: {
+  node: WorkflowNode
+  definition?: WorkflowDefinition
+  configuration: Record<string, unknown>
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  const conditionLoop = [
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+  ].includes(node.capability_id ?? '')
+  const choices = definition ? conditionStateSources(definition, node, 'condition') : []
+  if (node.capability_id === 'flow.control.if' || conditionLoop) {
+    return (
+      <ControlConditionFields
+        label={conditionLoop ? '循环条件' : '判断条件'}
+        value={configuration.condition}
+        choices={choices}
+        editable={editable}
+        onChange={(condition) => onChange({ ...configuration, condition })}
+      />
+    )
+  }
+  if (node.capability_id !== 'flow.control.switch') return null
+  return (
+    <SwitchBranchFields
+      configuration={configuration}
+      choices={choices}
+      editable={editable}
+      onChange={onChange}
+    />
+  )
+}
+
+function SwitchBranchFields({
+  configuration,
+  choices,
+  editable,
+  onChange,
+}: {
+  configuration: Record<string, unknown>
+  choices: SourceChoice[]
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  if (!Array.isArray(configuration.branches)) return null
+  const valueMode = switchToValue(configuration)
   return (
     <Space direction="vertical">
-      {(['left', 'right'] as const).map((operand) => (
-        <SourceShortcut
-          key={operand}
-          label={operand === 'left' ? '条件左侧来源' : '条件右侧来源'}
-          value={condition[operand]}
-          choices={choices}
-          editable={editable}
-          onChange={(source) =>
-            onChange({ ...configuration, condition: { ...condition, [operand]: source } })
-          }
-        />
-      ))}
+      <Select
+        aria-label="多分支模式"
+        disabled={!editable}
+        value={configuration.mode === 'rules' ? 'rules' : 'value'}
+        options={[
+          {
+            label: '按值匹配',
+            value: 'value',
+            disabled: configuration.mode === 'rules' && !valueMode,
+          },
+          { label: '按条件匹配', value: 'rules' },
+        ]}
+        onChange={(mode: 'value' | 'rules') => {
+          const next = mode === 'rules' ? switchToRules(configuration) : valueMode
+          if (next) onChange(next)
+        }}
+      />
+      {configuration.mode === 'rules' && !valueMode && (
+        <Typography.Text type="secondary">
+          当前条件不能无损转换为按值匹配；可在高级配置中编辑模式。
+        </Typography.Text>
+      )}
+      {configuration.branches.map((raw, index) => {
+        const branch = asRecord(raw)
+        if (!branch) return null
+        const label = `分支 ${String(branch.label ?? branch.id ?? index + 1)}`
+        const update = (patch: Record<string, unknown>) =>
+          onChange({
+            ...configuration,
+            branches: (configuration.branches as unknown[]).map((item, position) =>
+              position === index ? { ...branch, ...patch } : item,
+            ),
+          })
+        return configuration.mode === 'rules' ? (
+          <ControlConditionFields
+            key={String(branch.id ?? index)}
+            label={`${label} 条件`}
+            value={branch.condition}
+            choices={choices}
+            editable={editable}
+            onChange={(condition) => update({ condition })}
+          />
+        ) : (
+          <SourceShortcut
+            key={String(branch.id ?? index)}
+            label={`${label} 匹配来源`}
+            value={branch.match}
+            choices={choices}
+            editable={editable}
+            onChange={(match) => update({ match })}
+          />
+        )
+      })}
     </Space>
   )
 }
@@ -204,7 +313,7 @@ function SourceShortcut({
   editable: boolean
   onChange: (source: ValueSource) => void
 }) {
-  const source = asSource(value)
+  const source = parseValueSource(value)
   if (!source) return null
   return (
     <div>
@@ -224,34 +333,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null
-}
-
-function asSource(value: unknown): ValueSource | null {
-  const source = asRecord(value)
-  if (!source) return null
-  if (source.kind === 'literal' && 'value' in source) {
-    return { kind: 'literal', value: source.value }
-  }
-  if (source.kind === 'variable' && typeof source.scope === 'string' && validPath(source.path)) {
-    return { kind: 'variable', scope: source.scope, path: source.path }
-  }
-  if (
-    source.kind === 'node_output' &&
-    typeof source.node_id === 'string' &&
-    validPath(source.path)
-  ) {
-    return { kind: 'node_output', node_id: source.node_id, path: source.path }
-  }
-  return null
-}
-
-function validPath(value: unknown): value is Array<string | number> {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (segment) => typeof segment === 'string' || (Number.isInteger(segment) && segment >= 0),
-    )
-  )
 }
 
 function RegionEditor({
