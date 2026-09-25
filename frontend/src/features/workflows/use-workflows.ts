@@ -336,7 +336,7 @@ export function useWorkflows(initialWorkflowId?: string) {
       rerunFailedWorkflowItems(requiredId(projectId), input.executionId, input.payload),
   })
 
-  useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
+  useExecutionEvents(activeExecutionId, token, handleExecutionEvent, reconcileExecution)
 
   function selectProject(value: string) {
     selectContextProject(value)
@@ -537,6 +537,16 @@ export function useWorkflows(initialWorkflowId?: string) {
       }))
     }
     if (event.type === 'execution.completed') void completeExecution(event.execution_id)
+  }
+
+  async function reconcileExecution(executionId: string): Promise<void> {
+    if (!projectId) return
+    const result = await getWorkflowExecution(projectId, executionId, true)
+    if (['queued', 'running'].includes(result.execution.status)) {
+      setActiveExecution((current) => (current?.id === executionId ? result.execution : current))
+      return
+    }
+    await completeExecution(executionId)
   }
 
   async function watchExecution(executionId: string) {

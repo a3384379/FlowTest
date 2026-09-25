@@ -7,6 +7,7 @@ from typing import cast
 from uuid import UUID
 
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from app.engine.events import ExecutionEvent, ExecutionEventType
 from app.engine.events import ExecutionEventBus as ExecutionEventBus
@@ -30,17 +31,24 @@ class RedisExecutionEventBus:
     async def publish(self, event: ExecutionEvent) -> ExecutionEvent:
         sequence_key = _sequence_key(event.execution_id)
         history_key = _history_key(event.execution_id)
-        sequence = int(await self._client.incr(sequence_key))
-        stored = event.model_copy(update={"sequence": sequence})
-        serialized = stored.model_dump_json()
-        pipeline = self._client.pipeline(transaction=True)
-        pipeline.rpush(history_key, serialized)
-        pipeline.ltrim(history_key, -EVENT_HISTORY_LIMIT, -1)
-        pipeline.expire(history_key, self._retention_seconds)
-        pipeline.expire(sequence_key, self._retention_seconds)
-        pipeline.publish(_channel(event.execution_id), serialized)
-        await pipeline.execute()
-        return stored
+        while True:
+            async with self._client.pipeline(transaction=True) as pipeline:
+                try:
+                    await pipeline.watch(sequence_key)
+                    current = await pipeline.get(sequence_key)
+                    sequence = int(current or 0) + 1
+                    stored = event.model_copy(update={"sequence": sequence})
+                    serialized = stored.model_dump_json()
+                    pipeline.multi()  # type: ignore[no-untyped-call]
+                    pipeline.set(sequence_key, sequence, ex=self._retention_seconds)
+                    pipeline.rpush(history_key, serialized)
+                    pipeline.ltrim(history_key, -EVENT_HISTORY_LIMIT, -1)
+                    pipeline.expire(history_key, self._retention_seconds)
+                    pipeline.publish(_channel(event.execution_id), serialized)
+                    await pipeline.execute()
+                    return stored
+                except WatchError:
+                    continue
 
     async def _history(self, execution_id: UUID) -> list[ExecutionEvent]:
         values = await cast(

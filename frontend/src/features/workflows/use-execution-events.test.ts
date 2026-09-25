@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { executionEventsUrl, parseExecutionEvent, useExecutionEvents } from './use-execution-events'
 
 describe('workflow execution events', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
 
   it('parses valid events and rejects malformed messages', () => {
     const event = parseExecutionEvent(
@@ -50,9 +53,13 @@ describe('workflow execution events', () => {
     expect(executionEventsUrl('execution-id')).toBe(
       `ws://${window.location.host}/api/v1/executions/execution-id/events`,
     )
+    expect(executionEventsUrl('execution-id', 12)).toBe(
+      `ws://${window.location.host}/api/v1/executions/execution-id/events?after_sequence=12`,
+    )
   })
 
-  it('subscribes with a token, de-duplicates messages, and closes cleanly', () => {
+  it('reconciles before connecting, replays from the last sequence, and de-duplicates', async () => {
+    vi.useFakeTimers()
     const sockets: FakeWebSocket[] = []
     class TestSocket extends FakeWebSocket {
       constructor(url: string, protocols: string[]) {
@@ -63,23 +70,38 @@ describe('workflow execution events', () => {
     vi.stubGlobal('WebSocket', TestSocket)
     const firstHandler = vi.fn()
     const secondHandler = vi.fn()
+    const reconcile = vi.fn().mockResolvedValue(undefined)
     const { rerender, unmount } = renderHook(
-      ({ handler }) => useExecutionEvents('execution-id', 'access-token', handler),
+      ({ handler }) => useExecutionEvents('execution-id', 'access-token', handler, reconcile),
       { initialProps: { handler: firstHandler } },
     )
+    await act(async () => {})
+    expect(reconcile).toHaveBeenCalledOnce()
     expect(sockets[0].protocols).toEqual(['flowtest.events.v1', 'flowtest.token.access-token'])
 
     rerender({ handler: secondHandler })
     act(() => {
-      sockets[0].emit(eventMessage(2))
-      sockets[0].emit(eventMessage(2))
+      sockets[0].open()
+      sockets[0].emit(eventMessage(1))
+      sockets[0].emit(eventMessage(1))
       sockets[0].emit('invalid')
+      sockets[0].disconnect(1006)
     })
-
     expect(firstHandler).not.toHaveBeenCalled()
     expect(secondHandler).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(reconcile).toHaveBeenCalledTimes(2)
+    expect(sockets[1].url).toContain('after_sequence=1')
+    act(() => {
+      sockets[1].open()
+      sockets[1].emit(eventMessage(1))
+      sockets[1].emit(eventMessage(2))
+    })
+    expect(secondHandler).toHaveBeenCalledTimes(2)
     unmount()
-    expect(sockets[0].closed).toBe(true)
+    expect(sockets[1].closed).toBe(true)
   })
 
   it('does not connect without an execution and token', () => {
@@ -92,10 +114,45 @@ describe('workflow execution events', () => {
     rerender({ executionId: 'execution-id' })
     expect(constructor).not.toHaveBeenCalled()
   })
+
+  it('reconciles a sequence gap before accepting a replay beyond retained history', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class extends FakeWebSocket {
+        constructor(url: string, protocols: string[]) {
+          super(url, protocols)
+          sockets.push(this)
+        }
+      },
+    )
+    const handler = vi.fn()
+    const reconcile = vi.fn().mockResolvedValue(undefined)
+    const { unmount } = renderHook(() =>
+      useExecutionEvents('execution-id', 'access-token', handler, reconcile),
+    )
+    await act(async () => {})
+    act(() => {
+      sockets[0].open()
+      sockets[0].emit(eventMessage(1))
+      sockets[0].emit(eventMessage(3))
+    })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(sockets[0].closed).toBe(true)
+    await act(async () => vi.advanceTimersByTime(500))
+    expect(reconcile).toHaveBeenCalledTimes(2)
+    expect(sockets[1].url).toContain('after_sequence=1')
+    act(() => sockets[1].emit(eventMessage(3)))
+    expect(handler).toHaveBeenCalledTimes(2)
+    unmount()
+  })
 })
 
 class FakeWebSocket {
   onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onopen: (() => void) | null = null
+  onclose: ((event: CloseEvent) => void) | null = null
   closed = false
 
   constructor(
@@ -107,8 +164,17 @@ class FakeWebSocket {
     this.onmessage?.(new MessageEvent('message', { data }))
   }
 
-  close() {
+  open() {
+    this.onopen?.()
+  }
+
+  disconnect(code: number) {
     this.closed = true
+    this.onclose?.({ code } as CloseEvent)
+  }
+
+  close(code = 1000) {
+    this.disconnect(code)
   }
 }
 
