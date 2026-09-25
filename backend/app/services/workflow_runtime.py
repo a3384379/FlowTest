@@ -2,7 +2,8 @@ import asyncio
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
@@ -111,6 +112,16 @@ class PreparedWorkflowRequest:
     redacted_request: PreparedRequest
     body_kind: BodyKind
     multipart: PreparedMultipart | None
+
+
+@asynccontextmanager
+async def _api_request_window(context: ExecutionContext) -> AsyncIterator[None]:
+    semaphore = context.leaf_semaphore
+    if semaphore is None:
+        yield
+    else:
+        async with semaphore:
+            yield
 
 
 def retry_safe_request_nodes(
@@ -242,6 +253,9 @@ class WorkflowNodeExecutor:
             branch_client_factory=self._branch_client_factory,
             owns_client=True,
         )
+
+    def manages_request_window(self, node: WorkflowNode) -> bool:
+        return node.effective_type is NodeType.API
 
     async def _execute_capability(
         self,
@@ -419,7 +433,7 @@ class WorkflowNodeExecutor:
         started_at = datetime.now(UTC)
         started = perf_counter()
         try:
-            await self._outbound_guard.enforce(request.url, self._network_policy)
+            response = await self._send_api_http(request, prepared, timeout_seconds, context)
         except AppError as error:
             _record_http_observation(
                 context,
@@ -433,14 +447,6 @@ class WorkflowNodeExecutor:
                 error_message=error.message,
             )
             raise NodeExecutionError(code=error.code, message=error.message) from error
-        try:
-            response = await _send_request(
-                self._client,
-                request,
-                body_kind=prepared.body_kind,
-                timeout_seconds=timeout_seconds,
-                multipart=prepared.multipart,
-            )
         except httpx.TimeoutException as error:
             _record_http_observation(
                 context,
@@ -517,6 +523,23 @@ class WorkflowNodeExecutor:
             )
         return output
 
+    async def _send_api_http(
+        self,
+        request: PreparedRequest,
+        prepared: PreparedWorkflowRequest,
+        timeout_seconds: float,
+        context: ExecutionContext,
+    ) -> httpx.Response:
+        async with _api_request_window(context):
+            await self._outbound_guard.enforce(request.url, self._network_policy)
+            return await _send_request(
+                self._client,
+                request,
+                body_kind=prepared.body_kind,
+                timeout_seconds=timeout_seconds,
+                multipart=prepared.multipart,
+            )
+
     async def _execute_subflow(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         config = parse_node_config(node)
         if not isinstance(config, SubFlowNodeConfig) or isinstance(config, ForEachNodeConfig):
@@ -529,6 +552,7 @@ class WorkflowNodeExecutor:
             prepared,
             context.resolved_variables(),
             context.request_budget,
+            leaf_semaphore=context.leaf_semaphore,
             status_callback=context.status_callback,
             checkpoint_scope=_nested_scope(context.checkpoint_scope, "subflow", node.id),
             checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -663,6 +687,7 @@ class WorkflowNodeExecutor:
                 prepared,
                 variables,
                 context.request_budget,
+                leaf_semaphore=context.leaf_semaphore,
                 status_callback=context.status_callback,
                 checkpoint_scope=checkpoint_scope,
                 checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -687,6 +712,7 @@ class WorkflowNodeExecutor:
         runtime_variables: dict[str, JsonValue],
         request_budget: RequestBudget | None,
         *,
+        leaf_semaphore: asyncio.Semaphore | None,
         status_callback: NodeStatusCallback | None,
         checkpoint_scope: tuple[str, ...],
         checkpoint_phase: WorkflowPhase,
@@ -756,6 +782,7 @@ class WorkflowNodeExecutor:
                     retry_safe_node_ids=retry_safe_request_nodes(
                         prepared.definition, prepared.requests
                     ),
+                    leaf_semaphore=leaf_semaphore,
                     allow_return=True,
                     status_callback=status_callback,
                     checkpoint_scope=checkpoint_scope,

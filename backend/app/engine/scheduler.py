@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from functools import partial
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import JsonValue
 
@@ -269,6 +269,11 @@ class NodeExecutor(Protocol):
     async def execute(
         self, node: WorkflowNode, context: ExecutionContext
     ) -> NodeResult | JsonValue: ...
+
+
+@runtime_checkable
+class RequestWindowExecutor(Protocol):
+    def manages_request_window(self, node: WorkflowNode) -> bool: ...
 
 
 class CancellationToken:
@@ -856,7 +861,10 @@ class WorkflowScheduler:
         self, node: WorkflowNode, context: ExecutionContext
     ) -> NodeResult | JsonValue:
         semaphore = context.leaf_semaphore
-        if semaphore is None or not _node_consumes_request(node):
+        manages_window = isinstance(self._executor, RequestWindowExecutor) and (
+            self._executor.manages_request_window(node)
+        )
+        if semaphore is None or not _node_consumes_request(node) or manages_window:
             return await self._executor.execute(node, context)
         async with semaphore:
             return await self._executor.execute(node, context)
