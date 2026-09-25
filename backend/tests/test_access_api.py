@@ -187,6 +187,36 @@ async def test_user_project_isolation_roles_and_folder_invariants(client: AsyncC
     members = await client.get(f"/api/v1/projects/{project_id}/members", headers=admin_headers)
     assert members.status_code == 200
     assert len(members.json()) == 3
+    outbound_path = f"/api/v1/projects/{project_id}/outbound-policy"
+    assert (await client.get(outbound_path, headers=admin_headers)).json() == {
+        "outbound_concurrency_limit": None,
+        "outbound_requests_per_minute": None,
+    }
+    forbidden_outbound = await client.put(
+        outbound_path,
+        headers=_authorization(editor_token),
+        json={"outbound_concurrency_limit": 3, "outbound_requests_per_minute": 120},
+    )
+    assert forbidden_outbound.status_code == 403
+    updated_outbound = await client.put(
+        outbound_path,
+        headers=admin_headers,
+        json={"outbound_concurrency_limit": 3, "outbound_requests_per_minute": 120},
+    )
+    assert updated_outbound.status_code == 200
+    assert updated_outbound.json()["outbound_concurrency_limit"] == 3
+    assert (await client.get(outbound_path, headers=_authorization(editor_token))).json() == (
+        updated_outbound.json()
+    )
+    assert (
+        await client.get(outbound_path, headers=_authorization(outsider_token))
+    ).status_code == 404
+    invalid_outbound = await client.put(
+        outbound_path,
+        headers=admin_headers,
+        json={"outbound_concurrency_limit": 0, "outbound_requests_per_minute": 120},
+    )
+    assert invalid_outbound.status_code == 422
     mismatch = await client.put(
         f"/api/v1/projects/{project_id}/members/{viewer['id']}",
         headers=admin_headers,

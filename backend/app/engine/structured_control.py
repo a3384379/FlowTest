@@ -632,6 +632,7 @@ class StructuredControlRunner:
             cleanup_budget=parent.cleanup_budget,
             node_instance_budget=parent.node_instance_budget,
             leaf_semaphore=parent.leaf_semaphore,
+            outbound_admission=parent.outbound_admission,
             retry_safe_node_ids=parent.retry_safe_node_ids,
             status_callback=parent.status_callback,
             checkpoint_scope=scope,

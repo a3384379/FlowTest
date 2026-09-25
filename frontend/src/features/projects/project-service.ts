@@ -4,6 +4,7 @@ import {
   type Page,
   type Project,
   type ProjectPermission,
+  type ProjectOutboundPolicy,
   type ProjectRedactionPolicy,
   type ProjectRetentionPolicy,
   type ProjectSecurityPolicy,
@@ -39,6 +40,24 @@ export async function getProjectPermission(projectId: string): Promise<ProjectPe
 export async function getProjectSecurityPolicy(projectId: string): Promise<ProjectSecurityPolicy> {
   const response = await apiClient.get<ProjectSecurityPolicy>(
     `/projects/${projectId}/security-policy`,
+  )
+  return response.data
+}
+
+export async function getProjectOutboundPolicy(projectId: string): Promise<ProjectOutboundPolicy> {
+  const response = await apiClient.get<ProjectOutboundPolicy>(
+    `/projects/${projectId}/outbound-policy`,
+  )
+  return response.data
+}
+
+export async function updateProjectOutboundPolicy(
+  projectId: string,
+  policy: ProjectOutboundPolicy,
+): Promise<ProjectOutboundPolicy> {
+  const response = await apiClient.put<ProjectOutboundPolicy>(
+    `/projects/${projectId}/outbound-policy`,
+    policy,
   )
   return response.data
 }

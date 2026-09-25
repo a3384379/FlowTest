@@ -22,7 +22,7 @@ from app.domain.network import OutboundNetworkPolicy
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
-from app.runner.client import RunnerControlPlaneClient
+from app.runner.client import RemoteOutboundAdmission, RunnerControlPlaneClient
 from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
@@ -148,6 +148,14 @@ class RunnerAgent:
                         enabled=lease.task.outbound_policy_enabled,
                     ),
                     cancellation=cancellation,
+                    outbound_admission=(
+                        RemoteOutboundAdmission(
+                            self._control_plane, lease.lease_id, lease.task.fencing_token
+                        )
+                        if lease.task.outbound_concurrency_limit is not None
+                        or lease.task.outbound_requests_per_minute is not None
+                        else None
+                    ),
                     on_progress=progress,
                     resume_checkpoints=lease.task.resume_checkpoints,
                     reset_retry_budget=lease.task.reset_retry_budget,

@@ -1,11 +1,16 @@
+import asyncio
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
 import httpx
 
+from app.engine.scheduler import NodeExecutionError
 from app.runner.results import RunnerExecutionResult
 from app.schemas.runner_fabric import (
+    RunnerAcquirePermitResponse,
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
     RunnerLeaseAckResponse,
@@ -81,6 +86,27 @@ class RunnerControlPlaneClient:
         response.raise_for_status()
         return RunnerLeaseAckResponse.model_validate(response.json())
 
+    async def acquire_outbound_permit(
+        self, lease_id: UUID, fencing_token: int, timeout_seconds: float
+    ) -> RunnerAcquirePermitResponse:
+        response = await self._client.post(
+            f"/api/v1/runner-control/leases/{lease_id}/outbound-permits/acquire",
+            headers=self._headers(),
+            json={"fencing_token": fencing_token, "timeout_seconds": timeout_seconds},
+        )
+        response.raise_for_status()
+        return RunnerAcquirePermitResponse.model_validate(response.json())
+
+    async def release_outbound_permit(
+        self, lease_id: UUID, fencing_token: int, permit_id: UUID
+    ) -> None:
+        response = await self._client.post(
+            f"/api/v1/runner-control/leases/{lease_id}/outbound-permits/release",
+            headers=self._headers(),
+            json={"fencing_token": fencing_token, "permit_id": str(permit_id)},
+        )
+        response.raise_for_status()
+
     async def progress(
         self,
         lease_id: UUID,
@@ -150,6 +176,44 @@ class RunnerControlPlaneClient:
 
     def _headers(self) -> dict[str, str]:
         return _authorization(self._runner_token)
+
+
+class RemoteOutboundAdmission:
+    def __init__(
+        self, control_plane: RunnerControlPlaneClient, lease_id: UUID, fencing_token: int
+    ) -> None:
+        self._control_plane = control_plane
+        self._lease_id = lease_id
+        self._fencing_token = fencing_token
+
+    @asynccontextmanager
+    async def window(self, timeout_seconds: float) -> AsyncIterator[None]:
+        try:
+            while True:
+                decision = await self._control_plane.acquire_outbound_permit(
+                    self._lease_id, self._fencing_token, timeout_seconds
+                )
+                if decision.granted:
+                    break
+                await asyncio.sleep(min(0.5, decision.retry_after_seconds))
+        except httpx.HTTPError as error:
+            raise NodeExecutionError(
+                code="OUTBOUND_LIMITER_UNAVAILABLE",
+                message="出站请求限额服务不可用。请求尚未发送",
+            ) from error
+        try:
+            yield
+        finally:
+            if decision.permit_id is not None:
+                try:
+                    await self._control_plane.release_outbound_permit(
+                        self._lease_id, self._fencing_token, decision.permit_id
+                    )
+                except httpx.HTTPError as error:
+                    raise NodeExecutionError(
+                        code="OUTBOUND_LIMITER_RELEASE_FAILED",
+                        message="请求可能已完成。出站许可未能回收。不会自动重试",
+                    ) from error
 
 
 def _authorization(token: str) -> dict[str, str]:

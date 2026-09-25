@@ -143,6 +143,7 @@ from app.services.durable_execution import DurableExecutionService, checkpoint_t
 from app.services.encryption_keys import active_key_reference_for_project
 from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
+from app.services.outbound_limits import project_outbound_admission
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
 from app.services.workflow_runtime import (
@@ -1354,6 +1355,7 @@ class WorkflowService:
         if execution.cancel_requested_at is not None:
             token.cancel(force=execution.force_cancel_requested_at is not None)
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
+        outbound_policy = await self._projects.load_runtime_outbound_policy(plan.project_id)
         from app.repositories.durable_execution import DurableExecutionRepository
 
         checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
@@ -1387,7 +1389,11 @@ class WorkflowService:
                 extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
             )
         resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoint_history)
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        async with (
+            project_outbound_admission(plan.project_id, outbound_policy) as admission,
+            httpx.AsyncClient(follow_redirects=False) as client,
+        ):
+            context.outbound_admission = admission
             node_executor = WorkflowNodeExecutor(
                 client,
                 plan.prepared.requests,
@@ -1584,7 +1590,11 @@ class WorkflowService:
         selected_node_ids: frozenset[str],
     ) -> WorkflowRunResult:
         network_policy = await self._projects.load_runtime_security_policy(project_id)
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        outbound_policy = await self._projects.load_runtime_outbound_policy(project_id)
+        async with (
+            project_outbound_admission(project_id, outbound_policy) as admission,
+            httpx.AsyncClient(follow_redirects=False) as client,
+        ):
             node_executor = WorkflowNodeExecutor(
                 client,
                 prepared.requests,
@@ -1602,6 +1612,7 @@ class WorkflowService:
                         workflow_variables=cast(dict[str, JsonValue], definition.variables),
                         dataset_variables=prepared.dataset_variables,
                         runtime_variables=cast(dict[str, JsonValue], runtime_variables),
+                        outbound_admission=admission,
                     ),
                     selected_node_ids=selected_node_ids,
                 )

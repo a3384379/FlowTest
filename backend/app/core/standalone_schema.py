@@ -70,6 +70,19 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_semantic_gap_waiver_revision_schema(connection)
     await _ensure_s55_schema(connection)
     await _ensure_control_report_columns(connection)
+    await _ensure_outbound_limit_tables(connection)
+    await _add_column_if_missing(
+        connection,
+        table="projects",
+        column="outbound_concurrency_limit",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="projects",
+        column="outbound_requests_per_minute",
+        definition="INTEGER",
+    )
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -300,6 +313,18 @@ async def _ensure_control_report_columns(connection: AsyncConnection) -> None:
                 "ON workflow_executions (derived_from_execution_id)"
             )
         )
+
+
+async def _ensure_outbound_limit_tables(connection: AsyncConnection) -> None:
+    """Add local permit state to existing offline installs."""
+
+    for table in (
+        Base.metadata.tables["outbound_permits"],
+        Base.metadata.tables["outbound_rate_windows"],
+    ):
+        if not await _table_column_contract(connection, table.name):
+            await connection.execute(CreateTable(table))
+        await _ensure_table_indexes(connection, table)
 
 
 async def _ensure_s61b_schema(connection: AsyncConnection) -> None:

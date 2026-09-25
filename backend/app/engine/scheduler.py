@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Coroutine
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -118,6 +119,10 @@ NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
 NESTED_CHECKPOINT_PREFIX = "__nested_request__:"
 
 
+class OutboundAdmission(Protocol):
+    def window(self, timeout_seconds: float) -> AbstractAsyncContextManager[None]: ...
+
+
 @dataclass(slots=True)
 class RequestBudget:
     remaining: int
@@ -164,6 +169,7 @@ class ExecutionContext:
     cleanup_budget: RequestBudget | None = field(default=None, repr=False)
     node_instance_budget: RequestBudget | None = field(default=None, repr=False)
     leaf_semaphore: asyncio.Semaphore | None = field(default=None, repr=False)
+    outbound_admission: OutboundAdmission | None = field(default=None, repr=False)
     status_callback: NodeStatusCallback | None = field(default=None, repr=False)
     checkpoint_scope: tuple[str, ...] = field(default=(), repr=False)
     checkpoint_phase: WorkflowPhase | None = field(default=None, repr=False)
@@ -819,7 +825,9 @@ class WorkflowScheduler:
     ) -> NodeRunRecord | NodeExecutionError:
         try:
             async with asyncio.timeout(policy.timeout_seconds):
-                result = normalize_node_result(await self._invoke_node_executor(node, context))
+                result = normalize_node_result(
+                    await self._invoke_node_executor(node, context, policy.timeout_seconds)
+                )
             if node.capability_id in CONTROL_CONFIG_MODELS:
                 result = result.model_copy(update={"control_capability_id": node.capability_id})
             observations = context.observations_of(node.id)
@@ -858,13 +866,27 @@ class WorkflowScheduler:
             )
 
     async def _invoke_node_executor(
-        self, node: WorkflowNode, context: ExecutionContext
+        self, node: WorkflowNode, context: ExecutionContext, timeout_seconds: float = 30
     ) -> NodeResult | JsonValue:
         semaphore = context.leaf_semaphore
         manages_window = isinstance(self._executor, RequestWindowExecutor) and (
             self._executor.manages_request_window(node)
         )
-        if semaphore is None or not _node_consumes_request(node) or manages_window:
+        if not _node_consumes_request(node) or manages_window:
+            return await self._executor.execute(node, context)
+        admission = context.outbound_admission
+        if admission is not None:
+            async with admission.window(timeout_seconds):
+                return await self._execute_with_local_window(node, context, semaphore)
+        return await self._execute_with_local_window(node, context, semaphore)
+
+    async def _execute_with_local_window(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        semaphore: asyncio.Semaphore | None,
+    ) -> NodeResult | JsonValue:
+        if semaphore is None:
             return await self._executor.execute(node, context)
         async with semaphore:
             return await self._executor.execute(node, context)

@@ -25,11 +25,13 @@ import AccessManagementPanel from '../features/projects/AccessManagementPanel'
 import AssetManagementPanel from '../features/projects/AssetManagementPanel'
 import {
   getProjectPermission,
+  getProjectOutboundPolicy,
   getProjectRedactionPolicy,
   getProjectRetentionPolicy,
   getProjectSecurityPolicy,
   listProjectAuditLogs,
   updateProjectSecurityPolicy,
+  updateProjectOutboundPolicy,
   updateProjectRedactionPolicy,
   updateProjectRetentionPolicy,
 } from '../features/projects/project-service'
@@ -39,6 +41,7 @@ import {
   type AuditLog,
   type ProjectCapability,
   type ProjectPermission,
+  type ProjectOutboundPolicy,
   type ProjectRedactionPolicy,
   type ProjectRetentionPolicy,
   type ProjectSecurityPolicy,
@@ -85,6 +88,11 @@ function useProjectsPageState() {
     queryFn: () => getProjectSecurityPolicy(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
+  const outbound = useQuery({
+    queryKey: ['project-outbound-policy', projectId],
+    queryFn: () => getProjectOutboundPolicy(requiredId(projectId)),
+    enabled: Boolean(projectId),
+  })
   const retention = useQuery({
     queryKey: ['project-retention-policy', projectId],
     queryFn: () => getProjectRetentionPolicy(requiredId(projectId)),
@@ -119,6 +127,18 @@ function useProjectsPageState() {
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
+  const updateOutbound = useMutation({
+    mutationFn: (value: ProjectOutboundPolicy) =>
+      updateProjectOutboundPolicy(requiredId(projectId), value),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-outbound-policy', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-audit', projectId] }),
+      ])
+      void message.success('出站请求限额已保存')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
   const updateRetention = useMutation({
     mutationFn: (days: number) => updateProjectRetentionPolicy(requiredId(projectId), days),
     onSuccess: async () => {
@@ -150,6 +170,10 @@ function useProjectsPageState() {
     permission: permission.data,
     permissionLoading: permission.isLoading,
     policyLoading: policy.isLoading,
+    outbound: outbound.data,
+    outboundLoading: outbound.isLoading,
+    updateOutbound: (value: ProjectOutboundPolicy) => updateOutbound.mutate(value),
+    updateOutboundPending: updateOutbound.isPending,
     form,
     canManageSecurity,
     canManageMembers,
@@ -200,6 +224,13 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           saving={state.updatePolicyPending}
           onSave={state.updatePolicy}
         />
+        <OutboundPolicyPanel
+          policy={state.outbound}
+          loading={state.outboundLoading}
+          canManage={state.canManageSecurity}
+          saving={state.updateOutboundPending}
+          onSave={state.updateOutbound}
+        />
         <RetentionPolicyPanel
           policy={state.retention}
           loading={state.retentionLoading}
@@ -227,6 +258,54 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
         <AuditPanel visible={state.canViewAudit} loading={state.auditLoading} items={state.audit} />
       </Row>
     </>
+  )
+}
+
+function OutboundPolicyPanel({
+  policy,
+  loading,
+  canManage,
+  saving,
+  onSave,
+}: {
+  policy?: ProjectOutboundPolicy
+  loading: boolean
+  canManage: boolean
+  saving: boolean
+  onSave: (value: ProjectOutboundPolicy) => void
+}) {
+  const [form] = Form.useForm<ProjectOutboundPolicy>()
+  useEffect(() => {
+    if (policy) form.setFieldsValue(policy)
+  }, [form, policy])
+  return (
+    <Col xs={24} xl={10}>
+      <Card title="工作流出站请求限额" loading={loading}>
+        <Typography.Paragraph type="secondary">
+          同一项目的工作流共享并发和每分钟请求限额。留空表示不设置该项；轮询和重试的每次请求都会计数。
+        </Typography.Paragraph>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values) =>
+            onSave({
+              outbound_concurrency_limit: values.outbound_concurrency_limit ?? null,
+              outbound_requests_per_minute: values.outbound_requests_per_minute ?? null,
+            })
+          }
+        >
+          <Form.Item label="同时请求上限" name="outbound_concurrency_limit">
+            <InputNumber min={1} max={500} disabled={!canManage} />
+          </Form.Item>
+          <Form.Item label="每分钟请求上限" name="outbound_requests_per_minute">
+            <InputNumber min={1} max={60000} disabled={!canManage} />
+          </Form.Item>
+          <Button htmlType="submit" type="primary" disabled={!canManage} loading={saving}>
+            保存出站限额
+          </Button>
+        </Form>
+      </Card>
+    </Col>
   )
 }
 

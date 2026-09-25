@@ -15,6 +15,7 @@ from app.schemas.access import (
     MemberUpsert,
     ProjectCapacityPolicy,
     ProjectCreate,
+    ProjectOutboundPolicy,
     ProjectPermissionResponse,
     ProjectRedactionPolicy,
     ProjectRedactionPolicyUpdate,
@@ -204,6 +205,40 @@ async def update_project_capacity_policy(
     return ProjectCapacityPolicy(
         execution_concurrency_limit=concurrency,
         queued_run_limit=queued,
+    )
+
+
+@router.get("/{project_id}/outbound-policy", response_model=ProjectOutboundPolicy)
+async def get_project_outbound_policy(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectOutboundPolicy:
+    concurrency, rate = await ProjectService(session).get_outbound_policy(
+        actor=current_user, project_id=project_id
+    )
+    return ProjectOutboundPolicy(
+        outbound_concurrency_limit=concurrency,
+        outbound_requests_per_minute=rate,
+    )
+
+
+@router.put("/{project_id}/outbound-policy", response_model=ProjectOutboundPolicy)
+async def update_project_outbound_policy(
+    project_id: UUID,
+    payload: ProjectOutboundPolicy,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProjectOutboundPolicy:
+    concurrency, rate = await ProjectService(session).update_outbound_policy(
+        actor=current_user,
+        project_id=project_id,
+        outbound_concurrency_limit=payload.outbound_concurrency_limit,
+        outbound_requests_per_minute=payload.outbound_requests_per_minute,
+    )
+    return ProjectOutboundPolicy(
+        outbound_concurrency_limit=concurrency,
+        outbound_requests_per_minute=rate,
     )
 
 

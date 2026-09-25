@@ -18,6 +18,7 @@ from app.engine.scheduler import (
     ExecutionContext,
     NodeRunRecord,
     NodeStatusUpdate,
+    OutboundAdmission,
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
@@ -50,6 +51,7 @@ class RemoteWorkflowExecutor:
         *,
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
+        outbound_admission: OutboundAdmission | None = None,
         on_progress: RunnerProgressCallback | None = None,
         resume_checkpoints: dict[str, list[RunnerCheckpointResume]] | None = None,
         reset_retry_budget: bool = False,
@@ -59,6 +61,7 @@ class RemoteWorkflowExecutor:
                 plan,
                 network_policy=network_policy,
                 cancellation=cancellation,
+                outbound_admission=outbound_admission,
                 on_progress=on_progress,
                 resume_checkpoints=resume_checkpoints or {},
                 reset_retry_budget=reset_retry_budget,
@@ -76,6 +79,7 @@ class RemoteWorkflowExecutor:
                             child,
                             network_policy=network_policy,
                             cancellation=cancellation,
+                            outbound_admission=outbound_admission,
                             on_progress=on_progress,
                             resume_checkpoints=(resume_checkpoints or {}).get(
                                 str(child.execution_id), []
@@ -122,6 +126,7 @@ class RemoteWorkflowExecutor:
             plan,
             network_policy=network_policy,
             cancellation=cancellation,
+            outbound_admission=outbound_admission,
             on_progress=on_progress,
             resume_checkpoints=(resume_checkpoints or {}).get(str(plan.execution_id), []),
             reset_retry_budget=reset_retry_budget,
@@ -137,6 +142,7 @@ class RemoteWorkflowExecutor:
         *,
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
+        outbound_admission: OutboundAdmission | None,
         on_progress: RunnerProgressCallback | None,
         resume_checkpoints: dict[str, list[RunnerCheckpointResume]],
         reset_retry_budget: bool,
@@ -148,6 +154,7 @@ class RemoteWorkflowExecutor:
             plan,
             network_policy=network_policy,
             cancellation=cancellation,
+            outbound_admission=outbound_admission,
             on_progress=on_progress,
             resume_checkpoints=resume_checkpoints,
             reset_retry_budget=reset_retry_budget,
@@ -160,6 +167,7 @@ class RemoteWorkflowExecutor:
         *,
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
+        outbound_admission: OutboundAdmission | None,
         on_progress: RunnerProgressCallback | None,
         resume_checkpoints: dict[str, list[RunnerCheckpointResume]],
         reset_retry_budget: bool,
@@ -173,6 +181,7 @@ class RemoteWorkflowExecutor:
                     child,
                     network_policy=network_policy,
                     cancellation=cancellation,
+                    outbound_admission=outbound_admission,
                     on_progress=on_progress,
                     resume_checkpoints=resume_checkpoints[str(child.execution_id)],
                     reset_retry_budget=reset_retry_budget,
@@ -199,6 +208,7 @@ class RemoteWorkflowExecutor:
         *,
         network_policy: OutboundNetworkPolicy,
         cancellation: CancellationToken,
+        outbound_admission: OutboundAdmission | None,
         on_progress: RunnerProgressCallback | None,
         resume_checkpoints: list[RunnerCheckpointResume],
         reset_retry_budget: bool,
@@ -226,6 +236,7 @@ class RemoteWorkflowExecutor:
                 retry_safe_node_ids=retry_safe_request_nodes(
                     plan.definition, plan.prepared.requests
                 ),
+                outbound_admission=outbound_admission,
             )
             resume_records = tuple(_resume_record(item) for item in resume_checkpoints)
             resume_attempts = {

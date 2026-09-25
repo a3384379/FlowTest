@@ -47,6 +47,7 @@ from app.models.governance import (
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
 from app.models.organizations import Organization, OrganizationMember, ServiceAccount
+from app.models.outbound_limits import OutboundPermit, OutboundRateWindow
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
@@ -126,6 +127,8 @@ __all__ = [
     "OrganizationIdempotencyRecord",
     "OrganizationKeyVersion",
     "OrganizationMember",
+    "OutboundPermit",
+    "OutboundRateWindow",
     "PactContractVersion",
     "PactProviderVerification",
     "PerformanceGateEvaluation",

@@ -81,6 +81,7 @@ from app.engine.scheduler import (
     NodeRunRecord,
     NodeStatusCallback,
     NodeStatusUpdate,
+    OutboundAdmission,
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
@@ -530,15 +531,21 @@ class WorkflowNodeExecutor:
         timeout_seconds: float,
         context: ExecutionContext,
     ) -> httpx.Response:
-        async with _api_request_window(context):
-            await self._outbound_guard.enforce(request.url, self._network_policy)
-            return await _send_request(
-                self._client,
-                request,
-                body_kind=prepared.body_kind,
-                timeout_seconds=timeout_seconds,
-                multipart=prepared.multipart,
-            )
+        async def send() -> httpx.Response:
+            async with _api_request_window(context):
+                await self._outbound_guard.enforce(request.url, self._network_policy)
+                return await _send_request(
+                    self._client,
+                    request,
+                    body_kind=prepared.body_kind,
+                    timeout_seconds=timeout_seconds,
+                    multipart=prepared.multipart,
+                )
+
+        if context.outbound_admission is None:
+            return await send()
+        async with context.outbound_admission.window(timeout_seconds):
+            return await send()
 
     async def _execute_subflow(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         config = parse_node_config(node)
@@ -553,6 +560,7 @@ class WorkflowNodeExecutor:
             context.resolved_variables(),
             context.request_budget,
             leaf_semaphore=context.leaf_semaphore,
+            outbound_admission=context.outbound_admission,
             status_callback=context.status_callback,
             checkpoint_scope=_nested_scope(context.checkpoint_scope, "subflow", node.id),
             checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -688,6 +696,7 @@ class WorkflowNodeExecutor:
                 variables,
                 context.request_budget,
                 leaf_semaphore=context.leaf_semaphore,
+                outbound_admission=context.outbound_admission,
                 status_callback=context.status_callback,
                 checkpoint_scope=checkpoint_scope,
                 checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -713,6 +722,7 @@ class WorkflowNodeExecutor:
         request_budget: RequestBudget | None,
         *,
         leaf_semaphore: asyncio.Semaphore | None,
+        outbound_admission: OutboundAdmission | None,
         status_callback: NodeStatusCallback | None,
         checkpoint_scope: tuple[str, ...],
         checkpoint_phase: WorkflowPhase,
@@ -783,6 +793,7 @@ class WorkflowNodeExecutor:
                         prepared.definition, prepared.requests
                     ),
                     leaf_semaphore=leaf_semaphore,
+                    outbound_admission=outbound_admission,
                     allow_return=True,
                     status_callback=status_callback,
                     checkpoint_scope=checkpoint_scope,

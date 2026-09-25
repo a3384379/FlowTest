@@ -15,6 +15,7 @@ describe('ProjectsPage', () => {
     const saved = vi.fn()
     const savedRetention = vi.fn()
     const savedRedaction = vi.fn()
+    const savedOutbound = vi.fn()
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -58,6 +59,17 @@ describe('ProjectsPage', () => {
       http.put(`/api/v1/projects/${project.id}/security-policy`, async ({ request }) => {
         const body = await request.json()
         saved(body)
+        return HttpResponse.json(body)
+      }),
+      http.get(`/api/v1/projects/${project.id}/outbound-policy`, () =>
+        HttpResponse.json({
+          outbound_concurrency_limit: 2,
+          outbound_requests_per_minute: null,
+        }),
+      ),
+      http.put(`/api/v1/projects/${project.id}/outbound-policy`, async ({ request }) => {
+        const body = await request.json()
+        savedOutbound(body)
         return HttpResponse.json(body)
       }),
       http.get(`/api/v1/projects/${project.id}/retention-policy`, () =>
@@ -120,6 +132,16 @@ describe('ProjectsPage', () => {
     await browser.type(retention, '120')
     await browser.click(screen.getByRole('button', { name: '保存保留策略' }))
     await waitFor(() => expect(savedRetention).toHaveBeenCalledWith({ retention_days: 120 }))
+    const concurrency = await screen.findByRole('spinbutton', { name: '同时请求上限' })
+    await browser.clear(concurrency)
+    await browser.type(concurrency, '3')
+    await browser.click(screen.getByRole('button', { name: '保存出站限额' }))
+    await waitFor(() =>
+      expect(savedOutbound).toHaveBeenCalledWith({
+        outbound_concurrency_limit: 3,
+        outbound_requests_per_minute: null,
+      }),
+    )
     expect(screen.getByText('来源：安装默认')).toBeVisible()
     await browser.click(screen.getByRole('switch', { name: '开启项目脱敏' }))
     await waitFor(() => expect(savedRedaction).toHaveBeenCalledWith({ mode: 'on' }))

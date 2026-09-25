@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -43,7 +44,7 @@ from app.runner.agent import (
     _retryable_control_plane_error,
     configuration_from_environment,
 )
-from app.runner.client import RunnerControlPlaneClient
+from app.runner.client import RemoteOutboundAdmission, RunnerControlPlaneClient
 from app.runner.results import RunnerExecutionResult, RunnerWorkflowResult
 from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
@@ -67,6 +68,7 @@ from app.services.durable_execution import (
     checkpoint_to_runner_resume,
 )
 from app.services.execution_events import InProcessExecutionEventBus
+from app.services.outbound_limits import OutboundPermitDecision
 from app.services.runner_fabric import RunnerFabricService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_plan_codec import encode_execution_plan
@@ -805,6 +807,8 @@ async def test_runner_lease_carries_project_outbound_policy_toggle(
     async with fabric_sessions() as session:
         actor, project = await _seed_actor_and_project(session)
         project.outbound_policy_enabled = False
+        project.outbound_concurrency_limit = 3
+        project.outbound_requests_per_minute = 120
         await session.commit()
         plan, _execution = await _seed_execution_plan(session, actor, project)
         service = RunnerFabricService(session, enabled=True)
@@ -816,6 +820,77 @@ async def test_runner_lease_carries_project_outbound_policy_toggle(
 
         assert lease is not None
         assert lease.task.outbound_policy_enabled is False
+        assert lease.task.outbound_concurrency_limit == 3
+        assert lease.task.outbound_requests_per_minute == 120
+
+
+@pytest.mark.asyncio
+async def test_runner_outbound_permits_require_current_lease_and_fencing(
+    fabric_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    permits: list[tuple[str, UUID]] = []
+
+    class RecordingLimiter:
+        async def acquire(
+            self, *, policy: object, timeout_seconds: float, owner: str
+        ) -> OutboundPermitDecision:
+            assert timeout_seconds == 5
+            assert owner == str(lease.lease_id)
+            permit_id = uuid4()
+            permits.append(("acquire", permit_id))
+            return OutboundPermitDecision(True, permit_id, 0)
+
+        async def release(self, permit_id: UUID, *, owner: str) -> None:
+            assert owner == str(lease.lease_id)
+            permits.append(("release", permit_id))
+
+    @asynccontextmanager
+    async def fake_limiter(project_id: UUID) -> AsyncIterator[RecordingLimiter]:
+        assert project_id == project.id
+        yield RecordingLimiter()
+
+    monkeypatch.setattr("app.services.runner_fabric.project_outbound_limiter", fake_limiter)
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        project.outbound_concurrency_limit = 1
+        await session.commit()
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "runner-outbound")
+        await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+
+        granted = await service.acquire_outbound_permit(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            timeout_seconds=5,
+        )
+        assert granted.granted and granted.permit_id is not None
+        await service.release_outbound_permit(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            permit_id=granted.permit_id,
+        )
+        assert permits == [("acquire", granted.permit_id), ("release", granted.permit_id)]
+        with pytest.raises(AppError):
+            await service.acquire_outbound_permit(
+                runner_token=token,
+                lease_id=lease.lease_id,
+                fencing_token=lease.task.fencing_token + 1,
+                timeout_seconds=5,
+            )
+        await session.rollback()
+        with pytest.raises(AppError):
+            await service.release_outbound_permit(
+                runner_token="invalid",
+                lease_id=lease.lease_id,
+                fencing_token=lease.task.fencing_token,
+                permit_id=granted.permit_id,
+            )
 
 
 @pytest.mark.asyncio
@@ -970,6 +1045,7 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
     lease = _lease_fixture(plan)
     calls: list[Request] = []
     claim_count = 0
+    permit_id = uuid4()
 
     async def handler(request: Request) -> Response:
         nonlocal claim_count
@@ -992,6 +1068,13 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
             if claim_count == 1:
                 return Response(200, json=lease.model_dump(mode="json"))
             return Response(200, content=b"null", headers={"content-type": "application/json"})
+        if request.url.path.endswith("/outbound-permits/acquire"):
+            return Response(
+                200,
+                json={"granted": True, "permit_id": str(permit_id), "retry_after_seconds": 0},
+            )
+        if request.url.path.endswith("/outbound-permits/release"):
+            return Response(204)
         return Response(
             200,
             json={"accepted": True, "task_status": "leased", "cancel_requested": False},
@@ -1011,6 +1094,10 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
         assert await client.claim() is None
         renewed = await client.renew(lease.lease_id, lease.task.fencing_token)
         assert renewed.accepted
+        async with RemoteOutboundAdmission(client, lease.lease_id, lease.task.fencing_token).window(
+            5
+        ):
+            pass
         progressed = await client.progress(lease.lease_id, lease.task.fencing_token, 50, "running")
         assert progressed.task_status == "leased"
         record = result.result.records[0]
@@ -1045,6 +1132,10 @@ async def test_runner_control_plane_http_client_covers_full_protocol(tmp_path: P
         "ftrun_runner-client-token-that-is-long-enough"
     )
     assert all(request.headers["authorization"].startswith("Bearer ftr") for request in calls)
+    assert [request.url.path.rsplit("/", 1)[-1] for request in calls if "outbound-permits" in request.url.path] == [
+        "acquire",
+        "release",
+    ]
 
 
 @pytest.mark.asyncio

@@ -85,6 +85,15 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="project_execution_concurrency_limit",
         ),
         CheckConstraint(
+            "outbound_concurrency_limit IS NULL OR outbound_concurrency_limit BETWEEN 1 AND 500",
+            name="project_outbound_concurrency_limit",
+        ),
+        CheckConstraint(
+            "outbound_requests_per_minute IS NULL OR "
+            "outbound_requests_per_minute BETWEEN 1 AND 60000",
+            name="project_outbound_requests_per_minute",
+        ),
+        CheckConstraint(
             "queued_run_limit BETWEEN 1 AND 5000",
             name="project_queued_run_limit",
         ),
@@ -118,6 +127,8 @@ class Project(UuidPrimaryKeyMixin, TimestampMixin, Base):
     execution_concurrency_limit: Mapped[int] = mapped_column(
         Integer, default=20, server_default="20"
     )
+    outbound_concurrency_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outbound_requests_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     queued_run_limit: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
     ai_sample_sharing_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"

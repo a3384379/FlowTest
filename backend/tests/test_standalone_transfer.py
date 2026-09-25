@@ -232,11 +232,14 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
         "schema_version": "standalone-compact-transfer-v1",
         "tables": 87,
         "rows": 7,
-        "excluded_tables": 9,
+        "excluded_tables": 11,
         "artifacts": 1,
     }
     assert validate_bundle(bundle)["status"] == "validated"
     payload = _load_bundle(bundle)
+    assert {"outbound_permits", "outbound_rate_windows"} <= {
+        item["name"] for item in payload.manifest["database"]["excluded_tables"]
+    }
     assert payload.manifest["security"]["data_classification"] == {
         "portable": [
             "durable_domain_records",

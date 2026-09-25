@@ -31,6 +31,7 @@ from app.models.runner_fabric import (
 from app.repositories.runner_fabric import RunnerFabricRepository
 from app.runner.results import RunnerExecutionResult
 from app.schemas.runner_fabric import (
+    RunnerAcquirePermitResponse,
     RunnerCheckpointRequest,
     RunnerCheckpointResume,
     RunnerFailRequest,
@@ -50,6 +51,7 @@ from app.services.durable_execution import (
     checkpoint_to_runner_resume,
 )
 from app.services.organization_governance import OrganizationQuotaService
+from app.services.outbound_limits import project_outbound_limiter
 from app.services.projects import ProjectService
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
@@ -375,6 +377,9 @@ class RunnerFabricService:
         execution = await workflow_service.load_execution_for_run(task.execution_id)
         plan = await workflow_service.load_execution_plan(task.execution_id)
         policy = await ProjectService(self._session).load_runtime_security_policy(task.project_id)
+        outbound_policy = await ProjectService(self._session).load_runtime_outbound_policy(
+            task.project_id
+        )
         lease = self._acquire(task=task, runner=runner, pool=pool, now=now)
         await self._repository.set_execution_family_status(task.execution_id, "running")
         await self._session.flush()
@@ -407,6 +412,8 @@ class RunnerFabricService:
                 plan=encoded,
                 plan_sha256=hashlib.sha256(encoded.encode()).hexdigest(),
                 outbound_policy_enabled=policy.enabled,
+                outbound_concurrency_limit=outbound_policy.concurrency_limit,
+                outbound_requests_per_minute=outbound_policy.requests_per_minute,
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
                 resume_checkpoints=resume_checkpoints,
@@ -415,6 +422,50 @@ class RunnerFabricService:
                 redaction_policy_version=execution.redaction_policy_version,
             ),
         )
+
+    async def acquire_outbound_permit(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        fencing_token: int,
+        timeout_seconds: float,
+    ) -> RunnerAcquirePermitResponse:
+        _runner, _lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=fencing_token,
+            now=datetime.now(UTC),
+        )
+        policy = await ProjectService(self._session).load_runtime_outbound_policy(task.project_id)
+        async with project_outbound_limiter(task.project_id) as limiter:
+            decision = await limiter.acquire(
+                policy=policy,
+                timeout_seconds=timeout_seconds,
+                owner=str(lease_id),
+            )
+        return RunnerAcquirePermitResponse(
+            granted=decision.granted,
+            permit_id=decision.permit_id,
+            retry_after_seconds=decision.retry_after_seconds,
+        )
+
+    async def release_outbound_permit(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        fencing_token: int,
+        permit_id: UUID,
+    ) -> None:
+        _runner, _lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=fencing_token,
+            now=datetime.now(UTC),
+        )
+        async with project_outbound_limiter(task.project_id) as limiter:
+            await limiter.release(permit_id, owner=str(lease_id))
 
     async def renew(
         self, *, runner_token: str, lease_id: UUID, fencing_token: int

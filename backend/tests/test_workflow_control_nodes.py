@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -56,6 +58,24 @@ class ControlExecutor:
 class AllowOutbound:
     async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
         return None
+
+
+class CountingOutboundAdmission:
+    def __init__(self) -> None:
+        self.total = 0
+        self.active = 0
+        self.peak = 0
+
+    @asynccontextmanager
+    async def window(self, timeout_seconds: float) -> AsyncIterator[None]:
+        assert timeout_seconds > 0
+        self.total += 1
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            yield
+        finally:
+            self.active -= 1
 
 
 def test_only_prepared_read_requests_allow_automatic_unknown_outcome_retry() -> None:
@@ -129,6 +149,7 @@ async def test_polling_wait_releases_leaf_request_slot_for_another_branch() -> N
     first_poll_sent = asyncio.Event()
     order: list[str] = []
     poll_count = 0
+    admission = CountingOutboundAdmission()
 
     async def respond(request: httpx.Request) -> httpx.Response:
         nonlocal poll_count
@@ -173,13 +194,18 @@ async def test_polling_wait_releases_leaf_request_slot_for_another_branch() -> N
             outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
         )
         scheduler = WorkflowScheduler(TracingNodeExecutor(executor))
-        context = ExecutionContext(leaf_semaphore=asyncio.Semaphore(1))
+        context = ExecutionContext(
+            leaf_semaphore=asyncio.Semaphore(1), outbound_admission=admission
+        )
         polling_task = asyncio.create_task(scheduler._invoke_node_executor(poll, context))
         await asyncio.wait_for(first_poll_sent.wait(), timeout=1)
         other_task = asyncio.create_task(scheduler._invoke_node_executor(other, context))
         await asyncio.gather(polling_task, other_task)
 
     assert order == ["poll-1", "other", "poll-2"]
+    assert admission.total == 3
+    assert admission.active == 0
+    assert admission.peak == 1
 
 
 @pytest.mark.asyncio

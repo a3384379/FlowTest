@@ -128,6 +128,8 @@ class RunnerLeaseTaskResponse(BaseModel):
     plan: str
     plan_sha256: str
     outbound_policy_enabled: bool = True
+    outbound_concurrency_limit: int | None = Field(default=None, ge=1, le=500)
+    outbound_requests_per_minute: int | None = Field(default=None, ge=1, le=60000)
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
     resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
@@ -201,6 +203,20 @@ class RunnerRenewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     fencing_token: int = Field(ge=1)
+
+
+class RunnerAcquirePermitRequest(RunnerRenewRequest):
+    timeout_seconds: float = Field(gt=0, le=3600)
+
+
+class RunnerAcquirePermitResponse(BaseModel):
+    granted: bool
+    permit_id: UUID | None
+    retry_after_seconds: float = Field(ge=0)
+
+
+class RunnerReleasePermitRequest(RunnerRenewRequest):
+    permit_id: UUID
 
 
 class RunnerProgressRequest(RunnerRenewRequest):

@@ -63,6 +63,10 @@ def _rule(request: Request) -> tuple[str, int] | None:
         return "auth-login", settings.auth_rate_limit_per_minute
     if path.startswith(f"{settings.api_v1_prefix}/mock/"):
         return "mock-dispatch", settings.execution_rate_limit_per_minute
+    if path.startswith(f"{settings.api_v1_prefix}/runner-control/leases/") and (
+        "/outbound-permits/" in path
+    ):
+        return "runner-outbound-permits", settings.runner_outbound_permit_rate_limit_per_minute
     if path.startswith(f"{settings.api_v1_prefix}/runner-control/"):
         return "runner-control", settings.runner_control_rate_limit_per_minute
     if request.method == "POST" and (

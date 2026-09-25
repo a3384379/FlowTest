@@ -11,6 +11,8 @@ from app.core.errors import AppError
 from app.runner.results import RUNNER_EXECUTION_RESULT_ADAPTER
 from app.schemas.common import Page
 from app.schemas.runner_fabric import (
+    RunnerAcquirePermitRequest,
+    RunnerAcquirePermitResponse,
     RunnerActionRequest,
     RunnerCheckpointRequest,
     RunnerCompleteRequest,
@@ -29,6 +31,7 @@ from app.schemas.runner_fabric import (
     RunnerRegisterResponse,
     RunnerRegistrationTokenCreate,
     RunnerRegistrationTokenResponse,
+    RunnerReleasePermitRequest,
     RunnerRenewRequest,
     RunnerResponse,
     RunnerTaskResponse,
@@ -214,6 +217,39 @@ async def renew_runner_lease(
         runner_token=_bearer_token(authorization),
         lease_id=lease_id,
         fencing_token=payload.fencing_token,
+    )
+
+
+@runner_router.post(
+    "/leases/{lease_id}/outbound-permits/acquire",
+    response_model=RunnerAcquirePermitResponse,
+)
+async def acquire_runner_outbound_permit(
+    lease_id: UUID,
+    payload: RunnerAcquirePermitRequest,
+    session: SessionDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> RunnerAcquirePermitResponse:
+    return await _service(session).acquire_outbound_permit(
+        runner_token=_bearer_token(authorization),
+        lease_id=lease_id,
+        fencing_token=payload.fencing_token,
+        timeout_seconds=payload.timeout_seconds,
+    )
+
+
+@runner_router.post("/leases/{lease_id}/outbound-permits/release", status_code=204)
+async def release_runner_outbound_permit(
+    lease_id: UUID,
+    payload: RunnerReleasePermitRequest,
+    session: SessionDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    await _service(session).release_outbound_permit(
+        runner_token=_bearer_token(authorization),
+        lease_id=lease_id,
+        fencing_token=payload.fencing_token,
+        permit_id=payload.permit_id,
     )
 
 

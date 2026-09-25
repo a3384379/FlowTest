@@ -537,7 +537,11 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
         )
 
     await test_engine.dispose()
-    assert "outbound_policy_enabled" in {str(row[1]) for row in columns.fetchall()}
+    assert {
+        "outbound_policy_enabled",
+        "outbound_concurrency_limit",
+        "outbound_requests_per_minute",
+    } <= {str(row[1]) for row in columns.fetchall()}
     assert version == standalone_schema.BASELINE_REVISION
 
 

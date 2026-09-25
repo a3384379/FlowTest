@@ -259,6 +259,11 @@ export type ProjectSecurityPolicy = {
   allowed_private_cidrs: string[]
 }
 
+export type ProjectOutboundPolicy = {
+  outbound_concurrency_limit: number | null
+  outbound_requests_per_minute: number | null
+}
+
 export type ProjectRetentionPolicy = {
   retention_days: number
   maximum_days: number
