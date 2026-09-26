@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.network import OutboundNetworkPolicy
+from app.domain.scopes import VariableScope
 from app.engine.contracts import (
     ConditionExpression,
     NodeStatus,
@@ -32,7 +33,7 @@ from app.engine.structured_control import (
     _instance_id,
     control_placeholder,
 )
-from app.services.api_assets import PreparedRequest
+from app.services.api_assets import PreparedRequest, PreparedVariable
 from app.services.workflow_runtime import (
     PreparedSubflow,
     PreparedWorkflowRequest,
@@ -1170,6 +1171,79 @@ def test_unbound_control_input_is_rejected_before_http() -> None:
     request = PreparedRequest(HttpMethod.GET, f"https://example.test/{marker}", (), None, ())
     with pytest.raises(Exception, match="未绑定"):
         _apply_control_templates(request, "request", ExecutionContext())
+
+
+def test_unused_control_variable_does_not_block_plain_request() -> None:
+    marker = control_placeholder("request", "loop.item")
+    request = PreparedRequest(
+        HttpMethod.GET,
+        "https://example.test/health",
+        (),
+        None,
+        (PreparedVariable("loop.item", marker, VariableScope.RUNTIME, False),),
+    )
+
+    rendered = _apply_control_templates(request, "request", ExecutionContext())
+
+    assert rendered.url == "https://example.test/health"
+
+
+@pytest.mark.asyncio
+async def test_group_api_runs_without_loop_variable() -> None:
+    payload = _definition()
+    payload["nodes"][1]["capability_id"] = "flow.control.group"
+    payload["nodes"][1]["configuration"] = {
+        "body": {"kind": "inline", "region_id": "body"},
+        "inputs": {},
+    }
+    payload["regions"][0]["nodes"] = [
+        {
+            "id": "request",
+            "type": "api",
+            "name": "健康检查",
+            "position": {"x": 0, "y": 0},
+            "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+        }
+    ]
+    payload["regions"][0]["entry_node_id"] = "request"
+    payload["regions"][0]["exit_node_ids"] = ["request"]
+    definition = WorkflowDefinition.model_validate(payload)
+    request = PreparedRequest(
+        HttpMethod.GET,
+        "https://example.test/health",
+        (),
+        None,
+        (
+            PreparedVariable(
+                "loop.item",
+                control_placeholder("request", "loop.item"),
+                VariableScope.RUNTIME,
+                False,
+            ),
+        ),
+    )
+    seen: list[str] = []
+
+    def respond(incoming: httpx.Request) -> httpx.Response:
+        seen.append(incoming.url.path)
+        return httpx.Response(200, json={"ok": True})
+
+    class AllowOutbound:
+        async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
+            return None
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {"request": PreparedWorkflowRequest(request, request, BodyKind.NONE, None)},
+            definition,
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        result = await WorkflowScheduler(executor).run(definition)
+
+    assert result.status == "passed"
+    assert seen == ["/health"]
 
 
 @pytest.mark.asyncio

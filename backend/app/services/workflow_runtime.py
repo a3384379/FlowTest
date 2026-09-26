@@ -1142,7 +1142,6 @@ def _contains_unresolved_control_marker(request: PreparedRequest) -> bool:
     return bool(
         marker.search(request.url)
         or any(marker.search(header.value) for header in request.headers)
-        or any(marker.search(item.value) for item in request.variables)
         or marker.search(json.dumps(request.body, ensure_ascii=False))
     )
 
