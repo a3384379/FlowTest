@@ -607,6 +607,23 @@ export function moveRegionStepTo(
   }
 }
 
+export function connectRegionSteps(
+  region: WorkflowRegion,
+  sourceId: string,
+  targetId: string,
+): WorkflowRegion | null {
+  const path = linearRegionPath(region)
+  if (!path || sourceId === targetId) return null
+  const sourceIndex = path.indexOf(sourceId)
+  const targetIndex = path.indexOf(targetId)
+  if (sourceIndex < 0 || targetIndex < 0 || path[sourceIndex + 1] === targetId) return null
+  return moveRegionStepTo(
+    region,
+    targetId,
+    targetIndex < sourceIndex ? sourceIndex : sourceIndex + 1,
+  )
+}
+
 export function linearRegionPath(region: WorkflowRegion): string[] | null {
   if (!hasLinearRegionShape(region)) return null
   const ids = new Set(region.nodes.map((node) => node.id))

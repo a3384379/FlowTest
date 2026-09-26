@@ -648,6 +648,21 @@ function TryCatchFields({
   return (
     <section className="workflow-config-section" aria-label="异常处理配置">
       <Typography.Title level={5}>异常处理</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        Catch 决定错误后的执行路径；预期错误码在执行前固定，用于负向测试结论。
+      </Typography.Paragraph>
+      <TryExpectedErrorCodes
+        key={JSON.stringify(configuration.expected_error_codes)}
+        codes={
+          Array.isArray(configuration.expected_error_codes)
+            ? configuration.expected_error_codes.filter(
+                (code): code is string => typeof code === 'string',
+              )
+            : []
+        }
+        editable={editable}
+        onChange={(expected_error_codes) => onChange({ ...configuration, expected_error_codes })}
+      />
       {structural && (
         <Space wrap>
           <Button
@@ -696,6 +711,57 @@ function TryCatchFields({
   )
 }
 
+function TryExpectedErrorCodes({
+  codes,
+  editable,
+  onChange,
+}: {
+  codes: string[]
+  editable: boolean
+  onChange: (codes: string[]) => void
+}) {
+  const [draft, setDraft] = useState(codes.join(', '))
+  const [invalid, setInvalid] = useState(false)
+  function apply() {
+    const parsed = [
+      ...new Set(
+        draft
+          .split(',')
+          .map((code) => code.trim())
+          .filter(Boolean),
+      ),
+    ]
+    if (parsed.length > 20 || parsed.some((code) => code.length > 100)) {
+      setInvalid(true)
+      return
+    }
+    setInvalid(false)
+    if (JSON.stringify(parsed) !== JSON.stringify(codes)) onChange(parsed)
+  }
+  return (
+    <>
+      <Input
+        aria-label="预期错误码"
+        placeholder="逗号分隔；留空表示没有预期错误"
+        value={draft}
+        disabled={!editable}
+        status={invalid ? 'error' : undefined}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          setInvalid(false)
+        }}
+        onBlur={apply}
+        onPressEnter={(event) => event.currentTarget.blur()}
+      />
+      {invalid && (
+        <Typography.Text type="danger">
+          最多填写 20 个预期错误码，每个不超过 100 字符。
+        </Typography.Text>
+      )}
+    </>
+  )
+}
+
 function TryCatchRow({
   item,
   index,
@@ -732,7 +798,7 @@ function TryCatchRow({
           .filter(Boolean),
       ),
     ]
-    if (parsed.length === 0 || parsed.length > 20) {
+    if (parsed.length === 0 || parsed.length > 20 || parsed.some((code) => code.length > 100)) {
       setCodesError(true)
       return
     }
@@ -787,7 +853,9 @@ function TryCatchRow({
         onPressEnter={(event) => event.currentTarget.blur()}
       />
       {codesError && (
-        <Typography.Text type="danger">请输入 1–20 个逗号分隔的错误码。</Typography.Text>
+        <Typography.Text type="danger">
+          请输入 1–20 个逗号分隔的错误码，每个不超过 100 字符。
+        </Typography.Text>
       )}
     </div>
   )

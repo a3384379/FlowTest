@@ -349,6 +349,51 @@ it('confirms removal of Finally and can add it back without orphaning the region
   expect(restored.regions.some((region: WorkflowRegion) => region.role === 'finally')).toBe(true)
 })
 
+it('edits expected Try error codes without changing Catch matching codes', async () => {
+  const definition = addControlBlock(workflowDefinition, 'try')
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  const input = screen.getByRole('textbox', { name: '预期错误码' })
+  await userEvent.type(input, 'CASE_FAIL, UPSTREAM_ERROR, CASE_FAIL')
+  fireEvent.blur(input)
+  expect(onUpdate.mock.lastCall?.[0].configuration.expected_error_codes).toEqual([
+    'CASE_FAIL',
+    'UPSTREAM_ERROR',
+  ])
+  expect(onUpdate.mock.lastCall?.[0].configuration.catches).toEqual(
+    definition.nodes.at(-1)!.configuration!.catches,
+  )
+})
+
+it('keeps oversized expected error codes out of the Try definition', async () => {
+  const definition = addControlBlock(workflowDefinition, 'try')
+  const onUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={definition.regions!}
+      editable
+      onUpdate={onUpdate}
+      onRegionUpdate={vi.fn()}
+    />,
+  )
+  const input = screen.getByRole('textbox', { name: '预期错误码' })
+  fireEvent.change(input, { target: { value: 'x'.repeat(101) } })
+  fireEvent.blur(input)
+  expect(onUpdate).not.toHaveBeenCalled()
+  expect(screen.getByText(/每个不超过 100 字符/)).toBeInTheDocument()
+})
+
 it('inserts a nested control from the region canvas as one definition change', async () => {
   const definition = addControlBlock(workflowDefinition, 'group')
   const region = definition.regions![0]

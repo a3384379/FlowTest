@@ -5,6 +5,7 @@ import {
   insertNestedControlBlock,
   insertRegionApiAfter,
   insertRegionDelayAfter,
+  connectRegionSteps,
   linearRegionPath,
   moveRegionStep,
   moveRegionStepTo,
@@ -97,6 +98,15 @@ export default function WorkflowRegionCanvasModal({
     onUpdate(next)
     setError(null)
   }
+  function applyReconnection(sourceId: string, targetId: string) {
+    const next = connectRegionSteps(region, sourceId, targetId)
+    if (!next) {
+      setError('只能在无条件、无映射且没有节点引用的线性区域中重接连线。')
+      return
+    }
+    onUpdate(next)
+    setError(null)
+  }
   function applyNestedInsertion() {
     if (!selectedNodeId || !definition) return
     const next = insertNestedControlBlock(definition, region.id, selectedNodeId, controlKind)
@@ -136,6 +146,9 @@ export default function WorkflowRegionCanvasModal({
         onRemove={applyDeletion}
       />
       {error && <Alert type="error" title={error} />}
+      <Typography.Paragraph type="secondary">
+        拖动连线可调整线性区域的执行顺序；会自动重接整条路径，不能创建隐式分支。
+      </Typography.Paragraph>
       <WorkflowRegionCanvas
         key={regionCanvasKey(region)}
         region={region}
@@ -143,6 +156,7 @@ export default function WorkflowRegionCanvasModal({
         selectedNodeId={selectedNodeId}
         onSelectNode={setSelectedNodeId}
         onUpdate={onUpdate}
+        onReorder={applyReconnection}
       />
       <NestedControlConfiguration
         node={selectedNode}

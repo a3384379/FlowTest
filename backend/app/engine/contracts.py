@@ -2,7 +2,15 @@ from enum import StrEnum
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app.domain.api_assets import BodyKind
 from app.domain.assertions import ComparisonOperator
@@ -414,6 +422,15 @@ class TryCatch(BaseModel):
     error_codes: list[str] = Field(min_length=1, max_length=20)
     body: ControlBody
 
+    @field_validator("error_codes")
+    @classmethod
+    def validate_error_codes(cls, codes: list[str]) -> list[str]:
+        if any(not code.strip() or code != code.strip() or len(code) > 100 for code in codes):
+            raise ValueError("Catch error codes must be trimmed and at most 100 characters")
+        if len(codes) != len(set(codes)):
+            raise ValueError("Catch error codes must be unique")
+        return codes
+
 
 class TryControlConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -424,6 +441,15 @@ class TryControlConfig(BaseModel):
     expected_error_codes: list[str] = Field(default_factory=list, max_length=20)
     inputs: dict[VariableName, ValueSource] = Field(default_factory=dict, max_length=100)
     policy: ControlBlockPolicy = Field(default_factory=ControlBlockPolicy)
+
+    @field_validator("expected_error_codes")
+    @classmethod
+    def validate_expected_error_codes(cls, codes: list[str]) -> list[str]:
+        if any(not code.strip() or code != code.strip() or len(code) > 100 for code in codes):
+            raise ValueError("Expected error codes must be trimmed and at most 100 characters")
+        if len(codes) != len(set(codes)):
+            raise ValueError("Expected error codes must be unique")
+        return codes
 
     @model_validator(mode="after")
     def validate_catches(self) -> "TryControlConfig":

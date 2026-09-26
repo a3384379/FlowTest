@@ -11,6 +11,7 @@ import {
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
+  connectRegionSteps,
   insertRegionApiAfter,
   insertRegionDelayAfter,
   insertNestedControlBlock,
@@ -114,6 +115,29 @@ describe('workflow graph commands', () => {
     expect(restored.regions?.find((item) => item.id === finallyBody.region_id)?.role).toBe(
       'finally',
     )
+  })
+
+  it('reconnects a linear region by moving the target after the source atomically', () => {
+    const base = addControlBlock(graph(linear), 'group').regions![0]
+    const region = appendRegionDelay(appendRegionDelay(appendRegionDelay(base)!)!)!
+    const ids = region.nodes.map((node) => node.id)
+    const reordered = connectRegionSteps(region, ids[0], ids[3])!
+    expect(reordered.nodes.map((node) => node.id)).toEqual([ids[0], ids[3], ids[1], ids[2]])
+    expect(reordered.edges.map((edge) => edge.id)).toEqual(region.edges.map((edge) => edge.id))
+    expect(reordered.edges.map((edge) => [edge.source, edge.target])).toEqual([
+      [ids[0], ids[3]],
+      [ids[3], ids[1]],
+      [ids[1], ids[2]],
+    ])
+    expect(connectRegionSteps(region, ids[0], ids[1])).toBeNull()
+    expect(connectRegionSteps(region, ids[1], ids[1])).toBeNull()
+    expect(
+      connectRegionSteps(
+        { ...region, edges: [{ ...region.edges[0], condition: 'true' }, ...region.edges.slice(1)] },
+        ids[0],
+        ids[3],
+      ),
+    ).toBeNull()
   })
 
   it('inserts and removes a nested control with its descendant regions atomically', () => {

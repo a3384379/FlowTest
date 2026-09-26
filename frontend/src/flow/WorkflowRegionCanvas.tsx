@@ -1,5 +1,6 @@
 import { Controls, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react'
 import type { WorkflowRegion } from '../lib/api'
+import { linearRegionPath } from './editor/control-blocks'
 
 type Props = {
   region: WorkflowRegion
@@ -7,6 +8,7 @@ type Props = {
   selectedNodeId: string | null
   onSelectNode: (nodeId: string | null) => void
   onUpdate: (region: WorkflowRegion) => void
+  onReorder: (sourceId: string, targetId: string) => void
 }
 
 function canvasNodes(region: WorkflowRegion, selectedNodeId: string | null): Node[] {
@@ -40,20 +42,28 @@ export default function WorkflowRegionCanvas({
   selectedNodeId,
   onSelectNode,
   onUpdate,
+  onReorder,
 }: Props) {
+  const canConnect = editable && Boolean(linearRegionPath(region))
   return (
     <div className="workflow-region-canvas" aria-label={`${region.role} 区域画布`}>
       <ReactFlow
         defaultNodes={canvasNodes(region, selectedNodeId)}
         defaultEdges={canvasEdges(region)}
         nodesDraggable={editable}
-        nodesConnectable={false}
-        edgesReconnectable={false}
+        nodesConnectable={canConnect}
+        edgesReconnectable={canConnect}
         deleteKeyCode={null}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode(null)}
+        onConnect={(connection) => onReorder(connection.source, connection.target)}
+        onReconnect={(edge, connection) => {
+          const sourceChanged = edge.source !== connection.source
+          const targetChanged = edge.target !== connection.target
+          if (sourceChanged !== targetChanged) onReorder(connection.source, connection.target)
+        }}
         onNodeDragStop={(_, node) => {
           if (!editable) return
           onUpdate({

@@ -1229,6 +1229,30 @@ def _try_definition(*, fail_try: bool, expected: bool = False, fail_finally: boo
     return payload
 
 
+@pytest.mark.parametrize(
+    "field,codes",
+    [
+        ("catch", [" "]),
+        ("catch", [" CASE_FAIL"]),
+        ("catch", ["CASE_FAIL", "CASE_FAIL"]),
+        ("catch", ["x" * 101]),
+        ("expected", [" "]),
+        ("expected", ["CASE_FAIL "]),
+        ("expected", ["CASE_FAIL", "CASE_FAIL"]),
+        ("expected", ["x" * 101]),
+    ],
+)
+def test_try_rejects_invalid_error_codes(field: str, codes: list[str]) -> None:
+    payload = _try_definition(fail_try=False)
+    configuration = payload["nodes"][1]["configuration"]
+    if field == "catch":
+        configuration["catches"][0]["error_codes"] = codes
+    else:
+        configuration["expected_error_codes"] = codes
+    with pytest.raises(ValidationError, match="error codes"):
+        WorkflowDefinition.model_validate(payload)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("expected,final_status", [(False, "failed"), (True, "passed")])
 async def test_try_catch_finally_preserves_declared_verdict(
