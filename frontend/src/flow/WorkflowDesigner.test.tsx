@@ -61,6 +61,54 @@ describe('WorkflowDesigner', () => {
     )
   })
 
+  it('wraps two continuous canvas steps into one semantic group', async () => {
+    const onChange = vi.fn()
+    const definition = structuredClone(workflowDefinition)
+    definition.nodes.splice(2, 0, {
+      ...structuredClone(definition.nodes[1]),
+      id: 'api-next',
+      name: '下一接口',
+      position: { x: 200, y: 0 },
+    })
+    definition.edges.splice(1, 1, {
+      id: 'api-next',
+      source: 'api',
+      target: 'api-next',
+      condition: null,
+      mappings: [],
+    })
+    definition.edges.push({
+      id: 'next-end',
+      source: 'api-next',
+      target: 'end',
+      condition: null,
+      mappings: [],
+    })
+    render(
+      <WorkflowDesigner
+        definition={definition}
+        apis={[apiDefinition]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.click(screen.getByRole('button', { name: '画布编辑操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '包装连续步骤为步骤组…' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('combobox', { name: '包装结束步骤' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /包\s*装/ }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce())
+    const next = onChange.mock.calls[0][0] as WorkflowDefinition
+    const owner = next.nodes.find((node) => node.capability_id === 'flow.control.group')!
+    const region = next.regions!.find((item) => item.owner_node_id === owner.id)!
+    expect(region.nodes.map((node) => node.id)).toEqual(['api', 'api-next'])
+    expect(region.edges).toEqual([expect.objectContaining({ id: 'api-next' })])
+  })
+
   it('adds an explicit subflow return and labels control capabilities on the canvas', async () => {
     const onChange = vi.fn()
     const browser = userEvent.setup()

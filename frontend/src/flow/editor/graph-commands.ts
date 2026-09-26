@@ -163,6 +163,138 @@ export function wrapMainNode(
   }
 }
 
+export function wrapMainPath(
+  definition: WorkflowDefinition,
+  nodeIds: string[],
+  kind: 'group' | 'foreach',
+): GraphEditResult {
+  const selected = new Set(nodeIds)
+  if (nodeIds.length < 2 || selected.size !== nodeIds.length)
+    return {
+      kind: 'blocked',
+      diagnostics: [diagnostic('WRAP_SELECTION', '请选取至少两个连续步骤')],
+    }
+  const nodes = nodeIds.map((id) => definition.nodes.find((node) => node.id === id))
+  if (nodes.some((node) => !node))
+    return { kind: 'blocked', diagnostics: [diagnostic('WRAP_SELECTION', '所选步骤已不存在')] }
+  const issues = wrapPathIssues(definition, nodeIds, nodes as WorkflowNode[])
+  if (issues.length) return { kind: 'blocked', diagnostics: issues }
+
+  const expanded = addControlBlock(definition, kind)
+  const owner = expanded.nodes.at(-1)!
+  const region = expanded.regions!.find((item) => item.owner_node_id === owner.id)!
+  const first = nodes[0]!
+  const internalEdges = definition.edges.filter(
+    (edge) => selected.has(edge.source) && selected.has(edge.target),
+  )
+  return {
+    kind: 'changed',
+    diagnostics: [],
+    definition: {
+      ...expanded,
+      nodes: expanded.nodes
+        .filter((node) => !selected.has(node.id))
+        .map((node) => (node.id === owner.id ? { ...node, position: first.position } : node)),
+      edges: expanded.edges
+        .filter((edge) => !(selected.has(edge.source) && selected.has(edge.target)))
+        .map((edge) => ({
+          ...edge,
+          source: edge.source === nodeIds.at(-1) ? owner.id : edge.source,
+          target: edge.target === nodeIds[0] ? owner.id : edge.target,
+        })),
+      regions: expanded.regions!.map((item) =>
+        item.id === region.id
+          ? {
+              ...item,
+              nodes: (nodes as WorkflowNode[]).map((node) => ({
+                ...node,
+                position: {
+                  x: node.position.x - first.position.x,
+                  y: node.position.y - first.position.y,
+                },
+              })),
+              edges: internalEdges,
+              entry_node_id: nodeIds[0],
+              exit_node_ids: [nodeIds.at(-1)!],
+            }
+          : item,
+      ),
+    },
+  }
+}
+
+function wrapPathIssues(
+  definition: WorkflowDefinition,
+  nodeIds: string[],
+  nodes: WorkflowNode[],
+): EditDiagnostic[] {
+  return nodes.flatMap((node, index) => [
+    ...wrapNodeIssues(node),
+    ...wrapReferenceIssues(definition, node),
+    ...wrapPathBoundaryIssues(definition, nodeIds, node, index),
+  ])
+}
+
+function wrapPathBoundaryIssues(
+  definition: WorkflowDefinition,
+  nodeIds: string[],
+  node: WorkflowNode,
+  index: number,
+): EditDiagnostic[] {
+  const incoming = definition.edges.filter((edge) => edge.target === node.id)
+  const outgoing = definition.edges.filter((edge) => edge.source === node.id)
+  const issues = wrapBoundaryIssues(node, incoming, outgoing)
+  issues.push(...wrapPathConnectionIssues(nodeIds, node, index, incoming[0], outgoing[0]))
+  issues.push(...wrapPathOuterIssues(nodeIds, node, index, incoming[0], outgoing[0]))
+  return issues
+}
+
+function wrapPathConnectionIssues(
+  nodeIds: string[],
+  node: WorkflowNode,
+  index: number,
+  incoming: WorkflowDefinition['edges'][number] | undefined,
+  outgoing: WorkflowDefinition['edges'][number] | undefined,
+): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (index > 0 && !hasPreviousPathEdge(nodeIds, index, incoming))
+    issues.push(diagnostic('WRAP_BOUNDARY', `“${node.name}”没有来自前一步的普通连线`, node.id))
+  if (index < nodeIds.length - 1 && !hasNextPathEdge(nodeIds, index, outgoing))
+    issues.push(diagnostic('WRAP_BOUNDARY', `“${node.name}”没有通向后一步的普通连线`, node.id))
+  return issues
+}
+
+function hasPreviousPathEdge(
+  nodeIds: string[],
+  index: number,
+  edge: WorkflowDefinition['edges'][number] | undefined,
+): boolean {
+  return edge?.source === nodeIds[index - 1] && edge.condition === null
+}
+
+function hasNextPathEdge(
+  nodeIds: string[],
+  index: number,
+  edge: WorkflowDefinition['edges'][number] | undefined,
+): boolean {
+  return edge?.target === nodeIds[index + 1] && edge.condition === null
+}
+
+function wrapPathOuterIssues(
+  nodeIds: string[],
+  node: WorkflowNode,
+  index: number,
+  incoming: WorkflowDefinition['edges'][number] | undefined,
+  outgoing: WorkflowDefinition['edges'][number] | undefined,
+): EditDiagnostic[] {
+  const issues: EditDiagnostic[] = []
+  if (index === 0 && incoming && nodeIds.includes(incoming.source))
+    issues.push(diagnostic('WRAP_BOUNDARY', '入口不能来自选中区域内部', node.id))
+  if (index === nodeIds.length - 1 && outgoing && nodeIds.includes(outgoing.target))
+    issues.push(diagnostic('WRAP_BOUNDARY', '出口不能返回选中区域内部', node.id))
+  return issues
+}
+
 export function unwrapSingleNode(definition: WorkflowDefinition, ownerId: string): GraphEditResult {
   const owner = definition.nodes.find((node) => node.id === ownerId)
   if (!owner) return { kind: 'unchanged' }

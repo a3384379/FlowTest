@@ -33,6 +33,7 @@ import {
   swapBranches,
   unwrapSingleNode,
   wrapMainNode,
+  wrapMainPath,
 } from './editor/graph-commands'
 import { analyzeGraph, resolveEffectiveNodeType } from './editor/graph-analysis'
 import {
@@ -242,8 +243,15 @@ function WorkflowDesignerReady({
   const [focusMode, setFocusMode] = useState(false)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [wrapPathOpen, setWrapPathOpen] = useState(false)
+  const [wrapPathKind, setWrapPathKind] = useState<'group' | 'foreach'>('group')
+  const [wrapPathEnd, setWrapPathEnd] = useState<string | null>(null)
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null)
   const [modal, modalHolder] = Modal.useModal()
+  const wrapChoices = useMemo(
+    () => mainWrapChoices(definition, selectedId ?? ''),
+    [definition, selectedId],
+  )
   const [apiSelection, setApiSelection] = useState<string | undefined>(firstResourceId(apis))
   const [apiSelectionOverride, setApiSelectionOverride] = useState<ApiDefinition | undefined>()
   const [apiSelectionProjectId, setApiSelectionProjectId] = useState(projectId)
@@ -505,6 +513,33 @@ function WorkflowDesignerReady({
     if (owner) editor.commit(result.definition, { kind: 'node', id: owner.id })
   }
 
+  function openWrapPath(kind: 'group' | 'foreach') {
+    if (!canvasEditable || !wrapChoices.length) return
+    setWrapPathKind(kind)
+    setWrapPathEnd(wrapChoices[0].endId)
+    setWrapPathOpen(true)
+  }
+
+  function applyWrapPath() {
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const choice = wrapChoices.find((item) => item.endId === wrapPathEnd)
+    if (!choice) return
+    const before = editor.latest.current.definition
+    const result = wrapMainPath(before, choice.nodeIds, wrapPathKind)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    const owner = result.definition.nodes.find(
+      (node) => !before.nodes.some((item) => item.id === node.id),
+    )
+    if (owner) editor.commit(result.definition, { kind: 'node', id: owner.id })
+    setWrapPathOpen(false)
+  }
+
   function unwrapSelectedNode() {
     if (!canvasEditable) return
     if (draftSession.dirtyNodeEditorKeys(scope).length) {
@@ -721,9 +756,12 @@ function WorkflowDesignerReady({
           onCopy={copySelectedNode}
           onPaste={pasteCopiedNode}
           canWrap={Boolean(selected)}
+          canWrapPath={wrapChoices.length > 0}
           canUnwrap={canUnwrapNode(selected)}
           onWrapGroup={() => wrapSelectedNode('group')}
           onWrapForEach={() => wrapSelectedNode('foreach')}
+          onWrapPathGroup={() => openWrapPath('group')}
+          onWrapPathForEach={() => openWrapPath('foreach')}
           onUnwrap={() => void unwrapSelectedNode()}
           onUndo={undo}
           onRedo={redo}
@@ -738,6 +776,25 @@ function WorkflowDesignerReady({
           }
         />
       </DesignerModeToolbar>
+      <Modal
+        title={wrapPathTitle(wrapPathKind)}
+        open={wrapPathOpen}
+        okText="包装"
+        okButtonProps={{ disabled: !wrapPathEnd }}
+        onOk={applyWrapPath}
+        onCancel={() => setWrapPathOpen(false)}
+      >
+        <Typography.Paragraph type="secondary">
+          从当前选中步骤开始，选择最后一个步骤。仅支持单入口、单出口且无跨边界引用的连续路径。
+        </Typography.Paragraph>
+        <Select
+          aria-label="包装结束步骤"
+          value={wrapPathEnd}
+          style={{ width: '100%' }}
+          options={wrapChoices.map((choice) => ({ value: choice.endId, label: choice.label }))}
+          onChange={setWrapPathEnd}
+        />
+      </Modal>
       <WorkflowInspectorShell
         key={workflowLayoutKey(userId, projectId)}
         visible={showInspector(editor.selection, focusMode)}
@@ -1141,6 +1198,7 @@ function DesignerToolbar({
   canCopy,
   canPaste,
   canWrap,
+  canWrapPath,
   canUnwrap,
   canUndo,
   canRedo,
@@ -1148,6 +1206,8 @@ function DesignerToolbar({
   onPaste,
   onWrapGroup,
   onWrapForEach,
+  onWrapPathGroup,
+  onWrapPathForEach,
   onUnwrap,
   onUndo,
   onRedo,
@@ -1197,6 +1257,7 @@ function DesignerToolbar({
   canCopy: boolean
   canPaste: boolean
   canWrap: boolean
+  canWrapPath: boolean
   canUnwrap: boolean
   canUndo: boolean
   canRedo: boolean
@@ -1204,6 +1265,8 @@ function DesignerToolbar({
   onPaste: () => void
   onWrapGroup: () => void
   onWrapForEach: () => void
+  onWrapPathGroup: () => void
+  onWrapPathForEach: () => void
   onUnwrap: () => void
   onUndo: () => void
   onRedo: () => void
@@ -1306,6 +1369,16 @@ function DesignerToolbar({
                 disabled: isControlDisabled(editable, canWrap),
               },
               {
+                key: 'wrap-path-group',
+                label: '包装连续步骤为步骤组…',
+                disabled: isControlDisabled(editable, canWrapPath),
+              },
+              {
+                key: 'wrap-path-foreach',
+                label: '包装连续步骤为集合遍历…',
+                disabled: isControlDisabled(editable, canWrapPath),
+              },
+              {
                 key: 'unwrap',
                 label: '拆解单步骤控制块',
                 disabled: isControlDisabled(editable, canUnwrap),
@@ -1316,6 +1389,8 @@ function DesignerToolbar({
               if (key === 'paste') onPaste()
               if (key === 'wrap-group') onWrapGroup()
               if (key === 'wrap-foreach') onWrapForEach()
+              if (key === 'wrap-path-group') onWrapPathGroup()
+              if (key === 'wrap-path-foreach') onWrapPathForEach()
               if (key === 'unwrap') onUnwrap()
             },
           }}
@@ -2010,6 +2085,34 @@ function isControlDisabled(editable: boolean, available: boolean): boolean {
 
 function canUnwrapNode(node: WorkflowNode | null): boolean {
   return node?.capability_id?.startsWith('flow.control.') ?? false
+}
+
+function mainWrapChoices(
+  definition: WorkflowDefinition,
+  startId: string,
+): { endId: string; label: string; nodeIds: string[] }[] {
+  const path = [startId]
+  const choices: { endId: string; label: string; nodeIds: string[] }[] = []
+  while (path.length < 50) {
+    const outgoing = definition.edges.filter((edge) => edge.source === path.at(-1))
+    if (outgoing.length !== 1 || outgoing[0].condition || outgoing[0].mappings.length) break
+    const nextId = outgoing[0].target
+    if (path.includes(nextId)) break
+    const nextNode = definition.nodes.find((node) => node.id === nextId)
+    if (!nextNode) break
+    path.push(nextId)
+    if (wrapMainPath(definition, path, 'group').kind !== 'changed') break
+    choices.push({
+      endId: nextId,
+      label: `${nextNode.name}（共 ${path.length} 步）`,
+      nodeIds: [...path],
+    })
+  }
+  return choices
+}
+
+function wrapPathTitle(kind: 'group' | 'foreach'): string {
+  return kind === 'group' ? '包装连续步骤为步骤组' : '包装连续步骤为集合遍历'
 }
 
 function statusLabel(status: string): string {

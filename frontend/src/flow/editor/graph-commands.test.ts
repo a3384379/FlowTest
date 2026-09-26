@@ -31,6 +31,7 @@ import {
   swapBranches,
   unwrapSingleNode,
   wrapMainNode,
+  wrapMainPath,
 } from './graph-commands'
 
 function fixture(name: string): unknown {
@@ -284,6 +285,72 @@ describe('workflow graph commands', () => {
     ])
     expect(original.nodes.some((node) => node.id === 'api')).toBe(true)
     expect(analyzeGraph(wrapped)).toEqual([])
+  })
+
+  it('wraps a continuous two-step path with its original internal edge', () => {
+    const original = graph(linear)
+    const second = {
+      ...structuredClone(original.nodes[1]),
+      id: 'next',
+      name: '下一个接口',
+      position: { x: 480, y: 0 },
+    }
+    original.nodes.splice(2, 0, second)
+    original.edges.splice(1, 1, {
+      id: 'a-n',
+      source: 'api',
+      target: 'next',
+      condition: null,
+      mappings: [],
+    })
+    original.edges.push({ id: 'n-e', source: 'next', target: 'end', condition: null, mappings: [] })
+
+    const result = wrapMainPath(original, ['api', 'next'], 'group')
+    expect(result.kind).toBe('changed')
+    if (result.kind !== 'changed') return
+    const owner = result.definition.nodes.find(
+      (node) => node.capability_id === 'flow.control.group',
+    )!
+    const region = result.definition.regions!.find((item) => item.owner_node_id === owner.id)!
+    expect(result.definition.nodes.map((node) => node.id)).not.toContain('api')
+    expect(result.definition.nodes.map((node) => node.id)).not.toContain('next')
+    expect(result.definition.edges).toEqual([
+      expect.objectContaining({ id: 's-a', source: 'start', target: owner.id }),
+      expect.objectContaining({ id: 'n-e', source: owner.id, target: 'end' }),
+    ])
+    expect(region.nodes.map((node) => node.id)).toEqual(['api', 'next'])
+    expect(region.edges).toEqual([
+      expect.objectContaining({ id: 'a-n', source: 'api', target: 'next' }),
+    ])
+    expect(region.entry_node_id).toBe('api')
+    expect(region.exit_node_ids).toEqual(['next'])
+    expect(analyzeGraph(result.definition)).toEqual([])
+    expect(original.nodes.some((node) => node.id === 'next')).toBe(true)
+
+    const reversed = wrapMainPath(original, ['next', 'api'], 'group')
+    expect(reversed.kind).toBe('blocked')
+    if (reversed.kind === 'blocked')
+      expect(reversed.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'WRAP_BOUNDARY' })]),
+      )
+
+    const mapped = structuredClone(original)
+    mapped.edges[1].mappings = graph(fixture('03-mapped-edge.json')).edges[1].mappings
+    const blocked = wrapMainPath(mapped, ['api', 'next'], 'group')
+    expect(blocked.kind).toBe('blocked')
+    if (blocked.kind === 'blocked')
+      expect(blocked.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'WRAP_MAPPING' })]),
+      )
+
+    const referenced = structuredClone(original)
+    referenced.nodes.find((node) => node.id === 'end')!.config.source_node_id = 'next'
+    const referenceBlocked = wrapMainPath(referenced, ['api', 'next'], 'group')
+    expect(referenceBlocked.kind).toBe('blocked')
+    if (referenceBlocked.kind === 'blocked')
+      expect(referenceBlocked.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'WRAP_OUTPUT_REFERENCE' })]),
+      )
   })
 
   it('rejects wrapping a mapped or externally referenced node with specific diagnostics', () => {
