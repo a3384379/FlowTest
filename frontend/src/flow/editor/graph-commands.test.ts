@@ -7,6 +7,7 @@ import { analyzeGraph, editorNode, restoreEditedNode } from './graph-analysis'
 import {
   addControlBlock,
   addSwitchBranch,
+  addTryCatch,
   appendRegionApi,
   appendRegionDelay,
   appendRegionSignal,
@@ -15,7 +16,9 @@ import {
   insertNestedControlBlock,
   removeNestedControlBlock,
   removeSwitchBranch,
+  removeTryCatch,
   setSwitchDefaultBehavior,
+  setTryFinally,
 } from './control-blocks'
 import { insertNodeOnEdge, pasteNode } from '../workflow-graph'
 import {
@@ -78,6 +81,38 @@ describe('workflow graph commands', () => {
     expect(current.behavior).toBe('run')
     expect(restored.regions?.find((item) => item.id === current.body.region_id)?.role).toBe(
       'default',
+    )
+  })
+
+  it('edits Try catches and Finally together with their regions', () => {
+    const base = addControlBlock(graph(linear), 'try')
+    const owner = base.nodes.at(-1)!
+    const added = addTryCatch(base, owner.id)!
+    const catches = added.nodes.at(-1)!.configuration!.catches as {
+      id: string
+      error_codes: string[]
+      body: { region_id: string }
+    }[]
+    expect(catches).toHaveLength(2)
+    expect(catches[1].error_codes).not.toEqual(catches[0].error_codes)
+    expect(added.regions?.find((item) => item.id === catches[1].body.region_id)).toMatchObject({
+      owner_node_id: owner.id,
+      role: `catch:${catches[1].id}`,
+    })
+    const removed = removeTryCatch(added, owner.id, catches[1].id)!
+    expect(removed.nodes.at(-1)!.configuration!.catches).toEqual(owner.configuration!.catches)
+    expect(removed.regions).toEqual(base.regions)
+
+    const withoutFinally = setTryFinally(base, owner.id, false)!
+    expect(withoutFinally.nodes.at(-1)!.configuration!.finally_body).toBeNull()
+    expect(withoutFinally.regions?.some((item) => item.role === 'finally')).toBe(false)
+    expect(removeTryCatch(withoutFinally, owner.id, 'known')).toBeNull()
+    const restored = setTryFinally(withoutFinally, owner.id, true)!
+    const finallyBody = restored.nodes.at(-1)!.configuration!.finally_body as {
+      region_id: string
+    }
+    expect(restored.regions?.find((item) => item.id === finallyBody.region_id)?.role).toBe(
+      'finally',
     )
   })
 

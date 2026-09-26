@@ -8,6 +8,7 @@ import {
   appendRegionDelay,
   insertNestedControlBlock,
   moveRegionStep,
+  moveRegionStepTo,
   removeRegionStep,
 } from './editor/control-blocks'
 import { NodeEditContext, type NodeEditContextValue } from './editor/node-edit-session'
@@ -203,6 +204,149 @@ it('moves a linear region step while preserving node and edge identities', async
     [ids[1], ids[0]],
     [ids[0], ids[2]],
   ])
+})
+
+it('moves a region step across several positions without changing its identities', async () => {
+  const definition = addControlBlock(workflowDefinition, 'group')
+  const first = appendRegionDelay(definition.regions![0])!
+  const second = appendRegionDelay(first)!
+  const region = appendRegionDelay(second)!
+  const ids = region.nodes.map((node) => node.id)
+  const onRegionUpdate = vi.fn()
+  render(
+    <WorkflowControlFields
+      node={definition.nodes.at(-1)!}
+      regions={[region]}
+      editable
+      onUpdate={vi.fn()}
+      onRegionUpdate={onRegionUpdate}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const dialog = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(dialog).getByTestId(`rf__node-${ids[0]}`))
+  await userEvent.click(within(dialog).getByRole('combobox', { name: '移动步骤到位置' }))
+  await userEvent.click(screen.getByText('第 4 位 · 等待 0 秒'))
+  await userEvent.click(within(dialog).getByRole('button', { name: '移动到指定位置' }))
+  const moved = onRegionUpdate.mock.calls[0][0] as WorkflowRegion
+  expect(moved.nodes.map((node) => node.id)).toEqual([ids[1], ids[2], ids[3], ids[0]])
+  expect(moved.edges.map((edge) => edge.id)).toEqual(region.edges.map((edge) => edge.id))
+  expect(moved.entry_node_id).toBe(ids[1])
+  expect(moved.exit_node_ids).toEqual([ids[0]])
+  expect(moved.edges.map((edge) => [edge.source, edge.target])).toEqual([
+    [ids[1], ids[2]],
+    [ids[2], ids[3]],
+    [ids[3], ids[0]],
+  ])
+  expect(region.entry_node_id).toBe(ids[0])
+})
+
+it('rejects cross-position reordering when an edge or node refers to the original order', () => {
+  const base = addControlBlock(workflowDefinition, 'group').regions![0]
+  const region = appendRegionDelay(appendRegionDelay(appendRegionDelay(base)!)!)!
+  const ids = region.nodes.map((node) => node.id)
+  expect(
+    moveRegionStepTo(
+      { ...region, edges: [{ ...region.edges[0], condition: 'true' }, ...region.edges.slice(1)] },
+      ids[0],
+      3,
+    ),
+  ).toBeNull()
+  expect(
+    moveRegionStepTo(
+      {
+        ...region,
+        nodes: region.nodes.map((node, index) =>
+          index === 2 ? { ...node, config: { source: ids[0] } } : node,
+        ),
+      },
+      ids[0],
+      3,
+    ),
+  ).toBeNull()
+})
+
+it('adds and configures a Catch through the Try form', async () => {
+  const definition = addControlBlock(workflowDefinition, 'try')
+  const owner = definition.nodes.at(-1)!
+  const onStructureChange = vi.fn()
+  const onUpdate = vi.fn()
+  const props = {
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+    onStructureChange,
+  }
+  const view = render(
+    <WorkflowControlFields
+      {...props}
+      node={owner}
+      definition={definition}
+      regions={definition.regions!}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '添加 Catch' }))
+  const added = onStructureChange.mock.calls[0][0]
+  const catches = added.nodes.at(-1)!.configuration!.catches as { id: string }[]
+  const catchId = catches[1].id
+  expect(added.regions).toHaveLength(4)
+  view.rerender(
+    <WorkflowControlFields
+      {...props}
+      node={added.nodes.at(-1)!}
+      definition={added}
+      regions={added.regions!}
+    />,
+  )
+  const input = screen.getByRole('textbox', { name: `Catch ${catchId} 错误码` })
+  await userEvent.clear(input)
+  await userEvent.type(input, 'HTTP_500, HTTP_TIMEOUT')
+  fireEvent.blur(input)
+  expect(onUpdate.mock.lastCall?.[0].configuration.catches[1]).toMatchObject({
+    id: catchId,
+    error_codes: ['HTTP_500', 'HTTP_TIMEOUT'],
+  })
+  await userEvent.click(screen.getAllByRole('button', { name: '删除 Catch' })[1])
+  await userEvent.click(screen.getByRole('button', { name: 'OK' }))
+  const removed = onStructureChange.mock.lastCall?.[0]
+  expect(removed.regions).toHaveLength(3)
+  expect(removed.nodes.at(-1)!.configuration!.catches).toHaveLength(1)
+})
+
+it('confirms removal of Finally and can add it back without orphaning the region', async () => {
+  const definition = addControlBlock(workflowDefinition, 'try')
+  const onStructureChange = vi.fn()
+  const props = {
+    editable: true,
+    onUpdate: vi.fn(),
+    onRegionUpdate: vi.fn(),
+    onStructureChange,
+  }
+  const view = render(
+    <WorkflowControlFields
+      {...props}
+      node={definition.nodes.at(-1)!}
+      definition={definition}
+      regions={definition.regions!}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '移除 Finally' }))
+  await userEvent.click(screen.getByRole('button', { name: 'OK' }))
+  const withoutFinally = onStructureChange.mock.calls[0][0]
+  expect(withoutFinally.regions).toHaveLength(2)
+  expect(withoutFinally.nodes.at(-1)!.configuration!.finally_body).toBeNull()
+  view.rerender(
+    <WorkflowControlFields
+      {...props}
+      node={withoutFinally.nodes.at(-1)!}
+      definition={withoutFinally}
+      regions={withoutFinally.regions!}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '添加 Finally' }))
+  const restored = onStructureChange.mock.lastCall?.[0]
+  expect(restored.regions).toHaveLength(3)
+  expect(restored.regions.some((region: WorkflowRegion) => region.role === 'finally')).toBe(true)
 })
 
 it('inserts a nested control from the region canvas as one definition change', async () => {

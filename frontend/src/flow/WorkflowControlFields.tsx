@@ -22,8 +22,11 @@ import {
   appendRegionSignal,
   canAppendRegionSignal,
   addSwitchBranch,
+  addTryCatch,
   removeSwitchBranch,
+  removeTryCatch,
   setSwitchDefaultBehavior,
+  setTryFinally,
 } from './editor/control-blocks'
 import {
   conditionStateSources,
@@ -112,6 +115,14 @@ export default function WorkflowControlFields({
         </Typography.Text>
       )}
       <ControlConditionSections
+        node={node}
+        definition={definition}
+        configuration={configuration}
+        editable={configFieldsEditable}
+        onChange={updateConfiguration}
+        onStructureChange={onStructureChange}
+      />
+      <TryCatchFields
         node={node}
         definition={definition}
         configuration={configuration}
@@ -596,6 +607,190 @@ function switchDefaultBehavior(value: unknown): 'run' | 'skip' | 'fail' | undefi
   const behavior = asRecord(value)?.behavior
   if (behavior === 'run' || behavior === 'skip' || behavior === 'fail') return behavior
   return undefined
+}
+
+function TryCatchFields({
+  node,
+  definition,
+  configuration,
+  editable,
+  onChange,
+  onStructureChange,
+}: {
+  node: WorkflowNode
+  definition?: WorkflowDefinition
+  configuration: Record<string, unknown>
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+  onStructureChange?: (definition: WorkflowDefinition) => void
+}) {
+  if (node.capability_id !== 'flow.control.try' || !Array.isArray(configuration.catches))
+    return null
+  const catches = configuration.catches as unknown[]
+  const structural = Boolean(definition && onStructureChange)
+  const updateCatch = (id: string, patch: Record<string, unknown>) =>
+    onChange({
+      ...configuration,
+      catches: catches.map((item) =>
+        asRecord(item)?.id === id ? { ...asRecord(item), ...patch } : item,
+      ),
+    })
+  const moveCatch = (index: number, direction: -1 | 1) => {
+    const next = [...catches]
+    const target = index + direction
+    if (target < 0 || target >= next.length) return
+    ;[next[index], next[target]] = [next[target], next[index]]
+    onChange({ ...configuration, catches: next })
+  }
+  const applyStructure = (next: WorkflowDefinition | null) => {
+    if (next) onStructureChange?.(next)
+  }
+  return (
+    <section className="workflow-config-section" aria-label="异常处理配置">
+      <Typography.Title level={5}>异常处理</Typography.Title>
+      {structural && (
+        <Space wrap>
+          <Button
+            disabled={!editable || catches.length >= 20}
+            onClick={() => applyStructure(addTryCatch(definition!, node.id))}
+          >
+            添加 Catch
+          </Button>
+          {configuration.finally_body ? (
+            <Popconfirm
+              title="移除 Finally 区域？"
+              description="区域内步骤及其嵌套控制块将一并移除；草稿可撤销。"
+              onConfirm={() => applyStructure(setTryFinally(definition!, node.id, false))}
+            >
+              <Button disabled={!editable || catches.length === 0}>移除 Finally</Button>
+            </Popconfirm>
+          ) : (
+            <Button
+              disabled={!editable}
+              onClick={() => applyStructure(setTryFinally(definition!, node.id, true))}
+            >
+              添加 Finally
+            </Button>
+          )}
+        </Space>
+      )}
+      {catches.map((item, index) => {
+        const itemRecord = asRecord(item)
+        if (!itemRecord || typeof itemRecord.id !== 'string') return null
+        const id = itemRecord.id
+        return (
+          <TryCatchRow
+            key={`${id}:${String(itemRecord.label)}:${JSON.stringify(itemRecord.error_codes)}`}
+            item={itemRecord}
+            index={index}
+            count={catches.length}
+            editable={editable}
+            canRemove={structural && (catches.length > 1 || Boolean(configuration.finally_body))}
+            onChange={(patch) => updateCatch(id, patch)}
+            onMove={(direction) => moveCatch(index, direction)}
+            onRemove={() => applyStructure(removeTryCatch(definition!, node.id, id))}
+          />
+        )
+      })}
+    </section>
+  )
+}
+
+function TryCatchRow({
+  item,
+  index,
+  count,
+  editable,
+  canRemove,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  item: Record<string, unknown>
+  index: number
+  count: number
+  editable: boolean
+  canRemove: boolean
+  onChange: (patch: Record<string, unknown>) => void
+  onMove: (direction: -1 | 1) => void
+  onRemove: () => void
+}) {
+  const label = String(item.label ?? '')
+  const codes = Array.isArray(item.error_codes)
+    ? item.error_codes.filter((code): code is string => typeof code === 'string')
+    : []
+  const [labelDraft, setLabelDraft] = useState(label)
+  const [codesDraft, setCodesDraft] = useState(codes.join(', '))
+  const [codesError, setCodesError] = useState(false)
+  const id = String(item.id)
+  function applyCodes() {
+    const parsed = [
+      ...new Set(
+        codesDraft
+          .split(',')
+          .map((code) => code.trim())
+          .filter(Boolean),
+      ),
+    ]
+    if (parsed.length === 0 || parsed.length > 20) {
+      setCodesError(true)
+      return
+    }
+    setCodesError(false)
+    if (JSON.stringify(parsed) !== JSON.stringify(codes)) onChange({ error_codes: parsed })
+  }
+  return (
+    <div className="workflow-switch-branch">
+      <Space wrap>
+        <Input
+          aria-label={`Catch ${id} 名称`}
+          value={labelDraft}
+          maxLength={200}
+          disabled={!editable}
+          status={labelDraft.trim() ? undefined : 'error'}
+          onChange={(event) => setLabelDraft(event.target.value)}
+          onBlur={() => {
+            const next = labelDraft.trim()
+            if (next && next !== label) onChange({ label: next })
+            else setLabelDraft(label)
+          }}
+          onPressEnter={(event) => event.currentTarget.blur()}
+        />
+        <Button disabled={!editable || index === 0} onClick={() => onMove(-1)}>
+          上移 Catch
+        </Button>
+        <Button disabled={!editable || index === count - 1} onClick={() => onMove(1)}>
+          下移 Catch
+        </Button>
+        {canRemove && (
+          <Popconfirm
+            title={`删除 Catch ${label}？`}
+            description="此 Catch 区域及其嵌套步骤将被删除；草稿可撤销。"
+            onConfirm={onRemove}
+          >
+            <Button danger disabled={!editable}>
+              删除 Catch
+            </Button>
+          </Popconfirm>
+        )}
+      </Space>
+      <Input
+        aria-label={`Catch ${id} 错误码`}
+        value={codesDraft}
+        disabled={!editable}
+        status={codesError ? 'error' : undefined}
+        onChange={(event) => {
+          setCodesDraft(event.target.value)
+          setCodesError(false)
+        }}
+        onBlur={applyCodes}
+        onPressEnter={(event) => event.currentTarget.blur()}
+      />
+      {codesError && (
+        <Typography.Text type="danger">请输入 1–20 个逗号分隔的错误码。</Typography.Text>
+      )}
+    </div>
+  )
 }
 
 function SwitchBranchHeader({

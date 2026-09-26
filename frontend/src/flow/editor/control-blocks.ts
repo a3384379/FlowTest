@@ -271,6 +271,91 @@ export function setSwitchDefaultBehavior(
   return { ...updated, regions: updatedDefaultRegions(updated, existing, created) }
 }
 
+export function addTryCatch(
+  definition: WorkflowDefinition,
+  nodeId: string,
+): WorkflowDefinition | null {
+  const context = tryContext(definition, nodeId)
+  if (!context || context.catches.length >= 20) return null
+  const catchId = `catch-${crypto.randomUUID()}`
+  const catchRegion = region(nodeId, `catch:${catchId}`)
+  const existingCodes = new Set(
+    context.catches.flatMap((item) => {
+      const codes = asRecord(item)?.error_codes
+      return Array.isArray(codes)
+        ? codes.filter((code): code is string => typeof code === 'string')
+        : []
+    }),
+  )
+  let suffix = context.catches.length + 1
+  while (existingCodes.has(`CASE_ERROR_${suffix}`)) suffix += 1
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...context.config,
+    catches: [
+      ...context.catches,
+      {
+        id: catchId,
+        label: `捕获 ${context.catches.length + 1}`,
+        error_codes: [`CASE_ERROR_${suffix}`],
+        body: body(catchRegion),
+      },
+    ],
+  })
+  return { ...updated, regions: [...(updated.regions ?? []), catchRegion] }
+}
+
+export function removeTryCatch(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  catchId: string,
+): WorkflowDefinition | null {
+  const context = tryContext(definition, nodeId)
+  if (!context || (context.catches.length <= 1 && !context.config.finally_body)) return null
+  const selected = context.catches.map(asRecord).find((item) => item?.id === catchId)
+  const regionId = asRecord(selected?.body)?.region_id
+  const owned = definition.regions?.find(
+    (item) =>
+      item.id === regionId && item.owner_node_id === nodeId && item.role === `catch:${catchId}`,
+  )
+  if (!owned) return null
+  const removedIds = regionTreeIds(definition, owned)
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...context.config,
+    catches: context.catches.filter((item) => asRecord(item)?.id !== catchId),
+  })
+  return { ...updated, regions: updated.regions?.filter((item) => !removedIds.has(item.id)) }
+}
+
+export function setTryFinally(
+  definition: WorkflowDefinition,
+  nodeId: string,
+  enabled: boolean,
+): WorkflowDefinition | null {
+  const context = tryContext(definition, nodeId)
+  if (!context || (!enabled && context.catches.length === 0)) return null
+  const current = asRecord(context.config.finally_body)
+  if (Boolean(current) === enabled) return definition
+  if (enabled) {
+    const created = region(nodeId, 'finally')
+    const updated = replaceControlConfiguration(definition, nodeId, {
+      ...context.config,
+      finally_body: body(created),
+    })
+    return { ...updated, regions: [...(updated.regions ?? []), created] }
+  }
+  const owned = definition.regions?.find(
+    (item) =>
+      item.id === current?.region_id && item.owner_node_id === nodeId && item.role === 'finally',
+  )
+  if (!owned) return null
+  const removedIds = regionTreeIds(definition, owned)
+  const updated = replaceControlConfiguration(definition, nodeId, {
+    ...context.config,
+    finally_body: null,
+  })
+  return { ...updated, regions: updated.regions?.filter((item) => !removedIds.has(item.id)) }
+}
+
 export function insertNestedControlBlock(
   definition: WorkflowDefinition,
   regionId: string,
@@ -348,6 +433,15 @@ function switchContext(definition: WorkflowDefinition, nodeId: string) {
   const config = node?.configuration
   if (node?.capability_id !== 'flow.control.switch' || !Array.isArray(config?.branches)) return null
   return { config, branches: config.branches as unknown[] }
+}
+
+function tryContext(definition: WorkflowDefinition, nodeId: string) {
+  const node =
+    definition.nodes.find((item) => item.id === nodeId) ??
+    definition.regions?.flatMap((item) => item.nodes).find((item) => item.id === nodeId)
+  const config = node?.configuration
+  if (node?.capability_id !== 'flow.control.try' || !Array.isArray(config?.catches)) return null
+  return { config, catches: config.catches as unknown[] }
 }
 
 function replaceControlConfiguration(
@@ -467,20 +561,36 @@ export function moveRegionStep(
   direction: -1 | 1,
 ): WorkflowRegion | null {
   const path = linearRegionPath(region)
+  if (!path) return null
+  return moveRegionStepTo(region, nodeId, path.indexOf(nodeId) + direction)
+}
+
+export function moveRegionStepTo(
+  region: WorkflowRegion,
+  nodeId: string,
+  targetIndex: number,
+): WorkflowRegion | null {
+  const path = linearRegionPath(region)
   if (
     !path ||
     region.nodes.some((node) => region.nodes.some((other) => nodeReferences(node, other.id)))
   )
     return null
   const index = path.indexOf(nodeId)
-  const target = index + direction
-  if (index < 0 || target < 0 || target >= path.length) return null
+  if (
+    index < 0 ||
+    !Number.isInteger(targetIndex) ||
+    targetIndex < 0 ||
+    targetIndex >= path.length ||
+    index === targetIndex
+  )
+    return null
   const original = path.map((id) => region.nodes.find((node) => node.id === id)!)
   const orderedEdges = path
     .slice(0, -1)
     .map((id) => region.edges.find((edge) => edge.source === id)!)
-  const moved = [...path]
-  ;[moved[index], moved[target]] = [moved[target], moved[index]]
+  const moved = path.filter((id) => id !== nodeId)
+  moved.splice(targetIndex, 0, nodeId)
   return {
     ...region,
     nodes: moved.map((id, position) => ({
@@ -497,7 +607,7 @@ export function moveRegionStep(
   }
 }
 
-function linearRegionPath(region: WorkflowRegion): string[] | null {
+export function linearRegionPath(region: WorkflowRegion): string[] | null {
   if (!hasLinearRegionShape(region)) return null
   const ids = new Set(region.nodes.map((node) => node.id))
   const seen = new Set<string>()

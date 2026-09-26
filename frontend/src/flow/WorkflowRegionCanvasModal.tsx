@@ -5,7 +5,9 @@ import {
   insertNestedControlBlock,
   insertRegionApiAfter,
   insertRegionDelayAfter,
+  linearRegionPath,
   moveRegionStep,
+  moveRegionStepTo,
   removeNestedControlBlock,
   removeRegionStep,
   type ControlBlockKind,
@@ -85,6 +87,16 @@ export default function WorkflowRegionCanvasModal({
     onUpdate(next)
     setError(null)
   }
+  function applyMoveTo(targetIndex: number) {
+    if (!selectedNodeId) return
+    const next = moveRegionStepTo(region, selectedNodeId, targetIndex)
+    if (!next) {
+      setError('只能重排无条件、无字段映射且没有节点引用的线性区域步骤。')
+      return
+    }
+    onUpdate(next)
+    setError(null)
+  }
   function applyNestedInsertion() {
     if (!selectedNodeId || !definition) return
     const next = insertNestedControlBlock(definition, region.id, selectedNodeId, controlKind)
@@ -120,6 +132,7 @@ export default function WorkflowRegionCanvasModal({
         canInsertControl={Boolean(definition && onStructureChange)}
         onInsertControl={applyNestedInsertion}
         onMove={applyMove}
+        onMoveTo={applyMoveTo}
         onRemove={applyDeletion}
       />
       {error && <Alert type="error" title={error} />}
@@ -227,6 +240,7 @@ function CanvasToolbar({
   canInsertControl,
   onInsertControl,
   onMove,
+  onMoveTo,
   onRemove,
 }: {
   region: WorkflowRegion
@@ -242,6 +256,7 @@ function CanvasToolbar({
   canInsertControl: boolean
   onInsertControl: () => void
   onMove: (direction: -1 | 1) => void
+  onMoveTo: (targetIndex: number) => void
   onRemove: () => void
 }) {
   return (
@@ -249,7 +264,14 @@ function CanvasToolbar({
       <Typography.Text>
         {selectedNodeName ? `已选中：${selectedNodeName}` : '选择步骤后可在其后插入节点'}
       </Typography.Text>
-      <MoveButtons editable={editable} selectedNodeId={selectedNodeId} onMove={onMove} />
+      <MoveButtons
+        key={selectedNodeId ?? 'none'}
+        region={region}
+        editable={editable}
+        selectedNodeId={selectedNodeId}
+        onMove={onMove}
+        onMoveTo={onMoveTo}
+      />
       <Button
         disabled={!editable || !selectedNodeId}
         onClick={() => {
@@ -355,15 +377,21 @@ const nestedControlOptions: { value: ControlBlockKind; label: string }[] = [
 ]
 
 function MoveButtons({
+  region,
   editable,
   selectedNodeId,
   onMove,
+  onMoveTo,
 }: {
+  region: WorkflowRegion
   editable: boolean
   selectedNodeId: string | null
   onMove: (direction: -1 | 1) => void
+  onMoveTo: (targetIndex: number) => void
 }) {
+  const [targetIndex, setTargetIndex] = useState<number | undefined>()
   const disabled = !editable || !selectedNodeId
+  const path = linearRegionPath(region) ?? []
   return (
     <>
       <Button disabled={disabled} onClick={() => onMove(-1)}>
@@ -372,6 +400,29 @@ function MoveButtons({
       <Button disabled={disabled} onClick={() => onMove(1)}>
         向后移动
       </Button>
+      {path.length > 2 && (
+        <>
+          <Select
+            aria-label="移动步骤到位置"
+            value={targetIndex}
+            disabled={disabled}
+            placeholder="选择执行顺序"
+            options={path.map((id, index) => ({
+              value: index,
+              label: `第 ${index + 1} 位 · ${region.nodes.find((node) => node.id === id)?.name ?? id}`,
+              disabled: id === selectedNodeId,
+            }))}
+            onChange={setTargetIndex}
+            style={{ minWidth: 180 }}
+          />
+          <Button
+            disabled={disabled || targetIndex === undefined}
+            onClick={() => onMoveTo(targetIndex!)}
+          >
+            移动到指定位置
+          </Button>
+        </>
+      )}
     </>
   )
 }
