@@ -29,6 +29,7 @@ import {
   planDeletion,
   reconnectGraphEdge,
   swapBranches,
+  unwrapMainPath,
   unwrapSingleNode,
   wrapMainNode,
   wrapMainPath,
@@ -351,6 +352,55 @@ describe('workflow graph commands', () => {
       expect(referenceBlocked.diagnostics).toEqual(
         expect.arrayContaining([expect.objectContaining({ code: 'WRAP_OUTPUT_REFERENCE' })]),
       )
+  })
+
+  it('unwraps a linear multi-step group and preserves node and edge identities', () => {
+    const original = graph(linear)
+    const second = {
+      ...structuredClone(original.nodes[1]),
+      id: 'next',
+      name: '下一个接口',
+      position: { x: 480, y: 0 },
+    }
+    original.nodes.splice(2, 0, second)
+    original.edges.splice(1, 1, {
+      id: 'a-n',
+      source: 'api',
+      target: 'next',
+      condition: null,
+      mappings: [],
+    })
+    original.edges.push({ id: 'n-e', source: 'next', target: 'end', condition: null, mappings: [] })
+    const wrapped = wrapMainPath(original, ['api', 'next'], 'group')
+    expect(wrapped.kind).toBe('changed')
+    if (wrapped.kind !== 'changed') return
+    const owner = wrapped.definition.nodes.find(
+      (node) => node.capability_id === 'flow.control.group',
+    )!
+
+    const result = unwrapMainPath(wrapped.definition, owner.id)
+    expect(result.kind).toBe('changed')
+    if (result.kind !== 'changed') return
+    expect(result.definition.nodes.map((node) => node.id).sort()).toEqual(
+      original.nodes.map((node) => node.id).sort(),
+    )
+    expect(result.definition.edges).toEqual(
+      expect.arrayContaining(original.edges.map((edge) => expect.objectContaining(edge))),
+    )
+    expect(result.definition.nodes.find((node) => node.id === 'next')?.position).toEqual(
+      second.position,
+    )
+    expect(result.definition.regions).toEqual([])
+    expect(analyzeGraph(result.definition)).toEqual([])
+
+    const mapped = structuredClone(wrapped.definition)
+    mapped.regions![0].edges[0].mappings = graph(fixture('03-mapped-edge.json')).edges[1].mappings
+    expect(unwrapMainPath(mapped, owner.id)).toEqual(expect.objectContaining({ kind: 'blocked' }))
+    const referenced = structuredClone(wrapped.definition)
+    referenced.nodes.find((node) => node.id === 'end')!.config.source_node_id = 'api'
+    expect(unwrapMainPath(referenced, owner.id)).toEqual(
+      expect.objectContaining({ kind: 'blocked' }),
+    )
   })
 
   it('rejects wrapping a mapped or externally referenced node with specific diagnostics', () => {

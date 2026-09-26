@@ -2,6 +2,7 @@ import type { WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../../lib
 import { addControlBlock, descendantRegions } from './control-blocks'
 import {
   adjacency,
+  analyzeGraph,
   diagnostic,
   edgeIssues,
   effectiveConfig,
@@ -320,6 +321,162 @@ export function unwrapSingleNode(definition: WorkflowDefinition, ownerId: string
   }
 }
 
+export function unwrapMainPath(definition: WorkflowDefinition, ownerId: string): GraphEditResult {
+  const owner = definition.nodes.find((node) => node.id === ownerId)
+  const region = definition.regions?.find((item) => item.owner_node_id === ownerId)
+  if (!owner || !region || owner.capability_id !== 'flow.control.group' || region.nodes.length < 2)
+    return {
+      kind: 'blocked',
+      diagnostics: [diagnostic('UNWRAP_STRUCTURE', '仅支持拆解含多个线性步骤的步骤组', ownerId)],
+    }
+  const order = orderedRegionPath(region)
+  const incoming = definition.edges.filter((edge) => edge.target === ownerId)
+  const outgoing = definition.edges.filter((edge) => edge.source === ownerId)
+  const issues = [
+    ...unwrapRegionIssues(definition, owner, region),
+    ...unwrapGraphIssues(definition, owner),
+    ...unwrapPathIssues(definition, owner, region, order, incoming, outgoing),
+  ]
+  if (issues.length) return { kind: 'blocked', diagnostics: issues }
+  const firstId = order[0]!
+  const lastId = order.at(-1)!
+  const next: WorkflowDefinition = {
+    ...definition,
+    nodes: [
+      ...definition.nodes.filter((node) => node.id !== ownerId),
+      ...region.nodes.map((node) => ({
+        ...node,
+        position: {
+          x: node.position.x + owner.position.x,
+          y: node.position.y + owner.position.y,
+        },
+      })),
+    ],
+    edges: [
+      ...definition.edges.map((edge) => ({
+        ...edge,
+        source: edge.source === ownerId ? lastId : edge.source,
+        target: edge.target === ownerId ? firstId : edge.target,
+      })),
+      ...region.edges,
+    ],
+    regions: definition.regions?.filter((item) => item.id !== region.id),
+  }
+  const graphIssues = analyzeGraph(next)
+  return graphIssues.length
+    ? { kind: 'blocked', diagnostics: graphIssues }
+    : { kind: 'changed', diagnostics: [], definition: next }
+}
+
+function orderedRegionPath(region: WorkflowRegion): string[] {
+  const order: string[] = []
+  let current = region.entry_node_id
+  while (current && !order.includes(current)) {
+    order.push(current)
+    const next = region.edges.filter((edge) => edge.source === current)
+    current = next.length === 1 ? next[0].target : null
+  }
+  return order
+}
+
+function unwrapPathIssues(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion,
+  order: string[],
+  incoming: WorkflowDefinition['edges'],
+  outgoing: WorkflowDefinition['edges'],
+): EditDiagnostic[] {
+  const linear = isPlainLinearPath(region, order)
+  const boundaries = hasPlainOuterEdges(incoming, outgoing)
+  const ownerIsPlain = isPlainGroup(owner, region)
+  const externalReference = hasExternalPathReference(definition, owner, region)
+  const issues: EditDiagnostic[] = []
+  if (!linear || !ownerIsPlain)
+    issues.push(diagnostic('UNWRAP_STRUCTURE', '步骤组必须是无嵌套、无映射的线性主路径', owner.id))
+  if (!boundaries)
+    issues.push(diagnostic('UNWRAP_BOUNDARY', '步骤组需要一条普通入边和一条普通出边', owner.id))
+  if (externalReference)
+    issues.push(diagnostic('UNWRAP_REFERENCE', '其他节点仍引用区域步骤，不能直接拆解', owner.id))
+  return issues
+}
+
+function isPlainLinearPath(region: WorkflowRegion, order: string[]): boolean {
+  return (
+    order.length === region.nodes.length &&
+    region.edges.length === region.nodes.length - 1 &&
+    region.exit_node_ids.length === 1 &&
+    region.exit_node_ids[0] === order.at(-1) &&
+    region.edges.every((edge) => edge.condition === null && !edge.mappings.length) &&
+    region.nodes.every(isPlainWrappedStep)
+  )
+}
+
+function isPlainWrappedStep(node: WorkflowNode): boolean {
+  return (
+    !unsupportedWrapType(node) &&
+    !referencedNodeIds(effectiveConfig(node)).length &&
+    !node.bindings?.length &&
+    (!node.run_when || node.run_when === 'always') &&
+    !node.cleanup_for?.length &&
+    !node.best_effort
+  )
+}
+
+function hasPlainOuterEdges(
+  incoming: WorkflowDefinition['edges'],
+  outgoing: WorkflowDefinition['edges'],
+): boolean {
+  return (
+    incoming.length === 1 &&
+    outgoing.length === 1 &&
+    [...incoming, ...outgoing].every((edge) => edge.condition === null && !edge.mappings.length)
+  )
+}
+
+function isPlainGroup(owner: WorkflowNode, region: WorkflowRegion): boolean {
+  return (
+    region.role === 'body' &&
+    hasInlineBody(owner, region.id) &&
+    !owner.bindings?.length &&
+    owner.phase !== 'cleanup' &&
+    (!owner.run_when || owner.run_when === 'always') &&
+    !owner.cleanup_for?.length &&
+    !owner.best_effort
+  )
+}
+
+function hasInlineBody(owner: WorkflowNode, regionId: string): boolean {
+  const body = owner.configuration?.body
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'kind' in body &&
+    body.kind === 'inline' &&
+    'region_id' in body &&
+    body.region_id === regionId
+  )
+}
+
+function hasExternalPathReference(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion,
+): boolean {
+  const childIds = new Set(region.nodes.map((node) => node.id))
+  return [
+    ...definition.nodes.filter((node) => node.id !== owner.id),
+    ...(definition.regions ?? [])
+      .filter((item) => item.id !== region.id)
+      .flatMap((item) => item.nodes),
+  ].some(
+    (node) =>
+      referencedNodeIds(effectiveConfig(node)).some((id) => childIds.has(id)) ||
+      node.cleanup_for?.some((id) => childIds.has(id)) ||
+      node.bindings?.some((binding) => [...childIds].some((id) => binding.expression.includes(id))),
+  )
+}
+
 function unwrapIssues(
   definition: WorkflowDefinition,
   owner: WorkflowNode,
@@ -371,7 +528,7 @@ function unwrapGraphIssues(definition: WorkflowDefinition, owner: WorkflowNode):
   )
     issues.push(diagnostic('UNWRAP_MAPPING', '控制块连线含字段映射，请先处理映射', owner.id))
   if (
-    definition.nodes.some(
+    [...definition.nodes, ...(definition.regions ?? []).flatMap((region) => region.nodes)].some(
       (node) =>
         node.id !== owner.id &&
         (referencedNodeIds(effectiveConfig(node)).includes(owner.id) ||

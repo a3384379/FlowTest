@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import WorkflowDesigner, { applyCanvasNodeChanges } from './WorkflowDesigner'
+import { unwrapMainPath, wrapMainPath } from './editor/graph-commands'
 import {
   addEventProtocolNode,
   addProtocolNode,
@@ -107,6 +108,62 @@ describe('WorkflowDesigner', () => {
     const region = next.regions!.find((item) => item.owner_node_id === owner.id)!
     expect(region.nodes.map((node) => node.id)).toEqual(['api', 'api-next'])
     expect(region.edges).toEqual([expect.objectContaining({ id: 'api-next' })])
+  })
+
+  it('unwraps a multi-step group from the canvas menu after confirmation', async () => {
+    const onChange = vi.fn()
+    const definition = structuredClone(workflowDefinition)
+    definition.nodes.splice(2, 0, {
+      ...structuredClone(definition.nodes[1]),
+      id: 'api-next',
+      name: '下一接口',
+      position: { x: 200, y: 0 },
+    })
+    definition.edges.splice(1, 1, {
+      id: 'api-next',
+      source: 'api',
+      target: 'api-next',
+      condition: null,
+      mappings: [],
+    })
+    definition.edges.push({
+      id: 'next-end',
+      source: 'api-next',
+      target: 'end',
+      condition: null,
+      mappings: [],
+    })
+    const wrapped = wrapMainPath(definition, ['api', 'api-next'], 'group')
+    expect(wrapped.kind).toBe('changed')
+    if (wrapped.kind !== 'changed') return
+    const owner = wrapped.definition.nodes.find(
+      (node) => node.capability_id === 'flow.control.group',
+    )!
+    expect(unwrapMainPath(wrapped.definition, owner.id).kind).toBe('changed')
+    render(
+      <WorkflowDesigner
+        definition={wrapped.definition}
+        apis={[apiDefinition]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId(`rf__node-${owner.id}`))
+    fireEvent.click(screen.getByRole('button', { name: '画布编辑操作' }))
+    const unwrapItem = await screen.findByRole('menuitem', { name: '拆解控制块' })
+    expect(unwrapItem).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(unwrapItem)
+    expect((await screen.findAllByText('拆解控制块？')).length).toBeGreaterThan(0)
+    expect(screen.getByText(/按原顺序把区域中的步骤和连线放回主画布/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认拆解' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce())
+    const next = onChange.mock.calls[0][0] as WorkflowDefinition
+    expect(next.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(['api', 'api-next']))
+    expect(next.regions).toEqual([])
   })
 
   it('adds an explicit subflow return and labels control capabilities on the canvas', async () => {

@@ -24,6 +24,7 @@ import {
   emptySelection,
   jsonEqual,
   type GraphConnectionInput,
+  type GraphEditResult,
   type WorkflowSelection,
 } from './editor/editor-types'
 import {
@@ -31,6 +32,7 @@ import {
   planDeletion,
   reconnectGraphEdge,
   swapBranches,
+  unwrapMainPath,
   unwrapSingleNode,
   wrapMainNode,
   wrapMainPath,
@@ -549,22 +551,25 @@ function WorkflowDesignerReady({
     const before = editor.latest.current.definition
     const selection = editor.latest.current.selection
     if (selection?.kind !== 'node') return
-    const result = unwrapSingleNode(before, selection.id)
+    const { result, isMultiStepGroup } = unwrapSelectedControlBlock(before, selection.id)
     if (result.kind !== 'changed') {
       editor.accept(result)
       return
     }
-    void confirmUnwrap(before, selection.id, result.definition)
+    void confirmUnwrap(before, selection.id, result.definition, isMultiStepGroup)
   }
 
   async function confirmUnwrap(
     before: WorkflowDefinition,
     ownerId: string,
     next: WorkflowDefinition,
+    isMultiStepGroup: boolean,
   ) {
     const approved = await modal.confirm({
       title: '拆解控制块？',
-      content: '拆解会移除循环或步骤组的执行语义，只保留区域中的单个步骤。确认后可撤销。',
+      content: isMultiStepGroup
+        ? '拆解会移除步骤组，按原顺序把区域中的步骤和连线放回主画布。确认后可撤销。'
+        : '拆解会移除循环或步骤组的执行语义，只保留区域中的单个步骤。确认后可撤销。',
       okText: '确认拆解',
       cancelText: '取消',
     })
@@ -1380,7 +1385,7 @@ function DesignerToolbar({
               },
               {
                 key: 'unwrap',
-                label: '拆解单步骤控制块',
+                label: '拆解控制块',
                 disabled: isControlDisabled(editable, canUnwrap),
               },
             ],
@@ -2085,6 +2090,22 @@ function isControlDisabled(editable: boolean, available: boolean): boolean {
 
 function canUnwrapNode(node: WorkflowNode | null): boolean {
   return node?.capability_id?.startsWith('flow.control.') ?? false
+}
+
+function unwrapSelectedControlBlock(
+  definition: WorkflowDefinition,
+  ownerId: string,
+): { result: GraphEditResult; isMultiStepGroup: boolean } {
+  const owner = definition.nodes.find((node) => node.id === ownerId)
+  const region = definition.regions?.find((item) => item.owner_node_id === ownerId)
+  const isMultiStepGroup =
+    owner?.capability_id === 'flow.control.group' && (region?.nodes.length ?? 0) > 1
+  return {
+    result: isMultiStepGroup
+      ? unwrapMainPath(definition, ownerId)
+      : unwrapSingleNode(definition, ownerId),
+    isMultiStepGroup,
+  }
 }
 
 function mainWrapChoices(
