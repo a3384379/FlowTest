@@ -59,7 +59,8 @@ PR 验证运行将无关标签/元数据编辑标记为 `PR Validation ignored`�
 受控启用步骤：
 
 1. 先确认前两阶段依赖已经在受信基线，核对本分支相对最新 `main` 的差异及 Bootstrap 规则。
-2. 维护者按现有 Bootstrap 治理流程审查并合入本阶段工作流、计划器与发布器。保持 ruleset 的 `Required Gate`、Actions App 来源及 strict 要求；不要先关闭保护。
+2. 维护者按现有 Bootstrap 治理流程审查并合入本阶段工作流、计划器与发布器。临时要求精确 Head 的 Bootstrap 子检查时，维持 GitHub Actions App 来源、strict 和无 bypass；普通合并后立即恢复唯一的 `Required Gate`，全程不关闭保护。
+   `.github/workflows/ci-bootstrap-validation.yml` 对治理文件变更在 PR 事件中执行完整检查，供维护者核对精确 Head 后实施受控 Bootstrap；它不发布正式 `Required Gate`，普通功能 PR 不触发这套重复检查。
 3. 在代表性文档、局部功能、关键修改 PR 上观察 `PR Validation` 与 `PR Validation Shadow` 的实际 job 名、运行 ID、被测 SHA、跳过状态及发布器 Commit Status；再做一次追加提交、标签变化、失败后重跑，并确认旧运行不能覆盖新结果。
 4. 只有平台实测证明 `Required Gate` 的来源和状态被现有 ruleset 正确识别时才宣布激活。如工作流未触发或 publisher 无法可靠关联运行，保留保护并回滚到旧控制器/标签入口；不要以手动诊断成功补写 PR success。
 

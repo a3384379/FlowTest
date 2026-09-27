@@ -1,0 +1,37 @@
+name: CI Bootstrap Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/ci_plan.py"
+      - "scripts/ci_summary.py"
+      - "scripts/required_gate.py"
+      - "scripts/run_targeted_tests.py"
+      - "docs/ci-*.md"
+
+# Governance changes cannot pass the normal Required Gate. This separate,
+# PR-triggered full suite supplies eligible checks for maintainer Bootstrap.
+# It never publishes the Required Gate status or changes the branch ruleset.
+permissions:
+  contents: read
+
+jobs:
+  quick:
+    uses: ./.github/workflows/quick-ci.yml
+  backend:
+    uses: ./.github/workflows/backend-ci.yml
+  frontend:
+    uses: ./.github/workflows/frontend-ci.yml
+  compose:
+    uses: ./.github/workflows/compose-ci.yml
+  security:
+    uses: ./.github/workflows/security-ci.yml
+  windows:
+    uses: ./.github/workflows/standalone-windows.yml
+  upgrade:
+    uses: ./.github/workflows/upgrade-ci.yml
+  skills:
+    uses: ./.github/workflows/skills-ci.yml
