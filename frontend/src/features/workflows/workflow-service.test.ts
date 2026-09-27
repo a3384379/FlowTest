@@ -133,6 +133,7 @@ describe('workflow service', () => {
     expect(definition.nodes[1].config.api_definition_id).toBe(apiDefinition.id)
     expect(definition.nodes[1].config.api_version).toBe(apiDefinition.current_version)
     expect(definition.nodes[1].config.request_overrides).toEqual({})
+    expect(definition.nodes.map((node) => node.position.x)).toEqual([0, 320, 640])
   })
 })
 

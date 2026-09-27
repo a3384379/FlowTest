@@ -588,7 +588,7 @@ describe('WorkflowDesigner', () => {
     const pasted = pasteNode(workflowDefinition, workflowDefinition.nodes[1])
     expect(pasted.nodes.at(-1)?.name).toBe('查询用户 副本')
     expect(autoLayoutWorkflow(workflowDefinition).nodes.map((node) => node.position.x)).toEqual([
-      0, 240, 480,
+      0, 320, 640,
     ])
   })
 

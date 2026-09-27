@@ -442,7 +442,7 @@ function layoutPhase(nodes: WorkflowNode[], levels: Map<string, number>, offset:
       const level = levels.get(node.id) ?? 0
       const row = rows.get(level) ?? 0
       rows.set(level, row + 1)
-      return [node.id, { x: level * 240, y: row * 120 + offset }]
+      return [node.id, { x: level * 320, y: row * 120 + offset }]
     }),
   )
 }

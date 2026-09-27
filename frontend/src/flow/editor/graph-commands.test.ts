@@ -478,7 +478,7 @@ describe('workflow graph commands', () => {
         expect.objectContaining({ source: node.id, target: 'end', condition: null }),
       ]),
     )
-    expect(connected?.nodes.find((item) => item.id === node.id)?.position.x).toBe(480)
+    expect(connected?.nodes.find((item) => item.id === node.id)?.position.x).toBe(640)
     const mappedDefinition = addControlBlock(graph(mapped), 'foreach')
     expect(insertNodeOnEdge(mappedDefinition, mappedDefinition.nodes.at(-1)!.id, 'a-b')).toBeNull()
   })

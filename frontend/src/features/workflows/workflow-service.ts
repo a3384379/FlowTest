@@ -271,7 +271,7 @@ export function linearWorkflow(apiId: string, apiVersion?: number): WorkflowDefi
         id: 'api',
         type: 'api',
         name: '接口请求',
-        position: { x: 220, y: 80 },
+        position: { x: 320, y: 80 },
         config: {
           api_definition_id: apiId,
           ...(apiVersion ? { api_version: apiVersion } : {}),
@@ -280,7 +280,7 @@ export function linearWorkflow(apiId: string, apiVersion?: number): WorkflowDefi
           retry_on: ['network_error', '5xx'],
         },
       },
-      { id: 'end', type: 'end', name: '结束', position: { x: 440, y: 80 }, config: {} },
+      { id: 'end', type: 'end', name: '结束', position: { x: 640, y: 80 }, config: {} },
     ],
     edges: [
       { id: 'start-api', source: 'start', target: 'api', condition: null, mappings: [] },
