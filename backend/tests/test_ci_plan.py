@@ -147,9 +147,19 @@ def test_postgres_walg_image_is_built_verified_and_scanned() -> None:
     identity_step = next(
         step for step in steps if step.get("name") == "Verify scanned image identities"
     )
-    assert "flowtest-postgres-walg:17.6-v3.0.8" in identity_step["run"]
+    assert "flowtest-postgres-walg:17.11-v3.0.9-patched" in identity_step["run"]
     scan = next(step for step in steps if step.get("name") == "Scan Postgres WALG image")
-    assert scan["with"]["image"] == "flowtest-postgres-walg:17.6-v3.0.8"
+    assert scan["with"]["image"] == "flowtest-postgres-walg:17.11-v3.0.9-patched"
+    compose_workflow = yaml.load(
+        (root / ".github/workflows/compose-ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    compose_steps = compose_workflow["jobs"]["smoke"]["steps"]
+    compose_identity = next(
+        step
+        for step in compose_steps
+        if step.get("name") == "Verify loaded Compose image identities"
+    )
+    assert scan["with"]["image"] in compose_identity["run"]
 
 
 def test_renamed_image_input_uses_both_directories() -> None:

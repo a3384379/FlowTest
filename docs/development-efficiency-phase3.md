@@ -39,7 +39,7 @@ PR opened / synchronize / reopened / ready / 相关标签 / base 编辑
 
 标准档后端定向入口禁用覆盖率，全侧回退也用 `--no-cov`；完整 Backend CI 的 90% 与 Frontend CI 的 80% 覆盖率阈值维持原样。依赖审计由 Security CI 执行，避免 Backend/Frontend full 作业重复执行同一审计。
 
-本修正把 Alembic 实际配置的 `backend/migrations/` 与 `backend/alembic.ini` 纳入迁移/升级/Standalone 检查，并按实际 Dockerfile、补丁、dockerignore、Bake、nginx 和镜像清单选择构建、扫描及启动检查。Security 的 Bake 目标、镜像身份核对和漏洞扫描同时覆盖 Postgres WALG 镜像。标准档的已知源码映射与 PR 明确改动的测试文件取并集；删除/重命名测试由 PR 文件元数据标记并回退完整侧测试，未知源码或共享 fixture 也保持回退。受信发布器不依赖自己 checkout 中的测试文件是否存在来重算计划。
+本修正把 Alembic 实际配置的 `backend/migrations/` 与 `backend/alembic.ini` 纳入迁移/升级/Standalone 检查，并按实际 Dockerfile、补丁、dockerignore、Bake、nginx 和镜像清单选择构建、扫描及启动检查。Security 的 Bake 目标、镜像身份核对和漏洞扫描同时覆盖 Postgres WALG 镜像；新增扫描发现旧镜像存在可修复的高危项，因此固定 Postgres 17.11 基础镜像与 WAL-G v3.0.9 源码提交，用 Go 1.27.0 和已修补依赖重建。该镜像在本机使用与 CI 相同版本的 Grype 扫描为 High/Critical 0，正式结果仍以当前 PR 的远程检查为准。标准档的已知源码映射与 PR 明确改动的测试文件取并集；删除/重命名测试由 PR 文件元数据标记并回退完整侧测试，未知源码或共享 fixture 也保持回退。受信发布器不依赖自己 checkout 中的测试文件是否存在来重算计划。
 
 `ci:light` 保留为兼容请求，不能降低代码变更的最低档位；`ci:milestone` 请求 full；双标签按较重请求执行并在原因中说明。相关标签增删与新 Head 使用同一 PR 活动并发组，较新运行替代旧运行；无关标签和普通标题/正文修改使用独立 ignored 组，不取消有效检查。目标分支编辑触发重新计划；默认分支自身前进由 strict up-to-date 阻止旧基线合并，不声称普通 `edited` 会覆盖它。
 

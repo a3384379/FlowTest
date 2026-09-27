@@ -1,30 +1,29 @@
-FROM debian:bookworm-slim AS wal-g
+# syntax=docker/dockerfile:1.7
 
-ARG TARGETARCH
-ARG WAL_G_VERSION=v3.0.8
-ARG WAL_G_AMD64_SHA256=b0df1b484035eb5f131db7bbd303d1a460391848fdcce34ba1e0a564cca493e9
-ARG WAL_G_ARM64_SHA256=048b5033c34c1487dc1fccc0572db030e323230984ccc093e80e4e4081c797d1
+# WAL-G v3.0.9 release binaries contain fixable Go vulnerabilities. Rebuild the
+# pinned release source with patched Go dependencies until upstream ships them.
+FROM golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452 AS wal-g
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl \
-    && detected_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
-    && case "${detected_arch}" in \
-        amd64) asset_arch="amd64"; checksum="${WAL_G_AMD64_SHA256}" ;; \
-        arm64|aarch64) asset_arch="aarch64"; checksum="${WAL_G_ARM64_SHA256}" ;; \
-        *) echo "Unsupported architecture: ${detected_arch}" >&2; exit 1 ;; \
-    esac \
-    && asset="wal-g-pg-22.04-${asset_arch}.tar.gz" \
-    && curl --fail --location --show-error --silent \
-        "https://github.com/wal-g/wal-g/releases/download/${WAL_G_VERSION}/${asset}" \
-        --output "/tmp/${asset}" \
-    && echo "${checksum}  /tmp/${asset}" | sha256sum --check --strict \
-    && tar --extract --gzip --file "/tmp/${asset}" --directory /tmp \
-    && mv "/tmp/wal-g-pg-22.04-${asset_arch}" /usr/local/bin/wal-g \
-    && chmod 0755 /usr/local/bin/wal-g
+ARG WAL_G_COMMIT=3e493188db28335fb93a45bd680c6ff8fc3028c1
 
-FROM postgres:17.6-bookworm
+RUN git clone --depth 1 --branch v3.0.9 --single-branch https://github.com/wal-g/wal-g.git /src \
+    && test "$(git -C /src rev-parse HEAD)" = "${WAL_G_COMMIT}"
+
+WORKDIR /src
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod edit -go=1.27.0 \
+        -require=golang.org/x/crypto@v0.57.0 \
+        -require=google.golang.org/grpc@v1.83.2 \
+    && go mod tidy \
+    && CGO_ENABLED=0 go build -mod=readonly -trimpath \
+        -ldflags "-s -w -X github.com/wal-g/wal-g/cmd/pg.walgVersion=v3.0.9-patched -X github.com/wal-g/wal-g/cmd/pg.gitRevision=${WAL_G_COMMIT}" \
+        -o /usr/local/bin/wal-g ./main/pg
+
+FROM postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
 
 RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
         libbrotli1 \
