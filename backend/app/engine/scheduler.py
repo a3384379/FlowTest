@@ -147,6 +147,27 @@ class RequestBudget:
             self.parent._consume()
 
 
+class IterationDebugGate(Protocol):
+    async def before_iteration(
+        self,
+        *,
+        owner_node_id: str,
+        input_index: int,
+        scope: tuple[str, ...],
+        context: "ExecutionContext",
+    ) -> None: ...
+
+    async def after_iteration(
+        self,
+        *,
+        owner_node_id: str,
+        input_index: int,
+        scope: tuple[str, ...],
+        context: "ExecutionContext",
+        status: WorkflowRunStatus,
+    ) -> None: ...
+
+
 @dataclass(slots=True)
 class ExecutionContext:
     workflow_variables: dict[str, JsonValue] = field(default_factory=dict)
@@ -171,6 +192,7 @@ class ExecutionContext:
     leaf_semaphore: asyncio.Semaphore | None = field(default=None, repr=False)
     outbound_admission: OutboundAdmission | None = field(default=None, repr=False)
     status_callback: NodeStatusCallback | None = field(default=None, repr=False)
+    iteration_debug_gate: IterationDebugGate | None = field(default=None, repr=False)
     checkpoint_scope: tuple[str, ...] = field(default=(), repr=False)
     checkpoint_phase: WorkflowPhase | None = field(default=None, repr=False)
     checkpoint_best_effort: bool = field(default=False, repr=False)

@@ -105,6 +105,7 @@ from app.engine.results import NodeResult
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    IterationDebugGate,
     NodeRunRecord,
     NodeStatusCallback,
     RequestBudget,
@@ -1395,6 +1396,7 @@ class WorkflowService:
         plan: WorkflowRunPlan,
         on_node_status: NodeStatusCallback | None = None,
         cancellation: CancellationToken | None = None,
+        iteration_debug_gate: IterationDebugGate | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
         token = cancellation or CancellationToken()
         if execution.cancel_requested_at is not None:
@@ -1425,6 +1427,7 @@ class WorkflowService:
             retry_safe_node_ids=retry_safe_request_nodes(plan.definition, plan.prepared.requests),
             rerun_loop_node_id=plan.rerun_loop_node_id,
             rerun_input_indices=frozenset(plan.rerun_input_indices),
+            iteration_debug_gate=iteration_debug_gate,
         )
         output_storage = WorkflowOutputStorage(
             self._session,

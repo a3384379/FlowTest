@@ -635,6 +635,7 @@ class StructuredControlRunner:
             outbound_admission=parent.outbound_admission,
             retry_safe_node_ids=parent.retry_safe_node_ids,
             status_callback=parent.status_callback,
+            iteration_debug_gate=parent.iteration_debug_gate,
             checkpoint_scope=scope,
             checkpoint_phase=parent.checkpoint_phase,
             checkpoint_best_effort=parent.checkpoint_best_effort,
@@ -726,13 +727,8 @@ class StructuredControlRunner:
             child.input_variables = self._condition_region_inputs(
                 frozen_inputs, region.inputs, parent, child
             )
-            result = await self._run_region(region, child, token)
-            exports = self._collect(
-                config,
-                region,
-                child,
-                result.status,
-                allow_missing=result.control_signal is not None,
+            result, exports = await self._run_condition_iteration(
+                node, config, region, child, token, scope, index
             )
             iterations.append(
                 {
@@ -761,6 +757,50 @@ class StructuredControlRunner:
             if exit_reason is not None:
                 return _completed_condition_loop(iterations, state, exit_reason)
         raise NodeExecutionError(code="INVALID_CONTROL_CONFIG", message="循环执行状态无效")
+
+    async def _run_condition_iteration(
+        self,
+        node: WorkflowNode,
+        config: ConditionLoopConfig,
+        region: WorkflowRegion,
+        child: ExecutionContext,
+        token: CancellationToken,
+        scope: tuple[str, ...],
+        index: int,
+    ) -> tuple[WorkflowRunResult, dict[str, JsonValue]]:
+        gate = child.iteration_debug_gate
+        if gate is not None:
+            await gate.before_iteration(
+                owner_node_id=node.id, input_index=index, scope=scope, context=child
+            )
+        try:
+            result = await self._run_region(region, child, token)
+            exports = self._collect(
+                config,
+                region,
+                child,
+                result.status,
+                allow_missing=result.control_signal is not None,
+            )
+        except NodeExecutionError:
+            if gate is not None:
+                await gate.after_iteration(
+                    owner_node_id=node.id,
+                    input_index=index,
+                    scope=scope,
+                    context=child,
+                    status=WorkflowRunStatus.FAILED,
+                )
+            raise
+        if gate is not None:
+            await gate.after_iteration(
+                owner_node_id=node.id,
+                input_index=index,
+                scope=scope,
+                context=child,
+                status=result.status,
+            )
+        return result, exports
 
     @staticmethod
     def _condition_region_inputs(
@@ -904,17 +944,44 @@ class StructuredControlRunner:
             else None
         )
         try:
-            result = await self._run_region(region, child, token, executor=scoped_executor)
-        finally:
-            if scoped_executor is not None:
-                await scoped_executor.close()
-        exports = self._collect(
-            config,
-            region,
-            child,
-            result.status,
-            allow_missing=result.control_signal is not None,
-        )
+            gate = child.iteration_debug_gate
+            if gate is not None:
+                await gate.before_iteration(
+                    owner_node_id=node.id,
+                    input_index=index,
+                    scope=scope,
+                    context=child,
+                )
+            try:
+                result = await self._run_region(region, child, token, executor=scoped_executor)
+            finally:
+                if scoped_executor is not None:
+                    await scoped_executor.close()
+            exports = self._collect(
+                config,
+                region,
+                child,
+                result.status,
+                allow_missing=result.control_signal is not None,
+            )
+        except NodeExecutionError:
+            if gate is not None:
+                await gate.after_iteration(
+                    owner_node_id=node.id,
+                    input_index=index,
+                    scope=scope,
+                    context=child,
+                    status=WorkflowRunStatus.FAILED,
+                )
+            raise
+        if gate is not None:
+            await gate.after_iteration(
+                owner_node_id=node.id,
+                input_index=index,
+                scope=scope,
+                context=child,
+                status=result.status,
+            )
         summary: dict[str, JsonValue] = {
             "input_index": index,
             "instance_path": list(scope),

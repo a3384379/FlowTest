@@ -16,6 +16,7 @@ from app.engine.contracts import (
     NodeType,
     WorkflowDefinition,
     WorkflowPhase,
+    WorkflowRunStatus,
 )
 from app.engine.control_conditions import evaluate_condition
 from app.engine.control_nodes import execute_control_node
@@ -215,6 +216,106 @@ class BranchExecutor(CountingExecutor):
             self.visited.append(node.id)
             return {"visited": node.id}
         return await super().execute(node, context)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["foreach", "while"])
+async def test_debug_gate_waits_before_a_control_iteration(kind: str) -> None:
+    payload = (
+        _definition()
+        if kind == "foreach"
+        else _condition_loop_definition("while", _state_less_than(1))
+    )
+    definition = WorkflowDefinition.model_validate(payload)
+    executor = CountingExecutor(definition)
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+    observed: list[tuple[str, int, str]] = []
+
+    class Gate:
+        async def before_iteration(
+            self,
+            *,
+            owner_node_id: str,
+            input_index: int,
+            scope: tuple[str, ...],
+            context: ExecutionContext,
+        ) -> None:
+            assert context.loop_variables["index"] == input_index
+            assert scope[-2:] == ("iteration", str(input_index))
+            observed.append((owner_node_id, input_index, "before"))
+            entered.set()
+            await resume.wait()
+
+        async def after_iteration(
+            self,
+            *,
+            owner_node_id: str,
+            input_index: int,
+            scope: tuple[str, ...],
+            context: ExecutionContext,
+            status: WorkflowRunStatus,
+        ) -> None:
+            del scope, context
+            observed.append((owner_node_id, input_index, status.value))
+
+    context = ExecutionContext(
+        runtime_variables={"cases": [1]} if kind == "foreach" else {},
+        iteration_debug_gate=Gate(),
+    )
+    task = asyncio.create_task(WorkflowScheduler(executor).run(definition, context=context))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    assert executor.calls == []
+    resume.set()
+    result = await asyncio.wait_for(task, timeout=2)
+    assert result.status.value == "passed"
+    assert executor.calls == [(0, 1 if kind == "foreach" else None)]
+    assert observed == [("loop", 0, "before"), ("loop", 0, "passed")]
+
+
+@pytest.mark.asyncio
+async def test_debug_gate_waits_after_a_failed_iteration() -> None:
+    definition = WorkflowDefinition.model_validate(_definition())
+    executor = CountingExecutor(definition, fail_on=1)
+    failed = asyncio.Event()
+    resume = asyncio.Event()
+
+    class Gate:
+        async def before_iteration(
+            self,
+            *,
+            owner_node_id: str,
+            input_index: int,
+            scope: tuple[str, ...],
+            context: ExecutionContext,
+        ) -> None:
+            del owner_node_id, input_index, scope, context
+
+        async def after_iteration(
+            self,
+            *,
+            owner_node_id: str,
+            input_index: int,
+            scope: tuple[str, ...],
+            context: ExecutionContext,
+            status: WorkflowRunStatus,
+        ) -> None:
+            del owner_node_id, scope, context
+            if input_index == 1 and status is WorkflowRunStatus.FAILED:
+                failed.set()
+                await resume.wait()
+
+    context = ExecutionContext(
+        runtime_variables={"cases": [1, 2, 3]}, iteration_debug_gate=Gate()
+    )
+    task = asyncio.create_task(WorkflowScheduler(executor).run(definition, context=context))
+    await asyncio.wait_for(failed.wait(), timeout=1)
+    assert [index for index, _ in executor.calls] == [0, 1]
+    assert not task.done()
+    resume.set()
+    result = await asyncio.wait_for(task, timeout=2)
+    assert result.status is WorkflowRunStatus.FAILED
+    assert [index for index, _ in executor.calls] == [0, 1]
 
 
 @pytest.mark.asyncio
