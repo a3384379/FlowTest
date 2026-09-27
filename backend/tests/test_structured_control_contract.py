@@ -774,8 +774,13 @@ async def test_concurrent_foreach_keeps_input_order_and_bound() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_foreach_stop_does_not_start_later_item() -> None:
+@pytest.mark.parametrize("kind", ["foreach", "repeat"])
+async def test_concurrent_foreach_stop_does_not_start_later_item(kind: str) -> None:
     payload = _definition()
+    if kind == "repeat":
+        payload["nodes"][1]["capability_id"] = "flow.control.repeat"
+        payload["nodes"][1]["configuration"].pop("collection")
+        payload["nodes"][1]["configuration"]["count"] = 3
     payload["nodes"][1]["configuration"]["policy"].update({"concurrency": 2, "on_error": "stop"})
     definition = WorkflowDefinition.model_validate(payload)
 
@@ -792,7 +797,11 @@ async def test_concurrent_foreach_stop_does_not_start_later_item() -> None:
     summary = result.records[1].output
     assert result.status == "failed"
     assert summary["not_started_count"] == 1
-    assert (2, 3) not in executor.calls
+    assert summary["passed_count"] == 0
+    assert summary["failed_count"] == 1
+    assert summary["cancelled_count"] == 1
+    assert [item["status"] for item in summary["items"]] == ["failed", "cancelled"]
+    assert not any(index == 2 for index, _ in executor.calls)
 
 
 @pytest.mark.asyncio
@@ -1800,3 +1809,35 @@ async def test_nested_return_runs_finally_and_preserves_output() -> None:
     assert result.return_output == {"result": 42}
     assert result.records[2].status == "skipped"
     assert executor.visited == ["finally_region_step"]
+
+
+def test_return_inside_finally_is_rejected() -> None:
+    payload = _try_definition(fail_try=False)
+    payload["regions"][2]["nodes"] = [_return_node("finally_return")]
+    payload["regions"][2]["entry_node_id"] = "finally_return"
+    payload["regions"][2]["exit_node_ids"] = ["finally_return"]
+
+    with pytest.raises(ValidationError, match="Finally region"):
+        WorkflowDefinition.model_validate(payload)
+
+
+@pytest.mark.parametrize("signal", ["break", "continue"])
+def test_loop_signal_inside_finally_is_rejected(signal: str) -> None:
+    payload = _definition()
+    payload["run_policy"]["cleanup_request_budget"] = 10
+    nested = _try_definition(fail_try=False)
+    try_node = deepcopy(nested["nodes"][1])
+    try_node["id"] = "nested_try"
+    payload["regions"][0]["nodes"] = [try_node]
+    payload["regions"][0]["entry_node_id"] = "nested_try"
+    payload["regions"][0]["exit_node_ids"] = ["nested_try"]
+    for region in nested["regions"]:
+        region["owner_node_id"] = "nested_try"
+        payload["regions"].append(region)
+    finally_region = payload["regions"][-1]
+    finally_region["nodes"] = [_node("finally_signal", f"flow.control.{signal}")]
+    finally_region["entry_node_id"] = "finally_signal"
+    finally_region["exit_node_ids"] = ["finally_signal"]
+
+    with pytest.raises(ValidationError, match="Finally region"):
+        WorkflowDefinition.model_validate(payload)

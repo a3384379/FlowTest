@@ -1093,6 +1093,7 @@ class WorkflowDefinition(BaseModel):
         parents = {
             node.id: region.owner_node_id for region in self.regions for node in region.nodes
         }
+        regions = {node.id: region for region in self.regions for node in region.nodes}
         controls = {node.id: node for node in control_nodes}
         loops = {
             "flow.control.foreach",
@@ -1110,6 +1111,8 @@ class WorkflowDefinition(BaseModel):
                 continue
             current = node.id
             while current in parents:
+                if regions[current].role == "finally":
+                    raise ValueError(f"Control signal {node.id} cannot leave a Finally region")
                 current = parents[current]
                 if controls[current].capability_id == "flow.control.parallel":
                     raise ValueError(f"Control signal {node.id} cannot cross a parallel branch")

@@ -879,6 +879,8 @@ class StructuredControlRunner:
             if result.control_signal in {"break", "return"}:
                 break
         failed = sum(item["test_verdict"] == "failed" for item in iterations)
+        passed = sum(item["status"] == "passed" for item in iterations)
+        cancelled = sum(item["status"] == "cancelled" for item in iterations)
         terminated = (
             "cancelled"
             if token.cancelled
@@ -895,8 +897,9 @@ class StructuredControlRunner:
             "selected_count": len(selected_indices),
             "started_count": len(iterations),
             "completed_count": len(iterations),
-            "passed_count": len(iterations) - failed,
+            "passed_count": passed,
             "failed_count": failed,
+            "cancelled_count": cancelled,
             "not_started_count": len(items) - len(iterations),
             "termination_reason": terminated,
             "items": cast(JsonValue, iterations),
@@ -1054,14 +1057,17 @@ class StructuredControlRunner:
             if active:
                 await asyncio.gather(*active, return_exceptions=True)
         iterations = [results[index] for index in sorted(results)]
+        passed = sum(item["status"] == "passed" for item in iterations)
         failed = sum(item["status"] == "failed" for item in iterations)
+        cancelled = sum(item["status"] == "cancelled" for item in iterations)
         output: dict[str, JsonValue] = {
             "input_count": len(items),
             "selected_count": len(selected_indices),
             "started_count": len(iterations),
             "completed_count": len(iterations),
-            "passed_count": len(iterations) - failed,
+            "passed_count": passed,
             "failed_count": failed,
+            "cancelled_count": cancelled,
             "not_started_count": len(items) - len(iterations),
             "termination_reason": "cancelled"
             if root_token.cancelled
@@ -1388,12 +1394,15 @@ def _state_update_value(
 def _condition_loop_output(
     iterations: list[dict[str, JsonValue]], state: dict[str, JsonValue], reason: str
 ) -> dict[str, JsonValue]:
+    passed = sum(item["status"] == "passed" for item in iterations)
     failed = sum(item["status"] == "failed" for item in iterations)
+    cancelled = sum(item["status"] == "cancelled" for item in iterations)
     return {
         "started_count": len(iterations),
         "completed_count": len(iterations),
-        "passed_count": len(iterations) - failed,
+        "passed_count": passed,
         "failed_count": failed,
+        "cancelled_count": cancelled,
         "termination_reason": reason,
         "state": dict(state),
         "items": cast(JsonValue, iterations),
