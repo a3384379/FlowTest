@@ -482,6 +482,25 @@ describe('workflow graph commands', () => {
     const mappedDefinition = addControlBlock(graph(mapped), 'foreach')
     expect(insertNodeOnEdge(mappedDefinition, mappedDefinition.nodes.at(-1)!.id, 'a-b')).toBeNull()
   })
+  it('inserts a waiting step into a safe main edge without changing other edge IDs', () => {
+    const definition = graph(linear)
+    definition.nodes.push({
+      id: 'delay',
+      type: 'delay',
+      name: '等待',
+      position: { x: 0, y: 0 },
+      config: { seconds: 1 },
+    })
+    const connected = insertNodeOnEdge(definition, 'delay', 'a-e')
+    expect(connected?.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 's-a', source: 'start', target: 'api' }),
+        expect.objectContaining({ id: 'a-e', source: 'api', target: 'delay' }),
+        expect.objectContaining({ source: 'delay', target: 'end' }),
+      ]),
+    )
+    expect(connected && analyzeGraph(connected)).toEqual([])
+  })
   it('copies and deletes a control block with every owned region atomically', () => {
     const definition = addControlBlock(graph(linear), 'if')
     const source = definition.nodes.at(-1)!

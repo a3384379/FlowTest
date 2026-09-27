@@ -622,10 +622,10 @@ function WorkflowDesignerReady({
         node.id === added.id ? placeAddedNode(node, point, selected) : node,
       ),
     }
-    if (added.capability_id?.startsWith('flow.control.') && editor.selection?.kind === 'edge') {
+    if (canInsertOnSelectedEdge(added) && editor.selection?.kind === 'edge') {
       const connected = insertNodeOnEdge(placed, added.id, editor.selection.id)
       if (!connected) {
-        editor.notify('当前连线包含字段映射，无法直接插入控制块')
+        editor.notify('当前连线包含字段映射，无法直接插入节点')
         return
       }
       editor.commit(connected, { kind: 'node', id: added.id })
@@ -2090,6 +2090,12 @@ function isControlDisabled(editable: boolean, available: boolean): boolean {
 
 function canUnwrapNode(node: WorkflowNode | null): boolean {
   return node?.capability_id?.startsWith('flow.control.') ?? false
+}
+
+function canInsertOnSelectedEdge(node: WorkflowNode): boolean {
+  return Boolean(
+    node.capability_id?.startsWith('flow.control.') || node.type === 'api' || node.type === 'delay',
+  )
 }
 
 function unwrapSelectedControlBlock(
