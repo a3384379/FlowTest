@@ -1,21 +1,29 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.composition import build_workflow_service
+from app.core.config import settings
+from app.core.errors import AppError
 from app.domain.durable_execution import ExecutionCommandType
+from app.engine.contracts import WorkflowDefinition
 from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+from app.repositories.workflows import WorkflowExecutionReport, WorkflowNodeExecutionReport
 from app.schemas.common import Page
 from app.schemas.durable_execution import (
     ExecutionCheckpointResponse,
+    ExecutionCheckpointSummaryResponse,
     ExecutionCommandDetailResponse,
     ExecutionCommandResponse,
 )
 from app.schemas.workflows import (
     WorkflowCancelRequest,
+    WorkflowControlBlockInsert,
+    WorkflowControlRecordDetailResponse,
+    WorkflowControlRecordSummaryResponse,
     WorkflowCreate,
     WorkflowDebugNodeResponse,
     WorkflowDebugRequest,
@@ -24,6 +32,12 @@ from app.schemas.workflows import (
     WorkflowExecuteRequest,
     WorkflowExecutionDetailResponse,
     WorkflowExecutionResponse,
+    WorkflowFailedItemRerunRequest,
+    WorkflowIterationDebugCommandRequest,
+    WorkflowIterationDebugSessionResponse,
+    WorkflowIterationDebugStartRequest,
+    WorkflowIterationDebugStartResponse,
+    WorkflowNativeDocument,
     WorkflowNodeExecutionResponse,
     WorkflowResponse,
     WorkflowVersionChangeResponse,
@@ -32,7 +46,8 @@ from app.schemas.workflows import (
 )
 from app.services.durable_execution import DurableExecutionService
 from app.services.idempotency import IdempotencyService
-from app.services.workflows import WorkflowService
+from app.services.workflow_debug import WorkflowDebugService
+from app.services.workflows import WorkflowIterationDebugOptions, WorkflowRunPlan, WorkflowService
 
 router = APIRouter(prefix="/projects/{project_id}")
 
@@ -77,6 +92,27 @@ async def create_workflow(
     return WorkflowResponse.model_validate(workflow)
 
 
+@router.post(
+    "/workflows/native-import",
+    response_model=WorkflowResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_native_workflow(
+    project_id: UUID,
+    payload: WorkflowNativeDocument,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowResponse:
+    workflow = await WorkflowService(session).import_native_definition(
+        actor=current_user,
+        project_id=project_id,
+        name=payload.name,
+        description=payload.description,
+        definition=payload.definition,
+    )
+    return WorkflowResponse.model_validate(workflow)
+
+
 @router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
     project_id: UUID,
@@ -90,6 +126,26 @@ async def get_workflow(
         workflow_id=workflow_id,
     )
     return WorkflowResponse.model_validate(workflow)
+
+
+@router.get("/workflows/{workflow_id}/native-export", response_model=WorkflowNativeDocument)
+async def export_native_workflow(
+    project_id: UUID,
+    workflow_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowNativeDocument:
+    workflow = await WorkflowService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+    )
+    return WorkflowNativeDocument(
+        format_version="flowtest-workflow-native-v1",
+        name=workflow.name,
+        description=workflow.description,
+        definition=WorkflowDefinition.model_validate(workflow.draft_definition),
+    )
 
 
 @router.patch("/workflows/{workflow_id}", response_model=WorkflowResponse)
@@ -110,6 +166,28 @@ async def update_workflow_draft(
         folder_id=payload.folder_id,
         change_folder="folder_id" in payload.model_fields_set,
         definition=payload.definition,
+    )
+    return WorkflowResponse.model_validate(workflow)
+
+
+@router.post("/workflows/{workflow_id}/control-blocks", response_model=WorkflowResponse)
+async def insert_workflow_control_block(
+    project_id: UUID,
+    workflow_id: UUID,
+    payload: WorkflowControlBlockInsert,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowResponse:
+    workflow = await WorkflowService(session).insert_control_block(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+        expected_revision=payload.expected_revision,
+        edge_id=payload.edge_id,
+        node=payload.node,
+        regions=payload.regions,
+        request_budget=payload.request_budget,
+        cleanup_request_budget=payload.cleanup_request_budget,
     )
     return WorkflowResponse.model_validate(workflow)
 
@@ -213,6 +291,134 @@ async def debug_workflow(
 
 
 @router.post(
+    "/workflows/{workflow_id}/debug-sessions",
+    response_model=WorkflowIterationDebugStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_iteration_debug(
+    project_id: UUID,
+    workflow_id: UUID,
+    payload: WorkflowIterationDebugStartRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> WorkflowIterationDebugStartResponse:
+    if settings.feature_runner_fabric_enabled:
+        raise AppError(
+            code="DEBUG_RUNNER_UNSUPPORTED",
+            message="当前 Runner Fabric 尚不支持逐轮暂停调试",
+            status_code=422,
+        )
+
+    async def start() -> WorkflowIterationDebugStartResponse:
+        execution, plan = await build_workflow_service(session).prepare_execution(
+            actor=current_user,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            environment_id=payload.environment_id,
+            version=payload.version,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+            iteration_debug=WorkflowIterationDebugOptions(
+                loop_node_id=payload.loop_node_id,
+                pause_before_index=payload.pause_before_index,
+            ),
+        )
+        if not isinstance(plan, WorkflowRunPlan):
+            raise AppError(
+                code="DEBUG_DATASET_UNSUPPORTED",
+                message="逐轮调试暂不支持 Dataset 批量执行",
+                status_code=422,
+            )
+        debug = await WorkflowDebugService(session).create(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            loop_node_id=payload.loop_node_id,
+            pause_before_index=payload.pause_before_index,
+            pause_on_error=payload.pause_on_error,
+            max_session_seconds=payload.max_session_seconds,
+        )
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "workflow_id": str(workflow_id),
+                "execution_id": str(execution.id),
+                **payload.model_dump(mode="json"),
+            },
+        )
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command.id)
+        except Exception:
+            await session.rollback()
+            await WorkflowService(session).stage_runtime_failed(
+                execution.id,
+                error_code="DEBUG_DISPATCH_FAILED",
+                error_message="调试运行未能提交到执行服务",
+            )
+            await session.commit()
+            await WorkflowDebugService(session).finish(execution.id, execution_status="failed")
+            raise
+        return WorkflowIterationDebugStartResponse(
+            execution=WorkflowExecutionResponse.model_validate(execution),
+            session=WorkflowIterationDebugSessionResponse.model_validate(debug),
+        )
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.debug_session:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return WorkflowIterationDebugStartResponse.model_validate(response)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/debug-session",
+    response_model=WorkflowIterationDebugSessionResponse,
+)
+async def get_iteration_debug(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowIterationDebugSessionResponse:
+    row = await WorkflowDebugService(session).get(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return WorkflowIterationDebugSessionResponse.model_validate(row)
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/debug-session/commands",
+    response_model=WorkflowIterationDebugSessionResponse,
+)
+async def command_iteration_debug(
+    project_id: UUID,
+    execution_id: UUID,
+    payload: WorkflowIterationDebugCommandRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowIterationDebugSessionResponse:
+    row = await WorkflowDebugService(session).command(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        action=payload.action,
+        expected_revision=payload.expected_revision,
+    )
+    return WorkflowIterationDebugSessionResponse.model_validate(row)
+
+
+@router.post(
     "/workflows/{workflow_id}/executions",
     response_model=WorkflowExecutionResponse,
     status_code=status.HTTP_202_ACCEPTED,
@@ -267,6 +473,67 @@ async def execute_workflow(
         project_id=project_id,
         actor_key=f"user:{current_user.id}",
         operation=f"workflow.execute:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return WorkflowExecutionResponse.model_validate(response)
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/failed-items/rerun",
+    response_model=WorkflowExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def rerun_failed_workflow_items(
+    project_id: UUID,
+    execution_id: UUID,
+    payload: WorkflowFailedItemRerunRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> WorkflowExecutionResponse:
+    async def start() -> WorkflowExecutionResponse:
+        execution, plan = await build_workflow_service(session).prepare_failed_item_rerun(
+            actor=current_user,
+            project_id=project_id,
+            source_execution_id=execution_id,
+            loop_node_id=payload.loop_node_id,
+            input_indices=payload.input_indices,
+            write_retry_strategy=payload.write_retry_strategy,
+            upstream_resource_status=payload.upstream_resource_status,
+            verification_note=payload.verification_note,
+        )
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "source_execution_id": str(execution_id),
+                "execution_id": str(execution.id),
+                **payload.model_dump(mode="json"),
+            },
+        )
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command.id)
+        except Exception:
+            await session.rollback()
+            await DurableExecutionService(session).mark_failed(
+                command.id,
+                error_code="EXECUTION_COMMAND_DISPATCH_FAILED",
+                error_message="派生运行未能提交到执行运行时",
+            )
+            raise
+        return WorkflowExecutionResponse.model_validate(execution)
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.rerun_failed_items:{execution_id}",
         request_payload=payload.model_dump(mode="json"),
         action=start,
     )
@@ -402,13 +669,75 @@ async def get_workflow_execution(
     execution_id: UUID,
     session: SessionDependency,
     current_user: CurrentUser,
+    compact_control: bool = False,
 ) -> WorkflowExecutionDetailResponse:
-    execution, nodes, children = await WorkflowService(session).get_execution(
+    service = WorkflowService(session)
+    if compact_control:
+        execution, nodes, children = await service.get_execution_report(
+            actor=current_user, project_id=project_id, execution_id=execution_id
+        )
+        return _execution_detail(execution, nodes, children)
+    full_execution, full_nodes, full_children = await service.get_execution(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return _execution_detail(full_execution, full_nodes, full_children)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/control-records",
+    response_model=Page[WorkflowControlRecordSummaryResponse],
+)
+async def list_control_records(
+    project_id: UUID,
+    execution_id: UUID,
+    node_id: str,
+    kind: Literal["iteration", "branch"],
+    session: SessionDependency,
+    current_user: CurrentUser,
+    test_verdict: Literal["passed", "failed", "not_run"] | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[WorkflowControlRecordSummaryResponse]:
+    items, total = await WorkflowService(session).list_control_records(
         actor=current_user,
         project_id=project_id,
         execution_id=execution_id,
+        node_id=node_id,
+        kind=kind,
+        test_verdict=test_verdict,
+        page=page,
+        page_size=page_size,
     )
-    return _execution_detail(execution, nodes, children)
+    return Page(
+        items=[WorkflowControlRecordSummaryResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/control-records/{kind}/{ordinal}",
+    response_model=WorkflowControlRecordDetailResponse,
+)
+async def get_control_record(
+    project_id: UUID,
+    execution_id: UUID,
+    kind: Literal["iteration", "branch"],
+    ordinal: int,
+    node_id: str,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowControlRecordDetailResponse:
+    record = await WorkflowService(session).get_control_record(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        node_id=node_id,
+        kind=kind,
+        ordinal=ordinal,
+    )
+    return WorkflowControlRecordDetailResponse.model_validate(record)
 
 
 @router.get(
@@ -441,6 +770,100 @@ async def list_execution_checkpoints(
         actor=current_user, project_id=project_id, execution_id=execution_id
     )
     return [ExecutionCheckpointResponse.model_validate(item) for item in checkpoints]
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/checkpoint-log",
+    response_model=Page[ExecutionCheckpointSummaryResponse],
+)
+async def list_execution_checkpoint_log(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[ExecutionCheckpointSummaryResponse]:
+    items, total = await DurableExecutionService(session).list_checkpoint_log(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[ExecutionCheckpointSummaryResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/checkpoint-log/{checkpoint_id}",
+    response_model=ExecutionCheckpointResponse,
+)
+async def get_execution_checkpoint_log_entry(
+    project_id: UUID,
+    execution_id: UUID,
+    checkpoint_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ExecutionCheckpointResponse:
+    checkpoint = await DurableExecutionService(session).get_checkpoint_log_entry(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        checkpoint_id=checkpoint_id,
+    )
+    return ExecutionCheckpointResponse.model_validate(checkpoint)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/instances",
+    response_model=Page[ExecutionCheckpointResponse],
+)
+async def list_control_instances(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[ExecutionCheckpointResponse]:
+    items, total = await DurableExecutionService(session).list_instance_checkpoints(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[ExecutionCheckpointResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/instances/{instance_id}",
+    response_model=ExecutionCheckpointResponse,
+)
+async def get_control_instance(
+    project_id: UUID,
+    execution_id: UUID,
+    instance_id: str,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ExecutionCheckpointResponse:
+    checkpoint = await DurableExecutionService(session).get_instance_checkpoint(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        instance_id=instance_id,
+    )
+    return ExecutionCheckpointResponse.model_validate(checkpoint)
 
 
 @router.post(
@@ -486,9 +909,9 @@ async def replay_workflow_node(
 
 
 def _execution_detail(
-    execution: WorkflowExecution,
-    nodes: list[WorkflowNodeExecution],
-    children: list[WorkflowExecution],
+    execution: WorkflowExecution | WorkflowExecutionReport,
+    nodes: list[WorkflowNodeExecution] | list[WorkflowNodeExecutionReport],
+    children: list[WorkflowExecution] | list[WorkflowExecutionReport],
 ) -> WorkflowExecutionDetailResponse:
     return WorkflowExecutionDetailResponse(
         execution=WorkflowExecutionResponse.model_validate(execution),

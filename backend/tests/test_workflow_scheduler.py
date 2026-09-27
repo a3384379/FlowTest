@@ -1,12 +1,20 @@
 import asyncio
 from collections import defaultdict
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import JsonValue, ValidationError
 
-from app.engine.contracts import NodeStatus, RetryCategory, WorkflowDefinition, WorkflowNode
+from app.engine.contracts import (
+    NodeStatus,
+    NodeType,
+    RetryCategory,
+    WorkflowDefinition,
+    WorkflowNode,
+    WorkflowPhase,
+)
+from app.engine.results import NodeResult
 from app.engine.scheduler import (
     NESTED_CHECKPOINT_PREFIX,
     CancellationToken,
@@ -773,6 +781,96 @@ async def test_scheduler_resumes_completed_nodes_and_continues_attempt_numbers()
     assert resumed.status == "passed"
     assert resumed_executor.attempts == {"api": 1, "end": 1}
     assert resumed.records[1].attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_schema4_uncertain_request_is_not_resent_after_recovery() -> None:
+    original = workflow(
+        middle_nodes=[api_node("api")],
+        edges=[
+            {"id": "s-a", "source": "start", "target": "api"},
+            {"id": "a-e", "source": "api", "target": "end"},
+        ],
+        run_policy={"request_budget": 5},
+    )
+    raw = original.model_dump(mode="json")
+    raw["schema_version"] = "4.0"
+    definition = WorkflowDefinition.model_validate(raw)
+    now = datetime.now(UTC)
+    reserved = NodeRunRecord(
+        node_id="api",
+        node_type=NodeType.API,
+        name="API",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED, request_attempts=1),
+        error_code=None,
+        error_message=None,
+        started_at=now,
+        completed_at=now,
+        input_hash="a" * 64,
+    )
+    executor = ControlledExecutor()
+    resumed = await WorkflowScheduler(executor).run(definition, resume_records=(reserved,))
+    unknown = next(item for item in resumed.records if item.node_id == "api")
+    assert resumed.status == "failed"
+    assert unknown.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert unknown.result.request_attempts == 1
+    assert executor.executed == []
+
+    another_executor = ControlledExecutor()
+    again = await WorkflowScheduler(another_executor).run(definition, resume_records=(unknown,))
+    assert next(item for item in again.records if item.node_id == "api").error_code == (
+        "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    )
+    assert another_executor.executed == []
+
+    read_executor = ControlledExecutor()
+    read = await WorkflowScheduler(read_executor).run(
+        definition,
+        context=ExecutionContext(retry_safe_node_ids=frozenset({"api"})),
+        resume_records=(reserved,),
+    )
+    assert read.status == "passed"
+    assert read_executor.attempts["api"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_best_effort_cleanup_does_not_report_workflow_passed() -> None:
+    original = workflow(
+        middle_nodes=[cleanup_node("delete", cleanup_for=["start"], best_effort=True)],
+        edges=[{"id": "s-e", "source": "start", "target": "end"}],
+        run_policy={"request_budget": 5, "cleanup_request_budget": 3},
+    )
+    raw = original.model_dump(mode="json")
+    raw["schema_version"] = "4.0"
+    definition = WorkflowDefinition.model_validate(raw)
+    now = datetime.now(UTC)
+    reserved = NodeRunRecord(
+        node_id="delete",
+        node_type=NodeType.API,
+        name="DELETE",
+        status=NodeStatus.RUNNING,
+        attempts=1,
+        output=None,
+        result=NodeResult(status=NodeStatus.CANCELLED, request_attempts=1),
+        error_code=None,
+        error_message=None,
+        started_at=now,
+        completed_at=now,
+        input_hash="b" * 64,
+        phase=WorkflowPhase.CLEANUP,
+        best_effort=True,
+    )
+    executor = ControlledExecutor()
+    result = await WorkflowScheduler(executor).run(definition, resume_records=(reserved,))
+    assert result.status == "failed"
+    assert result.main_status == "passed"
+    assert result.cleanup_status == "failed"
+    assert result.cleanup_report is not None
+    assert result.cleanup_report.warnings[0].code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+    assert "delete" not in executor.executed
 
 
 @pytest.mark.asyncio

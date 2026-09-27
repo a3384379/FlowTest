@@ -706,6 +706,10 @@ def workflow_definition_to_flow_spec(
     services: list[FlowSpecService] | None = None,
     operations: list[FlowSpecOperation] | None = None,
 ) -> FlowSpec:
+    if definition.regions or any(
+        (node.capability_id or "").startswith("flow.control.") for node in definition.nodes
+    ):
+        raise ValueError("FlowSpec cannot represent structured control regions")
     nodes = []
     for node in definition.nodes:
         if node.type is NodeType.CAPABILITY:

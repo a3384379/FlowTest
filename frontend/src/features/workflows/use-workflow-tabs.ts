@@ -48,6 +48,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   const [closingTabs, setClosingTabs] = useState(false)
   const [, setDraftRevision] = useState(0)
   const previousStorageKeyRef = useRef<WorkflowTabKey | null>(null)
+  const restoredSelectionAppliedIdentityRef = useRef<string | null>(null)
   const cleanupErrorRef = useRef<string | null>(null)
   const storageReady = Boolean(storageIdentity && loadedStorageIdentity === storageIdentity)
 
@@ -96,14 +97,16 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   useEffect(() => {
     if (
       !storageReady ||
-      input.hasExplicitFocus ||
+      !storageIdentity ||
+      restoredSelectionAppliedIdentityRef.current === storageIdentity ||
       !restoredActiveWorkflowId ||
-      input.activeWorkflowId === restoredActiveWorkflowId ||
       !input.workflowIds.includes(restoredActiveWorkflowId)
     ) {
       return
     }
-    queueMicrotask(() => input.selectWorkflow(restoredActiveWorkflowId))
+    restoredSelectionAppliedIdentityRef.current = storageIdentity
+    if (!input.hasExplicitFocus && input.activeWorkflowId !== restoredActiveWorkflowId)
+      queueMicrotask(() => input.selectWorkflow(restoredActiveWorkflowId))
   }, [
     input.activeWorkflowId,
     input.hasExplicitFocus,
@@ -111,6 +114,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     input.workflowIds,
     input,
     restoredActiveWorkflowId,
+    storageIdentity,
     storageReady,
   ])
 

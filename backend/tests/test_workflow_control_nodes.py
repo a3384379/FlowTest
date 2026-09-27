@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -6,6 +8,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.network import OutboundNetworkPolicy
@@ -29,6 +32,7 @@ from app.engine.scheduler import (
     NodeStatusUpdate,
     WorkflowScheduler,
 )
+from app.observability.tracing import TracingNodeExecutor
 from app.services.api_assets import PreparedRequest
 from app.services.workflow_runtime import (
     PreparedSubflow,
@@ -37,6 +41,7 @@ from app.services.workflow_runtime import (
     _nested_checkpoint_id,
     _nested_scope,
     _preview_node_request_attempts,
+    retry_safe_request_nodes,
 )
 from app.services.workflows import WorkflowService
 
@@ -54,6 +59,90 @@ class ControlExecutor:
 class AllowOutbound:
     async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
         return None
+
+
+class CountingOutboundAdmission:
+    def __init__(self) -> None:
+        self.total = 0
+        self.active = 0
+        self.peak = 0
+
+    @asynccontextmanager
+    async def window(self, timeout_seconds: float) -> AsyncIterator[None]:
+        assert timeout_seconds > 0
+        self.total += 1
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            yield
+        finally:
+            self.active -= 1
+
+
+@pytest.mark.asyncio
+async def test_large_response_remains_available_to_downstream_mapping() -> None:
+    seen_ticket: list[str | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/large":
+            return httpx.Response(
+                200,
+                json={
+                    "ticket": "mapped-value",
+                    "padding": "x" * (settings.inline_body_limit_bytes + 1),
+                },
+            )
+        seen_ticket.append(request.url.params.get("ticket"))
+        return httpx.Response(200, json={"ok": True})
+
+    edge = _edge("large", "check")
+    edge["mappings"] = [
+        {
+            "source": {"node_id": "large", "path": "body.ticket"},
+            "target": {"node_id": "check", "location": "query", "key": "ticket"},
+        }
+    ]
+    definition = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                _node("start", "start", {}),
+                _node("large", "api", _api_config()),
+                _node("check", "api", _api_config()),
+                _node("end", "end", {}),
+            ],
+            "edges": [_edge("start", "large"), edge, _edge("check", "end")],
+        }
+    )
+    large = PreparedRequest(HttpMethod.GET, "https://example.test/large", (), None, ())
+    check = PreparedRequest(HttpMethod.GET, "https://example.test/check", (), None, ())
+    prepared = {
+        "large": PreparedWorkflowRequest(large, large, BodyKind.NONE, None),
+        "check": PreparedWorkflowRequest(check, check, BodyKind.NONE, None),
+    }
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            prepared,
+            definition,
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),
+        )
+        result = await WorkflowScheduler(executor).run(definition)
+    assert result.status.value == "passed"
+    assert seen_ticket == ["mapped-value"]
+
+
+def test_only_prepared_read_requests_allow_automatic_unknown_outcome_retry() -> None:
+    definition = _wrapper_workflow(
+        WorkflowNode.model_validate(_node("request", "api", _api_config()))
+    )
+    get_request = PreparedRequest(HttpMethod.GET, "https://example.test/read", (), None, ())
+    post_request = PreparedRequest(HttpMethod.POST, "https://example.test/write", (), None, ())
+    get_prepared = PreparedWorkflowRequest(get_request, get_request, BodyKind.NONE, None)
+    post_prepared = PreparedWorkflowRequest(post_request, post_request, BodyKind.NONE, None)
+    assert retry_safe_request_nodes(definition, {"request": get_prepared}) == frozenset({"request"})
+    assert retry_safe_request_nodes(definition, {"request": post_prepared}) == frozenset()
 
 
 @pytest.mark.asyncio
@@ -108,6 +197,70 @@ async def test_api_business_polling_waits_for_completion_without_transport_retri
 
     assert request_count == 3
     assert output["polling_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_polling_wait_releases_leaf_request_slot_for_another_branch() -> None:
+    first_poll_sent = asyncio.Event()
+    order: list[str] = []
+    poll_count = 0
+    admission = CountingOutboundAdmission()
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal poll_count
+        if request.url.path == "/poll":
+            poll_count += 1
+            order.append(f"poll-{poll_count}")
+            first_poll_sent.set()
+            return httpx.Response(200, json={"status": "ready" if poll_count == 2 else "pending"})
+        order.append("other")
+        return httpx.Response(200, json={"status": "ready"})
+
+    poll = WorkflowNode.model_validate(
+        _node(
+            "poll",
+            "api",
+            {
+                **_api_config(),
+                "polling": {
+                    "expression": "body.status",
+                    "expected": "ready",
+                    "max_attempts": 2,
+                    "interval_seconds": 0.05,
+                    "timeout_seconds": 10,
+                },
+            },
+        )
+    )
+    other = WorkflowNode.model_validate(_node("other", "api", _api_config()))
+    poll_request = PreparedRequest(HttpMethod.GET, "https://example.test/poll", (), None, ())
+    other_request = PreparedRequest(HttpMethod.GET, "https://example.test/other", (), None, ())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {
+                poll.id: PreparedWorkflowRequest(poll_request, poll_request, BodyKind.NONE, None),
+                other.id: PreparedWorkflowRequest(
+                    other_request, other_request, BodyKind.NONE, None
+                ),
+            },
+            _wrapper_workflow(poll),
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        scheduler = WorkflowScheduler(TracingNodeExecutor(executor))
+        context = ExecutionContext(
+            leaf_semaphore=asyncio.Semaphore(1), outbound_admission=admission
+        )
+        polling_task = asyncio.create_task(scheduler._invoke_node_executor(poll, context))
+        await asyncio.wait_for(first_poll_sent.wait(), timeout=1)
+        other_task = asyncio.create_task(scheduler._invoke_node_executor(other, context))
+        await asyncio.gather(polling_task, other_task)
+
+    assert order == ["poll-1", "other", "poll-2"]
+    assert admission.total == 3
+    assert admission.active == 0
+    assert admission.peak == 1
 
 
 @pytest.mark.asyncio
@@ -594,6 +747,65 @@ async def test_subflow_inherits_variables_from_an_immutable_prepared_version() -
     assert output["status"] == "passed"
     assert output["workflow_version"] == 2
     assert output["nodes"][0]["output"] == {"variables": {"tenant": "flowtest"}}
+
+
+@pytest.mark.asyncio
+async def test_nested_subflow_requests_share_the_parent_leaf_slot() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000108")
+    node = WorkflowNode.model_validate(
+        _node("nested", "subflow", {"workflow_id": str(workflow_id), "workflow_version": 1})
+    )
+    child = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                _node("start", "start", {}),
+                _node("first", "api", _api_config()),
+                _node("second", "api", _api_config()),
+                _node("end", "end", {}),
+            ],
+            "edges": [
+                _edge("start", "first"),
+                _edge("start", "second"),
+                _edge("first", "end"),
+                _edge("second", "end"),
+            ],
+        }
+    )
+    active = 0
+    peak = 0
+
+    async def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return httpx.Response(200, json={"ok": True})
+
+    request = PreparedRequest(HttpMethod.GET, "https://example.test/read", (), None, ())
+    prepared_request = PreparedWorkflowRequest(request, request, BodyKind.NONE, None)
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="e" * 64,
+        definition=child,
+        requests={"first": prepared_request, "second": prepared_request},
+        subflows={},
+        snapshot={},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            _wrapper_workflow(node),
+            OutboundNetworkPolicy(),
+            subflows={node.id: prepared},
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+        )
+        await executor.execute(node, ExecutionContext(leaf_semaphore=asyncio.Semaphore(1)))
+
+    assert peak == 1
 
 
 @pytest.mark.asyncio

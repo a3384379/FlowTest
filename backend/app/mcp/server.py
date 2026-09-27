@@ -53,6 +53,10 @@ from app.schemas.mcp_contract_import import (
     MCPCommitContractImportRequest,
     MCPPreviewContractImportRequest,
 )
+from app.schemas.mcp_control_blocks import (
+    MCPControlBlockProposalRequest,
+    MCPControlWorkflowProposalRequest,
+)
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
@@ -66,10 +70,11 @@ from app.schemas.test_contexts import (
 )
 
 MCP_INSTRUCTIONS = (
-    "FlowTest MCP 提供只读项目、服务、契约、工作流草稿和执行证据，并允许提交"
+    "FlowTest MCP 提供只读项目、服务、契约、控制能力、工作流草稿和执行证据，并允许提交"
     "版本化外部证据、强类型 Java/DB Evidence、内置 Java/Spring 静态源码分析、"
     "确定性 Integration Plan 与"
-    "只进入待审核状态的 Flow Draft、Repair、关联现有 Change Regression 的 Maintenance，"
+    "只进入待审核状态的 Flow Draft、原生控制流工作流与控制块、Repair、"
+    "关联现有 Change Regression 的 Maintenance，"
     "以及固定 Context 的 Change Regression 准备和 Test Plan 更新建议。"
     "flowtest.propose_simple_flow 是默认的 quick 入口：只需已有项目、环境、API ID/版本、"
     "少量步骤和必要输入即可创建待审核草稿，不要求 Test Context、Evidence 或外部数据库 MCP；"
@@ -579,6 +584,18 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_flow_spec_diff_tool(server, client)
 
     @server.tool(
+        name="flowtest.discover_control_capabilities",
+        description="读取可执行控制能力及配置 Schema、内联支持和预算边界。",
+        structured_output=True,
+    )
+    async def discover_control_capabilities(
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.discover_control_capabilities(token=_request_token(ctx, client))
+        )
+
+    @server.tool(
         name="flowtest.discover_services",
         description="Read service and endpoint variants visible in one project.",
         structured_output=True,
@@ -713,6 +730,8 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_preview_contract_import_tool(server, client)
     _register_preview_flow_proposal_tool(server, client)
     _register_propose_simple_flow_tool(server, client)
+    _register_propose_control_block_tool(server, client)
+    _register_propose_control_workflow_tool(server, client)
     _register_propose_flow_draft_tool(server, client)
     _register_propose_maintenance_tool(server, client)
     _register_propose_repair_tool(server, client)
@@ -921,6 +940,57 @@ def _register_propose_simple_flow_tool(server: MCPServer, client: MCPReadGateway
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.propose_simple_flow(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_propose_control_block_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.propose_control_block",
+        description=(
+            "Stage one native schema 4 control block and its inline regions as a single "
+            "pending workflow ChangeSet. Requires the target draft revision and an unmapped "
+            "main edge. A human must review and accept; this tool never saves the workflow, "
+            "publishes, previews, or executes it."
+        ),
+        structured_output=True,
+    )
+    async def propose_control_block(
+        request: MCPControlBlockProposalRequest,
+        idempotency_key: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_control_block(
+                request,
+                idempotency_key=idempotency_key,
+                token=_request_token(ctx, client),
+            )
+        )
+
+
+def _register_propose_control_workflow_tool(
+    server: MCPServer, client: MCPReadGatewayClient
+) -> None:
+    @server.tool(
+        name="flowtest.propose_control_workflow",
+        description=(
+            "Stage a new native schema 4 control-flow workflow as a pending ChangeSet. "
+            "A human must review and accept before a draft is created. This tool never "
+            "publishes, previews, or executes the workflow."
+        ),
+        structured_output=True,
+    )
+    async def propose_control_workflow(
+        request: MCPControlWorkflowProposalRequest,
+        idempotency_key: str,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> dict[str, Any]:
+        return await _tool_payload(
+            client.propose_control_workflow(
                 request,
                 idempotency_key=idempotency_key,
                 token=_request_token(ctx, client),

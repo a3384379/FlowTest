@@ -1,13 +1,13 @@
 import { useAuthStore } from '../features/auth/auth-store'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import WorkflowsPage from './WorkflowsPage'
+import WorkflowsPage, { DatasetRunSummary } from './WorkflowsPage'
 import {
   apiDefinition,
   environment,
@@ -108,6 +108,21 @@ describe('WorkflowsPage', () => {
     )
   })
 
+  it('falls back to an available workflow when the focused workflow was archived', async () => {
+    let missingRequests = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows/archived`, () => {
+        missingRequests += 1
+        return HttpResponse.json({ error: { code: 'WORKFLOW_NOT_FOUND' } }, { status: 404 })
+      }),
+    )
+    renderPage(`/projects/${project.id}/workflows?focus=archived`)
+
+    expect(await screen.findByText('已发布 v1')).toBeVisible()
+    expect(screen.getByLabelText('工作流画布')).toBeVisible()
+    expect(missingRequests).toBe(0)
+  })
+
   it('debugs the selected workflow without changing its definition', async () => {
     renderPage()
     const browser = userEvent.setup()
@@ -170,6 +185,158 @@ describe('WorkflowsPage', () => {
     expect(screen.queryByRole('button', { name: /保存草稿/ })).not.toBeInTheDocument()
   })
 
+  it.each([false, true])(
+    'starts a derived run for selected failed input indices after resource verification (paged=%s)',
+    async (paged) => {
+      const source = workflowExecutionDetail.execution
+      let submitted: unknown
+      let attempts = 0
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/workflow-executions/${source.id}`, () =>
+          HttpResponse.json({
+            ...workflowExecutionDetail,
+            execution: {
+              ...source,
+              snapshot: { workflow: { version: 2, definition: workflowDefinition } },
+            },
+            nodes: [
+              ...workflowExecutionDetail.nodes,
+              {
+                id: '00000000-0000-4000-8000-000000000079',
+                node_id: 'loop',
+                node_type: 'capability',
+                name: '集合遍历',
+                phase: 'main',
+                status: 'passed',
+                attempts: 1,
+                output: paged
+                  ? {
+                      input_count: 3,
+                      failed_count: 2,
+                      report_kind: 'iteration',
+                      report_paged: true,
+                      record_count: 3,
+                    }
+                  : {
+                      input_count: 3,
+                      failed_count: 2,
+                      items: [
+                        { input_index: 0, test_verdict: 'failed', nodes: [] },
+                        { input_index: 1, test_verdict: 'failed', nodes: [] },
+                        { input_index: 2, test_verdict: 'passed', nodes: [] },
+                      ],
+                    },
+                error_code: null,
+                error_message: null,
+              },
+            ],
+          }),
+        ),
+        http.get(
+          `/api/v1/projects/${project.id}/workflow-executions/${source.id}/control-records`,
+          () =>
+            HttpResponse.json({
+              items: [
+                { ordinal: 0, status: 'failed', test_verdict: 'failed' },
+                { ordinal: 1, status: 'failed', test_verdict: 'failed' },
+              ],
+              total: 2,
+              page: 1,
+              page_size: 20,
+            }),
+        ),
+        http.post(
+          `/api/v1/projects/${project.id}/workflow-executions/${source.id}/failed-items/rerun`,
+          async ({ request }) => {
+            submitted = await request.json()
+            attempts += 1
+            if (attempts === 1) {
+              return HttpResponse.json(
+                {
+                  error: {
+                    code: 'RERUN_NESTED_CONTROL_UNSUPPORTED',
+                    message: '嵌套控制块的失败项重跑仍需实例级来源校验',
+                    details: null,
+                    trace_id: 'rerun-e2e',
+                  },
+                },
+                { status: 409 },
+              )
+            }
+            return HttpResponse.json(
+              {
+                ...workflowRunningExecution,
+                derived_from_execution_id: source.id,
+                rerun_loop_node_id: 'loop',
+                rerun_input_indices: [1],
+              },
+              { status: 202 },
+            )
+          },
+        ),
+      )
+      renderPage()
+      const browser = userEvent.setup()
+      await screen.findAllByText(workflow.name)
+      await browser.click(screen.getByRole('button', { name: '打开执行历史' }))
+      await browser.click(screen.getByTestId('workflow-runtime-tab-history'))
+      await browser.click(screen.getByTestId(`workflow-history-${source.id}`))
+      expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+      await browser.click(screen.getByTestId('workflow-runtime-tab-run'))
+      await browser.click(await screen.findByRole('button', { name: /派生重跑失败项/ }))
+      const dialog = screen.getByRole('dialog', { name: '派生重跑失败项' })
+      expect(within(dialog).getByText(/原报告保留/)).toBeInTheDocument()
+      await browser.click(within(dialog).getByRole('combobox', { name: '选择失败轮次' }))
+      await browser.click(await screen.findByText('第 2 项（input_index 1）'))
+      await browser.click(within(dialog).getByRole('combobox', { name: '上游资源状态' }))
+      await browser.click(screen.getByText('已确认资源仍有效'))
+      await browser.type(
+        within(dialog).getByRole('textbox', { name: '外部状态查证说明' }),
+        '已核对外部资源状态，当前仍有效',
+      )
+      const createRun = within(dialog).getByRole('button', { name: '创建派生运行' })
+      expect(createRun).toBeEnabled()
+      await browser.click(createRun)
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('dialog', { name: '派生重跑失败项' })).getByText(
+            '嵌套控制块的失败项重跑仍需实例级来源校验',
+          ),
+        ).toBeInTheDocument(),
+      )
+      const retryDialog = screen.getByRole('dialog', { name: '派生重跑失败项' })
+      expect(within(retryDialog).getByText('第 2 项（input_index 1）')).toBeInTheDocument()
+      await browser.click(within(retryDialog).getByRole('button', { name: '创建派生运行' }))
+      await waitFor(() =>
+        expect(submitted).toEqual({
+          loop_node_id: 'loop',
+          input_indices: [1],
+          upstream_resource_status: 'confirmed_valid',
+          write_retry_strategy: 'reject',
+          verification_note: '已核对外部资源状态，当前仍有效',
+        }),
+      )
+      expect(attempts).toBe(2)
+    },
+  )
+
+  it('opens a dataset child report from the batch summary', () => {
+    const parent = workflowExecutionDetail.execution
+    const child = {
+      ...parent,
+      id: '00000000-0000-4000-8000-000000000089',
+      parent_execution_id: parent.id,
+      dataset_row_index: 0,
+      status: 'failed' as const,
+    }
+    let selectedId: string | null = null
+    render(<DatasetRunSummary items={[child]} onView={(id) => (selectedId = id)} />)
+    expect(screen.getByText('数据集子执行')).toBeVisible()
+    expect(screen.getByText('1')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '查看子执行' }))
+    expect(selectedId).toBe(child.id)
+  })
+
   it('compares the latest two immutable workflow versions', async () => {
     const versionedWorkflow = { ...workflow, current_version: 2 }
     let diffRequested = false
@@ -225,14 +392,14 @@ describe('WorkflowsPage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="workflows">
+        <ProjectTestProvider section="workflows" initialEntry={initialEntry}>
           <WorkflowsPage />
         </ProjectTestProvider>
       </QueryClientProvider>

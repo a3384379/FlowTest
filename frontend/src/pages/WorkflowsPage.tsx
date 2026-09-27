@@ -25,6 +25,7 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Popconfirm,
   Popover,
   Segmented,
@@ -36,20 +37,31 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
+import ExecutionCheckpointLog from '../features/workflows/ExecutionCheckpointLog'
 import FailureRepairDialog from '../features/workflows/FailureRepairDialog'
+import IterationDebugDialog from '../features/workflows/IterationDebugDialog'
 import FlowSpecReviewDialog, {
   type FlowSpecReviewSeed,
 } from '../features/workflows/FlowSpecReviewDialog'
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
+import NativeWorkflowTransferDialog from '../features/workflows/NativeWorkflowTransferDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
+import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
-import type { Workflow, WorkflowExecution, WorkflowNodeExecution } from '../lib/api'
+import {
+  apiErrorMessage,
+  type Page,
+  type WorkflowControlRecordSummary,
+  type Workflow,
+  type WorkflowExecution,
+  type WorkflowNodeExecution,
+} from '../lib/api'
 
 export default function WorkflowsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -58,9 +70,19 @@ export default function WorkflowsPage() {
   const [flowSpecOpen, setFlowSpecOpen] = useState(false)
   const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
   const [flowProposalOpen, setFlowProposalOpen] = useState(false)
+  const [nativeTransferOpen, setNativeTransferOpen] = useState(false)
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
+  const [iterationDebugOpen, setIterationDebugOpen] = useState(false)
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
+  useEffect(() => {
+    const listed = state.workflows.data
+    if (!initialWorkflowId || !listed || listed.items.length < listed.total) return
+    if (listed.items.some((workflow) => workflow.id === initialWorkflowId)) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('focus')
+    setSearchParams(next, { replace: true })
+  }, [initialWorkflowId, searchParams, setSearchParams, state.workflows.data])
   const userId = useAuthStore((store) => store.user?.id)
   const tabs = useWorkflowTabs({
     userId,
@@ -104,6 +126,8 @@ export default function WorkflowsPage() {
           setFlowSpecOpen(true)
         }}
         onFlowProposal={() => setFlowProposalOpen(true)}
+        onNativeTransfer={() => setNativeTransferOpen(true)}
+        onIterationDebug={() => setIterationDebugOpen(true)}
         onRepair={setRepairExecution}
       />
       <VersionDiffDialog state={state} />
@@ -113,6 +137,17 @@ export default function WorkflowsPage() {
         apis={state.apis.data?.items ?? []}
         onClose={() => setCreateOpen(false)}
         onCreate={create}
+      />
+      <NativeWorkflowTransferDialog
+        open={nativeTransferOpen}
+        projectId={state.projectId ?? ''}
+        workflowId={state.workflowId}
+        canEdit={state.canEdit}
+        onClose={() => setNativeTransferOpen(false)}
+        onImported={async (imported) => {
+          await state.workflows.refetch()
+          tabs.activateWorkflow(imported.id)
+        }}
       />
       <FlowDialogs
         state={state}
@@ -140,12 +175,27 @@ export default function WorkflowsPage() {
         setSearchParams={setSearchParams}
         onClose={() => setRepairExecution(undefined)}
       />
+      <IterationDebugDialog
+        open={iterationDebugOpen}
+        projectId={state.projectId}
+        workflowId={state.workflowId}
+        environmentId={state.environmentId}
+        version={selectedPublishedVersion(state)}
+        currentExecution={state.runtimeExecution}
+        canStart={canExecute(state)}
+        onStarted={state.beginIterationDebugExecution}
+        onClose={() => setIterationDebugOpen(false)}
+      />
       <WorkflowTabCloseModal tabs={tabs} />
     </div>
   )
 }
 
 type WorkflowState = ReturnType<typeof useWorkflows>
+
+function selectedPublishedVersion(state: WorkflowState): number | null {
+  return state.selectedWorkflow?.current_version ?? null
+}
 
 type WorkflowTabsState = ReturnType<typeof useWorkflowTabs>
 type RuntimeDockMode = 'run' | 'history' | 'debug'
@@ -453,6 +503,7 @@ function WorkflowProposalDialog({
 }
 
 function RunConsolePanel({ state }: { state: WorkflowState }) {
+  const [showCheckpointLog, setShowCheckpointLog] = useState(false)
   return (
     <div className="workflow-runtime-panel">
       <div className="workflow-runtime-panel-heading">
@@ -468,20 +519,396 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
           </Space>
         )}
       </div>
+      <ExecutionEventHistoryWarning
+        execution={state.runtimeExecution}
+        incompleteId={state.eventHistoryIncompleteId}
+      />
       {state.runtimeChildren.length ? (
-        <DatasetRunSummary items={state.runtimeChildren} />
+        <DatasetRunSummary items={state.runtimeChildren} onView={state.showHistory} />
       ) : (
-        <NodeTable
-          nodes={state.runtimeNodes}
-          replaying={state.replaying}
-          onReplay={
-            state.workspaceMode === 'run' && state.lastResult
-              ? (nodeId) => void state.replayNode(nodeId)
-              : undefined
-          }
-        />
+        <>
+          <NodeTable
+            nodes={state.runtimeNodes}
+            replaying={state.replaying}
+            onReplay={
+              state.workspaceMode === 'run' && state.lastResult
+                ? (nodeId) => void state.replayNode(nodeId)
+                : undefined
+            }
+          />
+          <FailedItemRerunAction state={state} />
+        </>
+      )}
+      {state.runtimeExecution && state.projectId && (
+        <>
+          <Button onClick={() => setShowCheckpointLog((value) => !value)}>
+            {showCheckpointLog ? '收起执行记录' : '查看执行记录'}
+          </Button>
+          {showCheckpointLog && (
+            <ExecutionCheckpointLog
+              key={state.runtimeExecution.id}
+              projectId={state.projectId}
+              executionId={state.runtimeExecution.id}
+              running={['queued', 'running'].includes(state.runtimeExecution.status)}
+            />
+          )}
+        </>
       )}
     </div>
+  )
+}
+
+function ExecutionEventHistoryWarning({
+  execution,
+  incompleteId,
+}: {
+  execution: WorkflowExecution | null
+  incompleteId: string | null
+}) {
+  if (!execution || execution.id !== incompleteId) return null
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      message="部分实时事件已超过保留范围"
+      description="运行状态已从服务器记录重新核对；实时事件记录不完整。可打开执行记录查看已持久化的节点详情。"
+    />
+  )
+}
+
+type FailedLoopOption = { nodeId: string; name: string; indices: number[]; paged: boolean }
+
+function canOfferFailedItemRerun(
+  state: WorkflowState,
+  source: WorkflowExecution | null,
+  loops: FailedLoopOption[],
+): source is WorkflowExecution {
+  return Boolean(
+    source &&
+    !source.derived_from_execution_id &&
+    source.run_purpose !== 'preview' &&
+    state.canEdit &&
+    loops.length > 0 &&
+    source.status !== 'queued' &&
+    source.status !== 'running',
+  )
+}
+
+function rerunSubmitDisabled(
+  loopNodeId: string | null,
+  indices: number[],
+  resourceStatus: string,
+  writeStrategy: string,
+  note: string,
+): boolean {
+  const requiresNote =
+    resourceStatus === 'confirmed_valid' || writeStrategy === 'verified_safe_to_retry'
+  return (
+    !loopNodeId ||
+    !indices.length ||
+    resourceStatus === 'expired' ||
+    (requiresNote && note.trim().length < 8)
+  )
+}
+
+function failedLoopOptions(nodes: WorkflowNodeExecution[]): FailedLoopOption[] {
+  return nodes.flatMap((node): FailedLoopOption[] => {
+    const output = node.output
+    if (!isRecord(output)) return []
+    if (output.report_paged === true && output.report_kind === 'iteration') {
+      return typeof output.failed_count === 'number' && output.failed_count > 0
+        ? [{ nodeId: node.node_id, name: node.name, indices: [], paged: true }]
+        : []
+    }
+    if (!Array.isArray(output.items)) return []
+    const indices = output.items.flatMap((item: unknown) =>
+      isRecord(item) && item.test_verdict === 'failed' && typeof item.input_index === 'number'
+        ? [item.input_index]
+        : [],
+    )
+    return indices.length ? [{ nodeId: node.node_id, name: node.name, indices, paged: false }] : []
+  })
+}
+
+function FailedItemRerunAction({ state }: { state: WorkflowState }) {
+  const loops = failedLoopOptions(state.runtimeNodes)
+  const [open, setOpen] = useState(false)
+  const source = state.runtimeExecution
+  if (!canOfferFailedItemRerun(state, source, loops)) return null
+  return (
+    <>
+      <Button icon={<RedoOutlined />} onClick={() => setOpen(true)}>
+        派生重跑失败项
+      </Button>
+      {open && (
+        <FailedItemRerunDialog
+          state={state}
+          source={source}
+          loops={loops}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+function FailedItemRerunDialog({
+  state,
+  source,
+  loops,
+  onClose,
+}: {
+  state: WorkflowState
+  source: WorkflowExecution
+  loops: FailedLoopOption[]
+  onClose: () => void
+}) {
+  const [loopNodeId, setLoopNodeId] = useState<string | null>(loops[0].nodeId)
+  const [indices, setIndices] = useState<number[]>([])
+  const [resourceStatus, setResourceStatus] = useState<
+    'unverified' | 'confirmed_valid' | 'expired'
+  >('unverified')
+  const [writeStrategy, setWriteStrategy] = useState<'reject' | 'verified_safe_to_retry'>('reject')
+  const [note, setNote] = useState('')
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [failedPageNumber, setFailedPageNumber] = useState(1)
+  const selectedLoop = loops.find((loop) => loop.nodeId === loopNodeId)
+  const { failedPage, failedPageError } = useFailedRecordPage(
+    state.projectId,
+    source.id,
+    selectedLoop,
+    failedPageNumber,
+  )
+  return (
+    <Modal
+      title="派生重跑失败项"
+      open
+      okText="创建派生运行"
+      okButtonProps={{
+        disabled: rerunSubmitDisabled(loopNodeId, indices, resourceStatus, writeStrategy, note),
+        loading: state.rerunningFailedItems,
+      }}
+      onCancel={onClose}
+      onOk={async () => {
+        setSubmitError(null)
+        try {
+          await state.rerunFailedItems(source.id, {
+            loop_node_id: loopNodeId ?? '',
+            input_indices: indices,
+            upstream_resource_status: resourceStatus,
+            write_retry_strategy: writeStrategy,
+            ...(note.trim() ? { verification_note: note.trim() } : {}),
+          })
+          onClose()
+        } catch (error) {
+          setSubmitError(apiErrorMessage(error))
+        }
+      }}
+    >
+      <Space orientation="vertical" className="workflow-more-content">
+        {submitError && <Alert type="error" showIcon title={submitError} />}
+        <Alert
+          type="info"
+          showIcon
+          title="原报告保留，使用原冻结输入和已成功步骤的输出。请先确认外部资源状态。"
+        />
+        <FailedItemSelection
+          loops={loops}
+          loopNodeId={loopNodeId}
+          indices={indices}
+          selectedLoop={selectedLoop}
+          failedPage={failedPage}
+          failedPageError={failedPageError}
+          failedPageNumber={failedPageNumber}
+          onLoopChange={(value) => {
+            setLoopNodeId(value)
+            setIndices([])
+            setFailedPageNumber(1)
+          }}
+          onIndicesChange={setIndices}
+          onPageChange={setFailedPageNumber}
+        />
+        <FailedItemVerificationFields
+          resourceStatus={resourceStatus}
+          writeStrategy={writeStrategy}
+          note={note}
+          onResourceStatusChange={setResourceStatus}
+          onWriteStrategyChange={setWriteStrategy}
+          onNoteChange={setNote}
+        />
+      </Space>
+    </Modal>
+  )
+}
+
+function useFailedRecordPage(
+  projectId: string | null,
+  executionId: string,
+  selectedLoop: FailedLoopOption | undefined,
+  page: number,
+) {
+  const [response, setResponse] = useState<{
+    key: string
+    value?: Page<WorkflowControlRecordSummary>
+    error?: string
+  } | null>(null)
+  const nodeId = selectedLoop?.nodeId
+  const paged = selectedLoop?.paged
+  const key = `${projectId}:${executionId}:${nodeId}:${page}`
+  useEffect(() => {
+    if (!paged || !projectId || !nodeId) return
+    let active = true
+    void listWorkflowControlRecords(projectId, executionId, nodeId, 'iteration', page, 'failed')
+      .then((value) => {
+        if (active) setResponse({ key, value })
+      })
+      .catch((reason: unknown) => {
+        if (active) setResponse({ key, error: apiErrorMessage(reason) })
+      })
+    return () => {
+      active = false
+    }
+  }, [paged, projectId, executionId, nodeId, page, key])
+  return {
+    failedPage: response?.key === key ? response.value : undefined,
+    failedPageError: response?.key === key ? response.error : undefined,
+  }
+}
+
+function FailedItemSelection({
+  loops,
+  loopNodeId,
+  indices,
+  selectedLoop,
+  failedPage,
+  failedPageError,
+  failedPageNumber,
+  onLoopChange,
+  onIndicesChange,
+  onPageChange,
+}: {
+  loops: FailedLoopOption[]
+  loopNodeId: string | null
+  indices: number[]
+  selectedLoop: FailedLoopOption | undefined
+  failedPage: Page<WorkflowControlRecordSummary> | undefined
+  failedPageError: string | undefined
+  failedPageNumber: number
+  onLoopChange: (value: string) => void
+  onIndicesChange: (value: number[]) => void
+  onPageChange: (value: number) => void
+}) {
+  const options = failedInputOptions(selectedLoop, indices, failedPage)
+  return (
+    <>
+      <Select
+        aria-label="选择失败循环"
+        value={loopNodeId}
+        options={loops.map((loop) => ({ value: loop.nodeId, label: loop.name }))}
+        onChange={onLoopChange}
+      />
+      {failedPageError && <Alert type="error" title={failedPageError} />}
+      {selectedLoop?.paged && failedPage?.total === 0 && (
+        <Alert type="error" title="执行摘要显示失败轮次，但持久化记录缺失" />
+      )}
+      <Select
+        mode="multiple"
+        aria-label="选择失败轮次"
+        value={indices}
+        options={options}
+        onChange={onIndicesChange}
+      />
+      <FailedItemPagination
+        selectedLoop={selectedLoop}
+        failedPage={failedPage}
+        failedPageNumber={failedPageNumber}
+        onPageChange={onPageChange}
+      />
+    </>
+  )
+}
+
+function failedInputOptions(
+  selectedLoop: FailedLoopOption | undefined,
+  indices: number[],
+  failedPage: Page<WorkflowControlRecordSummary> | undefined,
+) {
+  return [
+    ...new Set([
+      ...(selectedLoop?.indices ?? []),
+      ...indices,
+      ...(failedPage?.items.map((item) => item.ordinal) ?? []),
+    ]),
+  ].map((index) => ({ value: index, label: `第 ${index + 1} 项（input_index ${index}）` }))
+}
+
+function FailedItemPagination({
+  selectedLoop,
+  failedPage,
+  failedPageNumber,
+  onPageChange,
+}: {
+  selectedLoop: FailedLoopOption | undefined
+  failedPage: Page<WorkflowControlRecordSummary> | undefined
+  failedPageNumber: number
+  onPageChange: (value: number) => void
+}) {
+  if (!selectedLoop?.paged || (failedPage?.total ?? 0) <= 20) return null
+  return (
+    <Pagination
+      aria-label="失败轮次分页"
+      current={failedPageNumber}
+      total={failedPage?.total ?? 0}
+      pageSize={20}
+      showSizeChanger={false}
+      onChange={onPageChange}
+    />
+  )
+}
+
+function FailedItemVerificationFields({
+  resourceStatus,
+  writeStrategy,
+  note,
+  onResourceStatusChange,
+  onWriteStrategyChange,
+  onNoteChange,
+}: {
+  resourceStatus: 'unverified' | 'confirmed_valid' | 'expired'
+  writeStrategy: 'reject' | 'verified_safe_to_retry'
+  note: string
+  onResourceStatusChange: (value: 'unverified' | 'confirmed_valid' | 'expired') => void
+  onWriteStrategyChange: (value: 'reject' | 'verified_safe_to_retry') => void
+  onNoteChange: (value: string) => void
+}) {
+  return (
+    <>
+      <Select
+        aria-label="上游资源状态"
+        value={resourceStatus}
+        options={[
+          { value: 'unverified', label: '尚未查证' },
+          { value: 'confirmed_valid', label: '已确认资源仍有效' },
+          { value: 'expired', label: '资源已过期，暂停重跑' },
+        ]}
+        onChange={onResourceStatusChange}
+      />
+      <Select
+        aria-label="失败写操作策略"
+        value={writeStrategy}
+        options={[
+          { value: 'reject', label: '不重试失败写操作' },
+          { value: 'verified_safe_to_retry', label: '查证后允许重试失败写操作' },
+        ]}
+        onChange={onWriteStrategyChange}
+      />
+      <Input.TextArea
+        aria-label="外部状态查证说明"
+        placeholder="如确认了资源有效或写操作可安全重试，请写明查证依据（至少 8 字）"
+        value={note}
+        onChange={(event) => onNoteChange(event.target.value)}
+      />
+    </>
   )
 }
 
@@ -490,11 +917,13 @@ function WorkbenchMore({
   onCreate,
   onFlowSpec,
   onFlowProposal,
+  onNativeTransfer,
 }: {
   state: WorkflowState
   onCreate: () => void
   onFlowSpec: () => void
   onFlowProposal: () => void
+  onNativeTransfer: () => void
 }) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
@@ -557,6 +986,9 @@ function WorkbenchMore({
           <Button icon={<ImportOutlined />} disabled={!state.workflowId} onClick={onFlowSpec}>
             FlowSpec 导入 / 映射
           </Button>
+          <Button icon={<ImportOutlined />} disabled={!state.projectId} onClick={onNativeTransfer}>
+            原生定义导入 / 导出
+          </Button>
           <Button icon={<RobotOutlined />} disabled={!state.projectId} onClick={onFlowProposal}>
             MCP 流程提案
           </Button>
@@ -570,7 +1002,13 @@ function WorkbenchMore({
   )
 }
 
-function HeaderPrimaryActions({ state }: { state: WorkflowState }) {
+function HeaderPrimaryActions({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   const canDebug = canExecute(state) && Boolean(state.breakpointNodeId)
   return (
@@ -604,6 +1042,15 @@ function HeaderPrimaryActions({ state }: { state: WorkflowState }) {
         >
           调试
         </Button>
+      )}
+      {state.workspaceMode === 'draft' && (
+        <Button
+          icon={<BugOutlined />}
+          aria-label="逐轮调试"
+          title="逐轮调试"
+          disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
+          onClick={onIterationDebug}
+        />
       )}
     </Space>
   )
@@ -721,6 +1168,8 @@ function WorkflowWorkspace({
   onCreate,
   onFlowSpec,
   onFlowProposal,
+  onNativeTransfer,
+  onIterationDebug,
   onRepair,
 }: {
   state: WorkflowState
@@ -728,6 +1177,8 @@ function WorkflowWorkspace({
   onCreate: () => void
   onFlowSpec: () => void
   onFlowProposal: () => void
+  onNativeTransfer: () => void
+  onIterationDebug: () => void
   onRepair: (execution: WorkflowExecution) => void
 }) {
   const userId = useAuthStore((store) => store.user?.id)
@@ -742,7 +1193,9 @@ function WorkflowWorkspace({
           center={<WorkspaceModeSwitch state={state} />}
           right={
             <Space>
-              {state.workspaceMode !== 'history' && <HeaderPrimaryActions state={state} />}
+              {state.workspaceMode !== 'history' && (
+                <HeaderPrimaryActions state={state} onIterationDebug={onIterationDebug} />
+              )}
               {state.workspaceMode === 'draft' && !state.debugResult && (
                 <Button
                   icon={<HistoryOutlined />}
@@ -757,6 +1210,7 @@ function WorkflowWorkspace({
                 onCreate={onCreate}
                 onFlowSpec={onFlowSpec}
                 onFlowProposal={onFlowProposal}
+                onNativeTransfer={onNativeTransfer}
               />
             </Space>
           }
@@ -790,7 +1244,7 @@ function WorkflowWorkspace({
         className="workflow-workbench-card"
         loading={state.workspaceMode === 'history' && state.historyLoading}
       >
-        <DraftEditor state={state} />
+        <DraftEditor state={state} onIterationDebug={onIterationDebug} />
       </Card>
     </WorkflowWorkspaceShell>
   )
@@ -853,7 +1307,13 @@ function workspaceTitle(state: WorkflowState) {
   )
 }
 
-function FocusDraftActions({ state }: { state: WorkflowState }) {
+function FocusDraftActions({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
     <Space className="workflow-focus-commands">
@@ -885,11 +1345,24 @@ function FocusDraftActions({ state }: { state: WorkflowState }) {
       >
         调试至断点
       </Button>
+      <Button
+        icon={<BugOutlined />}
+        aria-label="逐轮调试"
+        title="逐轮调试"
+        disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
+        onClick={onIterationDebug}
+      />
     </Space>
   )
 }
 
-function DraftEditor({ state }: { state: WorkflowState }) {
+function DraftEditor({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const workflow = state.selectedWorkflow
   if (!workflow) return <Empty description="请选择或新建工作流" />
   const resources = workflowDesignerResources(state, workflow.id)
@@ -913,9 +1386,10 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         statuses={state.nodeStatuses}
         editable={state.canEdit && state.workspaceMode === 'draft' && !state.activeExecutionId}
         runtimeMode={state.workspaceMode === 'draft' ? undefined : state.workspaceMode}
+        runtimeExecutionId={state.runtimeExecution?.id}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
-        focusActions={<FocusDraftActions state={state} />}
+        focusActions={<FocusDraftActions state={state} onIterationDebug={onIterationDebug} />}
         onChange={state.setDraftDefinition}
       />
     </>
@@ -1178,7 +1652,13 @@ function VersionDiffDialog({ state }: { state: WorkflowState }) {
   )
 }
 
-function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
+export function DatasetRunSummary({
+  items,
+  onView,
+}: {
+  items: WorkflowExecution[]
+  onView: (executionId: string) => void
+}) {
   if (!items.length) return null
   return (
     <div className="dataset-run-summary">
@@ -1202,6 +1682,15 @@ function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
             render: (status: string) => <StatusTag status={status} />,
           },
           { title: '错误', dataIndex: 'error_message' },
+          {
+            title: '操作',
+            width: 110,
+            render: (_value: unknown, item: WorkflowExecution) => (
+              <Button type="link" size="small" onClick={() => onView(item.id)}>
+                查看子执行
+              </Button>
+            ),
+          },
         ]}
       />
     </div>

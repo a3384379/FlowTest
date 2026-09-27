@@ -72,6 +72,8 @@ EXCLUDED_TABLE_REASONS: dict[str, str] = {
     "idempotency_records": "API 幂等窗口属于临时运行状态",
     "notification_deliveries": "通知重试队列属于临时运行状态",
     "oidc_login_transactions": "OIDC 登录事务属于一次性认证状态",
+    "outbound_permits": "出站并发许可属于临时运行状态",
+    "outbound_rate_windows": "出站限速窗口属于临时运行状态",
     "refresh_sessions": "登录会话必须在目标环境重新建立",
     "runner_events": "Runner 事件属于 Compact/Runner Fabric 运行状态",
     "runner_leases": "Runner 租约属于临时运行状态",

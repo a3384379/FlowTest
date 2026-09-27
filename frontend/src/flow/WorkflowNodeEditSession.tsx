@@ -106,6 +106,16 @@ export default function WorkflowNodeEditSession({
       rawFields: { ...latest.current.rawFields, [field]: value },
     })
   }
+  function clearRaw(field: string) {
+    const rawFields = { ...latest.current.rawFields }
+    delete rawFields[field]
+    const next = { ...latest.current, rawFields }
+    next.dirty = hasPendingNodeEdits(next, next.draftNode, false)
+    latest.current = next
+    if (next.dirty) session.updateNodeEditor(key, next)
+    else session.clearNodeEditor(key)
+    setDraft(next)
+  }
   function setRequest(value: WorkflowRequestEditorDraft, dirty = true) {
     if (!isRequestCurrent(value.identity)) return
     update({
@@ -226,11 +236,26 @@ export default function WorkflowNodeEditSession({
     })
     setError(null)
   }
+  function updateStructure(next: WorkflowDefinition) {
+    if (latest.current.dirty) {
+      setError('请先应用或丢弃当前节点配置，再修改分支与区域。')
+      return
+    }
+    onChange(next)
+  }
   function updateDefinition(next: WorkflowDefinition, kind: WorkflowNodeEditKind) {
     if (kind === 'node') {
       const updated = next.nodes.find((item) => item.id === node.id)
       if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
-    } else if (!jsonEqual(next.edges, definition.edges)) {
+    } else if (kind === 'structure') {
+      updateStructure(next)
+    } else if (kind === 'regions' && !jsonEqual(next.regions, definition.regions)) {
+      if (latest.current.dirty) {
+        setError('请先应用或丢弃当前节点配置，再修改内部区域。')
+        return
+      }
+      onChange({ ...definition, regions: next.regions })
+    } else if (kind === 'edges' && !jsonEqual(next.edges, definition.edges)) {
       onChange({ ...definition, edges: next.edges })
     }
   }
@@ -239,6 +264,7 @@ export default function WorkflowNodeEditSession({
       value={{
         draft,
         setRaw,
+        clearRaw,
         setRequest,
         isRequestCurrent,
         apply,

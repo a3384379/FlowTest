@@ -1,12 +1,235 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
 import WorkflowRunInspector from './WorkflowRunInspector'
 import { workflowDefinition } from '../test/fixtures'
 import type { WorkflowNodeExecution } from '../lib/api'
+import { server } from '../test/server'
 
 describe('WorkflowRunInspector', () => {
+  it('shows an authorized download action for a stored response body', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        projectId="project-1"
+        executionId="execution-1"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            status_code: 200,
+            headers: {},
+            size_bytes: 3_000_000,
+            body: {
+              __flowtest_workflow_output_ref__: {
+                artifact_id: '00000000-0000-4000-8000-000000000001',
+                size_bytes: 3_000_000,
+              },
+            },
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByRole('tab', { name: '输出' }))
+    expect(screen.getByText(/大型响应已保存为对象引用/)).toBeVisible()
+    expect(screen.getByRole('button', { name: '下载响应体' })).toBeVisible()
+  })
+
+  it('shows parallel branch status separately from its test verdict', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            join: 'all',
+            started_count: 1,
+            failed_count: 1,
+            branches: [
+              {
+                definition_index: 0,
+                status: 'passed',
+                test_verdict: 'failed',
+                nodes: [{ node_id: 'assertion', status: 'failed', error_message: '断言未通过' }],
+              },
+            ],
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByLabelText('选择并行分支'))
+    await browser.click(screen.getByText('分支 1 · failed'))
+    expect(screen.getByText('assertion · failed')).toBeVisible()
+    expect(screen.getByText('断言未通过')).toBeVisible()
+  })
+
+  it('loads one report page and an exact persisted instance on demand', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    const projectId = 'project-1'
+    const executionId = 'execution-1'
+    const nodeId = 'api'
+    const reportPath = `/api/v1/projects/${projectId}/workflow-executions/${executionId}`
+    const requestedPages: number[] = []
+    server.use(
+      http.get(`${reportPath}/control-records`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        requestedPages.push(page)
+        return HttpResponse.json({
+          items: [{ ordinal: page === 2 ? 20 : 0, status: 'failed', test_verdict: 'failed' }],
+          total: 21,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.get(`${reportPath}/control-records/iteration/20`, () =>
+        HttpResponse.json({
+          kind: 'iteration',
+          ordinal: 20,
+          status: 'failed',
+          test_verdict: 'failed',
+          payload: {
+            input_index: 20,
+            status: 'failed',
+            test_verdict: 'failed',
+            nodes: [
+              { node_id: 'check', instance_id: '__nested_request__:example', status: 'failed' },
+            ],
+          },
+        }),
+      ),
+      http.get(`${reportPath}/instances/__nested_request__:example`, () =>
+        HttpResponse.json({
+          node_id: '__nested_request__:example',
+          node_name: '校验',
+          status: 'failed',
+          output: { actual: 409 },
+          result: { error_code: 'CASE_FAIL', observations: [{ response: { status_code: 409 } }] },
+        }),
+      ),
+    )
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        projectId={projectId}
+        executionId={executionId}
+        node={workflowDefinition.nodes.find((node) => node.id === nodeId) ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 21,
+            completed_count: 21,
+            failed_count: 21,
+            termination_reason: 'completed',
+            report_kind: 'iteration',
+            report_paged: true,
+            record_count: 21,
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await screen.findByRole('region', { name: '循环执行详情' })
+    await browser.click(screen.getByTitle('2'))
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(await screen.findByText('第 21 项 · failed'))
+    expect(await screen.findByText('check · failed')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '查看实例详情' }))
+    expect(await screen.findByText(/"actual": 409/)).toBeVisible()
+    expect(screen.getByText(/"status_code": 409/)).toBeVisible()
+    expect(requestedPages).toEqual([1, 2])
+  })
+
+  it('shows the selected loop item and its actual failed node', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 3,
+            completed_count: 2,
+            failed_count: 1,
+            termination_reason: 'failed',
+            items: [
+              { input_index: 0, status: 'passed', test_verdict: 'passed', nodes: [] },
+              {
+                input_index: 1,
+                status: 'failed',
+                test_verdict: 'failed',
+                nodes: [
+                  {
+                    node_id: 'check',
+                    status: 'failed',
+                    error_code: 'CASE_FAIL',
+                    error_message: '第二项失败',
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    expect(screen.getByRole('region', { name: '循环执行详情' })).toHaveTextContent('已完成 2/3')
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(screen.getByText('第 2 项 · failed'))
+    expect(screen.getByText('第二项失败')).toBeVisible()
+    expect(screen.getByText('CASE_FAIL')).toBeVisible()
+  })
+
+  it('pages loop choices without losing their original input indices', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="run"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            input_count: 21,
+            completed_count: 21,
+            items: Array.from({ length: 21 }, (_, input_index) => ({
+              input_index,
+              status: 'passed',
+              test_verdict: 'passed',
+              nodes: [{ node_id: `case-${input_index}`, status: 'passed' }],
+            })),
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByTitle('2'))
+    await browser.click(screen.getByLabelText('选择循环轮次'))
+    await browser.click(screen.getByText('第 21 项 · passed'))
+    expect(screen.getByText('case-20 · passed')).toBeVisible()
+  })
+
   it('shows redacted request, response, timing, and retry snapshots', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

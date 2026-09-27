@@ -2,12 +2,14 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import cast
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -18,13 +20,14 @@ from pydantic import JsonValue
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import redact
-from app.domain.api_assets import BodyKind
+from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.assertions import compare_values
 from app.domain.expressions import SafeExpressionError, evaluate_bounded_array
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.scopes import HeaderScope
 from app.engine.capabilities import legacy_node_adapter
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     FieldMapping,
     ForEachNodeConfig,
@@ -59,7 +62,7 @@ from app.engine.protocol_nodes import (
     PreparedProtocolNode,
     resolve_protocol_config,
 )
-from app.engine.request_accounting import node_type_consumes_request, resumed_request_attempts
+from app.engine.request_accounting import node_consumes_request, resumed_request_attempts
 from app.engine.request_accounting import (
     preview_node_request_attempts as _preview_node_request_attempts,
 )
@@ -78,10 +81,12 @@ from app.engine.scheduler import (
     NodeRunRecord,
     NodeStatusCallback,
     NodeStatusUpdate,
+    OutboundAdmission,
     RequestBudget,
     WorkflowRunResult,
     WorkflowScheduler,
 )
+from app.engine.structured_control import StructuredControlRunner, control_placeholder
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.data_nodes import (
     DataNodeRunner,
@@ -108,6 +113,33 @@ class PreparedWorkflowRequest:
     redacted_request: PreparedRequest
     body_kind: BodyKind
     multipart: PreparedMultipart | None
+
+
+@asynccontextmanager
+async def _api_request_window(context: ExecutionContext) -> AsyncIterator[None]:
+    semaphore = context.leaf_semaphore
+    if semaphore is None:
+        yield
+    else:
+        async with semaphore:
+            yield
+
+
+def retry_safe_request_nodes(
+    definition: WorkflowDefinition,
+    requests: dict[str, PreparedWorkflowRequest],
+) -> frozenset[str]:
+    safe = {
+        node_id
+        for node_id, prepared in requests.items()
+        if prepared.request.method is HttpMethod.GET
+    }
+    safe.update(
+        node.id
+        for node in definition.all_nodes()
+        if node.effective_type in {NodeType.SQL, NodeType.REDIS}
+    )
+    return frozenset(safe)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,8 +169,11 @@ class WorkflowNodeExecutor:
         data_runner: DataNodeRunner | None = None,
         protocol_nodes: dict[str, PreparedProtocolNode] | None = None,
         event_nodes: dict[str, PreparedEventNode] | None = None,
+        branch_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        owns_client: bool = False,
     ) -> None:
         self._client = client
+        self._definition = definition
         self._requests = requests
         self._mappings = _mappings_by_target(definition)
         self._network_policy = network_policy
@@ -147,6 +182,9 @@ class WorkflowNodeExecutor:
         self._outbound_guard = outbound_guard
         self._protocol_nodes = protocol_nodes or {}
         self._event_nodes = event_nodes or {}
+        self._branch_client_factory = branch_client_factory
+        self._owns_client = owns_client
+        self._provided_data_runner = data_runner
         self._protocol_runner = ProtocolRunner(
             client,
             network_policy,
@@ -183,17 +221,48 @@ class WorkflowNodeExecutor:
             ]
         )
 
-    async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+    async def execute(
+        self, node: WorkflowNode, context: ExecutionContext
+    ) -> NodeResult | JsonValue:
         return await self._handlers.execute(node, context)
 
     async def close(self) -> None:
         await self._event_runner.close_all()
+        if self._owns_client:
+            await self._client.aclose()
+
+    def fork_branch(self) -> "WorkflowNodeExecutor":
+        client = (
+            self._branch_client_factory()
+            if self._branch_client_factory is not None
+            else httpx.AsyncClient(follow_redirects=False)
+        )
+        client.cookies.update(self._client.cookies)
+        return WorkflowNodeExecutor(
+            client,
+            self._requests,
+            self._definition,
+            self._network_policy,
+            subflows=self._subflows,
+            outbound_guard=self._outbound_guard,
+            data_nodes=self._data_nodes,
+            data_runner=self._provided_data_runner,
+            protocol_nodes=self._protocol_nodes,
+            event_nodes=self._event_nodes,
+            branch_client_factory=self._branch_client_factory,
+            owns_client=True,
+        )
+
+    def manages_request_window(self, node: WorkflowNode) -> bool:
+        return node.effective_type is NodeType.API
 
     async def _execute_capability(
         self,
         node: WorkflowNode,
         context: ExecutionContext,
-    ) -> JsonValue:
+    ) -> NodeResult | JsonValue:
+        if node.capability_id in CONTROL_CONFIG_MODELS:
+            return await StructuredControlRunner(self._definition, self).execute(node, context)
         if node.capability_id in {"graphql.request", "grpc.call"}:
             return await self._execute_protocol(node, context)
         if node.capability_id and node.capability_id.startswith(("kafka.", "websocket.")):
@@ -284,18 +353,20 @@ class WorkflowNodeExecutor:
                 code="INVALID_API_CONFIG", message=f"节点 {node.name} 的 API 配置无效"
             )
         prepared = self._requests[node.id]
+        base_request = _apply_control_templates(prepared.request, node.id, context)
+        redacted_base = _apply_control_templates(prepared.redacted_request, node.id, context)
         try:
             resolved_mappings = resolve_field_mappings(
                 self._mappings.get(node.id, ()),
                 context,
             )
             request, mapping_trace = _apply_mappings(
-                prepared.request,
+                base_request,
                 resolved_mappings,
                 context,
             )
             redacted_request = _apply_redacted_mappings(
-                prepared.redacted_request,
+                redacted_base,
                 resolved_mappings,
             )
         except MappingResolutionError as error:
@@ -361,7 +432,7 @@ class WorkflowNodeExecutor:
         started_at = datetime.now(UTC)
         started = perf_counter()
         try:
-            await self._outbound_guard.enforce(request.url, self._network_policy)
+            response = await self._send_api_http(request, prepared, timeout_seconds, context)
         except AppError as error:
             _record_http_observation(
                 context,
@@ -375,14 +446,6 @@ class WorkflowNodeExecutor:
                 error_message=error.message,
             )
             raise NodeExecutionError(code=error.code, message=error.message) from error
-        try:
-            response = await _send_request(
-                self._client,
-                request,
-                body_kind=prepared.body_kind,
-                timeout_seconds=timeout_seconds,
-                multipart=prepared.multipart,
-            )
         except httpx.TimeoutException as error:
             _record_http_observation(
                 context,
@@ -459,6 +522,29 @@ class WorkflowNodeExecutor:
             )
         return output
 
+    async def _send_api_http(
+        self,
+        request: PreparedRequest,
+        prepared: PreparedWorkflowRequest,
+        timeout_seconds: float,
+        context: ExecutionContext,
+    ) -> httpx.Response:
+        async def send() -> httpx.Response:
+            async with _api_request_window(context):
+                await self._outbound_guard.enforce(request.url, self._network_policy)
+                return await _send_request(
+                    self._client,
+                    request,
+                    body_kind=prepared.body_kind,
+                    timeout_seconds=timeout_seconds,
+                    multipart=prepared.multipart,
+                )
+
+        if context.outbound_admission is None:
+            return await send()
+        async with context.outbound_admission.window(timeout_seconds):
+            return await send()
+
     async def _execute_subflow(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
         config = parse_node_config(node)
         if not isinstance(config, SubFlowNodeConfig) or isinstance(config, ForEachNodeConfig):
@@ -471,6 +557,8 @@ class WorkflowNodeExecutor:
             prepared,
             context.resolved_variables(),
             context.request_budget,
+            leaf_semaphore=context.leaf_semaphore,
+            outbound_admission=context.outbound_admission,
             status_callback=context.status_callback,
             checkpoint_scope=_nested_scope(context.checkpoint_scope, "subflow", node.id),
             checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -605,6 +693,8 @@ class WorkflowNodeExecutor:
                 prepared,
                 variables,
                 context.request_budget,
+                leaf_semaphore=context.leaf_semaphore,
+                outbound_admission=context.outbound_admission,
                 status_callback=context.status_callback,
                 checkpoint_scope=checkpoint_scope,
                 checkpoint_phase=context.checkpoint_phase or node.phase,
@@ -629,6 +719,8 @@ class WorkflowNodeExecutor:
         runtime_variables: dict[str, JsonValue],
         request_budget: RequestBudget | None,
         *,
+        leaf_semaphore: asyncio.Semaphore | None,
+        outbound_admission: OutboundAdmission | None,
         status_callback: NodeStatusCallback | None,
         checkpoint_scope: tuple[str, ...],
         checkpoint_phase: WorkflowPhase,
@@ -648,6 +740,7 @@ class WorkflowNodeExecutor:
             data_runner=self._data_runner,
             protocol_nodes=prepared.protocol_nodes,
             event_nodes=prepared.event_nodes,
+            branch_client_factory=self._branch_client_factory,
         )
         resume_records = _nested_resume_records(
             prepared.definition,
@@ -663,7 +756,7 @@ class WorkflowNodeExecutor:
             )
             if nested_node is None:
                 return
-            consumes_request = node_type_consumes_request(nested_node.effective_type)
+            consumes_request = node_consumes_request(nested_node)
             should_checkpoint = update.status.is_terminal or (
                 consumes_request and update.status is NodeStatus.RUNNING and update.request_reserved
             )
@@ -695,6 +788,12 @@ class WorkflowNodeExecutor:
                 context=ExecutionContext(
                     workflow_variables=dict(prepared.definition.variables),
                     runtime_variables=runtime_variables,
+                    retry_safe_node_ids=retry_safe_request_nodes(
+                        prepared.definition, prepared.requests
+                    ),
+                    leaf_semaphore=leaf_semaphore,
+                    outbound_admission=outbound_admission,
+                    allow_return=True,
                     status_callback=status_callback,
                     checkpoint_scope=checkpoint_scope,
                     checkpoint_phase=checkpoint_phase,
@@ -842,6 +941,7 @@ def _subflow_output(prepared: PreparedSubflow, result: WorkflowRunResult) -> dic
         "workflow_version": prepared.workflow_version,
         "fingerprint": prepared.fingerprint,
         "status": result.status.value,
+        "return": result.return_output,
         "nodes": [
             {
                 "node_id": record.node_id,
@@ -971,10 +1071,10 @@ def _for_each_output(
 
 def _response_output(response: httpx.Response) -> dict[str, JsonValue]:
     size_bytes = len(response.content)
-    if size_bytes > settings.inline_body_limit_bytes:
+    if size_bytes > settings.artifact_limit_bytes:
         raise NodeExecutionError(
             code="WORKFLOW_RESPONSE_TOO_LARGE",
-            message="工作流节点响应超过 2 MB 内联上限",
+            message="工作流节点响应超过 50 MB 存储上限",
             output={
                 "status_code": response.status_code,
                 "size_bytes": size_bytes,
@@ -995,10 +1095,72 @@ def _mappings_by_target(
     definition: WorkflowDefinition,
 ) -> dict[str, tuple[FieldMapping, ...]]:
     grouped: dict[str, list[FieldMapping]] = {}
-    for edge in definition.edges:
+    for edge in (
+        *definition.edges,
+        *(edge for region in definition.regions for edge in region.edges),
+    ):
         if edge.mappings:
             grouped.setdefault(edge.target, []).extend(edge.mappings)
     return {node_id: tuple(items) for node_id, items in grouped.items()}
+
+
+def _apply_control_templates(
+    request: PreparedRequest, node_id: str, context: ExecutionContext
+) -> PreparedRequest:
+    variables = {
+        control_placeholder(node_id, name): value
+        for name, value in context.resolved_variables().items()
+        if name.startswith(("input.", "loop.", "state.", "error."))
+    }
+    url = request.url
+    for marker, value in variables.items():
+        url = url.replace(marker, quote(_string_value(value), safe=""))
+    rendered = replace(
+        request,
+        url=url,
+        headers=tuple(
+            replace(header, value=_render_control_text(header.value, variables))
+            for header in request.headers
+        ),
+        body=_render_control_value(request.body, variables),
+        variables=tuple(
+            replace(item, value=_render_control_text(item.value, variables))
+            for item in request.variables
+        ),
+    )
+    if _contains_unresolved_control_marker(rendered):
+        raise NodeExecutionError(
+            code="CONTROL_INPUT_MISSING",
+            message="控制区域请求引用了未绑定的输入",
+        )
+    return rendered
+
+
+def _contains_unresolved_control_marker(request: PreparedRequest) -> bool:
+    marker = re.compile(r"__FLOWTEST_CONTROL_[0-9a-f]{24}__")
+    return bool(
+        marker.search(request.url)
+        or any(marker.search(header.value) for header in request.headers)
+        or marker.search(json.dumps(request.body, ensure_ascii=False))
+    )
+
+
+def _render_control_value(value: JsonValue, variables: dict[str, JsonValue]) -> JsonValue:
+    if isinstance(value, dict):
+        return {name: _render_control_value(item, variables) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_render_control_value(item, variables) for item in value]
+    if not isinstance(value, str):
+        return value
+    if value in variables:
+        return variables[value]
+    return _render_control_text(value, variables)
+
+
+def _render_control_text(value: str, variables: dict[str, JsonValue]) -> str:
+    for marker, replacement in variables.items():
+        value = value.replace(marker, _string_value(replacement))
+    return value
 
 
 def _apply_mappings(

@@ -102,6 +102,10 @@ class NodeResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     status: NodeStatus
+    test_verdict: Literal["passed", "failed", "not_run"] | None = None
+    control_signal: Literal["break", "continue", "return"] | None = None
+    return_output: dict[str, JsonValue] | None = None
+    control_capability_id: str | None = None
     output: JsonValue = None
     assertions: tuple[NodeAssertion, ...] = ()
     metrics: tuple[NodeMetric, ...] = ()

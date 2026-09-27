@@ -22,13 +22,20 @@ from app.engine.capabilities import (
 )
 from app.engine.contracts import (
     ApiNodeConfig,
+    ConditionLoopConfig,
+    ControlSignalConfig,
+    FailControlConfig,
     ForEachNodeConfig,
     NodeType,
     RedisNodeConfig,
+    ReturnControlConfig,
     SqlNodeConfig,
     SubFlowNodeConfig,
+    TryControlConfig,
     WorkflowDefinition,
+    WorkflowNode,
     parse_api_node_config,
+    parse_control_config,
     parse_node_config,
 )
 from app.engine.event_nodes import (
@@ -46,6 +53,7 @@ from app.engine.protocol_nodes import (
     ProtocolCredentialMaterial,
     parse_protocol_config,
 )
+from app.engine.structured_control import control_placeholder
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.repositories.api_assets import APIAssetRepository
@@ -277,7 +285,7 @@ class WorkflowSnapshotBuilder:
         depth: int,
     ) -> dict[str, PreparedSubflow]:
         prepared: dict[str, PreparedSubflow] = {}
-        for node in definition.nodes:
+        for node in definition.all_nodes():
             if node.effective_type not in {NodeType.SUBFLOW, NodeType.FOR_EACH}:
                 continue
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
@@ -368,7 +376,7 @@ class WorkflowSnapshotBuilder:
         definition: WorkflowDefinition,
     ) -> dict[str, PreparedEventNode]:
         prepared: dict[str, PreparedEventNode] = {}
-        for node in definition.nodes:
+        for node in definition.all_nodes():
             if node.type is not NodeType.CAPABILITY or node.capability_id not in {
                 "kafka.produce",
                 "kafka.consume",
@@ -445,7 +453,7 @@ class WorkflowSnapshotBuilder:
         definition: WorkflowDefinition,
     ) -> dict[str, PreparedDataNode]:
         prepared: dict[str, PreparedDataNode] = {}
-        for node in definition.nodes:
+        for node in definition.all_nodes():
             if node.effective_type not in {NodeType.SQL, NodeType.REDIS}:
                 continue
             config = parse_node_config(legacy_node_adapter.as_legacy_node(node))
@@ -465,7 +473,7 @@ class WorkflowSnapshotBuilder:
         definition: WorkflowDefinition,
     ) -> dict[str, PreparedProtocolNode]:
         prepared: dict[str, PreparedProtocolNode] = {}
-        for node in definition.nodes:
+        for node in definition.all_nodes():
             if node.type is not NodeType.CAPABILITY or node.capability_id not in {
                 "graphql.request",
                 "grpc.call",
@@ -545,7 +553,7 @@ class WorkflowSnapshotBuilder:
     ) -> tuple[dict[str, PreparedWorkflowRequest], dict[str, JsonValue]]:
         requests: dict[str, PreparedWorkflowRequest] = {}
         api_snapshots: dict[str, JsonValue] = {}
-        for node in definition.nodes:
+        for node in definition.all_nodes():
             if node.effective_type is not NodeType.API:
                 continue
             legacy_node = legacy_node_adapter.as_legacy_node(node)
@@ -564,7 +572,10 @@ class WorkflowSnapshotBuilder:
                 environment_id=environment_id,
                 workflow_variables=definition.variables,
                 dataset_variables=_template_variables(dataset_variables),
-                runtime_variables=runtime_variables,
+                runtime_variables={
+                    **runtime_variables,
+                    **_control_template_variables(definition, node),
+                },
                 runtime_headers=runtime_headers,
                 config=config,
             )
@@ -782,7 +793,7 @@ def _capability_snapshots(definition: dict[str, object]) -> dict[str, JsonValue]
             JsonValue,
             capability_snapshot(node, registry=builtin_capability_registry),
         )
-        for node in workflow.nodes
+        for node in workflow.all_nodes()
     }
 
 
@@ -873,6 +884,27 @@ def _template_variables(values: dict[str, JsonValue]) -> dict[str, str]:
         else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
         for name, value in values.items()
     }
+
+
+def _control_template_variables(
+    definition: WorkflowDefinition, node: WorkflowNode
+) -> dict[str, str]:
+    region = next((region for region in definition.regions if node in region.nodes), None)
+    if region is None:
+        return {}
+    owner = next((item for item in definition.all_nodes() if item.id == region.owner_node_id), None)
+    if owner is None:
+        return {}
+    config = parse_control_config(owner)
+    if isinstance(config, (ControlSignalConfig, FailControlConfig, ReturnControlConfig)):
+        return {}
+    names = {f"input.{name}" for name in (*config.inputs, *region.inputs)}
+    names.update({"loop.item", "loop.index", "loop.iteration", "loop.total"})
+    if isinstance(config, ConditionLoopConfig):
+        names.update(f"state.{name}" for name in config.state)
+    if isinstance(config, TryControlConfig) and region.role.startswith("catch:"):
+        names.update({"error.code", "error.message"})
+    return {name: control_placeholder(node.id, name) for name in names}
 
 
 def _environment_snapshot(
@@ -984,6 +1016,12 @@ def _redacted_workflow_definition(
         return result
     for node in nodes:
         _redact_node_suppressed_values(node, apis)
+    regions = result.get("regions")
+    if isinstance(regions, list):
+        for region in regions:
+            if isinstance(region, dict) and isinstance(region.get("nodes"), list):
+                for node in region["nodes"]:
+                    _redact_node_suppressed_values(node, apis)
     return result
 
 

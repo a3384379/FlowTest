@@ -94,6 +94,44 @@ async def test_redis_execution_events_are_ordered_and_replayable() -> None:
         await client.aclose()
 
 
+async def test_concurrent_redis_execution_events_keep_sequence_and_history_order() -> None:
+    execution_id = uuid4()
+    client: Redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        bus = RedisExecutionEventBus(client, retention_seconds=60)
+        published = await asyncio.gather(
+            *(
+                bus.publish(
+                    ExecutionEvent(
+                        type=ExecutionEventType.NODE_STATUS,
+                        execution_id=execution_id,
+                        emitted_at=datetime.now(UTC),
+                        node_id=f"node-{index}",
+                        node_status="running",
+                    )
+                )
+                for index in range(80)
+            )
+        )
+        await bus.publish(
+            ExecutionEvent(
+                type=ExecutionEventType.EXECUTION_COMPLETED,
+                execution_id=execution_id,
+                emitted_at=datetime.now(UTC),
+                execution_status="passed",
+            )
+        )
+        replayed = [event async for event in bus.subscribe(execution_id)]
+
+        assert sorted(event.sequence for event in published) == list(range(1, 81))
+        assert [event.sequence for event in replayed] == list(range(1, 82))
+        assert {event.node_id for event in replayed[:-1]} == {
+            f"node-{index}" for index in range(80)
+        }
+    finally:
+        await client.aclose()
+
+
 async def test_data_nodes_execute_real_postgres_and_redis_reads() -> None:
     runner = InfrastructureDataNodeRunner(
         OutboundNetworkPolicy(),

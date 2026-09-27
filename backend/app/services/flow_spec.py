@@ -550,6 +550,8 @@ class FlowSpecService:
         target_definition = (
             _load_definition(target.draft_definition) if target is not None else None
         )
+        if target_definition is not None:
+            _require_control_exportable(target_definition)
         before = (
             workflow_definition_to_flow_spec(
                 target_definition,
@@ -1192,8 +1194,10 @@ class FlowSpecService:
         )
 
     def _target_spec(self, project_id: UUID, workflow: Workflow) -> FlowSpec:
+        definition = _load_definition(workflow.draft_definition)
+        _require_control_exportable(definition)
         return workflow_definition_to_flow_spec(
-            _load_definition(workflow.draft_definition),
+            definition,
             project_id=project_id,
             name=workflow.name,
             description=workflow.description,
@@ -1209,6 +1213,7 @@ class FlowSpecService:
         description: str,
         evidence: list[str],
     ) -> FlowSpec | FlowSpecV2:
+        _require_control_exportable(definition)
         operation_refs: dict[str, str] = {}
         targets: dict[str, FlowSpecNodeTarget] = {}
         services: dict[str, PortableService] = {}
@@ -1811,6 +1816,21 @@ def _snapshot_target_spec(snapshot: dict[str, Any]) -> FlowSpec | None:
 def _target_revision(snapshot: dict[str, Any]) -> int | None:
     value = snapshot.get("target_revision")
     return value if isinstance(value, int) else None
+
+
+def _require_control_exportable(definition: WorkflowDefinition) -> None:
+    control_ids = [
+        node.id
+        for node in definition.nodes
+        if (node.capability_id or "").startswith("flow.control.")
+    ]
+    if definition.regions or control_ids:
+        raise AppError(
+            code="FLOWSPEC_CONTROL_UNSUPPORTED",
+            message="当前 FlowSpec 尚不能保真表示控制区域",
+            status_code=422,
+            details={"control_node_ids": control_ids},
+        )
 
 
 def _require_pipeline_exportable(pipeline: FlowSpecPipeline) -> None:

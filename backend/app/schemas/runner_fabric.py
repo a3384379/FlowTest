@@ -19,7 +19,14 @@ class RunnerPoolCreate(BaseModel):
     runtime: Literal["docker", "kubernetes"] = "docker"
     network_zone: str = Field(default="default", min_length=1, max_length=100)
     labels: list[str] = Field(default_factory=list, max_length=50)
-    capabilities: list[str] = Field(default_factory=lambda: ["flow.workflow"], max_length=100)
+    capabilities: list[str] = Field(
+        default_factory=lambda: [
+            "flow.workflow",
+            "flow.workflow.schema4",
+            "flow.workflow.output-refs",
+        ],
+        max_length=100,
+    )
     max_concurrency: int = Field(default=20, ge=1, le=500)
     lease_timeout_seconds: int = Field(default=30, ge=10, le=300)
     heartbeat_timeout_seconds: int = Field(default=90, ge=15, le=600)
@@ -38,6 +45,7 @@ class RunnerPoolUpdate(BaseModel):
     lease_timeout_seconds: int | None = Field(default=None, ge=10, le=300)
     heartbeat_timeout_seconds: int | None = Field(default=None, ge=15, le=600)
     enabled: bool | None = None
+    capabilities: list[str] | None = Field(default=None, max_length=100)
 
 
 class RunnerResponse(BaseModel):
@@ -125,9 +133,13 @@ class RunnerLeaseTaskResponse(BaseModel):
     plan: str
     plan_sha256: str
     outbound_policy_enabled: bool = True
+    outbound_concurrency_limit: int | None = Field(default=None, ge=1, le=500)
+    outbound_requests_per_minute: int | None = Field(default=None, ge=1, le=60000)
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
     resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
+    inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
+    runner_result_limit_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
     reset_retry_budget: bool = False
     redaction_mode: Literal["off", "on"] = "off"
     redaction_policy_version: int = Field(default=1, ge=1)
@@ -200,13 +212,34 @@ class RunnerRenewRequest(BaseModel):
     fencing_token: int = Field(ge=1)
 
 
+class RunnerAcquirePermitRequest(RunnerRenewRequest):
+    timeout_seconds: float = Field(gt=0, le=3600)
+
+
+class RunnerAcquirePermitResponse(BaseModel):
+    granted: bool
+    permit_id: UUID | None
+    retry_after_seconds: float = Field(ge=0)
+
+
+class RunnerReleasePermitRequest(RunnerRenewRequest):
+    permit_id: UUID
+
+
 class RunnerProgressRequest(RunnerRenewRequest):
     progress_percent: float = Field(ge=0, le=100)
     message: str = Field(default="", max_length=300)
 
 
 class RunnerCompleteRequest(RunnerRenewRequest):
-    result: RunnerExecutionResult
+    result: RunnerExecutionResult | None = None
+    result_reference: dict[str, JsonValue] | None = None
+
+    @model_validator(mode="after")
+    def require_one_result_source(self) -> RunnerCompleteRequest:
+        if (self.result is None) == (self.result_reference is None):
+            raise ValueError("Runner completion requires one result or result reference")
+        return self
 
 
 class RunnerFailRequest(RunnerRenewRequest):
@@ -304,7 +337,14 @@ class RunnerAgentConfiguration(BaseModel):
     agent_version: str = Field(min_length=1, max_length=64)
     architecture: str = Field(min_length=1, max_length=32)
     labels: list[str] = Field(default_factory=list, max_length=50)
-    capabilities: list[str] = Field(default_factory=lambda: ["flow.workflow"], max_length=100)
+    capabilities: list[str] = Field(
+        default_factory=lambda: [
+            "flow.workflow",
+            "flow.workflow.schema4",
+            "flow.workflow.output-refs",
+        ],
+        max_length=100,
+    )
     max_concurrency: int = Field(default=1, ge=1, le=500)
     poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
     production: bool = False

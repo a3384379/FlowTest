@@ -195,6 +195,13 @@ def test_runner_control_plane_uses_dedicated_rate_limit() -> None:
         "runner-control",
         settings.runner_control_rate_limit_per_minute,
     )
+    permit_scope = dict(request.scope)
+    permit_scope["path"] = "/api/v1/runner-control/leases/abc/outbound-permits/acquire"
+    permit_scope["raw_path"] = permit_scope["path"].encode()
+    assert rate_limit_middleware._rule(Request(permit_scope)) == (
+        "runner-outbound-permits",
+        settings.runner_outbound_permit_rate_limit_per_minute,
+    )
 
 
 @pytest.mark.asyncio

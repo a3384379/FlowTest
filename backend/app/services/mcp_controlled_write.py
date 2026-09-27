@@ -27,10 +27,17 @@ from app.domain.test_design import (
     normalized_design,
     sensitive_paths,
 )
+from app.engine.contracts import WorkflowDefinition
 from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.test_design import ChangeSetApproval, TestDesign
 from app.repositories.ai_change_sets import AIChangeSetRepository
+from app.schemas.mcp_control_blocks import (
+    CONTROL_PROPOSAL_SCHEMA,
+    CONTROL_WORKFLOW_PROPOSAL_SCHEMA,
+    MCPControlBlockPreviewResponse,
+    MCPControlWorkflowDraft,
+)
 from app.schemas.mcp_planning import MCPTestPlanUpdateContent
 from app.schemas.test_assets import TestCaseDefinitionInput
 from app.schemas.test_design import (
@@ -40,10 +47,12 @@ from app.schemas.test_design import (
     MCPManualApprovalCreate,
     MCPTestCaseDraft,
 )
+from app.schemas.workflows import WorkflowControlBlockInsert
 from app.services.audit import AuditService
 from app.services.idempotency import IdempotencyService
 from app.services.projects import ProjectService
 from app.services.test_assets import TestCaseService
+from app.services.workflows import WorkflowService
 
 MCP_WRITE_SCOPE = "mcp:write"
 MCP_WRITE_SCHEMA_VERSION = "flowtest-mcp-controlled-write-schema-v1"
@@ -196,6 +205,55 @@ class MCPControlledWriteService:
             warnings=_warnings_from_snapshot(change_set),
         )
 
+    async def control_block_preview(
+        self, *, actor: User, change_set_id: UUID
+    ) -> MCPControlBlockPreviewResponse:
+        change_set = await self._get_change_set(change_set_id)
+        await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=False)
+        if change_set.source_snapshot.get("schema_version") != CONTROL_PROPOSAL_SCHEMA:
+            raise _not_found()
+        items = await self._change_sets.list_items(change_set.id)
+        if len(items) != 1 or items[0].item_type != "workflow":
+            raise AppError(
+                code="MCP_CHANGE_ITEM_INVALID",
+                message="控制块提案必须只包含一个工作流变更项",
+                status_code=409,
+            )
+        item = items[0]
+        if item.target_resource_id is None or (
+            change_set.source_snapshot.get("workflow_id") != str(item.target_resource_id)
+        ):
+            raise AppError(
+                code="MCP_CHANGE_ITEM_INVALID",
+                message="控制块提案的目标工作流无效",
+                status_code=409,
+            )
+        content = await self._validated_content(change_set, item, None)
+        edit = WorkflowControlBlockInsert.model_validate(content)
+        workflows = WorkflowService(self._session)
+        workflow = await workflows.get(
+            actor=actor,
+            project_id=change_set.project_id,
+            workflow_id=item.target_resource_id,
+        )
+        proposed = await workflows.preview_control_block_insert(
+            actor=actor,
+            project_id=change_set.project_id,
+            workflow_id=item.target_resource_id,
+            expected_revision=edit.expected_revision,
+            edge_id=edit.edge_id,
+            node=edit.node,
+            regions=edit.regions,
+            request_budget=edit.request_budget,
+            cleanup_request_budget=edit.cleanup_request_budget,
+        )
+        return MCPControlBlockPreviewResponse(
+            workflow_id=workflow.id,
+            base_revision=edit.expected_revision,
+            existing_definition=WorkflowDefinition.model_validate(workflow.draft_definition),
+            proposed_definition=proposed,
+        )
+
     async def approve(
         self,
         *,
@@ -299,7 +357,7 @@ class MCPControlledWriteService:
                 message="高风险受控写入必须先完成人工审批",
                 status_code=409,
             )
-        content = await self._validated_content(item, payload.content)
+        content = await self._validated_content(change_set, item, payload.content)
         materialized_type: str | None = None
         materialized_id: UUID | None = None
         if decision == "accept":
@@ -347,7 +405,10 @@ class MCPControlledWriteService:
         )
 
     async def _validated_content(
-        self, item: AIChangeItem, content: dict[str, JsonValue] | None
+        self,
+        change_set: AIChangeSet,
+        item: AIChangeItem,
+        content: dict[str, JsonValue] | None,
     ) -> dict[str, JsonValue]:
         candidate = (
             content if content is not None else cast(dict[str, JsonValue], item.proposed_content)
@@ -367,10 +428,24 @@ class MCPControlledWriteService:
                 return _json_object(
                     MCPTestPlanUpdateContent.model_validate(candidate).model_dump(mode="json")
                 )
+            if item.item_type == "workflow" and (
+                change_set.source_snapshot.get("schema_version") == CONTROL_PROPOSAL_SCHEMA
+            ):
+                edit = WorkflowControlBlockInsert.model_validate(candidate)
+                if edit.expected_revision != change_set.source_snapshot.get("base_revision"):
+                    raise ValueError("控制块提案不能修改基线修订号")
+                return _json_object(edit.model_dump(mode="json", exclude_none=True))
+            if item.item_type == "workflow" and (
+                change_set.source_snapshot.get("schema_version") == CONTROL_WORKFLOW_PROPOSAL_SCHEMA
+            ):
+                if item.action != "create" or item.target_resource_id is not None:
+                    raise ValueError("新建工作流提案不能指定已有工作流")
+                draft = MCPControlWorkflowDraft.model_validate(candidate)
+                return _json_object(draft.model_dump(mode="json", exclude_none=True))
         except (TypeError, ValueError) as error:
             raise AppError(
                 code="MCP_CHANGE_CONTENT_INVALID",
-                message="受控变更内容不符合 Test Design 或 Test Case 契约",
+                message="受控变更内容不符合提案契约",
                 status_code=422,
             ) from error
         raise AppError(
@@ -452,6 +527,49 @@ class MCPControlledWriteService:
                 change_set=change_set,
                 content=content,
             )
+        if item.item_type == "workflow" and (
+            change_set.source_snapshot.get("schema_version") == CONTROL_PROPOSAL_SCHEMA
+        ):
+            if item.target_resource_id is None:
+                raise AppError(
+                    code="MCP_CHANGE_ITEM_INVALID",
+                    message="控制块提案缺少目标工作流",
+                    status_code=409,
+                )
+            edit = WorkflowControlBlockInsert.model_validate(content)
+            workflow = await WorkflowService(self._session).insert_control_block(
+                actor=actor,
+                project_id=change_set.project_id,
+                workflow_id=item.target_resource_id,
+                expected_revision=edit.expected_revision,
+                edge_id=edit.edge_id,
+                node=edit.node,
+                regions=edit.regions,
+                request_budget=edit.request_budget,
+                cleanup_request_budget=edit.cleanup_request_budget,
+                commit=False,
+            )
+            return "workflow", workflow.id
+        if item.item_type == "workflow" and (
+            change_set.source_snapshot.get("schema_version") == CONTROL_WORKFLOW_PROPOSAL_SCHEMA
+        ):
+            workflow_draft = MCPControlWorkflowDraft.model_validate(content)
+            workflows = WorkflowService(self._session)
+            await workflows.validate_proposed_definition(
+                actor=actor,
+                project_id=change_set.project_id,
+                definition=workflow_draft.definition,
+            )
+            workflow = await workflows.create(
+                actor=actor,
+                project_id=change_set.project_id,
+                name=workflow_draft.name,
+                description=workflow_draft.description,
+                folder_id=None,
+                definition=workflow_draft.definition,
+                commit=False,
+            )
+            return "workflow", workflow.id
         raise AppError(
             code="MCP_CHANGE_ITEM_INVALID", message="MCP 不支持此变更项类型", status_code=422
         )
@@ -644,6 +762,16 @@ def _change_set_data(
         "id": str(change_set.id),
         "project_id": str(change_set.project_id),
         "title": change_set.title,
+        "workflow_id": (
+            change_set.source_snapshot.get("workflow_id")
+            if change_set.source_snapshot.get("schema_version") == CONTROL_PROPOSAL_SCHEMA
+            else None
+        ),
+        "base_revision": (
+            change_set.source_snapshot.get("base_revision")
+            if change_set.source_snapshot.get("schema_version") == CONTROL_PROPOSAL_SCHEMA
+            else None
+        ),
         "status": change_set.status,
         "source_type": change_set.source_type,
         "source_ref": change_set.source_ref,
@@ -671,6 +799,9 @@ def _change_set_data(
                 "item_type": item.item_type,
                 "action": item.action,
                 "title": item.title,
+                "target_resource_id": (
+                    str(item.target_resource_id) if item.target_resource_id else None
+                ),
                 "proposed_content": cast(dict[str, JsonValue], item.proposed_content),
                 "review_status": item.review_status,
                 "review_note": item.review_note,

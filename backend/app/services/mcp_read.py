@@ -37,6 +37,7 @@ from app.domain.mcp_read import (
     MCPReadEnvelope,
 )
 from app.domain.test_design import normalized_design
+from app.engine.contracts import CONTROL_MAX_REGION_DEPTH
 from app.models.access import Project, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.service_targets import Service, ServiceEndpoint
@@ -46,6 +47,7 @@ from app.repositories.service_targets import ServiceTargetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.test_engineering import TestEngineeringGenerateRequest
 from app.services.audit import AuditService
+from app.services.capabilities import CapabilityService
 from app.services.flow_spec import FlowSpecService
 from app.services.impact import ImpactService
 from app.services.projects import ProjectService
@@ -53,6 +55,20 @@ from app.services.test_engineering import TestEngineeringService
 from app.services.workflows import WorkflowService
 
 MAX_CONTRACTS = 100
+_CONTROL_WITH_BODIES = frozenset(
+    {
+        "foreach",
+        "repeat",
+        "if",
+        "switch",
+        "while",
+        "do_while",
+        "until",
+        "parallel",
+        "try",
+        "group",
+    }
+)
 
 
 class MCPReadService:
@@ -66,6 +82,53 @@ class MCPReadService:
         self._workflows = WorkflowRepository(session)
         self._workflow_service = WorkflowService(session)
         self._audit = AuditService(session)
+
+    async def discover_control_capabilities(
+        self, *, actor: User, call: MCPReadCall
+    ) -> MCPReadEnvelope:
+        self._require_scope()
+        views = await CapabilityService(self._session).list_capabilities(actor=actor)
+        controls: list[JsonValue] = []
+        for view in views:
+            manifest = view.manifest
+            if view.source != "builtin" or not manifest.id.startswith("flow.control."):
+                continue
+            kind = manifest.id.removeprefix("flow.control.")
+            controls.append(
+                {
+                    "capability_id": manifest.id,
+                    "version": manifest.version,
+                    "control_kind": kind,
+                    "display_name": manifest.display_name,
+                    "configuration_schema": manifest.configuration_schema,
+                    "input_schema": manifest.input_schema,
+                    "output_schema": manifest.output_schema,
+                    "inline_supported": kind in _CONTROL_WITH_BODIES,
+                    "ref_supported": False,
+                    "max_nesting_depth": CONTROL_MAX_REGION_DEPTH,
+                    "request_budget_required": True,
+                    "environment_dependency": (
+                        "inherited_from_region" if kind in _CONTROL_WITH_BODIES else "none"
+                    ),
+                    "enabled": view.enabled,
+                    "executable": view.enabled,
+                }
+            )
+        return await self._envelope(
+            actor=actor,
+            call=call,
+            data={"schema_version": "4.0", "items": controls, "total": len(controls)},
+            evidence_refs=[
+                EvidenceRef(
+                    uri="flowtest://capabilities/control",
+                    kind="control-capability-registry",
+                    version="4.0",
+                )
+            ],
+            warnings=[
+                "需要控制体的能力目前仅支持内联区域；Break/Continue 等无控制体能力另有作用域约束。"
+            ],
+        )
 
     async def list_projects(
         self,
@@ -797,11 +860,16 @@ def _workflow_summary(workflow: Workflow) -> dict[str, JsonValue]:
     edges = definition.get("edges", [])
     node_values = nodes if isinstance(nodes, list) else []
     edge_values = edges if isinstance(edges, list) else []
+    run_policy = definition.get("run_policy")
+    budget = run_policy if isinstance(run_policy, dict) else {}
     return {
         "id": str(workflow.id),
         "project_id": str(workflow.project_id),
         "name": workflow.name,
         "draft_revision": workflow.draft_revision,
+        "schema_version": _safe_scalar(definition.get("schema_version"), "1.0"),
+        "request_budget": budget.get("request_budget"),
+        "cleanup_request_budget": budget.get("cleanup_request_budget"),
         "current_version": workflow.current_version,
         "draft_fingerprint": _fingerprint(definition),
         "nodes": [_node_summary(node) for node in node_values if isinstance(node, dict)],
@@ -824,6 +892,7 @@ def _node_summary(node: dict[str, Any]) -> dict[str, JsonValue]:
 
 def _edge_summary(edge: dict[str, Any]) -> dict[str, JsonValue]:
     return {
+        "id": _safe_scalar(edge.get("id"), ""),
         "source": _safe_scalar(edge.get("source", edge.get("from")), ""),
         "target": _safe_scalar(edge.get("target", edge.get("to")), ""),
     }

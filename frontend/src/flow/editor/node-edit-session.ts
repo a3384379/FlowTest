@@ -28,8 +28,8 @@ export type WorkflowRequestIdentity = {
   apiDefinitionId: string
   apiVersion: number
 }
-export type RawFieldDraft = { text: string; error: string | null }
-export type WorkflowNodeEditKind = 'node' | 'edges'
+export type RawFieldDraft = { text: string; error: string | null; baseText?: string }
+export type WorkflowNodeEditKind = 'node' | 'edges' | 'regions' | 'structure'
 export type WorkflowNodeEditorDraft = {
   nodeId: string
   baseNode: WorkflowNode
@@ -44,6 +44,7 @@ export type WorkflowNodeEditorDraft = {
 export type NodeEditContextValue = {
   draft: WorkflowNodeEditorDraft
   setRaw: (key: string, value: RawFieldDraft) => void
+  clearRaw: (key: string) => void
   setRequest: (value: WorkflowRequestEditorDraft, dirty?: boolean) => void
   isRequestCurrent: (identity: WorkflowRequestIdentity) => boolean
   apply: (replacement?: WorkflowNode) => boolean

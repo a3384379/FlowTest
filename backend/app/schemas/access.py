@@ -128,6 +128,11 @@ class ProjectCapacityPolicy(BaseModel):
     queued_run_limit: int = Field(ge=1, le=5000)
 
 
+class ProjectOutboundPolicy(BaseModel):
+    outbound_concurrency_limit: int | None = Field(default=None, ge=1, le=500)
+    outbound_requests_per_minute: int | None = Field(default=None, ge=1, le=60_000)
+
+
 class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -43,10 +43,86 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/control/cursor-pages")
+async def control_cursor_pages(cursor: str = "") -> dict[str, object]:
+    if cursor not in {"", "page-2"}:
+        raise HTTPException(status_code=400, detail="Unknown cursor")
+    return {
+        "items": ["first"] if cursor == "" else ["second"],
+        "nextCursor": "page-2" if cursor == "" else "",
+        "hasNext": cursor == "",
+        "receivedCursor": cursor,
+    }
+
+
+def _control_cookie_count(request: Request, name: str) -> int:
+    raw = request.cookies.get(name, "0")
+    return min(int(raw), 1000) if raw.isdecimal() else 0
+
+
+@app.post("/control/tasks")
+async def control_submit_task(
+    request: Request, response: Response
+) -> dict[str, object]:
+    submissions = _control_cookie_count(request, "flowtest_submit_count") + 1
+    response.set_cookie("flowtest_submit_count", str(submissions), httponly=True)
+    return {"taskId": "mock-task", "submitCount": submissions}
+
+
+@app.get("/control/tasks/status")
+async def control_task_status(
+    request: Request,
+    response: Response,
+    task_id: Annotated[str, Query(alias="taskId")],
+    outcome: Literal["success", "failed", "pending"] = "success",
+) -> dict[str, object]:
+    if (
+        task_id != "mock-task"
+        or _control_cookie_count(request, "flowtest_submit_count") == 0
+    ):
+        raise HTTPException(status_code=404, detail="Task not found")
+    polls = _control_cookie_count(request, "flowtest_poll_count") + 1
+    response.set_cookie("flowtest_poll_count", str(polls), httponly=True)
+    status_value = (
+        "FAILED"
+        if outcome == "failed"
+        else "PROCESSING"
+        if outcome == "pending" or polls == 1
+        else "SUCCESS"
+    )
+    return {
+        "taskId": task_id,
+        "status": status_value,
+        "submitCount": _control_cookie_count(request, "flowtest_submit_count"),
+        "pollCount": polls,
+    }
+
+
+@app.get("/control/branches/{branch}/start")
+async def control_branch_start(
+    branch: Literal["a", "b"], response: Response
+) -> dict[str, str]:
+    response.set_cookie("flowtest_branch", branch, httponly=True)
+    await asyncio.sleep(0.02)
+    return {"branch": branch}
+
+
+@app.get("/control/branches/{branch}/check")
+async def control_branch_check(
+    branch: Literal["a", "b"], request: Request
+) -> dict[str, str]:
+    observed = request.cookies.get("flowtest_branch")
+    if observed != branch:
+        raise HTTPException(status_code=409, detail="Branch cookie crossed")
+    return {"branch": branch, "observedCookie": observed}
+
+
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
     if payload.username != "tester" or payload.password != "flowtest":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
     return {"code": 0, "data": {"token": "mock-token", "user_id": "user-001"}}
 
 
@@ -55,7 +131,9 @@ async def current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
+        )
     return {"code": 0, "data": {"id": "user-001", "name": "测试用户"}}
 
 
@@ -65,7 +143,9 @@ async def create_order(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer mock-token":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
+        )
     return {"code": 0, "data": {"id": str(uuid4()), **payload.model_dump()}}
 
 
@@ -124,7 +204,9 @@ async def inspect_s472_request(request: Request) -> dict[str, bool]:
         "authorization_present": "authorization" in request.headers,
         "tenant_header_present": "x-tenant-id" in request.headers,
         "api_key_present": "api_key" in query_names,
-        "auth_cookie_present": bool({"session", "auth_session"}.intersection(cookie_names)),
+        "auth_cookie_present": bool(
+            {"session", "auth_session"}.intersection(cookie_names)
+        ),
         "service_metadata": request.headers.get("x-service-metadata"),
     }
     app.state.last_s472_request = receipt
@@ -271,7 +353,9 @@ async def receive_flowtest_notification(request: Request) -> Response:
 async def last_flowtest_notification() -> dict[str, object]:
     notification = getattr(app.state, "last_notification", None)
     if not isinstance(notification, dict):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notification")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No notification"
+        )
     return notification
 
 
@@ -281,14 +365,22 @@ async def openai_compatible_completion(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     if authorization != "Bearer flowtest-mock-ai-key":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AI key"
+        )
     payload = await request.json()
     messages = payload.get("messages")
     if not isinstance(messages, list) or len(messages) < 2:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="No prompt"
+        )
     user_message = messages[-1]
-    if not isinstance(user_message, dict) or not isinstance(user_message.get("content"), str):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt")
+    if not isinstance(user_message, dict) or not isinstance(
+        user_message.get("content"), str
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Bad prompt"
+        )
     prompt = json.loads(user_message["content"])
     encoded_prompt = json.dumps(prompt, ensure_ascii=False)
     if "must-not-reach-ai" in encoded_prompt:
@@ -304,7 +396,9 @@ async def openai_compatible_completion(
         )
     suggestions = _ai_suggestions(str(job_type))
     return {
-        "choices": [{"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}],
+        "choices": [
+            {"message": {"content": json.dumps(suggestions, ensure_ascii=False)}}
+        ],
         "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
     }
 
@@ -372,6 +466,7 @@ def _change_set_workflow_definition() -> dict[str, object]:
                 "mappings": [],
             }
         ],
+        "regions": [],
         "settings": {
             "fail_fast": True,
             "concurrency": 20,

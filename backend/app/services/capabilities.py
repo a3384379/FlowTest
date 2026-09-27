@@ -119,6 +119,8 @@ class CapabilityService:
 
 
 def _builtin_enabled(manifest: CapabilityManifest) -> bool:
+    if manifest.version == "1.0.0" and manifest.id.startswith("flow.control."):
+        return True
     if manifest.version == "3.0.0" and manifest.id.startswith(("kafka.", "websocket.")):
         return (
             settings.feature_capability_sdk_enabled

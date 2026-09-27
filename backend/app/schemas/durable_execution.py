@@ -28,7 +28,7 @@ class ExecutionCommandDetailResponse(BaseModel):
     execution: WorkflowExecutionResponse
 
 
-class ExecutionCheckpointResponse(BaseModel):
+class ExecutionCheckpointSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -37,16 +37,21 @@ class ExecutionCheckpointResponse(BaseModel):
     node_type: NodeType
     node_name: str
     phase: WorkflowPhase
-    best_effort: bool
     attempt: int
-    input_hash: str
     status: NodeStatus
+    started_at: datetime | None
+    finished_at: datetime
+
+
+class ExecutionCheckpointResponse(ExecutionCheckpointSummaryResponse):
+    model_config = ConfigDict(from_attributes=True)
+
+    best_effort: bool
+    input_hash: str
     output_digest: str
     output: JsonValue
     result: dict[str, JsonValue]
     extracted_variables: dict[str, JsonValue]
-    started_at: datetime | None
-    finished_at: datetime
     snapshot_revision: int
     fencing_token: int
     lease_id: UUID | None

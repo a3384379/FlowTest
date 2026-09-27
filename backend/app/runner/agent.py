@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import platform
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
@@ -19,14 +20,23 @@ from app.core.redaction import (
     set_redaction_policy,
 )
 from app.domain.network import OutboundNetworkPolicy
+from app.domain.workflow_output_refs import OUTPUT_REFERENCE_CAPABILITY
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
-from app.runner.client import RunnerControlPlaneClient
+from app.runner.client import RemoteOutboundAdmission, RunnerControlPlaneClient
+from app.runner.output_storage import RunnerLeaseOutputStores, RunnerWorkflowBodyStore
+from app.runner.results import (
+    RunnerExecutionResult,
+    RunnerSingleExecutionResult,
+    RunnerWorkflowResult,
+)
 from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
     RunnerCheckpointRequest,
+    RunnerCheckpointResume,
+    RunnerCompleteRequest,
     RunnerLeaseResponse,
 )
 from app.services.workflow_plan_codec import decode_execution_plan
@@ -111,6 +121,16 @@ class RunnerAgent:
                 if _sha256(lease.task.plan) != lease.task.plan_sha256:
                     raise ValueError("Runner plan digest mismatch")
                 plan = decode_execution_plan(lease.task.plan)
+                body_stores = RunnerLeaseOutputStores(
+                    self._control_plane,
+                    lease_id=lease.lease_id,
+                    fencing_token=lease.task.fencing_token,
+                    inline_limit_bytes=lease.task.inline_body_limit_bytes,
+                )
+
+                resume_checkpoints = await _restore_resume_checkpoints(
+                    lease.task.resume_checkpoints, body_stores.get
+                )
 
                 async def progress(execution_id: UUID, update: NodeStatusUpdate) -> None:
                     acknowledgment = await self._control_plane.progress(
@@ -132,6 +152,9 @@ class RunnerAgent:
                             update,
                             execution_id=execution_id,
                         )
+                        checkpoint = await _compact_checkpoint(
+                            checkpoint, body_stores.get(execution_id)
+                        )
                         acknowledgment = await self._control_plane.checkpoint(
                             lease.lease_id, checkpoint
                         )
@@ -148,11 +171,20 @@ class RunnerAgent:
                         enabled=lease.task.outbound_policy_enabled,
                     ),
                     cancellation=cancellation,
+                    outbound_admission=(
+                        RemoteOutboundAdmission(
+                            self._control_plane, lease.lease_id, lease.task.fencing_token
+                        )
+                        if lease.task.outbound_concurrency_limit is not None
+                        or lease.task.outbound_requests_per_minute is not None
+                        else None
+                    ),
                     on_progress=progress,
-                    resume_checkpoints=lease.task.resume_checkpoints,
+                    resume_checkpoints=resume_checkpoints,
                     reset_retry_budget=lease.task.reset_retry_budget,
                 )
-                await self._control_plane.complete(lease.lease_id, lease.task.fencing_token, result)
+                submitted = await _compact_result(result, body_stores.get)
+                await _submit_completion(self._control_plane, lease, submitted, body_stores.get)
             except PreviewRuntimeBudgetExceeded:
                 with suppress(httpx.HTTPError):
                     await self._control_plane.fail(
@@ -163,14 +195,7 @@ class RunnerAgent:
                         retryable=False,
                     )
             except httpx.HTTPStatusError as error:
-                if error.response.status_code != 409:
-                    logger.warning(
-                        "Runner control plane rejected execution",
-                        extra={
-                            "lease_id": str(lease.lease_id),
-                            "status": error.response.status_code,
-                        },
-                    )
+                await self._handle_control_plane_rejection(lease, error)
             except Exception:
                 logger.exception("Runner execution failed", extra={"lease_id": str(lease.lease_id)})
                 with suppress(httpx.HTTPError):
@@ -185,6 +210,34 @@ class RunnerAgent:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
                 reset_redaction_policy(policy_token)
+
+    async def _handle_control_plane_rejection(
+        self, lease: RunnerLeaseResponse, error: httpx.HTTPStatusError
+    ) -> None:
+        status = error.response.status_code
+        if status == 409:
+            return
+        failure = {
+            410: (
+                "WORKFLOW_OUTPUT_REFERENCE_UNAVAILABLE",
+                "工作流输出引用对应的响应体已过保留期或不可用",
+            ),
+            413: ("RUNNER_OUTPUT_TOO_LARGE", "Runner 输出超过对象或消息大小上限"),
+        }.get(status)
+        if failure is not None:
+            with suppress(httpx.HTTPError):
+                await self._control_plane.fail(
+                    lease.lease_id,
+                    lease.task.fencing_token,
+                    error_code=failure[0],
+                    error_message=failure[1],
+                    retryable=False,
+                )
+            return
+        logger.warning(
+            "Runner control plane rejected execution",
+            extra={"lease_id": str(lease.lease_id), "status": status},
+        )
 
     async def _renew_until_done(
         self, lease: RunnerLeaseResponse, cancellation: CancellationToken
@@ -236,7 +289,15 @@ def configuration_from_environment() -> RunnerAgentConfiguration:
         agent_version=os.environ.get("FLOWTEST_RUNNER_AGENT_VERSION", "3.0.0-beta.3"),
         architecture=os.environ.get("FLOWTEST_RUNNER_ARCHITECTURE", platform.machine()),
         labels=_csv_environment("FLOWTEST_RUNNER_LABELS"),
-        capabilities=_csv_environment("FLOWTEST_RUNNER_CAPABILITIES", default=["flow.workflow"]),
+        capabilities=sorted(
+            set(
+                _csv_environment(
+                    "FLOWTEST_RUNNER_CAPABILITIES",
+                    default=["flow.workflow", "flow.workflow.schema4"],
+                )
+            )
+            | {OUTPUT_REFERENCE_CAPABILITY}
+        ),
         max_concurrency=int(os.environ.get("FLOWTEST_RUNNER_MAX_CONCURRENCY", "1")),
         poll_seconds=float(os.environ.get("FLOWTEST_RUNNER_POLL_SECONDS", "1")),
         production=os.environ.get("FLOWTEST_ENVIRONMENT", "local") == "production",
@@ -312,6 +373,96 @@ def _checkpoint_payload(
         phase=update.phase,
         best_effort=update.best_effort,
     )
+
+
+async def _compact_checkpoint(
+    checkpoint: RunnerCheckpointRequest, store: RunnerWorkflowBodyStore
+) -> RunnerCheckpointRequest:
+    compacted_result = (
+        None
+        if checkpoint.result is None
+        else NodeResult.model_validate(
+            await store.compact(checkpoint.result.model_dump(mode="json"))
+        )
+    )
+    return checkpoint.model_copy(
+        update={
+            "output": await store.compact(checkpoint.output),
+            "result": compacted_result,
+            "extracted_variables": await store.compact(checkpoint.extracted_variables),
+        }
+    )
+
+
+async def _compact_result(
+    result: RunnerExecutionResult,
+    store_for: Callable[[UUID], RunnerWorkflowBodyStore],
+) -> RunnerExecutionResult:
+    if isinstance(result, RunnerSingleExecutionResult):
+        return result.model_copy(
+            update={
+                "result": await _compact_workflow_result(
+                    result.result, store_for(result.execution_id)
+                )
+            }
+        )
+    children = []
+    for child in result.children:
+        compacted = await _compact_workflow_result(child.result, store_for(child.execution_id))
+        children.append(child.model_copy(update={"result": compacted}))
+    return result.model_copy(update={"children": tuple(children)})
+
+
+async def _submit_completion(
+    control_plane: RunnerControlPlaneClient,
+    lease: RunnerLeaseResponse,
+    result: RunnerExecutionResult,
+    store_for: Callable[[UUID], RunnerWorkflowBodyStore],
+) -> None:
+    completion = RunnerCompleteRequest(fencing_token=lease.task.fencing_token, result=result)
+    if len(completion.model_dump_json().encode()) > lease.task.runner_result_limit_bytes:
+        reference = await store_for(lease.task.execution_id).store(result.model_dump(mode="json"))
+        await control_plane.complete(
+            lease.lease_id, lease.task.fencing_token, result_reference=reference
+        )
+        return
+    await control_plane.complete(lease.lease_id, lease.task.fencing_token, result)
+
+
+async def _compact_workflow_result(
+    result: RunnerWorkflowResult, store: RunnerWorkflowBodyStore
+) -> RunnerWorkflowResult:
+    compacted = await store.compact(result.model_dump(mode="json"))
+    return RunnerWorkflowResult.model_validate(compacted)
+
+
+async def _restore_resume_checkpoints(
+    checkpoints: dict[str, list[RunnerCheckpointResume]],
+    store_for: Callable[[UUID], RunnerWorkflowBodyStore],
+) -> dict[str, list[RunnerCheckpointResume]]:
+    restored: dict[str, list[RunnerCheckpointResume]] = {}
+    for execution_id, items in checkpoints.items():
+        store = store_for(UUID(execution_id))
+        records: list[RunnerCheckpointResume] = []
+        for item in items:
+            result = (
+                None
+                if item.result is None
+                else NodeResult.model_validate(
+                    await store.restore(item.result.model_dump(mode="json"))
+                )
+            )
+            records.append(
+                item.model_copy(
+                    update={
+                        "output": await store.restore(item.output),
+                        "result": result,
+                        "extracted_variables": await store.restore(item.extracted_variables),
+                    }
+                )
+            )
+        restored[execution_id] = records
+    return restored
 
 
 def _retryable_control_plane_error(error: httpx.HTTPError) -> bool:

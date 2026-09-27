@@ -259,6 +259,11 @@ export type ProjectSecurityPolicy = {
   allowed_private_cidrs: string[]
 }
 
+export type ProjectOutboundPolicy = {
+  outbound_concurrency_limit: number | null
+  outbound_requests_per_minute: number | null
+}
+
 export type ProjectRetentionPolicy = {
   retention_days: number
   maximum_days: number
@@ -547,12 +552,25 @@ export type WorkflowRuntimeInputDefinition = {
   description: string
 }
 
+export type WorkflowRegion = {
+  id: string
+  owner_node_id: string
+  role: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  entry_node_id: string | null
+  exit_node_ids: string[]
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+}
+
 export type WorkflowDefinition = {
   runtime_inputs?: WorkflowRuntimeInputDefinition[]
   schema_version: string
   variables: Record<string, string>
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  regions?: WorkflowRegion[]
   settings: {
     fail_fast: boolean
     concurrency: number
@@ -823,9 +841,25 @@ export type ExecutionCheckpoint = {
   best_effort: boolean
   attempt: number
   status: WorkflowNodeExecution['status']
+  output: unknown
+  result: Record<string, unknown>
   started_at: string | null
   finished_at: string
 }
+
+export type ExecutionCheckpointSummary = Pick<
+  ExecutionCheckpoint,
+  | 'id'
+  | 'execution_id'
+  | 'node_id'
+  | 'node_type'
+  | 'node_name'
+  | 'phase'
+  | 'attempt'
+  | 'status'
+  | 'started_at'
+  | 'finished_at'
+>
 
 export type IntegrationPlanDiagnostic = {
   code: string
@@ -1012,6 +1046,9 @@ export type WorkflowExecution = {
   triggered_by_id: string
   parent_execution_id: string | null
   dataset_row_index: number | null
+  derived_from_execution_id?: string | null
+  rerun_loop_node_id?: string | null
+  rerun_input_indices?: number[] | null
   run_purpose?: 'standard' | 'preview'
   source_change_set_id?: string | null
   preview_approval_id?: string | null
@@ -1037,6 +1074,25 @@ export type WorkflowExecution = {
   force_cancel_reason?: string | null
   started_at: string
   completed_at: string | null
+}
+
+export type WorkflowIterationDebugSession = {
+  execution_id: string
+  target_node_id: string
+  pause_before_index: number
+  pause_on_error: boolean
+  pause_scope: 'target_loop'
+  status: 'armed' | 'running' | 'paused' | 'completed' | 'expired' | 'cancelled'
+  pause_reason: string | null
+  paused_input_index: number | null
+  last_completed_index: number
+  expires_at: string
+  revision: number
+}
+
+export type WorkflowIterationDebugStart = {
+  execution: WorkflowExecution
+  session: WorkflowIterationDebugSession
 }
 
 export type NodeResult = {
@@ -1118,6 +1174,17 @@ export type WorkflowExecutionDetail = {
   execution: WorkflowExecution
   nodes: WorkflowNodeExecution[]
   children: WorkflowExecution[]
+}
+
+export type WorkflowControlRecordSummary = {
+  ordinal: number
+  status: string
+  test_verdict: string
+}
+
+export type WorkflowControlRecordDetail = WorkflowControlRecordSummary & {
+  kind: 'iteration' | 'branch'
+  payload: Record<string, unknown>
 }
 
 export type TestPlanItem = {

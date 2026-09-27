@@ -19,7 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.config import settings
 from app.engine.contracts import WorkflowNode
 from app.engine.results import NodeResult
-from app.engine.scheduler import ExecutionContext, NodeExecutionError, NodeExecutor
+from app.engine.scheduler import (
+    ExecutionContext,
+    NodeExecutionError,
+    NodeExecutor,
+    RequestWindowExecutor,
+)
 
 INSTRUMENTATION_NAME = "flowtest"
 EXCLUDED_FASTAPI_URLS = "/api/v1/(health|live|ready|metrics)"
@@ -74,6 +79,11 @@ class TracingNodeExecutor:
     def __init__(self, executor: NodeExecutor) -> None:
         self._executor = executor
         self._tracer = trace.get_tracer(INSTRUMENTATION_NAME)
+
+    def manages_request_window(self, node: WorkflowNode) -> bool:
+        return isinstance(self._executor, RequestWindowExecutor) and (
+            self._executor.manages_request_window(node)
+        )
 
     async def execute(
         self, node: WorkflowNode, context: ExecutionContext

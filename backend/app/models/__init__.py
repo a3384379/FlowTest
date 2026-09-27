@@ -47,6 +47,7 @@ from app.models.governance import (
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
 from app.models.imports import ImportRun
 from app.models.organizations import Organization, OrganizationMember, ServiceAccount
+from app.models.outbound_limits import OutboundPermit, OutboundRateWindow
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.protocols import EventSource, SchemaArtifact
 from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
@@ -71,7 +72,14 @@ from app.models.test_assets import (
 )
 from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
 from app.models.test_design import ChangeSetApproval, TestDesign
-from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution, WorkflowVersion
+from app.models.workflow_debug import WorkflowDebugSession
+from app.models.workflows import (
+    Workflow,
+    WorkflowControlRecord,
+    WorkflowExecution,
+    WorkflowNodeExecution,
+    WorkflowVersion,
+)
 
 __all__ = [
     "AIChangeItem",
@@ -120,6 +128,8 @@ __all__ = [
     "OrganizationIdempotencyRecord",
     "OrganizationKeyVersion",
     "OrganizationMember",
+    "OutboundPermit",
+    "OutboundRateWindow",
     "PactContractVersion",
     "PactProviderVerification",
     "PerformanceGateEvaluation",
@@ -167,6 +177,8 @@ __all__ = [
     "TestSuiteVersionItem",
     "User",
     "Workflow",
+    "WorkflowControlRecord",
+    "WorkflowDebugSession",
     "WorkflowExecution",
     "WorkflowNodeExecution",
     "WorkflowVersion",

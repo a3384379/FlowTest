@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -84,6 +85,13 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             name="workflow_execution_dataset_child",
         ),
         CheckConstraint(
+            "(derived_from_execution_id IS NULL AND rerun_loop_node_id IS NULL "
+            "AND rerun_input_indices IS NULL) OR "
+            "(derived_from_execution_id IS NOT NULL AND rerun_loop_node_id IS NOT NULL "
+            "AND rerun_input_indices IS NOT NULL AND parent_execution_id IS NULL)",
+            name="workflow_execution_derived_run",
+        ),
+        CheckConstraint(
             "redaction_mode IN ('off', 'on')",
             name="redaction_mode",
         ),
@@ -119,6 +127,11 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("workflow_executions.id", ondelete="CASCADE"), index=True
     )
     dataset_row_index: Mapped[int | None] = mapped_column(Integer)
+    derived_from_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="RESTRICT"), index=True
+    )
+    rerun_loop_node_id: Mapped[str | None] = mapped_column(String(128))
+    rerun_input_indices: Mapped[list[int] | None] = mapped_column(JSON(none_as_null=True))
     run_purpose: Mapped[str] = mapped_column(
         String(16), default="standard", server_default="standard", index=True
     )
@@ -138,6 +151,7 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     cleanup_report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    context_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_message: Mapped[str | None] = mapped_column(Text)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
@@ -180,7 +194,42 @@ class WorkflowNodeExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer)
     output: Mapped[Any | None] = mapped_column(JSON)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    output_summary: Mapped[Any | None] = mapped_column(JSON(none_as_null=True))
+    result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkflowControlRecord(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "workflow_control_records"
+    __table_args__ = (
+        Index(
+            "ix_workflow_control_records_verdict_page",
+            "workflow_execution_id",
+            "node_id",
+            "kind",
+            "test_verdict",
+            "ordinal",
+        ),
+        UniqueConstraint(
+            "workflow_execution_id",
+            "node_id",
+            "kind",
+            "ordinal",
+            name="uq_workflow_control_records_execution_node_kind_ordinal",
+        ),
+        CheckConstraint("kind IN ('iteration', 'branch')", name="workflow_control_record_kind"),
+        CheckConstraint("ordinal >= 0", name="workflow_control_record_ordinal"),
+    )
+
+    workflow_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), index=True
+    )
+    node_id: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    test_verdict: Mapped[str] = mapped_column(String(16))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)

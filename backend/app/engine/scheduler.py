@@ -2,28 +2,36 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Coroutine
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from functools import partial
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import JsonValue
 
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     CleanupRunWhen,
+    ControlConfig,
+    ControlSignalConfig,
     DelayNodeConfig,
+    FailControlConfig,
     NodeStatus,
     NodeType,
     RetryCategory,
+    ReturnControlConfig,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowPhase,
+    WorkflowRegion,
     WorkflowRunStatus,
+    parse_control_config,
 )
-from app.engine.request_accounting import node_type_consumes_request
+from app.engine.request_accounting import node_consumes_request, node_type_consumes_request
 from app.engine.request_accounting import resumed_request_attempts as _resumed_request_attempts
 from app.engine.results import NodeObservation, NodeResult, normalize_node_result
 
@@ -82,6 +90,9 @@ class WorkflowRunResult:
     main_status: WorkflowRunStatus | None = None
     cleanup_status: WorkflowRunStatus | None = None
     cleanup_report: CleanupReport | None = None
+    control_signal: Literal["break", "continue", "return"] | None = None
+    return_output: dict[str, JsonValue] | None = None
+    unknown_outcome: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +119,10 @@ NodeStatusCallback = Callable[[NodeStatusUpdate], Awaitable[None]]
 NESTED_CHECKPOINT_PREFIX = "__nested_request__:"
 
 
+class OutboundAdmission(Protocol):
+    def window(self, timeout_seconds: float) -> AbstractAsyncContextManager[None]: ...
+
+
 @dataclass(slots=True)
 class RequestBudget:
     remaining: int
@@ -132,21 +147,52 @@ class RequestBudget:
             self.parent._consume()
 
 
+class IterationDebugGate(Protocol):
+    async def before_iteration(
+        self,
+        *,
+        owner_node_id: str,
+        input_index: int,
+        scope: tuple[str, ...],
+        context: "ExecutionContext",
+    ) -> None: ...
+
+    async def after_iteration(
+        self,
+        *,
+        owner_node_id: str,
+        input_index: int,
+        scope: tuple[str, ...],
+        context: "ExecutionContext",
+        status: WorkflowRunStatus,
+    ) -> None: ...
+
+
 @dataclass(slots=True)
 class ExecutionContext:
     workflow_variables: dict[str, JsonValue] = field(default_factory=dict)
     dataset_variables: dict[str, JsonValue] = field(default_factory=dict)
     runtime_variables: dict[str, JsonValue] = field(default_factory=dict)
+    input_variables: dict[str, JsonValue] = field(default_factory=dict)
+    loop_variables: dict[str, JsonValue] = field(default_factory=dict)
+    state_variables: dict[str, JsonValue] = field(default_factory=dict)
+    error_variables: dict[str, JsonValue] = field(default_factory=dict)
     _node_outputs: dict[str, JsonValue] = field(default_factory=dict)
     _extracted_variables: dict[str, JsonValue] = field(default_factory=dict)
     _variable_sources: dict[str, JsonValue] = field(default_factory=dict)
     _node_observations: dict[str, list[NodeObservation]] = field(default_factory=dict)
     request_attempts: dict[str, int] = field(default_factory=dict, repr=False)
+    retry_safe_node_ids: frozenset[str] = field(default_factory=frozenset, repr=False)
     request_reservers: dict[str, Callable[[], Awaitable[None]]] = field(
         default_factory=dict, repr=False
     )
     request_budget: RequestBudget | None = field(default=None, repr=False)
+    cleanup_budget: RequestBudget | None = field(default=None, repr=False)
+    node_instance_budget: RequestBudget | None = field(default=None, repr=False)
+    leaf_semaphore: asyncio.Semaphore | None = field(default=None, repr=False)
+    outbound_admission: OutboundAdmission | None = field(default=None, repr=False)
     status_callback: NodeStatusCallback | None = field(default=None, repr=False)
+    iteration_debug_gate: IterationDebugGate | None = field(default=None, repr=False)
     checkpoint_scope: tuple[str, ...] = field(default=(), repr=False)
     checkpoint_phase: WorkflowPhase | None = field(default=None, repr=False)
     checkpoint_best_effort: bool = field(default=False, repr=False)
@@ -156,6 +202,9 @@ class ExecutionContext:
     )
     reset_retry_budget: bool = field(default=False, repr=False)
     cancellation: "CancellationToken | None" = field(default=None, repr=False)
+    allow_return: bool = False
+    rerun_loop_node_id: str | None = field(default=None, repr=False)
+    rerun_input_indices: frozenset[int] = field(default_factory=frozenset, repr=False)
 
     def __post_init__(self) -> None:
         self._record_scope(self.workflow_variables, "workflow")
@@ -164,6 +213,9 @@ class ExecutionContext:
 
     def output_of(self, node_id: str) -> JsonValue:
         return self._node_outputs.get(node_id)
+
+    def has_output(self, node_id: str) -> bool:
+        return node_id in self._node_outputs
 
     def record_output(self, node_id: str, output: JsonValue) -> None:
         self._node_outputs[node_id] = output
@@ -205,11 +257,19 @@ class ExecutionContext:
             **self._extracted_variables,
             **self.dataset_variables,
             **self.runtime_variables,
+            **{f"input.{name}": value for name, value in self.input_variables.items()},
+            **{f"loop.{name}": value for name, value in self.loop_variables.items()},
+            **{f"state.{name}": value for name, value in self.state_variables.items()},
+            **{f"error.{name}": value for name, value in self.error_variables.items()},
         }
 
     def snapshot(self) -> dict[str, JsonValue]:
         return {
             "runtime_variables": dict(self.runtime_variables),
+            "input_variables": dict(self.input_variables),
+            "loop_variables": dict(self.loop_variables),
+            "state_variables": dict(self.state_variables),
+            "error_variables": dict(self.error_variables),
             "workflow_variables": dict(self.workflow_variables),
             "dataset_variables": dict(self.dataset_variables),
             "resolved_variables": self.resolved_variables(),
@@ -239,10 +299,16 @@ class NodeExecutor(Protocol):
     ) -> NodeResult | JsonValue: ...
 
 
+@runtime_checkable
+class RequestWindowExecutor(Protocol):
+    def manages_request_window(self, node: WorkflowNode) -> bool: ...
+
+
 class CancellationToken:
-    def __init__(self) -> None:
+    def __init__(self, parent: "CancellationToken | None" = None) -> None:
         self._event = asyncio.Event()
         self._force_event = asyncio.Event()
+        self._parent = parent
 
     def cancel(self, *, force: bool = False) -> None:
         self._event.set()
@@ -251,14 +317,27 @@ class CancellationToken:
 
     @property
     def cancelled(self) -> bool:
-        return self._event.is_set()
+        return self._event.is_set() or (self._parent is not None and self._parent.cancelled)
 
     @property
     def force_cancelled(self) -> bool:
-        return self._force_event.is_set()
+        return self._force_event.is_set() or (
+            self._parent is not None and self._parent.force_cancelled
+        )
 
     async def wait(self, *, force_only: bool = False) -> None:
-        await (self._force_event if force_only else self._event).wait()
+        event = self._force_event if force_only else self._event
+        if self._parent is None:
+            await event.wait()
+            return
+        own_wait = asyncio.create_task(event.wait())
+        parent_wait = asyncio.create_task(self._parent.wait(force_only=force_only))
+        try:
+            await asyncio.wait({own_wait, parent_wait}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            own_wait.cancel()
+            parent_wait.cancel()
+            await asyncio.gather(own_wait, parent_wait, return_exceptions=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +350,31 @@ class _AttemptReservation:
 class WorkflowScheduler:
     def __init__(self, executor: NodeExecutor) -> None:
         self._executor = executor
+
+    async def run_region(
+        self,
+        definition: WorkflowDefinition,
+        region: WorkflowRegion,
+        *,
+        context: ExecutionContext,
+        cancellation: CancellationToken,
+        on_node_status: NodeStatusCallback | None = None,
+        resume_records: tuple[NodeRunRecord, ...] = (),
+    ) -> WorkflowRunResult:
+        return await self._run_phase(
+            definition,
+            nodes_for_phase=tuple(region.nodes),
+            edges_for_phase=tuple(region.edges),
+            context=context,
+            cancellation=cancellation,
+            on_node_status=on_node_status,
+            selected_node_ids=None,
+            resume_records=resume_records,
+            resume_attempts={record.node_id: record.attempts for record in resume_records},
+            reset_retry_budget=False,
+            preserve_terminal_records=False,
+            request_budget=context.request_budget,
+        )
 
     async def run(
         self,
@@ -297,6 +401,23 @@ class WorkflowScheduler:
                 }
             )
         run_context.reset_retry_budget = reset_retry_budget
+        if definition.schema_version == "4.0" and run_context.node_instance_budget is None:
+            restored_ids = {record.node_id for record in resume_records}
+            run_context.node_instance_budget = RequestBudget(max(10_000 - len(restored_ids), 0))
+        if definition.schema_version == "4.0" and run_context.leaf_semaphore is None:
+            run_context.leaf_semaphore = asyncio.Semaphore(definition.settings.concurrency)
+        if (
+            definition.schema_version == "4.0"
+            and run_context.cleanup_budget is None
+            and definition.run_policy.cleanup_request_budget is not None
+        ):
+            run_context.cleanup_budget = RequestBudget(
+                max(
+                    definition.run_policy.cleanup_request_budget
+                    - _nested_request_attempts(resume_records, phase=WorkflowPhase.CLEANUP),
+                    0,
+                )
+            )
         token = cancellation or CancellationToken()
         run_context.cancellation = token
         main_nodes = tuple(node for node in definition.nodes if node.phase is WorkflowPhase.MAIN)
@@ -363,6 +484,9 @@ class WorkflowScheduler:
                 records=main.records,
                 context=main.context,
                 main_status=main.status,
+                control_signal=main.control_signal,
+                return_output=main.return_output,
+                unknown_outcome=main.unknown_outcome,
             )
         return await self._run_cleanup(
             definition,
@@ -415,7 +539,7 @@ class WorkflowScheduler:
             activated,
             resume_attempts,
             reset=reset_retry_budget,
-            parent=shared_request_budget,
+            parent=context.cleanup_budget or shared_request_budget,
             resume_records=resume_records,
             phase=WorkflowPhase.CLEANUP,
         )
@@ -489,10 +613,13 @@ class WorkflowScheduler:
         run_context = context
         token = cancellation
         nodes = {node.id: node for node in nodes_for_phase}
+        phase = nodes_for_phase[0].phase if nodes_for_phase else WorkflowPhase.MAIN
         incoming = _incoming_edges(nodes_for_phase, edges_for_phase)
         statuses = dict.fromkeys(nodes, NodeStatus.PENDING)
         records: dict[str, NodeRunRecord] = {}
         active: dict[asyncio.Task[NodeRunRecord], str] = {}
+        control_signal: Literal["break", "continue", "return"] | None = None
+        return_output: dict[str, JsonValue] | None = None
         notified: dict[str, NodeStatus] = {}
         attempt_offsets = resume_attempts or {}
         _restore_request_attempts(run_context, resume_records)
@@ -523,13 +650,19 @@ class WorkflowScheduler:
             resume_records,
             preserve_terminal=preserve_terminal_records,
         )
+        if definition.schema_version == "4.0":
+            _restore_uncertain_requests(nodes, statuses, records, run_context, resume_records)
 
         await _notify_status_changes(
             nodes, statuses, records, notified, run_context, on_node_status
         )
 
         while len(records) < len(nodes):
-            if _phase_cancelled(token, force_only=cancellation_force_only):
+            if _phase_cancelled(token, force_only=cancellation_force_only) or _has_unknown_outcome(
+                records,
+                run_context.nested_checkpoint_records,
+                run_context.checkpoint_phase or phase,
+            ):
                 await _cancel_active(active)
                 _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
                 await _notify_status_changes(
@@ -578,21 +711,26 @@ class WorkflowScheduler:
             cancellation_wait.cancel()
             await asyncio.gather(cancellation_wait, return_exceptions=True)
 
-            failed = False
-            completed_tasks = [task for task in tuple(active) if task in done]
-            for task in completed_tasks:
-                node_id = active.pop(task)
-                record = task.result()
-                records[node_id] = record
-                statuses[node_id] = record.status
-                if record.status is NodeStatus.PASSED:
-                    run_context.record_output(node_id, record.output)
-                else:
-                    failed = failed or fail_fast_on_error
+            failed, control_signal, return_output = _record_completed_tasks(
+                active,
+                done,
+                records,
+                statuses,
+                run_context,
+                fail_fast_on_error=fail_fast_on_error,
+            )
 
             await _notify_status_changes(
                 nodes, statuses, records, notified, run_context, on_node_status
             )
+
+            if control_signal is not None:
+                await _cancel_active(active)
+                _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED, reservations)
+                await _notify_status_changes(
+                    nodes, statuses, records, notified, run_context, on_node_status
+                )
+                break
 
             if failed and definition.settings.fail_fast:
                 await _cancel_active(active)
@@ -603,11 +741,16 @@ class WorkflowScheduler:
                 break
 
         ordered = tuple(records[node.id] for node in nodes_for_phase)
-        status = _workflow_status(ordered)
+        status, unknown_outcome = _phase_status(
+            ordered, records, run_context.nested_checkpoint_records, phase
+        )
         return WorkflowRunResult(
             status=status,
             records=ordered,
             context=run_context.snapshot(),
+            control_signal=control_signal,
+            return_output=return_output,
+            unknown_outcome=unknown_outcome,
             main_status=(
                 status
                 if nodes_for_phase and nodes_for_phase[0].phase is WorkflowPhase.MAIN
@@ -633,28 +776,26 @@ class WorkflowScheduler:
     ) -> NodeRunRecord:
         started_at = datetime.now(UTC)
         input_hash = _input_hash(node.id, context.snapshot())
+        instance_error = _claim_node_instance_budget(context.node_instance_budget)
+        if instance_error is not None:
+            return _failed_record(
+                node,
+                initial_attempts,
+                started_at,
+                instance_error,
+                input_hash=input_hash,
+            )
         policy = _execution_policy(node, default_timeout_seconds)
         attempts = initial_attempts
         budget_attempts = 0 if reset_retry_budget else initial_attempts
         while True:
-            if (
-                request_budget is not None
-                and _node_consumes_request(node)
-                and not request_budget.claim()
-            ):
-                is_cleanup = node.phase is WorkflowPhase.CLEANUP
+            budget_error = _claim_node_request_budget(node, request_budget)
+            if budget_error is not None:
                 return _failed_record(
                     node,
                     attempts,
                     started_at,
-                    NodeExecutionError(
-                        code=(
-                            "CLEANUP_REQUEST_BUDGET_EXHAUSTED"
-                            if is_cleanup
-                            else "REQUEST_BUDGET_EXHAUSTED"
-                        ),
-                        message="清理请求预算已耗尽" if is_cleanup else "请求预算已耗尽",
-                    ),
+                    budget_error,
                     input_hash=input_hash,
                 )
             attempts += 1
@@ -677,48 +818,12 @@ class WorkflowScheduler:
                 callback=on_node_status,
             )
             await context.request_reservers[node.id]()
-            failure: NodeExecutionError
-            try:
-                async with asyncio.timeout(policy.timeout_seconds):
-                    result = normalize_node_result(await self._executor.execute(node, context))
-                observations = context.observations_of(node.id)
-                if observations and not result.observations:
-                    result = result.model_copy(update={"observations": observations})
-                error = result.error
-                return _record(
-                    node,
-                    result.status,
-                    attempts=attempts,
-                    output=result.output,
-                    result=result,
-                    error_code=error.code if error else None,
-                    error_message=error.message if error else None,
-                    started_at=started_at,
-                    input_hash=input_hash,
-                )
-            except TimeoutError:
-                failure = NodeExecutionError(
-                    code="NODE_TIMEOUT",
-                    message=f"节点在 {policy.timeout_seconds} 秒后超时",
-                    category=RetryCategory.NETWORK_ERROR,
-                )
-            except NodeExecutionError as caught:
-                failure = caught
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                return _failed_record(
-                    node,
-                    attempts,
-                    started_at,
-                    NodeExecutionError(
-                        code="NODE_EXECUTION_ERROR",
-                        message="节点执行发生未预期错误",
-                    ),
-                    observations=context.observations_of(node.id),
-                    input_hash=input_hash,
-                )
-
+            outcome = await self._execute_node_attempt(
+                node, context, policy, attempts, started_at, input_hash
+            )
+            if isinstance(outcome, NodeRunRecord):
+                return outcome
+            failure = outcome
             if budget_attempts > policy.max_retries or failure.category not in policy.retry_on:
                 return _failed_record(
                     node,
@@ -730,6 +835,83 @@ class WorkflowScheduler:
                 )
             if policy.retry_delay_seconds:
                 await asyncio.sleep(policy.retry_delay_seconds)
+
+    async def _execute_node_attempt(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        policy: "_ExecutionPolicy",
+        attempts: int,
+        started_at: datetime,
+        input_hash: str,
+    ) -> NodeRunRecord | NodeExecutionError:
+        try:
+            async with asyncio.timeout(policy.timeout_seconds):
+                result = normalize_node_result(
+                    await self._invoke_node_executor(node, context, policy.timeout_seconds)
+                )
+            if node.capability_id in CONTROL_CONFIG_MODELS:
+                result = result.model_copy(update={"control_capability_id": node.capability_id})
+            observations = context.observations_of(node.id)
+            if observations and not result.observations:
+                result = result.model_copy(update={"observations": observations})
+            error = result.error
+            return _record(
+                node,
+                result.status,
+                attempts=attempts,
+                output=result.output,
+                result=result,
+                error_code=error.code if error else None,
+                error_message=error.message if error else None,
+                started_at=started_at,
+                input_hash=input_hash,
+            )
+        except TimeoutError:
+            return NodeExecutionError(
+                code="NODE_TIMEOUT",
+                message=f"节点在 {policy.timeout_seconds} 秒后超时",
+                category=RetryCategory.NETWORK_ERROR,
+            )
+        except NodeExecutionError as caught:
+            return caught
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return _failed_record(
+                node,
+                attempts,
+                started_at,
+                NodeExecutionError(code="NODE_EXECUTION_ERROR", message="节点执行发生未预期错误"),
+                observations=context.observations_of(node.id),
+                input_hash=input_hash,
+            )
+
+    async def _invoke_node_executor(
+        self, node: WorkflowNode, context: ExecutionContext, timeout_seconds: float = 30
+    ) -> NodeResult | JsonValue:
+        semaphore = context.leaf_semaphore
+        manages_window = isinstance(self._executor, RequestWindowExecutor) and (
+            self._executor.manages_request_window(node)
+        )
+        if not _node_consumes_request(node) or manages_window:
+            return await self._executor.execute(node, context)
+        admission = context.outbound_admission
+        if admission is not None:
+            async with admission.window(timeout_seconds):
+                return await self._execute_with_local_window(node, context, semaphore)
+        return await self._execute_with_local_window(node, context, semaphore)
+
+    async def _execute_with_local_window(
+        self,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        semaphore: asyncio.Semaphore | None,
+    ) -> NodeResult | JsonValue:
+        if semaphore is None:
+            return await self._executor.execute(node, context)
+        async with semaphore:
+            return await self._executor.execute(node, context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -792,8 +974,26 @@ def _store_attempt_reservation(
         )
 
 
+def _claim_node_instance_budget(budget: RequestBudget | None) -> NodeExecutionError | None:
+    if budget is None or budget.claim():
+        return None
+    return NodeExecutionError(code="NODE_INSTANCE_BUDGET_EXHAUSTED", message="节点实例预算已耗尽")
+
+
+def _claim_node_request_budget(
+    node: WorkflowNode, budget: RequestBudget | None
+) -> NodeExecutionError | None:
+    if budget is None or not _node_consumes_request(node) or budget.claim():
+        return None
+    if node.phase is WorkflowPhase.CLEANUP:
+        return NodeExecutionError(
+            code="CLEANUP_REQUEST_BUDGET_EXHAUSTED", message="清理请求预算已耗尽"
+        )
+    return NodeExecutionError(code="REQUEST_BUDGET_EXHAUSTED", message="请求预算已耗尽")
+
+
 def _node_consumes_request(node: WorkflowNode) -> bool:
-    return node_type_consumes_request(node.effective_type)
+    return node_consumes_request(node)
 
 
 def _nested_request_attempts(
@@ -807,6 +1007,7 @@ def _nested_request_attempts(
             record.node_id.startswith(NESTED_CHECKPOINT_PREFIX)
             and record.phase is phase
             and node_type_consumes_request(record.node_type)
+            and record.result.control_capability_id is None
         ):
             attempts[record.node_id] = max(
                 attempts.get(record.node_id, 0),
@@ -926,7 +1127,11 @@ def _cleanup_report(
     required = tuple(record.node_id for record in failures if not record.best_effort)
     warnings = tuple(
         CleanupWarning(
-            code="BEST_EFFORT_CLEANUP_FAILED",
+            code=(
+                "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                if record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                else "BEST_EFFORT_CLEANUP_FAILED"
+            ),
             node_id=record.node_id,
             message=record.error_message or "Best-effort 清理失败",
         )
@@ -959,9 +1164,19 @@ def _combined_result(
     report: CleanupReport,
 ) -> WorkflowRunResult:
     records = {record.node_id: record for record in (*main.records, *cleanup_records)}
-    cleanup_status = _cleanup_run_status(cleanup_records, report)
     status = main.status
-    if main.status is WorkflowRunStatus.PASSED and report.required_failures:
+    unknown_cleanup = any(
+        record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN" for record in cleanup_records
+    ) or any(
+        record.phase is WorkflowPhase.CLEANUP and record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+        for record in context.nested_checkpoint_records.values()
+    )
+    cleanup_status = (
+        WorkflowRunStatus.FAILED
+        if unknown_cleanup
+        else _cleanup_run_status(cleanup_records, report)
+    )
+    if main.status is WorkflowRunStatus.PASSED and (report.required_failures or unknown_cleanup):
         status = WorkflowRunStatus.FAILED
     return WorkflowRunResult(
         status=status,
@@ -970,6 +1185,9 @@ def _combined_result(
         main_status=main.status,
         cleanup_status=cleanup_status,
         cleanup_report=report,
+        control_signal=main.control_signal,
+        return_output=main.return_output,
+        unknown_outcome=main.unknown_outcome or unknown_cleanup,
     )
 
 
@@ -985,7 +1203,21 @@ def _cleanup_run_status(
     return WorkflowRunStatus.PASSED
 
 
+def _control_timeout(config: ControlConfig) -> int:
+    if isinstance(config, (ControlSignalConfig, FailControlConfig, ReturnControlConfig)):
+        return 1
+    return config.policy.timeout_seconds
+
+
 def _execution_policy(node: WorkflowNode, default_timeout_seconds: int) -> _ExecutionPolicy:
+    if node.capability_id in CONTROL_CONFIG_MODELS:
+        control_config = parse_control_config(node)
+        return _ExecutionPolicy(
+            timeout_seconds=_control_timeout(control_config),
+            max_retries=0,
+            retry_on=frozenset(),
+            retry_delay_seconds=0,
+        )
     if node.effective_type is NodeType.API:
         config = ApiNodeConfig.model_validate(node.effective_config)
         request_timeout = config.timeout_seconds or default_timeout_seconds
@@ -1231,6 +1463,35 @@ def _exclude_unselected(
         )
 
 
+def _record_completed_tasks(
+    active: dict[asyncio.Task[NodeRunRecord], str],
+    done: set[asyncio.Task[NodeRunRecord | None]],
+    records: dict[str, NodeRunRecord],
+    statuses: dict[str, NodeStatus],
+    context: ExecutionContext,
+    *,
+    fail_fast_on_error: bool,
+) -> tuple[bool, Literal["break", "continue", "return"] | None, dict[str, JsonValue] | None]:
+    failed = False
+    signal: Literal["break", "continue", "return"] | None = None
+    return_output: dict[str, JsonValue] | None = None
+    for task in tuple(active):
+        if task not in done:
+            continue
+        node_id = active.pop(task)
+        record = task.result()
+        records[node_id] = record
+        statuses[node_id] = record.status
+        if record.status is NodeStatus.PASSED:
+            context.record_output(node_id, record.output)
+        else:
+            failed = failed or fail_fast_on_error
+        if record.result.control_signal is not None:
+            signal = record.result.control_signal
+            return_output = record.result.return_output
+    return failed, signal, return_output
+
+
 def _restore_records(
     nodes: dict[str, WorkflowNode],
     statuses: dict[str, NodeStatus],
@@ -1253,6 +1514,65 @@ def _restore_records(
         records[record.node_id] = record
         if record.status is NodeStatus.PASSED:
             context.record_output(record.node_id, record.output)
+
+
+def _restore_uncertain_requests(
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    context: ExecutionContext,
+    resume_records: tuple[NodeRunRecord, ...],
+) -> None:
+    latest = {record.node_id: record for record in resume_records}
+    for node_id, previous in latest.items():
+        node = nodes.get(node_id)
+        if node is None:
+            continue
+        if previous.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN":
+            statuses[node_id] = NodeStatus.FAILED
+            records[node_id] = previous
+            continue
+        if not node_consumes_request(node):
+            continue
+        if (
+            previous.status is not NodeStatus.RUNNING
+            or previous.attempts < 1
+            or node_id in context.retry_safe_node_ids
+        ):
+            continue
+        message = "请求已预留但外部结果未知, 需先查证或明确处理后才能继续"
+        records[node_id] = _failed_record(
+            node,
+            previous.attempts,
+            previous.started_at or datetime.now(UTC),
+            NodeExecutionError(code="SIDE_EFFECT_OUTCOME_UNKNOWN", message=message),
+            input_hash=previous.input_hash,
+        )
+        statuses[node_id] = NodeStatus.FAILED
+
+
+def _has_unknown_outcome(
+    records: dict[str, NodeRunRecord],
+    nested_records: dict[str, NodeRunRecord],
+    phase: WorkflowPhase,
+) -> bool:
+    return any(
+        record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN" for record in records.values()
+    ) or any(
+        (record.phase is phase or phase is WorkflowPhase.MAIN)
+        and record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+        for record in nested_records.values()
+    )
+
+
+def _phase_status(
+    ordered: tuple[NodeRunRecord, ...],
+    records: dict[str, NodeRunRecord],
+    nested_records: dict[str, NodeRunRecord],
+    phase: WorkflowPhase,
+) -> tuple[WorkflowRunStatus, bool]:
+    unknown = _has_unknown_outcome(records, nested_records, phase)
+    return (WorkflowRunStatus.FAILED if unknown else _workflow_status(ordered), unknown)
 
 
 def _failed_record(
@@ -1327,7 +1647,10 @@ def _record(
 
 
 def _workflow_status(records: tuple[NodeRunRecord, ...]) -> WorkflowRunStatus:
-    if any(record.status is NodeStatus.FAILED for record in records):
+    if any(
+        record.status is NodeStatus.FAILED or record.result.test_verdict == "failed"
+        for record in records
+    ):
         return WorkflowRunStatus.FAILED
     if any(record.status is NodeStatus.CANCELLED for record in records):
         return WorkflowRunStatus.CANCELLED

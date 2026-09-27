@@ -56,7 +56,7 @@ spec:
             - name: FLOWTEST_RUNNER_ARCHITECTURE
               value: arm64
             - name: FLOWTEST_RUNNER_CAPABILITIES
-              value: flow.workflow
+              value: flow.workflow,flow.workflow.schema4
             - name: FLOWTEST_RUNNER_MAX_CONCURRENCY
               value: "4"
           resources:

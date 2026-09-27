@@ -1,11 +1,12 @@
-import { apiClient } from '../../lib/api'
+import { apiClient, type WorkflowDefinition } from '../../lib/api'
 
 export type MCPChangeItem = {
   id: string
   position: number
-  item_type: 'test_design' | 'test_case' | 'test_plan_update'
+  item_type: 'test_design' | 'test_case' | 'test_plan_update' | 'workflow'
   action: 'create' | 'update'
   title: string
+  target_resource_id?: string | null
   proposed_content: Record<string, unknown>
   review_status: 'pending' | 'accepted' | 'rejected'
   review_note: string
@@ -19,6 +20,8 @@ export type MCPChangeSet = {
   id: string
   project_id: string
   title: string
+  workflow_id?: string | null
+  base_revision?: number | null
   status: 'draft' | 'partially_reviewed' | 'accepted' | 'rejected'
   source_type: 'mcp'
   source_ref: string | null
@@ -50,8 +53,25 @@ type MCPChangeSetEnvelope = {
   trace_id: string
 }
 
+export type MCPControlBlockPreview = {
+  workflow_id: string
+  base_revision: number
+  existing_definition: WorkflowDefinition
+  proposed_definition: WorkflowDefinition
+}
+
 export async function getMCPChangeSet(changeSetId: string): Promise<MCPChangeSetEnvelope> {
   return (await apiClient.get<MCPChangeSetEnvelope>(`/mcp/write/change-sets/${changeSetId}`)).data
+}
+
+export async function getMCPControlBlockPreview(
+  changeSetId: string,
+): Promise<MCPControlBlockPreview> {
+  return (
+    await apiClient.get<MCPControlBlockPreview>(
+      `/mcp/write/change-sets/${changeSetId}/control-block-preview`,
+    )
+  ).data
 }
 
 export async function approveMCPChangeSet(

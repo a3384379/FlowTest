@@ -1,6 +1,6 @@
 # Workflow contract
 
-Use this reference whenever the skill is invoked. The quick path is the default; deep stages are an explicit branch. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
+Use this reference whenever the skill is invoked. The Quick FlowSpec path is the default; new native control workflows, insertion into an existing workflow, and deep evidence stages are explicit branches. The output of one stage is the input identity for the next stage; never reconstruct IDs or revisions from memory.
 
 ## Quick path (default)
 
@@ -11,6 +11,17 @@ Use this reference whenever the skill is invoked. The quick path is the default;
 5. For each explicitly requested flow, use a distinct idempotency key and share the caller's `task_ref` for correlated proposals. A failed proposal does not roll back or recreate successful proposals.
 
 Use the deep path below only when the user explicitly asks for evidence, full coverage, source/database analysis, or an audit.
+
+For ordinary generation, select at most three representative cases and keep the flow serial unless its real behavior requires another structure. Existing API IDs and pinned versions take priority over copied assets. FlowSpec has no lossless schema 4.0 region representation. When the user requests an inline ForEach, IF/Switch, condition loop, parallel branch, or Try/Finally in an existing workflow, use the native control-block proposal path below. Do not replace it with repeated flat nodes or an unrelated legacy node.
+
+## Native control-block proposal (only when requested)
+
+1. Use `inspect_flow` to read the target workflow ID, project ID, current `draft_revision`, main edge ID, schema version, and budget. Use `discover_control_capabilities` to confirm the requested kind and version are executable with inline regions.
+2. Follow [control-blocks.md](control-blocks.md) to construct one control node and its regions. Supply the exact `expected_revision`, the chosen unmapped main edge ID, and an explicit main request budget when upgrading to schema 4.0. Use existing pinned API assets for body steps.
+3. Call `propose_control_block` once with a distinct idempotency key. It validates the entire candidate but writes only a pending MCP ChangeSet. Preserve `proposal_id`, `item_id`, `base_revision`, and `review_url`; the target draft is unchanged.
+4. Stop at the returned human MCP ChangeSet review page. The agent must never call the accept/reject route. A human acceptance rechecks the revision, atomically inserts the block into the draft, and still does not publish or execute it.
+
+If there is no existing authorized workflow or safe main edge, use the separate `propose_control_workflow` path only when the user requested a new native control workflow. See [control-workflows.md](control-workflows.md). If the required tool, authorized project, pinned assets, or executable capability is missing, return the exact blocker.
 
 | Stage | FlowTest MCP operations | Required result |
 | --- | --- | --- |

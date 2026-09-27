@@ -16,6 +16,12 @@ from app.api.dependencies import (
 from app.composition import build_workflow_service
 from app.domain.evidence_adapters import EntityMappingResult
 from app.domain.integration_plans import IntegrationPlan, IntegrationPlanCompilation
+from app.schemas.mcp_control_blocks import (
+    MCPControlBlockProposalRequest,
+    MCPControlBlockProposalResponse,
+    MCPControlWorkflowProposalRequest,
+    MCPControlWorkflowProposalResponse,
+)
 from app.schemas.mcp_simple_flows import SimpleFlowProposalResponse, SimpleFlowRequest
 from app.schemas.sandbox_preview import (
     MCPSandboxPreviewExecuteRequest,
@@ -45,6 +51,8 @@ from app.schemas.workflows import WorkflowExecutionResponse
 from app.services.durable_execution import DurableExecutionService
 from app.services.evidence_adapters import EvidenceAdapterService
 from app.services.idempotency import IdempotencyService, require_idempotency_key
+from app.services.mcp_control_blocks import MCPControlBlockProposalService
+from app.services.mcp_control_workflows import MCPControlWorkflowProposalService
 from app.services.mcp_flow_proposals import MCPFlowProposalService
 from app.services.mcp_integration_plans import MCPIntegrationPlanService
 from app.services.mcp_simple_flows import MCPSimpleFlowService
@@ -267,6 +275,42 @@ async def propose_simple_flow(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> SimpleFlowProposalResponse:
     return await MCPSimpleFlowService(session).propose(
+        actor=principal.actor,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+
+
+@flow_router.post(
+    "/control-block-proposals",
+    response_model=MCPControlBlockProposalResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def propose_control_block(
+    payload: MCPControlBlockProposalRequest,
+    session: SessionDependency,
+    principal: MCPFlowProposalCurrent,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> MCPControlBlockProposalResponse:
+    return await MCPControlBlockProposalService(session).propose(
+        actor=principal.actor,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+
+
+@flow_router.post(
+    "/control-workflow-proposals",
+    response_model=MCPControlWorkflowProposalResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def propose_control_workflow(
+    payload: MCPControlWorkflowProposalRequest,
+    session: SessionDependency,
+    principal: MCPFlowProposalCurrent,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> MCPControlWorkflowProposalResponse:
+    return await MCPControlWorkflowProposalService(session).propose(
         actor=principal.actor,
         payload=payload,
         idempotency_key=idempotency_key,

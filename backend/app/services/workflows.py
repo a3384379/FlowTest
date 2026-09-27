@@ -26,6 +26,8 @@ from app.core.redaction import (
     set_redaction_policy,
 )
 from app.domain.api_assets import BodyKind
+from app.domain.control_block_edits import ControlBlockEditError, insert_control_block
+from app.domain.control_reports import summarize_execution_context
 from app.domain.data_nodes import (
     CredentialKind,
     DataNodeValidationError,
@@ -50,22 +52,35 @@ from app.domain.sandbox_preview import (
 from app.domain.test_assets import VersionChange, version_changes
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.contracts import (
+    CONTROL_CONFIG_MODELS,
     ApiNodeConfig,
     ApiNodeMultipartBody,
     AssertNodeConfig,
     CleanupRunWhen,
+    ConditionLoopConfig,
     ConditionNodeConfig,
     DatasetNodeConfig,
     ExtractNodeConfig,
+    ForEachControlConfig,
     ForEachNodeConfig,
+    InlineControlBody,
     MappingTargetLocation,
+    NodeOutputValueSource,
+    NodeStatus,
     NodeType,
     RedisNodeConfig,
+    RepeatControlConfig,
     SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowNode,
     WorkflowPhase,
+    WorkflowRegion,
+    condition_sources,
+    control_bodies,
+    control_external_sources,
+    parse_control_config,
     parse_node_config,
 )
 from app.engine.event_nodes import (
@@ -87,9 +102,11 @@ from app.engine.request_accounting import node_type_consumes_request, resumed_re
 from app.engine.request_accounting import (
     preview_node_request_attempts as _preview_node_request_attempts,
 )
+from app.engine.results import NodeResult
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
+    IterationDebugGate,
     NodeRunRecord,
     NodeStatusCallback,
     RequestBudget,
@@ -98,10 +115,12 @@ from app.engine.scheduler import (
 )
 from app.models.access import Folder, Project, User
 from app.models.artifacts import Artifact
+from app.models.durable_execution import ExecutionCheckpoint
 from app.models.runner_fabric import RunnerTask
 from app.models.tasking import TestPlanItem
 from app.models.workflows import (
     Workflow,
+    WorkflowControlRecord,
     WorkflowExecution,
     WorkflowNodeExecution,
     WorkflowVersion,
@@ -109,7 +128,13 @@ from app.models.workflows import (
 from app.observability.tracing import TracingNodeExecutor, workflow_span
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.data_sources import DataSourceRepository
-from app.repositories.workflows import WorkflowRepository
+from app.repositories.durable_execution import DurableExecutionRepository
+from app.repositories.workflows import (
+    WorkflowControlRecordSummary,
+    WorkflowExecutionReport,
+    WorkflowNodeExecutionReport,
+    WorkflowRepository,
+)
 from app.runner.results import (
     RunnerBatchExecutionResult,
     RunnerExecutionResult,
@@ -122,9 +147,15 @@ from app.services.durable_execution import DurableExecutionService, checkpoint_t
 from app.services.encryption_keys import active_key_reference_for_project
 from app.services.event_sources import EventSourceService
 from app.services.organization_governance import OrganizationQuotaService
+from app.services.outbound_limits import project_outbound_admission
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
-from app.services.workflow_runtime import PreparedSubflow, WorkflowNodeExecutor
+from app.services.workflow_output_storage import WorkflowOutputStorage
+from app.services.workflow_runtime import (
+    PreparedSubflow,
+    WorkflowNodeExecutor,
+    retry_safe_request_nodes,
+)
 from app.services.workflow_snapshots import (
     PreparedExecution,
     PreparedWorkflow,
@@ -159,6 +190,55 @@ class WorkflowRunPlan:
     prepared: PreparedExecution
     runtime_variables: dict[str, str]
     request_budget: int | None = None
+    selected_node_ids: frozenset[str] | None = None
+    rerun_loop_node_id: str | None = None
+    rerun_input_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowIterationDebugOptions:
+    loop_node_id: str
+    pause_before_index: int
+
+
+def _validate_iteration_debug_target(
+    definition: WorkflowDefinition, options: WorkflowIterationDebugOptions
+) -> None:
+    node = next((item for item in definition.nodes if item.id == options.loop_node_id), None)
+    if definition.schema_version != "4.0" or node is None or node.phase is not WorkflowPhase.MAIN:
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="逐轮调试需要主流程中的内联控制循环",
+            status_code=422,
+        )
+    if not node.capability_id or not node.capability_id.startswith("flow.control."):
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="指定节点不是可调试的控制循环",
+            status_code=422,
+        )
+    config = parse_control_config(node)
+    if not isinstance(config, ForEachControlConfig | RepeatControlConfig | ConditionLoopConfig):
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="指定节点不是可调试的控制循环",
+            status_code=422,
+        )
+    if not isinstance(config.body, InlineControlBody) or config.policy.concurrency != 1:
+        raise AppError(
+            code="DEBUG_PARALLEL_SCOPE_UNSUPPORTED",
+            message="逐轮调试当前只暂停单个串行内联循环, 并发轮次不会被隐式全局暂停",
+            status_code=422,
+        )
+    maximum = (
+        config.count if isinstance(config, RepeatControlConfig) else config.policy.max_iterations
+    )
+    if options.pause_before_index >= maximum:
+        raise AppError(
+            code="DEBUG_ITERATION_OUT_OF_RANGE",
+            message="暂停轮次超过循环上限",
+            status_code=422,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +255,239 @@ class WorkflowBatchPlan:
 
 
 WorkflowExecutionPlan = WorkflowRunPlan | WorkflowBatchPlan
+
+
+def _rerun_main_scope(definition: WorkflowDefinition, loop_node_id: str) -> set[str]:
+    if definition.schema_version != "4.0":
+        raise AppError(
+            code="RERUN_SCHEMA_UNSUPPORTED",
+            message="仅支持结构化控制流的失败项重跑",
+            status_code=409,
+        )
+    if any(node.phase is WorkflowPhase.CLEANUP for node in definition.nodes):
+        raise AppError(
+            code="RERUN_CLEANUP_SCOPE_UNSUPPORTED",
+            message="包含流程清理阶段的工作流尚不能安全派生轮次运行",
+            status_code=409,
+        )
+    target = next((node for node in definition.nodes if node.id == loop_node_id), None)
+    if target is None:
+        raise AppError(
+            code="RERUN_LOOP_NOT_FOUND", message="主流程中没有指定的循环节点", status_code=404
+        )
+    if target.phase is not WorkflowPhase.MAIN or target.capability_id != "flow.control.foreach":
+        raise AppError(
+            code="RERUN_LOOP_UNSUPPORTED", message="只能选择主流程中的内联 ForEach", status_code=409
+        )
+    scope = {loop_node_id}
+    while True:
+        incoming = {edge.source for edge in definition.edges if edge.target in scope}
+        expanded = scope | incoming
+        if expanded == scope:
+            return scope
+        scope = expanded
+
+
+def _failed_rerun_items(
+    loop_result: WorkflowNodeExecution | None,
+    input_indices: list[int],
+) -> list[dict[str, JsonValue]]:
+    output = loop_result.output if loop_result is not None else None
+    items = output.get("items") if isinstance(output, dict) else None
+    if not isinstance(items, list) or len(input_indices) != len(set(input_indices)):
+        raise AppError(
+            code="RERUN_SOURCE_ITEMS_UNAVAILABLE",
+            message="原运行缺少可验证的冻结轮次报告",
+            status_code=409,
+        )
+    all_indices = [item.get("input_index") for item in items if isinstance(item, dict)]
+    if (
+        len(all_indices) != len(items)
+        or any(type(index) is not int for index in all_indices)
+        or len(set(cast(list[int], all_indices))) != len(items)
+    ):
+        raise AppError(
+            code="RERUN_SOURCE_ITEMS_UNAVAILABLE",
+            message="原运行的轮次索引不完整或重复",
+            status_code=409,
+        )
+    indexed = {
+        item["input_index"]: item
+        for item in items
+        if isinstance(item, dict)
+        and type(item.get("input_index")) is int
+        and item.get("test_verdict") == "failed"
+    }
+    if any(index not in indexed for index in input_indices):
+        raise AppError(
+            code="RERUN_INPUT_NOT_FAILED",
+            message="只能选择原报告中明确失败的 input_index",
+            status_code=409,
+        )
+    return [cast(dict[str, JsonValue], indexed[index]) for index in input_indices]
+
+
+def _rerun_reused_checkpoints(
+    history: list[ExecutionCheckpoint],
+    upstream_node_ids: set[str],
+    selected: list[dict[str, JsonValue]],
+    region: WorkflowRegion,
+    source_plan: WorkflowRunPlan,
+    *,
+    write_retry_strategy: str,
+    upstream_resource_status: str,
+    verification_note: str | None,
+) -> list[ExecutionCheckpoint]:
+    latest: dict[str, ExecutionCheckpoint] = {}
+    for row in history:
+        if row.node_id not in latest or row.attempt > latest[row.node_id].attempt:
+            latest[row.node_id] = row
+    safe_ids = retry_safe_request_nodes(source_plan.definition, source_plan.prepared.requests)
+    all_nodes = {node.id: node for node in source_plan.definition.all_nodes()}
+    region_nodes = {node.id: node for node in region.nodes}
+    reused: list[ExecutionCheckpoint] = []
+    for node_id in upstream_node_ids:
+        upstream_row = latest.get(node_id)
+        if upstream_row is None or upstream_row.status != "passed":
+            raise AppError(
+                code="RERUN_UPSTREAM_CHECKPOINT_UNAVAILABLE",
+                message="原运行的上游输出不完整, 不能安全复用",
+                status_code=409,
+            )
+        reused.append(upstream_row)
+    for item in selected:
+        reused.extend(
+            _rerun_item_checkpoints(item, latest, region_nodes, safe_ids, write_retry_strategy)
+        )
+    reused_writes = any(
+        _rerun_node_may_write(all_nodes[row.node_id], safe_ids)
+        for row in reused
+        if row.node_id in all_nodes
+    ) or any(
+        _rerun_node_may_write(region_nodes[node_id], safe_ids)
+        for item in selected
+        for node_id in _passed_item_node_ids(item)
+    )
+    if upstream_resource_status == "expired" or (
+        reused_writes and upstream_resource_status != "confirmed_valid"
+    ):
+        raise AppError(
+            code="RERUN_RESOURCE_VERIFICATION_REQUIRED",
+            message="复用写操作的输出前需确认外部资源仍有效",
+            status_code=409,
+        )
+    if (
+        write_retry_strategy == "verified_safe_to_retry"
+        or upstream_resource_status == "confirmed_valid"
+    ) and not verification_note:
+        raise AppError(
+            code="RERUN_VERIFICATION_NOTE_REQUIRED",
+            message="请记录外部状态查证说明",
+            status_code=422,
+        )
+    return reused
+
+
+def _passed_item_node_ids(item: dict[str, JsonValue]) -> set[str]:
+    summaries = item.get("nodes")
+    if not isinstance(summaries, list):
+        return set()
+    passed: set[str] = set()
+    for summary in summaries:
+        if isinstance(summary, dict) and summary.get("status") == "passed":
+            node_id = summary.get("node_id")
+            if isinstance(node_id, str):
+                passed.add(node_id)
+    return passed
+
+
+def _rerun_item_checkpoints(
+    item: dict[str, JsonValue],
+    latest: dict[str, ExecutionCheckpoint],
+    region_nodes: dict[str, WorkflowNode],
+    safe_ids: frozenset[str],
+    write_retry_strategy: str,
+) -> list[ExecutionCheckpoint]:
+    summaries = item.get("nodes")
+    if not isinstance(summaries, list) or not summaries:
+        raise AppError(
+            code="RERUN_INSTANCE_RECORD_UNAVAILABLE",
+            message="失败轮次缺少实例记录, 无法判断写操作是否已发生",
+            status_code=409,
+        )
+    reused: list[ExecutionCheckpoint] = []
+    for summary in summaries:
+        if not isinstance(summary, dict):
+            raise AppError(
+                code="RERUN_INSTANCE_RECORD_UNAVAILABLE", message="实例记录无效", status_code=409
+            )
+        node_id = summary.get("node_id")
+        instance_id = summary.get("instance_id")
+        if (
+            not isinstance(node_id, str)
+            or node_id not in region_nodes
+            or not isinstance(instance_id, str)
+        ):
+            raise AppError(
+                code="RERUN_INSTANCE_RECORD_UNAVAILABLE", message="实例记录不完整", status_code=409
+            )
+        instance_row = latest.get(instance_id)
+        if summary.get("status") == "passed":
+            if instance_row is None or instance_row.status != "passed":
+                raise AppError(
+                    code="RERUN_INSTANCE_CHECKPOINT_UNAVAILABLE",
+                    message="成功步骤缺少可复用 checkpoint, 不能避免重复发送",
+                    status_code=409,
+                )
+            reused.append(instance_row)
+        elif (
+            _rerun_node_may_write(region_nodes[node_id], safe_ids)
+            and write_retry_strategy != "verified_safe_to_retry"
+        ):
+            raise AppError(
+                code="RERUN_WRITE_VERIFICATION_REQUIRED",
+                message="失败步骤可能产生外部写入, 需先查证再明确选择重试策略",
+                status_code=409,
+            )
+    return reused
+
+
+def _rerun_node_may_write(node: WorkflowNode, safe_ids: frozenset[str]) -> bool:
+    if node.id in safe_ids:
+        return False
+    return node.effective_type in {
+        NodeType.API,
+        NodeType.SUBFLOW,
+        NodeType.FOR_EACH,
+        NodeType.CAPABILITY,
+    }
+
+
+def _copy_rerun_checkpoint(row: ExecutionCheckpoint, execution_id: UUID) -> ExecutionCheckpoint:
+    now = datetime.now(UTC)
+    return ExecutionCheckpoint(
+        id=uuid4(),
+        project_id=row.project_id,
+        execution_id=execution_id,
+        node_id=row.node_id,
+        node_type=row.node_type,
+        node_name=row.node_name,
+        phase=row.phase,
+        best_effort=row.best_effort,
+        attempt=row.attempt,
+        input_hash=row.input_hash,
+        status=row.status,
+        output_digest=row.output_digest,
+        output=row.output,
+        result=row.result,
+        extracted_variables=row.extracted_variables,
+        started_at=now,
+        finished_at=now,
+        snapshot_revision=row.snapshot_revision,
+        fencing_token=0,
+        lease_id=None,
+        runner_id=None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +609,35 @@ class WorkflowService:
             await self._session.commit()
             await self._session.refresh(workflow)
         return workflow
+
+    async def validate_proposed_definition(
+        self, *, actor: User, project_id: UUID, definition: WorkflowDefinition
+    ) -> None:
+        """Apply the same project-scoped checks used when publishing a workflow."""
+
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        await self._validate_publishable(project_id, uuid4(), definition)
+
+    async def import_native_definition(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        name: str,
+        description: str,
+        definition: WorkflowDefinition,
+    ) -> Workflow:
+        await self.validate_proposed_definition(
+            actor=actor, project_id=project_id, definition=definition
+        )
+        return await self.create(
+            actor=actor,
+            project_id=project_id,
+            name=name,
+            description=description,
+            folder_id=None,
+            definition=definition,
+        )
 
     async def get(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
@@ -421,6 +763,108 @@ class WorkflowService:
         else:
             await self._session.flush()
         return workflow
+
+    async def insert_control_block(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        expected_revision: int,
+        edge_id: str,
+        node: WorkflowNode,
+        regions: list[WorkflowRegion],
+        request_budget: int | None,
+        cleanup_request_budget: int | None,
+        commit: bool = True,
+    ) -> Workflow:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        workflow = await self._get_workflow_for_update(project_id, workflow_id)
+        definition = await self._control_block_candidate(
+            project_id=project_id,
+            workflow=workflow,
+            expected_revision=expected_revision,
+            edge_id=edge_id,
+            node=node,
+            regions=regions,
+            request_budget=request_budget,
+            cleanup_request_budget=cleanup_request_budget,
+        )
+        return await self.update_draft(
+            actor=actor,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            expected_revision=expected_revision,
+            name=None,
+            description=None,
+            folder_id=None,
+            change_folder=False,
+            definition=definition,
+            commit=commit,
+        )
+
+    async def preview_control_block_insert(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        workflow_id: UUID,
+        expected_revision: int,
+        edge_id: str,
+        node: WorkflowNode,
+        regions: list[WorkflowRegion],
+        request_budget: int | None,
+        cleanup_request_budget: int | None,
+    ) -> WorkflowDefinition:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        workflow = await self._get_workflow(project_id, workflow_id)
+        return await self._control_block_candidate(
+            project_id=project_id,
+            workflow=workflow,
+            expected_revision=expected_revision,
+            edge_id=edge_id,
+            node=node,
+            regions=regions,
+            request_budget=request_budget,
+            cleanup_request_budget=cleanup_request_budget,
+        )
+
+    async def _control_block_candidate(
+        self,
+        *,
+        project_id: UUID,
+        workflow: Workflow,
+        expected_revision: int,
+        edge_id: str,
+        node: WorkflowNode,
+        regions: list[WorkflowRegion],
+        request_budget: int | None,
+        cleanup_request_budget: int | None,
+    ) -> WorkflowDefinition:
+        if workflow.draft_revision != expected_revision:
+            raise AppError(
+                code="WORKFLOW_DRAFT_CONFLICT",
+                message="草稿已被其他操作更新, 请刷新后重试",
+                status_code=409,
+                details={"current_revision": workflow.draft_revision},
+            )
+        try:
+            definition = insert_control_block(
+                self._load_definition(workflow.draft_definition),
+                edge_id=edge_id,
+                node=node,
+                regions=regions,
+                request_budget=request_budget,
+                cleanup_request_budget=cleanup_request_budget,
+            )
+        except ControlBlockEditError as error:
+            raise AppError(
+                code="CONTROL_BLOCK_INSERT_INVALID",
+                message=str(error),
+                status_code=422,
+            ) from error
+        await self._validate_publishable(project_id, workflow.id, definition)
+        return definition
 
     async def publish(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> WorkflowVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
@@ -577,6 +1021,12 @@ class WorkflowService:
                 message="请在数据集子执行上重放节点",
                 status_code=422,
             )
+        if plan.definition.schema_version == "4.0":
+            raise AppError(
+                code="CONTROL_REPLAY_REQUIRES_DERIVED_RUN",
+                message="控制流运行需要按冻结输入创建派生运行, 不能重放原运行中的节点",
+                status_code=409,
+            )
         scope = _upstream_node_ids(plan.definition, node_id, include_target=True)
         result = await self._run_scoped(
             project_id=project_id,
@@ -634,11 +1084,14 @@ class WorkflowService:
         version: int | None,
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
+        iteration_debug: WorkflowIterationDebugOptions | None = None,
     ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow(project_id, workflow_id)
         selected = await self._select_version(workflow, version)
         definition = self._load_definition(selected.definition)
+        if iteration_debug is not None:
+            _validate_iteration_debug_target(definition, iteration_debug)
         _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare(
             actor=actor,
@@ -650,6 +1103,12 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        if iteration_debug is not None and prepared.snapshot["dataset"] is not None:
+            raise AppError(
+                code="DEBUG_DATASET_UNSUPPORTED",
+                message="逐轮调试暂不支持 Dataset 批量执行",
+                status_code=422,
+            )
         await self._ensure_execution_capacity(project_id)
         if prepared.snapshot["dataset"] is None:
             execution = await self._start_execution(
@@ -659,6 +1118,7 @@ class WorkflowService:
                 version=selected,
                 environment_id=environment_id,
                 snapshot=prepared.runs[0].snapshot,
+                commit=iteration_debug is None,
             )
             plan: WorkflowExecutionPlan = self._run_plan(
                 execution=execution,
@@ -680,8 +1140,138 @@ class WorkflowService:
                 prepared=prepared,
                 runtime_variables=runtime_variables,
             )
+        await self._persist_execution_plan(execution, plan, commit=iteration_debug is None)
+        return execution, plan
+
+    async def prepare_failed_item_rerun(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        source_execution_id: UUID,
+        loop_node_id: str,
+        input_indices: list[int],
+        write_retry_strategy: str,
+        upstream_resource_status: str,
+        verification_note: str | None,
+    ) -> tuple[WorkflowExecution, WorkflowRunPlan]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        source = await self._get_execution(project_id, source_execution_id)
+        if source.status in {"queued", "running"}:
+            raise AppError(
+                code="RERUN_SOURCE_NOT_TERMINAL",
+                message="只能从已结束的正式运行创建派生运行",
+                status_code=409,
+            )
+        if (
+            source.run_purpose != WorkflowRunPurpose.STANDARD.value
+            or source.derived_from_execution_id
+        ):
+            raise AppError(
+                code="RERUN_SOURCE_UNSUPPORTED",
+                message="当前仅支持从原始正式运行派生失败轮次",
+                status_code=409,
+            )
+        source_plan = await self._rerun_source_plan(project_id, source)
+        definition = source_plan.definition
+        scope = _rerun_main_scope(definition, loop_node_id)
+        loop_node = next(node for node in definition.nodes if node.id == loop_node_id)
+        config = parse_control_config(loop_node)
+        if not isinstance(config, ForEachControlConfig) or not isinstance(
+            config.body, InlineControlBody
+        ):
+            raise AppError(
+                code="RERUN_LOOP_UNSUPPORTED",
+                message="当前只能按原冻结集合重跑内联 ForEach 的失败轮次",
+                status_code=409,
+            )
+        region = next(region for region in definition.regions if region.id == config.body.region_id)
+        if any(
+            node.capability_id and node.capability_id.startswith("flow.control.")
+            for node in region.nodes
+        ):
+            raise AppError(
+                code="RERUN_NESTED_CONTROL_UNSUPPORTED",
+                message="嵌套控制块的失败项重跑仍需实例级来源校验",
+                status_code=409,
+            )
+        source_nodes = await self._workflows.list_node_executions(source.id)
+        loop_result = next((node for node in source_nodes if node.node_id == loop_node_id), None)
+        selected = _failed_rerun_items(loop_result, input_indices)
+        history = await DurableExecutionRepository(self._session).list_checkpoints(source.id)
+        reused = _rerun_reused_checkpoints(
+            history,
+            scope - {loop_node_id},
+            selected,
+            region,
+            source_plan,
+            write_retry_strategy=write_retry_strategy,
+            upstream_resource_status=upstream_resource_status,
+            verification_note=verification_note,
+        )
+        await self._ensure_execution_capacity(project_id)
+        if source.workflow_id is None or source.workflow_version_id is None:
+            raise AppError(
+                code="RERUN_SOURCE_UNSUPPORTED", message="来源缺少发布版本", status_code=409
+            )
+        workflow = await self._get_workflow(project_id, source.workflow_id)
+        version = await self._session.get(WorkflowVersion, source.workflow_version_id)
+        if version is None:
+            raise AppError(
+                code="WORKFLOW_VERSION_NOT_FOUND", message="工作流版本不存在", status_code=404
+            )
+        execution = self._execution_model(
+            actor=actor,
+            project_id=project_id,
+            workflow=workflow,
+            version=version,
+            environment_id=source.environment_id,
+            snapshot=source_plan.prepared.snapshot,
+        )
+        execution.derived_from_execution_id = source.id
+        execution.rerun_loop_node_id = loop_node_id
+        execution.rerun_input_indices = sorted(input_indices)
+        self._workflows.add(execution)
+        await self._session.flush()
+        for checkpoint in reused:
+            self._session.add(_copy_rerun_checkpoint(checkpoint, execution.id))
+        plan = replace(
+            source_plan,
+            execution_id=execution.id,
+            actor_id=actor.id,
+            selected_node_ids=frozenset(scope),
+            rerun_loop_node_id=loop_node_id,
+            rerun_input_indices=tuple(sorted(input_indices)),
+        )
         await self._persist_execution_plan(execution, plan)
         return execution, plan
+
+    async def _rerun_source_plan(
+        self, project_id: UUID, source: WorkflowExecution
+    ) -> WorkflowRunPlan:
+        if source.parent_execution_id is None:
+            plan = await self.load_execution_plan(source.id)
+            if isinstance(plan, WorkflowRunPlan):
+                return plan
+        else:
+            parent = await self._get_execution(project_id, source.parent_execution_id)
+            if parent.status in {"queued", "running"}:
+                raise AppError(
+                    code="RERUN_SOURCE_NOT_TERMINAL",
+                    message="数据集批量运行结束后才能派生失败轮次",
+                    status_code=409,
+                )
+            if parent.run_purpose == WorkflowRunPurpose.STANDARD.value:
+                plan = await self.load_execution_plan(parent.id)
+                if isinstance(plan, WorkflowBatchPlan):
+                    for index, child in enumerate(plan.children):
+                        if child.execution_id == source.id and index == source.dataset_row_index:
+                            return child
+        raise AppError(
+            code="RERUN_SOURCE_UNSUPPORTED",
+            message="来源执行缺少对应的单次或数据集子执行计划",
+            status_code=409,
+        )
 
     async def prepare_preview_execution(
         self,
@@ -835,11 +1425,18 @@ class WorkflowService:
         return decode_execution_plan(payload)
 
     async def _persist_execution_plan(
-        self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
+        self,
+        execution: WorkflowExecution,
+        plan: WorkflowExecutionPlan,
+        *,
+        commit: bool = True,
     ) -> None:
         await self._stage_execution_plan(execution, plan)
-        await self._session.commit()
-        await self._session.refresh(execution)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(execution)
+        else:
+            await self._session.flush()
 
     async def _stage_execution_plan(
         self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
@@ -863,11 +1460,13 @@ class WorkflowService:
         plan: WorkflowRunPlan,
         on_node_status: NodeStatusCallback | None = None,
         cancellation: CancellationToken | None = None,
+        iteration_debug_gate: IterationDebugGate | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
         token = cancellation or CancellationToken()
         if execution.cancel_requested_at is not None:
             token.cancel(force=execution.force_cancel_requested_at is not None)
         network_policy = await self._projects.load_runtime_security_policy(plan.project_id)
+        outbound_policy = await self._projects.load_runtime_outbound_policy(plan.project_id)
         from app.repositories.durable_execution import DurableExecutionRepository
 
         checkpoint_history = await DurableExecutionRepository(self._session).list_checkpoints(
@@ -877,10 +1476,10 @@ class WorkflowService:
             plan.request_budget,
             tuple(checkpoint_to_node_record(item) for item in checkpoint_history),
         )
-        reset_retry_budget = await DurableExecutionService(self._session).reset_retry_budget(
-            execution.id
+        reset_retry_budget = (
+            await DurableExecutionService(self._session).reset_retry_budget(execution.id)
+            or plan.rerun_loop_node_id is not None
         )
-        checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
         resume_attempts = {
             node_id: max(item.attempt for item in checkpoint_history if item.node_id == node_id)
             for node_id in {item.node_id for item in checkpoint_history}
@@ -889,15 +1488,49 @@ class WorkflowService:
             workflow_variables=cast(dict[str, JsonValue], plan.definition.variables),
             dataset_variables=plan.prepared.dataset_variables,
             runtime_variables=cast(dict[str, JsonValue], plan.runtime_variables),
+            retry_safe_node_ids=retry_safe_request_nodes(plan.definition, plan.prepared.requests),
+            rerun_loop_node_id=plan.rerun_loop_node_id,
+            rerun_input_indices=frozenset(plan.rerun_input_indices),
+            iteration_debug_gate=iteration_debug_gate,
         )
-        for checkpoint in checkpoints:
-            context.restore_checkpoint(
-                node_id=checkpoint.node_id,
-                output=cast(JsonValue, checkpoint.output),
-                extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
+        output_storage = WorkflowOutputStorage(
+            self._session,
+            project_id=plan.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        restored_records: list[NodeRunRecord] = []
+        for checkpoint in checkpoint_history:
+            output = await output_storage.restore(cast(JsonValue, checkpoint.output))
+            result_value = await output_storage.restore(cast(JsonValue, checkpoint.result))
+            extracted_variables = cast(
+                dict[str, JsonValue],
+                await output_storage.restore(cast(JsonValue, checkpoint.extracted_variables)),
             )
-        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoint_history)
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+            record = checkpoint_to_node_record(checkpoint)
+            restored_records.append(
+                replace(
+                    record,
+                    output=output,
+                    result=(
+                        record.result
+                        if record.status is NodeStatus.RUNNING
+                        else NodeResult.model_validate(result_value)
+                    ),
+                )
+            )
+            if is_resumable_checkpoint(checkpoint.status):
+                context.restore_checkpoint(
+                    node_id=checkpoint.node_id,
+                    output=output,
+                    extracted_variables=extracted_variables,
+                )
+        resume_records = tuple(restored_records)
+        async with (
+            project_outbound_admission(plan.project_id, outbound_policy) as admission,
+            httpx.AsyncClient(follow_redirects=False) as client,
+        ):
+            context.outbound_admission = admission
             node_executor = WorkflowNodeExecutor(
                 client,
                 plan.prepared.requests,
@@ -929,6 +1562,7 @@ class WorkflowService:
                         resume_attempts=resume_attempts,
                         reset_retry_budget=reset_retry_budget,
                         shared_request_budget=shared_request_budget,
+                        selected_node_ids=plan.selected_node_ids,
                     )
             finally:
                 await node_executor.close()
@@ -937,9 +1571,10 @@ class WorkflowService:
             limit=plan.request_budget,
             budget=shared_request_budget,
         )
-        nodes = self._node_models(execution.id, result)
+        stored_result = await self._stored_run_result(execution, result)
+        nodes = self._node_models(execution.id, stored_result)
         await self._workflows.replace_node_executions(execution.id, nodes)
-        self._stage_run_result(execution=execution, plan=plan, result=result)
+        self._stage_run_result(execution=execution, plan=plan, result=stored_result)
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, nodes
@@ -956,12 +1591,14 @@ class WorkflowService:
             execution = await self.load_execution_for_run(plan.execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                nodes = self._node_models(execution.id, submitted.result.to_domain())
+                restored = await self._restored_run_result(execution, submitted.result.to_domain())
+                stored_result = await self._stored_run_result(execution, restored)
+                nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
                     execution=execution,
                     plan=plan,
-                    result=submitted.result.to_domain(),
+                    result=stored_result,
                 )
             finally:
                 reset_redaction_policy(token)
@@ -995,12 +1632,16 @@ class WorkflowService:
             execution = await self.load_execution_for_run(execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
+                restored = await self._restored_run_result(
+                    execution, received[execution_id].result.to_domain()
+                )
+                stored_result = await self._stored_run_result(execution, restored)
+                nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
                     execution=execution,
                     plan=child_plan,
-                    result=received[execution_id].result.to_domain(),
+                    result=stored_result,
                 )
             finally:
                 reset_redaction_policy(token)
@@ -1012,6 +1653,57 @@ class WorkflowService:
         finally:
             reset_redaction_policy(token)
         return parent
+
+    async def _stored_run_result(
+        self, execution: WorkflowExecution, result: WorkflowRunResult
+    ) -> WorkflowRunResult:
+        storage = WorkflowOutputStorage(
+            self._session,
+            project_id=execution.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        records: list[NodeRunRecord] = []
+        for record in result.records:
+            output = await storage.compact(cast(JsonValue, redact(record.output)))
+            persisted_result = await storage.compact(
+                cast(JsonValue, redact(record.result.model_dump(mode="json")))
+            )
+            records.append(
+                replace(
+                    record,
+                    output=output,
+                    result=NodeResult.model_validate(persisted_result),
+                )
+            )
+        context = await storage.compact(cast(JsonValue, redact(result.context)))
+        return replace(
+            result,
+            records=tuple(records),
+            context=cast(dict[str, JsonValue], context),
+        )
+
+    async def _restored_run_result(
+        self, execution: WorkflowExecution, result: WorkflowRunResult
+    ) -> WorkflowRunResult:
+        storage = WorkflowOutputStorage(
+            self._session,
+            project_id=execution.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        records: list[NodeRunRecord] = []
+        for record in result.records:
+            restored_result = await storage.restore(record.result.model_dump(mode="json"))
+            records.append(
+                replace(
+                    record,
+                    output=await storage.restore(record.output),
+                    result=NodeResult.model_validate(restored_result),
+                )
+            )
+        context = await storage.restore(cast(JsonValue, result.context))
+        return replace(result, records=tuple(records), context=cast(dict[str, JsonValue], context))
 
     def _stage_run_result(
         self,
@@ -1030,6 +1722,7 @@ class WorkflowService:
             redact(asdict(result.cleanup_report)) if result.cleanup_report is not None else {},
         )
         execution.context = cast(dict[str, JsonValue], redact(result.context))
+        execution.context_summary = summarize_execution_context(execution.context)
         execution.completed_at = datetime.now(UTC)
         if execution.run_purpose == WorkflowRunPurpose.PREVIEW.value:
             execution.preview_evidence = _preview_run_evidence(execution, plan, result)
@@ -1038,13 +1731,20 @@ class WorkflowService:
                 record
                 for record in result.records
                 if record.status.value == "failed"
-                and (record.phase.value == "main" or not record.best_effort)
+                and (
+                    record.phase.value == "main"
+                    or not record.best_effort
+                    or record.error_code == "SIDE_EFFECT_OUTCOME_UNKNOWN"
+                )
             ),
             None,
         )
         if failed is not None:
             execution.error_code = failed.error_code
             execution.error_message = failed.error_message
+        elif result.unknown_outcome:
+            execution.error_code = "SIDE_EFFECT_OUTCOME_UNKNOWN"
+            execution.error_message = "内联请求的外部结果未知, 需先查证或明确处理"
         self._audit.record(
             actor_user_id=plan.actor_id,
             project_id=plan.project_id,
@@ -1085,7 +1785,11 @@ class WorkflowService:
         selected_node_ids: frozenset[str],
     ) -> WorkflowRunResult:
         network_policy = await self._projects.load_runtime_security_policy(project_id)
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        outbound_policy = await self._projects.load_runtime_outbound_policy(project_id)
+        async with (
+            project_outbound_admission(project_id, outbound_policy) as admission,
+            httpx.AsyncClient(follow_redirects=False) as client,
+        ):
             node_executor = WorkflowNodeExecutor(
                 client,
                 prepared.requests,
@@ -1103,6 +1807,7 @@ class WorkflowService:
                         workflow_variables=cast(dict[str, JsonValue], definition.variables),
                         dataset_variables=prepared.dataset_variables,
                         runtime_variables=cast(dict[str, JsonValue], runtime_variables),
+                        outbound_admission=admission,
                     ),
                     selected_node_ids=selected_node_ids,
                 )
@@ -1124,6 +1829,7 @@ class WorkflowService:
             main_status=result.main_status,
             cleanup_status=result.cleanup_status,
             cleanup_report=result.cleanup_report,
+            unknown_outcome=result.unknown_outcome,
         )
 
     async def load_execution_for_run(self, execution_id: UUID) -> WorkflowExecution:
@@ -1278,16 +1984,79 @@ class WorkflowService:
 
     async def get_execution(
         self, *, actor: User, project_id: UUID, execution_id: UUID
-    ) -> tuple[
-        WorkflowExecution,
-        list[WorkflowNodeExecution],
-        list[WorkflowExecution],
-    ]:
+    ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution], list[WorkflowExecution]]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._get_execution(project_id, execution_id)
         nodes = await self._workflows.list_node_executions(execution.id)
         children = await self._workflows.list_child_executions(execution.id)
         return execution, nodes, children
+
+    async def get_execution_report(
+        self, *, actor: User, project_id: UUID, execution_id: UUID
+    ) -> tuple[
+        WorkflowExecutionReport,
+        list[WorkflowNodeExecutionReport],
+        list[WorkflowExecutionReport],
+    ]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        execution = await self._workflows.get_execution_report(
+            project_id=project_id, execution_id=execution_id
+        )
+        if execution is None:
+            raise AppError(
+                code="WORKFLOW_EXECUTION_NOT_FOUND",
+                message="工作流执行不存在",
+                status_code=404,
+            )
+        nodes = await self._workflows.list_node_execution_reports(execution.id)
+        children = await self._workflows.list_child_execution_reports(execution.id)
+        return execution, nodes, children
+
+    async def list_control_records(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        node_id: str,
+        kind: str,
+        test_verdict: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[WorkflowControlRecordSummary], int]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._get_execution(project_id, execution_id)
+        return await self._workflows.list_control_records(
+            execution_id=execution_id,
+            node_id=node_id,
+            kind=kind,
+            test_verdict=test_verdict,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    async def get_control_record(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        node_id: str,
+        kind: str,
+        ordinal: int,
+    ) -> WorkflowControlRecord:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._get_execution(project_id, execution_id)
+        record = await self._workflows.get_control_record(
+            execution_id=execution_id, node_id=node_id, kind=kind, ordinal=ordinal
+        )
+        if record is None:
+            raise AppError(
+                code="WORKFLOW_CONTROL_RECORD_NOT_FOUND",
+                message="控制执行记录不存在",
+                status_code=404,
+            )
+        return record
 
     async def complete_batch(self, execution_id: UUID) -> WorkflowExecution:
         execution = await self.load_execution_for_run(execution_id)
@@ -1353,7 +2122,11 @@ class WorkflowService:
         definition: WorkflowDefinition,
     ) -> None:
         unsupported = sorted(
-            {node.type.value for node in definition.nodes if node.type not in SUPPORTED_NODE_TYPES}
+            {
+                node.type.value
+                for node in definition.all_nodes()
+                if node.type not in SUPPORTED_NODE_TYPES
+            }
         )
         if unsupported:
             raise AppError(
@@ -1363,9 +2136,15 @@ class WorkflowService:
                 details={"node_types": unsupported},
             )
         for node in definition.nodes:
-            await self._validate_publishable_node(project_id, definition, node)
+            await self._validate_node_or_control(project_id, definition, node)
+        for region in definition.regions:
+            for node in region.nodes:
+                await self._validate_node_or_control(project_id, definition, node, region=region)
         self._validate_websocket_session_graph(definition)
-        for edge in definition.edges:
+        for edge in (
+            *definition.edges,
+            *(edge for region in definition.regions for edge in region.edges),
+        ):
             for mapping in edge.mappings:
                 self._validate_jmespath(mapping.source.path, edge.id)
         if any(node.effective_type is NodeType.DATASET for node in definition.nodes):
@@ -1376,11 +2155,24 @@ class WorkflowService:
             workflow_path=(workflow_id,),
         )
 
+    async def _validate_node_or_control(
+        self,
+        project_id: UUID,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+        region: WorkflowRegion | None = None,
+    ) -> None:
+        if node.capability_id in CONTROL_CONFIG_MODELS:
+            self._validate_structured_control(definition, node, region)
+            return
+        await self._validate_publishable_node(project_id, definition, node, region=region)
+
     async def _validate_publishable_node(
         self,
         project_id: UUID,
         definition: WorkflowDefinition,
         node: WorkflowNode,
+        region: WorkflowRegion | None = None,
     ) -> None:
         try:
             if node.type is NodeType.CAPABILITY:
@@ -1426,9 +2218,58 @@ class WorkflowService:
                 details={"node_id": node.id},
             ) from error
         await self._validate_resource_node(project_id, node, config)
-        self._validate_control_node(definition, node, config)
+        self._validate_control_node(definition, node, config, region=region)
         if isinstance(config, (SubFlowNodeConfig, ForEachNodeConfig)):
             await self._load_subflow_version(project_id, config)
+
+    def _validate_structured_control(
+        self,
+        definition: WorkflowDefinition,
+        node: WorkflowNode,
+        region: WorkflowRegion | None,
+    ) -> None:
+        config = parse_control_config(node)
+        builtin_capability_registry.require(node.capability_id or "", node.capability_version or "")
+        for role, body in control_bodies(config):
+            if not isinstance(body, InlineControlBody):
+                raise AppError(
+                    code="CONTROL_BODY_UNSUPPORTED",
+                    message="当前版本仅支持内联控制区域。固定流程引用体尚不可发布",
+                    status_code=422,
+                    details={"node_id": node.id, "role": role},
+                )
+        inline_regions = [item for item in definition.regions if item.owner_node_id == node.id]
+        internal_ids = {item.id for item in inline_regions[0].nodes} if inline_regions else set()
+        post_sources = (
+            condition_sources(config.condition)
+            if isinstance(config, ConditionLoopConfig)
+            and node.capability_id in {"flow.control.do_while", "flow.control.until"}
+            else []
+        )
+        for source in control_external_sources(config):
+            if isinstance(source, NodeOutputValueSource):
+                if source in post_sources and source.node_id in internal_ids:
+                    continue
+                self._validate_control_source(
+                    definition,
+                    {item.id for item in (region.nodes if region else definition.nodes)},
+                    node.id,
+                    source.node_id,
+                    region=region,
+                )
+        for item in inline_regions:
+            for source in item.inputs.values():
+                if isinstance(source, NodeOutputValueSource):
+                    self._validate_control_source(
+                        definition,
+                        {
+                            candidate.id
+                            for candidate in (region.nodes if region else definition.nodes)
+                        },
+                        node.id,
+                        source.node_id,
+                        region=region,
+                    )
 
     async def _validate_protocol_node(
         self,
@@ -1646,29 +2487,34 @@ class WorkflowService:
         definition: WorkflowDefinition,
         node: WorkflowNode,
         config: object,
+        *,
+        region: WorkflowRegion | None = None,
     ) -> None:
         if isinstance(config, (ExtractNodeConfig, AssertNodeConfig, ConditionNodeConfig)):
             self._validate_control_source(
                 definition,
-                {node.id for node in definition.nodes},
+                {item.id for item in (region.nodes if region else definition.nodes)},
                 node.id,
                 config.source_node_id,
+                region=region,
             )
             self._validate_jmespath(config.expression, node.id)
             if isinstance(config, AssertNodeConfig) and config.expected_source_node_id is not None:
                 self._validate_control_source(
                     definition,
-                    {item.id for item in definition.nodes},
+                    {item.id for item in (region.nodes if region else definition.nodes)},
                     node.id,
                     config.expected_source_node_id,
+                    region=region,
                 )
                 self._validate_jmespath(cast(str, config.expected_expression), node.id)
         if isinstance(config, ForEachNodeConfig):
             self._validate_control_source(
                 definition,
-                {item.id for item in definition.nodes},
+                {item.id for item in (region.nodes if region else definition.nodes)},
                 node.id,
                 config.source_node_id,
+                region=region,
             )
             try:
                 validate_safe_expression(config.expression)
@@ -1783,8 +2629,13 @@ class WorkflowService:
         node_ids: set[str],
         node_id: str,
         source_node_id: str,
+        *,
+        region: WorkflowRegion | None = None,
     ) -> None:
-        if source_node_id not in node_ids or not _is_upstream(definition, source_node_id, node_id):
+        edges = region.edges if region is not None else definition.edges
+        if source_node_id not in node_ids or not _is_upstream_edges(
+            node_ids, edges, source_node_id, node_id
+        ):
             raise AppError(
                 code="INVALID_NODE_SOURCE",
                 message="控制节点的数据源必须是其上游节点",
@@ -1813,6 +2664,7 @@ class WorkflowService:
         version: WorkflowVersion,
         environment_id: UUID,
         snapshot: dict[str, JsonValue],
+        commit: bool = True,
     ) -> WorkflowExecution:
         execution = self._execution_model(
             actor=actor,
@@ -1823,8 +2675,11 @@ class WorkflowService:
             snapshot=snapshot,
         )
         self._workflows.add(execution)
-        await self._session.commit()
-        await self._session.refresh(execution)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(execution)
+        else:
+            await self._session.flush()
         return execution
 
     async def _start_dataset_execution(
@@ -2109,6 +2964,7 @@ class WorkflowService:
         resume_attempts: dict[str, int] | None = None,
         reset_retry_budget: bool = False,
         shared_request_budget: RequestBudget | None = None,
+        selected_node_ids: frozenset[str] | None = None,
     ) -> WorkflowRunResult:
         task = asyncio.create_task(
             scheduler.run(
@@ -2125,6 +2981,7 @@ class WorkflowService:
                 resume_attempts=resume_attempts,
                 reset_retry_budget=reset_retry_budget,
                 shared_request_budget=shared_request_budget,
+                selected_node_ids=selected_node_ids,
             )
         )
         try:
@@ -2748,7 +3605,10 @@ def _remaining_preview_request_budget(
         return None
     attempts: dict[str, int] = {}
     for record in records:
-        if node_type_consumes_request(record.node_type):
+        if (
+            node_type_consumes_request(record.node_type)
+            and record.result.control_capability_id is None
+        ):
             attempts[record.node_id] = max(
                 attempts.get(record.node_id, 0), resumed_request_attempts(record)
             )
@@ -2823,9 +3683,11 @@ def _contains_workflow_id(value: object, needle: str) -> bool:
     return False
 
 
-def _is_upstream(definition: WorkflowDefinition, source_id: str, target_id: str) -> bool:
-    outgoing: dict[str, set[str]] = {node.id: set() for node in definition.nodes}
-    for edge in definition.edges:
+def _is_upstream_edges(
+    node_ids: set[str], edges: list[WorkflowEdge], source_id: str, target_id: str
+) -> bool:
+    outgoing: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    for edge in edges:
         outgoing[edge.source].add(edge.target)
     pending = [source_id]
     visited: set[str] = set()

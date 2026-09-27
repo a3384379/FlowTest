@@ -113,6 +113,8 @@ class RunnerLeaseRecord(UuidPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     last_renewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outbound_concurrency_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outbound_requests_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class RunnerEvent(UuidPrimaryKeyMixin, TimestampMixin, Base):

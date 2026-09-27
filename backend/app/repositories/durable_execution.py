@@ -2,8 +2,9 @@ from collections.abc import Sequence
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from sqlalchemy.sql import Select
 
 from app.models.durable_execution import ExecutionCheckpoint, ExecutionCommand
@@ -61,6 +62,22 @@ class DurableExecutionRepository:
         )
         return cast(ExecutionCheckpoint | None, await self._one(statement, lock=lock))
 
+    async def latest_checkpoint(
+        self, *, execution_id: UUID, node_id: str
+    ) -> ExecutionCheckpoint | None:
+        return cast(
+            ExecutionCheckpoint | None,
+            await self._session.scalar(
+                select(ExecutionCheckpoint)
+                .where(
+                    ExecutionCheckpoint.execution_id == execution_id,
+                    ExecutionCheckpoint.node_id == node_id,
+                )
+                .order_by(ExecutionCheckpoint.attempt.desc())
+                .limit(1)
+            ),
+        )
+
     async def list_checkpoints(
         self, execution_id: UUID, *, resumable_only: bool = False
     ) -> list[ExecutionCheckpoint]:
@@ -84,6 +101,76 @@ class DurableExecutionRepository:
             if current is None or row.attempt > current.attempt:
                 latest[row.node_id] = row
         return sorted(latest.values(), key=lambda item: item.node_id)
+
+    async def list_checkpoint_log(
+        self, execution_id: UUID, *, page: int, page_size: int
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        predicate = ExecutionCheckpoint.execution_id == execution_id
+        total = await self._session.scalar(
+            select(func.count()).select_from(ExecutionCheckpoint).where(predicate)
+        )
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ExecutionCheckpoint)
+                    .options(
+                        load_only(
+                            ExecutionCheckpoint.id,
+                            ExecutionCheckpoint.execution_id,
+                            ExecutionCheckpoint.node_id,
+                            ExecutionCheckpoint.node_type,
+                            ExecutionCheckpoint.node_name,
+                            ExecutionCheckpoint.phase,
+                            ExecutionCheckpoint.attempt,
+                            ExecutionCheckpoint.status,
+                            ExecutionCheckpoint.started_at,
+                            ExecutionCheckpoint.finished_at,
+                        )
+                    )
+                    .where(predicate)
+                    .order_by(ExecutionCheckpoint.finished_at, ExecutionCheckpoint.id)
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+        )
+        return rows, int(total or 0)
+
+    async def get_checkpoint_by_id(
+        self, execution_id: UUID, checkpoint_id: UUID
+    ) -> ExecutionCheckpoint | None:
+        return cast(
+            ExecutionCheckpoint | None,
+            await self._session.scalar(
+                select(ExecutionCheckpoint).where(
+                    ExecutionCheckpoint.execution_id == execution_id,
+                    ExecutionCheckpoint.id == checkpoint_id,
+                )
+            ),
+        )
+
+    async def list_nested_checkpoints(
+        self, execution_id: UUID, prefix: str, *, page: int, page_size: int
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        predicate = (
+            ExecutionCheckpoint.execution_id == execution_id,
+            ExecutionCheckpoint.node_id.startswith(prefix, autoescape=True),
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(ExecutionCheckpoint).where(*predicate)
+        )
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ExecutionCheckpoint)
+                    .where(*predicate)
+                    .order_by(ExecutionCheckpoint.node_id, ExecutionCheckpoint.attempt)
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+        )
+        return rows, int(total or 0)
 
     async def list_checkpoints_for_executions(
         self, execution_ids: Sequence[UUID]

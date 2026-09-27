@@ -18,6 +18,7 @@ from app.domain.durable_execution import checkpoint_input_hash
 from app.engine.contracts import NodeStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import CancellationToken, NodeStatusUpdate
+from app.models.workflow_debug import WorkflowDebugSession
 from app.models.workflows import WorkflowExecution
 from app.repositories.durable_execution import DurableExecutionRepository
 from app.schemas.runner_fabric import RunnerCheckpointRequest
@@ -27,6 +28,7 @@ from app.services.execution_events import (
     ExecutionEventBus,
     ExecutionEventType,
 )
+from app.services.workflow_debug import DatabaseIterationDebugGate, WorkflowDebugService
 from app.services.workflows import (
     WorkflowBatchPlan,
     WorkflowExecutionPlan,
@@ -222,6 +224,19 @@ class WorkflowRunCoordinator:
         async with self._session_maker() as session:
             service = WorkflowService(session)
             execution = await service.load_execution_for_run(plan.execution_id)
+            debug_session = await session.get(WorkflowDebugSession, plan.execution_id)
+            if debug_session is not None and debug_session.status in {
+                "completed",
+                "cancelled",
+                "expired",
+            }:
+                await service.stage_runtime_failed(
+                    execution.id,
+                    error_code="DEBUG_SESSION_TERMINAL",
+                    error_message="调试会话已结束, 不会重新执行其工作流",
+                )
+                await session.commit()
+                return execution
             policy_token = set_redaction_policy(persisted_redaction_policy(execution))
 
             async def publish_status(update: NodeStatusUpdate) -> None:
@@ -229,27 +244,6 @@ class WorkflowRunCoordinator:
                     NodeResult.model_validate(redact(update.result.model_dump(mode="json")))
                     if update.result is not None
                     else None
-                )
-                await self._publish(
-                    ExecutionEvent(
-                        type=(
-                            ExecutionEventType.NODE_RESULT
-                            if update.result is not None
-                            else ExecutionEventType.NODE_STATUS
-                        ),
-                        execution_id=plan.execution_id,
-                        emitted_at=update.occurred_at,
-                        node_id=update.node_id,
-                        node_name=update.name,
-                        node_type=update.node_type.value,
-                        node_status=update.status,
-                        result=safe_result,
-                        attempt=update.attempts,
-                        attempts=update.attempts,
-                        fencing_token=0,
-                        error_code=update.error_code,
-                        error_message=update.error_message,
-                    )
                 )
                 should_checkpoint = (safe_result is not None and update.status.is_terminal) or (
                     update.status is NodeStatus.RUNNING
@@ -266,7 +260,9 @@ class WorkflowRunCoordinator:
                     # session so a checkpoint commit cannot race a refresh on the run
                     # session or interleave transactions for sibling nodes.
                     async with self._session_maker() as checkpoint_session:
-                        await DurableExecutionService(checkpoint_session).record_checkpoint(
+                        checkpoint = await DurableExecutionService(
+                            checkpoint_session
+                        ).record_checkpoint(
                             project_id=plan.project_id,
                             lease_id=None,
                             runner_id=None,
@@ -294,6 +290,29 @@ class WorkflowRunCoordinator:
                                 best_effort=update.best_effort,
                             ),
                         )
+                        if safe_result is not None:
+                            safe_result = NodeResult.model_validate(checkpoint.result)
+                await self._publish(
+                    ExecutionEvent(
+                        type=(
+                            ExecutionEventType.NODE_RESULT
+                            if update.result is not None
+                            else ExecutionEventType.NODE_STATUS
+                        ),
+                        execution_id=plan.execution_id,
+                        emitted_at=update.occurred_at,
+                        node_id=update.node_id,
+                        node_name=update.name,
+                        node_type=update.node_type.value,
+                        node_status=update.status,
+                        result=safe_result,
+                        attempt=update.attempts,
+                        attempts=update.attempts,
+                        fencing_token=0,
+                        error_code=update.error_code,
+                        error_message=update.error_message,
+                    )
+                )
 
             try:
                 completed, _nodes = await service.run_prepared(
@@ -301,14 +320,27 @@ class WorkflowRunCoordinator:
                     plan=plan,
                     on_node_status=publish_status,
                     cancellation=cancellation,
+                    iteration_debug_gate=(
+                        DatabaseIterationDebugGate(self._session_maker, plan.execution_id)
+                        if debug_session is not None
+                        else None
+                    ),
                 )
+                if debug_session is not None:
+                    await WorkflowDebugService(session).finish(
+                        plan.execution_id, execution_status=completed.status
+                    )
                 return completed
             finally:
                 reset_redaction_policy(policy_token)
 
     async def _mark_failed(self, plan: WorkflowExecutionPlan) -> WorkflowExecution:
         async with self._session_maker() as session:
-            return await WorkflowService(session).mark_runtime_failed(plan.execution_id)
+            execution = await WorkflowService(session).mark_runtime_failed(plan.execution_id)
+            await WorkflowDebugService(session).finish(
+                plan.execution_id, execution_status=execution.status
+            )
+            return execution
 
     async def _publish_completion(self, execution: WorkflowExecution) -> None:
         await self._publish(

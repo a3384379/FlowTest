@@ -21,7 +21,7 @@ from app.domain.durable_execution import (
 from app.domain.sandbox_preview import WorkflowRunPurpose
 from app.engine.contracts import NodeStatus, NodeType, WorkflowPhase
 from app.engine.results import NodeResult
-from app.engine.scheduler import NodeRunRecord
+from app.engine.scheduler import NESTED_CHECKPOINT_PREFIX, NodeRunRecord
 from app.models.access import User
 from app.models.durable_execution import ExecutionCheckpoint, ExecutionCommand
 from app.models.workflows import WorkflowExecution
@@ -29,6 +29,7 @@ from app.repositories.durable_execution import DurableExecutionRepository
 from app.schemas.runner_fabric import RunnerCheckpointRequest, RunnerCheckpointResume
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.workflow_output_storage import WorkflowOutputStorage
 
 
 class DurableExecutionService:
@@ -241,17 +242,29 @@ class DurableExecutionService:
             raise AppError(
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
             )
-        redacted_output = cast(JsonValue, redact(payload.output))
+        output_storage = WorkflowOutputStorage(
+            self._session,
+            project_id=project_id,
+            execution_id=payload.execution_id,
+            created_by_id=execution.triggered_by_id,
+        )
+        redacted_output = await output_storage.compact(cast(JsonValue, redact(payload.output)))
         redacted_result = (
             {}
             if payload.result is None
-            else json_object(redact(payload.result.model_dump(mode="json")))
+            else json_object(
+                await output_storage.compact(
+                    cast(JsonValue, redact(payload.result.model_dump(mode="json")))
+                )
+            )
         )
         request_attempts = max(
             payload.request_attempts, payload.result.request_attempts if payload.result else 0
         )
         redacted_result["request_attempts"] = request_attempts
-        redacted_variables = json_object(redact(payload.extracted_variables))
+        redacted_variables = json_object(
+            await output_storage.compact(cast(JsonValue, redact(payload.extracted_variables)))
+        )
         existing = await self._repository.get_checkpoint(
             execution_id=payload.execution_id,
             node_id=payload.node_id,
@@ -343,6 +356,84 @@ class DurableExecutionService:
     async def list_checkpoints(
         self, *, actor: User, project_id: UUID, execution_id: UUID
     ) -> list[ExecutionCheckpoint]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_checkpoints(execution_id)
+
+    async def list_checkpoint_log(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_checkpoint_log(
+            execution_id, page=page, page_size=page_size
+        )
+
+    async def get_checkpoint_log_entry(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        checkpoint_id: UUID,
+    ) -> ExecutionCheckpoint:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        checkpoint = await self._repository.get_checkpoint_by_id(execution_id, checkpoint_id)
+        if checkpoint is None:
+            raise AppError(
+                code="WORKFLOW_CHECKPOINT_NOT_FOUND",
+                message="执行记录不存在",
+                status_code=404,
+            )
+        return checkpoint
+
+    async def get_instance_checkpoint(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        instance_id: str,
+    ) -> ExecutionCheckpoint:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        if not instance_id.startswith(NESTED_CHECKPOINT_PREFIX):
+            raise AppError(
+                code="WORKFLOW_INSTANCE_NOT_FOUND",
+                message="控制节点实例不存在",
+                status_code=404,
+            )
+        checkpoint = await self._repository.latest_checkpoint(
+            execution_id=execution_id, node_id=instance_id
+        )
+        if checkpoint is None:
+            raise AppError(
+                code="WORKFLOW_INSTANCE_NOT_FOUND",
+                message="控制节点实例不存在",
+                status_code=404,
+            )
+        return checkpoint
+
+    async def list_instance_checkpoints(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_nested_checkpoints(
+            execution_id, NESTED_CHECKPOINT_PREFIX, page=page, page_size=page_size
+        )
+
+    async def _require_readable_execution(
+        self, actor: User, project_id: UUID, execution_id: UUID
+    ) -> None:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._session.scalar(
             select(WorkflowExecution).where(
@@ -354,7 +445,6 @@ class DurableExecutionService:
             raise AppError(
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
             )
-        return await self._repository.list_checkpoints(execution_id)
 
     async def list_commands(
         self, *, actor: User, project_id: UUID, execution_id: UUID

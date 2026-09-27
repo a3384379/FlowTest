@@ -1,16 +1,40 @@
 import { ClockCircleOutlined, LockOutlined } from '@ant-design/icons'
-import { Alert, Descriptions, Empty, Select, Space, Tabs, Tag, Typography } from 'antd'
-import { useState } from 'react'
+import {
+  Alert,
+  Button,
+  Descriptions,
+  Empty,
+  Pagination,
+  Select,
+  Space,
+  Tabs,
+  Tag,
+  Typography,
+} from 'antd'
+import { useEffect, useState } from 'react'
 
 import type {
+  ExecutionCheckpoint,
+  Page,
+  WorkflowControlRecordDetail,
+  WorkflowControlRecordSummary,
   WorkflowDefinition,
   WorkflowNode,
   WorkflowNodeExecution,
   WorkflowNodeObservation,
 } from '../lib/api'
+import { apiErrorMessage } from '../lib/api'
+import {
+  getWorkflowControlRecord,
+  getWorkflowInstance,
+  listWorkflowControlRecords,
+  downloadWorkflowOutput,
+} from '../features/workflows/workflow-service'
 
 type RuntimeInspectorProps = {
   mode: 'run' | 'history'
+  projectId?: string
+  executionId?: string
   node: WorkflowNode | null
   definition: WorkflowDefinition
   execution: WorkflowNodeExecution | undefined
@@ -20,6 +44,8 @@ type RuntimeInspectorProps = {
 
 export default function WorkflowRunInspector({
   mode,
+  projectId,
+  executionId,
   node,
   definition,
   execution,
@@ -29,8 +55,10 @@ export default function WorkflowRunInspector({
   if (!node) return <EmptyRuntimeInspector mode={mode} />
   return (
     <RuntimeNodeDetail
-      key={`${mode}:${node.id}`}
+      key={`${mode}:${executionId ?? ''}:${node.id}`}
       mode={mode}
+      projectId={projectId}
+      executionId={executionId}
       node={node}
       definition={definition}
       execution={execution}
@@ -42,6 +70,8 @@ export default function WorkflowRunInspector({
 
 function RuntimeNodeDetail({
   mode,
+  projectId,
+  executionId,
   node,
   definition,
   execution,
@@ -59,8 +89,15 @@ function RuntimeNodeDetail({
         <SnapshotTag mode={mode} />
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
+      <ControlIterations
+        output={execution?.output}
+        projectId={projectId}
+        executionId={executionId}
+        nodeId={node.id}
+      />
       <ObservationPicker observations={observations} selected={observation} onChange={setAttempt} />
       <RuntimeTabs
+        projectId={projectId}
         input={input}
         context={context}
         execution={execution}
@@ -70,6 +107,435 @@ function RuntimeNodeDetail({
         请求、响应和变量按本次执行策略展示；开启脱敏时，敏感值会显示为占位符。
       </Typography.Paragraph>
     </aside>
+  )
+}
+
+type ControlItem = {
+  input_index?: number
+  definition_index?: number
+  status: string
+  test_verdict: string
+  nodes: Array<{
+    node_id: string
+    instance_id?: string
+    status: string
+    error_code?: string | null
+    error_message?: string | null
+  }>
+}
+
+type ControlReport = {
+  kind: 'iteration' | 'branch'
+  paged: boolean
+  items: ControlItem[]
+  summary: Record<string, unknown>
+}
+
+function controlReport(output: unknown): ControlReport | null {
+  if (typeof output !== 'object' || output === null) return null
+  const summary = output as Record<string, unknown>
+  const paged = summary.report_paged === true
+  const kind = controlReportKind(summary)
+  const rawItems = kind === 'branch' ? summary.branches : summary.items
+  if (!paged && !Array.isArray(rawItems)) return null
+  if (paged && summary.report_kind !== kind) return null
+  const items = controlReportItems(rawItems, kind)
+  return { kind, paged, items, summary }
+}
+
+function controlReportKind(summary: Record<string, unknown>): ControlReport['kind'] {
+  return summary.report_kind === 'branch' || Array.isArray(summary.branches)
+    ? 'branch'
+    : 'iteration'
+}
+
+function controlReportItems(rawItems: unknown, kind: ControlReport['kind']): ControlItem[] {
+  if (!Array.isArray(rawItems)) return []
+  return rawItems.filter((item): item is ControlItem => isControlItem(item, kind))
+}
+
+function isControlItem(item: unknown, kind: ControlReport['kind']): item is ControlItem {
+  if (typeof item !== 'object' || item === null) return false
+  const value = item as Record<string, unknown>
+  return (
+    typeof value.status === 'string' &&
+    Array.isArray(value.nodes) &&
+    typeof value[kind === 'branch' ? 'definition_index' : 'input_index'] === 'number'
+  )
+}
+
+function ControlIterations({
+  output,
+  projectId,
+  executionId,
+  nodeId,
+}: {
+  output: unknown
+  projectId?: string
+  executionId?: string
+  nodeId: string
+}) {
+  const report = controlReport(output)
+  const [selected, setSelected] = useState<number | undefined>(undefined)
+  const [page, setPage] = useState(1)
+  const { listed, detail, error } = useControlReportData(
+    report,
+    projectId,
+    executionId,
+    nodeId,
+    page,
+    selected,
+  )
+  if (!report) return null
+  const pageSize = 20
+  const visibleItems = visibleControlItems(report, listed, page, pageSize)
+  const selectedItem = selectedControlItem(report, detail, selected)
+  const total = report.paged
+    ? (listed?.total ?? Number(report.summary.record_count ?? 0))
+    : report.items.length
+  const summary = report.summary
+  return (
+    <section
+      aria-label={report.kind === 'branch' ? '并行分支详情' : '循环执行详情'}
+      className="workflow-control-iterations"
+    >
+      <ControlReportSummary summary={summary} total={total} />
+      <ControlReportAlerts
+        report={report}
+        listed={listed}
+        projectId={projectId}
+        executionId={executionId}
+        error={error}
+      />
+      <ControlRecordSelector
+        report={report}
+        selected={selected}
+        items={visibleItems}
+        onChange={setSelected}
+      />
+      <ControlRecordPagination
+        kind={report.kind}
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onChange={(nextPage) => {
+          setPage(nextPage)
+          setSelected(undefined)
+        }}
+      />
+      <ControlRecordNodes item={selectedItem} projectId={projectId} executionId={executionId} />
+    </section>
+  )
+}
+
+function ControlReportSummary({
+  summary,
+  total,
+}: {
+  summary: Record<string, unknown>
+  total: number
+}) {
+  return (
+    <Typography.Text strong>
+      已完成 {String(summary.completed_count ?? summary.started_count ?? total)}/
+      {String(summary.input_count ?? total)}， 失败 {String(summary.failed_count ?? 0)}
+      ，退出原因：{String(summary.termination_reason ?? '未知')}
+    </Typography.Text>
+  )
+}
+
+function ControlReportAlerts({
+  report,
+  listed,
+  projectId,
+  executionId,
+  error,
+}: {
+  report: ControlReport
+  listed: Page<WorkflowControlRecordSummary> | null
+  projectId?: string
+  executionId?: string
+  error: string | null
+}) {
+  return (
+    <>
+      {report.paged && (!projectId || !executionId) && (
+        <Alert type="warning" title="缺少执行上下文，无法加载轮次记录" />
+      )}
+      {report.paged && Number(report.summary.record_count ?? 0) > 0 && listed?.total === 0 && (
+        <Alert type="error" title="执行摘要与轮次记录不一致，请核查原始执行报告" />
+      )}
+      {error && <Alert type="error" title={error} />}
+    </>
+  )
+}
+
+function ControlRecordSelector({
+  report,
+  selected,
+  items,
+  onChange,
+}: {
+  report: ControlReport
+  selected: number | undefined
+  items: ControlItem[]
+  onChange: (value: number) => void
+}) {
+  return (
+    <Select
+      aria-label={report.kind === 'branch' ? '选择并行分支' : '选择循环轮次'}
+      placeholder={report.kind === 'branch' ? '选择分支查看节点结果' : '选择轮次查看节点结果'}
+      value={selected}
+      options={items.map((item) => ({
+        value: controlOrdinal(report.kind, item),
+        label: controlOptionLabel(report.kind, item),
+      }))}
+      onChange={onChange}
+    />
+  )
+}
+
+function ControlRecordPagination({
+  kind,
+  total,
+  page,
+  pageSize,
+  onChange,
+}: {
+  kind: ControlReport['kind']
+  total: number
+  page: number
+  pageSize: number
+  onChange: (value: number) => void
+}) {
+  if (total <= pageSize) return null
+  return (
+    <Pagination
+      aria-label={kind === 'branch' ? '并行分支分页' : '循环轮次分页'}
+      current={page}
+      pageSize={pageSize}
+      total={total}
+      showSizeChanger={false}
+      onChange={onChange}
+    />
+  )
+}
+
+function ControlRecordNodes({
+  item,
+  projectId,
+  executionId,
+}: {
+  item: ControlItem | undefined
+  projectId?: string
+  executionId?: string
+}) {
+  return item?.nodes.map((node) => (
+    <ControlRecordNode
+      key={`${node.node_id}:${node.instance_id ?? ''}`}
+      item={node}
+      projectId={projectId}
+      executionId={executionId}
+    />
+  ))
+}
+
+function useControlReportData(
+  report: ControlReport | null,
+  projectId: string | undefined,
+  executionId: string | undefined,
+  nodeId: string,
+  page: number,
+  selected: number | undefined,
+) {
+  const kind = report?.kind
+  const paged = report?.paged ?? false
+  const pageData = useControlPage(paged, kind, projectId, executionId, nodeId, page)
+  const detailData = useControlDetail(paged, kind, projectId, executionId, nodeId, selected)
+  return {
+    listed: pageData.value,
+    detail: detailData.value,
+    error: pageData.error ?? detailData.error ?? null,
+  }
+}
+
+function useControlPage(
+  paged: boolean,
+  kind: ControlReport['kind'] | undefined,
+  projectId: string | undefined,
+  executionId: string | undefined,
+  nodeId: string,
+  page: number,
+) {
+  const [listedState, setListedState] = useState<{
+    key: string
+    value?: Page<WorkflowControlRecordSummary>
+    error?: string
+  } | null>(null)
+  const pageKey = `${projectId}:${executionId}:${nodeId}:${kind}:${page}`
+  useEffect(() => {
+    if (!paged || !kind || !projectId || !executionId) return
+    let active = true
+    void listWorkflowControlRecords(projectId, executionId, nodeId, kind, page)
+      .then((value) => {
+        if (active) setListedState({ key: pageKey, value })
+      })
+      .catch((reason: unknown) => {
+        if (active) setListedState({ key: pageKey, error: apiErrorMessage(reason) })
+      })
+    return () => {
+      active = false
+    }
+  }, [paged, kind, projectId, executionId, nodeId, page, pageKey])
+  return {
+    value: listedState?.key === pageKey ? (listedState.value ?? null) : null,
+    error: listedState?.key === pageKey ? listedState.error : undefined,
+  }
+}
+
+function useControlDetail(
+  paged: boolean,
+  kind: ControlReport['kind'] | undefined,
+  projectId: string | undefined,
+  executionId: string | undefined,
+  nodeId: string,
+  selected: number | undefined,
+) {
+  const [detailState, setDetailState] = useState<{
+    key: string
+    value?: WorkflowControlRecordDetail
+    error?: string
+  } | null>(null)
+  const detailKey = `${projectId}:${executionId}:${nodeId}:${kind}:${selected}`
+  useEffect(() => {
+    if (!paged || !kind || !projectId || !executionId || selected === undefined) return
+    let active = true
+    void getWorkflowControlRecord(projectId, executionId, nodeId, kind, selected)
+      .then((value) => {
+        if (active) setDetailState({ key: detailKey, value })
+      })
+      .catch((reason: unknown) => {
+        if (active) setDetailState({ key: detailKey, error: apiErrorMessage(reason) })
+      })
+    return () => {
+      active = false
+    }
+  }, [paged, kind, projectId, executionId, nodeId, selected, detailKey])
+  return {
+    value: detailState?.key === detailKey ? (detailState.value ?? null) : null,
+    error: detailState?.key === detailKey ? detailState.error : undefined,
+  }
+}
+
+function controlOrdinal(kind: ControlReport['kind'], item: ControlItem): number | undefined {
+  return kind === 'branch' ? item.definition_index : item.input_index
+}
+
+function controlOptionLabel(kind: ControlReport['kind'], item: ControlItem): string {
+  const index = (controlOrdinal(kind, item) ?? 0) + 1
+  return kind === 'branch'
+    ? `分支 ${index} · ${item.test_verdict ?? item.status}`
+    : `第 ${index} 项 · ${item.test_verdict ?? item.status}`
+}
+
+function visibleControlItems(
+  report: ControlReport,
+  listed: Page<WorkflowControlRecordSummary> | null,
+  page: number,
+  pageSize: number,
+): ControlItem[] {
+  if (!report.paged) return report.items.slice((page - 1) * pageSize, page * pageSize)
+  if (listed?.page !== page) return []
+  return listed.items.map((item) => ({
+    ...item,
+    [report.kind === 'branch' ? 'definition_index' : 'input_index']: item.ordinal,
+    nodes: [],
+  }))
+}
+
+function selectedControlItem(
+  report: ControlReport,
+  detail: WorkflowControlRecordDetail | null,
+  selected: number | undefined,
+): ControlItem | undefined {
+  if (!report.paged) {
+    return report.items.find((item) => controlOrdinal(report.kind, item) === selected)
+  }
+  return selected !== undefined && detail?.ordinal === selected
+    ? (detail.payload as ControlItem)
+    : undefined
+}
+
+function ControlRecordNode({
+  item,
+  projectId,
+  executionId,
+}: {
+  item: ControlItem['nodes'][number]
+  projectId?: string
+  executionId?: string
+}) {
+  return (
+    <div>
+      <Typography.Text>
+        {item.node_id} · {item.status}
+      </Typography.Text>
+      {item.error_message && (
+        <Alert type="error" title={item.error_message} description={item.error_code} />
+      )}
+      {item.instance_id && projectId && executionId && (
+        <ControlInstanceDetail
+          projectId={projectId}
+          executionId={executionId}
+          instanceId={item.instance_id}
+        />
+      )}
+    </div>
+  )
+}
+
+function ControlInstanceDetail({
+  projectId,
+  executionId,
+  instanceId,
+}: {
+  projectId: string
+  executionId: string
+  instanceId: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [checkpoint, setCheckpoint] = useState<ExecutionCheckpoint | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void getWorkflowInstance(projectId, executionId, instanceId)
+      .then((value) => {
+        if (active) setCheckpoint(value)
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(apiErrorMessage(reason))
+      })
+    return () => {
+      active = false
+    }
+  }, [open, projectId, executionId, instanceId])
+  return (
+    <div>
+      <Button type="link" onClick={() => setOpen((value) => !value)}>
+        {open ? '收起实例详情' : '查看实例详情'}
+      </Button>
+      {open && error && <Alert type="error" title={error} />}
+      {open && checkpoint && (
+        <>
+          <Typography.Text>
+            {checkpoint.node_name} · {checkpoint.status}
+          </Typography.Text>
+          <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />
+          <Payload title="实例请求、响应与校验" value={checkpoint.result} projectId={projectId} />
+        </>
+      )}
+    </div>
   )
 }
 
@@ -138,11 +604,13 @@ function ObservationPicker({
 }
 
 function RuntimeTabs({
+  projectId,
   input,
   context,
   execution,
   observation,
 }: {
+  projectId?: string
   input: Record<string, unknown>
   context: Record<string, unknown>
   execution: WorkflowNodeExecution | undefined
@@ -152,13 +620,17 @@ function RuntimeTabs({
     <Tabs
       size="small"
       items={[
-        { key: 'input', label: '输入', children: <InputDetail input={input} context={context} /> },
+        {
+          key: 'input',
+          label: '输入',
+          children: <InputDetail input={input} context={context} projectId={projectId} />,
+        },
         { key: 'request', label: '请求', children: <RequestDetail observation={observation} /> },
         { key: 'response', label: '响应', children: <ResponseDetail observation={observation} /> },
         {
           key: 'output',
           label: '输出',
-          children: <Payload title="节点输出" value={execution?.output} />,
+          children: <Payload title="节点输出" value={execution?.output} projectId={projectId} />,
         },
         {
           key: 'diagnostics',
@@ -173,14 +645,16 @@ function RuntimeTabs({
 function InputDetail({
   input,
   context,
+  projectId,
 }: {
   input: Record<string, unknown>
   context: Record<string, unknown>
+  projectId?: string
 }) {
   return (
     <>
-      <Payload title="上游节点输出" value={input} />
-      <Payload title="执行变量" value={resolvedVariables(context)} />
+      <Payload title="上游节点输出" value={input} projectId={projectId} />
+      <Payload title="执行变量" value={resolvedVariables(context)} projectId={projectId} />
     </>
   )
 }
@@ -259,13 +733,89 @@ function HttpRequestSummary({ observation }: { observation: WorkflowNodeObservat
   )
 }
 
-function Payload({ title, value }: { title: string; value: unknown }) {
+function Payload({
+  title,
+  value,
+  projectId,
+}: {
+  title: string
+  value: unknown
+  projectId?: string
+}) {
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const references = workflowOutputReferences(value)
   return (
     <section className="workflow-runtime-payload">
       <Typography.Text strong>{title}</Typography.Text>
+      {references.map((reference) => (
+        <div key={reference.artifactId}>
+          <Typography.Text type="secondary">
+            大型响应已保存为对象引用（{formatBytes(reference.sizeBytes)}）
+          </Typography.Text>
+          {projectId && (
+            <Button
+              type="link"
+              onClick={() => {
+                setDownloadError(null)
+                void downloadWorkflowOutput(projectId, reference.artifactId).catch(
+                  (error: unknown) => {
+                    setDownloadError(apiErrorMessage(error))
+                  },
+                )
+              }}
+            >
+              下载响应体
+            </Button>
+          )}
+        </div>
+      ))}
+      {downloadError && <Alert type="error" title={`响应体不可用：${downloadError}`} />}
       <pre>{serialize(value)}</pre>
     </section>
   )
+}
+
+function workflowOutputReferences(
+  value: unknown,
+): Array<{ artifactId: string; sizeBytes: number }> {
+  const found = new Map<string, number>()
+  const visit = (item: unknown): void => {
+    if (Array.isArray(item)) {
+      item.forEach(visit)
+      return
+    }
+    if (!isRecord(item)) return
+    if (isResponseOutput(item)) {
+      const reference = responseReference(item.body)
+      if (reference) found.set(reference.artifactId, reference.sizeBytes)
+      return
+    }
+    Object.values(item).forEach(visit)
+  }
+  visit(value)
+  return Array.from(found, ([artifactId, sizeBytes]) => ({ artifactId, sizeBytes }))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isResponseOutput(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.status_code === 'number' &&
+    typeof value.size_bytes === 'number' &&
+    isRecord(value.headers) &&
+    'body' in value
+  )
+}
+
+function responseReference(body: unknown): { artifactId: string; sizeBytes: number } | null {
+  if (!isRecord(body) || !isRecord(body.__flowtest_workflow_output_ref__)) return null
+  const metadata = body.__flowtest_workflow_output_ref__
+  if (typeof metadata.artifact_id !== 'string' || typeof metadata.size_bytes !== 'number') {
+    return null
+  }
+  return { artifactId: metadata.artifact_id, sizeBytes: metadata.size_bytes }
 }
 
 function EmptyPayload({ text }: { text: string }) {

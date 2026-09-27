@@ -17,16 +17,27 @@ from app.engine.contracts import (
     CAPABILITY_LEGACY_NODE_TYPES,
     ApiNodeConfig,
     AssertNodeConfig,
+    ConditionLoopConfig,
     ConditionNodeConfig,
+    ControlSignalConfig,
     DatasetNodeConfig,
     DelayNodeConfig,
     ExtractNodeConfig,
+    FailControlConfig,
+    ForEachControlConfig,
     ForEachNodeConfig,
+    IfControlConfig,
     NodeType,
+    ParallelControlConfig,
     RedisNodeConfig,
+    RepeatControlConfig,
+    ReturnControlConfig,
     SqlNodeConfig,
     StartNodeConfig,
+    StepGroupControlConfig,
     SubFlowNodeConfig,
+    SwitchControlConfig,
+    TryControlConfig,
     WorkflowNode,
 )
 from app.engine.event_nodes import (
@@ -280,6 +291,26 @@ def _v3_event_manifest(
     )
 
 
+def _control_manifest(
+    capability_id: str, display_name: str, config_model: type[object]
+) -> CapabilityManifest:
+    return CapabilityManifest(
+        id=capability_id,
+        version="1.0.0",
+        category=CapabilityCategory.CONTROL,
+        display_name=display_name,
+        description="结构化控制区域随父流程固定到执行快照",
+        input_schema=_schema(None),
+        output_schema=_schema(None),
+        configuration_schema=_schema(config_model),
+        network_policy=NetworkPolicy(),
+        runner_type=RunnerType.GENERAL,
+        timeout_policy=TimeoutPolicy(),
+        snapshot_policy=SnapshotPolicy(),
+        redaction_policy=RedactionPolicy(),
+    )
+
+
 BUILTIN_CAPABILITY_MANIFESTS = (
     _manifest("flow.start", "开始", CapabilityCategory.CONTROL, StartNodeConfig),
     _manifest(
@@ -305,6 +336,20 @@ BUILTIN_CAPABILITY_MANIFESTS = (
     _manifest("data.dataset", "数据集", CapabilityCategory.DATA, DatasetNodeConfig),
     _manifest("flow.subflow", "子流程", CapabilityCategory.CONTROL, SubFlowNodeConfig),
     _manifest("flow.foreach", "循环", CapabilityCategory.CONTROL, ForEachNodeConfig),
+    _control_manifest("flow.control.foreach", "集合遍历", ForEachControlConfig),
+    _control_manifest("flow.control.repeat", "重复次数", RepeatControlConfig),
+    _control_manifest("flow.control.if", "条件分支", IfControlConfig),
+    _control_manifest("flow.control.switch", "多路分支", SwitchControlConfig),
+    _control_manifest("flow.control.while", "条件循环", ConditionLoopConfig),
+    _control_manifest("flow.control.do_while", "先执行后判断", ConditionLoopConfig),
+    _control_manifest("flow.control.until", "直到条件满足", ConditionLoopConfig),
+    _control_manifest("flow.control.break", "退出循环", ControlSignalConfig),
+    _control_manifest("flow.control.continue", "下一轮", ControlSignalConfig),
+    _control_manifest("flow.control.parallel", "并行分支", ParallelControlConfig),
+    _control_manifest("flow.control.try", "尝试与清理", TryControlConfig),
+    _control_manifest("flow.control.group", "步骤组", StepGroupControlConfig),
+    _control_manifest("flow.control.fail", "主动失败", FailControlConfig),
+    _control_manifest("flow.control.return", "返回调用方", ReturnControlConfig),
     _manifest(
         "sql.query",
         "只读 SQL",

@@ -128,7 +128,7 @@ def test_plugin_manifest_enforces_digest_ownership_and_sandbox() -> None:
 
 def test_registry_and_legacy_adapter_pin_every_v2_node() -> None:
     manifests = builtin_capability_registry.list()
-    assert len(manifests) == 21
+    assert len(manifests) == 35
     assert builtin_capability_registry.require("http.request", "2.0.0").runner_type == "general"
     with pytest.raises(ValueError, match="Unknown capability"):
         builtin_capability_registry.require("grpc.unary", "3.0.0")
@@ -392,7 +392,7 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         headers=user_headers,
     )
     assert capabilities.status_code == 200
-    assert capabilities.json()["total"] == 21
+    assert capabilities.json()["total"] == 35
     assert len(capabilities.json()["items"]) == 5
     first = capabilities.json()["items"][0]
     detail = await capability_client.get(
@@ -401,6 +401,13 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
     )
     assert detail.status_code == 200
     assert detail.json()["schema_hash"] == first["schema_hash"]
+    control = await capability_client.get(
+        "/api/v1/capabilities/flow.control.foreach/versions/1.0.0",
+        headers=user_headers,
+    )
+    assert control.status_code == 200
+    assert control.json()["enabled"] is True
+    assert "configuration_schema" in control.json()["manifest"]
     missing = await capability_client.get(
         "/api/v1/capabilities/grpc.unary/versions/3.0.0",
         headers=user_headers,

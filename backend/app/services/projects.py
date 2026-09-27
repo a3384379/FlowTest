@@ -22,6 +22,7 @@ from app.repositories.access import ProjectRepository, UserRepository
 from app.services.audit import AuditService
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.organizations import OrganizationContextService
+from app.services.outbound_limits import OutboundLimitPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +366,57 @@ class ProjectService:
         )
         await self._session.commit()
         return execution_concurrency_limit, queued_run_limit
+
+    async def get_outbound_policy(
+        self, *, actor: User, project_id: UUID
+    ) -> tuple[int | None, int | None]:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.READ,
+        )
+        return (
+            access.project.outbound_concurrency_limit,
+            access.project.outbound_requests_per_minute,
+        )
+
+    async def load_runtime_outbound_policy(self, project_id: UUID) -> OutboundLimitPolicy:
+        project = await self._projects.get(project_id)
+        if project is None:
+            raise AppError(code="PROJECT_NOT_FOUND", message="项目不存在", status_code=404)
+        return OutboundLimitPolicy(
+            concurrency_limit=project.outbound_concurrency_limit,
+            requests_per_minute=project.outbound_requests_per_minute,
+        )
+
+    async def update_outbound_policy(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        outbound_concurrency_limit: int | None,
+        outbound_requests_per_minute: int | None,
+    ) -> tuple[int | None, int | None]:
+        access = await self.authorize(
+            actor=actor,
+            project_id=project_id,
+            capability=ProjectCapability.MANAGE_SECURITY,
+        )
+        access.project.outbound_concurrency_limit = outbound_concurrency_limit
+        access.project.outbound_requests_per_minute = outbound_requests_per_minute
+        self._audit.record(
+            actor_user_id=actor.id,
+            project_id=project_id,
+            action="project.outbound_policy_updated",
+            resource_type="project",
+            resource_id=project_id,
+            details={
+                "outbound_concurrency_limit": outbound_concurrency_limit,
+                "outbound_requests_per_minute": outbound_requests_per_minute,
+            },
+        )
+        await self._session.commit()
+        return outbound_concurrency_limit, outbound_requests_per_minute
 
     async def list_audit_logs(
         self,

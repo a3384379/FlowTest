@@ -1,8 +1,9 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import PurePath
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -84,6 +85,52 @@ class ArtifactService:
             purpose="response",
         )
 
+    async def store_workflow_output(
+        self,
+        *,
+        project_id: UUID,
+        execution_id: UUID,
+        created_by_id: UUID,
+        content: bytes,
+    ) -> Artifact:
+        digest = hashlib.sha256(content).hexdigest()
+        artifact_id = uuid5(execution_id, digest)
+        existing = await self._repository.get(artifact_id)
+        if existing is not None:
+            if (
+                existing.project_id != project_id
+                or existing.sha256 != digest
+                or existing.purpose != "workflow_output"
+            ):
+                raise AppError(
+                    code="ARTIFACT_CONFLICT", message="工作流输出引用冲突", status_code=409
+                )
+            return existing
+        actor = await self._session.get(User, created_by_id)
+        if actor is None:
+            raise AppError(code="USER_NOT_FOUND", message="执行用户不存在", status_code=404)
+        try:
+            async with self._session.begin_nested():
+                return await self._store(
+                    actor=actor,
+                    project_id=project_id,
+                    filename=f"workflow-{execution_id}-{digest}.json",
+                    content_type="application/json",
+                    content=content,
+                    purpose="workflow_output",
+                    artifact_id=artifact_id,
+                )
+        except IntegrityError:
+            existing = await self._repository.get(artifact_id)
+            if (
+                existing is None
+                or existing.project_id != project_id
+                or existing.sha256 != digest
+                or existing.purpose != "workflow_output"
+            ):
+                raise
+            return existing
+
     async def store_report(
         self,
         *,
@@ -136,6 +183,7 @@ class ArtifactService:
         content_type: str,
         content: bytes,
         purpose: str,
+        artifact_id: UUID | None = None,
     ) -> Artifact:
         if len(content) > settings.artifact_limit_bytes:
             raise AppError(
@@ -152,7 +200,7 @@ class ArtifactService:
             dimension=QuotaDimension.ARTIFACT_STORAGE,
             increment=len(content),
         )
-        artifact_id = uuid4()
+        artifact_id = artifact_id or uuid4()
         object_key = f"projects/{project_id}/artifacts/{artifact_id}"
         normalized_content_type = content_type.strip() or "application/octet-stream"
         await self._storage.put(

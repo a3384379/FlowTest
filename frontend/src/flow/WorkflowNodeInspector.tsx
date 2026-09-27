@@ -1,6 +1,7 @@
 import { editorNode, restoreEditedNode } from './editor/graph-analysis'
 import { getApiDetail } from '../features/api-console/api-service'
 import WorkflowJsonInput from './WorkflowJsonInput'
+import WorkflowControlFields from './WorkflowControlFields'
 import MappingEditor from './WorkflowMappingEditor'
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
@@ -26,6 +27,7 @@ import type {
   WorkflowEdge,
   WorkflowFieldMapping,
   WorkflowNode,
+  WorkflowRegion,
   RequestService,
   ServiceEndpoint,
 } from '../lib/api'
@@ -105,6 +107,16 @@ export default function WorkflowNodeInspector({
           environmentId={environmentId}
           editable={editable}
           onUpdate={updateNode}
+          onStructureChange={(next) => onChange(next, 'structure')}
+          onRegionUpdate={(region) =>
+            onChange(
+              {
+                ...definition,
+                regions: definition.regions?.map((item) => (item.id === region.id ? region : item)),
+              },
+              'regions',
+            )
+          }
         />
         {node.type === 'api' && (
           <MappingFields
@@ -184,6 +196,8 @@ function InspectorNodeFields({
   eventSources,
   editable,
   onUpdate,
+  onStructureChange,
+  onRegionUpdate,
 }: Omit<InspectorProps, 'node' | 'onChange' | 'onDelete'> & {
   node: WorkflowNode
   workflows: Workflow[]
@@ -191,7 +205,23 @@ function InspectorNodeFields({
   grpcDescriptors: SchemaArtifact[]
   eventSources: EventSource[]
   onUpdate: (node: WorkflowNode) => void
+  onStructureChange: (definition: WorkflowDefinition) => void
+  onRegionUpdate: (region: WorkflowRegion) => void
 }) {
+  if (node.type === 'capability' && node.capability_id?.startsWith('flow.control.')) {
+    return (
+      <WorkflowControlFields
+        node={node}
+        definition={definition}
+        regions={(definition.regions ?? []).filter((region) => region.owner_node_id === node.id)}
+        editable={editable}
+        apis={apis}
+        onUpdate={onUpdate}
+        onStructureChange={onStructureChange}
+        onRegionUpdate={onRegionUpdate}
+      />
+    )
+  }
   if (isEventCapability(node)) {
     return (
       <EventCapabilityFields

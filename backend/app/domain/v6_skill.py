@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SKILL_NAME = "flowtest-generate-integration-flow"
 SKILL_MANIFEST_SCHEMA_VERSION = "flowtest-skill-manifest-v1"
-SKILL_VERSION = "1.1.0-rc.1"
+SKILL_VERSION = "1.3.0-rc.1"
 SKILL_MINIMUM_MCP_VERSION = "s61-mcp-connection-v1"
 
 SKILL_QUICK_TOOLS = (
@@ -39,6 +39,10 @@ SKILL_DEEP_TOOLS = (
 SKILL_REQUIRED_TOOLS = SKILL_QUICK_TOOLS
 SKILL_OPTIONAL_TOOLS = (
     *SKILL_DEEP_TOOLS,
+    "flowtest.discover_control_capabilities",
+    "flowtest.inspect_flow",
+    "flowtest.propose_control_block",
+    "flowtest.propose_control_workflow",
     "flowtest.inspect_connection",
     "flowtest.check_service_target",
     "flowtest.inspect_entity_mapping",
@@ -138,7 +142,7 @@ class IntegrationFlowSkillManifest(BaseModel):
 
     schema_version: Literal["flowtest-skill-manifest-v1"]
     name: Literal["flowtest-generate-integration-flow"]
-    version: Literal["1.0.0-rc.1", "1.0.0-rc.2", "1.1.0-rc.1"]
+    version: Literal["1.0.0-rc.1", "1.0.0-rc.2", "1.1.0-rc.1", "1.3.0-rc.1"]
     minimum_mcp_version: Literal["s55-sandbox-preview-v1", "s61-mcp-connection-v1"]
     quick_tools: list[str] = Field(default_factory=list)
     deep_tools: list[str] = Field(default_factory=list)

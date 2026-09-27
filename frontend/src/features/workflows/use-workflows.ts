@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   apiErrorMessage,
   type ExecutionEvent,
+  type Page,
   type WorkflowDebugResult,
   type WorkflowDefinition,
   type WorkflowExecution,
@@ -27,6 +28,7 @@ import {
   listGrpcDescriptors,
 } from '../protocols/protocol-service'
 import { useExecutionEvents } from './use-execution-events'
+import type { WorkflowTemplateKind } from './workflow-templates'
 import {
   clearWorkflowDrafts,
   readWorkflowDraft,
@@ -51,10 +53,18 @@ import {
   listWorkflows,
   publishWorkflow,
   replayWorkflowNode,
+  rerunFailedWorkflowItems,
+  type FailedItemRerunRequest,
   updateWorkflowDraft,
 } from './workflow-service'
 
-export type CreateWorkflowInput = { name: string; description: string; apiId: string }
+export type CreateWorkflowInput = {
+  name: string
+  description: string
+  apiId: string
+  submitApiId?: string
+  template?: WorkflowTemplateKind
+}
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
 export type WorkflowDraftEdit = {
   workflowId: string
@@ -97,6 +107,7 @@ export function useWorkflows(initialWorkflowId?: string) {
   const [lastResult, setLastResult] = useState<WorkflowExecutionDetail | null>(null)
   const [activeExecution, setActiveExecution] = useState<WorkflowExecution | null>(null)
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
+  const [eventHistoryIncompleteId, setEventHistoryIncompleteId] = useState<string | null>(null)
   const [liveNodes, setLiveNodes] = useState<Record<string, WorkflowNodeExecution>>({})
   const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
   const [workspaceMode, setWorkspaceMode] = useState<WorkflowWorkspaceMode>('draft')
@@ -158,7 +169,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     projectId,
     workflowSelection,
     workflowSelectionCleared,
-    workflows.data?.items,
+    workflows.data,
   )
   const setDraftStorageError = useCallback(
     (error: string | null, targetId = workflowId) => {
@@ -262,7 +273,8 @@ export function useWorkflows(initialWorkflowId?: string) {
   })
   const historyExecution = useQuery({
     queryKey: ['workflow-execution', projectId, historyExecutionId],
-    queryFn: () => getWorkflowExecution(requiredId(projectId), requiredId(historyExecutionId)),
+    queryFn: () =>
+      getWorkflowExecution(requiredId(projectId), requiredId(historyExecutionId), true),
     enabled: canLoadHistory(projectId, historyExecutionId, workspaceMode),
   })
   const createMutation = useMutation({
@@ -270,6 +282,8 @@ export function useWorkflows(initialWorkflowId?: string) {
       createWorkflow(requiredId(projectId), {
         ...input,
         apiVersion: apis.data?.items.find((api) => api.id === input.apiId)?.current_version,
+        submitApiVersion: apis.data?.items.find((api) => api.id === input.submitApiId)
+          ?.current_version,
       }),
   })
   const deleteMutation = useMutation({
@@ -328,8 +342,18 @@ export function useWorkflows(initialWorkflowId?: string) {
         nodeId,
       ),
   })
+  const rerunFailedItemsMutation = useMutation({
+    mutationFn: (input: { executionId: string; payload: FailedItemRerunRequest }) =>
+      rerunFailedWorkflowItems(requiredId(projectId), input.executionId, input.payload),
+  })
 
-  useExecutionEvents(activeExecutionId, token, handleExecutionEvent)
+  useExecutionEvents(
+    activeExecutionId,
+    token,
+    handleExecutionEvent,
+    reconcileExecution,
+    setEventHistoryIncompleteId,
+  )
 
   function selectProject(value: string) {
     selectContextProject(value)
@@ -340,6 +364,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     setLastResult(null)
     setActiveExecution(null)
     setActiveExecutionId(null)
+    setEventHistoryIncompleteId(null)
     setLiveNodes({})
     setExecutionDefinition(null)
     setWorkspaceMode('draft')
@@ -468,18 +493,23 @@ export function useWorkflows(initialWorkflowId?: string) {
     if (!canEdit || hasPendingNodeEditor(workflowId)) return
     await runMutation(message.error, async () => {
       const execution = await executeMutation.mutateAsync()
-      const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
-      setLastResult(null)
-      setActiveExecution(execution)
-      setExecutionDefinition(runningDefinition)
-      setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
-      completedExecutionId.current = null
-      setActiveExecutionId(execution.id)
-      setWorkspaceMode('run')
-      setHistoryExecutionId(null)
-      void watchExecution(execution.id)
+      beginExecution(execution)
       void message.info('工作流已开始运行')
     })
+  }
+
+  function beginExecution(execution: WorkflowExecution) {
+    const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
+    setLastResult(null)
+    setActiveExecution(execution)
+    setExecutionDefinition(runningDefinition)
+    setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
+    completedExecutionId.current = null
+    setActiveExecutionId(execution.id)
+    setEventHistoryIncompleteId(null)
+    setWorkspaceMode('run')
+    setHistoryExecutionId(null)
+    void watchExecution(execution.id)
   }
 
   async function debugToBreakpoint() {
@@ -502,6 +532,12 @@ export function useWorkflows(initialWorkflowId?: string) {
     })
   }
 
+  async function rerunFailedItems(executionId: string, payload: FailedItemRerunRequest) {
+    const execution = await rerunFailedItemsMutation.mutateAsync({ executionId, payload })
+    beginExecution(execution)
+    void message.info('失败项派生运行已开始，原运行报告保留')
+  }
+
   function handleExecutionEvent(event: ExecutionEvent) {
     if (
       (event.type === 'node.status' || event.type === 'node.result') &&
@@ -517,6 +553,16 @@ export function useWorkflows(initialWorkflowId?: string) {
     if (event.type === 'execution.completed') void completeExecution(event.execution_id)
   }
 
+  async function reconcileExecution(executionId: string): Promise<void> {
+    if (!projectId) return
+    const result = await getWorkflowExecution(projectId, executionId, true)
+    if (['queued', 'running'].includes(result.execution.status)) {
+      setActiveExecution((current) => (current?.id === executionId ? result.execution : current))
+      return
+    }
+    await completeExecution(executionId)
+  }
+
   async function watchExecution(executionId: string) {
     for (let attempt = 0; attempt < 600; attempt += 1) {
       await delay(500)
@@ -530,7 +576,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     if (completingExecutionId.current === executionId) return false
     completingExecutionId.current = executionId
     try {
-      const result = await getWorkflowExecution(requiredId(projectId), executionId)
+      const result = await getWorkflowExecution(requiredId(projectId), executionId, true)
       if (['queued', 'running'].includes(result.execution.status)) return false
       completedExecutionId.current = executionId
       setLastResult(result)
@@ -561,6 +607,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     setLastResult(null)
     setActiveExecution(null)
     setActiveExecutionId(null)
+    setEventHistoryIncompleteId(null)
     setLiveNodes({})
     setExecutionDefinition(null)
     setWorkspaceMode('draft')
@@ -715,6 +762,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     memoryDraftIds,
     nodeStatuses: workspaceView.statuses,
     activeExecutionId,
+    eventHistoryIncompleteId,
     lastResult,
     runtimeExecution: workspaceView.execution,
     runtimeNodes: workspaceView.nodes,
@@ -740,9 +788,11 @@ export function useWorkflows(initialWorkflowId?: string) {
     discardWorkflowDraft,
     publish,
     execute,
+    beginIterationDebugExecution: beginExecution,
     debugToBreakpoint,
     compareLatestVersions,
     replayNode,
+    rerunFailedItems,
     creating: createMutation.isPending,
     deleting: deleteMutation.isPending,
     saving: saveMutation.isPending,
@@ -751,6 +801,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     debugging: debugMutation.isPending,
     comparing: diffMutation.isPending,
     replaying: replayMutation.isPending,
+    rerunningFailedItems: rerunFailedItemsMutation.isPending,
   }
 }
 
@@ -758,18 +809,38 @@ function useSelectedWorkflow(
   projectId: string | null,
   workflowSelection: string | null,
   workflowSelectionCleared: boolean,
-  workflows: Workflow[] | undefined,
+  workflows: Page<Workflow> | undefined,
 ) {
-  const workflowId = workflowSelectionCleared
-    ? null
-    : (workflowSelection ?? workflows?.at(0)?.id ?? null)
-  const listedWorkflow = workflows?.find((item) => item.id === workflowId) ?? null
+  const listed = workflows?.items
+  const workflowId = resolveSelectedWorkflowId(
+    workflowSelection,
+    workflowSelectionCleared,
+    workflows,
+  )
+  const listedWorkflow = listed?.find((item) => item.id === workflowId) ?? null
   const workflowDetail = useQuery({
     queryKey: ['workflow', projectId, workflowId],
     queryFn: () => getWorkflow(requiredId(projectId), requiredId(workflowId)),
-    enabled: canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
+    enabled: Boolean(workflows) && canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
   })
   return { workflowId, selectedWorkflow: listedWorkflow ?? workflowDetail.data ?? null }
+}
+
+function resolveSelectedWorkflowId(
+  selection: string | null,
+  cleared: boolean,
+  workflows: Page<Workflow> | undefined,
+): string | null {
+  if (cleared) return null
+  if (!workflows) return selection
+  const listed = workflows.items
+  if (
+    selection &&
+    (listed.some((item) => item.id === selection) || listed.length < workflows.total)
+  ) {
+    return selection
+  }
+  return listed.at(0)?.id ?? null
 }
 
 function workflowDraftIdentity(

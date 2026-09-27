@@ -69,6 +69,32 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_change_regression_tables(connection)
     await _ensure_semantic_gap_waiver_revision_schema(connection)
     await _ensure_s55_schema(connection)
+    await _ensure_control_report_columns(connection)
+    await _ensure_outbound_limit_tables(connection)
+    await _add_column_if_missing(
+        connection,
+        table="runner_leases",
+        column="outbound_concurrency_limit",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="runner_leases",
+        column="outbound_requests_per_minute",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="projects",
+        column="outbound_concurrency_limit",
+        definition="INTEGER",
+    )
+    await _add_column_if_missing(
+        connection,
+        table="projects",
+        column="outbound_requests_per_minute",
+        definition="INTEGER",
+    )
     await _add_column_if_missing(
         connection,
         table="projects",
@@ -277,6 +303,40 @@ async def _ensure_s55_schema(connection: AsyncConnection) -> None:
     elif not checkpoint_columns:
         await connection.execute(CreateTable(checkpoint_table))
         await _ensure_table_indexes(connection, checkpoint_table)
+
+
+async def _ensure_control_report_columns(connection: AsyncConnection) -> None:
+    """Keep existing Standalone workflow runs readable after S56/S57 upgrades."""
+
+    for table, column, definition in (
+        ("workflow_executions", "derived_from_execution_id", "CHAR(32)"),
+        ("workflow_executions", "rerun_loop_node_id", "VARCHAR(128)"),
+        ("workflow_executions", "rerun_input_indices", "JSON"),
+        ("workflow_executions", "context_summary", "JSON"),
+        ("workflow_node_executions", "output_summary", "JSON"),
+        ("workflow_node_executions", "result_summary", "JSON"),
+    ):
+        await _add_column_if_missing(connection, table=table, column=column, definition=definition)
+    columns = await _table_column_contract(connection, "workflow_executions")
+    if "derived_from_execution_id" in columns:
+        await connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_workflow_executions_derived_from_execution_id "
+                "ON workflow_executions (derived_from_execution_id)"
+            )
+        )
+
+
+async def _ensure_outbound_limit_tables(connection: AsyncConnection) -> None:
+    """Add local permit state to existing offline installs."""
+
+    for table in (
+        Base.metadata.tables["outbound_permits"],
+        Base.metadata.tables["outbound_rate_windows"],
+    ):
+        if not await _table_column_contract(connection, table.name):
+            await connection.execute(CreateTable(table))
+        await _ensure_table_indexes(connection, table)
 
 
 async def _ensure_s61b_schema(connection: AsyncConnection) -> None:

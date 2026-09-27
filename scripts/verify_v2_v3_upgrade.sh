@@ -5,7 +5,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/upgrade/compose.yaml"
 v2_ref="${FLOWTEST_UPGRADE_V2_REF:-v2.0.0-rc.1}"
 expected_v2_commit="06699d54bceee091a2efac838e426cf7ef5c9c9e"
-current_head_revision="20260910_0055"
 actual_v2_commit="$(git -C "${repo_root}" rev-parse "${v2_ref}^{commit}")"
 
 if [[ "${actual_v2_commit}" != "${expected_v2_commit}" ]]; then
@@ -94,6 +93,18 @@ echo "Building isolated V2 and current images..."
 docker build --tag "${FLOWTEST_UPGRADE_CURRENT_BACKEND_IMAGE}" "${repo_root}/backend"
 docker build --tag "${FLOWTEST_UPGRADE_V2_BACKEND_IMAGE}" "${v2_source}/backend"
 docker build --tag "${FLOWTEST_UPGRADE_V2_MOCK_IMAGE}" "${v2_source}/mock-target"
+current_head_revision="$(
+  "${compose[@]}" --profile current run --rm --no-deps current-api python -c '
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
+if len(heads) != 1:
+    raise SystemExit(f"Expected one Alembic head, found {heads!r}")
+print(heads[0])
+'
+)"
+echo "Current Alembic head: ${current_head_revision}"
 
 echo "Starting isolated V2 baseline ${v2_ref} (${actual_v2_commit})..."
 "${compose[@]}" up --detach --wait postgres redis minio mock-target

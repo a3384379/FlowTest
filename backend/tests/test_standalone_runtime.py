@@ -511,6 +511,9 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
             standalone_schema.text("CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY)")
         )
         await connection.execute(
+            standalone_schema.text("CREATE TABLE runner_leases (id VARCHAR(36) PRIMARY KEY)")
+        )
+        await connection.execute(
             standalone_schema.text(
                 "CREATE TABLE flowtest_standalone_meta "
                 "(key VARCHAR(100) PRIMARY KEY, value VARCHAR(500) NOT NULL)"
@@ -532,13 +535,63 @@ async def test_standalone_schema_upgrades_existing_project_policy_column(tmp_pat
         )
         await standalone_schema._ensure_incremental_columns(connection)
         columns = await connection.execute(standalone_schema.text("PRAGMA table_info(projects)"))
+        lease_columns = await connection.execute(
+            standalone_schema.text("PRAGMA table_info(runner_leases)")
+        )
         version = await connection.scalar(
             standalone_schema.text("SELECT version_num FROM alembic_version")
         )
 
     await test_engine.dispose()
-    assert "outbound_policy_enabled" in {str(row[1]) for row in columns.fetchall()}
+    assert {
+        "outbound_policy_enabled",
+        "outbound_concurrency_limit",
+        "outbound_requests_per_minute",
+    } <= {str(row[1]) for row in columns.fetchall()}
+    assert {"outbound_concurrency_limit", "outbound_requests_per_minute"} <= {
+        str(row[1]) for row in lease_columns.fetchall()
+    }
     assert version == standalone_schema.BASELINE_REVISION
+
+
+@pytest.mark.asyncio
+async def test_standalone_schema_adds_control_report_columns_to_existing_runs(tmp_path) -> None:
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'older-control.db'}")
+    async with test_engine.begin() as connection:
+        await connection.execute(
+            standalone_schema.text("CREATE TABLE workflow_executions (id CHAR(32) PRIMARY KEY)")
+        )
+        await connection.execute(
+            standalone_schema.text(
+                "CREATE TABLE workflow_node_executions (id CHAR(32) PRIMARY KEY)"
+            )
+        )
+        await standalone_schema._ensure_control_report_columns(connection)
+        await standalone_schema._ensure_control_report_columns(connection)
+        execution_columns = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA table_info(workflow_executions)")
+                )
+            ).all()
+        }
+        node_columns = {
+            str(row[1])
+            for row in (
+                await connection.execute(
+                    standalone_schema.text("PRAGMA table_info(workflow_node_executions)")
+                )
+            ).all()
+        }
+    await test_engine.dispose()
+    assert {
+        "derived_from_execution_id",
+        "rerun_loop_node_id",
+        "rerun_input_indices",
+        "context_summary",
+    } <= execution_columns
+    assert {"output_summary", "result_summary"} <= node_columns
 
 
 @pytest.mark.asyncio

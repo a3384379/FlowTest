@@ -26,10 +26,17 @@ async def workflow_execution_events(websocket: WebSocket, execution_id: UUID) ->
     execution = await _authorize(websocket, execution_id, token)
     if execution is None:
         return
+    after_sequence = websocket_after_sequence(websocket.query_params.get("after_sequence"))
+    if after_sequence is None:
+        await websocket.close(code=4400, reason="事件序号无效")
+        return
     events = _event_bus(websocket)
     await websocket.accept(subprotocol=EVENTS_SUBPROTOCOL)
+    if execution.status not in {"queued", "running"}:
+        await websocket.close(code=1000)
+        return
     try:
-        async for event in events.subscribe(execution_id):
+        async for event in events.subscribe(execution_id, after_sequence=after_sequence):
             await websocket.send_text(event.model_dump_json())
             if event.type is ExecutionEventType.EXECUTION_COMPLETED:
                 await websocket.close(code=1000)
@@ -46,6 +53,15 @@ def websocket_access_token(protocols: str | None) -> str | None:
             token = protocol.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
             return token or None
     return None
+
+
+def websocket_after_sequence(value: str | None) -> int | None:
+    if value is None:
+        return 0
+    if not value.isascii() or not value.isdigit() or len(value) > 19:
+        return None
+    sequence = int(value)
+    return sequence if sequence <= 9_223_372_036_854_775_807 else None
 
 
 async def _authorize(

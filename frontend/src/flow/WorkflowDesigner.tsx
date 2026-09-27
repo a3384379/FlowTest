@@ -9,6 +9,11 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { useDraftSession } from '../features/drafts/draft-session'
 import { nodeEditorScope } from './editor/editor-identity'
 import { nodeRegistryItem, type NodeRegistryKey } from './editor/node-registry'
+import {
+  addControlBlock,
+  controlCapabilityLabel,
+  type ControlBlockKind,
+} from './editor/control-blocks'
 import './workflow-editor.css'
 import WorkflowEdgeInspector from './WorkflowEdgeInspector'
 import WorkflowShortcutHelp from './WorkflowShortcutHelp'
@@ -19,6 +24,7 @@ import {
   emptySelection,
   jsonEqual,
   type GraphConnectionInput,
+  type GraphEditResult,
   type WorkflowSelection,
 } from './editor/editor-types'
 import {
@@ -26,6 +32,10 @@ import {
   planDeletion,
   reconnectGraphEdge,
   swapBranches,
+  unwrapMainPath,
+  unwrapSingleNode,
+  wrapMainNode,
+  wrapMainPath,
 } from './editor/graph-commands'
 import { analyzeGraph, resolveEffectiveNodeType } from './editor/graph-analysis'
 import {
@@ -105,6 +115,7 @@ import {
   addProtocolNode,
   addTypedNode,
   autoLayoutWorkflow,
+  insertNodeOnEdge,
   pasteNode,
   type PaletteNodeType,
 } from './workflow-graph'
@@ -128,6 +139,7 @@ type DesignerProps = {
   proposalNodeStatuses?: Record<string, ProposalGraphStatus>
   proposalEdgeStatuses?: Record<string, ProposalGraphStatus>
   runtimeMode?: 'run' | 'history'
+  runtimeExecutionId?: string
   runtimeNodes?: WorkflowNodeExecution[]
   runtimeContext?: Record<string, unknown>
   focusActions?: ReactNode
@@ -139,6 +151,7 @@ export type ProposalGraphStatus = 'added' | 'modified' | 'removed' | 'rewired'
 type NodeData = Record<string, unknown> & {
   label: string
   nodeType: WorkflowNode['type']
+  typeLabel: string
   status: string
   runtimeLabel: string
   canCopy?: boolean
@@ -206,6 +219,7 @@ function WorkflowDesignerReady({
   proposalNodeStatuses = {},
   proposalEdgeStatuses = {},
   runtimeMode,
+  runtimeExecutionId,
   runtimeNodes,
   runtimeContext,
   focusActions,
@@ -231,8 +245,15 @@ function WorkflowDesignerReady({
   const [focusMode, setFocusMode] = useState(false)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [wrapPathOpen, setWrapPathOpen] = useState(false)
+  const [wrapPathKind, setWrapPathKind] = useState<'group' | 'foreach'>('group')
+  const [wrapPathEnd, setWrapPathEnd] = useState<string | null>(null)
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null)
   const [modal, modalHolder] = Modal.useModal()
+  const wrapChoices = useMemo(
+    () => mainWrapChoices(definition, selectedId ?? ''),
+    [definition, selectedId],
+  )
   const [apiSelection, setApiSelection] = useState<string | undefined>(firstResourceId(apis))
   const [apiSelectionOverride, setApiSelectionOverride] = useState<ApiDefinition | undefined>()
   const [apiSelectionProjectId, setApiSelectionProjectId] = useState(projectId)
@@ -470,6 +491,98 @@ function WorkflowDesignerReady({
     )
   }
 
+  function addSelectedControlBlock(kind: ControlBlockKind) {
+    addCreatedNode(addControlBlock(editor.latest.current.definition, kind))
+  }
+
+  function wrapSelectedNode(kind: 'group' | 'foreach') {
+    if (!canvasEditable) return
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const before = editor.latest.current.definition
+    const selection = editor.latest.current.selection
+    if (selection?.kind !== 'node') return
+    const result = wrapMainNode(before, selection.id, kind)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    const owner = result.definition.nodes.find(
+      (node) => !before.nodes.some((item) => item.id === node.id),
+    )
+    if (owner) editor.commit(result.definition, { kind: 'node', id: owner.id })
+  }
+
+  function openWrapPath(kind: 'group' | 'foreach') {
+    if (!canvasEditable || !wrapChoices.length) return
+    setWrapPathKind(kind)
+    setWrapPathEnd(wrapChoices[0].endId)
+    setWrapPathOpen(true)
+  }
+
+  function applyWrapPath() {
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const choice = wrapChoices.find((item) => item.endId === wrapPathEnd)
+    if (!choice) return
+    const before = editor.latest.current.definition
+    const result = wrapMainPath(before, choice.nodeIds, wrapPathKind)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    const owner = result.definition.nodes.find(
+      (node) => !before.nodes.some((item) => item.id === node.id),
+    )
+    if (owner) editor.commit(result.definition, { kind: 'node', id: owner.id })
+    setWrapPathOpen(false)
+  }
+
+  function unwrapSelectedNode() {
+    if (!canvasEditable) return
+    if (draftSession.dirtyNodeEditorKeys(scope).length) {
+      editor.notify('请先应用或丢弃当前节点配置')
+      return
+    }
+    const before = editor.latest.current.definition
+    const selection = editor.latest.current.selection
+    if (selection?.kind !== 'node') return
+    const { result, isMultiStepGroup } = unwrapSelectedControlBlock(before, selection.id)
+    if (result.kind !== 'changed') {
+      editor.accept(result)
+      return
+    }
+    void confirmUnwrap(before, selection.id, result.definition, isMultiStepGroup)
+  }
+
+  async function confirmUnwrap(
+    before: WorkflowDefinition,
+    ownerId: string,
+    next: WorkflowDefinition,
+    isMultiStepGroup: boolean,
+  ) {
+    const approved = await modal.confirm({
+      title: '拆解控制块？',
+      content: isMultiStepGroup
+        ? '拆解会移除步骤组，按原顺序把区域中的步骤和连线放回主画布。确认后可撤销。'
+        : '拆解会移除循环或步骤组的执行语义，只保留区域中的单个步骤。确认后可撤销。',
+      okText: '确认拆解',
+      cancelText: '取消',
+    })
+    if (
+      !approved ||
+      !jsonEqual(before, editor.latest.current.definition) ||
+      !jsonEqual({ kind: 'node', id: ownerId }, editor.latest.current.selection)
+    )
+      return
+    const childId = before.regions?.find((region) => region.owner_node_id === ownerId)?.nodes[0]?.id
+    if (childId) editor.commit(next, { kind: 'node', id: childId })
+  }
+
   function copySelectedNode() {
     if (
       selected &&
@@ -509,6 +622,15 @@ function WorkflowDesignerReady({
         node.id === added.id ? placeAddedNode(node, point, selected) : node,
       ),
     }
+    if (canInsertOnSelectedEdge(added) && editor.selection?.kind === 'edge') {
+      const connected = insertNodeOnEdge(placed, added.id, editor.selection.id)
+      if (!connected) {
+        editor.notify('当前连线包含字段映射，无法直接插入节点')
+        return
+      }
+      editor.commit(connected, { kind: 'node', id: added.id })
+      return
+    }
     editor.commit(placed, { kind: 'node', id: added.id })
   }
   function dropLibraryNode(event: React.DragEvent) {
@@ -524,6 +646,18 @@ function WorkflowDesignerReady({
       'kafka.produce': () => addSelectedEvent('kafka.produce'),
       'kafka.consume': () => addSelectedEvent('kafka.consume'),
       'websocket.exchange': () => addSelectedEvent('websocket.exchange'),
+      'control.foreach': () => addSelectedControlBlock('foreach'),
+      'control.repeat': () => addSelectedControlBlock('repeat'),
+      'control.if': () => addSelectedControlBlock('if'),
+      'control.switch': () => addSelectedControlBlock('switch'),
+      'control.while': () => addSelectedControlBlock('while'),
+      'control.do_while': () => addSelectedControlBlock('do_while'),
+      'control.until': () => addSelectedControlBlock('until'),
+      'control.parallel': () => addSelectedControlBlock('parallel'),
+      'control.try': () => addSelectedControlBlock('try'),
+      'control.group': () => addSelectedControlBlock('group'),
+      'control.fail': () => addSelectedControlBlock('fail'),
+      'control.return': () => addSelectedControlBlock('return'),
     }
     if (actions[type]) actions[type]()
     else if (isPaletteType(type)) addPaletteNode(type)
@@ -619,12 +753,21 @@ function WorkflowDesignerReady({
           onAddKafkaConsume={() => addSelectedEvent('kafka.consume')}
           onAddWebsocketExchange={() => addSelectedEvent('websocket.exchange')}
           onAddNode={addPaletteNode}
+          onAddControlBlock={addSelectedControlBlock}
           canCopy={canCopyNode(selected)}
           canPaste={Boolean(clipboard)}
           canUndo={history.past.length > 0}
           canRedo={history.future.length > 0}
           onCopy={copySelectedNode}
           onPaste={pasteCopiedNode}
+          canWrap={Boolean(selected)}
+          canWrapPath={wrapChoices.length > 0}
+          canUnwrap={canUnwrapNode(selected)}
+          onWrapGroup={() => wrapSelectedNode('group')}
+          onWrapForEach={() => wrapSelectedNode('foreach')}
+          onWrapPathGroup={() => openWrapPath('group')}
+          onWrapPathForEach={() => openWrapPath('foreach')}
+          onUnwrap={() => void unwrapSelectedNode()}
           onUndo={undo}
           onRedo={redo}
           onAutoLayout={() => applyChange(autoLayoutWorkflow(definition))}
@@ -638,6 +781,25 @@ function WorkflowDesignerReady({
           }
         />
       </DesignerModeToolbar>
+      <Modal
+        title={wrapPathTitle(wrapPathKind)}
+        open={wrapPathOpen}
+        okText="包装"
+        okButtonProps={{ disabled: !wrapPathEnd }}
+        onOk={applyWrapPath}
+        onCancel={() => setWrapPathOpen(false)}
+      >
+        <Typography.Paragraph type="secondary">
+          从当前选中步骤开始，选择最后一个步骤。仅支持单入口、单出口且无跨边界引用的连续路径。
+        </Typography.Paragraph>
+        <Select
+          aria-label="包装结束步骤"
+          value={wrapPathEnd}
+          style={{ width: '100%' }}
+          options={wrapChoices.map((choice) => ({ value: choice.endId, label: choice.label }))}
+          onChange={setWrapPathEnd}
+        />
+      </Modal>
       <WorkflowInspectorShell
         key={workflowLayoutKey(userId, projectId)}
         visible={showInspector(editor.selection, focusMode)}
@@ -787,6 +949,7 @@ function WorkflowDesignerReady({
             projectId={projectId}
             environmentId={environmentId}
             runtimeMode={runtimeMode}
+            runtimeExecutionId={runtimeExecutionId}
             runtimeNodes={runtimeNodes}
             runtimeContext={runtimeContext}
             runtimeByNode={runtimeByNode}
@@ -849,6 +1012,7 @@ function DesignerInspector({
   projectId,
   environmentId,
   runtimeMode,
+  runtimeExecutionId,
   runtimeNodes,
   runtimeContext,
   runtimeByNode,
@@ -869,6 +1033,7 @@ function DesignerInspector({
   projectId?: string | null
   environmentId?: string | null
   runtimeMode?: 'run' | 'history'
+  runtimeExecutionId?: string
   runtimeNodes: WorkflowNodeExecution[]
   runtimeContext: Record<string, unknown>
   runtimeByNode: Map<string, WorkflowNodeExecution>
@@ -890,6 +1055,8 @@ function DesignerInspector({
     return (
       <WorkflowRunInspector
         mode={runtimeMode}
+        projectId={projectId ?? undefined}
+        executionId={runtimeExecutionId}
         node={selected}
         definition={definition}
         execution={selected ? runtimeByNode.get(selected.id) : undefined}
@@ -1032,12 +1199,21 @@ function DesignerToolbar({
   onAddKafkaConsume,
   onAddWebsocketExchange,
   onAddNode,
+  onAddControlBlock,
   canCopy,
   canPaste,
+  canWrap,
+  canWrapPath,
+  canUnwrap,
   canUndo,
   canRedo,
   onCopy,
   onPaste,
+  onWrapGroup,
+  onWrapForEach,
+  onWrapPathGroup,
+  onWrapPathForEach,
+  onUnwrap,
   onUndo,
   onRedo,
   onAutoLayout,
@@ -1082,12 +1258,21 @@ function DesignerToolbar({
   onAddKafkaConsume: () => void
   onAddWebsocketExchange: () => void
   onAddNode: (type: PaletteNodeType) => void
+  onAddControlBlock: (kind: ControlBlockKind) => void
   canCopy: boolean
   canPaste: boolean
+  canWrap: boolean
+  canWrapPath: boolean
+  canUnwrap: boolean
   canUndo: boolean
   canRedo: boolean
   onCopy: () => void
   onPaste: () => void
+  onWrapGroup: () => void
+  onWrapForEach: () => void
+  onWrapPathGroup: () => void
+  onWrapPathForEach: () => void
+  onUnwrap: () => void
   onUndo: () => void
   onRedo: () => void
   onAutoLayout: () => void
@@ -1178,10 +1363,40 @@ function DesignerToolbar({
                 label: '粘贴节点',
                 disabled: isControlDisabled(editable, canPaste),
               },
+              {
+                key: 'wrap-group',
+                label: '包装为步骤组',
+                disabled: isControlDisabled(editable, canWrap),
+              },
+              {
+                key: 'wrap-foreach',
+                label: '包装为集合遍历',
+                disabled: isControlDisabled(editable, canWrap),
+              },
+              {
+                key: 'wrap-path-group',
+                label: '包装连续步骤为步骤组…',
+                disabled: isControlDisabled(editable, canWrapPath),
+              },
+              {
+                key: 'wrap-path-foreach',
+                label: '包装连续步骤为集合遍历…',
+                disabled: isControlDisabled(editable, canWrapPath),
+              },
+              {
+                key: 'unwrap',
+                label: '拆解控制块',
+                disabled: isControlDisabled(editable, canUnwrap),
+              },
             ],
             onClick: ({ key }) => {
               if (key === 'copy') onCopy()
               if (key === 'paste') onPaste()
+              if (key === 'wrap-group') onWrapGroup()
+              if (key === 'wrap-foreach') onWrapForEach()
+              if (key === 'wrap-path-group') onWrapPathGroup()
+              if (key === 'wrap-path-foreach') onWrapPathForEach()
+              if (key === 'unwrap') onUnwrap()
             },
           }}
         >
@@ -1229,6 +1444,7 @@ function DesignerToolbar({
           onAddKafkaConsume,
           onAddWebsocketExchange,
           onAddNode,
+          onAddControlBlock,
         })}
       />
       <ApiPicker
@@ -1279,6 +1495,7 @@ type NodeLibraryInput = {
   onAddKafkaConsume: () => void
   onAddWebsocketExchange: () => void
   onAddNode: (type: PaletteNodeType) => void
+  onAddControlBlock: (kind: ControlBlockKind) => void
 }
 
 function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
@@ -1423,6 +1640,18 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
     item('extract', () => input.onAddNode('extract'), reason(true, '')),
     item('assert', () => input.onAddNode('assert'), reason(true, '')),
     item('condition', () => input.onAddNode('condition'), reason(true, '')),
+    item('control.if', () => input.onAddControlBlock('if'), reason(true, '')),
+    item('control.switch', () => input.onAddControlBlock('switch'), reason(true, '')),
+    item('control.foreach', () => input.onAddControlBlock('foreach'), reason(true, '')),
+    item('control.repeat', () => input.onAddControlBlock('repeat'), reason(true, '')),
+    item('control.while', () => input.onAddControlBlock('while'), reason(true, '')),
+    item('control.do_while', () => input.onAddControlBlock('do_while'), reason(true, '')),
+    item('control.until', () => input.onAddControlBlock('until'), reason(true, '')),
+    item('control.parallel', () => input.onAddControlBlock('parallel'), reason(true, '')),
+    item('control.try', () => input.onAddControlBlock('try'), reason(true, '')),
+    item('control.group', () => input.onAddControlBlock('group'), reason(true, '')),
+    item('control.fail', () => input.onAddControlBlock('fail'), reason(true, '')),
+    item('control.return', () => input.onAddControlBlock('return'), reason(true, '')),
     item(
       'dataset',
       () => input.onAddNode('dataset'),
@@ -1652,7 +1881,7 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
         <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
         <span>
           <strong>{data.label}</strong>
-          <small>{nodeTypeLabel(data.nodeType)}</small>
+          <small>{data.typeLabel}</small>
         </span>
         <span className="flow-node-status">
           {statusLabel(data.status)}
@@ -1727,6 +1956,8 @@ function toCanvasNode(
     data: {
       label: node.name,
       nodeType: resolveEffectiveNodeType(node),
+      typeLabel:
+        controlCapabilityLabel(node.capability_id) ?? nodeTypeLabel(resolveEffectiveNodeType(node)),
       status,
       runtimeLabel: runtimeLabel(runtime),
       canCopy: false,
@@ -1855,6 +2086,60 @@ const nodeIcons: Partial<Record<WorkflowNode['type'], ReactNode>> = {
 
 function isControlDisabled(editable: boolean, available: boolean): boolean {
   return !editable || !available
+}
+
+function canUnwrapNode(node: WorkflowNode | null): boolean {
+  return node?.capability_id?.startsWith('flow.control.') ?? false
+}
+
+function canInsertOnSelectedEdge(node: WorkflowNode): boolean {
+  return Boolean(
+    node.capability_id?.startsWith('flow.control.') || node.type === 'api' || node.type === 'delay',
+  )
+}
+
+function unwrapSelectedControlBlock(
+  definition: WorkflowDefinition,
+  ownerId: string,
+): { result: GraphEditResult; isMultiStepGroup: boolean } {
+  const owner = definition.nodes.find((node) => node.id === ownerId)
+  const region = definition.regions?.find((item) => item.owner_node_id === ownerId)
+  const isMultiStepGroup =
+    owner?.capability_id === 'flow.control.group' && (region?.nodes.length ?? 0) > 1
+  return {
+    result: isMultiStepGroup
+      ? unwrapMainPath(definition, ownerId)
+      : unwrapSingleNode(definition, ownerId),
+    isMultiStepGroup,
+  }
+}
+
+function mainWrapChoices(
+  definition: WorkflowDefinition,
+  startId: string,
+): { endId: string; label: string; nodeIds: string[] }[] {
+  const path = [startId]
+  const choices: { endId: string; label: string; nodeIds: string[] }[] = []
+  while (path.length < 50) {
+    const outgoing = definition.edges.filter((edge) => edge.source === path.at(-1))
+    if (outgoing.length !== 1 || outgoing[0].condition || outgoing[0].mappings.length) break
+    const nextId = outgoing[0].target
+    if (path.includes(nextId)) break
+    const nextNode = definition.nodes.find((node) => node.id === nextId)
+    if (!nextNode) break
+    path.push(nextId)
+    if (wrapMainPath(definition, path, 'group').kind !== 'changed') break
+    choices.push({
+      endId: nextId,
+      label: `${nextNode.name}（共 ${path.length} 步）`,
+      nodeIds: [...path],
+    })
+  }
+  return choices
+}
+
+function wrapPathTitle(kind: 'group' | 'foreach'): string {
+  return kind === 'group' ? '包装连续步骤为步骤组' : '包装连续步骤为集合遍历'
 }
 
 function statusLabel(status: string): string {

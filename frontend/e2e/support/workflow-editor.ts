@@ -4,6 +4,7 @@ import type { ApiDetail, Workflow, WorkflowDefinition } from '../../src/lib/api'
 
 export type EditorFixture = {
   projectId: string
+  serviceId: string
   workflow: Workflow
   headers: Record<string, string>
   root: string
@@ -82,7 +83,7 @@ export async function seedEditor(
   await expect(page.getByRole('heading', { name: '流程编排', exact: true })).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(prepared.nodes.length)
   await expect(page.locator('.react-flow__edge')).toHaveCount(prepared.edges.length)
-  return { projectId: project.id, workflow, headers, root }
+  return { projectId: project.id, serviceId: service.id, workflow, headers, root }
 }
 export async function clickEdge(page: Page, id = 'start-api') {
   const path = page.locator(`.react-flow__edge[data-id="${id}"] .react-flow__edge-interaction`)

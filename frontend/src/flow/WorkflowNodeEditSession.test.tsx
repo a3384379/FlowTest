@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { DraftContext, DraftSession } from '../features/drafts/draft-session'
@@ -6,6 +6,8 @@ import { workflowDefinition } from '../test/fixtures'
 import type { WorkflowDefinition } from '../lib/api'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import WorkflowJsonInput from './WorkflowJsonInput'
+import WorkflowControlFields from './WorkflowControlFields'
+import { addControlBlock } from './editor/control-blocks'
 import { editorNode, restoreEditedNode } from './editor/graph-analysis'
 
 function Harness({
@@ -34,6 +36,9 @@ function Harness({
       >
         {(draft, update) => (
           <>
+            <button onClick={() => update(addControlBlock(definition, 'group'), 'structure')}>
+              添加控制结构
+            </button>
             {(['edit', 'add', 'delete'] as const).map((operation) => (
               <button
                 key={operation}
@@ -122,6 +127,134 @@ function Harness({
   )
 }
 describe('node edit transactions', () => {
+  it('blocks an atomic structure change until the selected node draft is applied', () => {
+    const changed = vi.fn()
+    render(<Harness session={new DraftSession()} changed={changed} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '节点名称' }), {
+      target: { value: '暂存名称' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加控制结构' }))
+    expect(changed).not.toHaveBeenCalled()
+    expect(screen.getByText(/请先应用或丢弃当前节点配置/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加控制结构' }))
+    expect(changed.mock.calls.at(-1)![0].regions).toHaveLength(1)
+  })
+  it('clears an abandoned control JSON draft and retains only applied configuration edits', () => {
+    const definition = addControlBlock(workflowDefinition, 'repeat')
+    const node = definition.nodes.at(-1)!
+    const session = new DraftSession()
+    const changed = vi.fn()
+    render(
+      <DraftContext.Provider value={session}>
+        <WorkflowNodeEditSession
+          scope="control:"
+          node={node}
+          definition={definition}
+          editable
+          onChange={changed}
+        >
+          {(draft, update) => (
+            <WorkflowControlFields
+              node={draft}
+              regions={definition.regions!}
+              editable
+              onUpdate={(updated) =>
+                update(
+                  {
+                    ...definition,
+                    nodes: definition.nodes.map((item) => (item.id === node.id ? updated : item)),
+                  },
+                  'node',
+                )
+              }
+              onRegionUpdate={vi.fn()}
+            />
+          )}
+        </WorkflowNodeEditSession>
+      </DraftContext.Provider>,
+    )
+    const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+    fireEvent.change(editor, { target: { value: '[' } })
+    expect(session.nodeEditors.size).toBe(1)
+    expect(screen.getByText('配置尚未应用')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '丢弃配置草稿' }))
+    expect(session.nodeEditors.size).toBe(0)
+    expect(screen.getByText('配置已应用到本地流程')).toBeVisible()
+    fireEvent.change(editor, { target: { value: '{"count":4}' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用配置' }))
+    expect(session.nodeEditors.size).toBe(1)
+    const pending = [...session.nodeEditors.values()][0]
+    expect(pending.rawFields).toEqual({})
+    expect(pending.draftNode.configuration).toEqual({ count: 4 })
+    expect(changed).not.toHaveBeenCalled()
+  })
+  it('keeps a condition-loop literal draft across remount and blocks node Apply until value Apply', () => {
+    const definition = addControlBlock(workflowDefinition, 'while')
+    const original = definition.nodes.at(-1)!
+    const node = {
+      ...original,
+      configuration: {
+        ...original.configuration,
+        state: { page: { kind: 'literal', value: 0 } },
+        update: { page: { kind: 'add', value: { kind: 'literal', value: 1 } } },
+      },
+    }
+    const configured = {
+      ...definition,
+      nodes: definition.nodes.map((item) => (item.id === node.id ? node : item)),
+    }
+    const session = new DraftSession()
+    const changed = vi.fn()
+    function view() {
+      return render(
+        <DraftContext.Provider value={session}>
+          <WorkflowNodeEditSession
+            scope="state:"
+            node={node}
+            definition={configured}
+            editable
+            onChange={changed}
+          >
+            {(draft, update) => (
+              <WorkflowControlFields
+                node={draft}
+                regions={configured.regions!}
+                editable
+                onUpdate={(updated) =>
+                  update(
+                    {
+                      ...configured,
+                      nodes: configured.nodes.map((item) => (item.id === node.id ? updated : item)),
+                    },
+                    'node',
+                  )
+                }
+                onRegionUpdate={vi.fn()}
+              />
+            )}
+          </WorkflowNodeEditSession>
+        </DraftContext.Provider>,
+      )
+    }
+    const first = view()
+    fireEvent.change(screen.getByRole('textbox', { name: 'page 初始值 JSON 值' }), {
+      target: { value: '2' },
+    })
+    expect(session.nodeEditors.size).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }))
+    expect(changed).not.toHaveBeenCalled()
+    first.unmount()
+    view()
+    expect(screen.getByRole('textbox', { name: 'page 初始值 JSON 值' })).toHaveValue('2')
+    fireEvent.click(
+      within(screen.getByLabelText('page 初始值')).getByRole('button', { name: '应用值' }),
+    )
+    expect([...session.nodeEditors.values()][0].rawFields).toEqual({})
+    expect([...session.nodeEditors.values()][0].draftNode.configuration?.state).toEqual({
+      page: { kind: 'literal', value: 2 },
+    })
+  })
   it.each(['api', 'capability'] as const)(
     'keeps the last input when a %s node name returns to its applied value',
     (type) => {

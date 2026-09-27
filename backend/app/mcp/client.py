@@ -39,6 +39,12 @@ from app.schemas.mcp_contract_import import (
     MCPPreviewContractImportRequest,
     MCPPreviewContractImportResponse,
 )
+from app.schemas.mcp_control_blocks import (
+    MCPControlBlockProposalRequest,
+    MCPControlBlockProposalResponse,
+    MCPControlWorkflowProposalRequest,
+    MCPControlWorkflowProposalResponse,
+)
 from app.schemas.mcp_discovery import MCPFindAssetsRequest
 from app.schemas.mcp_planning import (
     MCPCancelPreviewRequest,
@@ -117,6 +123,13 @@ class MCPReadGatewayClient:
             params={"page": page, "page_size": page_size},
             token=token,
             resource_uri=resource_uri,
+        )
+
+    async def discover_control_capabilities(self, *, token: str | None = None) -> MCPReadEnvelope:
+        return await self._get(
+            "/api/v1/mcp/read/control-capabilities",
+            token=token,
+            resource_uri=None,
         )
 
     async def inspect_connection(
@@ -600,6 +613,36 @@ class MCPReadGatewayClient:
             additional_headers={"Idempotency-Key": idempotency_key},
         )
         return _validate_response(response, SimpleFlowProposalResponse)
+
+    async def propose_control_block(
+        self,
+        payload: MCPControlBlockProposalRequest | Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> MCPControlBlockProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/control-block-proposals",
+            payload=_model_payload(payload),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, MCPControlBlockProposalResponse)
+
+    async def propose_control_workflow(
+        self,
+        payload: MCPControlWorkflowProposalRequest | Mapping[str, Any],
+        *,
+        idempotency_key: str,
+        token: str | None = None,
+    ) -> MCPControlWorkflowProposalResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/control-workflow-proposals",
+            payload=_model_payload(payload),
+            token=token,
+            additional_headers={"Idempotency-Key": idempotency_key},
+        )
+        return _validate_response(response, MCPControlWorkflowProposalResponse)
 
     async def inspect_flow_proposal(
         self,

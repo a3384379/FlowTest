@@ -152,6 +152,9 @@ class StoredRunPlan(BaseModel):
     prepared: StoredPreparedExecution
     runtime_variables: dict[str, str]
     request_budget: int | None = Field(default=None, ge=1, le=10_000)
+    selected_node_ids: frozenset[str] | None = None
+    rerun_loop_node_id: str | None = None
+    rerun_input_indices: tuple[int, ...] = ()
 
 
 class StoredBatchPlan(BaseModel):
@@ -239,6 +242,9 @@ def _store_run(plan: WorkflowRunPlan) -> StoredRunPlan:
         ),
         runtime_variables=plan.runtime_variables,
         request_budget=plan.request_budget,
+        selected_node_ids=plan.selected_node_ids,
+        rerun_loop_node_id=plan.rerun_loop_node_id,
+        rerun_input_indices=plan.rerun_input_indices,
     )
 
 
@@ -343,6 +349,9 @@ def _load_run(stored: StoredRunPlan) -> WorkflowRunPlan:
         ),
         runtime_variables=stored.runtime_variables,
         request_budget=stored.request_budget,
+        selected_node_ids=stored.selected_node_ids,
+        rerun_loop_node_id=stored.rerun_loop_node_id,
+        rerun_input_indices=stored.rerun_input_indices,
     )
 
 

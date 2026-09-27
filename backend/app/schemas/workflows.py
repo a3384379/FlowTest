@@ -1,11 +1,18 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.domain.sandbox_preview import WorkflowRunPurpose
-from app.engine.contracts import NodeStatus, WorkflowDefinition, WorkflowPhase, WorkflowRunStatus
+from app.engine.contracts import (
+    NodeStatus,
+    WorkflowDefinition,
+    WorkflowNode,
+    WorkflowPhase,
+    WorkflowRegion,
+    WorkflowRunStatus,
+)
 
 RuntimeVariableName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 
@@ -17,12 +24,32 @@ class WorkflowCreate(BaseModel):
     definition: WorkflowDefinition
 
 
+class WorkflowNativeDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format_version: Literal["flowtest-workflow-native-v1"]
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    definition: WorkflowDefinition
+
+
 class WorkflowDraftUpdate(BaseModel):
     expected_revision: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None
     definition: WorkflowDefinition | None = None
+
+
+class WorkflowControlBlockInsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    edge_id: str = Field(min_length=1, max_length=128)
+    node: WorkflowNode
+    regions: list[WorkflowRegion] = Field(default_factory=list, max_length=500)
+    request_budget: int | None = Field(default=None, ge=1, le=10_000)
+    cleanup_request_budget: int | None = Field(default=None, ge=1, le=1000)
 
 
 class WorkflowResponse(BaseModel):
@@ -91,6 +118,46 @@ class WorkflowDebugRequest(WorkflowExecuteRequest):
     breakpoint_node_id: str = Field(min_length=1, max_length=128)
 
 
+class WorkflowIterationDebugStartRequest(WorkflowExecuteRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    loop_node_id: str = Field(min_length=1, max_length=128)
+    pause_before_index: int = Field(default=0, ge=0, le=999)
+    pause_on_error: bool = True
+    max_session_seconds: int = Field(default=300, ge=30, le=600)
+    pause_scope: Literal["target_loop"] = "target_loop"
+
+
+class WorkflowIterationDebugCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["step", "continue"]
+    expected_revision: int = Field(ge=1)
+
+
+class WorkflowFailedItemRerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    loop_node_id: str = Field(min_length=1, max_length=128)
+    input_indices: list[int] = Field(min_length=1, max_length=1000)
+    write_retry_strategy: Literal["reject", "verified_safe_to_retry"] = "reject"
+    upstream_resource_status: Literal["unverified", "confirmed_valid", "expired"] = "unverified"
+    verification_note: str | None = Field(default=None, min_length=8, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "WorkflowFailedItemRerunRequest":
+        if any(index < 0 for index in self.input_indices):
+            raise ValueError("轮次索引不能小于零")
+        if len(set(self.input_indices)) != len(self.input_indices):
+            raise ValueError("轮次索引不能重复")
+        if (
+            self.write_retry_strategy == "verified_safe_to_retry"
+            or self.upstream_resource_status == "confirmed_valid"
+        ) and self.verification_note is None:
+            raise ValueError("确认外部状态时必须填写查证说明")
+        return self
+
+
 class WorkflowExecutionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -104,6 +171,9 @@ class WorkflowExecutionResponse(BaseModel):
     triggered_by_id: UUID
     parent_execution_id: UUID | None
     dataset_row_index: int | None
+    derived_from_execution_id: UUID | None = None
+    rerun_loop_node_id: str | None = None
+    rerun_input_indices: list[int] | None = None
     run_purpose: WorkflowRunPurpose
     source_change_set_id: UUID | None
     preview_approval_id: UUID | None
@@ -122,6 +192,27 @@ class WorkflowExecutionResponse(BaseModel):
     force_cancel_reason: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+class WorkflowIterationDebugSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    execution_id: UUID
+    target_node_id: str
+    pause_before_index: int
+    pause_on_error: bool
+    pause_scope: Literal["target_loop"] = "target_loop"
+    status: Literal["armed", "running", "paused", "completed", "expired", "cancelled"]
+    pause_reason: str | None
+    paused_input_index: int | None
+    last_completed_index: int
+    expires_at: datetime
+    revision: int
+
+
+class WorkflowIterationDebugStartResponse(BaseModel):
+    execution: WorkflowExecutionResponse
+    session: WorkflowIterationDebugSessionResponse
 
 
 class WorkflowNodeExecutionResponse(BaseModel):
@@ -148,6 +239,19 @@ class WorkflowExecutionDetailResponse(BaseModel):
     execution: WorkflowExecutionResponse
     nodes: list[WorkflowNodeExecutionResponse]
     children: list[WorkflowExecutionResponse] = Field(default_factory=list)
+
+
+class WorkflowControlRecordSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ordinal: int
+    status: str
+    test_verdict: str
+
+
+class WorkflowControlRecordDetailResponse(WorkflowControlRecordSummaryResponse):
+    kind: str
+    payload: dict[str, JsonValue]
 
 
 class WorkflowDebugNodeResponse(BaseModel):

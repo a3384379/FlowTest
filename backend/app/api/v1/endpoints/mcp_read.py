@@ -18,6 +18,19 @@ router = APIRouter(prefix="/mcp/read")
 _CLIENT_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,80}$")
 
 
+@router.get("/control-capabilities", response_model=MCPReadResponse)
+async def discover_control_capabilities(
+    request: Request,
+    session: SessionDependency,
+    principal: MCPCurrent,
+) -> MCPReadResponse:
+    result = await MCPReadService(session).discover_control_capabilities(
+        actor=principal.actor,
+        call=_call(request, "discover_control_capabilities", "flowtest://capabilities/control"),
+    )
+    return _response(result)
+
+
 @router.get("/projects", response_model=MCPReadResponse)
 async def list_projects(
     request: Request,

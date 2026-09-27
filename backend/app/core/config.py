@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     execution_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
     write_rate_limit_per_minute: int = Field(default=120, ge=1, le=5000)
     runner_control_rate_limit_per_minute: int = Field(default=5000, ge=100, le=50_000)
+    runner_outbound_permit_rate_limit_per_minute: int = Field(default=150_000, ge=100, le=1_000_000)
     workflow_event_retention_seconds: int = Field(default=86_400, ge=60, le=604_800)
     secret_key: str = "change-me-before-production-at-least-32-bytes"  # noqa: S105
     access_token_minutes: int = Field(default=15, ge=1, le=60)

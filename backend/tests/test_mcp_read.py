@@ -172,7 +172,8 @@ async def mcp_context() -> AsyncIterator[dict[str, Any]]:
                         },
                     }
                 ],
-                "edges": [],
+                "edges": [{"id": "request-end", "source": "request", "target": "end"}],
+                "run_policy": {"request_budget": 20},
             },
             draft_revision=2,
             current_version=1,
@@ -526,6 +527,20 @@ async def test_mcp_read_gateway_is_tenant_scoped_and_redacted(mcp_context: dict[
     assert project_payload["trace_id"]
     assert "project-secret" not in projects.text
 
+    controls = await client.get("/api/v1/mcp/read/control-capabilities", headers=headers)
+    assert controls.status_code == 200, controls.text
+    control_data = controls.json()["data"]
+    assert control_data["schema_version"] == "4.0"
+    assert control_data["total"] == 14
+    foreach = next(
+        item for item in control_data["items"] if item["capability_id"] == "flow.control.foreach"
+    )
+    assert foreach["enabled"] and foreach["executable"]
+    assert foreach["inline_supported"] and not foreach["ref_supported"]
+    assert foreach["max_nesting_depth"] == 4
+    assert foreach["request_budget_required"]
+    assert foreach["configuration_schema"]["type"] == "object"
+
     services = await client.get(
         f"/api/v1/mcp/read/projects/{mcp_context['project_id']}/services",
         headers=headers,
@@ -595,6 +610,8 @@ async def test_mcp_read_gateway_is_tenant_scoped_and_redacted(mcp_context: dict[
     )
     assert draft.status_code == 200, draft.text
     assert draft.json()["data"]["nodes"][0]["kind"] == "api"
+    assert draft.json()["data"]["edges"][0]["id"] == "request-end"
+    assert draft.json()["data"]["request_budget"] == 20
     assert "workflow-secret" not in draft.text
 
     evidence = await client.get(
@@ -755,6 +772,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.compile_integration_flowspec",
             "flowtest.diagnose_failure",
             "flowtest.diff_flowspec",
+            "flowtest.discover_control_capabilities",
             "flowtest.discover_services",
             "flowtest.ensure_project",
             "flowtest.ensure_service_target",
@@ -789,6 +807,8 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.prepare_change_regression",
             "flowtest.preview_contract_import",
             "flowtest.preview_flow_proposal",
+            "flowtest.propose_control_block",
+            "flowtest.propose_control_workflow",
             "flowtest.propose_flow_draft",
             "flowtest.propose_maintenance",
             "flowtest.propose_repair",
@@ -821,6 +841,9 @@ async def test_mcp_sdk_registration_and_transports() -> None:
 
         tool_result = await server.call_tool("flowtest.list_projects", {})
         assert tool_result.structured_content["trace_id"] == "sdk-trace"
+        controls_result = await server.call_tool("flowtest.discover_control_capabilities", {})
+        assert controls_result.is_error is False
+        assert requests[-1].url.path == "/api/v1/mcp/read/control-capabilities"
         write_result = await server.call_tool(
             "flowtest.propose_test_design",
             {

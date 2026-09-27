@@ -2,7 +2,7 @@ import hashlib
 import io
 import json
 import sys
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -230,13 +230,16 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
     assert exported == {
         "status": "exported",
         "schema_version": "standalone-compact-transfer-v1",
-        "tables": 86,
+        "tables": 88,
         "rows": 7,
-        "excluded_tables": 9,
+        "excluded_tables": 11,
         "artifacts": 1,
     }
     assert validate_bundle(bundle)["status"] == "validated"
     payload = _load_bundle(bundle)
+    assert {"outbound_permits", "outbound_rate_windows"} <= {
+        item["name"] for item in payload.manifest["database"]["excluded_tables"]
+    }
     assert payload.manifest["security"]["data_classification"] == {
         "portable": [
             "durable_domain_records",
@@ -272,6 +275,115 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
     artifact_file.write_bytes(b"tampered")
     with pytest.raises(TransferError, match="Artifact"):
         validate_bundle(bundle)
+
+
+@pytest.mark.asyncio
+async def test_standalone_transfer_preserves_control_report_records(tmp_path: Path) -> None:
+    source_data = tmp_path / "data"
+    identifiers = await _seed_source(source_data, include_artifact=False)
+    user_id = identifiers["user_id"]
+    project_id = identifiers["project_id"]
+    environment_id = uuid4()
+    workflow_id = uuid4()
+    version_id = uuid4()
+    execution_id = uuid4()
+    record_id = uuid4()
+    definition = {"schema_version": "4.0", "nodes": [], "edges": [], "regions": []}
+    engine = create_async_engine(f"sqlite+aiosqlite:///{source_data / 'flowtest.db'}")
+    async with engine.begin() as connection:
+        await connection.execute(
+            Base.metadata.tables["environments"]
+            .insert()
+            .values(
+                id=environment_id,
+                project_id=project_id,
+                name="Transfer environment",
+                base_url="http://example.test",
+                variables={},
+                headers={},
+                created_by_id=user_id,
+            )
+        )
+        await connection.execute(
+            Base.metadata.tables["workflows"]
+            .insert()
+            .values(
+                id=workflow_id,
+                project_id=project_id,
+                name="Transfer workflow",
+                draft_definition=definition,
+                created_by_id=user_id,
+            )
+        )
+        await connection.execute(
+            Base.metadata.tables["workflow_versions"]
+            .insert()
+            .values(
+                id=version_id,
+                workflow_id=workflow_id,
+                version=1,
+                definition=definition,
+                fingerprint="0" * 64,
+                created_by_id=user_id,
+                published_at=datetime.now(UTC),
+            )
+        )
+        await connection.execute(
+            Base.metadata.tables["workflow_executions"]
+            .insert()
+            .values(
+                id=execution_id,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                workflow_version_id=version_id,
+                environment_id=environment_id,
+                triggered_by_id=user_id,
+                run_purpose="standard",
+                status="failed",
+                snapshot={"workflow": definition},
+                context={"node_outputs": {}},
+                started_at=datetime.now(UTC),
+            )
+        )
+        await connection.execute(
+            Base.metadata.tables["workflow_control_records"]
+            .insert()
+            .values(
+                id=record_id,
+                workflow_execution_id=execution_id,
+                node_id="loop",
+                kind="iteration",
+                ordinal=1,
+                status="failed",
+                test_verdict="failed",
+                payload={"input_index": 1, "status": "failed", "nodes": []},
+            )
+        )
+    await engine.dispose()
+
+    bundle = tmp_path / "bundle"
+    exported = await export_bundle(source_data, bundle)
+    assert exported["rows"] == 11
+    assert validate_bundle(bundle)["status"] == "validated"
+    target_path = tmp_path / "target.db"
+    target = await _create_database(target_path, target=True)
+    imported = await import_bundle(bundle, f"sqlite+aiosqlite:///{target_path}")
+    assert imported["status"] == "imported"
+    async with target.connect() as connection:
+        record = (
+            (
+                await connection.execute(
+                    select(Base.metadata.tables["workflow_control_records"]).where(
+                        Base.metadata.tables["workflow_control_records"].c.id == record_id
+                    )
+                )
+            )
+            .one()
+            ._mapping
+        )
+        assert record["workflow_execution_id"] == execution_id
+        assert record["payload"]["input_index"] == 1
+    await target.dispose()
 
 
 @pytest.mark.asyncio
