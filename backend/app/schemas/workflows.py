@@ -118,6 +118,23 @@ class WorkflowDebugRequest(WorkflowExecuteRequest):
     breakpoint_node_id: str = Field(min_length=1, max_length=128)
 
 
+class WorkflowIterationDebugStartRequest(WorkflowExecuteRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    loop_node_id: str = Field(min_length=1, max_length=128)
+    pause_before_index: int = Field(default=0, ge=0, le=999)
+    pause_on_error: bool = True
+    max_session_seconds: int = Field(default=300, ge=30, le=600)
+    pause_scope: Literal["target_loop"] = "target_loop"
+
+
+class WorkflowIterationDebugCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["step", "continue"]
+    expected_revision: int = Field(ge=1)
+
+
 class WorkflowFailedItemRerunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -175,6 +192,27 @@ class WorkflowExecutionResponse(BaseModel):
     force_cancel_reason: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+class WorkflowIterationDebugSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    execution_id: UUID
+    target_node_id: str
+    pause_before_index: int
+    pause_on_error: bool
+    pause_scope: Literal["target_loop"] = "target_loop"
+    status: Literal["armed", "running", "paused", "completed", "expired", "cancelled"]
+    pause_reason: str | None
+    paused_input_index: int | None
+    last_completed_index: int
+    expires_at: datetime
+    revision: int
+
+
+class WorkflowIterationDebugStartResponse(BaseModel):
+    execution: WorkflowExecutionResponse
+    session: WorkflowIterationDebugSessionResponse
 
 
 class WorkflowNodeExecutionResponse(BaseModel):

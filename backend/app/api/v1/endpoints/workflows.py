@@ -5,6 +5,8 @@ from fastapi import APIRouter, Header, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.composition import build_workflow_service
+from app.core.config import settings
+from app.core.errors import AppError
 from app.domain.durable_execution import ExecutionCommandType
 from app.engine.contracts import WorkflowDefinition
 from app.engine.scheduler import WorkflowRunResult
@@ -31,6 +33,10 @@ from app.schemas.workflows import (
     WorkflowExecutionDetailResponse,
     WorkflowExecutionResponse,
     WorkflowFailedItemRerunRequest,
+    WorkflowIterationDebugCommandRequest,
+    WorkflowIterationDebugSessionResponse,
+    WorkflowIterationDebugStartRequest,
+    WorkflowIterationDebugStartResponse,
     WorkflowNativeDocument,
     WorkflowNodeExecutionResponse,
     WorkflowResponse,
@@ -40,7 +46,8 @@ from app.schemas.workflows import (
 )
 from app.services.durable_execution import DurableExecutionService
 from app.services.idempotency import IdempotencyService
-from app.services.workflows import WorkflowService
+from app.services.workflow_debug import WorkflowDebugService
+from app.services.workflows import WorkflowIterationDebugOptions, WorkflowRunPlan, WorkflowService
 
 router = APIRouter(prefix="/projects/{project_id}")
 
@@ -281,6 +288,134 @@ async def debug_workflow(
         breakpoint_node_id=payload.breakpoint_node_id,
     )
     return _debug_response(result, mode="breakpoint", target_node_id=payload.breakpoint_node_id)
+
+
+@router.post(
+    "/workflows/{workflow_id}/debug-sessions",
+    response_model=WorkflowIterationDebugStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_iteration_debug(
+    project_id: UUID,
+    workflow_id: UUID,
+    payload: WorkflowIterationDebugStartRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> WorkflowIterationDebugStartResponse:
+    if settings.feature_runner_fabric_enabled:
+        raise AppError(
+            code="DEBUG_RUNNER_UNSUPPORTED",
+            message="当前 Runner Fabric 尚不支持逐轮暂停调试",
+            status_code=422,
+        )
+
+    async def start() -> WorkflowIterationDebugStartResponse:
+        execution, plan = await build_workflow_service(session).prepare_execution(
+            actor=current_user,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            environment_id=payload.environment_id,
+            version=payload.version,
+            runtime_variables=payload.runtime_variables,
+            runtime_headers=payload.runtime_headers,
+            iteration_debug=WorkflowIterationDebugOptions(
+                loop_node_id=payload.loop_node_id,
+                pause_before_index=payload.pause_before_index,
+            ),
+        )
+        if not isinstance(plan, WorkflowRunPlan):
+            raise AppError(
+                code="DEBUG_DATASET_UNSUPPORTED",
+                message="逐轮调试暂不支持 Dataset 批量执行",
+                status_code=422,
+            )
+        debug = await WorkflowDebugService(session).create(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            loop_node_id=payload.loop_node_id,
+            pause_before_index=payload.pause_before_index,
+            pause_on_error=payload.pause_on_error,
+            max_session_seconds=payload.max_session_seconds,
+        )
+        command = await DurableExecutionService(session).create_start_command(
+            actor=current_user,
+            project_id=project_id,
+            execution_id=execution.id,
+            actor_key=f"user:{current_user.id}",
+            idempotency_key=idempotency_key,
+            payload={
+                "workflow_id": str(workflow_id),
+                "execution_id": str(execution.id),
+                **payload.model_dump(mode="json"),
+            },
+        )
+        try:
+            await coordinator.start(plan)
+            await DurableExecutionService(session).mark_dispatched(command.id)
+        except Exception:
+            await session.rollback()
+            await WorkflowService(session).stage_runtime_failed(
+                execution.id,
+                error_code="DEBUG_DISPATCH_FAILED",
+                error_message="调试运行未能提交到执行服务",
+            )
+            await session.commit()
+            await WorkflowDebugService(session).finish(execution.id, execution_status="failed")
+            raise
+        return WorkflowIterationDebugStartResponse(
+            execution=WorkflowExecutionResponse.model_validate(execution),
+            session=WorkflowIterationDebugSessionResponse.model_validate(debug),
+        )
+
+    response = await IdempotencyService(session).run(
+        key=idempotency_key,
+        project_id=project_id,
+        actor_key=f"user:{current_user.id}",
+        operation=f"workflow.debug_session:{workflow_id}",
+        request_payload=payload.model_dump(mode="json"),
+        action=start,
+    )
+    return WorkflowIterationDebugStartResponse.model_validate(response)
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/debug-session",
+    response_model=WorkflowIterationDebugSessionResponse,
+)
+async def get_iteration_debug(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowIterationDebugSessionResponse:
+    row = await WorkflowDebugService(session).get(
+        actor=current_user, project_id=project_id, execution_id=execution_id
+    )
+    return WorkflowIterationDebugSessionResponse.model_validate(row)
+
+
+@router.post(
+    "/workflow-executions/{execution_id}/debug-session/commands",
+    response_model=WorkflowIterationDebugSessionResponse,
+)
+async def command_iteration_debug(
+    project_id: UUID,
+    execution_id: UUID,
+    payload: WorkflowIterationDebugCommandRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowIterationDebugSessionResponse:
+    row = await WorkflowDebugService(session).command(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        action=payload.action,
+        expected_revision=payload.expected_revision,
+    )
+    return WorkflowIterationDebugSessionResponse.model_validate(row)
 
 
 @router.post(

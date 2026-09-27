@@ -72,6 +72,7 @@ from app.models.test_assets import (
 )
 from app.models.test_contexts import ContextEvidenceItem, TestContext, TestContextRevision
 from app.models.test_design import ChangeSetApproval, TestDesign
+from app.models.workflow_debug import WorkflowDebugSession
 from app.models.workflows import (
     Workflow,
     WorkflowControlRecord,
@@ -177,6 +178,7 @@ __all__ = [
     "User",
     "Workflow",
     "WorkflowControlRecord",
+    "WorkflowDebugSession",
     "WorkflowExecution",
     "WorkflowNodeExecution",
     "WorkflowVersion",

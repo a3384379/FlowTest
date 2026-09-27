@@ -43,6 +43,7 @@ import { useSearchParams } from 'react-router-dom'
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
 import ExecutionCheckpointLog from '../features/workflows/ExecutionCheckpointLog'
 import FailureRepairDialog from '../features/workflows/FailureRepairDialog'
+import IterationDebugDialog from '../features/workflows/IterationDebugDialog'
 import FlowSpecReviewDialog, {
   type FlowSpecReviewSeed,
 } from '../features/workflows/FlowSpecReviewDialog'
@@ -71,6 +72,7 @@ export default function WorkflowsPage() {
   const [flowProposalOpen, setFlowProposalOpen] = useState(false)
   const [nativeTransferOpen, setNativeTransferOpen] = useState(false)
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
+  const [iterationDebugOpen, setIterationDebugOpen] = useState(false)
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
   useEffect(() => {
@@ -125,6 +127,7 @@ export default function WorkflowsPage() {
         }}
         onFlowProposal={() => setFlowProposalOpen(true)}
         onNativeTransfer={() => setNativeTransferOpen(true)}
+        onIterationDebug={() => setIterationDebugOpen(true)}
         onRepair={setRepairExecution}
       />
       <VersionDiffDialog state={state} />
@@ -172,12 +175,27 @@ export default function WorkflowsPage() {
         setSearchParams={setSearchParams}
         onClose={() => setRepairExecution(undefined)}
       />
+      <IterationDebugDialog
+        open={iterationDebugOpen}
+        projectId={state.projectId}
+        workflowId={state.workflowId}
+        environmentId={state.environmentId}
+        version={selectedPublishedVersion(state)}
+        currentExecution={state.runtimeExecution}
+        canStart={canExecute(state)}
+        onStarted={state.beginIterationDebugExecution}
+        onClose={() => setIterationDebugOpen(false)}
+      />
       <WorkflowTabCloseModal tabs={tabs} />
     </div>
   )
 }
 
 type WorkflowState = ReturnType<typeof useWorkflows>
+
+function selectedPublishedVersion(state: WorkflowState): number | null {
+  return state.selectedWorkflow?.current_version ?? null
+}
 
 type WorkflowTabsState = ReturnType<typeof useWorkflowTabs>
 type RuntimeDockMode = 'run' | 'history' | 'debug'
@@ -984,7 +1002,13 @@ function WorkbenchMore({
   )
 }
 
-function HeaderPrimaryActions({ state }: { state: WorkflowState }) {
+function HeaderPrimaryActions({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   const canDebug = canExecute(state) && Boolean(state.breakpointNodeId)
   return (
@@ -1019,6 +1043,14 @@ function HeaderPrimaryActions({ state }: { state: WorkflowState }) {
           调试
         </Button>
       )}
+      <Button
+        icon={<BugOutlined />}
+        aria-label="逐轮调试"
+        disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
+        onClick={onIterationDebug}
+      >
+        逐轮调试
+      </Button>
     </Space>
   )
 }
@@ -1136,6 +1168,7 @@ function WorkflowWorkspace({
   onFlowSpec,
   onFlowProposal,
   onNativeTransfer,
+  onIterationDebug,
   onRepair,
 }: {
   state: WorkflowState
@@ -1144,6 +1177,7 @@ function WorkflowWorkspace({
   onFlowSpec: () => void
   onFlowProposal: () => void
   onNativeTransfer: () => void
+  onIterationDebug: () => void
   onRepair: (execution: WorkflowExecution) => void
 }) {
   const userId = useAuthStore((store) => store.user?.id)
@@ -1158,7 +1192,9 @@ function WorkflowWorkspace({
           center={<WorkspaceModeSwitch state={state} />}
           right={
             <Space>
-              {state.workspaceMode !== 'history' && <HeaderPrimaryActions state={state} />}
+              {state.workspaceMode !== 'history' && (
+                <HeaderPrimaryActions state={state} onIterationDebug={onIterationDebug} />
+              )}
               {state.workspaceMode === 'draft' && !state.debugResult && (
                 <Button
                   icon={<HistoryOutlined />}
@@ -1207,7 +1243,7 @@ function WorkflowWorkspace({
         className="workflow-workbench-card"
         loading={state.workspaceMode === 'history' && state.historyLoading}
       >
-        <DraftEditor state={state} />
+        <DraftEditor state={state} onIterationDebug={onIterationDebug} />
       </Card>
     </WorkflowWorkspaceShell>
   )
@@ -1270,7 +1306,13 @@ function workspaceTitle(state: WorkflowState) {
   )
 }
 
-function FocusDraftActions({ state }: { state: WorkflowState }) {
+function FocusDraftActions({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
     <Space className="workflow-focus-commands">
@@ -1302,11 +1344,25 @@ function FocusDraftActions({ state }: { state: WorkflowState }) {
       >
         调试至断点
       </Button>
+      <Button
+        icon={<BugOutlined />}
+        aria-label="逐轮调试"
+        disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
+        onClick={onIterationDebug}
+      >
+        逐轮调试
+      </Button>
     </Space>
   )
 }
 
-function DraftEditor({ state }: { state: WorkflowState }) {
+function DraftEditor({
+  state,
+  onIterationDebug,
+}: {
+  state: WorkflowState
+  onIterationDebug: () => void
+}) {
   const workflow = state.selectedWorkflow
   if (!workflow) return <Empty description="请选择或新建工作流" />
   const resources = workflowDesignerResources(state, workflow.id)
@@ -1333,7 +1389,7 @@ function DraftEditor({ state }: { state: WorkflowState }) {
         runtimeExecutionId={state.runtimeExecution?.id}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
-        focusActions={<FocusDraftActions state={state} />}
+        focusActions={<FocusDraftActions state={state} onIterationDebug={onIterationDebug} />}
         onChange={state.setDraftDefinition}
       />
     </>

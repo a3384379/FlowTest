@@ -69,6 +69,7 @@ from app.engine.contracts import (
     NodeStatus,
     NodeType,
     RedisNodeConfig,
+    RepeatControlConfig,
     SqlNodeConfig,
     SubFlowNodeConfig,
     WorkflowDefinition,
@@ -192,6 +193,52 @@ class WorkflowRunPlan:
     selected_node_ids: frozenset[str] | None = None
     rerun_loop_node_id: str | None = None
     rerun_input_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowIterationDebugOptions:
+    loop_node_id: str
+    pause_before_index: int
+
+
+def _validate_iteration_debug_target(
+    definition: WorkflowDefinition, options: WorkflowIterationDebugOptions
+) -> None:
+    node = next((item for item in definition.nodes if item.id == options.loop_node_id), None)
+    if definition.schema_version != "4.0" or node is None or node.phase is not WorkflowPhase.MAIN:
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="逐轮调试需要主流程中的内联控制循环",
+            status_code=422,
+        )
+    if not node.capability_id or not node.capability_id.startswith("flow.control."):
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="指定节点不是可调试的控制循环",
+            status_code=422,
+        )
+    config = parse_control_config(node)
+    if not isinstance(config, ForEachControlConfig | RepeatControlConfig | ConditionLoopConfig):
+        raise AppError(
+            code="DEBUG_LOOP_UNSUPPORTED",
+            message="指定节点不是可调试的控制循环",
+            status_code=422,
+        )
+    if not isinstance(config.body, InlineControlBody) or config.policy.concurrency != 1:
+        raise AppError(
+            code="DEBUG_PARALLEL_SCOPE_UNSUPPORTED",
+            message="逐轮调试当前只暂停单个串行内联循环, 并发轮次不会被隐式全局暂停",
+            status_code=422,
+        )
+    maximum = (
+        config.count if isinstance(config, RepeatControlConfig) else config.policy.max_iterations
+    )
+    if options.pause_before_index >= maximum:
+        raise AppError(
+            code="DEBUG_ITERATION_OUT_OF_RANGE",
+            message="暂停轮次超过循环上限",
+            status_code=422,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1037,11 +1084,14 @@ class WorkflowService:
         version: int | None,
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
+        iteration_debug: WorkflowIterationDebugOptions | None = None,
     ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow(project_id, workflow_id)
         selected = await self._select_version(workflow, version)
         definition = self._load_definition(selected.definition)
+        if iteration_debug is not None:
+            _validate_iteration_debug_target(definition, iteration_debug)
         _validate_runtime_inputs(definition, runtime_variables)
         prepared = await self._snapshots.prepare(
             actor=actor,
@@ -1053,6 +1103,12 @@ class WorkflowService:
             runtime_variables=runtime_variables,
             runtime_headers=runtime_headers,
         )
+        if iteration_debug is not None and prepared.snapshot["dataset"] is not None:
+            raise AppError(
+                code="DEBUG_DATASET_UNSUPPORTED",
+                message="逐轮调试暂不支持 Dataset 批量执行",
+                status_code=422,
+            )
         await self._ensure_execution_capacity(project_id)
         if prepared.snapshot["dataset"] is None:
             execution = await self._start_execution(
@@ -1062,6 +1118,7 @@ class WorkflowService:
                 version=selected,
                 environment_id=environment_id,
                 snapshot=prepared.runs[0].snapshot,
+                commit=iteration_debug is None,
             )
             plan: WorkflowExecutionPlan = self._run_plan(
                 execution=execution,
@@ -1083,7 +1140,7 @@ class WorkflowService:
                 prepared=prepared,
                 runtime_variables=runtime_variables,
             )
-        await self._persist_execution_plan(execution, plan)
+        await self._persist_execution_plan(execution, plan, commit=iteration_debug is None)
         return execution, plan
 
     async def prepare_failed_item_rerun(
@@ -1368,11 +1425,18 @@ class WorkflowService:
         return decode_execution_plan(payload)
 
     async def _persist_execution_plan(
-        self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
+        self,
+        execution: WorkflowExecution,
+        plan: WorkflowExecutionPlan,
+        *,
+        commit: bool = True,
     ) -> None:
         await self._stage_execution_plan(execution, plan)
-        await self._session.commit()
-        await self._session.refresh(execution)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(execution)
+        else:
+            await self._session.flush()
 
     async def _stage_execution_plan(
         self, execution: WorkflowExecution, plan: WorkflowExecutionPlan
@@ -2600,6 +2664,7 @@ class WorkflowService:
         version: WorkflowVersion,
         environment_id: UUID,
         snapshot: dict[str, JsonValue],
+        commit: bool = True,
     ) -> WorkflowExecution:
         execution = self._execution_model(
             actor=actor,
@@ -2610,8 +2675,11 @@ class WorkflowService:
             snapshot=snapshot,
         )
         self._workflows.add(execution)
-        await self._session.commit()
-        await self._session.refresh(execution)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(execution)
+        else:
+            await self._session.flush()
         return execution
 
     async def _start_dataset_execution(

@@ -305,9 +305,7 @@ async def test_debug_gate_waits_after_a_failed_iteration() -> None:
                 failed.set()
                 await resume.wait()
 
-    context = ExecutionContext(
-        runtime_variables={"cases": [1, 2, 3]}, iteration_debug_gate=Gate()
-    )
+    context = ExecutionContext(runtime_variables={"cases": [1, 2, 3]}, iteration_debug_gate=Gate())
     task = asyncio.create_task(WorkflowScheduler(executor).run(definition, context=context))
     await asyncio.wait_for(failed.wait(), timeout=1)
     assert [index for index, _ in executor.calls] == [0, 1]

@@ -493,19 +493,23 @@ export function useWorkflows(initialWorkflowId?: string) {
     if (!canEdit || hasPendingNodeEditor(workflowId)) return
     await runMutation(message.error, async () => {
       const execution = await executeMutation.mutateAsync()
-      const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
-      setLastResult(null)
-      setActiveExecution(execution)
-      setExecutionDefinition(runningDefinition)
-      setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
-      completedExecutionId.current = null
-      setActiveExecutionId(execution.id)
-      setEventHistoryIncompleteId(null)
-      setWorkspaceMode('run')
-      setHistoryExecutionId(null)
-      void watchExecution(execution.id)
+      beginExecution(execution)
       void message.info('工作流已开始运行')
     })
+  }
+
+  function beginExecution(execution: WorkflowExecution) {
+    const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
+    setLastResult(null)
+    setActiveExecution(execution)
+    setExecutionDefinition(runningDefinition)
+    setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
+    completedExecutionId.current = null
+    setActiveExecutionId(execution.id)
+    setEventHistoryIncompleteId(null)
+    setWorkspaceMode('run')
+    setHistoryExecutionId(null)
+    void watchExecution(execution.id)
   }
 
   async function debugToBreakpoint() {
@@ -530,17 +534,7 @@ export function useWorkflows(initialWorkflowId?: string) {
 
   async function rerunFailedItems(executionId: string, payload: FailedItemRerunRequest) {
     const execution = await rerunFailedItemsMutation.mutateAsync({ executionId, payload })
-    const runningDefinition = snapshotDefinition(execution.snapshot) ?? emptyDefinition()
-    setLastResult(null)
-    setActiveExecution(execution)
-    setExecutionDefinition(runningDefinition)
-    setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
-    completedExecutionId.current = null
-    setActiveExecutionId(execution.id)
-    setEventHistoryIncompleteId(null)
-    setWorkspaceMode('run')
-    setHistoryExecutionId(null)
-    void watchExecution(execution.id)
+    beginExecution(execution)
     void message.info('失败项派生运行已开始，原运行报告保留')
   }
 
@@ -794,6 +788,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     discardWorkflowDraft,
     publish,
     execute,
+    beginIterationDebugExecution: beginExecution,
     debugToBreakpoint,
     compareLatestVersions,
     replayNode,

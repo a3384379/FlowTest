@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -363,6 +364,262 @@ async def test_atomic_control_block_insert_rejects_stale_and_invalid_edits(
         f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
     )
     assert published.status_code == 200, published.text
+
+
+def _iteration_debug_definition(*, fail: bool = False) -> dict[str, Any]:
+    definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 10, "max_runtime_seconds": 30},
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "loop",
+                "type": "capability",
+                "name": "重复三轮",
+                "position": {"x": 200, "y": 0},
+                "capability_id": "flow.control.repeat",
+                "capability_version": "1.0.0",
+                "configuration": {
+                    "count": 3,
+                    "body": {"kind": "inline", "region_id": "body"},
+                },
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 400, "y": 0}},
+        ],
+        "edges": [
+            {"id": "s-l", "source": "start", "target": "loop"},
+            {"id": "l-e", "source": "loop", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "loop",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "wait",
+                        "type": "delay",
+                        "name": "等待",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"seconds": 0},
+                    }
+                ],
+                "edges": [],
+                "entry_node_id": "wait",
+                "exit_node_ids": ["wait"],
+            }
+        ],
+    }
+    if fail:
+        definition["regions"][0]["nodes"] = [
+            {
+                "id": "fail",
+                "type": "capability",
+                "name": "受控失败",
+                "position": {"x": 0, "y": 0},
+                "capability_id": "flow.control.fail",
+                "capability_version": "1.0.0",
+                "configuration": {"code": "DEBUG_CASE_FAIL", "message": "受控失败"},
+                "bindings": [],
+            }
+        ]
+        definition["regions"][0]["entry_node_id"] = "fail"
+        definition["regions"][0]["exit_node_ids"] = ["fail"]
+    return definition
+
+
+@pytest.mark.asyncio
+async def test_iteration_debug_pauses_steps_and_resumes_a_published_loop(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    definition = _iteration_debug_definition()
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "逐轮调试", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    start = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/debug-sessions",
+        headers=headers,
+        json={
+            "environment_id": environment_id,
+            "version": 1,
+            "loop_node_id": "loop",
+            "pause_before_index": 1,
+            "max_session_seconds": 30,
+        },
+    )
+    assert start.status_code == 202, start.text
+    execution_id = start.json()["execution"]["id"]
+    path = f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/debug-session"
+
+    async def wait_for_pause(reason: str) -> dict[str, Any]:
+        for _ in range(100):
+            response = await workflow_client.get(path, headers=headers)
+            assert response.status_code == 200, response.text
+            state = response.json()
+            if state["status"] == "paused" and state["pause_reason"] == reason:
+                return state
+            await asyncio.sleep(0.02)
+        pytest.fail(f"debug session did not pause for {reason}")
+
+    paused = await wait_for_pause("before_iteration")
+    assert paused["paused_input_index"] == 1
+    assert paused["last_completed_index"] == 0
+    command_path = f"{path}/commands"
+    stale = await workflow_client.post(
+        command_path,
+        headers=headers,
+        json={"action": "step", "expected_revision": paused["revision"] - 1},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "DEBUG_SESSION_REVISION_CONFLICT"
+    stepped = await workflow_client.post(
+        command_path,
+        headers=headers,
+        json={"action": "step", "expected_revision": paused["revision"]},
+    )
+    assert stepped.status_code == 200, stepped.text
+    paused_again = await wait_for_pause("step_completed")
+    assert paused_again["paused_input_index"] == 1
+    assert paused_again["last_completed_index"] == 1
+    resumed = await workflow_client.post(
+        command_path,
+        headers=headers,
+        json={"action": "continue", "expected_revision": paused_again["revision"]},
+    )
+    assert resumed.status_code == 200, resumed.text
+    detail = await _wait_for_completed_execution(workflow_client, headers, project_id, execution_id)
+    assert detail["execution"]["status"] == "passed", detail
+    final = await workflow_client.get(path, headers=headers)
+    assert final.json()["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_iteration_debug_pauses_failed_iteration_before_final_failure(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "失败轮次调试", "definition": _iteration_debug_definition(fail=True)},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/debug-sessions",
+        headers=headers,
+        json={
+            "environment_id": environment_id,
+            "loop_node_id": "loop",
+            "pause_before_index": 0,
+            "pause_on_error": True,
+            "max_session_seconds": 30,
+        },
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["execution"]["id"]
+    path = f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/debug-session"
+    initial = await _wait_for_debug_pause(workflow_client, headers, path, "before_iteration")
+    resumed = await workflow_client.post(
+        f"{path}/commands",
+        headers=headers,
+        json={"action": "continue", "expected_revision": initial["revision"]},
+    )
+    assert resumed.status_code == 200, resumed.text
+    failed_pause = await _wait_for_debug_pause(workflow_client, headers, path, "error")
+    assert failed_pause["paused_input_index"] == 0
+    assert failed_pause["last_completed_index"] == 0
+    detail = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}", headers=headers
+    )
+    assert detail.json()["execution"]["status"] == "running"
+    continued = await workflow_client.post(
+        f"{path}/commands",
+        headers=headers,
+        json={"action": "continue", "expected_revision": failed_pause["revision"]},
+    )
+    assert continued.status_code == 200, continued.text
+    finished = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, execution_id
+    )
+    assert finished["execution"]["status"] == "failed"
+    assert (await workflow_client.get(path, headers=headers)).json()["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_iteration_debug_expiry_stops_paused_execution(
+    workflow_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, _api_id = await _create_assets(workflow_client, headers)
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "调试超时", "definition": _iteration_debug_definition()},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/debug-sessions",
+        headers=headers,
+        json={
+            "environment_id": environment_id,
+            "loop_node_id": "loop",
+            "pause_before_index": 0,
+            "max_session_seconds": 30,
+        },
+    )
+    assert started.status_code == 202, started.text
+    execution_id = started.json()["execution"]["id"]
+    path = f"/api/v1/projects/{project_id}/workflow-executions/{execution_id}/debug-session"
+    await _wait_for_debug_pause(workflow_client, headers, path, "before_iteration")
+
+    class AfterDeadline(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return datetime.now(UTC) + timedelta(seconds=31)
+
+    monkeypatch.setattr("app.services.workflow_debug.datetime", AfterDeadline)
+    finished = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, execution_id
+    )
+    assert finished["execution"]["status"] == "failed"
+    expired = await workflow_client.get(path, headers=headers)
+    assert expired.json()["status"] == "expired"
+
+
+async def _wait_for_debug_pause(
+    client: AsyncClient, headers: dict[str, str], path: str, reason: str
+) -> dict[str, Any]:
+    for _ in range(100):
+        response = await client.get(path, headers=headers)
+        assert response.status_code == 200, response.text
+        state = response.json()
+        if state["status"] == "paused" and state["pause_reason"] == reason:
+            return state
+        await asyncio.sleep(0.02)
+    pytest.fail(f"debug session did not pause for {reason}")
 
 
 @pytest.mark.asyncio

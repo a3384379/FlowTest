@@ -1,3 +1,5 @@
+import axios from 'axios'
+
 import {
   apiClient,
   type ApiDetail,
@@ -13,6 +15,8 @@ import {
   type WorkflowDebugResult,
   type WorkflowExecution,
   type WorkflowExecutionDetail,
+  type WorkflowIterationDebugSession,
+  type WorkflowIterationDebugStart,
   type WorkflowControlRecordDetail,
   type WorkflowControlRecordSummary,
   type WorkflowVersion,
@@ -207,6 +211,16 @@ export async function diffWorkflowVersions(
   return response.data
 }
 
+export async function listWorkflowVersions(
+  projectId: string,
+  workflowId: string,
+): Promise<WorkflowVersion[]> {
+  const response = await apiClient.get<WorkflowVersion[]>(
+    `/projects/${projectId}/workflows/${workflowId}/versions`,
+  )
+  return response.data
+}
+
 export async function debugWorkflow(
   projectId: string,
   workflowId: string,
@@ -221,6 +235,64 @@ export async function debugWorkflow(
       version,
       breakpoint_node_id: breakpointNodeId,
     },
+  )
+  return response.data
+}
+
+export type IterationDebugStartRequest = {
+  environment_id: string
+  version: number
+  loop_node_id: string
+  pause_before_index: number
+  pause_on_error: boolean
+  max_session_seconds: number
+  pause_scope: 'target_loop'
+}
+
+export async function startIterationDebug(
+  projectId: string,
+  workflowId: string,
+  payload: IterationDebugStartRequest,
+): Promise<WorkflowIterationDebugStart> {
+  const response = await apiClient.post<WorkflowIterationDebugStart>(
+    `/projects/${projectId}/workflows/${workflowId}/debug-sessions`,
+    payload,
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+  )
+  return response.data
+}
+
+export async function getIterationDebugSession(
+  projectId: string,
+  executionId: string,
+): Promise<WorkflowIterationDebugSession> {
+  const response = await apiClient.get<WorkflowIterationDebugSession>(
+    `/projects/${projectId}/workflow-executions/${executionId}/debug-session`,
+  )
+  return response.data
+}
+
+export async function findIterationDebugSession(
+  projectId: string,
+  executionId: string,
+): Promise<WorkflowIterationDebugSession | null> {
+  try {
+    return await getIterationDebugSession(projectId, executionId)
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) return null
+    throw error
+  }
+}
+
+export async function commandIterationDebug(
+  projectId: string,
+  executionId: string,
+  action: 'step' | 'continue',
+  expectedRevision: number,
+): Promise<WorkflowIterationDebugSession> {
+  const response = await apiClient.post<WorkflowIterationDebugSession>(
+    `/projects/${projectId}/workflow-executions/${executionId}/debug-session/commands`,
+    { action, expected_revision: expectedRevision },
   )
   return response.data
 }

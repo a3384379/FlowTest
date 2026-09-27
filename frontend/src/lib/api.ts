@@ -1076,6 +1076,25 @@ export type WorkflowExecution = {
   completed_at: string | null
 }
 
+export type WorkflowIterationDebugSession = {
+  execution_id: string
+  target_node_id: string
+  pause_before_index: number
+  pause_on_error: boolean
+  pause_scope: 'target_loop'
+  status: 'armed' | 'running' | 'paused' | 'completed' | 'expired' | 'cancelled'
+  pause_reason: string | null
+  paused_input_index: number | null
+  last_completed_index: number
+  expires_at: string
+  revision: number
+}
+
+export type WorkflowIterationDebugStart = {
+  execution: WorkflowExecution
+  session: WorkflowIterationDebugSession
+}
+
 export type NodeResult = {
   status: 'passed' | 'failed' | 'skipped' | 'cancelled'
   output: unknown
