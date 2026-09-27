@@ -254,15 +254,30 @@ def test_irrelevant_pr_metadata_change_does_not_invalidate_plan() -> None:
     assert client.pr_plan(7, SHA).tier == "full"
 
 
-def test_only_one_automatic_pr_entry_and_workflow_call_reuse() -> None:
+def test_automatic_pr_entries_and_workflow_call_reuse() -> None:
     root = Path(__file__).parents[2] / ".github/workflows"
     workflows = {
         path.name: yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         for path in root.glob("*.yml")
     }
     automatic = [name for name, body in workflows.items() if "pull_request" in body["on"]]
-    assert automatic == ["pr-validation.yml"]
+    assert set(automatic) == {"pr-validation.yml", "ci-bootstrap-validation.yml"}
     assert "paths" not in workflows["pr-validation.yml"]["on"]["pull_request"]
+    bootstrap = workflows["ci-bootstrap-validation.yml"]
+    assert set(bootstrap["on"]["pull_request"]["paths"]) == set(ci_plan.GOVERNANCE_FILES) | {
+        f"{prefix}**" for prefix in ci_plan.GOVERNANCE_PREFIXES
+    }
+    assert bootstrap["permissions"] == {"contents": "read"}
+    assert set(bootstrap["jobs"]) == {
+        "bootstrap-quick",
+        "bootstrap-backend",
+        "bootstrap-frontend",
+        "bootstrap-compose",
+        "bootstrap-security",
+        "bootstrap-windows",
+        "bootstrap-upgrade",
+        "bootstrap-skills",
+    }
     assert "workflow_dispatch" not in workflows["required-gate.yml"]["on"]
     assert "workflow_run" in workflows["required-gate.yml"]["on"]
     assert "pull_request_target" not in workflows["required-gate.yml"]["on"]

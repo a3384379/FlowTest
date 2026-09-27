@@ -4,13 +4,21 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "Makefile"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
       - ".github/workflows/**"
       - ".github/actions/**"
+      - "docs/ci-milestone.md"
+      - "docs/development-efficiency-phase3.md"
+      - "backend/tests/test_ci_plan.py"
+      - "backend/tests/test_required_gate.py"
+      - "scripts/build_skill_evaluation.py"
       - "scripts/ci_plan.py"
       - "scripts/ci_summary.py"
       - "scripts/required_gate.py"
       - "scripts/run_targeted_tests.py"
-      - "docs/ci-*.md"
 
 # Governance changes cannot pass the normal Required Gate. This separate,
 # PR-triggered full suite supplies eligible checks for maintainer Bootstrap.
