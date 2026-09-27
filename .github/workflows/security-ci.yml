@@ -56,15 +56,38 @@ jobs:
             shellcheck -x -P deploy/compact \
               scripts/backup.sh scripts/restore.sh scripts/verify_restore.sh \
               scripts/verify_v2_v3_upgrade.sh deploy/compact/*.sh
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Verify build checkout
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${BUILD_SHA}"
       - name: Build release images
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        env:
+          FLOWTEST_CI_SHA: ${{ github.sha }}
+          FLOWTEST_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          source: .
+          files: |
+            ./compose.yaml
+            ./backend/docker-bake.ci.hcl
+          targets: ci-security
+          load: true
+      - name: Verify scanned image identities
+        env:
+          BUILD_SHA: ${{ github.sha }}
         run: |
-          docker build -t flowtest-backend:ci backend
-          docker build --target performance-runtime -t flowtest-performance:ci backend
-          docker build --target environment-runtime -t flowtest-environment:ci backend
-          docker build --target environment-daemon -t flowtest-environment-daemon:ci backend
-          docker build --target runner-runtime -t flowtest-runner:ci backend
-          docker build -t flowtest-frontend:ci frontend
-          docker build -t flowtest-mock-target:ci mock-target
+          for image in \
+            flowtest-backend:ci flowtest-frontend:ci flowtest-performance:ci \
+            flowtest-environment:ci flowtest-environment-daemon:ci \
+            flowtest-runner:ci flowtest-mock-target:ci; do
+            test "$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "${BUILD_SHA}"
+            test "$(docker image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" = 'linux/amd64'
+            docker image inspect "${image}" --format '{{.RepoTags}} {{.Id}} {{.Os}}/{{.Architecture}}'
+          done
+      - name: Prepare pinned environment fixture
+        run: |
           docker pull docker.io/nginxinc/nginx-unprivileged@sha256:123fb7283ffb4788e260d4e980005a978995fefedcdbb04d268077a19b84576d
           docker tag docker.io/nginxinc/nginx-unprivileged@sha256:123fb7283ffb4788e260d4e980005a978995fefedcdbb04d268077a19b84576d flowtest-environment-fixture:ci
       - name: Scan backend image

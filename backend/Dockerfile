@@ -1,3 +1,8 @@
+ARG FLOWTEST_PYTHON_BASE=python-base-source
+ARG FLOWTEST_K6_BASE=k6-base-source
+ARG FLOWTEST_DOCKER_CLI_BASE=docker-cli-base-source
+ARG FLOWTEST_ENVIRONMENT_DAEMON_BASE=environment-daemon-source
+
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
 FROM golang:1.26.6-alpine3.23@sha256:5978cc992ad5ef96a7469713c8af849c1433824761ce3be2c56381403cd8d9a3 AS go-toolchain
 
@@ -15,6 +20,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go version -m /out/k6 | grep -F 'go1.26.6'; \
     go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     /out/k6 version | grep -F 'k6 v2.2.0'
+
+FROM scratch AS k6-base-source
+COPY --from=k6-builder /out/k6 /out/k6
 
 FROM go-toolchain AS docker-cli-builder
 WORKDIR /go/src/github.com/docker/cli
@@ -42,6 +50,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     install -D build/docker /out/docker; \
     go version -m /out/docker | grep -F 'go1.26.6'; \
     /out/docker --version | grep -F 'Docker version 29.7.2'
+
+FROM scratch AS docker-cli-base-source
+COPY --from=docker-cli-builder /out/docker /out/docker
+
+FROM ${FLOWTEST_DOCKER_CLI_BASE} AS selected-docker-cli-base
 
 FROM go-toolchain AS dockerd-builder
 RUN apk add --no-cache bash build-base libseccomp-dev libseccomp-static linux-headers pkgconf
@@ -116,8 +129,8 @@ RUN set -eux; \
         /usr/local/libexec/docker/cli-plugins/docker-buildx \
         /usr/local/libexec/docker/cli-plugins/docker-compose
 
-FROM environment-daemon-base AS environment-daemon
-COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
+FROM environment-daemon-base AS environment-daemon-source
+COPY --from=selected-docker-cli-base /out/docker /usr/local/bin/docker
 COPY --from=dockerd-builder /out/bundles/binary-daemon/dockerd /usr/local/bin/dockerd
 COPY --from=containerd-builder /src/containerd/bin/containerd /usr/local/bin/containerd
 COPY --from=containerd-builder /src/containerd/bin/ctr /usr/local/bin/ctr
@@ -126,7 +139,9 @@ RUN set -eux; \
     containerd --version; \
     ctr --version
 
-FROM debian:trixie-slim AS python-runtime
+FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
+
+FROM debian:trixie-slim AS python-base-source
 
 COPY patches/cpython-3.13-cve-2026-82049.patch /tmp/cpython-3.13-cve-2026-82049.patch
 
@@ -228,6 +243,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+FROM ${FLOWTEST_PYTHON_BASE} AS python-runtime
 WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
@@ -244,8 +260,10 @@ EXPOSE 8000
 
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
+FROM ${FLOWTEST_K6_BASE} AS selected-k6-base
+
 FROM python-runtime AS performance-runtime
-COPY --from=k6-builder /out/k6 /usr/local/bin/k6
+COPY --from=selected-k6-base /out/k6 /usr/local/bin/k6
 RUN set -eux; \
     groupadd --gid 65532 flowtest; \
     useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
@@ -255,7 +273,7 @@ ENV HOME=/tmp
 USER flowtest
 
 FROM python-runtime AS environment-runtime
-COPY --from=docker-cli-builder /out/docker /usr/local/bin/docker
+COPY --from=selected-docker-cli-base /out/docker /usr/local/bin/docker
 RUN set -eux; \
     groupadd --gid 65532 flowtest; \
     useradd --uid 65532 --gid 65532 --no-create-home --home-dir /tmp \
