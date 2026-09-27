@@ -29,6 +29,7 @@ from app.repositories.durable_execution import DurableExecutionRepository
 from app.schemas.runner_fabric import RunnerCheckpointRequest, RunnerCheckpointResume
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.workflow_output_storage import WorkflowOutputStorage
 
 
 class DurableExecutionService:
@@ -241,17 +242,29 @@ class DurableExecutionService:
             raise AppError(
                 code="WORKFLOW_EXECUTION_NOT_FOUND", message="执行不存在", status_code=404
             )
-        redacted_output = cast(JsonValue, redact(payload.output))
+        output_storage = WorkflowOutputStorage(
+            self._session,
+            project_id=project_id,
+            execution_id=payload.execution_id,
+            created_by_id=execution.triggered_by_id,
+        )
+        redacted_output = await output_storage.compact(cast(JsonValue, redact(payload.output)))
         redacted_result = (
             {}
             if payload.result is None
-            else json_object(redact(payload.result.model_dump(mode="json")))
+            else json_object(
+                await output_storage.compact(
+                    cast(JsonValue, redact(payload.result.model_dump(mode="json")))
+                )
+            )
         )
         request_attempts = max(
             payload.request_attempts, payload.result.request_attempts if payload.result else 0
         )
         redacted_result["request_attempts"] = request_attempts
-        redacted_variables = json_object(redact(payload.extracted_variables))
+        redacted_variables = json_object(
+            await output_storage.compact(cast(JsonValue, redact(payload.extracted_variables)))
+        )
         existing = await self._repository.get_checkpoint(
             execution_id=payload.execution_id,
             node_id=payload.node_id,

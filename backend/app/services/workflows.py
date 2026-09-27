@@ -66,6 +66,7 @@ from app.engine.contracts import (
     InlineControlBody,
     MappingTargetLocation,
     NodeOutputValueSource,
+    NodeStatus,
     NodeType,
     RedisNodeConfig,
     SqlNodeConfig,
@@ -100,6 +101,7 @@ from app.engine.request_accounting import node_type_consumes_request, resumed_re
 from app.engine.request_accounting import (
     preview_node_request_attempts as _preview_node_request_attempts,
 )
+from app.engine.results import NodeResult
 from app.engine.scheduler import (
     CancellationToken,
     ExecutionContext,
@@ -146,6 +148,7 @@ from app.services.organization_governance import OrganizationQuotaService
 from app.services.outbound_limits import project_outbound_admission
 from app.services.projects import ProjectService
 from app.services.protocol_assets import ProtocolAssetService
+from app.services.workflow_output_storage import WorkflowOutputStorage
 from app.services.workflow_runtime import (
     PreparedSubflow,
     WorkflowNodeExecutor,
@@ -1390,7 +1393,6 @@ class WorkflowService:
             await DurableExecutionService(self._session).reset_retry_budget(execution.id)
             or plan.rerun_loop_node_id is not None
         )
-        checkpoints = [item for item in checkpoint_history if is_resumable_checkpoint(item.status)]
         resume_attempts = {
             node_id: max(item.attempt for item in checkpoint_history if item.node_id == node_id)
             for node_id in {item.node_id for item in checkpoint_history}
@@ -1403,13 +1405,39 @@ class WorkflowService:
             rerun_loop_node_id=plan.rerun_loop_node_id,
             rerun_input_indices=frozenset(plan.rerun_input_indices),
         )
-        for checkpoint in checkpoints:
-            context.restore_checkpoint(
-                node_id=checkpoint.node_id,
-                output=cast(JsonValue, checkpoint.output),
-                extracted_variables=cast(dict[str, JsonValue], checkpoint.extracted_variables),
+        output_storage = WorkflowOutputStorage(
+            self._session,
+            project_id=plan.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        restored_records: list[NodeRunRecord] = []
+        for checkpoint in checkpoint_history:
+            output = await output_storage.restore(cast(JsonValue, checkpoint.output))
+            result_value = await output_storage.restore(cast(JsonValue, checkpoint.result))
+            extracted_variables = cast(
+                dict[str, JsonValue],
+                await output_storage.restore(cast(JsonValue, checkpoint.extracted_variables)),
             )
-        resume_records = tuple(checkpoint_to_node_record(item) for item in checkpoint_history)
+            record = checkpoint_to_node_record(checkpoint)
+            restored_records.append(
+                replace(
+                    record,
+                    output=output,
+                    result=(
+                        record.result
+                        if record.status is NodeStatus.RUNNING
+                        else NodeResult.model_validate(result_value)
+                    ),
+                )
+            )
+            if is_resumable_checkpoint(checkpoint.status):
+                context.restore_checkpoint(
+                    node_id=checkpoint.node_id,
+                    output=output,
+                    extracted_variables=extracted_variables,
+                )
+        resume_records = tuple(restored_records)
         async with (
             project_outbound_admission(plan.project_id, outbound_policy) as admission,
             httpx.AsyncClient(follow_redirects=False) as client,
@@ -1455,9 +1483,10 @@ class WorkflowService:
             limit=plan.request_budget,
             budget=shared_request_budget,
         )
-        nodes = self._node_models(execution.id, result)
+        stored_result = await self._stored_run_result(execution, result)
+        nodes = self._node_models(execution.id, stored_result)
         await self._workflows.replace_node_executions(execution.id, nodes)
-        self._stage_run_result(execution=execution, plan=plan, result=result)
+        self._stage_run_result(execution=execution, plan=plan, result=stored_result)
         await self._session.commit()
         await self._session.refresh(execution)
         return execution, nodes
@@ -1474,12 +1503,15 @@ class WorkflowService:
             execution = await self.load_execution_for_run(plan.execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                nodes = self._node_models(execution.id, submitted.result.to_domain())
+                stored_result = await self._stored_run_result(
+                    execution, submitted.result.to_domain()
+                )
+                nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
                     execution=execution,
                     plan=plan,
-                    result=submitted.result.to_domain(),
+                    result=stored_result,
                 )
             finally:
                 reset_redaction_policy(token)
@@ -1513,12 +1545,15 @@ class WorkflowService:
             execution = await self.load_execution_for_run(execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                nodes = self._node_models(execution.id, received[execution_id].result.to_domain())
+                stored_result = await self._stored_run_result(
+                    execution, received[execution_id].result.to_domain()
+                )
+                nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
                     execution=execution,
                     plan=child_plan,
-                    result=received[execution_id].result.to_domain(),
+                    result=stored_result,
                 )
             finally:
                 reset_redaction_policy(token)
@@ -1530,6 +1565,35 @@ class WorkflowService:
         finally:
             reset_redaction_policy(token)
         return parent
+
+    async def _stored_run_result(
+        self, execution: WorkflowExecution, result: WorkflowRunResult
+    ) -> WorkflowRunResult:
+        storage = WorkflowOutputStorage(
+            self._session,
+            project_id=execution.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        records: list[NodeRunRecord] = []
+        for record in result.records:
+            output = await storage.compact(cast(JsonValue, redact(record.output)))
+            persisted_result = await storage.compact(
+                cast(JsonValue, redact(record.result.model_dump(mode="json")))
+            )
+            records.append(
+                replace(
+                    record,
+                    output=output,
+                    result=NodeResult.model_validate(persisted_result),
+                )
+            )
+        context = await storage.compact(cast(JsonValue, redact(result.context)))
+        return replace(
+            result,
+            records=tuple(records),
+            context=cast(dict[str, JsonValue], context),
+        )
 
     def _stage_run_result(
         self,

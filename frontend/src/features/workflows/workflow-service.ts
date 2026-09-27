@@ -263,6 +263,21 @@ export async function getWorkflowExecution(
   return response.data
 }
 
+export async function downloadWorkflowOutput(projectId: string, artifactId: string): Promise<void> {
+  const response = await apiClient.get<ArrayBuffer>(`/projects/${projectId}/files/${artifactId}`, {
+    responseType: 'arraybuffer',
+  })
+  const url = URL.createObjectURL(new Blob([response.data], { type: 'application/json' }))
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `workflow-output-${artifactId}.json`
+    link.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 export async function listWorkflowControlRecords(
   projectId: string,
   executionId: string,

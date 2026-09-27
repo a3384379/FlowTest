@@ -1071,10 +1071,10 @@ def _for_each_output(
 
 def _response_output(response: httpx.Response) -> dict[str, JsonValue]:
     size_bytes = len(response.content)
-    if size_bytes > settings.inline_body_limit_bytes:
+    if size_bytes > settings.artifact_limit_bytes:
         raise NodeExecutionError(
             code="WORKFLOW_RESPONSE_TOO_LARGE",
-            message="工作流节点响应超过 2 MB 内联上限",
+            message="工作流节点响应超过 50 MB 存储上限",
             output={
                 "status_code": response.status_code,
                 "size_bytes": size_bytes,

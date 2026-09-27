@@ -8,6 +8,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from app.core.config import settings
 from app.core.errors import AppError
 from app.domain.api_assets import BodyKind, HttpMethod
 from app.domain.network import OutboundNetworkPolicy
@@ -76,6 +77,60 @@ class CountingOutboundAdmission:
             yield
         finally:
             self.active -= 1
+
+
+@pytest.mark.asyncio
+async def test_large_response_remains_available_to_downstream_mapping() -> None:
+    seen_ticket: list[str | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/large":
+            return httpx.Response(
+                200,
+                json={
+                    "ticket": "mapped-value",
+                    "padding": "x" * (settings.inline_body_limit_bytes + 1),
+                },
+            )
+        seen_ticket.append(request.url.params.get("ticket"))
+        return httpx.Response(200, json={"ok": True})
+
+    edge = _edge("large", "check")
+    edge["mappings"] = [
+        {
+            "source": {"node_id": "large", "path": "body.ticket"},
+            "target": {"node_id": "check", "location": "query", "key": "ticket"},
+        }
+    ]
+    definition = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                _node("start", "start", {}),
+                _node("large", "api", _api_config()),
+                _node("check", "api", _api_config()),
+                _node("end", "end", {}),
+            ],
+            "edges": [_edge("start", "large"), edge, _edge("check", "end")],
+        }
+    )
+    large = PreparedRequest(HttpMethod.GET, "https://example.test/large", (), None, ())
+    check = PreparedRequest(HttpMethod.GET, "https://example.test/check", (), None, ())
+    prepared = {
+        "large": PreparedWorkflowRequest(large, large, BodyKind.NONE, None),
+        "check": PreparedWorkflowRequest(check, check, BodyKind.NONE, None),
+    }
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            prepared,
+            definition,
+            OutboundNetworkPolicy(),
+            outbound_guard=AllowOutbound(),
+        )
+        result = await WorkflowScheduler(executor).run(definition)
+    assert result.status.value == "passed"
+    assert seen_ticket == ["mapped-value"]
 
 
 def test_only_prepared_read_requests_allow_automatic_unknown_outcome_retry() -> None:

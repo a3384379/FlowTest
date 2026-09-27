@@ -23,15 +23,22 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
+from app.core.storage import ObjectStorage, StoredObject
 from app.domain.durable_execution import ExecutionCommandType
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.runner_fabric import RunnerProfile, normalize_labels
 from app.engine.contracts import NodeStatus, NodeType, WorkflowDefinition, WorkflowRunStatus
 from app.engine.results import NodeResult
-from app.engine.scheduler import CancellationToken, NodeStatusUpdate, WorkflowRunResult
+from app.engine.scheduler import (
+    CancellationToken,
+    NodeRunRecord,
+    NodeStatusUpdate,
+    WorkflowRunResult,
+)
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
+from app.models.artifacts import Artifact
 from app.models.durable_execution import ExecutionCommand
 from app.models.runner_fabric import RunnerLeaseRecord, RunnerTask
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
@@ -74,6 +81,95 @@ from app.services.workflow_coordinator import WorkflowRunCoordinator
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflow_snapshots import PreparedExecution
 from app.services.workflows import WorkflowBatchPlan, WorkflowRunPlan, WorkflowService
+
+
+class MemoryObjectStorage(ObjectStorage):
+    def __init__(self) -> None:
+        self.objects: dict[str, StoredObject] = {}
+
+    async def put(self, *, key: str, content: bytes, content_type: str) -> None:
+        self.objects[key] = StoredObject(content=content, content_type=content_type)
+
+    async def get(self, *, key: str) -> StoredObject:
+        return self.objects[key]
+
+
+@pytest.mark.asyncio
+async def test_large_workflow_response_is_referenced_and_restored_for_runner(
+    fabric_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryObjectStorage()
+    monkeypatch.setattr("app.services.artifacts.object_storage", storage)
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        plan, execution = await _seed_execution_plan(session, actor, project)
+        body = {"ticket": "resume-value", "padding": "x" * (settings.inline_body_limit_bytes + 1)}
+        output = {
+            "status_code": 200,
+            "headers": {},
+            "body": body,
+            "size_bytes": settings.inline_body_limit_bytes + 1,
+        }
+        result = NodeResult.passed(output)
+        now = datetime.now(UTC)
+        checkpoint = await DurableExecutionService(session).record_checkpoint(
+            project_id=project.id,
+            lease_id=None,
+            runner_id=None,
+            actor_user_id=actor.id,
+            payload=RunnerCheckpointRequest(
+                execution_id=execution.id,
+                node_id="start",
+                node_type=NodeType.START,
+                name="Start",
+                status=NodeStatus.PASSED,
+                attempts=1,
+                output=output,
+                result=result,
+                started_at=now,
+                finished_at=now,
+                input_hash="0" * 64,
+                fencing_token=0,
+            ),
+        )
+        assert "__flowtest_workflow_output_ref__" in checkpoint.output["body"]
+        assert "padding" not in str(checkpoint.output)
+        resumed = await RunnerFabricService(session, enabled=True)._resume_checkpoints(plan)
+        record = resumed[str(execution.id)][0]
+        assert record.output == output
+        assert record.result is not None and record.result.output == output
+        stored = await WorkflowService(session)._stored_run_result(
+            execution,
+            WorkflowRunResult(
+                status=WorkflowRunStatus.PASSED,
+                records=(
+                    NodeRunRecord(
+                        node_id="start",
+                        node_type=NodeType.START,
+                        name="Start",
+                        status=NodeStatus.PASSED,
+                        attempts=1,
+                        output=output,
+                        result=result,
+                        error_code=None,
+                        error_message=None,
+                        started_at=now,
+                        completed_at=now,
+                    ),
+                ),
+                context={"outputs": {"start": output}},
+            ),
+        )
+        assert stored.records[0].output == checkpoint.output
+        assert stored.context["outputs"]["start"] == checkpoint.output
+        artifacts = (await session.scalars(select(Artifact))).all()
+        assert len(artifacts) == 1
+        assert len(storage.objects) == 1
+        await session.delete(artifacts[0])
+        await session.commit()
+        with pytest.raises(AppError) as unavailable:
+            await RunnerFabricService(session, enabled=True)._resume_checkpoints(plan)
+        assert unavailable.value.code == "WORKFLOW_OUTPUT_REFERENCE_UNAVAILABLE"
 
 
 def test_pool_advisory_lock_key_is_stable_and_signed() -> None:

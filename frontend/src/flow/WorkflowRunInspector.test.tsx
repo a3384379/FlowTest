@@ -9,6 +9,39 @@ import type { WorkflowNodeExecution } from '../lib/api'
 import { server } from '../test/server'
 
 describe('WorkflowRunInspector', () => {
+  it('shows an authorized download action for a stored response body', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        projectId="project-1"
+        executionId="execution-1"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            status_code: 200,
+            headers: {},
+            size_bytes: 3_000_000,
+            body: {
+              __flowtest_workflow_output_ref__: {
+                artifact_id: '00000000-0000-4000-8000-000000000001',
+                size_bytes: 3_000_000,
+              },
+            },
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    await browser.click(screen.getByRole('tab', { name: '输出' }))
+    expect(screen.getByText(/大型响应已保存为对象引用/)).toBeVisible()
+    expect(screen.getByRole('button', { name: '下载响应体' })).toBeVisible()
+  })
+
   it('shows parallel branch status separately from its test verdict', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

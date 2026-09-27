@@ -230,27 +230,6 @@ class WorkflowRunCoordinator:
                     if update.result is not None
                     else None
                 )
-                await self._publish(
-                    ExecutionEvent(
-                        type=(
-                            ExecutionEventType.NODE_RESULT
-                            if update.result is not None
-                            else ExecutionEventType.NODE_STATUS
-                        ),
-                        execution_id=plan.execution_id,
-                        emitted_at=update.occurred_at,
-                        node_id=update.node_id,
-                        node_name=update.name,
-                        node_type=update.node_type.value,
-                        node_status=update.status,
-                        result=safe_result,
-                        attempt=update.attempts,
-                        attempts=update.attempts,
-                        fencing_token=0,
-                        error_code=update.error_code,
-                        error_message=update.error_message,
-                    )
-                )
                 should_checkpoint = (safe_result is not None and update.status.is_terminal) or (
                     update.status is NodeStatus.RUNNING
                     and update.attempts > 0
@@ -266,7 +245,9 @@ class WorkflowRunCoordinator:
                     # session so a checkpoint commit cannot race a refresh on the run
                     # session or interleave transactions for sibling nodes.
                     async with self._session_maker() as checkpoint_session:
-                        await DurableExecutionService(checkpoint_session).record_checkpoint(
+                        checkpoint = await DurableExecutionService(
+                            checkpoint_session
+                        ).record_checkpoint(
                             project_id=plan.project_id,
                             lease_id=None,
                             runner_id=None,
@@ -294,6 +275,29 @@ class WorkflowRunCoordinator:
                                 best_effort=update.best_effort,
                             ),
                         )
+                        if safe_result is not None:
+                            safe_result = NodeResult.model_validate(checkpoint.result)
+                await self._publish(
+                    ExecutionEvent(
+                        type=(
+                            ExecutionEventType.NODE_RESULT
+                            if update.result is not None
+                            else ExecutionEventType.NODE_STATUS
+                        ),
+                        execution_id=plan.execution_id,
+                        emitted_at=update.occurred_at,
+                        node_id=update.node_id,
+                        node_name=update.name,
+                        node_type=update.node_type.value,
+                        node_status=update.status,
+                        result=safe_result,
+                        attempt=update.attempts,
+                        attempts=update.attempts,
+                        fencing_token=0,
+                        error_code=update.error_code,
+                        error_message=update.error_message,
+                    )
+                )
 
             try:
                 completed, _nodes = await service.run_prepared(

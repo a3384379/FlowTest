@@ -28,6 +28,7 @@ import {
   getWorkflowControlRecord,
   getWorkflowInstance,
   listWorkflowControlRecords,
+  downloadWorkflowOutput,
 } from '../features/workflows/workflow-service'
 
 type RuntimeInspectorProps = {
@@ -96,6 +97,7 @@ function RuntimeNodeDetail({
       />
       <ObservationPicker observations={observations} selected={observation} onChange={setAttempt} />
       <RuntimeTabs
+        projectId={projectId}
         input={input}
         context={context}
         execution={execution}
@@ -529,8 +531,8 @@ function ControlInstanceDetail({
           <Typography.Text>
             {checkpoint.node_name} · {checkpoint.status}
           </Typography.Text>
-          <Payload title="实例输出" value={checkpoint.output} />
-          <Payload title="实例请求、响应与校验" value={checkpoint.result} />
+          <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />
+          <Payload title="实例请求、响应与校验" value={checkpoint.result} projectId={projectId} />
         </>
       )}
     </div>
@@ -602,11 +604,13 @@ function ObservationPicker({
 }
 
 function RuntimeTabs({
+  projectId,
   input,
   context,
   execution,
   observation,
 }: {
+  projectId?: string
   input: Record<string, unknown>
   context: Record<string, unknown>
   execution: WorkflowNodeExecution | undefined
@@ -616,13 +620,17 @@ function RuntimeTabs({
     <Tabs
       size="small"
       items={[
-        { key: 'input', label: '输入', children: <InputDetail input={input} context={context} /> },
+        {
+          key: 'input',
+          label: '输入',
+          children: <InputDetail input={input} context={context} projectId={projectId} />,
+        },
         { key: 'request', label: '请求', children: <RequestDetail observation={observation} /> },
         { key: 'response', label: '响应', children: <ResponseDetail observation={observation} /> },
         {
           key: 'output',
           label: '输出',
-          children: <Payload title="节点输出" value={execution?.output} />,
+          children: <Payload title="节点输出" value={execution?.output} projectId={projectId} />,
         },
         {
           key: 'diagnostics',
@@ -637,14 +645,16 @@ function RuntimeTabs({
 function InputDetail({
   input,
   context,
+  projectId,
 }: {
   input: Record<string, unknown>
   context: Record<string, unknown>
+  projectId?: string
 }) {
   return (
     <>
-      <Payload title="上游节点输出" value={input} />
-      <Payload title="执行变量" value={resolvedVariables(context)} />
+      <Payload title="上游节点输出" value={input} projectId={projectId} />
+      <Payload title="执行变量" value={resolvedVariables(context)} projectId={projectId} />
     </>
   )
 }
@@ -723,13 +733,89 @@ function HttpRequestSummary({ observation }: { observation: WorkflowNodeObservat
   )
 }
 
-function Payload({ title, value }: { title: string; value: unknown }) {
+function Payload({
+  title,
+  value,
+  projectId,
+}: {
+  title: string
+  value: unknown
+  projectId?: string
+}) {
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const references = workflowOutputReferences(value)
   return (
     <section className="workflow-runtime-payload">
       <Typography.Text strong>{title}</Typography.Text>
+      {references.map((reference) => (
+        <div key={reference.artifactId}>
+          <Typography.Text type="secondary">
+            大型响应已保存为对象引用（{formatBytes(reference.sizeBytes)}）
+          </Typography.Text>
+          {projectId && (
+            <Button
+              type="link"
+              onClick={() => {
+                setDownloadError(null)
+                void downloadWorkflowOutput(projectId, reference.artifactId).catch(
+                  (error: unknown) => {
+                    setDownloadError(apiErrorMessage(error))
+                  },
+                )
+              }}
+            >
+              下载响应体
+            </Button>
+          )}
+        </div>
+      ))}
+      {downloadError && <Alert type="error" title={`响应体不可用：${downloadError}`} />}
       <pre>{serialize(value)}</pre>
     </section>
   )
+}
+
+function workflowOutputReferences(
+  value: unknown,
+): Array<{ artifactId: string; sizeBytes: number }> {
+  const found = new Map<string, number>()
+  const visit = (item: unknown): void => {
+    if (Array.isArray(item)) {
+      item.forEach(visit)
+      return
+    }
+    if (!isRecord(item)) return
+    if (isResponseOutput(item)) {
+      const reference = responseReference(item.body)
+      if (reference) found.set(reference.artifactId, reference.sizeBytes)
+      return
+    }
+    Object.values(item).forEach(visit)
+  }
+  visit(value)
+  return Array.from(found, ([artifactId, sizeBytes]) => ({ artifactId, sizeBytes }))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isResponseOutput(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.status_code === 'number' &&
+    typeof value.size_bytes === 'number' &&
+    isRecord(value.headers) &&
+    'body' in value
+  )
+}
+
+function responseReference(body: unknown): { artifactId: string; sizeBytes: number } | null {
+  if (!isRecord(body) || !isRecord(body.__flowtest_workflow_output_ref__)) return null
+  const metadata = body.__flowtest_workflow_output_ref__
+  if (typeof metadata.artifact_id !== 'string' || typeof metadata.size_bytes !== 'number') {
+    return null
+  }
+  return { artifactId: metadata.artifact_id, sizeBytes: metadata.size_bytes }
 }
 
 function EmptyPayload({ text }: { text: string }) {

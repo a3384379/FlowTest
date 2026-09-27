@@ -20,6 +20,7 @@ from app.domain.runner_fabric import (
     select_runner_type,
 )
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
+from app.engine.results import NodeResult
 from app.models.access import User
 from app.models.capabilities import Runner, RunnerPool
 from app.models.runner_fabric import (
@@ -53,6 +54,7 @@ from app.services.durable_execution import (
 from app.services.organization_governance import OrganizationQuotaService
 from app.services.outbound_limits import OutboundLimitPolicy, project_outbound_limiter
 from app.services.projects import ProjectService
+from app.services.workflow_output_storage import WorkflowOutputStorage
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
 
@@ -933,10 +935,37 @@ class RunnerFabricService:
             else [plan.execution_id]
         )
         checkpoints = await DurableExecutionService(self._session).checkpoint_history(execution_ids)
-        return {
-            str(execution_id): [checkpoint_to_runner_resume(item) for item in items]
-            for execution_id, items in checkpoints.items()
-        }
+        restored: dict[str, list[RunnerCheckpointResume]] = {}
+        for execution_id, items in checkpoints.items():
+            storage = WorkflowOutputStorage(
+                self._session,
+                project_id=plan.project_id,
+                execution_id=execution_id,
+                created_by_id=plan.actor_id,
+            )
+            records: list[RunnerCheckpointResume] = []
+            for item in items:
+                record = checkpoint_to_runner_resume(item)
+                result = (
+                    None
+                    if record.result is None
+                    else await storage.restore(record.result.model_dump(mode="json"))
+                )
+                records.append(
+                    record.model_copy(
+                        update={
+                            "output": await storage.restore(record.output),
+                            "result": (
+                                None if result is None else NodeResult.model_validate(result)
+                            ),
+                            "extracted_variables": await storage.restore(
+                                record.extracted_variables
+                            ),
+                        }
+                    )
+                )
+            restored[str(execution_id)] = records
+        return restored
 
     async def _authenticate_runner(self, raw_token: str) -> Runner:
         self._require_enabled()
