@@ -55,8 +55,9 @@ docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml sto
 ```
 
 验收脚本要求恰好 6 个服务运行，并通过 PostgreSQL、Redis、MinIO Readiness 以及 `compact` 运行档位检查。
-独立 CI 还会执行 `scripts/smoke_s32.py`，覆盖真实登录、API/Workflow 发布、合并 Worker 执行和
-不可变 Snapshot。
+修改 `deploy/compact/` 的 PR 会自动运行当前提交的六服务启动和 `scripts/smoke_s32.py` 基础兼容验收，
+覆盖真实登录、API/Workflow 发布、合并 Worker 执行和不可变 Snapshot。备份/恢复、离线升级、
+容量与稳定性完整 RC 仍走复审后的手动入口，不由这项 PR 兼容检查代替。
 日常停止不要添加 `--volumes`，否则会删除业务数据。
 
 ## 私有仓库与离线包
