@@ -65,6 +65,8 @@ describe('useWorkflowTabs', () => {
 
     rendered.rerender({ activeWorkflowId: 'one' })
     await waitFor(() => expect(readWorkflowTabs(key)?.activeWorkflowId).toBe('one'))
+    await act(async () => Promise.resolve())
+    expect(selectWorkflow).toHaveBeenLastCalledWith('one')
   })
 
   it('closes clean tabs and selects the next tab or clears focus', async () => {
