@@ -19,19 +19,19 @@ permissions:
   contents: read
 
 jobs:
-  quick:
+  bootstrap-quick:
     uses: ./.github/workflows/quick-ci.yml
-  backend:
+  bootstrap-backend:
     uses: ./.github/workflows/backend-ci.yml
-  frontend:
+  bootstrap-frontend:
     uses: ./.github/workflows/frontend-ci.yml
-  compose:
+  bootstrap-compose:
     uses: ./.github/workflows/compose-ci.yml
-  security:
+  bootstrap-security:
     uses: ./.github/workflows/security-ci.yml
-  windows:
+  bootstrap-windows:
     uses: ./.github/workflows/standalone-windows.yml
-  upgrade:
+  bootstrap-upgrade:
     uses: ./.github/workflows/upgrade-ci.yml
-  skills:
+  bootstrap-skills:
     uses: ./.github/workflows/skills-ci.yml
