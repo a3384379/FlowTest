@@ -923,6 +923,36 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert checkpoints.status_code == 200, checkpoints.text
     assert {item["node_id"] for item in checkpoints.json()} == {"start", "api", "end"}
     assert all(len(item["input_hash"]) == 64 for item in checkpoints.json())
+    checkpoint_log_url = (
+        f"/api/v1/projects/{project_id}/workflow-executions/"
+        f"{detail['execution']['id']}/checkpoint-log"
+    )
+    first_log_page = await workflow_client.get(
+        checkpoint_log_url, headers=headers, params={"page": 1, "page_size": 2}
+    )
+    second_log_page = await workflow_client.get(
+        checkpoint_log_url, headers=headers, params={"page": 2, "page_size": 2}
+    )
+    assert first_log_page.status_code == 200, first_log_page.text
+    assert second_log_page.status_code == 200, second_log_page.text
+    assert first_log_page.json()["total"] == 4
+    log_items = first_log_page.json()["items"] + second_log_page.json()["items"]
+    assert {item["node_id"] for item in log_items} == {"start", "api", "end"}
+    assert sorted(item["attempt"] for item in log_items if item["node_id"] == "api") == [1, 2]
+    assert all("output" not in item and "result" not in item for item in log_items)
+    assert len({item["id"] for item in log_items}) == 4
+    log_detail = await workflow_client.get(
+        f"{checkpoint_log_url}/{log_items[0]['id']}", headers=headers
+    )
+    assert log_detail.status_code == 200, log_detail.text
+    assert log_detail.json()["id"] == log_items[0]["id"]
+    assert "output" in log_detail.json() and "result" in log_detail.json()
+    missing_log_entry = await workflow_client.get(
+        f"{checkpoint_log_url}/00000000-0000-4000-8000-000000000099",
+        headers=headers,
+    )
+    assert missing_log_entry.status_code == 404
+    assert missing_log_entry.json()["error"]["code"] == "WORKFLOW_CHECKPOINT_NOT_FOUND"
     snapshot = detail["execution"]["snapshot"]
     assert snapshot["workflow"]["version"] == 1
     assert snapshot["apis"]["api"]["version"] == 1

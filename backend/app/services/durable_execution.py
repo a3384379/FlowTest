@@ -359,6 +359,38 @@ class DurableExecutionService:
         await self._require_readable_execution(actor, project_id, execution_id)
         return await self._repository.list_checkpoints(execution_id)
 
+    async def list_checkpoint_log(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[ExecutionCheckpoint], int]:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        return await self._repository.list_checkpoint_log(
+            execution_id, page=page, page_size=page_size
+        )
+
+    async def get_checkpoint_log_entry(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        execution_id: UUID,
+        checkpoint_id: UUID,
+    ) -> ExecutionCheckpoint:
+        await self._require_readable_execution(actor, project_id, execution_id)
+        checkpoint = await self._repository.get_checkpoint_by_id(execution_id, checkpoint_id)
+        if checkpoint is None:
+            raise AppError(
+                code="WORKFLOW_CHECKPOINT_NOT_FOUND",
+                message="执行记录不存在",
+                status_code=404,
+            )
+        return checkpoint
+
     async def get_instance_checkpoint(
         self,
         *,

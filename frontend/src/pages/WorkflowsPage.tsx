@@ -41,6 +41,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
+import ExecutionCheckpointLog from '../features/workflows/ExecutionCheckpointLog'
 import FailureRepairDialog from '../features/workflows/FailureRepairDialog'
 import FlowSpecReviewDialog, {
   type FlowSpecReviewSeed,
@@ -484,6 +485,7 @@ function WorkflowProposalDialog({
 }
 
 function RunConsolePanel({ state }: { state: WorkflowState }) {
+  const [showCheckpointLog, setShowCheckpointLog] = useState(false)
   return (
     <div className="workflow-runtime-panel">
       <div className="workflow-runtime-panel-heading">
@@ -513,6 +515,21 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
             }
           />
           <FailedItemRerunAction state={state} />
+        </>
+      )}
+      {state.runtimeExecution && state.projectId && (
+        <>
+          <Button onClick={() => setShowCheckpointLog((value) => !value)}>
+            {showCheckpointLog ? '收起执行记录' : '查看执行记录'}
+          </Button>
+          {showCheckpointLog && (
+            <ExecutionCheckpointLog
+              key={state.runtimeExecution.id}
+              projectId={state.projectId}
+              executionId={state.runtimeExecution.id}
+              running={['queued', 'running'].includes(state.runtimeExecution.status)}
+            />
+          )}
         </>
       )}
     </div>

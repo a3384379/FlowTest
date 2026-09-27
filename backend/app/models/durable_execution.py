@@ -65,6 +65,12 @@ class ExecutionCheckpoint(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "execution_checkpoints"
     __table_args__ = (
         Index("ix_execution_checkpoints_execution_status", "execution_id", "status"),
+        Index(
+            "ix_execution_checkpoints_execution_finished_id",
+            "execution_id",
+            "finished_at",
+            "id",
+        ),
         UniqueConstraint(
             "execution_id",
             "node_id",

@@ -847,6 +847,20 @@ export type ExecutionCheckpoint = {
   finished_at: string
 }
 
+export type ExecutionCheckpointSummary = Pick<
+  ExecutionCheckpoint,
+  | 'id'
+  | 'execution_id'
+  | 'node_id'
+  | 'node_type'
+  | 'node_name'
+  | 'phase'
+  | 'attempt'
+  | 'status'
+  | 'started_at'
+  | 'finished_at'
+>
+
 export type IntegrationPlanDiagnostic = {
   code: string
   severity: 'blocker' | 'review' | 'warning' | 'info'

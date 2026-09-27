@@ -5,6 +5,7 @@ import {
   type Artifact,
   type Environment,
   type ExecutionCheckpoint,
+  type ExecutionCheckpointSummary,
   type Page,
   type Project,
   type Workflow,
@@ -322,6 +323,29 @@ export async function getWorkflowInstance(
 ): Promise<ExecutionCheckpoint> {
   const response = await apiClient.get<ExecutionCheckpoint>(
     `/projects/${projectId}/workflow-executions/${executionId}/instances/${encodeURIComponent(instanceId)}`,
+  )
+  return response.data
+}
+
+export async function listWorkflowCheckpointLog(
+  projectId: string,
+  executionId: string,
+  page: number,
+): Promise<Page<ExecutionCheckpointSummary>> {
+  const response = await apiClient.get<Page<ExecutionCheckpointSummary>>(
+    `/projects/${projectId}/workflow-executions/${executionId}/checkpoint-log`,
+    { params: { page, page_size: 20 } },
+  )
+  return response.data
+}
+
+export async function getWorkflowCheckpointLogEntry(
+  projectId: string,
+  executionId: string,
+  checkpointId: string,
+): Promise<ExecutionCheckpoint> {
+  const response = await apiClient.get<ExecutionCheckpoint>(
+    `/projects/${projectId}/workflow-executions/${executionId}/checkpoint-log/${checkpointId}`,
   )
   return response.data
 }

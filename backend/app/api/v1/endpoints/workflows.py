@@ -13,6 +13,7 @@ from app.repositories.workflows import WorkflowExecutionReport, WorkflowNodeExec
 from app.schemas.common import Page
 from app.schemas.durable_execution import (
     ExecutionCheckpointResponse,
+    ExecutionCheckpointSummaryResponse,
     ExecutionCommandDetailResponse,
     ExecutionCommandResponse,
 )
@@ -634,6 +635,53 @@ async def list_execution_checkpoints(
         actor=current_user, project_id=project_id, execution_id=execution_id
     )
     return [ExecutionCheckpointResponse.model_validate(item) for item in checkpoints]
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/checkpoint-log",
+    response_model=Page[ExecutionCheckpointSummaryResponse],
+)
+async def list_execution_checkpoint_log(
+    project_id: UUID,
+    execution_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[ExecutionCheckpointSummaryResponse]:
+    items, total = await DurableExecutionService(session).list_checkpoint_log(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[ExecutionCheckpointSummaryResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/checkpoint-log/{checkpoint_id}",
+    response_model=ExecutionCheckpointResponse,
+)
+async def get_execution_checkpoint_log_entry(
+    project_id: UUID,
+    execution_id: UUID,
+    checkpoint_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ExecutionCheckpointResponse:
+    checkpoint = await DurableExecutionService(session).get_checkpoint_log_entry(
+        actor=current_user,
+        project_id=project_id,
+        execution_id=execution_id,
+        checkpoint_id=checkpoint_id,
+    )
+    return ExecutionCheckpointResponse.model_validate(checkpoint)
 
 
 @router.get(

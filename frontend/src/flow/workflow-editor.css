@@ -886,6 +886,13 @@
   margin-bottom: 8px;
 }
 
+.workflow-checkpoint-log-detail {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-height: 800px) {
   .workflow-runtime-dock {
     flex-basis: 220px;
