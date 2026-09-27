@@ -98,6 +98,25 @@ async def control_task_status(
     }
 
 
+@app.get("/control/branches/{branch}/start")
+async def control_branch_start(
+    branch: Literal["a", "b"], response: Response
+) -> dict[str, str]:
+    response.set_cookie("flowtest_branch", branch, httponly=True)
+    await asyncio.sleep(0.02)
+    return {"branch": branch}
+
+
+@app.get("/control/branches/{branch}/check")
+async def control_branch_check(
+    branch: Literal["a", "b"], request: Request
+) -> dict[str, str]:
+    observed = request.cookies.get("flowtest_branch")
+    if observed != branch:
+        raise HTTPException(status_code=409, detail="Branch cookie crossed")
+    return {"branch": branch, "observedCookie": observed}
+
+
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
     if payload.username != "tester" or payload.password != "flowtest":

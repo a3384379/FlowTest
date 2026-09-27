@@ -235,11 +235,9 @@ class WorkflowNodeExecutor:
         client = (
             self._branch_client_factory()
             if self._branch_client_factory is not None
-            else httpx.AsyncClient(
-                follow_redirects=False,
-                cookies=httpx.Cookies(self._client.cookies),
-            )
+            else httpx.AsyncClient(follow_redirects=False)
         )
+        client.cookies.update(self._client.cookies)
         return WorkflowNodeExecutor(
             client,
             self._requests,
@@ -742,6 +740,7 @@ class WorkflowNodeExecutor:
             data_runner=self._data_runner,
             protocol_nodes=prepared.protocol_nodes,
             event_nodes=prepared.event_nodes,
+            branch_client_factory=self._branch_client_factory,
         )
         resume_records = _nested_resume_records(
             prepared.definition,

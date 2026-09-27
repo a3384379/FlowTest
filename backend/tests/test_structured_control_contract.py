@@ -985,6 +985,124 @@ async def test_parallel_branches_call_subflows_without_holding_leaf_permits() ->
 
 
 @pytest.mark.asyncio
+async def test_subflow_nested_parallel_inherits_client_and_isolates_branch_cookies() -> None:
+    workflow_id = UUID("00000000-0000-0000-0000-000000000322")
+    child_payload = _branch_definition(
+        "flow.control.parallel",
+        {
+            "branches": [
+                {"id": name, "label": name, "body": {"kind": "inline", "region_id": name}}
+                for name in ("a", "b")
+            ],
+            "policy": {"concurrency": 2, "timeout_seconds": 30},
+        },
+        [(f"branch:{name}", name) for name in ("a", "b")],
+    )
+    requests: dict[str, PreparedWorkflowRequest] = {}
+    for region in child_payload["regions"]:
+        name = region["id"]
+        region["nodes"] = [
+            {
+                "id": f"{name}_{part}",
+                "type": "api",
+                "name": f"{name}_{part}",
+                "position": {"x": 0, "y": 0},
+                "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+            }
+            for part in ("start", "check")
+        ]
+        region["entry_node_id"] = f"{name}_start"
+        region["exit_node_ids"] = [f"{name}_check"]
+        region["edges"] = [
+            {"id": f"{name}-edge", "source": f"{name}_start", "target": f"{name}_check"}
+        ]
+        for part in ("start", "check"):
+            request = PreparedRequest(
+                HttpMethod.GET, f"https://example.test/{name}/{part}", (), None, ()
+            )
+            requests[f"{name}_{part}"] = PreparedWorkflowRequest(
+                request, request, BodyKind.NONE, None
+            )
+    child = WorkflowDefinition.model_validate(child_payload)
+    parent_node = {
+        "id": "nested",
+        "type": "subflow",
+        "name": "nested",
+        "position": {"x": 0, "y": 0},
+        "config": {"workflow_id": str(workflow_id), "workflow_version": 1},
+    }
+    parent = WorkflowDefinition.model_validate(
+        {
+            "schema_version": "2.0",
+            "nodes": [
+                {"id": "start", "type": "start", "name": "start", "position": {"x": 0, "y": 0}},
+                parent_node,
+                {"id": "end", "type": "end", "name": "end", "position": {"x": 0, "y": 0}},
+            ],
+            "edges": [
+                {"id": "s-n", "source": "start", "target": "nested"},
+                {"id": "n-e", "source": "nested", "target": "end"},
+            ],
+        }
+    )
+    prepared = PreparedSubflow(
+        workflow_id=workflow_id,
+        workflow_version=1,
+        fingerprint="e" * 64,
+        definition=child,
+        requests=requests,
+        subflows={},
+        snapshot={},
+    )
+    observed: dict[str, str] = {}
+
+    async def respond(incoming: httpx.Request) -> httpx.Response:
+        name, part = incoming.url.path.strip("/").split("/")
+        cookies = incoming.headers.get("cookie", "")
+        assert "auth=parent" in cookies
+        if part == "start":
+            return httpx.Response(200, json={"ok": True}, headers={"set-cookie": f"session={name}"})
+        observed[name] = cookies
+        return httpx.Response(200, json={"ok": True})
+
+    class AllowOutbound:
+        async def enforce(self, url: str, policy: OutboundNetworkPolicy) -> None:
+            return None
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport, cookies={"auth": "parent"}) as client:
+        executor = WorkflowNodeExecutor(
+            client,
+            {},
+            parent,
+            OutboundNetworkPolicy(),
+            subflows={"nested": prepared},
+            outbound_guard=AllowOutbound(),  # type: ignore[arg-type]
+            branch_client_factory=lambda: httpx.AsyncClient(transport=transport),
+        )
+        result = await asyncio.wait_for(
+            WorkflowScheduler(executor).run(
+                parent, context=ExecutionContext(leaf_semaphore=asyncio.Semaphore(1))
+            ),
+            timeout=2,
+        )
+    assert result.status == "passed", [
+        (
+            branch["branch_id"],
+            [
+                (item["node_id"], item.get("status"), item.get("error_code"))
+                for item in branch["nodes"]
+            ],
+        )
+        for branch in result.records[1].output["nodes"][1]["output"]["branches"]
+    ]
+    assert {name: set(cookie.split("; ")) for name, cookie in observed.items()} == {
+        "a": {"auth=parent", "session=a"},
+        "b": {"auth=parent", "session=b"},
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cases", [[], [{"id": 1}], [{"id": 1}, {"id": 2}, {"id": 3}]])
 async def test_inline_foreach_runs_each_item_once_with_isolated_output(cases: list[dict]) -> None:
     definition = WorkflowDefinition.model_validate(_definition())
