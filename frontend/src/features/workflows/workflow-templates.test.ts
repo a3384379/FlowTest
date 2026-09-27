@@ -16,8 +16,12 @@ describe('workflow creation templates', () => {
     expect(
       definition.edges.every((edge) => mainIds.has(edge.source) && mainIds.has(edge.target)),
     ).toBe(true)
-    expect(definition.edges).toHaveLength(value === 'async_poll' ? 3 : 2)
-    expect(definition.nodes).toHaveLength(value === 'async_poll' ? 4 : 3)
+    expect(definition.edges).toHaveLength(
+      value === 'async_poll' || value === 'parallel_compare' ? 3 : 2,
+    )
+    expect(definition.nodes).toHaveLength(
+      value === 'async_poll' || value === 'parallel_compare' ? 4 : 3,
+    )
     expect(definition.nodes.find((node) => node.id === 'start')).toBeDefined()
     expect(definition.nodes.find((node) => node.id === 'end')).toBeDefined()
     if (value === 'linear' || value === 'async_poll') {
@@ -38,6 +42,25 @@ describe('workflow creation templates', () => {
     const regions = definition.regions!
     expect(regions.map((region) => region.nodes[0].id)).toEqual(['api-first', 'api-second'])
     expect(regions.every((region) => region.nodes[0].config.api_version === 2)).toBe(true)
+    expect(regions.map((region) => region.outputs.response)).toEqual([
+      { kind: 'node_output', node_id: 'api-first', path: ['body'] },
+      { kind: 'node_output', node_id: 'api-second', path: ['body'] },
+    ])
+    const owner = definition.nodes.find((node) => node.capability_id === 'flow.control.parallel')!
+    const assertion = definition.nodes.find((node) => node.type === 'assert')!
+    expect(assertion.config).toMatchObject({
+      source_node_id: owner.id,
+      expression: 'branches[0].outputs.response',
+      expected_source_node_id: owner.id,
+      expected_expression: 'branches[1].outputs.response',
+      operator: 'equals',
+    })
+    expect(
+      definition.edges.some((edge) => edge.source === owner.id && edge.target === assertion.id),
+    ).toBe(true)
+    expect(
+      definition.edges.some((edge) => edge.source === assertion.id && edge.target === 'end'),
+    ).toBe(true)
   })
 
   it('binds a bounded pagination state to the API query parameter', () => {

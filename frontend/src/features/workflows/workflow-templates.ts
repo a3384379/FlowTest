@@ -22,8 +22,16 @@ export const WORKFLOW_TEMPLATES: { value: WorkflowTemplateKind; label: string; h
   },
   { value: 'pagination', label: '分页查询', help: 'page 从 1 到 3，检查接口的 page 参数' },
   { value: 'cursor_pagination', label: '游标分页', help: '按响应的 nextCursor 和 hasNext 继续' },
-  { value: 'parallel_compare', label: '并行请求对照', help: '并行请求两次，请先确认接口只读' },
-  { value: 'try_finally', label: '请求与清理', help: 'Try 中请求，Finally 中编辑清理步骤' },
+  {
+    value: 'parallel_compare',
+    label: '并行响应一致性验证',
+    help: '并行请求两次并断言响应 body 相同；请先确认接口只读',
+  },
+  {
+    value: 'try_finally',
+    label: '请求与清理（需配置）',
+    help: 'Finally 仅含占位等待；创建草稿后配置资源查证与真实清理接口',
+  },
 ]
 
 const CONTROL_KIND: Record<
@@ -48,8 +56,62 @@ export function buildWorkflowTemplate(
     return asyncPollingTemplate(base, options.submitApiId, options.submitApiVersion)
   }
   const expanded = replaceMainApiWithControl(base, CONTROL_KIND[kind], kind)
+  if (kind === 'parallel_compare') return parallelConsistencyTemplate(expanded)
   if (kind !== 'pagination' && kind !== 'cursor_pagination') return expanded
   return paginationTemplate(expanded, kind)
+}
+
+function parallelConsistencyTemplate(expanded: WorkflowDefinition): WorkflowDefinition {
+  const owner = expanded.nodes.find((node) => node.capability_id === 'flow.control.parallel')!
+  const assertionId = `assert-${owner.id}`
+  return {
+    ...expanded,
+    nodes: [
+      ...expanded.nodes.map((node) =>
+        node.id === 'end'
+          ? { ...node, position: { x: node.position.x + 260, y: node.position.y } }
+          : node,
+      ),
+      {
+        id: assertionId,
+        type: 'assert',
+        name: '验证并行响应一致',
+        position: { x: owner.position.x + 260, y: owner.position.y },
+        config: {
+          source_node_id: owner.id,
+          expression: 'branches[0].outputs.response',
+          expected_source_node_id: owner.id,
+          expected_expression: 'branches[1].outputs.response',
+          operator: 'equals',
+        },
+      },
+    ],
+    edges: expanded.edges.flatMap((edge) =>
+      edge.source === owner.id && edge.target === 'end'
+        ? [
+            { ...edge, target: assertionId },
+            {
+              id: `${assertionId}-end`,
+              source: assertionId,
+              target: 'end',
+              condition: null,
+              mappings: [],
+            },
+          ]
+        : [edge],
+    ),
+    regions: expanded.regions?.map((region) =>
+      region.owner_node_id === owner.id && region.role.startsWith('branch:')
+        ? {
+            ...region,
+            outputs: {
+              ...region.outputs,
+              response: { kind: 'node_output', node_id: region.entry_node_id!, path: ['body'] },
+            },
+          }
+        : region,
+    ),
+  }
 }
 
 function asyncPollingTemplate(

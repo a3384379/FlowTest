@@ -81,6 +81,13 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
             />
           </>
         )}
+        {template === 'try_finally' && (
+          <Alert
+            type="warning"
+            showIcon
+            title="此模板的 Finally 仅含占位等待，不会清理外部资源。发布前请配置资源句柄查证和真实清理步骤。"
+          />
+        )}
       </Form>
     </Modal>
   )

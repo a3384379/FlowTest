@@ -501,6 +501,10 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
           </Space>
         )}
       </div>
+      <ExecutionEventHistoryWarning
+        execution={state.runtimeExecution}
+        incompleteId={state.eventHistoryIncompleteId}
+      />
       {state.runtimeChildren.length ? (
         <DatasetRunSummary items={state.runtimeChildren} onView={state.showHistory} />
       ) : (
@@ -533,6 +537,24 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
         </>
       )}
     </div>
+  )
+}
+
+function ExecutionEventHistoryWarning({
+  execution,
+  incompleteId,
+}: {
+  execution: WorkflowExecution | null
+  incompleteId: string | null
+}) {
+  if (!execution || execution.id !== incompleteId) return null
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      message="部分实时事件已超过保留范围"
+      description="运行状态已从服务器记录重新核对；实时事件记录不完整。可打开执行记录查看已持久化的节点详情。"
+    />
   )
 }
 

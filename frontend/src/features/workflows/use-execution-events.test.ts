@@ -129,8 +129,9 @@ describe('workflow execution events', () => {
     )
     const handler = vi.fn()
     const reconcile = vi.fn().mockResolvedValue(undefined)
+    const onHistoryGap = vi.fn()
     const { unmount } = renderHook(() =>
-      useExecutionEvents('execution-id', 'access-token', handler, reconcile),
+      useExecutionEvents('execution-id', 'access-token', handler, reconcile, onHistoryGap),
     )
     await act(async () => {})
     act(() => {
@@ -145,6 +146,37 @@ describe('workflow execution events', () => {
     expect(sockets[1].url).toContain('after_sequence=1')
     act(() => sockets[1].emit(eventMessage(3)))
     expect(handler).toHaveBeenCalledTimes(2)
+    expect(onHistoryGap).toHaveBeenCalledOnce()
+    expect(onHistoryGap).toHaveBeenCalledWith('execution-id')
+    unmount()
+  })
+
+  it('marks an initial retained-history gap after reconciling', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class extends FakeWebSocket {
+        constructor(url: string, protocols: string[]) {
+          super(url, protocols)
+          sockets.push(this)
+        }
+      },
+    )
+    const handler = vi.fn()
+    const reconcile = vi.fn().mockResolvedValue(undefined)
+    const onHistoryGap = vi.fn()
+    const { unmount } = renderHook(() =>
+      useExecutionEvents('execution-id', 'access-token', handler, reconcile, onHistoryGap),
+    )
+    await act(async () => {})
+    act(() => sockets[0].emit(eventMessage(502)))
+    expect(handler).not.toHaveBeenCalled()
+    await act(async () => vi.advanceTimersByTime(500))
+    expect(reconcile).toHaveBeenCalledTimes(2)
+    act(() => sockets[1].emit(eventMessage(502)))
+    expect(handler).toHaveBeenCalledOnce()
+    expect(onHistoryGap).toHaveBeenCalledWith('execution-id')
     unmount()
   })
 })

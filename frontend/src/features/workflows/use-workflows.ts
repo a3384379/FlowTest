@@ -107,6 +107,7 @@ export function useWorkflows(initialWorkflowId?: string) {
   const [lastResult, setLastResult] = useState<WorkflowExecutionDetail | null>(null)
   const [activeExecution, setActiveExecution] = useState<WorkflowExecution | null>(null)
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null)
+  const [eventHistoryIncompleteId, setEventHistoryIncompleteId] = useState<string | null>(null)
   const [liveNodes, setLiveNodes] = useState<Record<string, WorkflowNodeExecution>>({})
   const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
   const [workspaceMode, setWorkspaceMode] = useState<WorkflowWorkspaceMode>('draft')
@@ -346,7 +347,13 @@ export function useWorkflows(initialWorkflowId?: string) {
       rerunFailedWorkflowItems(requiredId(projectId), input.executionId, input.payload),
   })
 
-  useExecutionEvents(activeExecutionId, token, handleExecutionEvent, reconcileExecution)
+  useExecutionEvents(
+    activeExecutionId,
+    token,
+    handleExecutionEvent,
+    reconcileExecution,
+    setEventHistoryIncompleteId,
+  )
 
   function selectProject(value: string) {
     selectContextProject(value)
@@ -357,6 +364,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     setLastResult(null)
     setActiveExecution(null)
     setActiveExecutionId(null)
+    setEventHistoryIncompleteId(null)
     setLiveNodes({})
     setExecutionDefinition(null)
     setWorkspaceMode('draft')
@@ -492,6 +500,7 @@ export function useWorkflows(initialWorkflowId?: string) {
       setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
       completedExecutionId.current = null
       setActiveExecutionId(execution.id)
+      setEventHistoryIncompleteId(null)
       setWorkspaceMode('run')
       setHistoryExecutionId(null)
       void watchExecution(execution.id)
@@ -528,6 +537,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     setLiveNodes(initialNodeExecutions(execution.id, runningDefinition))
     completedExecutionId.current = null
     setActiveExecutionId(execution.id)
+    setEventHistoryIncompleteId(null)
     setWorkspaceMode('run')
     setHistoryExecutionId(null)
     void watchExecution(execution.id)
@@ -603,6 +613,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     setLastResult(null)
     setActiveExecution(null)
     setActiveExecutionId(null)
+    setEventHistoryIncompleteId(null)
     setLiveNodes({})
     setExecutionDefinition(null)
     setWorkspaceMode('draft')
@@ -757,6 +768,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     memoryDraftIds,
     nodeStatuses: workspaceView.statuses,
     activeExecutionId,
+    eventHistoryIncompleteId,
     lastResult,
     runtimeExecution: workspaceView.execution,
     runtimeNodes: workspaceView.nodes,

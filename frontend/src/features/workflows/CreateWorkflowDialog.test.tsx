@@ -84,4 +84,20 @@ describe('CreateWorkflowDialog', () => {
       }),
     )
   })
+
+  it('marks the cleanup template as unfinished until a real cleanup step is configured', async () => {
+    const user = userEvent.setup()
+    render(
+      <CreateWorkflowDialog
+        open
+        submitting={false}
+        apis={[]}
+        onClose={() => {}}
+        onCreate={async () => {}}
+      />,
+    )
+    await user.click(screen.getByLabelText('起始模板'))
+    await user.click(screen.getByText(/请求与清理（需配置）/))
+    expect(screen.getByText(/不会清理外部资源/)).toBeInTheDocument()
+  })
 })

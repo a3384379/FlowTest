@@ -10,14 +10,17 @@ export function useExecutionEvents(
   token: string | null,
   onEvent: (event: ExecutionEvent) => void,
   onReconcile?: (executionId: string) => Promise<void>,
+  onHistoryGap?: (executionId: string) => void,
 ) {
   const handler = useRef(onEvent)
   const reconcile = useRef(onReconcile)
+  const historyGap = useRef(onHistoryGap)
 
   useEffect(() => {
     handler.current = onEvent
     reconcile.current = onReconcile
-  }, [onEvent, onReconcile])
+    historyGap.current = onHistoryGap
+  }, [onEvent, onReconcile, onHistoryGap])
 
   useEffect(() => {
     if (!executionId || !token) return
@@ -37,12 +40,13 @@ export function useExecutionEvents(
     function handleMessage(message: MessageEvent<string>, current: WebSocket) {
       const event = parseExecutionEvent(message.data)
       if (!event || event.execution_id !== executionId || event.sequence <= latestSequence) return
-      if (latestSequence > 0 && event.sequence > latestSequence + 1) {
+      if (event.sequence > latestSequence + 1) {
         if (!reconciledGap) {
           reconciledGap = true
           current.close(4000, 'event-gap')
           return
         }
+        historyGap.current?.(executionId)
         latestSequence = event.sequence - 1
       }
       reconciledGap = false
