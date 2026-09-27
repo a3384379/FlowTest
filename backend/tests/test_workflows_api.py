@@ -125,6 +125,35 @@ async def test_native_workflow_export_import_preserves_inline_control_and_runs(
                 "role": "body",
                 "nodes": [
                     {
+                        "id": "choice",
+                        "type": "capability",
+                        "name": "分支",
+                        "position": {"x": 0, "y": 0},
+                        "capability_id": "flow.control.if",
+                        "capability_version": "1.0.0",
+                        "configuration": {
+                            "condition": {
+                                "kind": "compare",
+                                "left": {"kind": "literal", "value": 4},
+                                "operator": "equals",
+                                "right": {"kind": "literal", "value": 4},
+                            },
+                            "true_body": {"kind": "inline", "region_id": "true"},
+                            "false_body": {"kind": "inline", "region_id": "false"},
+                            "policy": {"timeout_seconds": 45},
+                        },
+                        "bindings": [{"input": "marker", "expression": "literal"}],
+                    }
+                ],
+                "entry_node_id": "choice",
+                "exit_node_ids": ["choice"],
+            },
+            {
+                "id": "true",
+                "owner_node_id": "choice",
+                "role": "true",
+                "nodes": [
+                    {
                         "id": "api",
                         "type": "api",
                         "name": "查询用户",
@@ -134,9 +163,26 @@ async def test_native_workflow_export_import_preserves_inline_control_and_runs(
                 ],
                 "entry_node_id": "api",
                 "exit_node_ids": ["api"],
-            }
+                "outputs": {"selected": {"kind": "literal", "value": "true"}},
+            },
+            {
+                "id": "false",
+                "owner_node_id": "choice",
+                "role": "false",
+                "nodes": [
+                    {
+                        "id": "delay",
+                        "type": "delay",
+                        "name": "跳过接口",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"seconds": 0},
+                    }
+                ],
+                "entry_node_id": "delay",
+                "exit_node_ids": ["delay"],
+            },
         ],
-        "run_policy": {"request_budget": 5},
+        "run_policy": {"request_budget": 5, "max_runtime_seconds": 90},
     }
     created = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows",
@@ -152,6 +198,14 @@ async def test_native_workflow_export_import_preserves_inline_control_and_runs(
     document = exported.json()
     assert document["format_version"] == "flowtest-workflow-native-v1"
     assert document["definition"] == created.json()["draft_definition"]
+    assert [region["id"] for region in document["definition"]["regions"]] == [
+        "body",
+        "true",
+        "false",
+    ]
+    assert document["definition"]["regions"][0]["nodes"][0]["bindings"] == [
+        {"input": "marker", "expression": "literal"}
+    ]
 
     imported = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/native-import",

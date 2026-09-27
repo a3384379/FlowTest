@@ -72,6 +72,14 @@ export default function WorkflowsPage() {
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
+  useEffect(() => {
+    const listed = state.workflows.data
+    if (!initialWorkflowId || !listed || listed.items.length < listed.total) return
+    if (listed.items.some((workflow) => workflow.id === initialWorkflowId)) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('focus')
+    setSearchParams(next, { replace: true })
+  }, [initialWorkflowId, searchParams, setSearchParams, state.workflows.data])
   const userId = useAuthStore((store) => store.user?.id)
   const tabs = useWorkflowTabs({
     userId,

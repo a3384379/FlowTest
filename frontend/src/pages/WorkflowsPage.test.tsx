@@ -108,6 +108,21 @@ describe('WorkflowsPage', () => {
     )
   })
 
+  it('falls back to an available workflow when the focused workflow was archived', async () => {
+    let missingRequests = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows/archived`, () => {
+        missingRequests += 1
+        return HttpResponse.json({ error: { code: 'WORKFLOW_NOT_FOUND' } }, { status: 404 })
+      }),
+    )
+    renderPage(`/projects/${project.id}/workflows?focus=archived`)
+
+    expect(await screen.findByText('已发布 v1')).toBeVisible()
+    expect(screen.getByLabelText('工作流画布')).toBeVisible()
+    expect(missingRequests).toBe(0)
+  })
+
   it('debugs the selected workflow without changing its definition', async () => {
     renderPage()
     const browser = userEvent.setup()
@@ -360,14 +375,14 @@ describe('WorkflowsPage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="workflows">
+        <ProjectTestProvider section="workflows" initialEntry={initialEntry}>
           <WorkflowsPage />
         </ProjectTestProvider>
       </QueryClientProvider>

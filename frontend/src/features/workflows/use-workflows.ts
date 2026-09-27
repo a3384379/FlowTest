@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   apiErrorMessage,
   type ExecutionEvent,
+  type Page,
   type WorkflowDebugResult,
   type WorkflowDefinition,
   type WorkflowExecution,
@@ -166,7 +167,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     projectId,
     workflowSelection,
     workflowSelectionCleared,
-    workflows.data?.items,
+    workflows.data,
   )
   const setDraftStorageError = useCallback(
     (error: string | null, targetId = workflowId) => {
@@ -798,18 +799,38 @@ function useSelectedWorkflow(
   projectId: string | null,
   workflowSelection: string | null,
   workflowSelectionCleared: boolean,
-  workflows: Workflow[] | undefined,
+  workflows: Page<Workflow> | undefined,
 ) {
-  const workflowId = workflowSelectionCleared
-    ? null
-    : (workflowSelection ?? workflows?.at(0)?.id ?? null)
-  const listedWorkflow = workflows?.find((item) => item.id === workflowId) ?? null
+  const listed = workflows?.items
+  const workflowId = resolveSelectedWorkflowId(
+    workflowSelection,
+    workflowSelectionCleared,
+    workflows,
+  )
+  const listedWorkflow = listed?.find((item) => item.id === workflowId) ?? null
   const workflowDetail = useQuery({
     queryKey: ['workflow', projectId, workflowId],
     queryFn: () => getWorkflow(requiredId(projectId), requiredId(workflowId)),
-    enabled: canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
+    enabled: Boolean(workflows) && canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
   })
   return { workflowId, selectedWorkflow: listedWorkflow ?? workflowDetail.data ?? null }
+}
+
+function resolveSelectedWorkflowId(
+  selection: string | null,
+  cleared: boolean,
+  workflows: Page<Workflow> | undefined,
+): string | null {
+  if (cleared) return null
+  if (!workflows) return selection
+  const listed = workflows.items
+  if (
+    selection &&
+    (listed.some((item) => item.id === selection) || listed.length < workflows.total)
+  ) {
+    return selection
+  }
+  return listed.at(0)?.id ?? null
 }
 
 function workflowDraftIdentity(
