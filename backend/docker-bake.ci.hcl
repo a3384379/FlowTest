@@ -73,7 +73,7 @@ target "postgres" {
 }
 
 group "ci-security" {
-  targets = ["backend", "frontend", "worker-performance", "worker-environment", "environment-docker", "runner-agent-a", "mock-target"]
+  targets = ["backend", "frontend", "worker-performance", "worker-environment", "environment-docker", "runner-agent-a", "mock-target", "postgres"]
 }
 
 group "ci-compose" {

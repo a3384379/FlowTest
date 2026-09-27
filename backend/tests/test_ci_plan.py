@@ -135,6 +135,23 @@ def test_governance_and_compact_change_still_requires_compact() -> None:
     assert {"policy", "compact"} <= set(selected.required)
 
 
+def test_postgres_walg_image_is_built_verified_and_scanned() -> None:
+    root = Path(__file__).parents[2]
+    bake = (root / "backend/docker-bake.ci.hcl").read_text()
+    security_group = bake.split('group "ci-security" {', 1)[1].split("}", 1)[0]
+    assert '"postgres"' in security_group
+    workflow = yaml.load(
+        (root / ".github/workflows/security-ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    steps = workflow["jobs"]["source-and-images"]["steps"]
+    identity_step = next(
+        step for step in steps if step.get("name") == "Verify scanned image identities"
+    )
+    assert "flowtest-postgres-walg:17.6-v3.0.8" in identity_step["run"]
+    scan = next(step for step in steps if step.get("name") == "Scan Postgres WALG image")
+    assert scan["with"]["image"] == "flowtest-postgres-walg:17.6-v3.0.8"
+
+
 def test_renamed_image_input_uses_both_directories() -> None:
     paths = ci_plan._paths_from_files(
         [

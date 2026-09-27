@@ -7,6 +7,8 @@ on:
 
 # Serialize all wakeups for a candidate Head. Keep completed wakeups queued so
 # a late pending handler cannot replace the terminal result.
+# GitHub documents queue: max for workflow-level concurrency:
+# https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
 concurrency:
   group: required-gate-${{ github.event.workflow_run.head_sha }}
   queue: max
