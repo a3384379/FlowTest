@@ -58,6 +58,32 @@ def validate_merge(gh: GitHub, pr: dict[str, Any]) -> str:
     return cast(str, merge_sha)
 
 
+def pr_validation_identity(pr: dict[str, Any]) -> tuple[object, ...]:
+    """Identify the PR revision and policy inputs without mutable repository metadata."""
+    base = pr.get("base")
+    head = pr.get("head")
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise GateError("PR base/head 元数据无效")
+    base_repo = base.get("repo") or {}
+    head_repo = head.get("repo") or {}
+    labels = frozenset(
+        item.get("name")
+        for item in pr.get("labels", [])
+        if isinstance(item, dict) and item.get("name") in {"ci:light", "ci:milestone"}
+    )
+    return (
+        pr.get("state"),
+        base.get("sha"),
+        base.get("ref"),
+        base_repo.get("full_name"),
+        head.get("sha"),
+        head.get("ref"),
+        head_repo.get("full_name"),
+        pr.get("merge_commit_sha"),
+        labels,
+    )
+
+
 def fingerprint(plan: Plan) -> str:
     return hashlib.sha256(plan.to_json().encode()).hexdigest()
 
@@ -264,9 +290,9 @@ def publish_checked_run(
         run, gh.jobs(current["id"]), plan, gh.repository, workflow["id"]
     )
     refreshed = gh.get(f"pulls/{number}")
-    if not isinstance(refreshed, dict) or any(
-        refreshed.get(key) != pr.get(key) for key in ("base", "head", "labels", "merge_commit_sha")
-    ):
+    if not isinstance(refreshed, dict) or pr_validation_identity(
+        refreshed
+    ) != pr_validation_identity(pr):
         return  # A new PR state must get its own run and status.
     if latest_run(gh, pr).get("id") != current["id"]:
         return

@@ -321,6 +321,32 @@ def build_plan(
     )
 
 
+def plan_source_identity(pr: dict[str, Any]) -> tuple[object, ...]:
+    """Keep only PR fields that can change the selected plan or tested revision."""
+    base = pr.get("base")
+    head = pr.get("head")
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise PlanError("PR base/head 元数据无效")
+    base_repo = base.get("repo") or {}
+    head_repo = head.get("repo") or {}
+    labels = frozenset(
+        item.get("name")
+        for item in pr.get("labels", [])
+        if isinstance(item, dict) and item.get("name") in {"ci:light", "ci:milestone"}
+    )
+    return (
+        pr.get("state"),
+        pr.get("changed_files"),
+        base.get("sha"),
+        base.get("ref"),
+        base_repo.get("full_name"),
+        head.get("sha"),
+        head.get("ref"),
+        head_repo.get("full_name"),
+        labels,
+    )
+
+
 class GitHub:
     def __init__(self, repository: str, token: str) -> None:
         self.repository = repository
@@ -366,8 +392,8 @@ class GitHub:
             raise PlanError("PR 元数据无效或 PR 未开放")
         paths = self.changed_paths(number, pr.get("changed_files"))
         current = self.get(f"pulls/{number}")
-        if not isinstance(current, dict) or any(
-            current.get(key) != pr.get(key) for key in ("base", "head", "labels", "changed_files")
+        if not isinstance(current, dict) or plan_source_identity(current) != plan_source_identity(
+            pr
         ):
             raise PlanError("读取文件期间 PR 元数据已改变")
         labels = {

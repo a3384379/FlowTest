@@ -266,5 +266,23 @@ def test_merge_commit_must_match_exact_base_and_head() -> None:
         gate.validate_merge(gh, pr)
 
 
+def test_pr_validation_identity_ignores_irrelevant_metadata() -> None:
+    original = {
+        "state": "open",
+        "base": {"sha": BASE, "ref": "main", "repo": {"full_name": REPO, "pushed_at": "old"}},
+        "head": {"sha": SHA, "ref": "feature", "repo": {"full_name": REPO}},
+        "merge_commit_sha": MERGE,
+        "labels": [{"name": "ci:milestone"}, {"name": "reviewed"}],
+    }
+    refreshed = {
+        **original,
+        "base": {**original["base"], "repo": {"full_name": REPO, "pushed_at": "new"}},
+        "labels": [{"name": "ci:milestone"}, {"name": "unrelated"}],
+    }
+    assert gate.pr_validation_identity(refreshed) == gate.pr_validation_identity(original)
+    refreshed["labels"] = [{"name": "ci:light"}]
+    assert gate.pr_validation_identity(refreshed) != gate.pr_validation_identity(original)
+
+
 def test_plan_fingerprint_is_content_bound() -> None:
     assert hashlib.sha256(plan().to_json().encode()).hexdigest() == gate.fingerprint(plan())

@@ -186,6 +186,36 @@ def test_changed_pr_snapshot_cannot_mix_file_versions() -> None:
         client.pr_plan(7, SHA)
 
 
+def test_irrelevant_pr_metadata_change_does_not_invalidate_plan() -> None:
+    original = {
+        **pr_payload(1),
+        "base": {"sha": SHA, "repo": {"full_name": "a3384379/FlowTest", "pushed_at": "old"}},
+        "labels": [{"name": "ci:milestone"}, {"name": "reviewed"}],
+    }
+
+    class MovingGitHub(StubGitHub):
+        calls = 0
+
+        def get(self, path: str) -> Any:
+            if path == "pulls/7":
+                self.calls += 1
+                if self.calls == 2:
+                    return {
+                        **original,
+                        "base": {
+                            "sha": SHA,
+                            "repo": {"full_name": "a3384379/FlowTest", "pushed_at": "new"},
+                        },
+                        "labels": [{"name": "ci:milestone"}, {"name": "unrelated"}],
+                    }
+            return super().get(path)
+
+    client = MovingGitHub(
+        {"pulls/7": original, "pulls/7/files?per_page=100&page=1": [{"filename": "README.md"}]}
+    )
+    assert client.pr_plan(7, SHA).tier == "full"
+
+
 def test_only_one_automatic_pr_entry_and_workflow_call_reuse() -> None:
     root = Path(__file__).parents[2] / ".github/workflows"
     workflows = {
