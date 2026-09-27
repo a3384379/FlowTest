@@ -14,3 +14,5 @@
 | 请求与清理 | Try 区域执行 API，Catch 和 Finally 区域各有一个零秒等待步骤 | 在 Finally 中配置真实清理步骤；检查清理预算、资源标识与错误匹配。默认步骤不会执行外部清理。 |
 
 模板中的示例条件与数据可在控制块配置和区域画布修改。编辑后使用现有发布校验；任何未配置完成的业务输入应保持草稿状态。
+
+游标分页可用 Mock Target 的 `GET /control/cursor-pages` 做本地验收：首次请求不传或传空 `cursor` 得到 `nextCursor="page-2"`、`hasNext=true`；第二次传 `cursor=page-2` 得到 `hasNext=false`，工作流应在两轮后停止。该端点只提供确定性测试响应，不代表业务接口的分页字段约定。

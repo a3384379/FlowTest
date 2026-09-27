@@ -43,6 +43,18 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/control/cursor-pages")
+async def control_cursor_pages(cursor: str = "") -> dict[str, object]:
+    if cursor not in {"", "page-2"}:
+        raise HTTPException(status_code=400, detail="Unknown cursor")
+    return {
+        "items": ["first"] if cursor == "" else ["second"],
+        "nextCursor": "page-2" if cursor == "" else "",
+        "hasNext": cursor == "",
+        "receivedCursor": cursor,
+    }
+
+
 @app.post("/auth/login")
 async def login(payload: LoginRequest) -> dict[str, object]:
     if payload.username != "tester" or payload.password != "flowtest":
