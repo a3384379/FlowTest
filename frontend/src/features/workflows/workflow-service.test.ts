@@ -29,6 +29,60 @@ import {
 } from './workflow-service'
 
 describe('workflow service', () => {
+  it('pins a read-only API and its equality assertion for the parallel template', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version: { version: 3, method: 'GET' } }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/workflows`, async ({ request }) => {
+        const payload = (await request.json()) as { definition: ReturnType<typeof linearWorkflow> }
+        const owner = payload.definition.nodes.find(
+          (node) => node.capability_id === 'flow.control.parallel',
+        )!
+        expect(
+          payload.definition.nodes.find((node) => node.type === 'assert')?.config,
+        ).toMatchObject({
+          source_node_id: owner.id,
+          expected_source_node_id: owner.id,
+        })
+        expect(
+          payload.definition.regions?.every((region) => region.nodes[0].config.api_version === 3),
+        ).toBe(true)
+        return HttpResponse.json(workflow, { status: 201 })
+      }),
+    )
+    await expect(
+      createWorkflow(project.id, {
+        name: '并行一致性',
+        description: '',
+        apiId: apiDefinition.id,
+        template: 'parallel_compare',
+      }),
+    ).resolves.toEqual(workflow)
+  })
+
+  it('rejects a write API before creating a parallel comparison draft', async () => {
+    let created = false
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version: { version: 1, method: 'POST' } }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/workflows`, () => {
+        created = true
+        return HttpResponse.json(workflow, { status: 201 })
+      }),
+    )
+    await expect(
+      createWorkflow(project.id, {
+        name: '并行一致性',
+        description: '',
+        apiId: apiDefinition.id,
+        template: 'parallel_compare',
+      }),
+    ).rejects.toThrow('并行一致性模板只能使用只读 GET 接口')
+    expect(created).toBe(false)
+  })
+
   it('pins separate POST submit and GET poll APIs before creating a polling draft', async () => {
     const submitId = '00000000-0000-4000-8000-000000000031'
     server.use(

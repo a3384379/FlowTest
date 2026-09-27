@@ -90,11 +90,18 @@ export async function createWorkflow(
 ): Promise<Workflow> {
   const pollingApis =
     input.template === 'async_poll' ? await validatePollingApis(projectId, input) : null
+  const parallelApi =
+    input.template === 'parallel_compare'
+      ? await validateParallelCompareApi(projectId, input.apiId, input.apiVersion)
+      : null
   const response = await apiClient.post<Workflow>(`/projects/${projectId}/workflows`, {
     name: input.name,
     description: input.description,
     definition: buildWorkflowTemplate(
-      linearWorkflow(input.apiId, pollingApis?.poll.version.version ?? input.apiVersion),
+      linearWorkflow(
+        input.apiId,
+        pollingApis?.poll.version.version ?? parallelApi?.version.version ?? input.apiVersion,
+      ),
       input.template,
       pollingApis
         ? {
@@ -105,6 +112,18 @@ export async function createWorkflow(
     ),
   })
   return response.data
+}
+
+async function validateParallelCompareApi(
+  projectId: string,
+  apiId: string,
+  apiVersion?: number,
+): Promise<ApiDetail> {
+  const api = await getApiDetail(projectId, apiId, apiVersion)
+  if (api.version.method !== 'GET') {
+    throw new Error('并行一致性模板只能使用只读 GET 接口，避免重复提交写请求')
+  }
+  return api
 }
 
 async function validatePollingApis(

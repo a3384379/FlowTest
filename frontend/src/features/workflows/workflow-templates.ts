@@ -25,7 +25,7 @@ export const WORKFLOW_TEMPLATES: { value: WorkflowTemplateKind; label: string; h
   {
     value: 'parallel_compare',
     label: '并行响应一致性验证',
-    help: '并行请求两次并断言响应 body 相同；请先确认接口只读',
+    help: '使用只读 GET 并行请求两次，断言响应 body 相同',
   },
   {
     value: 'try_finally',
