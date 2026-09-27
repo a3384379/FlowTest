@@ -121,6 +121,50 @@ def test_standalone_schema_requires_runtime_validation(paths: list[str], labels:
     assert set(selected.required) == {"quick", "backend-full", "windows"}
 
 
+@pytest.mark.parametrize("labels", [set(), {"ci:light"}])
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["backend/app/migrations_support/canonical_contract_v2.py"],
+        [
+            "backend/app/migrations_support/canonical_contract_v2.py",
+            "backend/tests/test_s47_3_semantic_integrity.py",
+        ],
+    ],
+)
+def test_shared_migration_helper_requires_both_upgrade_shapes(
+    paths: list[str], labels: set[str]
+) -> None:
+    selected = plan(paths, labels)
+    assert selected.tier_floor == "integration"
+    assert set(selected.required) == {"quick", "backend-full", "windows", "upgrade"}
+
+
+@pytest.mark.parametrize("status", ["removed", "renamed"])
+def test_removed_or_renamed_migration_helper_keeps_upgrade_risk(status: str) -> None:
+    helper = "backend/app/migrations_support/canonical_contract_v2.py"
+    item = {"filename": helper, "status": status}
+    if status == "renamed":
+        item = {
+            "filename": "backend/app/core/storage.py",
+            "previous_filename": helper,
+            "status": status,
+        }
+    files = [item]
+    selected = plan(
+        ci_plan._paths_from_files(files),
+        removed_paths=ci_plan._removed_paths_from_files(files),
+    )
+    assert selected.tier_floor == "integration"
+    assert {"backend-full", "windows", "upgrade"} <= set(selected.required)
+    assert selected.backend_targets == ()
+
+
+def test_unrelated_backend_helper_keeps_standard_scope() -> None:
+    selected = plan(["backend/app/core/storage.py"])
+    assert set(selected.required) == {"quick", "backend-standard"}
+
+
 def test_api_schema_keeps_consumers_without_database_upgrade() -> None:
     selected = plan(["backend/app/schemas/workflows.py"])
     assert selected.tier_floor == "integration"
@@ -223,6 +267,66 @@ def test_mock_dependency_requires_security_without_label(path: str) -> None:
 def test_mock_application_source_does_not_require_image_scan() -> None:
     selected = plan(["mock-target/app/main.py"])
     assert set(selected.required) == {"quick", "compose"}
+
+
+@pytest.mark.parametrize("labels", [set(), {"ci:light"}])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "frontend/e2e/workflow-editor-audit.spec.ts",
+        "frontend/e2e/support/auth.ts",
+        "frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1280x800-01-default-edit-chromium-linux.png",
+        "frontend/playwright.config.ts",
+    ],
+)
+def test_playwright_inputs_require_browser_acceptance(path: str, labels: set[str]) -> None:
+    selected = plan([path], labels)
+    assert selected.tier_floor == "standard"
+    assert set(selected.required) == {"quick", "frontend-standard", "compose"}
+
+
+def test_playwright_input_with_unit_test_keeps_browser_acceptance() -> None:
+    selected = plan(["frontend/e2e/support/auth.ts", "frontend/src/App.test.tsx"])
+    assert "compose" in selected.required
+
+
+@pytest.mark.parametrize("status", ["removed", "renamed"])
+def test_removed_or_renamed_playwright_input_keeps_browser_acceptance(status: str) -> None:
+    old_path = "frontend/e2e/workflow-editor-audit.spec.ts"
+    item = {"filename": old_path, "status": status}
+    if status == "renamed":
+        item = {"filename": "docs/e2e-notes.md", "previous_filename": old_path, "status": status}
+    files = [item]
+    selected = plan(
+        ci_plan._paths_from_files(files),
+        removed_paths=ci_plan._removed_paths_from_files(files),
+    )
+    assert "compose" in selected.required
+
+
+def test_compose_browser_steps_require_playwright_execution() -> None:
+    root = Path(__file__).parents[2]
+    workflow = yaml.load(
+        (root / ".github/workflows/compose-ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    smoke = workflow["jobs"]["smoke"]
+    assert "continue-on-error" not in smoke
+    steps = {step.get("name"): step for step in smoke["steps"]}
+    assert "e2e:setup" in steps["Authenticate browser acceptance session"]["run"]
+    s29 = steps["Verify S29 browser acceptance flow"]
+    remaining = steps["Verify non-S29 browser acceptance flow"]
+    assert "playwright test" in s29["run"]
+    assert "e2e/s29-execution-fabric.spec.ts" in s29["run"]
+    assert "playwright test" in remaining["run"]
+    assert '--grep-invert "S29 Worker"' in remaining["run"]
+    for step in (s29, remaining):
+        assert "if" not in step
+        assert "continue-on-error" not in step
+        assert "--pass-with-no-tests" not in step["run"]
+        assert "|| true" not in step["run"]
+    config = (root / "frontend/playwright.config.ts").read_text()
+    assert "testDir: './e2e'" in config
+    assert "forbidOnly: Boolean(process.env.CI)" in config
 
 
 def test_policy_entrypoints_use_isolated_python() -> None:
