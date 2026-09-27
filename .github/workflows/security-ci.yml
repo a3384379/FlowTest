@@ -75,7 +75,7 @@ jobs:
           for image in \
             flowtest-backend:ci flowtest-frontend:ci flowtest-performance:ci \
             flowtest-environment:ci flowtest-environment-daemon:ci \
-            flowtest-runner:ci flowtest-mock-target:ci; do
+            flowtest-runner:ci flowtest-mock-target:ci flowtest-postgres-walg:17.11-v3.0.9-patched; do
             test "$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "${BUILD_SHA}"
             test "$(docker image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" = 'linux/amd64'
             docker image inspect "${image}" --format '{{.RepoTags}} {{.Id}} {{.Os}}/{{.Architecture}}'
@@ -151,6 +151,15 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           image: flowtest-mock-target:ci
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.116.1
+          config: .grype.yaml
+      - name: Scan Postgres WALG image
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: flowtest-postgres-walg:17.11-v3.0.9-patched
           severity-cutoff: high
           only-fixed: true
           output-format: table

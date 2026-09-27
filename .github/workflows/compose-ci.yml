@@ -249,7 +249,7 @@ jobs:
             flowtest-backend flowtest-worker flowtest-worker-data flowtest-worker-ai flowtest-beat \
             flowtest-frontend flowtest-worker-performance flowtest-worker-environment \
             flowtest-environment-docker \
-            flowtest-mock-target flowtest-grpc-target flowtest-postgres-walg:17.6-v3.0.8; do
+            flowtest-mock-target flowtest-grpc-target flowtest-postgres-walg:17.11-v3.0.9-patched; do
             test "$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "${BUILD_SHA}"
             test "$(docker image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" = 'linux/amd64'
             docker image inspect "${image}" --format '{{.RepoTags}} {{.Id}} {{.Os}}/{{.Architecture}}'

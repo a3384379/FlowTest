@@ -94,7 +94,7 @@ services:
   postgres:
     build:
       context: ./deploy/postgres-walg
-    image: flowtest-postgres-walg:17.6-v3.0.8
+    image: flowtest-postgres-walg:17.11-v3.0.9-patched
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-flowtest}
       POSTGRES_USER: ${POSTGRES_USER:-flowtest}

@@ -48,7 +48,11 @@ def evaluate(plan: dict[str, Any] | None, needs: dict[str, Any]) -> tuple[bool, 
         f"policy=scripts/ci_plan.py@{plan.get('policy_digest')}",
         f"档位: {plan.get('tier')}；原因: {', '.join(plan.get('reasons', []))}",
     ]
-    valid = not plan.get("governance_change", False)
+    if plan.get("governance_change"):
+        lines.extend(f"{key}: bootstrap_only" for key in ALL_JOBS if key in required)
+        lines.append("治理文件需 Bootstrap 受信审核；普通链路不重复执行重型检查")
+        return False, lines
+    valid = True
     for key in ALL_JOBS:
         if key in required:
             result = needs.get(key, {}).get("result", "missing")
@@ -56,8 +60,6 @@ def evaluate(plan: dict[str, Any] | None, needs: dict[str, Any]) -> tuple[bool, 
             valid &= result == "success"
         else:
             lines.append(f"{key}: not_applicable")
-    if plan.get("governance_change"):
-        lines.append("治理文件需 Bootstrap 受信审核")
     return valid, lines
 
 
