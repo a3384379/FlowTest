@@ -48,4 +48,4 @@
 
 - Distinguish local targeted validation, remote merge gates for the latest commit, and full release acceptance.
 - Report changed files, checks actually run, checks not run, and remaining risks. Never infer a green CI gate or release readiness from a local targeted pass.
-- Use `ci:light` only for its allowed documentation scope. Code and development-rule changes require the applicable `ci:milestone` or controlled governance path; do not bypass branch protection or required checks.
+- Ordinary PRs receive automatic docs, standard, or integration checks from the trusted path/risk plan. `ci:light` cannot lower that floor; `ci:milestone` requests full PR acceptance. Governance files require controlled Bootstrap review. The formal `Required Gate` remains a trusted Commit Status; manual and periodic runs do not grant PR merge success.

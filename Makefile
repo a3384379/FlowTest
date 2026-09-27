@@ -1,4 +1,4 @@
-.PHONY: help install dev-backend dev-frontend test test-backend-targeted test-frontend-targeted test-integration lint format check up down logs
+.PHONY: help install dev-backend dev-frontend test test-backend-targeted test-frontend-targeted test-ci-routing test-integration lint format check up down logs
 
 help:
 	@echo "make install       Install backend and frontend dependencies"
@@ -6,6 +6,8 @@ help:
 	@echo "make dev-frontend  Run Vite development server"
 	@echo "make test-backend-targeted TARGETS='[\"tests/test_imports_api.py\"]'"
 	@echo "make test-frontend-targeted TARGETS='[\"src/lib/api.test.ts\"]'"
+	@echo "make test-ci-routing   Run local CI plan and gate regression tests"
+	@echo "PR checks route automatically after trusted CI activation; ci:milestone requests full acceptance"
 	@echo "make check         Run backend tests/lint and frontend checks"
 
 install:
@@ -26,6 +28,9 @@ test-backend-targeted:
 
 test-frontend-targeted:
 	@python3 scripts/run_targeted_tests.py frontend
+
+test-ci-routing:
+	cd backend && uv run pytest --no-cov tests/test_ci_plan.py tests/test_required_gate.py
 
 test-integration:
 	docker compose up -d postgres redis minio

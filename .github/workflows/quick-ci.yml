@@ -1,20 +1,14 @@
 name: Quick CI
 
 on:
-  pull_request:
-    types: [labeled]
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   quick:
-    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:light' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

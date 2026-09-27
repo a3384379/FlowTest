@@ -1,0 +1,159 @@
+name: PR Validation
+run-name: ${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'ci:light' && github.event.label.name != 'ci:milestone' && 'PR Validation ignored' || github.event.action == 'edited' && !github.event.changes.base && 'PR Validation ignored' || 'PR Validation active' }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+
+# Label runs have their own group: an unrelated label event must not cancel a valid run.
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}-${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled' || github.event.action == 'edited') && github.run_id || 'head' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  plan:
+    name: CI Plan ${{ github.sha }}
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' || github.event.label.name == 'ci:light' || github.event.label.name == 'ci:milestone' || github.event.changes.base }}
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.select.outputs.plan }}
+      fingerprint: ${{ steps.select.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: select
+        name: Select checks from complete PR metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TESTED_SHA: ${{ github.sha }}
+        run: >-
+          python3 scripts/ci_plan.py --pr "$PR_NUMBER"
+          --expected-base "$BASE_SHA" --expected-head "$HEAD_SHA"
+          --tested-sha "$TESTED_SHA" --output "$GITHUB_OUTPUT"
+
+  quick:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'quick') }}
+    uses: ./.github/workflows/quick-ci.yml
+  backend-standard:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'backend-standard') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13.15"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev
+      - name: Static checks
+        working-directory: backend
+        run: |
+          uv run ruff format --check . ../scripts/*.py
+          uv run ruff check . ../scripts/*.py
+          uv run mypy app ../scripts/*.py
+          uv run lint-imports
+      - name: Affected tests (full side when mapping is unknown)
+        working-directory: backend
+        env:
+          TARGETS: ${{ toJSON(fromJSON(needs.plan.outputs.plan).backend_targets) }}
+        run: |
+          if [[ "$TARGETS" == '[]' ]]; then
+            uv run pytest --no-cov
+          else
+            python3 ../scripts/run_targeted_tests.py backend
+          fi
+
+  backend-full:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'backend-full') }}
+    uses: ./.github/workflows/backend-ci.yml
+  frontend-standard:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-standard') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with:
+          version: 11.16.0
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Static checks and build
+        working-directory: frontend
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm build
+      - name: Affected tests (full side when mapping is unknown)
+        working-directory: frontend
+        env:
+          TARGETS: ${{ toJSON(fromJSON(needs.plan.outputs.plan).frontend_targets) }}
+        run: |
+          if [[ "$TARGETS" == '[]' ]]; then
+            pnpm test
+          else
+            python3 ../scripts/run_targeted_tests.py frontend
+          fi
+
+  frontend-full:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-full') }}
+    uses: ./.github/workflows/frontend-ci.yml
+  compose:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'compose') }}
+    uses: ./.github/workflows/compose-ci.yml
+  security:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'security') }}
+    uses: ./.github/workflows/security-ci.yml
+  windows:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'windows') }}
+    uses: ./.github/workflows/standalone-windows.yml
+  upgrade:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'upgrade') }}
+    uses: ./.github/workflows/upgrade-ci.yml
+  skills:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'skills') }}
+    uses: ./.github/workflows/skills-ci.yml
+
+  shadow:
+    name: PR Validation Shadow ${{ github.sha }} ${{ needs.plan.outputs.fingerprint }}
+    if: ${{ always() && (github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' || github.event.label.name == 'ci:light' || github.event.label.name == 'ci:milestone' || github.event.changes.base) }}
+    needs: [plan, quick, backend-standard, backend-full, frontend-standard, frontend-full, compose, security, windows, upgrade, skills]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Summarize this run without publishing the required context
+        env:
+          CI_PLAN: ${{ needs.plan.outputs.plan }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_summary.py

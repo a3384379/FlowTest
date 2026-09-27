@@ -18,6 +18,8 @@ make test-frontend-targeted TARGETS='["src/lib/api.test.ts"]'
 
 完整本地前后端检查仍使用 `make check`。Compose Playwright、跨部署形态、历史升级和发布验收按变更风险及合并/发布门禁执行；不要把每次编辑都当作发布验收。CI 治理调整由独立授权的变更处理，不使用 `ci:light` 规避代码门禁。
 
+普通 PR 在新门禁激活后自动获得按路径和风险选择的检查；追加提交会验证新版本。`ci:light` 不能降低最低档位，`ci:milestone` 请求完整验收，双标签按较重要求。合并依据当前提交的受信 `Required Gate`，手动工作流和周期结果仅供诊断/回归。当前激活状态与操作边界见 [第三阶段 CI 说明](docs/development-efficiency-phase3.md)。
+
 涉及数据库模型的变更必须包含 Alembic 迁移；涉及 API 契约的变更必须更新测试和 OpenAPI 示例。
 
 ## 完成定义
