@@ -10,9 +10,17 @@ test('S22 能力版本、安全边界与平台深链接主路径', async ({ page
   await navigateMenu(page, '平台管理')
   await expect(page).toHaveURL(/\/platform$/)
   await expect(page.getByRole('heading', { name: '能力与插件中心' })).toBeVisible()
+  await expect(page.locator('.v3-platform-table .ant-table-row').first()).toBeVisible()
   const httpCapability = page.getByRole('row').filter({ hasText: 'http.request' })
-  if (!(await httpCapability.isVisible())) {
-    await page.getByTitle('2').click()
+  for (let pageNumber = 1; pageNumber < 10 && !(await httpCapability.isVisible()); pageNumber++) {
+    const next = page.locator(
+      '.v3-platform-table .ant-pagination-next:not(.ant-pagination-disabled)',
+    )
+    if (!(await next.count())) break
+    await next.click()
+    await expect(page.locator('.v3-platform-table .ant-pagination-item-active')).toHaveText(
+      String(pageNumber + 1),
+    )
   }
   await expect(httpCapability).toContainText('HTTP 请求')
   await expect(page.getByText('固定 Schema 哈希')).toBeVisible()

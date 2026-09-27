@@ -47,6 +47,8 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
           rules={[{ required: true, message: '请选择接口' }]}
         >
           <Select
+            showSearch
+            optionFilterProp="label"
             placeholder={template === 'async_poll' ? '选择只读状态查询接口' : '选择初始接口'}
             options={apis.map((api) => ({ value: api.id, label: api.name }))}
           />
@@ -70,6 +72,8 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
               ]}
             >
               <Select
+                showSearch
+                optionFilterProp="label"
                 placeholder="选择只提交一次的接口"
                 options={apis.map((api) => ({ value: api.id, label: api.name }))}
               />

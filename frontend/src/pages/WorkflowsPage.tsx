@@ -1043,14 +1043,15 @@ function HeaderPrimaryActions({
           调试
         </Button>
       )}
-      <Button
-        icon={<BugOutlined />}
-        aria-label="逐轮调试"
-        disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
-        onClick={onIterationDebug}
-      >
-        逐轮调试
-      </Button>
+      {state.workspaceMode === 'draft' && (
+        <Button
+          icon={<BugOutlined />}
+          aria-label="逐轮调试"
+          title="逐轮调试"
+          disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
+          onClick={onIterationDebug}
+        />
+      )}
     </Space>
   )
 }
@@ -1347,11 +1348,10 @@ function FocusDraftActions({
       <Button
         icon={<BugOutlined />}
         aria-label="逐轮调试"
+        title="逐轮调试"
         disabled={!state.selectedWorkflow?.current_version || !state.canEdit}
         onClick={onIterationDebug}
-      >
-        逐轮调试
-      </Button>
+      />
     </Space>
   )
 }
