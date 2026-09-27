@@ -55,6 +55,22 @@ FRONTEND_SHARED = (
     "frontend/src/features/projects/",
     "frontend/src/features/auth/",
 )
+BACKEND_IDENTITY_BOUNDARY = (
+    "backend/app/api/dependencies.py",
+    "backend/app/api/v1/endpoints/auth",
+    "backend/app/api/v1/endpoints/organizations.py",
+    "backend/app/api/v1/endpoints/users.py",
+    "backend/app/core/context.py",
+    "backend/app/core/security.py",
+    "backend/app/domain/tenant.py",
+    "backend/app/http/oidc.py",
+    "backend/app/repositories/access.py",
+    "backend/app/repositories/organizations.py",
+    "backend/app/services/auth.py",
+    "backend/app/services/oidc.py",
+    "backend/app/services/organizations.py",
+    "backend/app/services/organization_governance.py",
+)
 BACKEND_CRITICAL = (
     "backend/app/domain/",
     "backend/app/engine/",
@@ -208,6 +224,10 @@ class Routing:
         self.domains.add("backend")
         self.tier = _tier_max(self.tier, "standard")
         self.backend_sources.append(path)
+        if path.startswith(BACKEND_IDENTITY_BOUNDARY):
+            self.tier = _tier_max(self.tier, "integration")
+            self.domains.update(("compose", "frontend", "security"))
+            self.reasons.add("认证、授权与租户边界需集成消费者和安全检查")
         if path.startswith(BACKEND_CRITICAL):
             self.tier = _tier_max(self.tier, "integration")
             self.domains.add("compose")
@@ -218,9 +238,6 @@ class Routing:
         if path.startswith(("backend/app/schemas/", "backend/app/api/v1/endpoints/auth")):
             self.domains.add("frontend")
             self.reasons.add("共享 API 契约需前端消费者验证")
-        if path.startswith(("backend/app/services/auth.py", "backend/app/api/v1/endpoints/auth")):
-            self.domains.add("security")
-            self.reasons.add("认证边界需安全检查")
         if path.startswith(
             ("backend/alembic/", "backend/app/models/", "backend/app/repositories/")
         ):

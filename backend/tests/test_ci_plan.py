@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -50,6 +52,42 @@ def test_routing(path: str, tier: str, required: set[str]) -> None:
     result = plan([path])
     assert result.tier_floor == tier
     assert required <= set(result.required)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "backend/app/services/auth.py",
+        "backend/app/services/oidc.py",
+        "backend/app/http/oidc.py",
+        "backend/app/api/dependencies.py",
+        "backend/app/core/context.py",
+        "backend/app/services/organizations.py",
+        "backend/app/repositories/access.py",
+    ],
+)
+def test_identity_boundaries_require_integration_consumers(path: str) -> None:
+    selected = plan([path])
+    assert selected.tier == "integration"
+    assert {"backend-full", "frontend-full", "compose", "security"} <= set(selected.required)
+
+
+def test_policy_entrypoints_use_isolated_python() -> None:
+    workflow = (Path(__file__).parents[2] / ".github/workflows/pr-validation.yml").read_text()
+    assert "python3 -I scripts/ci_plan.py" in workflow
+    assert "python3 -I scripts/ci_summary.py" in workflow
+
+
+def test_isolated_planner_ignores_adjacent_module(tmp_path: Path) -> None:
+    shutil.copyfile(MODULE_PATH, tmp_path / "ci_plan.py")
+    (tmp_path / "hashlib.py").write_text("raise RuntimeError('adjacent module loaded')\n")
+    result = subprocess.run(
+        [sys.executable, "-I", str(tmp_path / "ci_plan.py"), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_labels_only_raise_scope() -> None:

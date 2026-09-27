@@ -35,7 +35,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TESTED_SHA: ${{ github.sha }}
         run: >-
-          python3 scripts/ci_plan.py --pr "$PR_NUMBER"
+          python3 -I scripts/ci_plan.py --pr "$PR_NUMBER"
           --expected-base "$BASE_SHA" --expected-head "$HEAD_SHA"
           --tested-sha "$TESTED_SHA" --output "$GITHUB_OUTPUT"
 
@@ -156,4 +156,4 @@ jobs:
         env:
           CI_PLAN: ${{ needs.plan.outputs.plan }}
           CI_NEEDS: ${{ toJSON(needs) }}
-        run: python3 scripts/ci_summary.py
+        run: python3 -I scripts/ci_summary.py

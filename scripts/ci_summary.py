@@ -10,7 +10,22 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ci_plan import ALL_JOBS
+# This script runs with Python's isolated path. Keep the job contract local so
+# a PR-added module beside the planner cannot intercept the shadow summary.
+ALL_JOBS = (
+    "quick",
+    "backend-standard",
+    "backend-full",
+    "frontend-standard",
+    "frontend-full",
+    "compose",
+    "security",
+    "windows",
+    "upgrade",
+    "compact",
+    "skills",
+    "policy",
+)
 
 
 def evaluate(plan: dict[str, Any] | None, needs: dict[str, Any]) -> tuple[bool, list[str]]:

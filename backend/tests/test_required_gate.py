@@ -92,6 +92,10 @@ def test_shadow_records_not_applicable_separately() -> None:
     assert "windows: not_applicable" in lines
 
 
+def test_shadow_job_contract_matches_planner() -> None:
+    assert ci_summary.ALL_JOBS == ci_plan.ALL_JOBS
+
+
 @pytest.mark.parametrize(
     "payload",
     [None, {"required": []}, {"required": ["quick", "quick"]}, {"required": ["nonexistent"]}],
