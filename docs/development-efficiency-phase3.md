@@ -54,7 +54,7 @@ PR 验证运行将无关标签/元数据编辑标记为 `PR Validation ignored`�
 
 本地已核对规则集和原有工作流，计划/发布器单元测试覆盖 docs、局部前后端、引擎、权限、迁移、依赖、部署、Skill、治理路径、重命名与分页、标签最低档、聚合异常、旧 run、手动运行边界。实际命令与结果以交付记录为准；尚无新工作流在 GitHub 上的运行、消耗分钟数或缓存命中数据，不宣称固定提速。预期省去的工作是文档 PR 的应用构建、局部前端 PR 的无关后端升级与 Windows 打包，以及旧控制器最长 90 分钟的轮询 runner 占用；标准档回退完整侧测试时仍需执行该侧测试。不能把并行 job 时间相加作为等待时间。
 
-本地条件为 macOS、已有 uv 与 pnpm 依赖缓存，不代表 GitHub runner 的冷启动性能。`pytest --no-cov tests/test_ci_plan.py tests/test_required_gate.py -q` 通过 59 项；后端 `ruff format --check`、`ruff check`、`mypy app ../scripts/*.py`、`lint-imports` 和完整 `pytest -q` 通过，最终完整 pytest 墙钟 181.33 秒、覆盖率 90.67%（阈值 90%）。Skills 契约测试和 `build_skill_evaluation.py --check` 通过。前端 `pnpm format:check`、`pnpm lint`、`pnpm test:coverage`、`pnpm build` 通过；覆盖率测试为 88 个文件、425 项，Vitest 报告历时 172.65 秒，语句 85.71%、分支 80.72%。11 个工作流经 PyYAML 解析；本机无 actionlint，GitHub 平台语法及实际 job 命名尚未验证。Compose、Windows、历史升级及真实 PR E2E 未在本轮本地执行。
+本地条件为 macOS、已有 uv 与 pnpm 依赖缓存，不代表 GitHub runner 的冷启动性能。集成期间一次完整后端 `pytest -q` 通过，墙钟 181.33 秒、覆盖率 90.67%（阈值 90%）；之后针对最终规则改动复跑 `pytest --no-cov tests/test_ci_plan.py tests/test_required_gate.py -q`，59 项通过。后端 `ruff format --check`、`ruff check`、`mypy app ../scripts/*.py`、`lint-imports` 通过。Skills 契约测试和 `build_skill_evaluation.py --check` 通过。前端 `pnpm format:check`、`pnpm lint`、`pnpm test:coverage`、`pnpm build` 通过；覆盖率测试为 88 个文件、425 项，Vitest 报告历时 172.65 秒，语句 85.71%、分支 80.72%。11 个工作流经 PyYAML 解析；本机无 actionlint，GitHub 平台语法及实际 job 命名尚未验证。Compose、Windows、历史升级及真实 PR E2E 未在本轮本地执行。
 
 受控启用步骤：
 
