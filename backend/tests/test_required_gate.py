@@ -160,6 +160,24 @@ def test_missing_or_skipped_shadow_rejected() -> None:
 def test_governance_change_cannot_self_approve() -> None:
     selected = plan(["scripts/ci_plan.py"])
     assert not gate.evaluate_run(run_for(selected), jobs_for(selected), selected, REPO, 99)[0]
+    valid, lines = ci_summary.evaluate(
+        json.loads(selected.to_json()), {"plan": {"result": "success"}}
+    )
+    assert not valid
+    assert "backend-full: bootstrap_only" in lines
+    assert not any("missing" in line for line in lines)
+
+
+def test_compact_requires_its_own_successful_compatibility_job() -> None:
+    selected = json.loads(plan(["deploy/compact/start.sh"]).to_json())
+    needs = {
+        "plan": {"result": "success"},
+        "quick": {"result": "success"},
+        "compose": {"result": "success"},
+    }
+    assert not ci_summary.evaluate(selected, needs)[0]
+    assert not ci_summary.evaluate(selected, {**needs, "compact": {"result": "failure"}})[0]
+    assert ci_summary.evaluate(selected, {**needs, "compact": {"result": "success"}})[0]
 
 
 class FakeGitHub:
@@ -171,15 +189,19 @@ class FakeGitHub:
 
 
 @pytest.mark.parametrize(
-    "run_status,latest_id,expected_posts",
+    "run_status,latest_id,expected_posts,expected_checked",
     [
-        ("in_progress", 42, 1),
-        ("completed", 42, 0),
-        ("in_progress", 43, 0),
+        ("in_progress", 42, 1, 0),
+        ("completed", 42, 0, 1),
+        ("in_progress", 43, 0, 0),
     ],
 )
-def test_delayed_pending_event_cannot_overwrite_terminal_status(
-    run_status: str, latest_id: int, expected_posts: int
+def test_wakeup_reconciles_actual_run_state(
+    monkeypatch: pytest.MonkeyPatch,
+    run_status: str,
+    latest_id: int,
+    expected_posts: int,
+    expected_checked: int,
 ) -> None:
     class FakePublisher(FakeGitHub):
         repository = REPO
@@ -223,10 +245,88 @@ def test_delayed_pending_event_cannot_overwrite_terminal_status(
             "actions/runs/42": run,
         }
     )
-    gate.publish_pending_run(gh, {"workflow_run": notified}, "main")
+    checked: list[int] = []
+    monkeypatch.setattr(
+        gate,
+        "publish_checked_run",
+        lambda _gh, _notified, _pr, number, _current: checked.append(number),
+    )
+    gate.publish_current_run(gh, {"workflow_run": notified}, "main")
     assert len(gh.posts) == expected_posts
+    assert len(checked) == expected_checked
     if expected_posts:
         assert gh.posts == [(SHA, "pending")]
+
+
+def test_delayed_wakeup_reads_terminal_state_after_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked: list[int] = []
+    monkeypatch.setattr(
+        gate,
+        "publish_checked_run",
+        lambda _gh, _notified, _pr, number, _current: checked.append(number),
+    )
+
+    class FakePublisher(FakeGitHub):
+        repository = REPO
+
+        def __init__(self, pages: dict[str, Any]) -> None:
+            super().__init__(pages)
+            self.posts: list[str] = []
+
+        def post(self, sha: str, state: str, description: str, run_id: int) -> None:
+            self.posts.append(state)
+
+    pr = {
+        "state": "open",
+        "base": {"sha": BASE, "ref": "main", "repo": {"full_name": REPO}},
+        "head": {"sha": SHA, "ref": "feature", "repo": {"full_name": REPO}},
+    }
+    notified = {
+        "id": 42,
+        "run_attempt": 1,
+        "head_sha": SHA,
+        "display_title": "PR Validation active",
+        "repository": {"full_name": REPO},
+        "pull_requests": [{"number": 7}],
+    }
+    latest = {
+        "id": 42,
+        "run_attempt": 1,
+        "display_title": "PR Validation active",
+        "head_branch": "feature",
+        "head_repository": {"full_name": REPO},
+    }
+    run_path = (
+        f"actions/workflows/pr-validation.yml/runs?event=pull_request&head_sha={SHA}&per_page=100"
+    )
+    gh = FakePublisher(
+        {
+            "pulls/7": pr,
+            run_path: {"total_count": 1, "workflow_runs": [latest]},
+            "actions/workflows/pr-validation.yml": {"id": 99},
+            "actions/runs/42": {**run_for(plan()), "status": "in_progress", "run_attempt": 1},
+        }
+    )
+    gate.publish_current_run(gh, {"workflow_run": notified}, "main")
+    original_get = gh.get
+    reads = 0
+
+    def delayed_completion(path: str) -> Any:
+        nonlocal reads
+        if path == "actions/runs/42":
+            reads += 1
+            if reads == 2:
+                gh.pages[path]["status"] = "completed"
+        return original_get(path)
+
+    monkeypatch.setattr(gh, "get", delayed_completion)
+    monkeypatch.setattr(gate.time, "sleep", lambda _seconds: None)
+    gate.publish_current_run(gh, {"action": "completed", "workflow_run": notified}, "main")
+    assert gh.posts == ["pending"]
+    assert reads >= 2
+    assert checked == [7]
 
 
 def test_latest_run_rejects_old_completion_and_ignores_irrelevant_label_run() -> None:
@@ -259,6 +359,58 @@ def test_latest_run_rejects_old_completion_and_ignores_irrelevant_label_run() ->
     )
     gh = FakeGitHub({path: {"total_count": 3, "workflow_runs": runs}})
     assert gate.latest_run(gh, pr)["id"] == 13
+
+
+@pytest.mark.parametrize("changed_at", ["latest", "final_run"])
+def test_attempt_change_before_terminal_post_does_not_publish(
+    monkeypatch: pytest.MonkeyPatch, changed_at: str
+) -> None:
+    selected = plan()
+    pr = {
+        "state": "open",
+        "merge_commit_sha": MERGE,
+        "base": {"sha": BASE, "ref": "main", "repo": {"full_name": REPO}},
+        "head": {"sha": SHA, "ref": "feature", "repo": {"full_name": REPO}},
+        "labels": [],
+    }
+    current = {"id": 42, "run_attempt": 1}
+
+    class FakePublisher:
+        repository = REPO
+
+        def __init__(self) -> None:
+            self.run_reads = 0
+            self.posts: list[str] = []
+
+        def get(self, path: str) -> Any:
+            if path == "actions/workflows/pr-validation.yml":
+                return {"id": 99}
+            if path == "pulls/7":
+                return pr
+            if path == "actions/runs/42":
+                self.run_reads += 1
+                attempt = 2 if changed_at == "final_run" and self.run_reads == 2 else 1
+                return {**run_for(selected), "run_attempt": attempt}
+            raise AssertionError(path)
+
+        def pr_plan(self, number: int, tested_sha: str) -> Any:
+            return selected
+
+        def jobs(self, run_id: int) -> list[dict[str, Any]]:
+            return jobs_for(selected)
+
+        def post(self, sha: str, state: str, description: str, run_id: int) -> None:
+            self.posts.append(state)
+
+    gh = FakePublisher()
+    monkeypatch.setattr(gate, "validate_merge", lambda _gh, _pr: MERGE)
+    monkeypatch.setattr(
+        gate,
+        "latest_run",
+        lambda _gh, _pr: {"id": 42, "run_attempt": 2 if changed_at == "latest" else 1},
+    )
+    gate.publish_checked_run(gh, {"run_attempt": 1}, pr, 7, current)
+    assert gh.posts == []
 
 
 def test_merge_commit_must_match_exact_base_and_head() -> None:

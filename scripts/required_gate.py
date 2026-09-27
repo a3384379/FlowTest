@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
@@ -237,17 +238,23 @@ def current_event_run(
     return notified, pr, number, current
 
 
-def publish_pending_run(gh: Publisher, event: dict[str, Any], default_branch: str) -> None:
+def publish_current_run(gh: Publisher, event: dict[str, Any], default_branch: str) -> None:
     resolved = current_event_run(gh, event, default_branch)
     if resolved is None:
         return
-    notified, pr, _, current = resolved
+    notified, pr, number, current = resolved
     workflow = gh.get("actions/workflows/pr-validation.yml")
     run = gh.get(f"actions/runs/{current['id']}")
+    if event.get("action") == "completed":
+        for _ in range(3):
+            if isinstance(run, dict) and run.get("status") == "completed":
+                break
+            time.sleep(2)
+            run = gh.get(f"actions/runs/{current['id']}")
+        if not isinstance(run, dict) or run.get("status") != "completed":
+            raise GateError("完成事件对应的运行尚未进入终态")
     if not isinstance(workflow, dict) or not isinstance(run, dict):
         raise GateError("运行身份不可用")
-    if run.get("status") == "completed":
-        return  # A delayed requested/in_progress event cannot replace a final result.
     if (
         run.get("workflow_id") != workflow.get("id")
         or run.get("id") != notified.get("id")
@@ -255,16 +262,11 @@ def publish_pending_run(gh: Publisher, event: dict[str, Any], default_branch: st
         or run.get("path", "").split("@")[0] != WORKFLOW
         or run.get("event") != "pull_request"
     ):
-        raise GateError("pending 运行身份不匹配")
-    gh.post(pr["head"]["sha"], "pending", "等待当前 PR 验证与受信汇总", current["id"])
-
-
-def publish_complete(gh: Publisher, event: dict[str, Any], default_branch: str) -> None:
-    resolved = current_event_run(gh, event, default_branch)
-    if resolved is None:
-        return
-    notified, pr, number, current = resolved
-    publish_checked_run(gh, notified, pr, number, current)
+        raise GateError("运行身份不匹配")
+    if run.get("status") == "completed":
+        publish_checked_run(gh, notified, pr, number, current)
+    else:
+        gh.post(pr["head"]["sha"], "pending", "等待当前 PR 验证与受信汇总", current["id"])
 
 
 def publish_checked_run(
@@ -294,7 +296,15 @@ def publish_checked_run(
         refreshed
     ) != pr_validation_identity(pr):
         return  # A new PR state must get its own run and status.
-    if latest_run(gh, pr).get("id") != current["id"]:
+    latest = latest_run(gh, pr)
+    if latest.get("id") != current["id"] or latest.get("run_attempt") != current.get("run_attempt"):
+        return
+    final_run = gh.get(f"actions/runs/{current['id']}")
+    if (
+        not isinstance(final_run, dict)
+        or final_run.get("run_attempt") != current.get("run_attempt")
+        or final_run.get("status") != "completed"
+    ):
         return
     gh.post(plan.head_sha, "success" if valid else "failure", description, current["id"])
     if not valid:
@@ -310,12 +320,9 @@ def main() -> int:
         gh = Publisher(repository, token)
         if os.environ["GITHUB_EVENT_NAME"] != "workflow_run":
             raise GateError("不支持的门禁事件")
-        if event.get("action") == "completed":
-            publish_complete(gh, event, default_branch)
-        elif event.get("action") in {"requested", "in_progress"}:
-            publish_pending_run(gh, event, default_branch)
-        else:
+        if event.get("action") not in {"requested", "in_progress", "completed"}:
             raise GateError("不支持的 workflow_run 活动类型")
+        publish_current_run(gh, event, default_branch)
     except (GateError, KeyError, ValueError, PlanError) as exc:
         print(f"Required Gate: {exc}", file=sys.stderr)
         return 1

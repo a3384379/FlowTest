@@ -5,9 +5,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
 
-# Label runs have their own group: an unrelated label event must not cancel a valid run.
+# Only ignored metadata events use a separate group. Effective label changes and
+# new heads replace the active run for the same PR.
 concurrency:
-  group: pr-validation-${{ github.event.pull_request.number }}-${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled' || github.event.action == 'edited') && github.run_id || 'head' }}
+  group: pr-validation-${{ github.event.pull_request.number }}-${{ (((github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'ci:light' && github.event.label.name != 'ci:milestone') || (github.event.action == 'edited' && !github.event.changes.base)) && 'ignored' || 'active' }}
   cancel-in-progress: true
 
 permissions:
@@ -41,11 +42,11 @@ jobs:
 
   quick:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'quick') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'quick') }}
     uses: ./.github/workflows/quick-ci.yml
   backend-standard:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'backend-standard') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'backend-standard') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -82,11 +83,11 @@ jobs:
 
   backend-full:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'backend-full') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'backend-full') }}
     uses: ./.github/workflows/backend-ci.yml
   frontend-standard:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-standard') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-standard') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -120,33 +121,67 @@ jobs:
 
   frontend-full:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-full') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'frontend-full') }}
     uses: ./.github/workflows/frontend-ci.yml
   compose:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'compose') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'compose') }}
     uses: ./.github/workflows/compose-ci.yml
   security:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'security') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'security') }}
     uses: ./.github/workflows/security-ci.yml
   windows:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'windows') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'windows') }}
     uses: ./.github/workflows/standalone-windows.yml
   upgrade:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'upgrade') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'upgrade') }}
     uses: ./.github/workflows/upgrade-ci.yml
   skills:
     needs: plan
-    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'skills') }}
+    if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'skills') }}
     uses: ./.github/workflows/skills-ci.yml
+
+  compact:
+    needs: plan
+    if: ${{ contains(fromJSON(needs.plan.outputs.plan).required, 'compact') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Start six-service Compact stack
+        run: ./deploy/compact/start.sh
+      - name: Verify Compact business flow on this PR revision
+        run: |
+          set -a
+          source deploy/compact/.env
+          set +a
+          FLOWTEST_SMOKE_API_URL=http://127.0.0.1:3000/api/v1 \
+          FLOWTEST_SMOKE_ADMIN_EMAIL="${FLOWTEST_BOOTSTRAP_ADMIN_EMAIL}" \
+          FLOWTEST_SMOKE_ADMIN_PASSWORD="${FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD}" \
+          FLOWTEST_SMOKE_TARGET_URL=http://backend:8000/api/v1 \
+            python3 scripts/smoke_s32.py
+      - name: Print Compact logs on failure
+        if: failure()
+        run: |
+          if [[ -f deploy/compact/.env ]]; then
+            docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml logs --no-color --tail=300
+          fi
+      - name: Stop Compact stack
+        if: always()
+        run: |
+          if [[ -f deploy/compact/.env ]]; then
+            docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml down --volumes
+          fi
 
   shadow:
     name: PR Validation Shadow ${{ github.sha }} ${{ needs.plan.outputs.fingerprint }}
     if: ${{ always() && (github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' || github.event.label.name == 'ci:light' || github.event.label.name == 'ci:milestone' || github.event.changes.base) }}
-    needs: [plan, quick, backend-standard, backend-full, frontend-standard, frontend-full, compose, security, windows, upgrade, skills]
+    needs: [plan, quick, backend-standard, backend-full, frontend-standard, frontend-full, compose, security, windows, upgrade, skills, compact]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

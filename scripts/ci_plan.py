@@ -40,6 +40,7 @@ GOVERNANCE_FILES = frozenset(
         "docs/development-efficiency-phase3.md",
         "backend/tests/test_ci_plan.py",
         "backend/tests/test_required_gate.py",
+        "backend/docker-bake.ci.hcl",
         "scripts/build_skill_evaluation.py",
         "scripts/ci_plan.py",
         "scripts/ci_summary.py",
@@ -87,7 +88,25 @@ BACKEND_CRITICAL = (
     "backend/app/api/v1/endpoints/executions.py",
     "backend/app/models/",
     "backend/app/repositories/",
-    "backend/alembic/",
+    "backend/migrations/",
+)
+MIGRATION_PREFIXES = ("backend/migrations/", "backend/app/schemas/")
+BACKEND_IMAGE_INPUTS = frozenset({"backend/Dockerfile", "backend/.dockerignore"})
+FRONTEND_IMAGE_INPUTS = frozenset(
+    {"frontend/Dockerfile", "frontend/.dockerignore", "frontend/nginx.conf"}
+)
+DEPLOY_IMAGE_INPUTS = frozenset(
+    {
+        "compose.yaml",
+        "mock-target/Dockerfile",
+        "mock-target/.dockerignore",
+        "deploy/postgres-walg/Dockerfile",
+        "deploy/compact/compose.yaml",
+        "deploy/compact/compose.build.yaml",
+        "deploy/compact/images.env.example",
+        "deploy/compatibility/compose.yaml",
+        "deploy/upgrade/compose.yaml",
+    }
 )
 BACKEND_TEST_MAP: dict[str, tuple[str, ...]] = {
     "backend/app/services/imports.py": ("tests/test_imports_api.py",),
@@ -188,6 +207,9 @@ class Routing:
             self.reasons.add(f"未知路径保守执行完整验收: {path}")
 
     def deploy(self, path: str) -> None:
+        if path in DEPLOY_IMAGE_INPUTS:
+            self.domains.add("security")
+            self.reasons.add("镜像清单或构建输入需扫描")
         if path.startswith("deploy/standalone/"):
             self.tier = _tier_max(self.tier, "integration")
             self.domains.update(("windows", "backend", "frontend"))
@@ -199,7 +221,7 @@ class Routing:
         elif path.startswith("deploy/compact/"):
             self.tier = _tier_max(self.tier, "integration")
             self.domains.update(("compose", "compact"))
-            self.reasons.add("Compact RC 仍需现有人工复审入口")
+            self.reasons.add("Compact 基础兼容验收；完整 RC 仍需人工复审")
         else:
             self.tier = _tier_max(self.tier, "integration")
             self.domains.add("compose")
@@ -215,9 +237,12 @@ class Routing:
         if path.startswith(("frontend/src/lib/api", "frontend/src/features/workflows/")):
             self.domains.add("compose")
             self.reasons.add("前端 API/流程契约需端到端冒烟")
-        if path in {"frontend/package.json", "frontend/pnpm-lock.yaml"} or "Dockerfile" in path:
+        if (
+            path in {"frontend/package.json", "frontend/pnpm-lock.yaml"}
+            or path in FRONTEND_IMAGE_INPUTS
+        ):
             self.tier = _tier_max(self.tier, "integration")
-            self.domains.add("security")
+            self.domains.update(("security", "compose"))
             self.reasons.add("前端依赖或镜像输入")
 
     def backend(self, path: str) -> None:
@@ -228,7 +253,7 @@ class Routing:
             self.tier = _tier_max(self.tier, "integration")
             self.domains.update(("compose", "frontend", "security"))
             self.reasons.add("认证、授权与租户边界需集成消费者和安全检查")
-        if path.startswith(BACKEND_CRITICAL):
+        if path.startswith(BACKEND_CRITICAL) or path == "backend/alembic.ini":
             self.tier = _tier_max(self.tier, "integration")
             self.domains.add("compose")
             self.reasons.add("关键后端运行或数据路径")
@@ -238,26 +263,60 @@ class Routing:
         if path.startswith(("backend/app/schemas/", "backend/app/api/v1/endpoints/auth")):
             self.domains.add("frontend")
             self.reasons.add("共享 API 契约需前端消费者验证")
-        if path.startswith(
-            ("backend/alembic/", "backend/app/models/", "backend/app/repositories/")
+        if path == "backend/alembic.ini" or path.startswith(
+            (*MIGRATION_PREFIXES, "backend/app/models/", "backend/app/repositories/")
         ):
             self.domains.update(("upgrade", "windows"))
             self.reasons.add("数据模型与历史升级/Standalone 兼容")
-        if path in {"backend/pyproject.toml", "backend/uv.lock"} or "Dockerfile" in path:
+        if (
+            path in {"backend/pyproject.toml", "backend/uv.lock"}
+            or path in BACKEND_IMAGE_INPUTS
+            or path.startswith("backend/patches/")
+        ):
             self.tier = _tier_max(self.tier, "integration")
             self.domains.update(("security", "compose"))
             self.reasons.add("后端依赖或镜像输入")
 
 
-def _mapped_targets(sources: list[str], mapping: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
-    selected = [mapping.get(path) for path in sources]
-    if not selected or not all(selected):
+def _direct_test_target(path: str, project: str) -> str | None:
+    prefix = f"{project}/tests/" if project == "backend" else "frontend/src/"
+    if not path.startswith(prefix):
+        return None
+    name = Path(path).name
+    valid = (
+        name.startswith("test_") and name.endswith(".py")
+        if project == "backend"
+        else name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+    )
+    if valid:
+        return path.removeprefix(f"{project}/")
+    return None
+
+
+def _mapped_targets(
+    sources: list[str],
+    mapping: dict[str, tuple[str, ...]],
+    project: str,
+    removed_paths: frozenset[str],
+) -> tuple[str, ...]:
+    if not sources:
         return ()
-    return tuple(sorted({target for group in selected if group for target in group}))
+    targets: set[str] = set()
+    for path in sources:
+        if path in removed_paths:
+            return ()
+        selected = mapping.get(path)
+        if selected:
+            targets.update(selected)
+        elif direct := _direct_test_target(path, project):
+            targets.add(direct)
+        else:
+            return ()  # Unknown source or shared test input requires the full side.
+    return tuple(sorted(targets))
 
 
 def _required_jobs(
-    routing: Routing, tier: str
+    routing: Routing, tier: str, removed_paths: frozenset[str]
 ) -> tuple[set[str], tuple[str, ...], tuple[str, ...]]:
     required = {"quick"}
     backend_targets: tuple[str, ...] = ()
@@ -269,10 +328,14 @@ def _required_jobs(
     else:
         if "backend" in routing.domains:
             required.add("backend-full" if tier == "integration" else "backend-standard")
-            backend_targets = _mapped_targets(routing.backend_sources, BACKEND_TEST_MAP)
+            backend_targets = _mapped_targets(
+                routing.backend_sources, BACKEND_TEST_MAP, "backend", removed_paths
+            )
         if "frontend" in routing.domains:
             required.add("frontend-full" if tier == "integration" else "frontend-standard")
-            frontend_targets = _mapped_targets(routing.frontend_sources, FRONTEND_TEST_MAP)
+            frontend_targets = _mapped_targets(
+                routing.frontend_sources, FRONTEND_TEST_MAP, "frontend", removed_paths
+            )
         required.update(
             routing.domains & {"compose", "security", "windows", "upgrade", "compact", "skills"}
         )
@@ -298,11 +361,28 @@ def _paths_from_files(files: list[dict[str, Any]]) -> list[str]:
     return paths
 
 
+def _removed_paths_from_files(files: list[dict[str, Any]]) -> frozenset[str]:
+    removed = [
+        item["previous_filename"] if item.get("status") == "renamed" else item["filename"]
+        for item in files
+        if item.get("status") in {"removed", "renamed"}
+    ]
+    return frozenset(removed)
+
+
 def build_plan(
-    paths: list[str], labels: set[str], *, base_sha: str, head_sha: str, tested_sha: str
+    paths: list[str],
+    labels: set[str],
+    *,
+    base_sha: str,
+    head_sha: str,
+    tested_sha: str,
+    removed_paths: frozenset[str] = frozenset(),
 ) -> Plan:
     if not paths or any(not isinstance(path, str) or not path for path in paths):
         raise PlanError("变更路径为空或无效，不能推断为文档变更")
+    if not removed_paths <= set(paths):
+        raise PlanError("删除路径不在 PR 文件清单中")
     if any(
         len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha)
         for sha in (base_sha, head_sha, tested_sha)
@@ -320,7 +400,7 @@ def build_plan(
         routing.reasons.add("ci:light 保留自动最低档位")
     if {"ci:milestone", "ci:light"} <= labels:
         routing.reasons.add("两个 CI 标签同时存在，采用较重请求")
-    required, backend_targets, frontend_targets = _required_jobs(routing, tier)
+    required, backend_targets, frontend_targets = _required_jobs(routing, tier, removed_paths)
     return Plan(
         base_sha,
         head_sha,
@@ -384,7 +464,7 @@ class GitHub:
         except (HTTPError, URLError, ValueError) as exc:
             raise PlanError("GitHub 元数据读取失败") from exc
 
-    def changed_paths(self, number: int, changed_count: object) -> list[str]:
+    def changed_paths(self, number: int, changed_count: object) -> tuple[list[str], frozenset[str]]:
         if not isinstance(changed_count, int) or changed_count <= 0 or changed_count >= 3000:
             raise PlanError("PR 文件清单为空或达到 GitHub API 上限")
         files: list[dict[str, Any]] = []
@@ -401,13 +481,13 @@ class GitHub:
             raise PlanError("PR 文件清单与 changed_files 不一致")
         if len({item.get("filename") for item in files}) != changed_count:
             raise PlanError("PR 文件分页重复或不完整")
-        return _paths_from_files(files)
+        return _paths_from_files(files), _removed_paths_from_files(files)
 
     def pr_plan(self, number: int, tested_sha: str) -> Plan:
         pr = self.get(f"pulls/{number}")
         if not isinstance(pr, dict) or pr.get("state") != "open":
             raise PlanError("PR 元数据无效或 PR 未开放")
-        paths = self.changed_paths(number, pr.get("changed_files"))
+        paths, removed_paths = self.changed_paths(number, pr.get("changed_files"))
         current = self.get(f"pulls/{number}")
         if not isinstance(current, dict) or plan_source_identity(current) != plan_source_identity(
             pr
@@ -424,6 +504,7 @@ class GitHub:
             base_sha=pr["base"]["sha"],
             head_sha=pr["head"]["sha"],
             tested_sha=tested_sha,
+            removed_paths=removed_paths,
         )
 
 

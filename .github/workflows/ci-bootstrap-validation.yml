@@ -14,6 +14,7 @@ on:
       - "docs/development-efficiency-phase3.md"
       - "backend/tests/test_ci_plan.py"
       - "backend/tests/test_required_gate.py"
+      - "backend/docker-bake.ci.hcl"
       - "scripts/build_skill_evaluation.py"
       - "scripts/ci_plan.py"
       - "scripts/ci_summary.py"
@@ -23,6 +24,10 @@ on:
 # Governance changes cannot pass the normal Required Gate. This separate,
 # PR-triggered full suite supplies eligible checks for maintainer Bootstrap.
 # It never publishes the Required Gate status or changes the branch ruleset.
+concurrency:
+  group: ci-bootstrap-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

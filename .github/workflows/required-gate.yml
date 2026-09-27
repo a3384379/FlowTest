@@ -5,6 +5,13 @@ on:
     workflows: [PR Validation]
     types: [requested, in_progress, completed]
 
+# Serialize all wakeups for a candidate Head. Keep completed wakeups queued so
+# a late pending handler cannot replace the terminal result.
+concurrency:
+  group: required-gate-${{ github.event.workflow_run.head_sha }}
+  queue: max
+  cancel-in-progress: false
+
 permissions:
   actions: read
   contents: read

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 import importlib.util
 import json
 import shutil
@@ -24,8 +25,19 @@ SPEC.loader.exec_module(ci_plan)
 SHA = "a" * 40
 
 
-def plan(paths: list[str], labels: set[str] | None = None) -> Any:
-    return ci_plan.build_plan(paths, labels or set(), base_sha=SHA, head_sha=SHA, tested_sha=SHA)
+def plan(
+    paths: list[str],
+    labels: set[str] | None = None,
+    removed_paths: frozenset[str] = frozenset(),
+) -> Any:
+    return ci_plan.build_plan(
+        paths,
+        labels or set(),
+        base_sha=SHA,
+        head_sha=SHA,
+        tested_sha=SHA,
+        removed_paths=removed_paths,
+    )
 
 
 @pytest.mark.parametrize(
@@ -37,7 +49,11 @@ def plan(paths: list[str], labels: set[str] | None = None) -> Any:
         ("backend/app/services/imports.py", "standard", {"backend-standard"}),
         ("backend/app/domain/execution.py", "integration", {"backend-full", "compose"}),
         ("backend/app/core/security.py", "integration", {"backend-full", "compose"}),
-        ("backend/alembic/versions/123.py", "integration", {"upgrade", "windows"}),
+        (
+            "backend/migrations/versions/20260809_0001_access_control.py",
+            "integration",
+            {"upgrade", "windows", "backend-full"},
+        ),
         ("backend/uv.lock", "integration", {"security", "compose"}),
         ("deploy/standalone/mcp.ps1", "integration", {"windows"}),
         ("deploy/upgrade/verify.sh", "integration", {"upgrade", "compose"}),
@@ -69,6 +85,67 @@ def test_routing(path: str, tier: str, required: set[str]) -> None:
 def test_identity_boundaries_require_integration_consumers(path: str) -> None:
     selected = plan([path])
     assert selected.tier == "integration"
+    assert {"backend-full", "frontend-full", "compose", "security"} <= set(selected.required)
+
+
+def test_alembic_config_and_real_migration_root_are_routed() -> None:
+    root = Path(__file__).parents[2]
+    config = configparser.ConfigParser()
+    config.read(root / "backend/alembic.ini")
+    migration_root = root / "backend" / config["alembic"]["script_location"]
+    assert migration_root.is_dir()
+    assert migration_root == root / "backend/migrations"
+    for path in (
+        "backend/alembic.ini",
+        "backend/migrations/env.py",
+        "backend/migrations/versions/20260809_0001_access_control.py",
+        "backend/app/schemas/workflows.py",
+    ):
+        selected = plan([path])
+        assert selected.tier == "integration"
+        assert {"backend-full", "upgrade", "windows"} <= set(selected.required)
+
+
+@pytest.mark.parametrize(
+    ("path", "required"),
+    [
+        ("backend/docker-bake.ci.hcl", {"policy", "backend-full", "compose", "security"}),
+        ("backend/Dockerfile", {"backend-full", "compose", "security"}),
+        ("backend/.dockerignore", {"backend-full", "compose", "security"}),
+        (
+            "backend/patches/cpython-3.13-cve-2026-82049.patch",
+            {"backend-full", "compose", "security"},
+        ),
+        ("frontend/nginx.conf", {"frontend-full", "compose", "security"}),
+        ("frontend/.dockerignore", {"frontend-full", "compose", "security"}),
+        ("mock-target/Dockerfile", {"compose", "security"}),
+        ("deploy/compact/images.env.example", {"compact", "compose", "security"}),
+    ],
+)
+def test_real_image_inputs_require_build_and_scan(path: str, required: set[str]) -> None:
+    assert (Path(__file__).parents[2] / path).exists()
+    selected = plan([path], {"ci:light"})
+    assert required <= set(selected.required)
+    assert selected.tier in {"integration", "full"}
+
+
+def test_governance_and_compact_change_still_requires_compact() -> None:
+    selected = plan(["scripts/ci_plan.py", "deploy/compact/compose.yaml"])
+    assert selected.governance_change
+    assert {"policy", "compact"} <= set(selected.required)
+
+
+def test_renamed_image_input_uses_both_directories() -> None:
+    paths = ci_plan._paths_from_files(
+        [
+            {
+                "filename": "frontend/nginx.conf",
+                "previous_filename": "backend/.dockerignore",
+                "status": "renamed",
+            }
+        ]
+    )
+    selected = plan(paths)
     assert {"backend-full", "frontend-full", "compose", "security"} <= set(selected.required)
 
 
@@ -115,6 +192,81 @@ def test_targets_include_direct_consumers_and_fallback() -> None:
     )
     assert plan(["docs/release/s46-ga-gate.md"]).backend_targets == ("tests/test_s46_ga_gate.py",)
     assert plan(["backend/app/services/new_service.py"]).backend_targets == ()
+
+
+def test_changed_tests_join_known_source_targets() -> None:
+    backend = plan(["backend/app/services/imports.py", "backend/tests/test_imports_api.py"])
+    assert backend.backend_targets == ("tests/test_imports_api.py",)
+    assert plan(["backend/tests/test_imports_api.py"]).backend_targets == (
+        "tests/test_imports_api.py",
+    )
+    frontend = plan(
+        [
+            "frontend/src/features/navigation/ShellSidebar.tsx",
+            "frontend/src/features/navigation/ShellSidebar.test.tsx",
+        ]
+    )
+    assert "src/features/navigation/ShellSidebar.test.tsx" in frontend.frontend_targets
+    assert "src/App.test.tsx" in frontend.frontend_targets
+    assert plan(["backend/tests/test_new_feature.py"]).backend_targets == (
+        "tests/test_new_feature.py",
+    )
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["backend/app/services/imports.py", "backend/app/services/new_service.py"],
+        ["backend/app/services/imports.py", "backend/tests/conftest.py"],
+    ],
+)
+def test_unknown_or_removed_backend_input_falls_back_to_full_side(paths: list[str]) -> None:
+    assert plan(paths).backend_targets == ()
+
+
+def test_removed_or_renamed_test_falls_back_on_pr_metadata() -> None:
+    old = "backend/tests/test_imports_api.py"
+    assert plan([old], removed_paths=frozenset({old})).backend_targets == ()
+    files = [
+        {
+            "filename": "backend/tests/test_imports_api_v2.py",
+            "previous_filename": old,
+            "status": "renamed",
+        }
+    ]
+    paths = ci_plan._paths_from_files(files)
+    removed = ci_plan._removed_paths_from_files(files)
+    assert plan(paths, removed_paths=removed).backend_targets == ()
+    assert ci_plan._removed_paths_from_files([{"filename": old, "status": "removed"}]) == {old}
+
+
+def test_unknown_or_removed_frontend_input_falls_back_to_full_side() -> None:
+    assert (
+        plan(
+            ["frontend/src/features/navigation/ShellSidebar.tsx", "frontend/vitest.config.ts"]
+        ).frontend_targets
+        == ()
+    )
+    old = "frontend/src/features/navigation/Removed.test.tsx"
+    assert plan([old], removed_paths=frozenset({old})).frontend_targets == ()
+
+
+def test_targeted_runner_propagates_no_tests_collected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner_path = Path(__file__).parents[2] / "scripts/run_targeted_tests.py"
+    spec = importlib.util.spec_from_file_location("run_targeted_tests", runner_path)
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    monkeypatch.setenv("TARGETS", json.dumps(["tests/test_ci_plan.py"]))
+    monkeypatch.setattr(sys, "argv", [str(runner_path), "backend"])
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 5),
+    )
+    assert runner.main() == 5
 
 
 def test_rename_considers_old_and_new_paths() -> None:
@@ -268,6 +420,8 @@ def test_automatic_pr_entries_and_workflow_call_reuse() -> None:
         f"{prefix}**" for prefix in ci_plan.GOVERNANCE_PREFIXES
     }
     assert bootstrap["permissions"] == {"contents": "read"}
+    assert bootstrap["concurrency"]["cancel-in-progress"] == "true"
+    assert "github.event.pull_request.number" in bootstrap["concurrency"]["group"]
     assert set(bootstrap["jobs"]) == {
         "bootstrap-quick",
         "bootstrap-backend",
@@ -286,7 +440,25 @@ def test_automatic_pr_entries_and_workflow_call_reuse() -> None:
         "in_progress",
         "completed",
     ]
-    assert "github.run_id" in workflows["pr-validation.yml"]["concurrency"]["group"]
+    publisher_concurrency = workflows["required-gate.yml"]["concurrency"]
+    assert "github.event.workflow_run.head_sha" in publisher_concurrency["group"]
+    assert publisher_concurrency["queue"] == "max"
+    assert publisher_concurrency["cancel-in-progress"] == "false"
+    active_group = workflows["pr-validation.yml"]["concurrency"]["group"]
+    assert "github.run_id" not in active_group
+    assert "'ignored'" in active_group and "'active'" in active_group
+    assert "github.event.label.name" in active_group
+    assert workflows["pr-validation.yml"]["concurrency"]["cancel-in-progress"] == "true"
+    for name, job in workflows["pr-validation.yml"]["jobs"].items():
+        if name != "compact" and job.get("needs") == "plan":
+            assert "governance_change" in job["if"]
+    assert set(ci_plan.ALL_JOBS) - {"policy"} <= set(workflows["pr-validation.yml"]["jobs"])
+    compact = workflows["pr-validation.yml"]["jobs"]["compact"]
+    assert "governance_change" not in compact["if"]
+    assert "compact" in workflows["pr-validation.yml"]["jobs"]["shadow"]["needs"]
+    assert "run_rc_gates" not in str(compact)
+    assert "./deploy/compact/start.sh" in str(compact)
+    assert "scripts/smoke_s32.py" in str(compact)
     assert "opened" in workflows["pr-validation.yml"]["on"]["pull_request"]["types"]
     assert "synchronize" in workflows["pr-validation.yml"]["on"]["pull_request"]["types"]
     for name in (

@@ -1,5 +1,11 @@
 # 开发效率优化第二阶段实施记录
 
+## 合并后状态（2026-09-27）
+
+第一、二、三阶段分别由 PR #112、#113、#114 合入 `main@0ad736efef03e46c2cfc7cb0e710a7dcd0dab319`。以下各节保留实施时的本机验证快照，不表示当前分支尚未合并。PR #114 的远程样本中，Compose 作业 16:25、Security 作业 3:53、Frontend 完整作业 16:10；历史参考分别为 30:04、21:17、16:24。两组并非同提交同缓存条件的 A/B 实验，不计算固定提速率。
+
+基础镜像发布、不可变 digest 默认切换和跨工作流同一应用镜像产物复用仍未完成；现有收益主要来自构建分层及 GHA 缓存。缺少已授权镜像仓库或发布权限时，继续使用可验证的源码目标默认值，不填写不存在的 digest。本次合并后审计修复另见第三阶段记录，其代码和远程门禁须以该修复 PR 的实际结果为准。
+
 ## 范围与基线
 
 本阶段从第一阶段提交 `ce21e7a74d69597d9c388904102012f265ac4876` 建立独立分支；第一阶段的定向测试入口保持不变。普通 Compose、Security 的触发条件和作业名保持不变，Compact RC 作业未调整。此次不改业务代码、数据库或发布审批。
@@ -54,8 +60,8 @@ Docker 与 k6 超时 fixture 改为 `exec sleep 5`，避免 shell 进程被终�
 
 由于另一工作区占用默认宿主端口，本机以临时 Compose override 建立独立项目 `flowtest-phase2`，给前后端分配随机本机端口，其他服务不暴露宿主端口；`up --no-build --wait` 的 15 个服务均健康。12 个由本仓库构建的运行容器 image ID 与已加载镜像相同，后端 `/api/v1/live` 与 `/api/v1/ready` 正常，前端返回 HTTP 200。Playwright 执行登录初始化及 1366×768 编辑器导航场景，2 passed（9.1 秒）。本次项目和卷在测试后清理，原有工作区未重启。该冒烟不替代 CI 中完整浏览器验收。
 
-尚未执行或无法宣称通过：CI linux/amd64 冷暖构建、GHA 缓存跨 runner 命中、Security 实际漏洞扫描、CI 完整 Compose/Playwright 验收、跨工作流同一镜像复用、基础镜像发布与 digest 清单。Security 与 Compose 仍分别构建当前 checkout 的应用镜像；若要跨工作流共享经扫描产物，需要第三阶段的门禁拓扑与可信产物传递设计。
+合并前尚未执行或无法宣称通过的项目包括：CI linux/amd64 冷暖构建、GHA 缓存跨 runner 命中、Security 实际漏洞扫描、CI 完整 Compose/Playwright 验收、跨工作流同一镜像复用、基础镜像发布与 digest 清单。其后 PR #114 的 Security 与 Compose 检查已提供实际远程样本，但缓存冷暖状态仍未知；跨工作流同一镜像产物复用和基础镜像发布仍未实施。
 
-`scripts/required_gate.py` 对 `.github/workflows/*` 变更要求受控 Bootstrap。此次两个工作流只改内部构建步骤，正常 PR 的 Required Gate 仍会因 CI 治理文件而阻断；不能用 `ci:light`、删除门禁或伪造检查绕过。需要项目维护者依既有 Bootstrap 流程纳入这两个工作流，并在适用的当前提交上重新运行必需检查。第一阶段提交也尚未进入 `main`，第二阶段分支依赖该提交；远程合并前应先处理这一依赖。
+合并前，`scripts/required_gate.py` 对 `.github/workflows/*` 变更要求受控 Bootstrap，且第二阶段依赖尚未合入的第一阶段。上述依赖已按顺序通过 PR #112、#113 交付；治理保护与唯一 `Required Gate` 已恢复。此段仅记录当时的交付前置条件，不应再次按“尚未合并”执行。
 
 回退方式：工作流回到各自原有 `docker build` / `docker compose up --build` 步骤；Dockerfile 四个参数维持源码目标默认值，任何未发布或缺平台的基础镜像都不会成为默认依赖。禁用持久缓存只影响构建耗时，不影响必需测试和扫描。
