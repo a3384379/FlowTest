@@ -90,7 +90,8 @@ BACKEND_CRITICAL = (
     "backend/app/repositories/",
     "backend/migrations/",
 )
-MIGRATION_PREFIXES = ("backend/migrations/", "backend/app/schemas/")
+MIGRATION_PREFIXES = ("backend/migrations/",)
+STANDALONE_SCHEMA_FILE = "backend/app/core/standalone_schema.py"
 BACKEND_IMAGE_INPUTS = frozenset({"backend/Dockerfile", "backend/.dockerignore"})
 FRONTEND_IMAGE_INPUTS = frozenset(
     {"frontend/Dockerfile", "frontend/.dockerignore", "frontend/nginx.conf"}
@@ -100,6 +101,8 @@ DEPLOY_IMAGE_INPUTS = frozenset(
         "compose.yaml",
         "mock-target/Dockerfile",
         "mock-target/.dockerignore",
+        "mock-target/pyproject.toml",
+        "mock-target/uv.lock",
         "deploy/postgres-walg/Dockerfile",
         "deploy/compact/compose.yaml",
         "deploy/compact/compose.build.yaml",
@@ -257,6 +260,10 @@ class Routing:
             self.tier = _tier_max(self.tier, "integration")
             self.domains.add("compose")
             self.reasons.add("关键后端运行或数据路径")
+        if path == STANDALONE_SCHEMA_FILE:
+            self.tier = _tier_max(self.tier, "integration")
+            self.domains.add("windows")
+            self.reasons.add("Standalone SQLite 初始化与现存安装升级需运行形态验证")
         if path.startswith(("backend/app/domain/execution", "backend/app/engine/")):
             self.domains.update(("frontend", "windows"))
             self.reasons.add("引擎结果需前端契约与 Standalone 验证")

@@ -99,11 +99,32 @@ def test_alembic_config_and_real_migration_root_are_routed() -> None:
         "backend/alembic.ini",
         "backend/migrations/env.py",
         "backend/migrations/versions/20260809_0001_access_control.py",
-        "backend/app/schemas/workflows.py",
+        "backend/app/models/workflows.py",
+        "backend/app/repositories/workflows.py",
     ):
         selected = plan([path])
         assert selected.tier == "integration"
         assert {"backend-full", "upgrade", "windows"} <= set(selected.required)
+
+
+@pytest.mark.parametrize("labels", [set(), {"ci:light"}])
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["backend/app/core/standalone_schema.py"],
+        ["backend/app/core/standalone_schema.py", "backend/tests/test_standalone_runtime.py"],
+    ],
+)
+def test_standalone_schema_requires_runtime_validation(paths: list[str], labels: set[str]) -> None:
+    selected = plan(paths, labels)
+    assert selected.tier_floor == "integration"
+    assert set(selected.required) == {"quick", "backend-full", "windows"}
+
+
+def test_api_schema_keeps_consumers_without_database_upgrade() -> None:
+    selected = plan(["backend/app/schemas/workflows.py"])
+    assert selected.tier_floor == "integration"
+    assert set(selected.required) == {"quick", "backend-full", "frontend-full", "compose"}
 
 
 @pytest.mark.parametrize(
@@ -119,6 +140,8 @@ def test_alembic_config_and_real_migration_root_are_routed() -> None:
         ("frontend/nginx.conf", {"frontend-full", "compose", "security"}),
         ("frontend/.dockerignore", {"frontend-full", "compose", "security"}),
         ("mock-target/Dockerfile", {"compose", "security"}),
+        ("mock-target/pyproject.toml", {"compose", "security"}),
+        ("mock-target/uv.lock", {"compose", "security"}),
         ("deploy/compact/images.env.example", {"compact", "compose", "security"}),
     ],
 )
@@ -174,6 +197,32 @@ def test_renamed_image_input_uses_both_directories() -> None:
     )
     selected = plan(paths)
     assert {"backend-full", "frontend-full", "compose", "security"} <= set(selected.required)
+
+
+@pytest.mark.parametrize("old_path", ["mock-target/pyproject.toml", "mock-target/uv.lock"])
+def test_renamed_mock_dependency_keeps_old_image_risk(old_path: str) -> None:
+    files = [
+        {"filename": "docs/mock-dependency.md", "previous_filename": old_path, "status": "renamed"}
+    ]
+    paths = ci_plan._paths_from_files(files)
+    selected = plan(
+        paths,
+        {"ci:light"},
+        ci_plan._removed_paths_from_files(files),
+    )
+    assert selected.tier_floor == "integration"
+    assert {"quick", "compose", "security"} <= set(selected.required)
+
+
+@pytest.mark.parametrize("path", ["mock-target/pyproject.toml", "mock-target/uv.lock"])
+def test_mock_dependency_requires_security_without_label(path: str) -> None:
+    selected = plan([path])
+    assert set(selected.required) == {"quick", "compose", "security"}
+
+
+def test_mock_application_source_does_not_require_image_scan() -> None:
+    selected = plan(["mock-target/app/main.py"])
+    assert set(selected.required) == {"quick", "compose"}
 
 
 def test_policy_entrypoints_use_isolated_python() -> None:
