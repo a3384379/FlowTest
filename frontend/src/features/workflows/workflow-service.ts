@@ -47,6 +47,13 @@ export async function listApis(
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
+export type NativeWorkflowDocument = {
+  format_version: 'flowtest-workflow-native-v1'
+  name: string
+  description: string
+  definition: WorkflowDefinition
+}
+
 export async function listArtifacts(projectId: string): Promise<Page<Artifact>> {
   const response = await apiClient.get<Page<Artifact>>(`/projects/${projectId}/files`, {
     params: { page: 1, page_size: 100 },
@@ -84,6 +91,27 @@ export async function createWorkflow(
       input.template,
     ),
   })
+  return response.data
+}
+
+export async function exportNativeWorkflow(
+  projectId: string,
+  workflowId: string,
+): Promise<NativeWorkflowDocument> {
+  const response = await apiClient.get<NativeWorkflowDocument>(
+    `/projects/${projectId}/workflows/${workflowId}/native-export`,
+  )
+  return response.data
+}
+
+export async function importNativeWorkflow(
+  projectId: string,
+  document: NativeWorkflowDocument,
+): Promise<Workflow> {
+  const response = await apiClient.post<Workflow>(
+    `/projects/${projectId}/workflows/native-import`,
+    document,
+  )
   return response.data
 }
 

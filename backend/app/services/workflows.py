@@ -567,6 +567,27 @@ class WorkflowService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await self._validate_publishable(project_id, uuid4(), definition)
 
+    async def import_native_definition(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        name: str,
+        description: str,
+        definition: WorkflowDefinition,
+    ) -> Workflow:
+        await self.validate_proposed_definition(
+            actor=actor, project_id=project_id, definition=definition
+        )
+        return await self.create(
+            actor=actor,
+            project_id=project_id,
+            name=name,
+            description=description,
+            folder_id=None,
+            definition=definition,
+        )
+
     async def get(self, *, actor: User, project_id: UUID, workflow_id: UUID) -> Workflow:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._get_workflow(project_id, workflow_id)

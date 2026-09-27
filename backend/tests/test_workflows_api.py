@@ -91,6 +91,127 @@ class MemoryObjectStorage:
         self.objects.pop(key, None)
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_native_workflow_export_import_preserves_inline_control_and_runs(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = {
+        "schema_version": "4.0",
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "group",
+                "type": "capability",
+                "name": "步骤组",
+                "position": {"x": 320, "y": 0},
+                "capability_id": "flow.control.group",
+                "capability_version": "1.0.0",
+                "configuration": {"body": {"kind": "inline", "region_id": "body"}},
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 640, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-group", "source": "start", "target": "group"},
+            {"id": "group-end", "source": "group", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "group",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "api",
+                        "type": "api",
+                        "name": "查询用户",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"api_definition_id": api_id, "api_version": 1},
+                    }
+                ],
+                "entry_node_id": "api",
+                "exit_node_ids": ["api"],
+            }
+        ],
+        "run_policy": {"request_budget": 5},
+    }
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "原生定义源", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    exported = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflows/{created.json()['id']}/native-export",
+        headers=headers,
+    )
+    assert exported.status_code == 200, exported.text
+    document = exported.json()
+    assert document["format_version"] == "flowtest-workflow-native-v1"
+    assert document["definition"] == created.json()["draft_definition"]
+
+    imported = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/native-import",
+        headers=headers,
+        json={**document, "name": "原生定义副本"},
+    )
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["draft_definition"] == document["definition"]
+    assert imported.json()["current_version"] is None
+    copied_id = imported.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{copied_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"id": 7})
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{copied_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    detail = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, started.json()["id"]
+    )
+    assert detail["execution"]["status"] == "passed"
+    assert len(target.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_native_workflow_import_rejects_unknown_fields_and_missing_project_refs(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, _environment_id, api_id = await _create_assets(workflow_client, headers)
+    document = {
+        "format_version": "flowtest-workflow-native-v1",
+        "name": "无效导入",
+        "definition": _workflow_definition(api_id),
+    }
+    path = f"/api/v1/projects/{project_id}/workflows/native-import"
+    unknown = await workflow_client.post(
+        path, headers=headers, json={**document, "ignored_field": True}
+    )
+    assert unknown.status_code == 422
+    missing = await workflow_client.post(
+        path,
+        headers=headers,
+        json={
+            **document,
+            "definition": _workflow_definition("00000000-0000-0000-0000-000000000099"),
+        },
+    )
+    assert missing.status_code == 422
+    assert missing.json()["error"]["code"] == "WORKFLOW_API_NOT_FOUND"
+    listed = await workflow_client.get(f"/api/v1/projects/{project_id}/workflows", headers=headers)
+    assert listed.json()["total"] == 0
+
+
 @pytest.mark.asyncio
 async def test_atomic_control_block_insert_rejects_stale_and_invalid_edits(
     workflow_client: AsyncClient,

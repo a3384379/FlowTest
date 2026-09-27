@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, Query, status
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.composition import build_workflow_service
 from app.domain.durable_execution import ExecutionCommandType
+from app.engine.contracts import WorkflowDefinition
 from app.engine.scheduler import WorkflowRunResult
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
 from app.repositories.workflows import WorkflowExecutionReport, WorkflowNodeExecutionReport
@@ -29,6 +30,7 @@ from app.schemas.workflows import (
     WorkflowExecutionDetailResponse,
     WorkflowExecutionResponse,
     WorkflowFailedItemRerunRequest,
+    WorkflowNativeDocument,
     WorkflowNodeExecutionResponse,
     WorkflowResponse,
     WorkflowVersionChangeResponse,
@@ -82,6 +84,27 @@ async def create_workflow(
     return WorkflowResponse.model_validate(workflow)
 
 
+@router.post(
+    "/workflows/native-import",
+    response_model=WorkflowResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_native_workflow(
+    project_id: UUID,
+    payload: WorkflowNativeDocument,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowResponse:
+    workflow = await WorkflowService(session).import_native_definition(
+        actor=current_user,
+        project_id=project_id,
+        name=payload.name,
+        description=payload.description,
+        definition=payload.definition,
+    )
+    return WorkflowResponse.model_validate(workflow)
+
+
 @router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
     project_id: UUID,
@@ -95,6 +118,26 @@ async def get_workflow(
         workflow_id=workflow_id,
     )
     return WorkflowResponse.model_validate(workflow)
+
+
+@router.get("/workflows/{workflow_id}/native-export", response_model=WorkflowNativeDocument)
+async def export_native_workflow(
+    project_id: UUID,
+    workflow_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> WorkflowNativeDocument:
+    workflow = await WorkflowService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        workflow_id=workflow_id,
+    )
+    return WorkflowNativeDocument(
+        format_version="flowtest-workflow-native-v1",
+        name=workflow.name,
+        description=workflow.description,
+        definition=WorkflowDefinition.model_validate(workflow.draft_definition),
+    )
 
 
 @router.patch("/workflows/{workflow_id}", response_model=WorkflowResponse)

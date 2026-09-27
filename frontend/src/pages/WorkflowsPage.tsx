@@ -46,6 +46,7 @@ import FlowSpecReviewDialog, {
   type FlowSpecReviewSeed,
 } from '../features/workflows/FlowSpecReviewDialog'
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
+import NativeWorkflowTransferDialog from '../features/workflows/NativeWorkflowTransferDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
 import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
@@ -67,6 +68,7 @@ export default function WorkflowsPage() {
   const [flowSpecOpen, setFlowSpecOpen] = useState(false)
   const [flowSpecSeed, setFlowSpecSeed] = useState<FlowSpecReviewSeed>()
   const [flowProposalOpen, setFlowProposalOpen] = useState(false)
+  const [nativeTransferOpen, setNativeTransferOpen] = useState(false)
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
@@ -113,6 +115,7 @@ export default function WorkflowsPage() {
           setFlowSpecOpen(true)
         }}
         onFlowProposal={() => setFlowProposalOpen(true)}
+        onNativeTransfer={() => setNativeTransferOpen(true)}
         onRepair={setRepairExecution}
       />
       <VersionDiffDialog state={state} />
@@ -122,6 +125,17 @@ export default function WorkflowsPage() {
         apis={state.apis.data?.items ?? []}
         onClose={() => setCreateOpen(false)}
         onCreate={create}
+      />
+      <NativeWorkflowTransferDialog
+        open={nativeTransferOpen}
+        projectId={state.projectId ?? ''}
+        workflowId={state.workflowId}
+        canEdit={state.canEdit}
+        onClose={() => setNativeTransferOpen(false)}
+        onImported={async (imported) => {
+          await state.workflows.refetch()
+          tabs.activateWorkflow(imported.id)
+        }}
       />
       <FlowDialogs
         state={state}
@@ -838,11 +852,13 @@ function WorkbenchMore({
   onCreate,
   onFlowSpec,
   onFlowProposal,
+  onNativeTransfer,
 }: {
   state: WorkflowState
   onCreate: () => void
   onFlowSpec: () => void
   onFlowProposal: () => void
+  onNativeTransfer: () => void
 }) {
   const disabled = !state.canEdit || !state.selectedWorkflow || Boolean(state.activeExecutionId)
   return (
@@ -904,6 +920,9 @@ function WorkbenchMore({
           </Button>
           <Button icon={<ImportOutlined />} disabled={!state.workflowId} onClick={onFlowSpec}>
             FlowSpec 导入 / 映射
+          </Button>
+          <Button icon={<ImportOutlined />} disabled={!state.projectId} onClick={onNativeTransfer}>
+            原生定义导入 / 导出
           </Button>
           <Button icon={<RobotOutlined />} disabled={!state.projectId} onClick={onFlowProposal}>
             MCP 流程提案
@@ -1069,6 +1088,7 @@ function WorkflowWorkspace({
   onCreate,
   onFlowSpec,
   onFlowProposal,
+  onNativeTransfer,
   onRepair,
 }: {
   state: WorkflowState
@@ -1076,6 +1096,7 @@ function WorkflowWorkspace({
   onCreate: () => void
   onFlowSpec: () => void
   onFlowProposal: () => void
+  onNativeTransfer: () => void
   onRepair: (execution: WorkflowExecution) => void
 }) {
   const userId = useAuthStore((store) => store.user?.id)
@@ -1105,6 +1126,7 @@ function WorkflowWorkspace({
                 onCreate={onCreate}
                 onFlowSpec={onFlowSpec}
                 onFlowProposal={onFlowProposal}
+                onNativeTransfer={onNativeTransfer}
               />
             </Space>
           }

@@ -24,6 +24,15 @@ class WorkflowCreate(BaseModel):
     definition: WorkflowDefinition
 
 
+class WorkflowNativeDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format_version: Literal["flowtest-workflow-native-v1"]
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    definition: WorkflowDefinition
+
+
 class WorkflowDraftUpdate(BaseModel):
     expected_revision: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=200)
