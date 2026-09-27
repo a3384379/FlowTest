@@ -606,7 +606,7 @@ async def test_fixed_docker_command_maps_failure_and_timeout(
     assert failed.value.code == "ENVIRONMENT_RUNTIME_FAILED"
     assert await environment_runner._run_docker("version", timeout_seconds=2, check=False) == ""
 
-    executable.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+    executable.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
     with pytest.raises(EnvironmentRuntimeError) as timed_out:
         await environment_runner._run_docker("version", timeout_seconds=1)
     assert timed_out.value.code == "ENVIRONMENT_RUNTIME_TIMEOUT"

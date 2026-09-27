@@ -164,12 +164,12 @@ describe('FlowProposalReviewDialog', () => {
     expect(within(dialog).getByRole('button', { name: '应用到工作流草稿' })).toBeDisabled()
     await browser.click(within(dialog).getByRole('button', { name: '接受' }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '应用到工作流草稿' })).not.toBeDisabled(),
+      expect(within(dialog).getByLabelText('应用到工作流草稿')).not.toBeDisabled(),
     )
-    await browser.click(screen.getByRole('button', { name: '应用到工作流草稿' }))
+    await browser.click(within(dialog).getByLabelText('应用到工作流草稿'))
     await waitFor(() => expect(applyCalls).toBe(1))
-    expect(screen.getByRole('button', { name: '应用到工作流草稿' })).toBeDisabled()
-    await browser.click(screen.getByRole('button', { name: '应用到工作流草稿' }))
+    expect(within(dialog).getByLabelText('应用到工作流草稿')).toBeDisabled()
+    await browser.click(within(dialog).getByLabelText('应用到工作流草稿'))
     expect(applyCalls).toBe(1)
     expect(appliedWorkflowId).toBe(workflow.id)
   })

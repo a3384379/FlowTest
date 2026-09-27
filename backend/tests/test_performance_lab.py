@@ -299,7 +299,7 @@ async def test_k6_process_runner_accepts_threshold_exit_and_rejects_missing_summ
         )
 
     sleepy = tmp_path / "sleepy-k6"
-    sleepy.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+    sleepy.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
     sleepy.chmod(0o700)
     with pytest.raises(K6ExecutionError, match="K6_TIMEOUT"):
         await K6ProcessRunner(str(sleepy)).run(
