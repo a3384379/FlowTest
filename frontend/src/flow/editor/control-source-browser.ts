@@ -85,6 +85,99 @@ export function conditionStateSources(
   ]
 }
 
+export function controlInputSources(
+  definition: WorkflowDefinition,
+  node: WorkflowNode,
+): SourceChoice[] {
+  const base = conditionStateSources(definition, node, 'initial').filter(
+    (choice) => choice.key !== 'state-before-start',
+  )
+  if (!['flow.control.foreach', 'flow.control.repeat'].includes(node.capability_id ?? '')) {
+    return base
+  }
+  const names = ['index', 'iteration', 'total']
+  if (node.capability_id === 'flow.control.foreach') names.push('item')
+  return [...base, ...names.map((name) => variableChoice('loop', name, `当前轮次 · ${name}`))]
+}
+
+export function regionInputSources(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion,
+): SourceChoice[] {
+  const parent = controlInputSources(definition, owner)
+  const configInputs = Object.keys(asRecord(owner.configuration?.inputs)).map((name) =>
+    variableChoice('input', name, `控制块输入 · ${name}`),
+  )
+  return [
+    ...parent.filter(
+      (choice) => !choice.key.startsWith('input:') && !choice.key.startsWith('loop:'),
+    ),
+    ...configInputs,
+    ...regionContextChoices(owner, region),
+  ]
+}
+
+export function regionOutputSources(
+  definition: WorkflowDefinition,
+  owner: WorkflowNode,
+  region: WorkflowRegion,
+): SourceChoice[] {
+  const inputs = { ...asRecord(owner.configuration?.inputs), ...region.inputs }
+  const scope = graphContext(definition, region)
+  const guaranteed = guaranteedBeforeAllExits(
+    scope.nodes,
+    scope.edges,
+    scope.entry,
+    region.exit_node_ids,
+  )
+  return [
+    ...baseVariableChoices(definition),
+    ...Object.keys(inputs).map((name) => variableChoice('input', name, `当前区域输入 · ${name}`)),
+    ...regionContextChoices(owner, region),
+    ...scope.nodes
+      .filter((candidate) => !['start', 'end'].includes(candidate.type))
+      .map((candidate) => outputChoice(candidate, guaranteed.has(candidate.id), 'update')),
+    ...outOfScopeChoices(definition.regions ?? [], region),
+  ]
+}
+
+function regionContextChoices(owner: WorkflowNode, region: WorkflowRegion): SourceChoice[] {
+  const kind = owner.capability_id
+  const loop = [
+    'flow.control.foreach',
+    'flow.control.repeat',
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+  ].includes(kind ?? '')
+  const conditionLoop = [
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+  ].includes(kind ?? '')
+  return [
+    ...(loop
+      ? [
+          ...['index', 'iteration'].map((name) =>
+            variableChoice('loop', name, `当前轮次 · ${name}`),
+          ),
+          ...(kind === 'flow.control.foreach'
+            ? [variableChoice('loop', 'item', '当前轮次 · item')]
+            : []),
+        ]
+      : []),
+    ...(conditionLoop
+      ? Object.keys(asRecord(owner.configuration?.state)).map((name) =>
+          variableChoice('state', name, `当前块状态 · ${name}`),
+        )
+      : []),
+    ...(kind === 'flow.control.try' && region.role.startsWith('catch:')
+      ? [...['code', 'message'].map((name) => variableChoice('error', name, `当前错误 · ${name}`))]
+      : []),
+  ]
+}
+
 function baseVariableChoices(definition: WorkflowDefinition): SourceChoice[] {
   return [
     ...(definition.runtime_inputs ?? []).map((input) =>

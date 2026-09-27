@@ -15,6 +15,7 @@ import { NodeEditContext } from './editor/node-edit-session'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
 import ControlConditionFields from './ControlConditionFields'
 import ControlConfigurationJson from './ControlConfigurationJson'
+import ControlSourceBindings from './ControlSourceBindings'
 import ControlSourcePicker from './ControlSourcePicker'
 import {
   appendRegionApi,
@@ -30,7 +31,10 @@ import {
 } from './editor/control-blocks'
 import {
   conditionStateSources,
+  controlInputSources,
   parseValueSource,
+  regionInputSources,
+  regionOutputSources,
   type SourceChoice,
   type ValueSource,
 } from './editor/control-source-browser'
@@ -88,19 +92,14 @@ export default function WorkflowControlFields({
         editable={configFieldsEditable}
         onChange={updateConfiguration}
       />
-      {definition && (
-        <ControlSourceShortcuts
-          node={node}
-          configuration={configuration}
-          choices={conditionStateSources(
-            definition,
-            node,
-            node.capability_id === 'flow.control.foreach' ? 'initial' : 'condition',
-          )}
-          editable={configFieldsEditable}
-          onChange={updateConfiguration}
-        />
-      )}
+      <ControlBoundaryBindings
+        node={node}
+        definition={definition}
+        configuration={configuration}
+        regions={regions}
+        editable={configFieldsEditable}
+        onChange={updateConfiguration}
+      />
       <ControlConfigurationJson
         nodeId={node.id}
         value={configuration}
@@ -154,6 +153,92 @@ export default function WorkflowControlFields({
         />
       ))}
     </section>
+  )
+}
+
+function supportsInputBindings(capabilityId?: string): boolean {
+  return [
+    'flow.control.foreach',
+    'flow.control.repeat',
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+    'flow.control.parallel',
+    'flow.control.try',
+    'flow.control.group',
+    'flow.control.if',
+    'flow.control.switch',
+  ].includes(capabilityId ?? '')
+}
+
+function supportsCollectBindings(capabilityId?: string): boolean {
+  return [
+    'flow.control.foreach',
+    'flow.control.repeat',
+    'flow.control.while',
+    'flow.control.do_while',
+    'flow.control.until',
+  ].includes(capabilityId ?? '')
+}
+
+function ControlBoundaryBindings({
+  node,
+  definition,
+  configuration,
+  regions,
+  editable,
+  onChange,
+}: {
+  node: WorkflowNode
+  definition?: WorkflowDefinition
+  configuration: Record<string, unknown>
+  regions: WorkflowRegion[]
+  editable: boolean
+  onChange: (configuration: Record<string, unknown>) => void
+}) {
+  if (!definition) return null
+  return (
+    <>
+      <ControlSourceShortcuts
+        node={node}
+        configuration={configuration}
+        choices={conditionStateSources(
+          definition,
+          node,
+          node.capability_id === 'flow.control.foreach' ? 'initial' : 'condition',
+        )}
+        editable={editable}
+        onChange={onChange}
+      />
+      {supportsInputBindings(node.capability_id) && (
+        <ControlSourceBindings
+          label="控制块输入"
+          values={asRecord(configuration.inputs) ?? {}}
+          choices={controlInputSources(definition, node)}
+          editable={editable}
+          onChange={(inputs) => onChange({ ...configuration, inputs })}
+        />
+      )}
+      {node.capability_id === 'flow.control.return' && (
+        <ControlSourceBindings
+          label="返回输出"
+          values={asRecord(configuration.outputs) ?? {}}
+          choices={controlInputSources(definition, node)}
+          editable={editable}
+          onChange={(outputs) => onChange({ ...configuration, outputs })}
+        />
+      )}
+      {supportsCollectBindings(node.capability_id) && regions[0] && (
+        <ControlSourceBindings
+          label="循环收集"
+          values={asRecord(configuration.collect) ?? {}}
+          choices={regionOutputSources(definition, node, regions[0])}
+          editable={editable}
+          blockedNames={Object.keys(regions[0].outputs)}
+          onChange={(collect) => onChange({ ...configuration, collect })}
+        />
+      )}
+    </>
   )
 }
 
@@ -988,6 +1073,13 @@ function RegionEditor({
         {region.nodes.length} 个步骤。区域节点和连线属于流程定义，单次执行的轮次不会复制画布节点。
       </Typography.Paragraph>
       <Button onClick={() => setCanvasOpen(true)}>打开区域画布</Button>
+      <RegionBoundaryBindings
+        region={region}
+        owner={owner}
+        definition={definition}
+        editable={editable && !dirty}
+        onUpdate={onUpdate}
+      />
       <WorkflowRegionCanvasModal
         open={canvasOpen}
         region={region}
@@ -1052,6 +1144,42 @@ function RegionEditor({
       </Space>
       {error && <Alert type="error" title={error} />}
     </div>
+  )
+}
+
+function RegionBoundaryBindings({
+  region,
+  owner,
+  definition,
+  editable,
+  onUpdate,
+}: {
+  region: WorkflowRegion
+  owner: WorkflowNode
+  definition?: WorkflowDefinition
+  editable: boolean
+  onUpdate: (region: WorkflowRegion) => void
+}) {
+  if (!definition) return null
+  return (
+    <>
+      <ControlSourceBindings
+        label={`${region.role} 区域输入`}
+        values={region.inputs}
+        choices={regionInputSources(definition, owner, region)}
+        editable={editable}
+        blockedNames={Object.keys(asRecord(owner.configuration?.inputs) ?? {})}
+        onChange={(inputs) => onUpdate({ ...region, inputs })}
+      />
+      <ControlSourceBindings
+        label={`${region.role} 区域输出`}
+        values={region.outputs}
+        choices={regionOutputSources(definition, owner, region)}
+        editable={editable}
+        blockedNames={Object.keys(asRecord(owner.configuration?.collect) ?? {})}
+        onChange={(outputs) => onUpdate({ ...region, outputs })}
+      />
+    </>
   )
 }
 

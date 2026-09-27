@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { workflowDefinition } from '../../test/fixtures'
 import type { WorkflowDefinition, WorkflowRegion } from '../../lib/api'
 import { addControlBlock } from './control-blocks'
-import { conditionStateSources } from './control-source-browser'
+import {
+  conditionStateSources,
+  controlInputSources,
+  regionInputSources,
+  regionOutputSources,
+} from './control-source-browser'
 
 function example(): WorkflowDefinition {
   const expanded = addControlBlock(workflowDefinition, 'while')
@@ -150,5 +155,58 @@ describe('condition loop source browser', () => {
       source: null,
       reason: '该节点可能尚未执行',
     })
+  })
+})
+
+describe('control boundary source browser', () => {
+  it('only offers parent sources and explicit control bindings to a region input', () => {
+    const definition = example()
+    const owner = {
+      ...definition.nodes.at(-1)!,
+      configuration: {
+        ...definition.nodes.at(-1)!.configuration,
+        inputs: { requestId: { kind: 'literal', value: 'id' } },
+      },
+    }
+    const region = definition.regions![0]
+    const choices = regionInputSources(definition, owner, region)
+    expect(choices.find((choice) => choice.key === 'input:requestId')?.source).toEqual({
+      kind: 'variable',
+      scope: 'input',
+      path: ['requestId'],
+    })
+    expect(choices.find((choice) => choice.key === 'state:page')?.source).toMatchObject({
+      scope: 'state',
+    })
+    expect(choices.find((choice) => choice.key === 'input:token')).toBeUndefined()
+    expect(
+      choices.find((choice) => choice.key === `output:${region.entry_node_id}`),
+    ).toBeUndefined()
+  })
+
+  it('offers guaranteed body output on export but explains skipped and outside nodes', () => {
+    const definition = example()
+    const owner = definition.nodes.at(-1)!
+    const region = definition.regions![0]
+    const choices = regionOutputSources(definition, owner, region)
+    expect(
+      choices.find((choice) => choice.key === `output:${region.entry_node_id}`)?.source,
+    ).toEqual({
+      kind: 'node_output',
+      node_id: region.entry_node_id,
+      path: [],
+    })
+    expect(choices.find((choice) => choice.key === 'input:token')?.source).toMatchObject({
+      scope: 'input',
+    })
+    expect(
+      choices.find((choice) => choice.key === 'outside:sibling-region:other-step'),
+    ).toMatchObject({
+      source: null,
+      reason: '节点不在当前可见作用域',
+    })
+    expect(
+      controlInputSources(definition, owner).find((choice) => choice.key === 'state:page'),
+    ).toBeUndefined()
   })
 })

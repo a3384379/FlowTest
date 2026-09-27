@@ -723,6 +723,7 @@ it('keeps an unfinished region JSON draft while visual actions are disabled', as
   render(
     <WorkflowControlFields
       node={definition.nodes.at(-1)!}
+      definition={definition}
       regions={[region]}
       editable
       onUpdate={vi.fn()}
@@ -733,6 +734,8 @@ it('keeps an unfinished region JSON draft while visual actions are disabled', as
   await userEvent.type(editor, 'x')
   expect(screen.getByRole('button', { name: '添加等待步骤' })).toBeDisabled()
   expect(screen.getByRole('button', { name: '添加退出循环' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '添加body 区域输入' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '添加body 区域输出' })).toBeDisabled()
   expect(onRegionUpdate).not.toHaveBeenCalled()
   expect(editor).toHaveValue(`${JSON.stringify(region, null, 2)}x`)
 })
@@ -936,6 +939,80 @@ it('binds the ForEach collection to a declared runtime input', async () => {
     kind: 'variable',
     scope: 'runtime',
     path: ['cases'],
+  })
+})
+
+it('adds a control input and binds it to a declared runtime source', async () => {
+  const definition = addControlBlock(workflowDefinition, 'foreach')
+  const node = definition.nodes.at(-1)!
+  const withRuntime = {
+    ...definition,
+    runtime_inputs: [
+      {
+        name: 'caseId',
+        value_type: 'string' as const,
+        required: true,
+        nullable: false,
+        description: '',
+      },
+    ],
+  }
+  const onUpdate = vi.fn()
+  const props = {
+    definition: withRuntime,
+    regions: withRuntime.regions!,
+    editable: true,
+    onUpdate,
+    onRegionUpdate: vi.fn(),
+  }
+  const view = render(<WorkflowControlFields node={node} {...props} />)
+  await userEvent.type(screen.getByRole('textbox', { name: '新增控制块输入名称' }), 'case')
+  await userEvent.click(screen.getByRole('button', { name: '添加控制块输入' }))
+  const added = onUpdate.mock.calls.at(-1)![0]
+  expect(added.configuration.inputs.case).toEqual({ kind: 'literal', value: null })
+  view.rerender(<WorkflowControlFields node={added} {...props} />)
+  await userEvent.click(screen.getByRole('combobox', { name: '控制块输入 case 来源浏览器' }))
+  await userEvent.click(screen.getByText('运行输入 · caseId'))
+  expect(onUpdate.mock.calls.at(-1)![0].configuration.inputs.case).toEqual({
+    kind: 'variable',
+    scope: 'runtime',
+    path: ['caseId'],
+  })
+})
+
+it('binds region inputs and exports without leaking a body node into input choices', async () => {
+  const definition = addControlBlock(workflowDefinition, 'foreach')
+  const node = definition.nodes.at(-1)!
+  const region = definition.regions![0]
+  const onRegionUpdate = vi.fn()
+  const props = {
+    node,
+    definition,
+    editable: true,
+    onUpdate: vi.fn(),
+    onRegionUpdate,
+  }
+  const view = render(<WorkflowControlFields {...props} regions={[region]} />)
+  await userEvent.type(screen.getByRole('textbox', { name: '新增body 区域输入名称' }), 'item')
+  await userEvent.click(screen.getByRole('button', { name: '添加body 区域输入' }))
+  const withInput = onRegionUpdate.mock.calls.at(-1)![0] as WorkflowRegion
+  view.rerender(<WorkflowControlFields {...props} regions={[withInput]} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'body 区域输入 item 来源浏览器' }))
+  expect(screen.queryByText(`节点输出 · ${region.nodes[0].name}`)).not.toBeInTheDocument()
+  await userEvent.click(screen.getByText('当前轮次 · item'))
+  const bound = onRegionUpdate.mock.calls.at(-1)![0] as WorkflowRegion
+  expect(bound.inputs.item).toEqual({ kind: 'variable', scope: 'loop', path: ['item'] })
+  view.rerender(<WorkflowControlFields {...props} regions={[bound]} />)
+  await userEvent.type(screen.getByRole('textbox', { name: '新增body 区域输出名称' }), 'result')
+  await userEvent.click(screen.getByRole('button', { name: '添加body 区域输出' }))
+  const withOutput = onRegionUpdate.mock.calls.at(-1)![0] as WorkflowRegion
+  view.rerender(<WorkflowControlFields {...props} regions={[withOutput]} />)
+  await userEvent.click(screen.getByRole('combobox', { name: 'body 区域输出 result 来源浏览器' }))
+  await userEvent.click(screen.getByText(`节点输出 · ${region.nodes[0].name}`))
+  expect(onRegionUpdate.mock.calls.at(-1)![0].outputs.result).toEqual({
+    kind: 'node_output',
+    node_id: region.nodes[0].id,
+    path: [],
   })
 })
 
@@ -1163,6 +1240,7 @@ it('protects an unfinished control configuration draft from a newer visual edit'
   const node = definition.nodes.at(-1)!
   const onUpdate = vi.fn()
   const props = {
+    definition,
     regions: definition.regions!,
     editable: true,
     onUpdate,
@@ -1172,6 +1250,7 @@ it('protects an unfinished control configuration draft from a newer visual edit'
   const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
   fireEvent.change(editor, { target: { value: `${JSON.stringify(node.configuration, null, 2)}x` } })
   expect(screen.getByRole('button', { name: '添加状态字段' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '添加控制块输入' })).toBeDisabled()
   const newer = {
     ...node,
     configuration: { ...node.configuration, state: { page: { kind: 'literal', value: 1 } } },
