@@ -15,7 +15,11 @@ export const WORKFLOW_TEMPLATES: { value: WorkflowTemplateKind; label: string; h
   { value: 'linear', label: '普通接口请求', help: '开始 → 接口 → 结束' },
   { value: 'foreach_three', label: '三组数据驱动', help: '示例集合 [1, 2, 3]，串行执行接口' },
   { value: 'repeat_three', label: '重复三次', help: '同一个接口严格执行三轮' },
-  { value: 'async_poll', label: '异步状态轮询', help: '最多查询三次，按 body.status 判断' },
+  {
+    value: 'async_poll',
+    label: '异步状态轮询',
+    help: '提交一次任务，再用只读 GET 接口按 body.status 轮询',
+  },
   { value: 'pagination', label: '分页查询', help: 'page 从 1 到 3，检查接口的 page 参数' },
   { value: 'cursor_pagination', label: '游标分页', help: '按响应的 nextCursor 和 hasNext 继续' },
   { value: 'parallel_compare', label: '并行请求对照', help: '并行请求两次，请先确认接口只读' },
@@ -37,36 +41,82 @@ const CONTROL_KIND: Record<
 export function buildWorkflowTemplate(
   base: WorkflowDefinition,
   kind: WorkflowTemplateKind = 'linear',
+  options: { submitApiId?: string; submitApiVersion?: number } = {},
 ): WorkflowDefinition {
   if (kind === 'linear') return base
-  if (kind === 'async_poll') return asyncPollingTemplate(base)
+  if (kind === 'async_poll') {
+    return asyncPollingTemplate(base, options.submitApiId, options.submitApiVersion)
+  }
   const expanded = replaceMainApiWithControl(base, CONTROL_KIND[kind], kind)
   if (kind !== 'pagination' && kind !== 'cursor_pagination') return expanded
   return paginationTemplate(expanded, kind)
 }
 
-function asyncPollingTemplate(base: WorkflowDefinition): WorkflowDefinition {
+function asyncPollingTemplate(
+  base: WorkflowDefinition,
+  submitApiId?: string,
+  submitApiVersion?: number,
+): WorkflowDefinition {
+  const poll = base.nodes.find((node) => node.id === 'api')
+  if (!submitApiId || !poll || poll.config.api_definition_id === submitApiId) {
+    throw new Error('异步轮询模板需要两个不同的提交与查询接口')
+  }
+  const submit: WorkflowNode = {
+    ...poll,
+    id: 'submit',
+    name: '提交任务一次',
+    position: { x: 280, y: 80 },
+    config: {
+      api_definition_id: submitApiId,
+      ...(submitApiVersion ? { api_version: submitApiVersion } : {}),
+      request_overrides: {},
+      max_retries: 0,
+    },
+  }
   return {
     ...base,
-    nodes: base.nodes.map((node) =>
-      node.id === 'api'
-        ? {
-            ...node,
-            config: {
-              ...node.config,
-              polling: {
-                expression: 'body.status',
-                operator: 'equals',
-                expected: 'success',
-                terminal_failure_values: ['failed'],
-                max_attempts: 3,
-                interval_seconds: 1,
-                timeout_seconds: 30,
+    nodes: [
+      base.nodes[0],
+      submit,
+      ...base.nodes.slice(1).map((node) =>
+        node.id === 'api'
+          ? {
+              ...node,
+              name: '查询任务状态',
+              position: { x: 560, y: 80 },
+              config: {
+                ...node.config,
+                polling: {
+                  expression: 'body.status',
+                  operator: 'equals',
+                  expected: 'SUCCESS',
+                  terminal_failure_values: ['FAILED'],
+                  max_attempts: 20,
+                  interval_seconds: 1,
+                  timeout_seconds: 30,
+                },
               },
-            },
-          }
-        : node,
-    ),
+            }
+          : { ...node, position: { x: 840, y: 80 } },
+      ),
+    ],
+    edges: [
+      { id: 'start-submit', source: 'start', target: 'submit', condition: null, mappings: [] },
+      {
+        id: 'submit-api',
+        source: 'submit',
+        target: 'api',
+        condition: null,
+        mappings: [
+          {
+            source: { node_id: 'submit', path: 'body.taskId' },
+            transform: { kind: 'identity', template: '{{value}}' },
+            target: { node_id: 'api', location: 'query', key: 'taskId' },
+          },
+        ],
+      },
+      { id: 'api-end', source: 'api', target: 'end', condition: null, mappings: [] },
+    ],
   }
 }
 

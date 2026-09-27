@@ -62,6 +62,7 @@ export type CreateWorkflowInput = {
   name: string
   description: string
   apiId: string
+  submitApiId?: string
   template?: WorkflowTemplateKind
 }
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
@@ -280,6 +281,8 @@ export function useWorkflows(initialWorkflowId?: string) {
       createWorkflow(requiredId(projectId), {
         ...input,
         apiVersion: apis.data?.items.find((api) => api.id === input.apiId)?.current_version,
+        submitApiVersion: apis.data?.items.find((api) => api.id === input.submitApiId)
+          ?.current_version,
       }),
   })
   const deleteMutation = useMutation({

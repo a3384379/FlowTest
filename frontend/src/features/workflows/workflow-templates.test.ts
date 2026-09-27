@@ -4,16 +4,20 @@ import { linearWorkflow } from './workflow-service'
 import { buildWorkflowTemplate, WORKFLOW_TEMPLATES } from './workflow-templates'
 
 const API_ID = '00000000-0000-0000-0000-000000000001'
+const SUBMIT_ID = '00000000-0000-0000-0000-000000000002'
 
 describe('workflow creation templates', () => {
   it.each(WORKFLOW_TEMPLATES)('builds $value as a connected draft', ({ value }) => {
-    const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), value)
+    const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), value, {
+      submitApiId: SUBMIT_ID,
+      submitApiVersion: 3,
+    })
     const mainIds = new Set(definition.nodes.map((node) => node.id))
     expect(
       definition.edges.every((edge) => mainIds.has(edge.source) && mainIds.has(edge.target)),
     ).toBe(true)
-    expect(definition.edges).toHaveLength(2)
-    expect(definition.nodes).toHaveLength(3)
+    expect(definition.edges).toHaveLength(value === 'async_poll' ? 3 : 2)
+    expect(definition.nodes).toHaveLength(value === 'async_poll' ? 4 : 3)
     expect(definition.nodes.find((node) => node.id === 'start')).toBeDefined()
     expect(definition.nodes.find((node) => node.id === 'end')).toBeDefined()
     if (value === 'linear' || value === 'async_poll') {
@@ -70,10 +74,31 @@ describe('workflow creation templates', () => {
   })
 
   it('keeps polling separate from failure retries', () => {
-    const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), 'async_poll')
+    const definition = buildWorkflowTemplate(linearWorkflow(API_ID, 2), 'async_poll', {
+      submitApiId: SUBMIT_ID,
+      submitApiVersion: 3,
+    })
+    const submit = definition.nodes.find((node) => node.id === 'submit')!
     const request = definition.nodes.find((node) => node.id === 'api')!
+    expect(submit.config).toMatchObject({
+      api_definition_id: SUBMIT_ID,
+      api_version: 3,
+      max_retries: 0,
+    })
     expect(request.config.max_retries).toBe(0)
-    expect(request.config.polling).toMatchObject({ max_attempts: 3, expected: 'success' })
+    expect(request.config.polling).toMatchObject({
+      max_attempts: 20,
+      expected: 'SUCCESS',
+      terminal_failure_values: ['FAILED'],
+    })
+    expect(definition.edges[1].mappings).toEqual([
+      {
+        source: { node_id: 'submit', path: 'body.taskId' },
+        transform: { kind: 'identity', template: '{{value}}' },
+        target: { node_id: 'api', location: 'query', key: 'taskId' },
+      },
+    ])
+    expect(() => buildWorkflowTemplate(linearWorkflow(API_ID, 2), 'async_poll')).toThrow()
   })
 
   it('passes each ForEach item to its API request', () => {

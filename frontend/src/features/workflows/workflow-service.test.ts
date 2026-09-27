@@ -29,6 +29,70 @@ import {
 } from './workflow-service'
 
 describe('workflow service', () => {
+  it('pins separate POST submit and GET poll APIs before creating a polling draft', async () => {
+    const submitId = '00000000-0000-4000-8000-000000000031'
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${submitId}`, () =>
+        HttpResponse.json({
+          definition: { ...apiDefinition, id: submitId },
+          version: { version: 2, method: 'POST' },
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version: { version: 1, method: 'GET' } }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/workflows`, async ({ request }) => {
+        const payload = (await request.json()) as { definition: ReturnType<typeof linearWorkflow> }
+        expect(payload.definition.nodes.map((node) => node.id)).toEqual([
+          'start',
+          'submit',
+          'api',
+          'end',
+        ])
+        expect(payload.definition.nodes[1].config.api_version).toBe(2)
+        expect(payload.definition.nodes[2].config.api_version).toBe(1)
+        expect(payload.definition.edges[1].mappings[0].source.path).toBe('body.taskId')
+        return HttpResponse.json(workflow, { status: 201 })
+      }),
+    )
+    await expect(
+      createWorkflow(project.id, {
+        name: '异步任务',
+        description: '',
+        apiId: apiDefinition.id,
+        submitApiId: submitId,
+        template: 'async_poll',
+      }),
+    ).resolves.toEqual(workflow)
+  })
+
+  it('rejects a write API as the polling target before creating a draft', async () => {
+    const submitId = '00000000-0000-4000-8000-000000000031'
+    let created = false
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${submitId}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version: { version: 2, method: 'POST' } }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version: { version: 1, method: 'POST' } }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/workflows`, () => {
+        created = true
+        return HttpResponse.json(workflow, { status: 201 })
+      }),
+    )
+    await expect(
+      createWorkflow(project.id, {
+        name: '异步任务',
+        description: '',
+        apiId: apiDefinition.id,
+        submitApiId: submitId,
+        template: 'async_poll',
+      }),
+    ).rejects.toThrow('状态轮询接口必须使用只读 GET 方法')
+    expect(created).toBe(false)
+  })
+
   it('maps workflow drafts, versions, and executions', async () => {
     server.use(
       http.get('/api/v1/projects', () =>

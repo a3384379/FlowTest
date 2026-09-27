@@ -1,5 +1,6 @@
 import {
   apiClient,
+  type ApiDetail,
   type ApiDefinition,
   type Artifact,
   type Environment,
@@ -17,6 +18,7 @@ import {
   type WorkflowVersionDiff,
 } from '../../lib/api'
 import { buildWorkflowTemplate, type WorkflowTemplateKind } from './workflow-templates'
+import { getApiDetail } from '../api-console/api-service'
 
 export async function listProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
@@ -80,18 +82,49 @@ export async function createWorkflow(
     description: string
     apiId: string
     apiVersion?: number
+    submitApiId?: string
+    submitApiVersion?: number
     template?: WorkflowTemplateKind
   },
 ): Promise<Workflow> {
+  const pollingApis =
+    input.template === 'async_poll' ? await validatePollingApis(projectId, input) : null
   const response = await apiClient.post<Workflow>(`/projects/${projectId}/workflows`, {
     name: input.name,
     description: input.description,
     definition: buildWorkflowTemplate(
-      linearWorkflow(input.apiId, input.apiVersion),
+      linearWorkflow(input.apiId, pollingApis?.poll.version.version ?? input.apiVersion),
       input.template,
+      pollingApis
+        ? {
+            submitApiId: pollingApis.submit.definition.id,
+            submitApiVersion: pollingApis.submit.version.version,
+          }
+        : {},
     ),
   })
   return response.data
+}
+
+async function validatePollingApis(
+  projectId: string,
+  input: {
+    apiId: string
+    apiVersion?: number
+    submitApiId?: string
+    submitApiVersion?: number
+  },
+): Promise<{ submit: ApiDetail; poll: ApiDetail }> {
+  if (!input.submitApiId || input.submitApiId === input.apiId) {
+    throw new Error('异步轮询模板需要分别选择提交接口和状态查询接口')
+  }
+  const [submit, poll] = await Promise.all([
+    getApiDetail(projectId, input.submitApiId, input.submitApiVersion),
+    getApiDetail(projectId, input.apiId, input.apiVersion),
+  ])
+  if (submit.version.method !== 'POST') throw new Error('提交任务接口必须使用 POST 方法')
+  if (poll.version.method !== 'GET') throw new Error('状态轮询接口必须使用只读 GET 方法')
+  return { submit, poll }
 }
 
 export async function exportNativeWorkflow(

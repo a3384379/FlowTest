@@ -7,7 +7,7 @@
 | 普通接口请求 | Start → API → End | 接口目标和版本。 |
 | 三组数据驱动 | 串行 ForEach，示例集合 `[1, 2, 3]`，体内 API 的 `item` 查询参数绑定 `loop.item` | 用业务数据替换示例集合；核对接口实际参数名及其他必需查询参数。 |
 | 重复三次 | Repeat=3，体内一个 API | 确认重复发送请求符合业务预期。 |
-| 异步状态轮询 | API 轮询 `body.status`，`success` 成功、`failed` 失败，最多三次，间隔一秒，总时限 30 秒 | 确认接口返回字段与终态值；轮询请求每次消耗请求预算。 |
+| 异步状态轮询 | POST 提交任务一次 → 从响应 `body.taskId` 绑定 GET 查询参数 `taskId` → 轮询 `body.status`，`SUCCESS` 成功、`FAILED` 立即失败，最多 20 次、间隔一秒、总时限 30 秒 | 分别选择已发布的提交和只读查询接口；核对任务 ID、状态字段和终态值。查询及其重试都消耗请求预算，提交节点默认不自动重试。 |
 | 分页查询 | While 状态 `page=1`，`page<4` 时执行，之后加一；API 查询参数 `page={{state.page}}` | 检查接口分页参数及其他必需查询参数；初始模板固定三页，不从响应自动读取游标。 |
 | 游标分页 | While 初始 `cursor=""`、`hasNext=true`；每轮从 API 响应 `body.nextCursor` 与 `body.hasNext` 更新状态，最多 100 轮、120 秒 | 确认响应字段、查询参数和首次空游标的含义；`hasNext` 必须是布尔值。 |
 | 并行请求对照 | 两个并行分支各调用同一固定版本 API | 先确认接口只读；按分支报告比较结果，模板本身不自动断言两个响应相同。 |
@@ -16,3 +16,5 @@
 模板中的示例条件与数据可在控制块配置和区域画布修改。编辑后使用现有发布校验；任何未配置完成的业务输入应保持草稿状态。
 
 游标分页可用 Mock Target 的 `GET /control/cursor-pages` 做本地验收：首次请求不传或传空 `cursor` 得到 `nextCursor="page-2"`、`hasNext=true`；第二次传 `cursor=page-2` 得到 `hasNext=false`，工作流应在两轮后停止。该端点只提供确定性测试响应，不代表业务接口的分页字段约定。
+
+异步轮询可在 Mock Target 中使用 `POST /control/tasks` 和 `GET /control/tasks/status` 验收。提交响应提供 `body.taskId`；首次查询为 `PROCESSING`，第二次为 `SUCCESS`，响应中的 `submitCount` 应始终为 1。查询接口可用 `outcome=failed` 验证立即失败，用 `outcome=pending` 验证轮询上限。Mock 目标通过本次请求会话的 Cookie 记录调用次数，不代表生产任务持久化方案。
