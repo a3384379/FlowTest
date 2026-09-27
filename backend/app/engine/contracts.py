@@ -1116,8 +1116,6 @@ class WorkflowDefinition(BaseModel):
                 current = parents[current]
                 if controls[current].capability_id == "flow.control.parallel":
                     raise ValueError(f"Control signal {node.id} cannot cross a parallel branch")
-                if node.capability_id == "flow.control.return":
-                    continue
                 if controls[current].capability_id in loops:
                     loop_config = parse_control_config(controls[current])
                     if (
@@ -1125,7 +1123,8 @@ class WorkflowDefinition(BaseModel):
                         and loop_config.policy.concurrency > 1
                     ):
                         raise ValueError(f"Control signal {node.id} requires a serial loop")
-                    break
+                    if node.capability_id != "flow.control.return":
+                        break
             else:
                 if node.capability_id == "flow.control.return":
                     continue
