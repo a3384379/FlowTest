@@ -1,49 +1,7 @@
 name: Compose Smoke Test
 
 on:
-  pull_request:
-    types: [labeled]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "mock-target/**"
-      - "compose.yaml"
-      - "deploy/compact/**"
-      - "deploy/compatibility/**"
-      - "deploy/s47/**"
-      - "scripts/smoke_s3.py"
-      - "scripts/smoke_s4.py"
-      - "scripts/smoke_s5.py"
-      - "scripts/smoke_s6.py"
-      - "scripts/smoke_s7.py"
-      - "scripts/smoke_s8.py"
-      - "scripts/smoke_s9.py"
-      - "scripts/smoke_s10.py"
-      - "scripts/smoke_s11.py"
-      - "scripts/smoke_s18.py"
-      - "scripts/smoke_s19.py"
-      - "scripts/smoke_s21.py"
-      - "scripts/smoke_s22.py"
-      - "scripts/smoke_s23.py"
-      - "scripts/smoke_s24.py"
-      - "scripts/smoke_s25.py"
-      - "scripts/smoke_s26.py"
-      - "scripts/smoke_s27.py"
-      - "scripts/smoke_s28.py"
-      - "scripts/smoke_s29.py"
-      - "scripts/smoke_s30.py"
-      - "scripts/smoke_s31.py"
-      - "scripts/smoke_s32.py"
-      - "scripts/smoke_s47.py"
-      - "scripts/verify_kafka_compat.py"
-      - "scripts/storage_transfer.py"
-      - "scripts/capacity_s11.py"
-      - "scripts/capacity_workflow.py"
-      - "scripts/capacity_s19.py"
-      - "scripts/capacity_s29.py"
-      - "scripts/backup.sh"
-      - "scripts/verify_restore.sh"
-      - ".github/workflows/compose-ci.yml"
+  workflow_call:
   workflow_dispatch:
     inputs:
       run_rc_gates:
@@ -51,10 +9,6 @@ on:
         required: true
         default: false
         type: boolean
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -219,7 +173,6 @@ jobs:
         run: docker compose --env-file deploy/compact/.env -f deploy/compact/compose.yaml down --volumes
 
   smoke:
-    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'ci:milestone' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -270,8 +223,63 @@ jobs:
           pnpm --dir frontend exec playwright install --with-deps chromium
       - name: Validate Compose configuration
         run: docker compose config --quiet
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Verify build checkout
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${BUILD_SHA}"
+      - name: Build Compose images
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        env:
+          FLOWTEST_CI_SHA: ${{ github.sha }}
+          FLOWTEST_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          source: .
+          files: |
+            ./compose.yaml
+            ./backend/docker-bake.ci.hcl
+          targets: ci-compose
+          load: true
+      - name: Verify loaded Compose image identities
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          for image in \
+            flowtest-backend flowtest-worker flowtest-worker-data flowtest-worker-ai flowtest-beat \
+            flowtest-frontend flowtest-worker-performance flowtest-worker-environment \
+            flowtest-environment-docker \
+            flowtest-mock-target flowtest-grpc-target flowtest-postgres-walg:17.11-v3.0.9-patched; do
+            test "$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "${BUILD_SHA}"
+            test "$(docker image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" = 'linux/amd64'
+            docker image inspect "${image}" --format '{{.RepoTags}} {{.Id}} {{.Os}}/{{.Architecture}}'
+          done
       - name: Start FlowTest stack
-        run: docker compose up -d --build --wait
+        run: docker compose up -d --no-build --wait
+      - name: Verify running containers use loaded images
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+
+          def docker(*arguments: str) -> str:
+              return subprocess.check_output(("docker", *arguments), text=True).strip()
+
+          compose = json.loads(docker("compose", "config", "--format", "json"))
+          services = compose["services"]
+          for service_name, service in services.items():
+              if "build" not in service:
+                  continue
+              container_id = docker("compose", "ps", "-q", service_name)
+              if not container_id:
+                  raise SystemExit(f"Missing running container: {service_name}")
+              image = service.get("image", f"{compose['name']}-{service_name}")
+              expected = docker("image", "inspect", image, "--format", "{{.Id}}")
+              actual = docker("inspect", container_id, "--format", "{{.Image}}")
+              if actual != expected:
+                  raise SystemExit(f"Image mismatch for {service_name}: {actual} != {expected}")
+              print(f"{service_name}: {actual}")
+          PY
       - name: Verify public endpoints
         run: |
           curl --fail --retry 10 --retry-delay 2 http://localhost:8000/api/v1/live

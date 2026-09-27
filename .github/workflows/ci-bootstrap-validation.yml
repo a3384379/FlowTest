@@ -1,0 +1,50 @@
+name: CI Bootstrap Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "Makefile"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "docs/ci-milestone.md"
+      - "docs/development-efficiency-phase3.md"
+      - "backend/tests/test_ci_plan.py"
+      - "backend/tests/test_required_gate.py"
+      - "backend/docker-bake.ci.hcl"
+      - "scripts/build_skill_evaluation.py"
+      - "scripts/ci_plan.py"
+      - "scripts/ci_summary.py"
+      - "scripts/required_gate.py"
+      - "scripts/run_targeted_tests.py"
+
+# Governance changes cannot pass the normal Required Gate. This separate,
+# PR-triggered full suite supplies eligible checks for maintainer Bootstrap.
+# It never publishes the Required Gate status or changes the branch ruleset.
+concurrency:
+  group: ci-bootstrap-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-quick:
+    uses: ./.github/workflows/quick-ci.yml
+  bootstrap-backend:
+    uses: ./.github/workflows/backend-ci.yml
+  bootstrap-frontend:
+    uses: ./.github/workflows/frontend-ci.yml
+  bootstrap-compose:
+    uses: ./.github/workflows/compose-ci.yml
+  bootstrap-security:
+    uses: ./.github/workflows/security-ci.yml
+  bootstrap-windows:
+    uses: ./.github/workflows/standalone-windows.yml
+  bootstrap-upgrade:
+    uses: ./.github/workflows/upgrade-ci.yml
+  bootstrap-skills:
+    uses: ./.github/workflows/skills-ci.yml

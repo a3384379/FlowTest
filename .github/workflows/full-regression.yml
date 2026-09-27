@@ -1,0 +1,29 @@
+name: Full Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-regression-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    uses: ./.github/workflows/backend-ci.yml
+  frontend:
+    uses: ./.github/workflows/frontend-ci.yml
+  compose:
+    uses: ./.github/workflows/compose-ci.yml
+  security:
+    uses: ./.github/workflows/security-ci.yml
+  windows:
+    uses: ./.github/workflows/standalone-windows.yml
+  upgrade:
+    uses: ./.github/workflows/upgrade-ci.yml
+  skills:
+    uses: ./.github/workflows/skills-ci.yml
