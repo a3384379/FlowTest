@@ -97,9 +97,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 COPY app ./app
-RUN uv sync --frozen --no-dev
+RUN uv sync --locked --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
