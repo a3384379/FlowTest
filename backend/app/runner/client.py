@@ -1,11 +1,14 @@
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import httpx
+from pydantic import JsonValue
 
 from app.engine.scheduler import NodeExecutionError
 from app.runner.results import RunnerExecutionResult
@@ -137,13 +140,53 @@ class RunnerControlPlaneClient:
         response.raise_for_status()
         return RunnerLeaseAckResponse.model_validate(response.json())
 
+    async def upload_output(
+        self, lease_id: UUID, fencing_token: int, execution_id: UUID, body: JsonValue
+    ) -> dict[str, JsonValue]:
+        response = await self._client.post(
+            f"/api/v1/runner-control/leases/{lease_id}/outputs/{execution_id}",
+            headers={**self._headers(), "Content-Type": "application/json"},
+            params={"fencing_token": fencing_token},
+            content=json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode(),
+            timeout=120,
+        )
+        response.raise_for_status()
+        reference = response.json()
+        if not isinstance(reference, dict):
+            raise ValueError("Runner output reference response is invalid")
+        return reference
+
+    async def download_output(
+        self, lease_id: UUID, fencing_token: int, execution_id: UUID, artifact_id: UUID
+    ) -> JsonValue:
+        response = await self._client.get(
+            f"/api/v1/runner-control/leases/{lease_id}/outputs/{execution_id}/{artifact_id}",
+            headers=self._headers(),
+            params={"fencing_token": fencing_token},
+            timeout=120,
+        )
+        response.raise_for_status()
+        return cast(JsonValue, response.json())
+
     async def complete(
-        self, lease_id: UUID, fencing_token: int, result: RunnerExecutionResult
+        self,
+        lease_id: UUID,
+        fencing_token: int,
+        result: RunnerExecutionResult | None = None,
+        *,
+        result_reference: dict[str, JsonValue] | None = None,
     ) -> RunnerLeaseAckResponse:
+        if (result is None) == (result_reference is None):
+            raise ValueError("Runner completion requires one result source")
+        body: dict[str, object] = {"fencing_token": fencing_token}
+        if result is not None:
+            body["result"] = _result_payload(result)
+        else:
+            body["result_reference"] = result_reference
         response = await self._client.post(
             f"/api/v1/runner-control/leases/{lease_id}/complete",
             headers=self._headers(),
-            json={"fencing_token": fencing_token, "result": _result_payload(result)},
+            json=body,
         )
         response.raise_for_status()
         return RunnerLeaseAckResponse.model_validate(response.json())

@@ -20,7 +20,12 @@ class RunnerPoolCreate(BaseModel):
     network_zone: str = Field(default="default", min_length=1, max_length=100)
     labels: list[str] = Field(default_factory=list, max_length=50)
     capabilities: list[str] = Field(
-        default_factory=lambda: ["flow.workflow", "flow.workflow.schema4"], max_length=100
+        default_factory=lambda: [
+            "flow.workflow",
+            "flow.workflow.schema4",
+            "flow.workflow.output-refs",
+        ],
+        max_length=100,
     )
     max_concurrency: int = Field(default=20, ge=1, le=500)
     lease_timeout_seconds: int = Field(default=30, ge=10, le=300)
@@ -133,6 +138,8 @@ class RunnerLeaseTaskResponse(BaseModel):
     allowed_hosts: list[str]
     allowed_private_cidrs: list[str]
     resume_checkpoints: dict[str, list[RunnerCheckpointResume]] = Field(default_factory=dict)
+    inline_body_limit_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
+    runner_result_limit_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
     reset_retry_budget: bool = False
     redaction_mode: Literal["off", "on"] = "off"
     redaction_policy_version: int = Field(default=1, ge=1)
@@ -225,7 +232,14 @@ class RunnerProgressRequest(RunnerRenewRequest):
 
 
 class RunnerCompleteRequest(RunnerRenewRequest):
-    result: RunnerExecutionResult
+    result: RunnerExecutionResult | None = None
+    result_reference: dict[str, JsonValue] | None = None
+
+    @model_validator(mode="after")
+    def require_one_result_source(self) -> RunnerCompleteRequest:
+        if (self.result is None) == (self.result_reference is None):
+            raise ValueError("Runner completion requires one result or result reference")
+        return self
 
 
 class RunnerFailRequest(RunnerRenewRequest):
@@ -324,7 +338,12 @@ class RunnerAgentConfiguration(BaseModel):
     architecture: str = Field(min_length=1, max_length=32)
     labels: list[str] = Field(default_factory=list, max_length=50)
     capabilities: list[str] = Field(
-        default_factory=lambda: ["flow.workflow", "flow.workflow.schema4"], max_length=100
+        default_factory=lambda: [
+            "flow.workflow",
+            "flow.workflow.schema4",
+            "flow.workflow.output-refs",
+        ],
+        max_length=100,
     )
     max_concurrency: int = Field(default=1, ge=1, le=500)
     poll_seconds: float = Field(default=1.0, ge=0.1, le=30)

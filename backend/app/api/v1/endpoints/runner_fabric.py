@@ -2,13 +2,13 @@ from collections.abc import Sequence
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.core.config import settings
 from app.core.errors import AppError
-from app.runner.results import RUNNER_EXECUTION_RESULT_ADAPTER
 from app.schemas.common import Page
 from app.schemas.runner_fabric import (
     RunnerAcquirePermitRequest,
@@ -279,6 +279,52 @@ async def record_runner_checkpoint(
     )
 
 
+@runner_router.post("/leases/{lease_id}/outputs/{execution_id}")
+async def upload_runner_output(
+    lease_id: UUID,
+    execution_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    fencing_token: int = Query(ge=0),
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, JsonValue]:
+    runner_token = _bearer_token(authorization)
+    service = _service(session)
+    await service.authorize_output_upload(
+        runner_token=runner_token,
+        lease_id=lease_id,
+        fencing_token=fencing_token,
+        execution_id=execution_id,
+    )
+    body = await _bounded_output_body(request)
+    return await service.upload_output(
+        runner_token=runner_token,
+        lease_id=lease_id,
+        fencing_token=fencing_token,
+        execution_id=execution_id,
+        body=body,
+    )
+
+
+@runner_router.get("/leases/{lease_id}/outputs/{execution_id}/{artifact_id}")
+async def download_runner_output(
+    lease_id: UUID,
+    execution_id: UUID,
+    artifact_id: UUID,
+    session: SessionDependency,
+    fencing_token: int = Query(ge=0),
+    authorization: Annotated[str | None, Header()] = None,
+) -> Response:
+    content = await _service(session).download_output(
+        runner_token=_bearer_token(authorization),
+        lease_id=lease_id,
+        fencing_token=fencing_token,
+        execution_id=execution_id,
+        artifact_id=artifact_id,
+    )
+    return Response(content, media_type="application/json")
+
+
 @runner_router.post("/leases/{lease_id}/complete", response_model=RunnerLeaseAckResponse)
 async def complete_runner_lease(
     lease_id: UUID,
@@ -293,6 +339,7 @@ async def complete_runner_lease(
         lease_id=lease_id,
         fencing_token=payload.fencing_token,
         result=payload.result,
+        result_reference=payload.result_reference,
     )
 
 
@@ -349,7 +396,7 @@ def _validate_result_size(request: Request, payload: RunnerCompleteRequest) -> N
             ) from error
         if declared_size > settings.runner_result_limit_bytes:
             raise _result_too_large()
-    encoded = RUNNER_EXECUTION_RESULT_ADAPTER.dump_json(payload.result)
+    encoded = payload.model_dump_json().encode()
     if len(encoded) > settings.runner_result_limit_bytes:
         raise _result_too_large()
 
@@ -387,3 +434,23 @@ def _checkpoint_too_large() -> AppError:
         status_code=413,
         details={"limit_bytes": settings.runner_result_limit_bytes},
     )
+
+
+async def _bounded_output_body(request: Request) -> JsonValue:
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > settings.artifact_limit_bytes:
+            raise AppError(
+                code="ARTIFACT_TOO_LARGE",
+                message="文件超过 50 MB 上限",
+                status_code=413,
+            )
+    try:
+        return TypeAdapter(JsonValue).validate_json(content)
+    except ValidationError as error:
+        raise AppError(
+            code="RUNNER_OUTPUT_INVALID",
+            message="Runner 输出必须是合法 JSON",
+            status_code=422,
+        ) from error

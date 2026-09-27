@@ -6,6 +6,7 @@ from typing import Protocol, TypeGuard, cast
 from pydantic import JsonValue
 
 REFERENCE_KEY = "__flowtest_workflow_output_ref__"
+OUTPUT_REFERENCE_CAPABILITY = "flow.workflow.output-refs"
 
 
 class WorkflowBodyStore(Protocol):

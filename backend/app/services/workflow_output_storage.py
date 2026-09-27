@@ -42,6 +42,14 @@ class WorkflowOutputStorage:
     async def restore(self, value: JsonValue) -> JsonValue:
         return await restore_response_bodies(value, store=self)
 
+    async def download(self, artifact_id: UUID) -> bytes:
+        loaded = await self._load_artifact(artifact_id)
+        if loaded.artifact.purpose != "workflow_output" or artifact_id != uuid5(
+            self._execution_id, loaded.artifact.sha256
+        ):
+            raise _invalid_reference()
+        return loaded.content
+
     async def store(self, body: JsonValue) -> dict[str, JsonValue]:
         content = _encode_body(body)
         artifact = await self._artifacts.store_workflow_output(

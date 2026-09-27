@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import httpx
 import pytest
@@ -18,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.requests import Request as StarletteRequest
 
 from app.api.dependencies import get_current_user
-from app.api.v1.endpoints.runner_fabric import _validate_result_size
+from app.api.v1.endpoints.runner_fabric import _bounded_output_body, _validate_result_size
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
@@ -27,6 +28,7 @@ from app.core.storage import ObjectStorage, StoredObject
 from app.domain.durable_execution import ExecutionCommandType
 from app.domain.network import OutboundNetworkPolicy
 from app.domain.runner_fabric import RunnerProfile, normalize_labels
+from app.domain.workflow_output_refs import REFERENCE_KEY
 from app.engine.contracts import NodeStatus, NodeType, WorkflowDefinition, WorkflowRunStatus
 from app.engine.results import NodeResult
 from app.engine.scheduler import (
@@ -52,7 +54,11 @@ from app.runner.agent import (
     configuration_from_environment,
 )
 from app.runner.client import RemoteOutboundAdmission, RunnerControlPlaneClient
-from app.runner.results import RunnerExecutionResult, RunnerWorkflowResult
+from app.runner.results import (
+    RunnerExecutionResult,
+    RunnerSingleExecutionResult,
+    RunnerWorkflowResult,
+)
 from app.runner.workflow import PreviewRuntimeBudgetExceeded, RemoteWorkflowExecutor
 from app.schemas.runner_fabric import (
     RunnerAgentConfiguration,
@@ -78,6 +84,7 @@ from app.services.execution_events import InProcessExecutionEventBus
 from app.services.outbound_limits import OutboundLimitPolicy, OutboundPermitDecision
 from app.services.runner_fabric import RunnerFabricService
 from app.services.workflow_coordinator import WorkflowRunCoordinator
+from app.services.workflow_output_storage import WorkflowOutputStorage
 from app.services.workflow_plan_codec import encode_execution_plan
 from app.services.workflow_snapshots import PreparedExecution
 from app.services.workflows import WorkflowBatchPlan, WorkflowRunPlan, WorkflowService
@@ -136,8 +143,15 @@ async def test_large_workflow_response_is_referenced_and_restored_for_runner(
         assert "padding" not in str(checkpoint.output)
         resumed = await RunnerFabricService(session, enabled=True)._resume_checkpoints(plan)
         record = resumed[str(execution.id)][0]
-        assert record.output == output
-        assert record.result is not None and record.result.output == output
+        assert record.output == checkpoint.output
+        assert record.result is not None and record.result.output == checkpoint.output
+        output_storage = WorkflowOutputStorage(
+            session,
+            project_id=project.id,
+            execution_id=execution.id,
+            created_by_id=actor.id,
+        )
+        assert await output_storage.restore(record.output) == output
         stored = await WorkflowService(session)._stored_run_result(
             execution,
             WorkflowRunResult(
@@ -168,8 +182,208 @@ async def test_large_workflow_response_is_referenced_and_restored_for_runner(
         await session.delete(artifacts[0])
         await session.commit()
         with pytest.raises(AppError) as unavailable:
-            await RunnerFabricService(session, enabled=True)._resume_checkpoints(plan)
+            await WorkflowOutputStorage(
+                session,
+                project_id=project.id,
+                execution_id=execution.id,
+                created_by_id=actor.id,
+            ).restore(record.output)
         assert unavailable.value.code == "WORKFLOW_OUTPUT_REFERENCE_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_runner_large_output_upload_checkpoint_download_and_completion(
+    fabric_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryObjectStorage()
+    monkeypatch.setattr("app.services.artifacts.object_storage", storage)
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        plan, execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "output-runner")
+        await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+        body = {"ticket": "from-remote", "padding": "x" * (5 * 1024 * 1024)}
+        reference = await service.upload_output(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            execution_id=execution.id,
+            body=body,
+        )
+        task = await session.get(RunnerTask, lease.task.task_id)
+        assert task is not None
+        assert "flow.workflow.output-refs" in task.required_capabilities
+        metadata = reference["__flowtest_workflow_output_ref__"]
+        assert isinstance(metadata, dict)
+        artifact_id = UUID(str(metadata["artifact_id"]))
+        downloaded = await service.download_output(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            execution_id=execution.id,
+            artifact_id=artifact_id,
+        )
+        assert json.loads(downloaded) == body
+        with pytest.raises(AppError) as other_execution:
+            await service.download_output(
+                runner_token=token,
+                lease_id=lease.lease_id,
+                fencing_token=lease.task.fencing_token,
+                execution_id=uuid4(),
+                artifact_id=artifact_id,
+            )
+        assert other_execution.value.code == "RUNNER_OUTPUT_EXECUTION_MISMATCH"
+
+        output = {
+            "status_code": 200,
+            "headers": {},
+            "body": reference,
+            "size_bytes": 5 * 1024 * 1024,
+        }
+        result = NodeResult.passed(output)
+        now = datetime.now(UTC)
+        await service.checkpoint(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            payload=RunnerCheckpointRequest(
+                execution_id=execution.id,
+                node_id="start",
+                node_type=NodeType.START,
+                name="Start",
+                status=NodeStatus.PASSED,
+                attempts=1,
+                output=output,
+                result=result,
+                started_at=now,
+                finished_at=now,
+                input_hash="0" * 64,
+                fencing_token=lease.task.fencing_token,
+            ),
+        )
+        checkpoint = (await DurableExecutionRepository(session).list_checkpoints(execution.id))[0]
+        assert checkpoint.output["body"] == reference
+        submitted = RunnerSingleExecutionResult(
+            execution_id=execution.id,
+            result=RunnerWorkflowResult.from_domain(
+                WorkflowRunResult(
+                    status=WorkflowRunStatus.PASSED,
+                    records=(
+                        NodeRunRecord(
+                            node_id="start",
+                            node_type=NodeType.START,
+                            name="Start",
+                            status=NodeStatus.PASSED,
+                            attempts=1,
+                            output=output,
+                            result=result,
+                            error_code=None,
+                            error_message=None,
+                            started_at=now,
+                            completed_at=now,
+                        ),
+                    ),
+                    context={"outputs": {"start": output}},
+                )
+            ),
+        )
+        result_reference = await service.upload_output(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            execution_id=execution.id,
+            body=submitted.model_dump(mode="json"),
+        )
+        await service.complete(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            fencing_token=lease.task.fencing_token,
+            result=None,
+            result_reference=result_reference,
+        )
+        saved = (await session.scalars(select(WorkflowNodeExecution))).all()
+        assert saved[0].output["body"] == reference
+        assert len((await session.scalars(select(Artifact))).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_runner_output_http_routes_enforce_lease_and_fence(
+    fabric_api_context: "FabricApiContext", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.services.artifacts.object_storage", MemoryObjectStorage())
+    async with fabric_api_context.sessions() as session:
+        actor = await session.get(User, fabric_api_context.actor.id)
+        project = await session.scalar(select(Project))
+        assert actor is not None and project is not None
+        plan, execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "route-output-runner")
+        await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+
+    root = f"/api/v1/runner-control/leases/{lease.lease_id}/outputs/{execution.id}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    params = {"fencing_token": lease.task.fencing_token}
+    body = {"ticket": "http-route", "padding": "x" * (3 * 1024 * 1024)}
+    uploaded = await fabric_api_context.client.post(
+        root, params=params, headers=headers, content=json.dumps(body)
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    metadata = uploaded.json()["__flowtest_workflow_output_ref__"]
+    artifact_id = metadata["artifact_id"]
+    downloaded = await fabric_api_context.client.get(
+        f"{root}/{artifact_id}", params=params, headers=headers
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.json() == body
+    async with fabric_api_context.sessions() as session:
+        artifact = await session.get(Artifact, UUID(artifact_id))
+        assert artifact is not None
+        await session.delete(artifact)
+        await session.commit()
+    expired = await fabric_api_context.client.get(
+        f"{root}/{artifact_id}", params=params, headers=headers
+    )
+    assert expired.status_code == 410
+    assert expired.json()["error"]["code"] == "WORKFLOW_OUTPUT_REFERENCE_UNAVAILABLE"
+    fenced = await fabric_api_context.client.get(
+        f"{root}/{artifact_id}",
+        params={"fencing_token": lease.task.fencing_token + 1},
+        headers=headers,
+    )
+    assert fenced.status_code == 409
+    assert fenced.json()["error"]["trace_id"]
+    unauthorized = await fabric_api_context.client.get(f"{root}/{artifact_id}", params=params)
+    assert unauthorized.status_code == 401
+    completed_result = RunnerSingleExecutionResult(
+        execution_id=execution.id,
+        result=RunnerWorkflowResult(
+            status=WorkflowRunStatus.PASSED,
+            records=(),
+            context={},
+        ),
+    )
+    uploaded_result = await fabric_api_context.client.post(
+        root,
+        params=params,
+        headers=headers,
+        content=completed_result.model_dump_json(),
+    )
+    assert uploaded_result.status_code == 200, uploaded_result.text
+    completed = await fabric_api_context.client.post(
+        f"/api/v1/runner-control/leases/{lease.lease_id}/complete",
+        headers=headers,
+        json={
+            "fencing_token": lease.task.fencing_token,
+            "result_reference": uploaded_result.json(),
+        },
+    )
+    assert completed.status_code == 200, completed.text
 
 
 def test_pool_advisory_lock_key_is_stable_and_signed() -> None:
@@ -177,6 +391,29 @@ def test_pool_advisory_lock_key_is_stable_and_signed() -> None:
 
     assert _advisory_lock_key(identifier, 0) == -1
     assert _advisory_lock_key(identifier, 1) != _advisory_lock_key(identifier, 2)
+
+
+@pytest.mark.asyncio
+async def test_runner_output_upload_rejects_invalid_or_oversized_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def request_with_body(body: bytes) -> StarletteRequest:
+        async def receive() -> dict[str, object]:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        return StarletteRequest(
+            {"type": "http", "method": "POST", "path": "/", "headers": []},
+            receive=receive,
+        )
+
+    assert await _bounded_output_body(request_with_body(b'{"ok":true}')) == {"ok": True}
+    with pytest.raises(AppError) as invalid:
+        await _bounded_output_body(request_with_body(b"{invalid"))
+    assert invalid.value.code == "RUNNER_OUTPUT_INVALID"
+    monkeypatch.setattr(settings, "artifact_limit_bytes", 4)
+    with pytest.raises(AppError) as oversized:
+        await _bounded_output_body(request_with_body(b'{"ok":true}'))
+    assert oversized.value.code == "ARTIFACT_TOO_LARGE"
 
 
 def test_runner_result_preserves_nested_unknown_outcome() -> None:
@@ -1544,6 +1781,91 @@ async def test_runner_agent_honors_checkpoint_cancel_and_fenced_complete() -> No
         _agent_configuration(runner_token="ftrun_agent-token"), control_plane=fenced
     )._execute(lease)
     assert fenced.failed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rejection_status", "expected_code"),
+    [
+        (410, "WORKFLOW_OUTPUT_REFERENCE_UNAVAILABLE"),
+        (413, "RUNNER_OUTPUT_TOO_LARGE"),
+    ],
+)
+async def test_runner_agent_fails_without_retry_when_output_transfer_rejected(
+    rejection_status: int, expected_code: str
+) -> None:
+    plan = _plan_fixture()
+    lease = _lease_fixture(plan)
+    body = {"ticket": "expired"}
+    content = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+    digest = hashlib.sha256(content).hexdigest()
+    reference = {
+        REFERENCE_KEY: {
+            "artifact_id": str(uuid5(plan.execution_id, digest)),
+            "execution_id": str(plan.execution_id),
+            "sha256": digest,
+            "size_bytes": len(content),
+        }
+    }
+    output = {"status_code": 200, "headers": {}, "body": reference, "size_bytes": len(content)}
+    now = datetime.now(UTC)
+    checkpoint = RunnerCheckpointResume(
+        node_id="start",
+        node_type=NodeType.START,
+        name="Start",
+        status=NodeStatus.PASSED,
+        attempts=1,
+        output=output,
+        result=NodeResult.passed(output),
+        started_at=now,
+        completed_at=now,
+        input_hash="0" * 64,
+    )
+    lease = lease.model_copy(
+        update={
+            "task": lease.task.model_copy(
+                update={"resume_checkpoints": {str(plan.execution_id): [checkpoint]}}
+            )
+        }
+    )
+
+    class RejectedOutput(FakeControlPlane):
+        reported: tuple[str, bool] | None = None
+
+        async def download_output(
+            self, _lease_id: UUID, _fencing_token: int, _execution_id: UUID, _artifact_id: UUID
+        ) -> object:
+            request = Request("GET", "http://control/outputs/rejected")
+            raise httpx.HTTPStatusError(
+                "rejected",
+                request=request,
+                response=Response(rejection_status, request=request),
+            )
+
+        async def fail(
+            self,
+            lease_id: UUID,
+            fencing_token: int,
+            *,
+            error_code: str,
+            error_message: str,
+            retryable: bool,
+        ) -> None:
+            self.reported = (error_code, retryable)
+            await super().fail(
+                lease_id,
+                fencing_token,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=retryable,
+            )
+
+    control = RejectedOutput(leases=[])
+    await RunnerAgent(
+        _agent_configuration(runner_token="ftrun_agent-token"), control_plane=control
+    )._execute(lease)
+    assert control.reported == (expected_code, False)
+    assert control.failed == [lease.lease_id]
 
 
 def test_runner_checkpoint_and_token_guards(tmp_path: Path) -> None:

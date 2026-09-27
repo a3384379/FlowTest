@@ -1503,9 +1503,8 @@ class WorkflowService:
             execution = await self.load_execution_for_run(plan.execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                stored_result = await self._stored_run_result(
-                    execution, submitted.result.to_domain()
-                )
+                restored = await self._restored_run_result(execution, submitted.result.to_domain())
+                stored_result = await self._stored_run_result(execution, restored)
                 nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
@@ -1545,9 +1544,10 @@ class WorkflowService:
             execution = await self.load_execution_for_run(execution_id)
             token = set_redaction_policy(persisted_redaction_policy(execution))
             try:
-                stored_result = await self._stored_run_result(
+                restored = await self._restored_run_result(
                     execution, received[execution_id].result.to_domain()
                 )
+                stored_result = await self._stored_run_result(execution, restored)
                 nodes = self._node_models(execution.id, stored_result)
                 await self._workflows.replace_node_executions(execution.id, nodes)
                 self._stage_run_result(
@@ -1594,6 +1594,28 @@ class WorkflowService:
             records=tuple(records),
             context=cast(dict[str, JsonValue], context),
         )
+
+    async def _restored_run_result(
+        self, execution: WorkflowExecution, result: WorkflowRunResult
+    ) -> WorkflowRunResult:
+        storage = WorkflowOutputStorage(
+            self._session,
+            project_id=execution.project_id,
+            execution_id=execution.id,
+            created_by_id=execution.triggered_by_id,
+        )
+        records: list[NodeRunRecord] = []
+        for record in result.records:
+            restored_result = await storage.restore(record.result.model_dump(mode="json"))
+            records.append(
+                replace(
+                    record,
+                    output=await storage.restore(record.output),
+                    result=NodeResult.model_validate(restored_result),
+                )
+            )
+        context = await storage.restore(cast(JsonValue, result.context))
+        return replace(result, records=tuple(records), context=cast(dict[str, JsonValue], context))
 
     def _stage_run_result(
         self,

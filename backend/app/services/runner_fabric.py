@@ -3,7 +3,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,6 +19,7 @@ from app.domain.runner_fabric import (
     identity_fingerprint,
     select_runner_type,
 )
+from app.domain.workflow_output_refs import OUTPUT_REFERENCE_CAPABILITY, REFERENCE_KEY
 from app.engine.capabilities import builtin_capability_registry, legacy_node_adapter
 from app.engine.results import NodeResult
 from app.models.access import User
@@ -29,8 +30,9 @@ from app.models.runner_fabric import (
     RunnerRegistrationToken,
     RunnerTask,
 )
+from app.models.workflows import WorkflowExecution
 from app.repositories.runner_fabric import RunnerFabricRepository
-from app.runner.results import RunnerExecutionResult
+from app.runner.results import RUNNER_EXECUTION_RESULT_ADAPTER, RunnerExecutionResult
 from app.schemas.runner_fabric import (
     RunnerAcquirePermitResponse,
     RunnerCheckpointRequest,
@@ -56,7 +58,12 @@ from app.services.outbound_limits import OutboundLimitPolicy, project_outbound_l
 from app.services.projects import ProjectService
 from app.services.workflow_output_storage import WorkflowOutputStorage
 from app.services.workflow_plan_codec import encode_execution_plan
-from app.services.workflows import WorkflowBatchPlan, WorkflowExecutionPlan, WorkflowService
+from app.services.workflows import (
+    WorkflowBatchPlan,
+    WorkflowExecutionPlan,
+    WorkflowRunPlan,
+    WorkflowService,
+)
 
 REGISTRATION_TOKEN_PREFIX = "ftrreg_"  # noqa: S105
 RUNNER_TOKEN_PREFIX = "ftrun_"  # noqa: S105
@@ -421,6 +428,8 @@ class RunnerFabricService:
                 allowed_hosts=list(policy.allowed_hosts),
                 allowed_private_cidrs=list(policy.allowed_private_cidrs),
                 resume_checkpoints=resume_checkpoints,
+                inline_body_limit_bytes=settings.inline_body_limit_bytes,
+                runner_result_limit_bytes=settings.runner_result_limit_bytes,
                 reset_retry_budget=reset_retry_budget,
                 redaction_mode=execution.redaction_mode,
                 redaction_policy_version=execution.redaction_policy_version,
@@ -533,6 +542,26 @@ class RunnerFabricService:
                 message="Checkpoint 不属于当前 Runner 执行",
                 status_code=409,
             )
+        output_storage = WorkflowOutputStorage(
+            self._session,
+            project_id=task.project_id,
+            execution_id=payload.execution_id,
+            created_by_id=plan.actor_id,
+        )
+        restored_result = (
+            None
+            if payload.result is None
+            else NodeResult.model_validate(
+                await output_storage.restore(payload.result.model_dump(mode="json"))
+            )
+        )
+        payload = payload.model_copy(
+            update={
+                "output": await output_storage.restore(payload.output),
+                "result": restored_result,
+                "extracted_variables": await output_storage.restore(payload.extracted_variables),
+            }
+        )
         await DurableExecutionService(self._session).record_checkpoint(
             project_id=task.project_id,
             lease_id=lease.id,
@@ -550,13 +579,105 @@ class RunnerFabricService:
             force_cancel_requested=force_cancel_requested,
         )
 
+    async def upload_output(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        fencing_token: int,
+        execution_id: UUID,
+        body: JsonValue,
+    ) -> dict[str, JsonValue]:
+        task, plan = await self._output_upload_context(
+            runner_token, lease_id, fencing_token, execution_id
+        )
+        reference = await WorkflowOutputStorage(
+            self._session,
+            project_id=task.project_id,
+            execution_id=execution_id,
+            created_by_id=plan.actor_id,
+        ).store(body)
+        task.required_capabilities = sorted(
+            set(task.required_capabilities) | {OUTPUT_REFERENCE_CAPABILITY}
+        )
+        await self._session.commit()
+        return reference
+
+    async def authorize_output_upload(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        fencing_token: int,
+        execution_id: UUID,
+    ) -> None:
+        await self._output_upload_context(runner_token, lease_id, fencing_token, execution_id)
+        await self._session.commit()
+
+    async def _output_upload_context(
+        self, runner_token: str, lease_id: UUID, fencing_token: int, execution_id: UUID
+    ) -> tuple[RunnerTask, WorkflowExecutionPlan]:
+        _runner, _lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=fencing_token,
+            now=datetime.now(UTC),
+        )
+        plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
+        if execution_id not in _plan_execution_ids(plan) | {plan.execution_id}:
+            raise AppError(
+                code="RUNNER_OUTPUT_EXECUTION_MISMATCH",
+                message="输出不属于当前 Runner 执行",
+                status_code=409,
+            )
+        return task, plan
+
+    async def download_output(
+        self,
+        *,
+        runner_token: str,
+        lease_id: UUID,
+        fencing_token: int,
+        execution_id: UUID,
+        artifact_id: UUID,
+    ) -> bytes:
+        _runner, _lease, task = await self._active_lease(
+            runner_token=runner_token,
+            lease_id=lease_id,
+            fencing_token=fencing_token,
+            now=datetime.now(UTC),
+        )
+        plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
+        allowed_ids = await self._output_execution_ids(plan)
+        if execution_id not in allowed_ids:
+            raise AppError(
+                code="RUNNER_OUTPUT_EXECUTION_MISMATCH",
+                message="输出不属于当前 Runner 执行",
+                status_code=409,
+            )
+        return await WorkflowOutputStorage(
+            self._session,
+            project_id=task.project_id,
+            execution_id=execution_id,
+            created_by_id=plan.actor_id,
+        ).download(artifact_id)
+
+    async def _output_execution_ids(self, plan: WorkflowExecutionPlan) -> set[UUID]:
+        allowed = _plan_execution_ids(plan)
+        for execution_id in tuple(allowed):
+            execution = await self._session.get(WorkflowExecution, execution_id)
+            if execution is not None and execution.derived_from_execution_id is not None:
+                allowed.add(execution.derived_from_execution_id)
+        return allowed
+
     async def complete(
         self,
         *,
         runner_token: str,
         lease_id: UUID,
         fencing_token: int,
-        result: RunnerExecutionResult,
+        result: RunnerExecutionResult | None,
+        result_reference: dict[str, JsonValue] | None = None,
     ) -> RunnerLeaseAckResponse:
         now = datetime.now(UTC)
         runner = await self._authenticate_locked_runner(runner_token)
@@ -569,7 +690,8 @@ class RunnerFabricService:
             return RunnerLeaseAckResponse(task_status=task.status)
         self._validate_active_lease(lease, task, runner.id, fencing_token, now)
         plan = await WorkflowService(self._session).load_execution_plan(task.execution_id)
-        await WorkflowService(self._session).stage_remote_result(plan=plan, submitted=result)
+        submitted = result or await self._load_result_reference(task, plan, result_reference)
+        await WorkflowService(self._session).stage_remote_result(plan=plan, submitted=submitted)
         lease.status = "completed"
         lease.completed_at = now
         task.status = "completed"
@@ -593,6 +715,40 @@ class RunnerFabricService:
             execution_status=task.status,
         )
         return RunnerLeaseAckResponse(task_status=task.status)
+
+    async def _load_result_reference(
+        self,
+        task: RunnerTask,
+        plan: WorkflowExecutionPlan,
+        reference: dict[str, JsonValue] | None,
+    ) -> RunnerExecutionResult:
+        if reference is None:
+            raise AppError(
+                code="RUNNER_RESULT_REFERENCE_INVALID",
+                message="Runner 结果引用无效",
+                status_code=409,
+            )
+        metadata = reference.get(REFERENCE_KEY)
+        if not isinstance(metadata, dict) or metadata.get("execution_id") != str(task.execution_id):
+            raise AppError(
+                code="RUNNER_RESULT_REFERENCE_INVALID",
+                message="Runner 结果引用无效",
+                status_code=409,
+            )
+        value = await WorkflowOutputStorage(
+            self._session,
+            project_id=task.project_id,
+            execution_id=task.execution_id,
+            created_by_id=plan.actor_id,
+        ).load(reference)
+        try:
+            return RUNNER_EXECUTION_RESULT_ADAPTER.validate_python(value)
+        except ValidationError as error:
+            raise AppError(
+                code="RUNNER_RESULT_REFERENCE_INVALID",
+                message="Runner 结果引用内容无效",
+                status_code=409,
+            ) from error
 
     async def fail(
         self, *, runner_token: str, lease_id: UUID, payload: RunnerFailRequest
@@ -929,43 +1085,13 @@ class RunnerFabricService:
     async def _resume_checkpoints(
         self, plan: WorkflowExecutionPlan
     ) -> dict[str, list[RunnerCheckpointResume]]:
-        execution_ids = (
-            [child.execution_id for child in plan.children]
-            if isinstance(plan, WorkflowBatchPlan)
-            else [plan.execution_id]
+        checkpoints = await DurableExecutionService(self._session).checkpoint_history(
+            list(_plan_execution_ids(plan))
         )
-        checkpoints = await DurableExecutionService(self._session).checkpoint_history(execution_ids)
-        restored: dict[str, list[RunnerCheckpointResume]] = {}
-        for execution_id, items in checkpoints.items():
-            storage = WorkflowOutputStorage(
-                self._session,
-                project_id=plan.project_id,
-                execution_id=execution_id,
-                created_by_id=plan.actor_id,
-            )
-            records: list[RunnerCheckpointResume] = []
-            for item in items:
-                record = checkpoint_to_runner_resume(item)
-                result = (
-                    None
-                    if record.result is None
-                    else await storage.restore(record.result.model_dump(mode="json"))
-                )
-                records.append(
-                    record.model_copy(
-                        update={
-                            "output": await storage.restore(record.output),
-                            "result": (
-                                None if result is None else NodeResult.model_validate(result)
-                            ),
-                            "extracted_variables": await storage.restore(
-                                record.extracted_variables
-                            ),
-                        }
-                    )
-                )
-            restored[str(execution_id)] = records
-        return restored
+        return {
+            str(execution_id): [checkpoint_to_runner_resume(item) for item in items]
+            for execution_id, items in checkpoints.items()
+        }
 
     async def _authenticate_runner(self, raw_token: str) -> Runner:
         self._require_enabled()
@@ -1089,7 +1215,7 @@ class RunnerFabricService:
             pool.enabled
             and profile.runtime.value == pool.runtime
             and set(pool.labels).issubset(set(profile.labels))
-            and capabilities.issubset(set(pool.capabilities))
+            and capabilities.issubset(set(pool.capabilities) | {OUTPUT_REFERENCE_CAPABILITY})
             and WORKFLOW_CAPABILITY in capabilities
             and profile.max_concurrency <= pool.max_concurrency
         )
@@ -1131,6 +1257,12 @@ def _task_matches(task: RunnerTask, runner: Runner) -> bool:
     ).issubset(set(runner.capabilities))
 
 
+def _plan_execution_ids(plan: WorkflowExecutionPlan) -> set[UUID]:
+    if isinstance(plan, WorkflowBatchPlan):
+        return {child.execution_id for child in plan.children}
+    return {plan.execution_id}
+
+
 def _required_capabilities(plan: WorkflowExecutionPlan) -> list[str]:
     definitions = (
         tuple(child.definition for child in plan.children)
@@ -1140,6 +1272,8 @@ def _required_capabilities(plan: WorkflowExecutionPlan) -> list[str]:
     required = [WORKFLOW_CAPABILITY]
     if any(definition.schema_version == "4.0" for definition in definitions):
         required.append(STRUCTURED_CONTROL_CAPABILITY)
+    if isinstance(plan, WorkflowRunPlan) and plan.rerun_loop_node_id is not None:
+        required.append(OUTPUT_REFERENCE_CAPABILITY)
     return required
 
 
