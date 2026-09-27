@@ -1099,10 +1099,10 @@ class WorkflowService:
     ) -> tuple[WorkflowExecution, WorkflowRunPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         source = await self._get_execution(project_id, source_execution_id)
-        if source.status in {"queued", "running"} or source.parent_execution_id is not None:
+        if source.status in {"queued", "running"}:
             raise AppError(
                 code="RERUN_SOURCE_NOT_TERMINAL",
-                message="只能从已结束的单次运行创建派生运行",
+                message="只能从已结束的正式运行创建派生运行",
                 status_code=409,
             )
         if (
@@ -1114,13 +1114,7 @@ class WorkflowService:
                 message="当前仅支持从原始正式运行派生失败轮次",
                 status_code=409,
             )
-        source_plan = await self.load_execution_plan(source.id)
-        if not isinstance(source_plan, WorkflowRunPlan):
-            raise AppError(
-                code="RERUN_SOURCE_UNSUPPORTED",
-                message="数据集批量运行暂不支持失败轮次派生",
-                status_code=409,
-            )
+        source_plan = await self._rerun_source_plan(project_id, source)
         definition = source_plan.definition
         scope = _rerun_main_scope(definition, loop_node_id)
         loop_node = next(node for node in definition.nodes if node.id == loop_node_id)
@@ -1193,6 +1187,33 @@ class WorkflowService:
         )
         await self._persist_execution_plan(execution, plan)
         return execution, plan
+
+    async def _rerun_source_plan(
+        self, project_id: UUID, source: WorkflowExecution
+    ) -> WorkflowRunPlan:
+        if source.parent_execution_id is None:
+            plan = await self.load_execution_plan(source.id)
+            if isinstance(plan, WorkflowRunPlan):
+                return plan
+        else:
+            parent = await self._get_execution(project_id, source.parent_execution_id)
+            if parent.status in {"queued", "running"}:
+                raise AppError(
+                    code="RERUN_SOURCE_NOT_TERMINAL",
+                    message="数据集批量运行结束后才能派生失败轮次",
+                    status_code=409,
+                )
+            if parent.run_purpose == WorkflowRunPurpose.STANDARD.value:
+                plan = await self.load_execution_plan(parent.id)
+                if isinstance(plan, WorkflowBatchPlan):
+                    for index, child in enumerate(plan.children):
+                        if child.execution_id == source.id and index == source.dataset_row_index:
+                            return child
+        raise AppError(
+            code="RERUN_SOURCE_UNSUPPORTED",
+            message="来源执行缺少对应的单次或数据集子执行计划",
+            status_code=409,
+        )
 
     async def prepare_preview_execution(
         self,

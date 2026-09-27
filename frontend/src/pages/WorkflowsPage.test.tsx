@@ -7,7 +7,7 @@ import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import WorkflowsPage from './WorkflowsPage'
+import WorkflowsPage, { DatasetRunSummary } from './WorkflowsPage'
 import {
   apiDefinition,
   environment,
@@ -319,6 +319,23 @@ describe('WorkflowsPage', () => {
       expect(attempts).toBe(2)
     },
   )
+
+  it('opens a dataset child report from the batch summary', () => {
+    const parent = workflowExecutionDetail.execution
+    const child = {
+      ...parent,
+      id: '00000000-0000-4000-8000-000000000089',
+      parent_execution_id: parent.id,
+      dataset_row_index: 0,
+      status: 'failed' as const,
+    }
+    let selectedId: string | null = null
+    render(<DatasetRunSummary items={[child]} onView={(id) => (selectedId = id)} />)
+    expect(screen.getByText('数据集子执行')).toBeVisible()
+    expect(screen.getByText('1')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '查看子执行' }))
+    expect(selectedId).toBe(child.id)
+  })
 
   it('compares the latest two immutable workflow versions', async () => {
     const versionedWorkflow = { ...workflow, current_version: 2 }

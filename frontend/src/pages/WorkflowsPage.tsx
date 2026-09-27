@@ -500,7 +500,7 @@ function RunConsolePanel({ state }: { state: WorkflowState }) {
         )}
       </div>
       {state.runtimeChildren.length ? (
-        <DatasetRunSummary items={state.runtimeChildren} />
+        <DatasetRunSummary items={state.runtimeChildren} onView={state.showHistory} />
       ) : (
         <>
           <NodeTable
@@ -1557,7 +1557,13 @@ function VersionDiffDialog({ state }: { state: WorkflowState }) {
   )
 }
 
-function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
+export function DatasetRunSummary({
+  items,
+  onView,
+}: {
+  items: WorkflowExecution[]
+  onView: (executionId: string) => void
+}) {
   if (!items.length) return null
   return (
     <div className="dataset-run-summary">
@@ -1581,6 +1587,15 @@ function DatasetRunSummary({ items }: { items: WorkflowExecution[] }) {
             render: (status: string) => <StatusTag status={status} />,
           },
           { title: '错误', dataIndex: 'error_message' },
+          {
+            title: '操作',
+            width: 110,
+            render: (_value: unknown, item: WorkflowExecution) => (
+              <Button type="link" size="small" onClick={() => onView(item.id)}>
+                查看子执行
+              </Button>
+            ),
+          },
         ]}
       />
     </div>

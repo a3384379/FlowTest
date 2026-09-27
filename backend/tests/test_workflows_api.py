@@ -2025,6 +2025,174 @@ async def test_dataset_execution_maps_rows_and_explains_condition_branches(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_dataset_child_can_rerun_failed_control_iteration_without_rerunning_other_rows(
+    workflow_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(workflow_client)
+    project_id, environment_id, api_id = await _create_assets(workflow_client, headers)
+    dataset = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/files",
+        headers=headers,
+        files={
+            "file": (
+                "rows.json",
+                b'[{"row":"first"},{"row":"second"}]',
+                "application/json",
+            )
+        },
+    )
+    assert dataset.status_code == 201, dataset.text
+    definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 4},
+        "nodes": [
+            {"id": "start", "type": "start", "name": "开始", "position": {"x": 0, "y": 0}},
+            {
+                "id": "dataset",
+                "type": "dataset",
+                "name": "数据行",
+                "position": {"x": 100, "y": 0},
+                "config": {"artifact_id": dataset.json()["id"], "format": "json"},
+            },
+            {
+                "id": "api",
+                "type": "api",
+                "name": "读取集合",
+                "position": {"x": 200, "y": 0},
+                "config": {"api_definition_id": api_id},
+            },
+            {
+                "id": "loop",
+                "type": "capability",
+                "name": "遍历",
+                "position": {"x": 300, "y": 0},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                    "collection": {
+                        "kind": "node_output",
+                        "node_id": "api",
+                        "path": ["body", "items"],
+                    },
+                    "body": {"kind": "inline", "region_id": "body"},
+                    "policy": {
+                        "max_iterations": 2,
+                        "timeout_seconds": 30,
+                        "on_error": "continue_collect",
+                    },
+                },
+                "bindings": [],
+            },
+            {"id": "end", "type": "end", "name": "结束", "position": {"x": 400, "y": 0}},
+        ],
+        "edges": [
+            {"id": "start-dataset", "source": "start", "target": "dataset"},
+            {"id": "dataset-api", "source": "dataset", "target": "api"},
+            {"id": "api-loop", "source": "api", "target": "loop"},
+            {"id": "loop-end", "source": "loop", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "loop",
+                "role": "body",
+                "nodes": [
+                    {
+                        "id": "check",
+                        "type": "api",
+                        "name": "检查资源",
+                        "position": {"x": 0, "y": 0},
+                        "config": {"api_definition_id": api_id},
+                    },
+                    {
+                        "id": "assert",
+                        "type": "assert",
+                        "name": "校验状态",
+                        "position": {"x": 100, "y": 0},
+                        "config": {
+                            "source_node_id": "check",
+                            "expression": "status_code",
+                            "operator": "equals",
+                            "expected": 201,
+                        },
+                    },
+                ],
+                "edges": [{"id": "check-assert", "source": "check", "target": "assert"}],
+                "entry_node_id": "check",
+                "exit_node_ids": ["assert"],
+            }
+        ],
+    }
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "批量失败轮次", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    published = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/versions", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"items": ["one", "two"]})
+    )
+    started = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
+        headers=headers,
+        json={"environment_id": environment_id},
+    )
+    assert started.status_code == 202, started.text
+    parent_id = started.json()["id"]
+    parent = await _wait_for_completed_execution(workflow_client, headers, project_id, parent_id)
+    assert len(parent["children"]) == 2
+    assert len(target.calls) == 6
+    source_id = parent["children"][0]["id"]
+    source = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}", headers=headers
+    )
+    assert source.status_code == 200
+    original_loop = next(node for node in source.json()["nodes"] if node["node_id"] == "loop")
+    assert [item["input_index"] for item in original_loop["output"]["items"]] == [0, 1]
+    parent_rerun = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{parent_id}/failed-items/rerun",
+        headers=headers,
+        json={"loop_node_id": "loop", "input_indices": [1]},
+    )
+    assert parent_rerun.status_code == 409
+    assert parent_rerun.json()["error"]["code"] == "RERUN_SOURCE_UNSUPPORTED"
+
+    rerun = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}/failed-items/rerun",
+        headers=headers,
+        json={"loop_node_id": "loop", "input_indices": [1]},
+    )
+    assert rerun.status_code == 202, rerun.text
+    assert rerun.json()["derived_from_execution_id"] == source_id
+    assert rerun.json()["parent_execution_id"] is None
+    derived = await _wait_for_completed_execution(
+        workflow_client, headers, project_id, rerun.json()["id"]
+    )
+    derived_loop = next(node for node in derived["nodes"] if node["node_id"] == "loop")
+    assert [item["input_index"] for item in derived_loop["output"]["items"]] == [1]
+    assert len(target.calls) == 6
+    unchanged_parent = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{parent_id}", headers=headers
+    )
+    assert [child["id"] for child in unchanged_parent.json()["children"]] == [
+        child["id"] for child in parent["children"]
+    ]
+    unchanged_child = await workflow_client.get(
+        f"/api/v1/projects/{project_id}/workflow-executions/{source_id}", headers=headers
+    )
+    unchanged_loop = next(
+        node for node in unchanged_child.json()["nodes"] if node["node_id"] == "loop"
+    )
+    assert unchanged_loop["output"] == original_loop["output"]
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_dataset_parent_cancellation_reaches_active_and_queued_rows(
     workflow_client: AsyncClient,
 ) -> None:
