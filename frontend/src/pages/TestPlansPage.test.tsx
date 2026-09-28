@@ -220,7 +220,7 @@ describe('TestPlansPage', () => {
 
     await browser.click(screen.getByRole('button', { name: /新建计划/ }))
     await browser.type(screen.getByLabelText('计划名称'), '部署回归')
-    await chooseSelect(browser, '资产类型', '测试套件')
+    await chooseSelect(browser, '执行目标', '测试套件')
     await chooseSelect(browser, '测试套件', testSuite.name)
     await chooseSelect(browser, '调度方式', '固定间隔')
     await browser.type(screen.getByLabelText('定时间隔（分钟）'), '30')
@@ -231,7 +231,7 @@ describe('TestPlansPage', () => {
 
     await browser.click(screen.getByRole('button', { name: /新建计划/ }))
     await browser.type(screen.getByLabelText('计划名称'), 'Cron 部署回归')
-    await chooseSelect(browser, '资产类型', '测试套件')
+    await chooseSelect(browser, '执行目标', '测试套件')
     await chooseSelect(browser, '测试套件', testSuite.name)
     await chooseSelect(browser, '调度方式', 'Cron')
     await browser.type(screen.getByLabelText('Cron 表达式'), '0 9 * * 1-5')

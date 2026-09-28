@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { listFolders } from '../projects/asset-service'
 import { listEnvironments, listWorkflows } from '../workflows/workflow-service'
 import { useProjectContext } from '../projects/use-project-context'
-import type { TestCase, TestSuite, VersionDiff } from '../../lib/api'
+import type { TestCase, TestCaseRun, TestSuite, VersionDiff } from '../../lib/api'
 import {
   cloneTestCase,
   cloneTestSuite,
@@ -13,6 +13,7 @@ import {
   diffTestCaseVersions,
   diffTestSuiteVersions,
   listTestCases,
+  listLatestTestCaseRuns,
   listTestCaseVersions,
   listTestSuites,
   listTestSuiteVersions,
@@ -20,6 +21,8 @@ import {
   moveTestSuites,
   publishTestCase,
   publishTestSuite,
+  runTestCase,
+  type RunCaseInput,
   type TestCaseDraftInput,
   type TestSuiteDraftInput,
   updateTestCase,
@@ -31,16 +34,45 @@ export function useTestAssets() {
   const { projectId } = useProjectContext()
   const [search, setSearch] = useState('')
   const [tag, setTag] = useState('')
+  const [casePage, setCasePage] = useState(1)
+  const [suitePage, setSuitePage] = useState(1)
   const [diff, setDiff] = useState<VersionDiff | null>(null)
+  const updateSearch = useCallback((value: string) => {
+    setSearch(value)
+    setCasePage(1)
+    setSuitePage(1)
+  }, [])
+  const updateTag = useCallback((value: string) => {
+    setTag(value)
+    setCasePage(1)
+    setSuitePage(1)
+  }, [])
   const enabled = Boolean(projectId)
   const cases = useQuery({
-    queryKey: ['test-cases', projectId, search, tag],
-    queryFn: () => listTestCases(projectId!, search, tag),
+    queryKey: ['test-cases', projectId, search, tag, casePage],
+    queryFn: () => listTestCases(projectId!, search, tag, casePage),
     enabled,
   })
+  const suiteCaseOptions = useQuery({
+    queryKey: ['test-cases', projectId, 'suite-options'],
+    queryFn: () => listTestCases(projectId!, '', '', 1, 100),
+    enabled,
+  })
+  const caseIds = cases.data?.items.map((item) => item.id) ?? []
+  const latestRuns = useQuery({
+    queryKey: ['test-case-runs', projectId, caseIds.join('|')],
+    queryFn: () => listLatestTestCaseRuns(projectId!, caseIds),
+    enabled: enabled && cases.isSuccess,
+    refetchInterval: (query) =>
+      (query.state.data as TestCaseRun[] | undefined)?.some(
+        (run) => run.status === 'queued' || run.status === 'running',
+      )
+        ? 2000
+        : false,
+  })
   const suites = useQuery({
-    queryKey: ['test-suites', projectId, search, tag],
-    queryFn: () => listTestSuites(projectId!, search, tag),
+    queryKey: ['test-suites', projectId, search, tag, suitePage],
+    queryFn: () => listTestSuites(projectId!, search, tag, suitePage),
     enabled,
   })
   const workflows = useQuery({
@@ -79,6 +111,11 @@ export function useTestAssets() {
   const publishCaseMutation = useMutation({
     mutationFn: (caseId: string) => publishTestCase(projectId!, caseId),
     onSuccess: invalidateAssets,
+  })
+  const runCaseMutation = useMutation({
+    mutationFn: ({ caseId, input }: { caseId: string; input: RunCaseInput }) =>
+      runTestCase(projectId!, caseId, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
   })
   const publishSuiteMutation = useMutation({
     mutationFn: (suiteId: string) => publishTestSuite(projectId!, suiteId),
@@ -123,9 +160,15 @@ export function useTestAssets() {
     projectId,
     search,
     tag,
-    setSearch,
-    setTag,
+    setSearch: updateSearch,
+    setTag: updateTag,
+    casePage,
+    suitePage,
+    setCasePage,
+    setSuitePage,
     cases,
+    suiteCaseOptions,
+    latestRuns,
     suites,
     workflows,
     environments,
@@ -135,6 +178,8 @@ export function useTestAssets() {
     saveCase: saveCaseMutation.mutateAsync,
     saveSuite: saveSuiteMutation.mutateAsync,
     publishCase: publishCaseMutation.mutateAsync,
+    runCase: runCaseMutation.mutateAsync,
+    runningCase: runCaseMutation.isPending,
     publishSuite: publishSuiteMutation.mutateAsync,
     cloneCase: cloneCaseMutation.mutateAsync,
     cloneSuite: cloneSuiteMutation.mutateAsync,

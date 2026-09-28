@@ -9,7 +9,7 @@ test('S18 契约 Diff、Schema 覆盖率与生成草稿审核主路径', async (
 
   await page.goto('/')
   await authenticate(page)
-  await navigateMenu(page, '测试资产')
+  await navigateMenu(page, '契约中心')
   await page.getByRole('tab', { name: '契约自动化' }).click()
 
   const schema = openApiSchema(`S18 Contract ${suffix}`)

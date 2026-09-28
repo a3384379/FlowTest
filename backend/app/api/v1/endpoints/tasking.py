@@ -16,6 +16,7 @@ from app.schemas.tasking import (
     ServiceTokenResponse,
     TestPlanCreate,
     TestPlanCreatedResponse,
+    TestPlanItemInput,
     TestPlanItemResponse,
     TestPlanResponse,
     TestPlanRunDetailResponse,
@@ -89,6 +90,27 @@ async def get_test_plan(
 ) -> TestPlanResponse:
     detail = await TestPlanService(session).get(
         actor=current_user, project_id=project_id, plan_id=plan_id
+    )
+    return _plan_response(detail)
+
+
+@router.post(
+    "/projects/{project_id}/test-plans/{plan_id}/items",
+    response_model=TestPlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_test_plan_item(
+    project_id: UUID,
+    plan_id: UUID,
+    payload: TestPlanItemInput,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> TestPlanResponse:
+    detail = await TestPlanService(session).add_item(
+        actor=current_user,
+        project_id=project_id,
+        plan_id=plan_id,
+        item=payload,
     )
     return _plan_response(detail)
 

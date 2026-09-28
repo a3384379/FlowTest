@@ -95,6 +95,20 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
             "redaction_mode IN ('off', 'on')",
             name="redaction_mode",
         ),
+        CheckConstraint(
+            "(source_case_id IS NULL AND source_case_version IS NULL "
+            "AND source_trigger IS NULL) OR "
+            "(source_case_id IS NOT NULL AND source_case_version >= 1 "
+            "AND source_trigger IN ('direct', 'plan'))",
+            name="workflow_execution_case_source",
+        ),
+        Index(
+            "ix_workflow_executions_case_latest",
+            "project_id",
+            "source_case_id",
+            "started_at",
+            "id",
+        ),
         UniqueConstraint(
             "parent_execution_id",
             "dataset_row_index",
@@ -116,6 +130,14 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     workflow_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("workflow_versions.id", ondelete="RESTRICT"), index=True
+    )
+    source_case_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("test_cases.id", ondelete="RESTRICT")
+    )
+    source_case_version: Mapped[int | None] = mapped_column(Integer)
+    source_trigger: Mapped[str | None] = mapped_column(String(16))
+    source_plan_run_item_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("test_plan_run_items.id", ondelete="SET NULL"), index=True
     )
     environment_id: Mapped[UUID] = mapped_column(
         ForeignKey("environments.id", ondelete="RESTRICT"), index=True

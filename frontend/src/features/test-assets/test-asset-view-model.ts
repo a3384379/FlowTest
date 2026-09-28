@@ -1,4 +1,4 @@
-import type { Folder, TestCase } from '../../lib/api'
+import type { Folder, TestCase, TestSuite } from '../../lib/api'
 import type { TestCaseDraftInput, TestSuiteDraftInput } from './test-asset-service'
 
 export type CaseFormValues = {
@@ -6,10 +6,14 @@ export type CaseFormValues = {
   description: string
   folderId?: string
   tags: string[]
-  isTemplate: boolean
   workflowId: string
+  workflowVersion?: number | null
   environmentId: string
+  runtimeVariables?: KeyValueEntry[]
+  runtimeHeaders?: KeyValueEntry[]
 }
+
+export type KeyValueEntry = { name: string; value: string }
 
 export type SuiteFormValues = {
   name: string
@@ -17,30 +21,85 @@ export type SuiteFormValues = {
   folderId?: string
   tags: string[]
   caseIds: string[]
+  memberVersions?: Record<string, number | null>
+}
+
+export function entries(value: Record<string, string>): KeyValueEntry[] {
+  return Object.entries(value).map(([name, item]) => ({ name, value: item }))
+}
+
+export function validateEntries(values: KeyValueEntry[], headers: boolean): string | undefined {
+  const seen = new Set<string>()
+  for (const item of values) {
+    const name = item.name ?? ''
+    if (!validEntryName(name, headers)) return invalidNameMessage(headers)
+    if (headers && /[\r\n]/.test(item.value ?? '')) return 'Header 值不能包含换行'
+    const key = headers ? name.toLowerCase() : name
+    if (seen.has(key)) return duplicateNameMessage(headers)
+    seen.add(key)
+  }
+}
+
+function validEntryName(name: string, headers: boolean): boolean {
+  return headers
+    ? /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
+    : /^[A-Za-z_][A-Za-z0-9_.-]{0,159}$/.test(name)
+}
+
+function invalidNameMessage(headers: boolean): string {
+  return headers ? 'Header 名称不合法' : '变量名不合法'
+}
+
+function duplicateNameMessage(headers: boolean): string {
+  return headers ? 'Header 名称重复（不区分大小写）' : '变量名重复'
+}
+
+function toRecord(values: KeyValueEntry[]): Record<string, string> {
+  return Object.fromEntries(values.map(({ name, value }) => [name, value]))
 }
 
 export function caseInput(
   values: CaseFormValues,
   previous: TestCase['draft_definition'] | undefined,
+  isTemplate = false,
 ): TestCaseDraftInput {
   return {
     name: values.name,
     description: values.description,
     folderId: values.folderId ?? null,
     tags: values.tags ?? [],
-    isTemplate: values.isTemplate,
+    isTemplate,
     definition: {
       workflow_id: values.workflowId,
-      workflow_version:
-        previous?.workflow_id === values.workflowId ? previous.workflow_version : null,
+      workflow_version: selectedWorkflowVersion(values, previous),
       environment_id: values.environmentId,
-      runtime_variables: previous?.runtime_variables ?? {},
-      runtime_headers: previous?.runtime_headers ?? {},
+      runtime_variables: selectedEntries(values.runtimeVariables, previous?.runtime_variables),
+      runtime_headers: selectedEntries(values.runtimeHeaders, previous?.runtime_headers),
     },
   }
 }
 
-export function suiteInput(values: SuiteFormValues, cases: TestCase[]): TestSuiteDraftInput {
+function selectedWorkflowVersion(
+  values: CaseFormValues,
+  previous: TestCase['draft_definition'] | undefined,
+): number | null {
+  if (values.workflowVersion !== undefined) return values.workflowVersion
+  if (previous?.workflow_id === values.workflowId) return previous.workflow_version
+  return null
+}
+
+function selectedEntries(
+  values: KeyValueEntry[] | undefined,
+  previous: Record<string, string> | undefined,
+): Record<string, string> {
+  return values ? toRecord(values) : (previous ?? {})
+}
+
+export function suiteInput(
+  values: SuiteFormValues,
+  cases: TestCase[],
+  previous?: TestSuite,
+): TestSuiteDraftInput {
   return {
     name: values.name,
     description: values.description,
@@ -48,7 +107,13 @@ export function suiteInput(values: SuiteFormValues, cases: TestCase[]): TestSuit
     tags: values.tags ?? [],
     items: values.caseIds.map((caseId) => ({
       test_case_id: caseId,
-      test_case_version: cases.find((item) => item.id === caseId)?.current_version ?? null,
+      test_case_version:
+        values.memberVersions && Object.hasOwn(values.memberVersions, caseId)
+          ? values.memberVersions[caseId]
+          : (previous?.draft_definition.items.find((item) => item.test_case_id === caseId)
+              ?.test_case_version ??
+            cases.find((item) => item.id === caseId)?.current_version ??
+            null),
     })),
   }
 }

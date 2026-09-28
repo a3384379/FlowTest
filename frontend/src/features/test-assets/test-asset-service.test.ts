@@ -3,18 +3,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiClient, type TestCaseDefinition, type TestSuiteItem } from '../../lib/api'
 import {
   cloneTestCase,
+  addCaseToPlan,
   cloneTestSuite,
   createTestCase,
   createTestSuite,
   diffTestCaseVersions,
   diffTestSuiteVersions,
   listTestCases,
+  listLatestTestCaseRuns,
   listTestCaseVersions,
   listTestSuites,
   listTestSuiteVersions,
   moveTestCases,
   moveTestSuites,
   publishTestCase,
+  runTestCase,
   publishTestSuite,
   updateTestCase,
   updateTestSuite,
@@ -57,10 +60,10 @@ describe('test asset service', () => {
     await diffTestCaseVersions('project-1', 'case-1', 1, 2)
 
     expect(get).toHaveBeenNthCalledWith(1, '/projects/project-1/test-cases', {
-      params: { page: 1, page_size: 100, search: '登录', tag: 'smoke' },
+      params: { page: 1, page_size: 20, search: '登录', tag: 'smoke' },
     })
     expect(get).toHaveBeenNthCalledWith(2, '/projects/project-1/test-cases', {
-      params: { page: 1, page_size: 100, search: undefined, tag: undefined },
+      params: { page: 1, page_size: 20, search: undefined, tag: undefined },
     })
     expect(post).toHaveBeenCalledWith('/projects/project-1/test-cases', {
       name: draft.name,
@@ -107,7 +110,7 @@ describe('test asset service', () => {
     await diffTestSuiteVersions('project-1', 'suite-1', 2, 3)
 
     expect(get).toHaveBeenNthCalledWith(1, '/projects/project-1/test-suites', {
-      params: { page: 1, page_size: 100, search: undefined, tag: undefined },
+      params: { page: 1, page_size: 20, search: undefined, tag: undefined },
     })
     expect(post).toHaveBeenCalledWith('/projects/project-1/test-suites', {
       name: draft.name,
@@ -135,5 +138,25 @@ describe('test asset service', () => {
     })
     expect(get).toHaveBeenCalledWith('/projects/project-1/test-suites/suite-1/versions')
     expect(get).toHaveBeenCalledWith('/projects/project-1/test-suites/suite-1/versions/2/diff/3')
+  })
+
+  it('starts a direct run with an idempotency key and adds an exact case version to a plan', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] })
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: {} })
+    await runTestCase('project-1', 'case-1', { source: 'published', version: 2 })
+    await listLatestTestCaseRuns('project-1', ['case-1', 'case-2'])
+    await addCaseToPlan('project-1', 'plan-1', 'case-1', 2)
+    expect(post).toHaveBeenCalledWith(
+      '/projects/project-1/test-cases/case-1/runs',
+      { source: 'published', version: 2 },
+      { headers: { 'Idempotency-Key': expect.any(String) } },
+    )
+    const params = get.mock.calls[0][1]?.params as URLSearchParams
+    expect(params.getAll('case_ids')).toEqual(['case-1', 'case-2'])
+    expect(post).toHaveBeenCalledWith('/projects/project-1/test-plans/plan-1/items', {
+      target_type: 'case',
+      target_id: 'case-1',
+      target_version: 2,
+    })
   })
 })

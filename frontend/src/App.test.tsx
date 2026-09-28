@@ -41,7 +41,7 @@ describe('App authentication', () => {
         'request-targets': '请求目标',
         apis: '接口管理',
         protocols: '多协议工作台',
-        assets: '测试资产',
+        assets: '测试用例',
         workflows: '流程编排',
         data: '数据与 Mock',
         tasks: '任务执行',

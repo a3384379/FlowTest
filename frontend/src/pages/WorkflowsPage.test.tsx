@@ -108,6 +108,14 @@ describe('WorkflowsPage', () => {
     )
   })
 
+  it('opens a linked case execution in the existing history detail', async () => {
+    renderPage(
+      `/projects/${project.id}/workflows?focus=${workflow.id}&execution=${workflowRunningExecution.id}`,
+    )
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
+  })
+
   it('falls back to an available workflow when the focused workflow was archived', async () => {
     let missingRequests = 0
     server.use(

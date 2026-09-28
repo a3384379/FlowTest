@@ -1218,6 +1218,7 @@ export type TestCase = {
   tags: string[]
   is_template: boolean
   draft_definition: TestCaseDefinition
+  draft_fingerprint?: string
   current_version: number | null
   created_by_id: string
   created_at: string
@@ -1233,6 +1234,19 @@ export type TestCaseVersion = {
   change_note: string
   created_by_id: string
   created_at: string
+}
+
+export type TestCaseRun = {
+  execution_id: string
+  case_id: string
+  case_version: number
+  workflow_id: string
+  workflow_version: number
+  environment_id: string
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
+  source: 'direct' | 'plan'
+  started_at: string
+  created_new_version: boolean
 }
 
 export type TestSuiteItem = {

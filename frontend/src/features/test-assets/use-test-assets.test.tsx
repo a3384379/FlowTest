@@ -15,6 +15,7 @@ import {
   diffTestCaseVersions,
   diffTestSuiteVersions,
   listTestCases,
+  listLatestTestCaseRuns,
   listTestCaseVersions,
   listTestSuites,
   listTestSuiteVersions,
@@ -53,6 +54,7 @@ describe('useTestAssets', () => {
     vi.resetAllMocks()
     vi.mocked(useProjectContext).mockReturnValue({ projectId: 'project-1' } as never)
     vi.mocked(listTestCases).mockResolvedValue(page([testCase]))
+    vi.mocked(listLatestTestCaseRuns).mockResolvedValue([])
     vi.mocked(listTestSuites).mockResolvedValue(page([testSuite]))
     vi.mocked(listWorkflows).mockResolvedValue(page([]))
     vi.mocked(listEnvironments).mockResolvedValue([])
@@ -79,7 +81,7 @@ describe('useTestAssets', () => {
       result.current.setSearch('登录')
       result.current.setTag('smoke')
     })
-    await waitFor(() => expect(listTestCases).toHaveBeenCalledWith('project-1', '登录', 'smoke'))
+    await waitFor(() => expect(listTestCases).toHaveBeenCalledWith('project-1', '登录', 'smoke', 1))
     await waitFor(() => expect(result.current.cases.data?.items).toEqual([testCase]))
     await waitFor(() => expect(result.current.suites.data?.items).toEqual([testSuite]))
   })

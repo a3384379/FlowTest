@@ -155,6 +155,7 @@ class TestCaseService:
         project_id: UUID,
         case_id: UUID,
         change_note: str,
+        commit: bool = True,
     ) -> TestCaseVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         model = await self._get_project_case_for_update(project_id, case_id)
@@ -178,9 +179,44 @@ class TestCaseService:
             "test_case.published",
             details={"version": version_number},
         )
-        await self._session.commit()
-        await self._session.refresh(version)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(version)
+        else:
+            await self._session.flush()
         return version
+
+    async def publish_for_run(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        case_id: UUID,
+        expected_fingerprint: str,
+    ) -> tuple[TestCaseVersion, bool]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        case = await self._get_project_case_for_update(project_id, case_id)
+        if case.draft_fingerprint != expected_fingerprint:
+            raise AppError(
+                code="TEST_CASE_DRAFT_CONFLICT",
+                message="用例草稿已变化, 请刷新后重试",
+                status_code=409,
+            )
+        draft = TestCaseDefinitionInput.model_validate(case.draft_definition)
+        published = await self._published_definition(project_id, draft)
+        fingerprint = definition_fingerprint(_json_definition(published))
+        if case.current_version is not None:
+            current = await self._get_version(case_id, case.current_version)
+            if current.fingerprint == fingerprint:
+                return current, False
+        version = await self.publish(
+            actor=actor,
+            project_id=project_id,
+            case_id=case_id,
+            change_note="运行前发布",
+            commit=False,
+        )
+        return version, True
 
     async def list_versions(
         self, *, actor: User, project_id: UUID, case_id: UUID

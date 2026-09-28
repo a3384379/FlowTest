@@ -28,10 +28,10 @@ from app.repositories.tasking import TaskingRepository
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.tasking import TestPlanItemInput
-from app.schemas.test_assets import PublishedTestCaseDefinition
 from app.services.audit import AuditService
 from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
+from app.services.test_case_targets import resolve_test_case_target
 
 
 @dataclass(frozen=True, slots=True)
@@ -780,39 +780,27 @@ class TestPlanService:
         suite_id: UUID | None = None,
         suite_version: int | None = None,
     ) -> ExpandedPlanItem:
-        case = await self._assets.get_case(case_id)
-        version = await self._assets.find_case_version(case_id, case_version)
-        if case is None or case.project_id != project_id or version is None:
-            raise AppError(
-                code="TEST_CASE_VERSION_NOT_FOUND",
-                message="测试用例版本不存在",
-                status_code=409,
-            )
-        definition = PublishedTestCaseDefinition.model_validate(version.definition)
-        merged_variables = {**definition.runtime_variables, **runtime_variables}
-        merged_headers = {**definition.runtime_headers, **runtime_headers}
-        snapshot: dict[str, JsonValue] = {
-            "target_type": TestTargetType.CASE.value,
-            "target_id": str(case.id),
-            "target_version": version.version,
-            "definition": definition.model_dump(mode="json"),
-        }
-        if suite_id is not None:
-            snapshot["source_suite"] = {
-                "id": str(suite_id),
-                "version": suite_version,
-            }
+        target = await resolve_test_case_target(
+            self._session,
+            project_id=project_id,
+            case_id=case_id,
+            case_version=case_version,
+            runtime_variables=runtime_variables,
+            runtime_headers=runtime_headers,
+            suite_id=suite_id,
+            suite_version=suite_version,
+        )
         return ExpandedPlanItem(
-            workflow_id=definition.workflow_id,
-            environment_id=definition.environment_id,
-            workflow_version=definition.workflow_version,
+            workflow_id=target.workflow_id,
+            environment_id=target.environment_id,
+            workflow_version=target.workflow_version,
             target_type=TestTargetType.CASE,
-            target_id=case.id,
-            target_version=version.version,
+            target_id=target.case_id,
+            target_version=target.case_version,
             max_retries=max_retries,
-            runtime_variables=merged_variables,
-            runtime_headers=merged_headers,
-            target_snapshot=snapshot,
+            runtime_variables=target.runtime_variables,
+            runtime_headers=target.runtime_headers,
+            target_snapshot=target.target_snapshot,
         )
 
     async def _get_project_plan(self, project_id: UUID, plan_id: UUID) -> TestPlan:

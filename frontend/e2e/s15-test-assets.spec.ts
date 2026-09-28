@@ -22,16 +22,20 @@ test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async (
 
   await page.goto('/')
   await authenticate(page)
+  const projectId = await createIsolatedProject(page, suffix)
+  await page.goto(`/projects/${projectId}/apis`)
   await createSecondaryEnvironment(page, firstEnvironmentName)
   await createSecondaryEnvironment(page, secondEnvironmentName)
   await createPublishedWorkflow(page, workflowName)
-  await navigateMenu(page, '测试资产')
-  await expect(page.getByRole('heading', { name: '测试资产' })).toBeVisible()
+  await navigateMenu(page, '测试用例')
+  await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible()
 
   await createCase(page, caseName, workflowName, firstEnvironmentName)
   await publishCaseTwiceAndReviewDiff(page, caseName, secondEnvironmentName)
+  await runPublishedCase(page, caseName)
   await createAndPublishSuite(page, caseName, suiteName)
   await createSuitePlan(page, suiteName, planName)
+  await addCaseToExistingPlan(page, caseName, planName)
 })
 
 async function createCase(
@@ -45,6 +49,9 @@ async function createCase(
   await dialog.getByLabel('用例名称').fill(caseName)
   await chooseOption(page, dialog.getByLabel('已发布工作流'), workflowName)
   await chooseOption(page, dialog.getByLabel('运行环境'), environmentName)
+  await dialog.getByRole('button', { name: '添加请求头' }).click()
+  await dialog.getByLabel('请求头覆盖名称1').fill('X-Tenant-ID')
+  await dialog.getByLabel('请求头覆盖值1').fill('synthetic-tenant')
   const tagsSelect = dialog.getByLabel('标签')
   await tagsSelect.fill('s15')
   await tagsSelect.press('Enter')
@@ -60,6 +67,15 @@ async function createCase(
 async function createPublishedWorkflow(page: Page, name: string) {
   const projectId = await selectedProjectId(page)
   const token = await accessTokenFromSession(page.request)
+  const apiCreated = await page.request.post(`/api/v1/projects/${projectId}/apis`, {
+    headers: authorization(token),
+    data: {
+      name: `S15 检查租户请求 ${name}`,
+      request: { method: 'GET', path: '/s47-2/inspect', body_kind: 'none' },
+    },
+  })
+  expect(apiCreated.ok(), await apiCreated.text()).toBeTruthy()
+  const api = (await apiCreated.json()) as { definition: { id: string } }
   const created = await page.request.post(`/api/v1/projects/${projectId}/workflows`, {
     headers: authorization(token),
     data: {
@@ -70,9 +86,19 @@ async function createPublishedWorkflow(page: Page, name: string) {
         variables: {},
         nodes: [
           { id: 'start', type: 'start', name: '开始', position: { x: 0, y: 80 }, config: {} },
+          {
+            id: 'api',
+            type: 'api',
+            name: '检查租户请求',
+            position: { x: 220, y: 80 },
+            config: { api_definition_id: api.definition.id },
+          },
           { id: 'end', type: 'end', name: '结束', position: { x: 440, y: 80 }, config: {} },
         ],
-        edges: [{ id: 'start-end', source: 'start', target: 'end' }],
+        edges: [
+          { id: 'start-api', source: 'start', target: 'api' },
+          { id: 'api-end', source: 'api', target: 'end' },
+        ],
         settings: { fail_fast: true, concurrency: 20, default_timeout_seconds: 30 },
       },
     },
@@ -84,6 +110,22 @@ async function createPublishedWorkflow(page: Page, name: string) {
     { headers: authorization(token) },
   )
   expect(published.ok(), await published.text()).toBeTruthy()
+}
+
+async function createIsolatedProject(page: Page, suffix: string): Promise<string> {
+  const token = await accessTokenFromSession(page.request)
+  const created = await page.request.post('/api/v1/projects', {
+    headers: authorization(token),
+    data: { name: `S15 隔离用例项目 ${suffix}` },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const project = (await created.json()) as { id: string }
+  const policy = await page.request.put(`/api/v1/projects/${project.id}/security-policy`, {
+    headers: authorization(token),
+    data: { allowed_hosts: ['mock-target'], allowed_private_cidrs: ['172.16.0.0/12'] },
+  })
+  expect(policy.ok(), await policy.text()).toBeTruthy()
+  return project.id
 }
 
 async function selectedProjectId(page: Page): Promise<string> {
@@ -110,7 +152,7 @@ async function publishCaseTwiceAndReviewDiff(
   caseName: string,
   secondEnvironmentName: string,
 ) {
-  await assetRow(page, caseName).getByRole('button', { name: '发布' }).click()
+  await caseAction(page, caseName, '发布新版本')
   await expect(assetRow(page, caseName).getByText('v1', { exact: true })).toBeVisible()
 
   await assetRow(page, caseName).getByRole('button', { name: '编辑' }).click()
@@ -118,16 +160,80 @@ async function publishCaseTwiceAndReviewDiff(
   await editor.getByLabel('说明').fill('S15 第二版固定用例')
   await chooseOption(page, editor.getByLabel('运行环境'), secondEnvironmentName)
   await editor.getByRole('button', { name: /确\s*定/ }).click()
-  await assetRow(page, caseName).getByRole('button', { name: '发布' }).click()
+  await caseAction(page, caseName, '发布新版本')
   await expect(assetRow(page, caseName).getByText('v2', { exact: true })).toBeVisible()
 
-  await assetRow(page, caseName).getByRole('button', { name: 'Diff' }).click()
+  await caseAction(page, caseName, '版本对比')
   const diff = page.getByRole('dialog', { name: /版本 Diff：v1 → v2/ })
   await expect(diff).toContainText('environment_id')
   await page.keyboard.press('Escape')
 
-  await assetRow(page, caseName).getByRole('button', { name: '克隆' }).click()
+  await caseAction(page, caseName, '克隆')
   await expect(assetRow(page, `${caseName} 副本`)).toBeVisible()
+}
+
+async function runPublishedCase(page: Page, caseName: string) {
+  const projectId = await selectedProjectId(page)
+  await assetRow(page, caseName).getByRole('button', { name: '运行' }).click()
+  const dialog = page.getByRole('dialog', { name: `运行测试用例：${caseName}` })
+  await dialog.getByLabel('运行已发布用例版本').check()
+  await expect(selectControl(dialog.getByLabel('运行用例版本'))).toContainText('用例 v2')
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.url().includes('/test-cases/') &&
+      response.url().endsWith('/runs') &&
+      response.request().method() === 'POST',
+  )
+  await dialog.getByRole('button', { name: '运行已发布版本' }).click()
+  const response = await submitted
+  expect(response.status()).toBe(202)
+  const run = (await response.json()) as { execution_id: string }
+  const token = await accessTokenFromSession(page.request)
+  await expect
+    .poll(
+      async () => {
+        const detail = await page.request.get(
+          `/api/v1/projects/${projectId}/workflow-executions/${run.execution_id}`,
+          { headers: authorization(token) },
+        )
+        if (!detail.ok()) return null
+        const payload = (await detail.json()) as {
+          nodes: Array<{ node_id: string; output: { body?: { tenant_header_present?: boolean } } }>
+        }
+        return payload.nodes.find((node) => node.node_id === 'api')?.output.body
+          ?.tenant_header_present
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
+  const receipt = page.getByRole('dialog', { name: '运行已提交' })
+  await expect(receipt).toContainText('用例 v2')
+  await receipt.getByRole('button', { name: '查看执行详情' }).click()
+  await expect(page.getByText('正在查看历史执行快照')).toBeVisible({ timeout: 30_000 })
+  await navigateMenu(page, '测试用例')
+  await expect(assetRow(page, caseName)).toContainText('用例 v2', { timeout: 30_000 })
+}
+
+async function addCaseToExistingPlan(page: Page, caseName: string, planName: string) {
+  await navigateMenu(page, '测试用例')
+  await caseAction(page, caseName, '加入测试计划')
+  const dialog = page.getByRole('dialog', { name: '加入测试计划' })
+  await chooseOption(page, dialog.getByLabel('选择测试计划'), planName)
+  const added = page.waitForResponse(
+    (response) =>
+      response.url().includes('/test-plans/') &&
+      response.url().endsWith('/items') &&
+      response.request().method() === 'POST',
+  )
+  await dialog.getByRole('button', { name: /确\s*定|OK/ }).click()
+  const response = await added
+  expect(response.status()).toBe(201)
+  const plan = (await response.json()) as {
+    items: Array<{ target_type: string; target_version: number }>
+  }
+  expect(plan.items.some((item) => item.target_type === 'case' && item.target_version === 2)).toBe(
+    true,
+  )
 }
 
 async function createSecondaryEnvironment(page: Page, name: string) {
@@ -136,7 +242,7 @@ async function createSecondaryEnvironment(page: Page, name: string) {
   await page.getByRole('button', { name: '新建环境' }).click()
   const dialog = page.getByRole('dialog', { name: '新建环境' })
   await dialog.getByLabel('环境名称').fill(name)
-  await dialog.getByLabel('基础 URL').fill('http://mock-target.test:8080')
+  await dialog.getByLabel('基础 URL').fill('http://mock-target:8080')
   const created = waitForProjectPost(page, '/environments')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
   await expectSuccessful(created)
@@ -167,7 +273,7 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await page.getByRole('button', { name: '新建计划' }).click()
   const dialog = page.getByRole('dialog', { name: '新建测试计划' })
   await dialog.getByLabel('计划名称').fill(planName)
-  await chooseOption(page, dialog.getByLabel('资产类型'), '测试套件')
+  await chooseOption(page, dialog.getByLabel('执行目标'), '测试套件')
   const suiteSelect = dialog.getByLabel('测试套件')
   await expect(suiteSelect).toBeVisible()
   await chooseOption(page, suiteSelect, suiteName)
@@ -211,6 +317,11 @@ function selectControl(select: Locator): Locator {
 
 function assetRow(page: Page, name: string) {
   return page.getByRole('row').filter({ hasText: name }).first()
+}
+
+async function caseAction(page: Page, name: string, action: string) {
+  await assetRow(page, name).getByRole('button', { name: '更多' }).click()
+  await page.getByRole('menuitem', { name: action }).click()
 }
 
 function waitForProjectPost(page: Page, pathSuffix: string): Promise<Response> {
