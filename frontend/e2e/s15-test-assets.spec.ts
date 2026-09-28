@@ -314,7 +314,7 @@ function selectControl(select: Locator): Locator {
 }
 
 function assetRow(page: Page, name: string) {
-  return page.getByRole('row').filter({ hasText: name }).first()
+  return page.getByRole('row').filter({ has: page.getByRole('cell', { name, exact: true }) })
 }
 
 async function caseAction(page: Page, name: string, action: string) {
