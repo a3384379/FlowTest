@@ -137,7 +137,13 @@ class WorkflowExecution(UuidPrimaryKeyMixin, TimestampMixin, Base):
     source_case_version: Mapped[int | None] = mapped_column(Integer)
     source_trigger: Mapped[str | None] = mapped_column(String(16))
     source_plan_run_item_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("test_plan_run_items.id", ondelete="SET NULL"), index=True
+        ForeignKey(
+            "test_plan_run_items.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_workflow_exec_source_plan_run_item",
+        ),
+        index=True,
     )
     environment_id: Mapped[UUID] = mapped_column(
         ForeignKey("environments.id", ondelete="RESTRICT"), index=True
