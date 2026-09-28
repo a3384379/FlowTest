@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -54,7 +55,14 @@ async def resolve_test_case_target(
         raise AppError(
             code="TEST_CASE_VERSION_NOT_FOUND", message="测试用例版本不存在", status_code=409
         )
-    definition = PublishedTestCaseDefinition.model_validate(version.definition)
+    try:
+        definition = PublishedTestCaseDefinition.model_validate(version.definition)
+    except ValidationError as error:
+        raise AppError(
+            code="INVALID_TEST_CASE_DEFINITION",
+            message="用例版本定义无效, 请修正草稿并发布新版本",
+            status_code=422,
+        ) from error
     workflow = await session.get(Workflow, definition.workflow_id)
     environment = await session.get(Environment, definition.environment_id)
     if (

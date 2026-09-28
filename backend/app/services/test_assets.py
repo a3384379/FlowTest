@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -35,6 +36,17 @@ class AssetVersionDiff:
     from_version: int
     to_version: int
     changes: tuple[VersionChange, ...]
+
+
+def _validated_case_definition(raw: dict[str, JsonValue]) -> TestCaseDefinitionInput:
+    try:
+        return TestCaseDefinitionInput.model_validate(raw)
+    except ValidationError as error:
+        raise AppError(
+            code="INVALID_TEST_CASE_DEFINITION",
+            message="用例定义无效, 请编辑并保存后重试",
+            status_code=422,
+        ) from error
 
 
 class TestCaseService:
@@ -159,7 +171,7 @@ class TestCaseService:
     ) -> TestCaseVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         model = await self._get_project_case_for_update(project_id, case_id)
-        definition = TestCaseDefinitionInput.model_validate(model.draft_definition)
+        definition = _validated_case_definition(model.draft_definition)
         published = await self._published_definition(project_id, definition)
         payload = _json_definition(published)
         version_number = (model.current_version or 0) + 1
@@ -202,7 +214,7 @@ class TestCaseService:
                 message="用例草稿已变化, 请刷新后重试",
                 status_code=409,
             )
-        draft = TestCaseDefinitionInput.model_validate(case.draft_definition)
+        draft = _validated_case_definition(case.draft_definition)
         published = await self._published_definition(project_id, draft)
         fingerprint = definition_fingerprint(_json_definition(published))
         if case.current_version is not None:
@@ -257,7 +269,7 @@ class TestCaseService:
             folder_id=source.folder_id,
             tags=source.tags,
             is_template=False,
-            definition=TestCaseDefinitionInput.model_validate(source.draft_definition),
+            definition=_validated_case_definition(source.draft_definition),
         )
 
     async def bulk_move(

@@ -26,7 +26,7 @@ def validate_runtime_headers(headers: dict[str, str]) -> dict[str, str]:
     return headers
 
 
-class TestCaseDefinitionInput(BaseModel):
+class StoredTestCaseDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow_id: UUID
@@ -35,6 +35,8 @@ class TestCaseDefinitionInput(BaseModel):
     runtime_variables: dict[RuntimeName, str] = Field(default_factory=dict)
     runtime_headers: dict[str, str] = Field(default_factory=dict)
 
+
+class TestCaseDefinitionInput(StoredTestCaseDefinition):
     @field_validator("runtime_headers")
     @classmethod
     def validate_headers(cls, headers: dict[str, str]) -> dict[str, str]:
@@ -42,6 +44,10 @@ class TestCaseDefinitionInput(BaseModel):
 
 
 class PublishedTestCaseDefinition(TestCaseDefinitionInput):
+    workflow_version: int = Field(ge=1)
+
+
+class StoredPublishedTestCaseDefinition(StoredTestCaseDefinition):
     workflow_version: int = Field(ge=1)
 
 
@@ -73,7 +79,7 @@ class TestCaseResponse(BaseModel):
     description: str
     tags: list[str]
     is_template: bool
-    draft_definition: TestCaseDefinitionInput
+    draft_definition: StoredTestCaseDefinition
     draft_fingerprint: str
     current_version: int | None
     created_by_id: UUID
@@ -120,7 +126,7 @@ class TestCaseVersionResponse(BaseModel):
     id: UUID
     test_case_id: UUID
     version: int
-    definition: PublishedTestCaseDefinition
+    definition: StoredPublishedTestCaseDefinition
     fingerprint: str
     change_note: str
     created_by_id: UUID
