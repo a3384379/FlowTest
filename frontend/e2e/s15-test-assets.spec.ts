@@ -74,7 +74,7 @@ async function createPublishedWorkflow(page: Page, projectId: string, name: stri
     headers: authorization(token),
     data: {
       name: `S15 检查租户请求 ${name}`,
-      request: { method: 'GET', path: '/s47-2/inspect', body_kind: 'none' },
+      request: { method: 'POST', path: '/s47-2/inspect', body_kind: 'none' },
     },
   })
   expect(apiCreated.ok(), await apiCreated.text()).toBeTruthy()
@@ -201,14 +201,18 @@ async function runPublishedCase(page: Page, caseName: string) {
         )
         if (!detail.ok()) return null
         const payload = (await detail.json()) as {
+          execution: { status: string }
           nodes: Array<{ node_id: string; output: { body?: { tenant_header_present?: boolean } } }>
         }
-        return payload.nodes.find((node) => node.node_id === 'api')?.output.body
-          ?.tenant_header_present
+        return {
+          status: payload.execution.status,
+          tenantHeaderPresent: payload.nodes.find((node) => node.node_id === 'api')?.output.body
+            ?.tenant_header_present,
+        }
       },
       { timeout: 30_000 },
     )
-    .toBe(true)
+    .toEqual({ status: 'passed', tenantHeaderPresent: true })
   const receipt = page.getByRole('dialog', { name: '运行已提交' })
   await expect(receipt).toContainText('用例 v2')
   await receipt.getByRole('button', { name: '查看执行详情' }).click()
