@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:PYTHONIOENCODING = "utf-8"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $errors = New-Object System.Collections.Generic.List[string]
 $warnings = New-Object System.Collections.Generic.List[string]
@@ -149,6 +150,6 @@ $status = if ($errors.Count -eq 0) { "passed" } else { "failed" }
 } | ConvertTo-Json -Depth 4 | Write-Host
 
 if ($errors.Count -gt 0) {
-    exit 1
+    throw "Standalone 安装前检查失败；请查看上方 JSON 中的 errors"
 }
 Write-Host "Standalone 安装前检查通过。"
