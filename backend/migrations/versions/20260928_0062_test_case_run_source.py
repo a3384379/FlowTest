@@ -25,7 +25,7 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         )
         batch.create_foreign_key(
-            "fk_workflow_executions_source_plan_run_item_id_test_plan_run_items",
+            "fk_workflow_exec_source_plan_run_item",
             "test_plan_run_items",
             ["source_plan_run_item_id"],
             ["id"],
@@ -57,9 +57,7 @@ def downgrade() -> None:
     op.drop_index("ix_workflow_executions_case_latest", table_name="workflow_executions")
     with op.batch_alter_table("workflow_executions") as batch:
         batch.drop_constraint("workflow_execution_case_source", type_="check")
-        batch.drop_constraint(
-            "fk_workflow_executions_source_plan_run_item_id_test_plan_run_items", type_="foreignkey"
-        )
+        batch.drop_constraint("fk_workflow_exec_source_plan_run_item", type_="foreignkey")
         batch.drop_constraint(
             "fk_workflow_executions_source_case_id_test_cases", type_="foreignkey"
         )
