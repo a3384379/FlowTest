@@ -404,7 +404,7 @@ export function CaseReviewDialog({
           <Input.TextArea rows={2} maxLength={2000} />
         </Form.Item>
       </Form>
-      <Typography.Text type="secondary">接受后才允许进入后续测试资产流程。</Typography.Text>
+      <Typography.Text type="secondary">接受后才允许进入后续测试用例流程。</Typography.Text>
     </Modal>
   )
 }

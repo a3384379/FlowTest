@@ -37,7 +37,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -75,6 +75,17 @@ export default function WorkflowsPage() {
   const [iterationDebugOpen, setIterationDebugOpen] = useState(false)
   const initialWorkflowId = searchParams.get('focus') ?? undefined
   const state = useWorkflows(initialWorkflowId)
+  const linkedExecutionId = searchParams.get('execution')
+  const openedExecutionLink = useRef<string | null>(null)
+  const showHistory = state.showHistory
+  useEffect(() => {
+    const key =
+      linkedExecutionId && state.projectId ? `${state.projectId}:${linkedExecutionId}` : null
+    if (linkedExecutionId && key && openedExecutionLink.current !== key) {
+      openedExecutionLink.current = key
+      showHistory(linkedExecutionId)
+    }
+  }, [linkedExecutionId, state.projectId, showHistory])
   useEffect(() => {
     const listed = state.workflows.data
     if (!initialWorkflowId || !listed || listed.items.length < listed.total) return

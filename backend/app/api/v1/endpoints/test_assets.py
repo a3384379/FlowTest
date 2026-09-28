@@ -1,8 +1,9 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Header, Query, status
 
-from app.api.dependencies import CurrentUser, SessionDependency
+from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.domain.test_assets import VersionChange
 from app.schemas.common import Page
 from app.schemas.test_assets import (
@@ -11,6 +12,8 @@ from app.schemas.test_assets import (
     AssetClone,
     TestCaseCreate,
     TestCaseResponse,
+    TestCaseRunRequest,
+    TestCaseRunResponse,
     TestCaseUpdate,
     TestCaseVersionResponse,
     TestSuiteCreate,
@@ -22,8 +25,54 @@ from app.schemas.test_assets import (
     VersionPublish,
 )
 from app.services.test_assets import TestCaseService, TestSuiteService
+from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.get("/test-cases/runs/latest", response_model=list[TestCaseRunResponse])
+async def latest_test_case_runs(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    case_ids: Annotated[list[UUID] | None, Query()] = None,
+) -> list[TestCaseRunResponse]:
+    case_ids = case_ids or []
+    if len(case_ids) > 100:
+        from app.core.errors import AppError
+
+        raise AppError(
+            code="TOO_MANY_TEST_CASES", message="每次最多查询 100 个用例", status_code=422
+        )
+    return await TestCaseRunService(session, coordinator).latest(
+        actor=current_user,
+        project_id=project_id,
+        case_ids=case_ids,
+    )
+
+
+@router.post(
+    "/test-cases/{case_id}/runs",
+    response_model=TestCaseRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def run_test_case(
+    project_id: UUID,
+    case_id: UUID,
+    payload: TestCaseRunRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    coordinator: WorkflowCoordinator,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> TestCaseRunResponse:
+    return await TestCaseRunService(session, coordinator).start(
+        actor=current_user,
+        project_id=project_id,
+        case_id=case_id,
+        request=payload,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.get("/test-cases", response_model=Page[TestCaseResponse])

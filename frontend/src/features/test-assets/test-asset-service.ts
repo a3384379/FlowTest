@@ -3,6 +3,7 @@ import {
   type Page,
   type TestCase,
   type TestCaseDefinition,
+  type TestCaseRun,
   type TestCaseVersion,
   type TestSuite,
   type TestSuiteItem,
@@ -31,9 +32,11 @@ export async function listTestCases(
   projectId: string,
   search: string,
   tag: string,
+  page = 1,
+  pageSize = 20,
 ): Promise<Page<TestCase>> {
   const response = await apiClient.get<Page<TestCase>>(`/projects/${projectId}/test-cases`, {
-    params: { page: 1, page_size: 100, search: search || undefined, tag: tag || undefined },
+    params: { page, page_size: pageSize, search: search || undefined, tag: tag || undefined },
   })
   return response.data
 }
@@ -50,6 +53,11 @@ export async function createTestCase(
     is_template: input.isTemplate,
     definition: input.definition,
   })
+  return response.data
+}
+
+export async function getTestCase(projectId: string, caseId: string): Promise<TestCase> {
+  const response = await apiClient.get<TestCase>(`/projects/${projectId}/test-cases/${caseId}`)
   return response.data
 }
 
@@ -111,6 +119,55 @@ export async function listTestCaseVersions(
   return response.data
 }
 
+export type RunCaseInput = {
+  source: 'published' | 'draft'
+  version?: number
+  publish_draft?: boolean
+  expected_draft_fingerprint?: string
+  runtime_variables?: Record<string, string>
+  runtime_headers?: Record<string, string>
+}
+
+export async function runTestCase(
+  projectId: string,
+  caseId: string,
+  input: RunCaseInput,
+): Promise<TestCaseRun> {
+  const response = await apiClient.post<TestCaseRun>(
+    `/projects/${projectId}/test-cases/${caseId}/runs`,
+    input,
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+  )
+  return response.data
+}
+
+export async function listLatestTestCaseRuns(
+  projectId: string,
+  caseIds: string[],
+): Promise<TestCaseRun[]> {
+  if (!caseIds.length) return []
+  const params = new URLSearchParams()
+  caseIds.forEach((id) => params.append('case_ids', id))
+  const response = await apiClient.get<TestCaseRun[]>(
+    `/projects/${projectId}/test-cases/runs/latest`,
+    { params },
+  )
+  return response.data
+}
+
+export async function addCaseToPlan(
+  projectId: string,
+  planId: string,
+  caseId: string,
+  version: number,
+): Promise<void> {
+  await apiClient.post(`/projects/${projectId}/test-plans/${planId}/items`, {
+    target_type: 'case',
+    target_id: caseId,
+    target_version: version,
+  })
+}
+
 export async function diffTestCaseVersions(
   projectId: string,
   caseId: string,
@@ -127,10 +184,16 @@ export async function listTestSuites(
   projectId: string,
   search: string,
   tag: string,
+  page = 1,
 ): Promise<Page<TestSuite>> {
   const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
-    params: { page: 1, page_size: 100, search: search || undefined, tag: tag || undefined },
+    params: { page, page_size: 20, search: search || undefined, tag: tag || undefined },
   })
+  return response.data
+}
+
+export async function getTestSuite(projectId: string, suiteId: string): Promise<TestSuite> {
+  const response = await apiClient.get<TestSuite>(`/projects/${projectId}/test-suites/${suiteId}`)
   return response.data
 }
 

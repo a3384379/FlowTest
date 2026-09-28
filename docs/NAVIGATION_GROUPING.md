@@ -17,7 +17,7 @@
 | protocols         | 多协议工作台 | 项目与接口                 | /projects/:projectId/protocols                  |
 | settings          | 项目管理     | 项目与接口                 | /projects/:projectId/settings                   |
 | workflows         | 流程编排     | 测试设计                   | /projects/:projectId/workflows                  |
-| assets            | 测试资产     | 测试设计                   | /projects/:projectId/assets                     |
+| assets            | 测试用例     | 测试设计                   | /projects/:projectId/assets                     |
 | data              | 数据与 Mock  | 测试设计                   | /projects/:projectId/data                       |
 | contracts         | 契约中心     | 测试设计                   | /projects/:projectId/contracts                  |
 | test-engineering  | 测试工程     | 测试设计                   | /projects/:projectId/test-engineering           |
