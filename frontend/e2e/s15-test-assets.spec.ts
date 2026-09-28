@@ -24,9 +24,13 @@ test('S15 用例、套件、版本 Diff 与固定计划目标主路径', async (
   await authenticate(page)
   const projectId = await createIsolatedProject(page, suffix)
   await page.goto(`/projects/${projectId}/apis`)
-  await createSecondaryEnvironment(page, firstEnvironmentName)
-  await createSecondaryEnvironment(page, secondEnvironmentName)
-  await createPublishedWorkflow(page, workflowName)
+  await expect(page.getByRole('link', { name: '质量总览' })).toHaveAttribute(
+    'href',
+    `/projects/${projectId}/dashboard`,
+  )
+  await createSecondaryEnvironment(page, projectId, firstEnvironmentName)
+  await createSecondaryEnvironment(page, projectId, secondEnvironmentName)
+  await createPublishedWorkflow(page, projectId, workflowName)
   await navigateMenu(page, '测试用例')
   await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible()
 
@@ -64,8 +68,7 @@ async function createCase(
   await expect(assetRow(page, caseName)).toBeVisible({ timeout: 15_000 })
 }
 
-async function createPublishedWorkflow(page: Page, name: string) {
-  const projectId = await selectedProjectId(page)
+async function createPublishedWorkflow(page: Page, projectId: string, name: string) {
   const token = await accessTokenFromSession(page.request)
   const apiCreated = await page.request.post(`/api/v1/projects/${projectId}/apis`, {
     headers: authorization(token),
@@ -236,18 +239,13 @@ async function addCaseToExistingPlan(page: Page, caseName: string, planName: str
   )
 }
 
-async function createSecondaryEnvironment(page: Page, name: string) {
-  await navigateMenu(page, '接口管理')
-  await expect(page.getByRole('heading', { name: '接口管理' })).toBeVisible()
-  await page.getByRole('button', { name: '新建环境' }).click()
-  const dialog = page.getByRole('dialog', { name: '新建环境' })
-  await dialog.getByLabel('环境名称').fill(name)
-  await dialog.getByLabel('基础 URL').fill('http://mock-target:8080')
-  const created = waitForProjectPost(page, '/environments')
-  await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  await expectSuccessful(created)
-  await expect(dialog).toBeHidden()
-  await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 15_000 })
+async function createSecondaryEnvironment(page: Page, projectId: string, name: string) {
+  const token = await accessTokenFromSession(page.request)
+  const created = await page.request.post(`/api/v1/projects/${projectId}/environments`, {
+    headers: authorization(token),
+    data: { name, base_url: 'http://mock-target:8080', variables: {}, headers: {} },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
 }
 
 async function createAndPublishSuite(page: Page, caseName: string, suiteName: string) {
