@@ -37,7 +37,9 @@ test('S14 团队、测试资产与 API 工作台主路径', async ({ page }, tes
 })
 
 async function createIsolatedProject(request: APIRequestContext, suffix: string): Promise<string> {
-  const refresh = await request.post('/api/v1/auth/refresh')
+  const refresh = await request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(refresh.ok(), await refresh.text()).toBeTruthy()
   const token = ((await refresh.json()) as { access_token: string }).access_token
   const created = await request.post('/api/v1/projects', {

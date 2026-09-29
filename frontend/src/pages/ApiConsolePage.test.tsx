@@ -1,4 +1,5 @@
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
@@ -12,7 +13,7 @@ import { apiDefinition, environment, executionDetail, project } from '../test/fi
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 
-beforeEach(() => useAuthStore.setState({ user: authenticatedUser }))
+beforeEach(() => authenticateTestUser(authenticatedUser))
 afterEach(() => {
   useAuthStore.setState({ user: null })
   localStorage.clear()

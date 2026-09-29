@@ -1,67 +1,42 @@
 import { create } from 'zustand'
 
-import { apiClient, setAccessToken, type User } from '../../lib/api'
+import { configureAuthSession } from '../../lib/api'
+import { AuthSessionCoordinator, type SessionSnapshot } from './auth-session'
 
 type LoginPayload = { email: string; password: string }
 
-type AuthState = {
-  initialized: boolean
-  initializing: boolean
-  token: string | null
-  user: User | null
+type AuthState = SessionSnapshot & {
   initialize: () => Promise<void>
   login: (payload: LoginPayload) => Promise<void>
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => Promise<void>
+  registerRecoveryListeners: () => () => void
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  initialized: false,
-  initializing: false,
-  token: null,
-  user: null,
-  initialize: async () => {
-    if (get().initialized || get().initializing) return
-    set({ initializing: true })
-    try {
-      const refreshed = await apiClient.post<{ access_token: string }>('/auth/refresh')
-      setAccessToken(refreshed.data.access_token)
-      const currentUser = await apiClient.get<User>('/auth/me')
-      set({ token: refreshed.data.access_token, user: currentUser.data })
-    } catch {
-      setAccessToken(null)
-      set({ token: null, user: null })
-    } finally {
-      set({ initialized: true, initializing: false })
-    }
-  },
-  login: async (payload) => {
-    const response = await apiClient.post<{
-      access_token: string
-      user: User
-    }>('/auth/login', payload)
-    setAccessToken(response.data.access_token)
-    set({
-      token: response.data.access_token,
-      user: response.data.user,
-      initialized: true,
-      initializing: false,
-    })
-  },
-  changePassword: async (currentPassword, newPassword) => {
-    await apiClient.post('/auth/change-password', {
-      current_password: currentPassword,
-      new_password: newPassword,
-    })
-    const user = get().user
-    if (user) set({ user: { ...user, requires_password_change: false } })
-  },
-  logout: async () => {
-    try {
-      await apiClient.post('/auth/logout')
-    } finally {
-      setAccessToken(null)
-      set({ token: null, user: null, initialized: true })
-    }
-  },
-}))
+export const useAuthStore = create<AuthState>((set, get) => {
+  const coordinator = new AuthSessionCoordinator({
+    read: get,
+    write: (patch) => set(patch),
+  })
+  configureAuthSession(coordinator)
+  return {
+    phase: 'initializing',
+    initialized: false,
+    initializing: false,
+    token: null,
+    user: null,
+    lastUserId: null,
+    expiresAtMs: null,
+    issuedTtlSeconds: null,
+    epoch: 0,
+    tokenVersion: 0,
+    sessionStartedAtMs: null,
+    notice: null,
+    initialize: () => coordinator.initialize(),
+    login: (payload) => coordinator.login(payload),
+    changePassword: (currentPassword, newPassword) =>
+      coordinator.changePassword(currentPassword, newPassword),
+    logout: () => coordinator.logout(),
+    registerRecoveryListeners: () => coordinator.registerRecoveryListeners(),
+  }
+})

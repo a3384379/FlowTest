@@ -49,7 +49,11 @@ async def client() -> AsyncIterator[AsyncClient]:
 
     app.dependency_overrides[get_session] = override_session
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-Requested-With": "FlowTest"},
+    ) as test_client:
         yield test_client
     app.dependency_overrides.clear()
     await test_engine.dispose()
@@ -81,7 +85,8 @@ async def test_login_refresh_rotation_logout_and_password_change(client: AsyncCl
     client.cookies.clear()
     client.cookies.set("flowtest_refresh", first_refresh, domain="test.local", path="/api/v1/auth")
     replay = await client.post("/api/v1/auth/refresh")
-    assert replay.status_code == 401
+    assert replay.status_code == 409
+    assert replay.json()["error"]["code"] == "REFRESH_ROTATION_CONFLICT"
 
     client.cookies.clear()
     client.cookies.set("flowtest_refresh", second_refresh, domain="test.local", path="/api/v1/auth")

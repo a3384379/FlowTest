@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import type {
   FabricEvent,
   FabricPool,
@@ -63,7 +64,7 @@ const events: FabricEvent[] = [
 
 describe('ExecutionFabricPage', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user, initialized: true, token: 'test-token' })
+    authenticateTestUser(user)
   })
 
   it('blocks regular users before requesting administrator data', () => {

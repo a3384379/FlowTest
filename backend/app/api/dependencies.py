@@ -102,6 +102,10 @@ async def get_current_user(
         raise AppError(code="AUTHENTICATION_REQUIRED", message="请先登录", status_code=401)
     try:
         claims = token_service.decode_access_token(credentials.credentials)
+    except jwt.ExpiredSignatureError as error:
+        raise AppError(
+            code="ACCESS_TOKEN_EXPIRED", message="访问令牌已过期", status_code=401
+        ) from error
     except (jwt.InvalidTokenError, ValueError, KeyError) as error:
         raise AppError(
             code="INVALID_ACCESS_TOKEN", message="访问令牌无效", status_code=401

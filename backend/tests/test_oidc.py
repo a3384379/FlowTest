@@ -101,6 +101,7 @@ async def oidc_context(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[OIDCTes
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://test",
         follow_redirects=False,
+        headers={"X-Requested-With": "FlowTest"},
     ) as client:
         yield OIDCTestContext(client=client, provider=provider, sessions=sessions)
     app.dependency_overrides.clear()

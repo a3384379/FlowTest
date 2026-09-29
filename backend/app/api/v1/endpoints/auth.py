@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Query, Response, status
+from fastapi import APIRouter, Cookie, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import AuthenticatedUser, OIDCProviderDependency, SessionDependency
@@ -23,10 +23,12 @@ REFRESH_COOKIE_NAME = "flowtest_refresh"
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
-    payload: LoginRequest, response: Response, session: SessionDependency
+    payload: LoginRequest, response: Response, session: SessionDependency, request: Request
 ) -> LoginResponse:
+    _check_auth_origin(request, allow_json=True)
     pair = await AuthService(session).login(email=payload.email, password=payload.password)
     _set_refresh_cookie(response, pair.refresh_token)
+    response.headers["Cache-Control"] = "no-store"
     return _login_response(pair)
 
 
@@ -70,6 +72,7 @@ async def oidc_callback(
         status_code=status.HTTP_303_SEE_OTHER,
     )
     _set_refresh_cookie(response, pair.refresh_token)
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -77,12 +80,15 @@ async def oidc_callback(
 async def refresh_access_token(
     response: Response,
     session: SessionDependency,
+    request: Request,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
 ) -> AccessTokenResponse:
+    _check_auth_origin(request)
     if refresh_token is None:
         raise AppError(code="INVALID_REFRESH_TOKEN", message="登录状态已失效", status_code=401)
     pair = await AuthService(session).rotate(refresh_token)
     _set_refresh_cookie(response, pair.refresh_token)
+    response.headers["Cache-Control"] = "no-store"
     return AccessTokenResponse(
         access_token=pair.access_token,
         expires_in=settings.access_token_minutes * 60,
@@ -93,10 +99,11 @@ async def refresh_access_token(
 async def logout(
     response: Response,
     session: SessionDependency,
-    current_user: AuthenticatedUser,
+    request: Request,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
 ) -> None:
-    await AuthService(session).logout(refresh_token, actor_user_id=current_user.id)
+    _check_auth_origin(request)
+    await AuthService(session).logout(refresh_token)
     response.delete_cookie(
         REFRESH_COOKIE_NAME,
         path=f"{settings.api_v1_prefix}/auth",
@@ -104,6 +111,7 @@ async def logout(
         httponly=True,
         samesite="lax",
     )
+    response.headers["Cache-Control"] = "no-store"
 
 
 @router.get("/me", response_model=UserResponse)
@@ -134,6 +142,20 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         httponly=True,
         samesite="lax",
     )
+
+
+def _check_auth_origin(request: Request, *, allow_json: bool = False) -> None:
+    origin = request.headers.get("origin")
+    if origin is not None:
+        same_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin == same_origin or origin in settings.cors_origins:
+            return
+    elif request.headers.get("x-requested-with") == "FlowTest" or (
+        allow_json
+        and request.headers.get("content-type", "").split(";", 1)[0] == "application/json"
+    ):
+        return
+    raise AppError(code="CSRF_VALIDATION_FAILED", message="请求来源不可信", status_code=403)
 
 
 def _login_response(pair: TokenPair) -> LoginResponse:

@@ -35,7 +35,7 @@ test('管理员登录并完成首次密码初始化', async ({ page }) => {
         response.url().endsWith('/api/v1/auth/change-password') &&
         response.request().method() === 'POST',
     )
-    await page.getByRole('button', { name: '保存并进入平台' }).click()
+    await page.getByRole('button', { name: '修改密码并重新登录' }).click()
     expect((await changeResponsePromise).ok()).toBeTruthy()
     passwordChanged = true
   } else if (authenticatedPassword !== activePassword) {
