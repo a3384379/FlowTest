@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-import { authClient, SessionBoundaryError, type User } from '../../lib/api'
+import { authClient, SessionBoundaryError } from '../../lib/auth-client'
+import type { User } from '../../lib/api'
 
 export type SessionPhase =
   | 'initializing'
@@ -21,6 +22,7 @@ export type SessionSnapshot = {
   issuedTtlSeconds: number | null
   epoch: number
   tokenVersion: number
+  organizationId: string | null
   sessionStartedAtMs: number | null
   notice: string | null
 }
@@ -105,7 +107,7 @@ export class AuthSessionCoordinator {
   async login(payload: { email: string; password: string }): Promise<void> {
     const startEpoch = this.snapshot().epoch + 1
     this.candidate = null
-    this.port.write({ epoch: startEpoch })
+    this.port.write({ epoch: startEpoch, organizationId: null })
     const response = await this.withBrowserLock(() =>
       authClient.post<unknown>('/auth/login', payload),
     )
@@ -323,6 +325,7 @@ export class AuthSessionCoordinator {
       expiresAtMs: null,
       issuedTtlSeconds: null,
       sessionStartedAtMs: null,
+      organizationId: null,
       epoch: snapshot.epoch + 1,
       initialized: true,
       initializing: false,

@@ -1,22 +1,10 @@
-import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 
-import type { AuthSessionCoordinator, SessionSnapshot } from '../features/auth/auth-session'
+import { useAuthStore } from '../features/auth/auth-store'
+import type { SessionSnapshot } from '../features/auth/auth-session'
+import { SessionBoundaryError } from './auth-client'
 
-export const apiClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30_000,
-  withCredentials: true,
-})
-
-export const authClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30_000,
-  withCredentials: true,
-  headers: { 'X-Requested-With': 'FlowTest' },
-})
-
-let organizationId: string | null = null
-let authSession: AuthSessionCoordinator | null = null
+export { authClient, SessionBoundaryError } from './auth-client'
 
 type ScopedConfig = InternalAxiosRequestConfig & {
   authScope?: { epoch: number; userId: string; organizationId: string | null }
@@ -24,27 +12,60 @@ type ScopedConfig = InternalAxiosRequestConfig & {
   authRetried?: boolean
 }
 
-export class SessionBoundaryError extends Error {}
-
-export function configureAuthSession(session: AuthSessionCoordinator): void {
-  authSession = session
+export type PlatformAuthPort = {
+  snapshot: () => SessionSnapshot
+  ensureFreshAccessToken: () => Promise<string>
+  recoverExpiredAccessToken: (usedVersion: number | undefined) => Promise<string>
+  rejectInvalidAccessToken: (usedVersion: number | undefined) => void
 }
 
-export function setOrganizationId(id: string | null) {
-  organizationId = id
+export function createPlatformApiClient(port: PlatformAuthPort): AxiosInstance {
+  const client = axios.create({
+    baseURL: '/api/v1',
+    timeout: 30_000,
+    withCredentials: true,
+  })
+  client.interceptors.request.use((config) => preparePlatformRequest(config, port))
+  client.interceptors.response.use(
+    (response) => {
+      const config = response.config as ScopedConfig
+      if (config.authScope && !isCurrentScope(config.authScope, port)) {
+        throw new SessionBoundaryError('登录身份已变化')
+      }
+      return response
+    },
+    (error) => recoverPlatformRequest(error, port, client),
+  )
+  return client
 }
 
-apiClient.interceptors.request.use(preparePlatformRequest)
+const defaultSessionActions = useAuthStore.getState()
 
-async function preparePlatformRequest(config: ScopedConfig): Promise<ScopedConfig> {
+export const apiClient = createPlatformApiClient({
+  snapshot: () => useAuthStore.getState(),
+  ensureFreshAccessToken: defaultSessionActions.requestAccessToken,
+  recoverExpiredAccessToken: defaultSessionActions.recoverExpiredAccessToken,
+  rejectInvalidAccessToken: defaultSessionActions.rejectInvalidAccessToken,
+})
+
+export function setOrganizationId(id: string | null): void {
+  if (useAuthStore.getState().organizationId !== id) {
+    useAuthStore.setState({ organizationId: id })
+  }
+}
+
+async function preparePlatformRequest(
+  config: ScopedConfig,
+  port: PlatformAuthPort,
+): Promise<ScopedConfig> {
   assertPlatformUrl(config.url)
-  const snapshot = authSession?.snapshot()
+  const snapshot = port.snapshot()
   assignRequestScope(config, snapshot)
-  assertRequestScope(config)
-  const token = await requestToken(config, snapshot)
-  assertRequestScope(config)
-  assignRequestHeaders(config, token)
-  config.authTokenVersion = authSession?.snapshot().tokenVersion
+  assertRequestScope(config, port)
+  const token = await requestToken(config, snapshot, port)
+  assertRequestScope(config, port)
+  assignRequestHeaders(config, token, port.snapshot().organizationId)
+  config.authTokenVersion = port.snapshot().tokenVersion
   return config
 }
 
@@ -54,55 +75,59 @@ function assertPlatformUrl(url: string | undefined): void {
   }
 }
 
-function assignRequestScope(config: ScopedConfig, snapshot: SessionSnapshot | undefined): void {
-  if (snapshot?.phase === 'logging-out') throw new SessionBoundaryError('已退出登录')
-  if (snapshot?.user && !config.authScope) config.authScope = scopeOf(snapshot)
+function assignRequestScope(config: ScopedConfig, snapshot: SessionSnapshot): void {
+  if (snapshot.phase === 'logging-out') throw new SessionBoundaryError('已退出登录')
+  if (snapshot.user && !config.authScope) config.authScope = scopeOf(snapshot)
 }
 
-function assignRequestHeaders(config: ScopedConfig, token: string | null): void {
+function assignRequestHeaders(
+  config: ScopedConfig,
+  token: string | null,
+  organizationId: string | null,
+): void {
   if (token) config.headers.Authorization = `Bearer ${token}`
   else delete config.headers.Authorization
   if (organizationId) config.headers['X-Organization-Id'] = organizationId
   else delete config.headers['X-Organization-Id']
 }
 
-async function requestToken(config: ScopedConfig, snapshot: SessionSnapshot | undefined) {
-  if (authSession && snapshot?.user && !config.authRetried) {
-    return authSession.ensureFreshAccessToken()
+async function requestToken(
+  config: ScopedConfig,
+  snapshot: SessionSnapshot,
+  port: PlatformAuthPort,
+) {
+  if (snapshot.user && !config.authRetried) {
+    return port.ensureFreshAccessToken()
   }
-  return snapshot?.token ?? null
+  return snapshot.token
 }
 
-function assertRequestScope(config: ScopedConfig): void {
-  if (config.authScope && !isCurrentScope(config.authScope)) {
+function assertRequestScope(config: ScopedConfig, port: PlatformAuthPort): void {
+  if (config.authScope && !isCurrentScope(config.authScope, port)) {
     throw new SessionBoundaryError('登录身份已变化')
   }
   if (config.signal?.aborted) throw new Error('请求已取消')
 }
 
-apiClient.interceptors.response.use((response) => {
-  const config = response.config as ScopedConfig
-  if (config.authScope && !isCurrentScope(config.authScope)) {
-    throw new SessionBoundaryError('登录身份已变化')
-  }
-  return response
-}, recoverPlatformRequest)
-
-async function recoverPlatformRequest(error: unknown): Promise<unknown> {
+async function recoverPlatformRequest(
+  error: unknown,
+  port: PlatformAuthPort,
+  client: AxiosInstance,
+): Promise<unknown> {
   if (isInvalidPlatformToken(error)) {
     const config = error.config as ScopedConfig | undefined
-    if (config?.authScope && isCurrentScope(config.authScope)) {
-      authSession?.rejectInvalidAccessToken(config.authTokenVersion)
+    if (config?.authScope && isCurrentScope(config.authScope, port)) {
+      port.rejectInvalidAccessToken(config.authTokenVersion)
     }
     throw error
   }
-  if (!canRecover(error)) throw error
+  if (!canRecover(error, port)) throw error
   const config = error.config as ScopedConfig
   config.authRetried = true
-  const token = await authSession!.recoverExpiredAccessToken(config.authTokenVersion)
-  assertRequestScope(config)
+  const token = await port.recoverExpiredAccessToken(config.authTokenVersion)
+  assertRequestScope(config, port)
   config.headers.Authorization = `Bearer ${token}`
-  return apiClient.request(config)
+  return client.request(config)
 }
 
 function isInvalidPlatformToken(error: unknown): error is AxiosError {
@@ -111,11 +136,11 @@ function isInvalidPlatformToken(error: unknown): error is AxiosError {
   return error.response?.status === 401 && data?.error?.code === 'INVALID_ACCESS_TOKEN'
 }
 
-function canRecover(error: unknown): error is AxiosError {
-  if (!axios.isAxiosError(error) || !authSession) return false
+function canRecover(error: unknown, port: PlatformAuthPort): error is AxiosError {
+  if (!axios.isAxiosError(error)) return false
   const config = error.config as ScopedConfig | undefined
   if (!config || config.authRetried || config.signal?.aborted) return false
-  return isExpiredPlatformError(error) && isRecoverableScope(config)
+  return isExpiredPlatformError(error) && isRecoverableScope(config, port)
 }
 
 function isExpiredPlatformError(error: AxiosError): boolean {
@@ -123,21 +148,29 @@ function isExpiredPlatformError(error: AxiosError): boolean {
   return error.response?.status === 401 && data?.error?.code === 'ACCESS_TOKEN_EXPIRED'
 }
 
-function isRecoverableScope(config: ScopedConfig): boolean {
-  return Boolean(config.authScope && isCurrentScope(config.authScope) && isReplayable(config.data))
+function isRecoverableScope(config: ScopedConfig, port: PlatformAuthPort): boolean {
+  return Boolean(
+    config.authScope && isCurrentScope(config.authScope, port) && isReplayable(config.data),
+  )
 }
 
 function scopeOf(snapshot: SessionSnapshot) {
-  return { epoch: snapshot.epoch, userId: snapshot.user!.id, organizationId }
+  return {
+    epoch: snapshot.epoch,
+    userId: snapshot.user!.id,
+    organizationId: snapshot.organizationId,
+  }
 }
 
-function isCurrentScope(scope: NonNullable<ScopedConfig['authScope']>): boolean {
-  const snapshot = authSession?.snapshot()
-  return Boolean(
-    snapshot &&
+function isCurrentScope(
+  scope: NonNullable<ScopedConfig['authScope']>,
+  port: PlatformAuthPort,
+): boolean {
+  const snapshot = port.snapshot()
+  return (
     snapshot.epoch === scope.epoch &&
     snapshot.user?.id === scope.userId &&
-    organizationId === scope.organizationId,
+    snapshot.organizationId === scope.organizationId
   )
 }
 

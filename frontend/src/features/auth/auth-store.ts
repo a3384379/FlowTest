@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 
-import { configureAuthSession } from '../../lib/api'
 import { AuthSessionCoordinator, type SessionSnapshot } from './auth-session'
 
 type LoginPayload = { email: string; password: string }
@@ -11,6 +10,9 @@ type AuthState = SessionSnapshot & {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => Promise<void>
   registerRecoveryListeners: () => () => void
+  requestAccessToken: () => Promise<string>
+  recoverExpiredAccessToken: (usedVersion: number | undefined) => Promise<string>
+  rejectInvalidAccessToken: (usedVersion: number | undefined) => void
 }
 
 export const useAuthStore = create<AuthState>((set, get) => {
@@ -18,7 +20,6 @@ export const useAuthStore = create<AuthState>((set, get) => {
     read: get,
     write: (patch) => set(patch),
   })
-  configureAuthSession(coordinator)
   return {
     phase: 'initializing',
     initialized: false,
@@ -30,6 +31,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     issuedTtlSeconds: null,
     epoch: 0,
     tokenVersion: 0,
+    organizationId: null,
     sessionStartedAtMs: null,
     notice: null,
     initialize: () => coordinator.initialize(),
@@ -38,5 +40,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
       coordinator.changePassword(currentPassword, newPassword),
     logout: () => coordinator.logout(),
     registerRecoveryListeners: () => coordinator.registerRecoveryListeners(),
+    requestAccessToken: () => coordinator.ensureFreshAccessToken(),
+    recoverExpiredAccessToken: (usedVersion) => coordinator.recoverExpiredAccessToken(usedVersion),
+    rejectInvalidAccessToken: (usedVersion) => coordinator.rejectInvalidAccessToken(usedVersion),
   }
 })
