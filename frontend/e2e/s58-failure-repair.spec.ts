@@ -86,7 +86,9 @@ test('S58 失败诊断创建受限 Repair Proposal 并完成 Re-preview', async 
 })
 
 async function refreshAccessToken(request: APIRequestContext): Promise<string> {
-  const response = await request.post('/api/v1/auth/refresh')
+  const response = await request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(response.ok(), await response.text()).toBeTruthy()
   return ((await response.json()) as { access_token: string }).access_token
 }

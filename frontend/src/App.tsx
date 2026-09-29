@@ -1,7 +1,10 @@
 import { DraftSessionProvider } from './features/drafts/DraftSessionProvider'
+import type { User } from './lib/api'
+import type { SessionPhase } from './features/auth/auth-session'
 import { LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import {
   Avatar,
+  Alert,
   Breadcrumb,
   Button,
   Layout,
@@ -61,23 +64,66 @@ const { Header, Content } = Layout
 
 export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
+  const phase = useAuthStore((state) => state.phase)
   const token = useAuthStore((state) => state.token)
   const user = useAuthStore((state) => state.user)
+  const lastUserId = useAuthStore((state) => state.lastUserId)
+  const notice = useAuthStore((state) => state.notice)
   const initialize = useAuthStore((state) => state.initialize)
+  const registerRecoveryListeners = useAuthStore((state) => state.registerRecoveryListeners)
 
   useEffect(() => {
     void initialize()
   }, [initialize])
 
+  useEffect(() => registerRecoveryListeners(), [registerRecoveryListeners])
+
   if (!initialized) return <FullPageLoading />
-  if (!token || !user) return <LoginPage />
+  return (
+    <DraftSessionProvider key={user?.id ?? lastUserId ?? 'anonymous'}>
+      <SessionContent
+        phase={phase}
+        token={token}
+        user={user}
+        notice={notice}
+        initialize={initialize}
+      />
+    </DraftSessionProvider>
+  )
+}
+
+function SessionContent({
+  phase,
+  token,
+  user,
+  notice,
+  initialize,
+}: {
+  phase: SessionPhase
+  token: string | null
+  user: User | null
+  notice: string | null
+  initialize: () => Promise<void>
+}) {
+  if (!token || !user) {
+    if (phase !== 'temporarily-unavailable') return <LoginPage />
+    return (
+      <main className="centered-page">
+        <Alert type="warning" title={notice ?? '暂时无法确认登录状态'} />
+        <Button onClick={() => void initialize()}>重试连接</Button>
+      </main>
+    )
+  }
   if (user.requires_password_change) return <PasswordChangePage />
   return (
-    <DraftSessionProvider key={user.id}>
+    <>
+      {phase === 'temporarily-unavailable' && (
+        <Alert type="warning" title={notice ?? '认证服务暂时不可用'} />
+      )}
       <ProjectProvider>
         <AuthenticatedShell />
       </ProjectProvider>
-    </DraftSessionProvider>
+    </>
   )
 }
 

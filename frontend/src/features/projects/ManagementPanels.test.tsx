@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccessManagementPanel from './AccessManagementPanel'
 import AssetManagementPanel from './AssetManagementPanel'
 import { useAuthStore } from '../auth/auth-store'
+import { authenticateTestUser } from '../../test/auth'
 import { server } from '../../test/server'
 
 const projectId = 'project-management'
@@ -14,18 +15,16 @@ const projectId = 'project-management'
 describe('project management panels', () => {
   beforeEach(() => {
     localStorage.clear()
-    useAuthStore.setState({
-      user: {
-        id: 'admin-1',
-        email: 'admin@example.com',
-        display_name: 'Admin',
-        is_active: true,
-        is_system_admin: true,
-        requires_password_change: false,
-        oidc_provider: null,
-        oidc_subject: null,
-        last_login_at: null,
-      },
+    authenticateTestUser({
+      id: 'admin-1',
+      email: 'admin@example.com',
+      display_name: 'Admin',
+      is_active: true,
+      is_system_admin: true,
+      requires_password_change: false,
+      oidc_provider: null,
+      oidc_subject: null,
+      last_login_at: null,
     })
   })
 

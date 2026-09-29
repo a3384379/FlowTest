@@ -8,19 +8,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { useAuthStore } from './features/auth/auth-store'
-import { setAccessToken } from './lib/api'
 import { project, user } from './test/fixtures'
 import { server } from './test/server'
 
 describe('App authentication', () => {
   beforeEach(() => {
     localStorage.clear()
-    setAccessToken(null)
     useAuthStore.setState({
+      phase: 'initializing',
       initialized: false,
       initializing: false,
       token: null,
       user: null,
+      expiresAtMs: null,
+      issuedTtlSeconds: null,
+      notice: null,
     })
   })
 
@@ -99,7 +101,7 @@ describe('App authentication', () => {
 
   it('logs in, shows the lazy dashboard, and logs out', async () => {
     server.use(
-      http.post('/api/v1/auth/refresh', () => HttpResponse.json({}, { status: 401 })),
+      http.post('/api/v1/auth/refresh', invalidRefreshResponse),
       http.post('/api/v1/auth/login', () =>
         HttpResponse.json({ access_token: 'access-token', expires_in: 900, user }),
       ),
@@ -173,7 +175,7 @@ describe('App authentication', () => {
 
   it('requires a password change after first login', async () => {
     server.use(
-      http.post('/api/v1/auth/refresh', () => HttpResponse.json({}, { status: 401 })),
+      http.post('/api/v1/auth/refresh', invalidRefreshResponse),
       http.post('/api/v1/auth/login', () =>
         HttpResponse.json({
           access_token: 'access-token',
@@ -195,8 +197,9 @@ describe('App authentication', () => {
     await browser.type(screen.getByLabelText('当前密码'), 'initial-password')
     await browser.type(screen.getByLabelText('新密码'), 'new-password-123')
     await browser.type(screen.getByLabelText('确认新密码'), 'new-password-123')
-    await browser.click(screen.getByRole('button', { name: /保\s*存并进入平台/ }))
-    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '修改密码并重新登录' }))
+    expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
+    expect(screen.getByText('密码已修改，请重新登录。')).toBeVisible()
   })
 
   it('restores a session with refresh rotation', async () => {
@@ -214,7 +217,7 @@ describe('App authentication', () => {
   })
 
   it('shows the configured OIDC login entry without exposing credentials', async () => {
-    server.use(http.post('/api/v1/auth/refresh', () => HttpResponse.json({}, { status: 401 })))
+    server.use(http.post('/api/v1/auth/refresh', invalidRefreshResponse))
 
     renderApp('/dashboard', [project], { enabled: true, provider: '公司统一身份' })
 
@@ -386,11 +389,21 @@ function renderApp(
 }
 
 function authenticateExistingUser() {
-  setAccessToken('existing-token')
   useAuthStore.setState({
+    phase: 'authenticated',
     initialized: true,
     initializing: false,
     token: 'existing-token',
     user,
+    lastUserId: user.id,
+    expiresAtMs: Date.now() + 900_000,
+    issuedTtlSeconds: 900,
   })
+}
+
+function invalidRefreshResponse() {
+  return HttpResponse.json(
+    { error: { code: 'INVALID_REFRESH_TOKEN', message: '登录状态已失效' } },
+    { status: 401 },
+  )
 }

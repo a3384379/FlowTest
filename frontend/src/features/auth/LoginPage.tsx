@@ -2,7 +2,7 @@ import { ApiOutlined, LockOutlined, SafetyOutlined, UserOutlined } from '@ant-de
 import { Alert, Button, Card, Divider, Form, Input, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
-import { apiClient, apiErrorMessage } from '../../lib/api'
+import { authClient, apiErrorMessage } from '../../lib/api'
 import { useAuthStore } from './auth-store'
 
 type LoginValues = { email: string; password: string }
@@ -10,13 +10,14 @@ type OIDCStatus = { enabled: boolean; provider: string | null }
 
 export default function LoginPage() {
   const login = useAuthStore((state) => state.login)
+  const notice = useAuthStore((state) => state.notice)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [oidcStatus, setOIDCStatus] = useState<OIDCStatus>({ enabled: false, provider: null })
 
   useEffect(() => {
     let active = true
-    void apiClient
+    void authClient
       .get<OIDCStatus>('/auth/oidc/status')
       .then((response) => {
         if (active) setOIDCStatus(response.data)
@@ -55,6 +56,9 @@ export default function LoginPage() {
         <Typography.Title level={3}>登录账号</Typography.Title>
         <Typography.Paragraph type="secondary">请使用管理员分配的内部账号</Typography.Paragraph>
         {error && <Alert type="error" showIcon message={error} className="form-alert" />}
+        {!error && notice && (
+          <Alert type="warning" showIcon message={notice} className="form-alert" />
+        )}
         <Form<LoginValues> layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="账号" name="email" rules={[{ required: true, message: '请输入账号' }]}>
             <Input

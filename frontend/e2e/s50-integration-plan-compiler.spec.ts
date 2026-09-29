@@ -146,7 +146,9 @@ test('S50 Golden Plan 编译产物可审核并创建 Workflow Draft', async ({ p
 })
 
 async function refreshAccessToken(request: APIRequestContext): Promise<string> {
-  const response = await request.post('/api/v1/auth/refresh')
+  const response = await request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(response.ok()).toBeTruthy()
   return ((await response.json()) as { access_token: string }).access_token
 }

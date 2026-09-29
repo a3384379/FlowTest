@@ -16,7 +16,9 @@ export async function seedEditor(
 ): Promise<EditorFixture> {
   await page.goto('/')
   await authenticate(page)
-  const refreshed = await page.request.post('/api/v1/auth/refresh')
+  const refreshed = await page.request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(refreshed.ok()).toBeTruthy()
   const authentication: { access_token: string } = await refreshed.json()
   const headers = { Authorization: `Bearer ${authentication.access_token}` }
