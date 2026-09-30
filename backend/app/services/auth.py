@@ -39,6 +39,12 @@ class AuthService:
 
     async def login(self, *, email: str, password: str) -> TokenPair:
         user = await self._users.get_by_email(_normalize_login_identifier(email))
+        if user is None:
+            raise AppError(code="INVALID_CREDENTIALS", message="账号或密码错误", status_code=401)
+        user_id = user.id
+        await self._session.rollback()
+        locked = await self._users.lock_session_changes(user_id)
+        user = await self._users.get(user_id) if locked else None
         if (
             user is None
             or not user.is_active

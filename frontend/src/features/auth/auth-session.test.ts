@@ -16,9 +16,11 @@ const invalidRefresh = {
 describe('auth session recovery', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     setOrganizationId(null)
     useAuthStore.setState({
       phase: 'initializing',
+      sessionId: null,
       initialized: false,
       initializing: false,
       token: null,
@@ -261,6 +263,106 @@ describe('auth session recovery', () => {
     setOrganizationId(null)
   })
 
+  it.each(['refresh', 'me'])('keeps a new login when an old %s failure arrives', async (stage) => {
+    const started = deferred()
+    const release = deferred()
+    const nextUser = { ...user, id: 'new-user', email: 'new@example.com' }
+    server.use(
+      http.post('/api/v1/auth/refresh', async () => {
+        if (stage === 'refresh') {
+          started.resolve()
+          await release.promise
+          return HttpResponse.json(invalidRefresh, { status: 401 })
+        }
+        return HttpResponse.json({ access_token: 'old-candidate', expires_in: 900 })
+      }),
+      http.get('/api/v1/auth/me', async () => {
+        started.resolve()
+        await release.promise
+        return HttpResponse.json({ error: { code: 'INVALID_ACCESS_TOKEN' } }, { status: 401 })
+      }),
+      http.post('/api/v1/auth/login', () =>
+        HttpResponse.json({ access_token: 'new-token', expires_in: 900, user: nextUser }),
+      ),
+    )
+    signedInNearExpiry()
+    const oldRequest = useAuthStore
+      .getState()
+      .requestAccessToken()
+      .catch((error: unknown) => error)
+    await started.promise
+    useAuthStore.setState({ epoch: useAuthStore.getState().epoch + 1, user: null, token: null })
+    await useAuthStore.getState().login({ email: nextUser.email, password: 'test-password' })
+    const newEpoch = useAuthStore.getState().epoch
+    release.resolve()
+    await oldRequest
+    expect(useAuthStore.getState()).toMatchObject({
+      phase: 'authenticated',
+      user: nextUser,
+      token: 'new-token',
+      epoch: newEpoch,
+      notice: null,
+    })
+  })
+
+  it('classifies an invalid initialization candidate once as anonymous', async () => {
+    server.use(
+      http.post('/api/v1/auth/refresh', () =>
+        HttpResponse.json({ access_token: 'invalid-candidate', expires_in: 900 }),
+      ),
+      http.get('/api/v1/auth/me', () =>
+        HttpResponse.json({ error: { code: 'INVALID_ACCESS_TOKEN' } }, { status: 401 }),
+      ),
+    )
+    const epoch = useAuthStore.getState().epoch
+    await useAuthStore.getState().initialize()
+    expect(useAuthStore.getState()).toMatchObject({
+      phase: 'anonymous',
+      token: null,
+      user: null,
+      epoch: epoch + 1,
+    })
+  })
+
+  it.each(['account', 'organization'])(
+    'does not replay an expired request across a changed %s',
+    async (boundary) => {
+      const started = deferred()
+      const release = deferred()
+      let refreshes = 0
+      let requests = 0
+      server.use(
+        http.get('/api/v1/projects', async () => {
+          requests += 1
+          started.resolve()
+          await release.promise
+          return HttpResponse.json(expiredAccess, { status: 401 })
+        }),
+        http.post('/api/v1/auth/refresh', () => {
+          refreshes += 1
+          return HttpResponse.json({ access_token: 'unexpected', expires_in: 900 })
+        }),
+        http.post('/api/v1/auth/login', () =>
+          HttpResponse.json({
+            access_token: 'new-token',
+            expires_in: 900,
+            user: { ...user, id: 'new-user' },
+          }),
+        ),
+      )
+      signedIn()
+      const request = apiClient.get('/projects').catch((error: unknown) => error)
+      await started.promise
+      if (boundary === 'account')
+        await useAuthStore.getState().login({ email: 'new@example.com', password: 'test-password' })
+      else setOrganizationId('new-organization')
+      release.resolve()
+      await request
+      expect(refreshes).toBe(0)
+      expect(requests).toBe(1)
+    },
+  )
+
   it('rejects a token response without a valid TTL', async () => {
     server.use(
       http.post('/api/v1/auth/login', () =>
@@ -290,4 +392,12 @@ function signedIn() {
 function signedInNearExpiry() {
   signedIn()
   useAuthStore.setState({ expiresAtMs: Date.now() + 1000 })
+}
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }

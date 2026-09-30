@@ -21,9 +21,15 @@
 
 ## 并发与安全边界
 
-服务端先以数据库写操作串行化同一用户的刷新、注销和改密，再通过条件更新消费旧刷新会话，并在同一事务创建后继。两个事务不能从同一旧令牌得到两个后继；提交失败时旧会话仍可用。注销使用刷新 Cookie，无 Cookie 时幂等返回 204；若请求携带已轮换的旧 Cookie，则沿 `replaced_by_id` 撤销当前链后继。链损坏或超出遍历上限时返回错误，不报告成功。
+服务端先以数据库写操作串行化同一用户的密码登录、刷新、注销和改密，再通过条件更新消费旧刷新会话，并在同一事务创建后继。两个事务不能从同一旧令牌得到两个后继；提交失败时旧会话仍可用。注销使用刷新 Cookie，无 Cookie 时幂等返回 204；若请求携带已轮换的旧 Cookie，则沿 `replaced_by_id` 撤销当前链后继。链损坏或超出遍历上限时返回错误，不报告成功。
 
-浏览器在安全上下文且支持 Web Locks 时，串行化登录、刷新、注销和改密。BroadcastChannel 仅发送不含令牌的状态事件。其他环境依赖服务端原子消费和一次有限冲突恢复；极端竞争或刷新响应丢失后可能需要重新登录。平台令牌不会进入 localStorage、草稿、广播或被测接口请求。
+浏览器在安全上下文且支持 Web Locks 时，串行化登录、刷新、注销和改密。所有异步认证任务、候选令牌和初始化标记绑定页面 epoch；旧任务的成功、失败和 finally 均不能修改后来登录的状态。取得浏览器锁后、发送请求前、冲突重试前与发布刷新结果前再次核查归属。确定失效由刷新层统一分类，初始化不再将其覆盖为暂时不可用。
+
+本地会话用随机非敏感 ID 标识交互代次，同一浏览器的页面共享该代次。用户发起退出时立即保存带代次和操作 ID 的 `flowtest:logout-pending:v2`，通过 BroadcastChannel 发布退出意图，并结束匹配页面的本地身份。未确认服务端注销时保留标记，获取 Token、过期恢复和焦点/联网/可见事件均阻止继续续期。没有 BroadcastChannel 时用 Storage Event；即使服务端很快确认并删除标记，事件自身的代次仍可结束对应页面。旧代次的迟到事件或标记不能结束新登录。
+
+密码登录和企业登录按钮共用交互式登录准备：在 Cookie 写锁内，先确认匹配的待注销操作成功，再建立新代次。注销失败时保留旧意图并显示错误，不继续向身份提供方跳转。OIDC 跳转保存每页的非敏感尝试 ID，回跳恢复须与共享代次匹配；取消或失败不会清除未确认的注销意图。兼容旧 `flowtest:logout-pending:v1=1`，无法识别归属时先保守完成服务端注销，不自动恢复旧 Cookie。
+
+BroadcastChannel 和浏览器存储均不包含令牌。若浏览器禁用存储，跨页代次无法可靠共享，只能保证当前页的退出意图，部署验收须核查该环境的支持范围。其他环境依赖服务端原子消费和一次有限冲突恢复；极端竞争或刷新响应丢失后可能需要重新登录。平台令牌不会进入 localStorage、草稿、广播或被测接口请求。
 
 浏览器 Cookie 写接口校验精确 Origin。无 Origin 的刷新与注销请求须发送 `X-Requested-With: FlowTest`；JSON 登录请求可凭 `application/json` 触发浏览器预检。`Origin: null` 和不允许的来源会被拒绝。前端独立认证客户端发送此头，不附加旧组织头；OIDC 回调维持原有 state/nonce 验证。Cookie 名、Path、HttpOnly、SameSite 与 Secure 配置未变；自定义 API 前缀下设置和删除 Path 一致。
 
@@ -37,7 +43,9 @@
 
 ```bash
 make test-backend-targeted TARGETS='["tests/test_auth_session_refresh.py","tests/test_access_api.py","tests/test_oidc.py"]'
-make test-frontend-targeted TARGETS='["src/lib/api.test.ts","src/features/auth/auth-session.test.ts","src/App.test.tsx"]'
+make test-frontend-targeted TARGETS='["src/lib/api.test.ts","src/features/auth/auth-session.test.ts","src/features/auth/auth-session-boundaries.test.ts","src/App.test.tsx"]'
 ```
+
+登录与改密的真实 PostgreSQL 回归使用两个独立事务和屏障，分别验证改密先提交后旧凭证登录被拒绝，以及登录先持锁后改密撤销其会话。OIDC 依赖外部身份认证，不将本地密码修改等同于禁用企业身份登录。
 
 合并门禁和发布验收分别核查最新提交。部署时先更新兼容新错误码和原子轮换的后端，再更新前端静态资源。隔离环境应使用合法短 TTL 经过两个访问令牌周期，验证保存只执行一次、双标签页、断网恢复、过期后注销、OIDC、PostgreSQL 与 Standalone SQLite。回滚前端可能重新出现到期中断；不能以关闭鉴权、延长为永久令牌或回退原子轮换作为补救。

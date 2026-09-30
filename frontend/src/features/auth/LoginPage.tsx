@@ -1,6 +1,6 @@
 import { ApiOutlined, LockOutlined, SafetyOutlined, UserOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Divider, Form, Input, Typography } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 
 import { authClient, apiErrorMessage } from '../../lib/api'
 import { useAuthStore } from './auth-store'
@@ -10,6 +10,7 @@ type OIDCStatus = { enabled: boolean; provider: string | null }
 
 export default function LoginPage() {
   const login = useAuthStore((state) => state.login)
+  const prepareOIDCLogin = useAuthStore((state) => state.prepareOIDCLogin)
   const notice = useAuthStore((state) => state.notice)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -36,6 +37,19 @@ export default function LoginPage() {
     } catch (requestError) {
       setError(apiErrorMessage(requestError))
     } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function submitOIDC(event: MouseEvent<HTMLElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      await prepareOIDCLogin()
+      window.location.assign('/api/v1/auth/oidc/login')
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError))
       setSubmitting(false)
     }
   }
@@ -87,7 +101,14 @@ export default function LoginPage() {
         {oidcStatus.enabled && (
           <>
             <Divider plain>或</Divider>
-            <Button href="/api/v1/auth/oidc/login" icon={<SafetyOutlined />} size="large" block>
+            <Button
+              href="/api/v1/auth/oidc/login"
+              onClick={submitOIDC}
+              loading={submitting}
+              icon={<SafetyOutlined />}
+              size="large"
+              block
+            >
               使用{oidcStatus.provider ? ` ${oidcStatus.provider} ` : '企业身份'}登录
             </Button>
           </>

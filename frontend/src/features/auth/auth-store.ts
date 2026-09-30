@@ -9,6 +9,7 @@ type AuthState = SessionSnapshot & {
   login: (payload: LoginPayload) => Promise<void>
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => Promise<void>
+  prepareOIDCLogin: () => Promise<void>
   registerRecoveryListeners: () => () => void
   requestAccessToken: () => Promise<string>
   recoverExpiredAccessToken: (usedVersion: number | undefined) => Promise<string>
@@ -33,12 +34,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
     tokenVersion: 0,
     organizationId: null,
     sessionStartedAtMs: null,
+    sessionId: null,
     notice: null,
     initialize: () => coordinator.initialize(),
     login: (payload) => coordinator.login(payload),
     changePassword: (currentPassword, newPassword) =>
       coordinator.changePassword(currentPassword, newPassword),
     logout: () => coordinator.logout(),
+    prepareOIDCLogin: () => coordinator.prepareOIDCLogin(),
     registerRecoveryListeners: () => coordinator.registerRecoveryListeners(),
     requestAccessToken: () => coordinator.ensureFreshAccessToken(),
     recoverExpiredAccessToken: (usedVersion) => coordinator.recoverExpiredAccessToken(usedVersion),

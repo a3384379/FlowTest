@@ -3,7 +3,7 @@ import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 import pytest
@@ -18,8 +18,8 @@ from app.core.security import password_service
 from app.main import app
 from app.models import Base
 from app.models.access import RefreshSession, User
-from app.repositories.access import RefreshSessionRepository
-from app.services.auth import AuthService
+from app.repositories.access import RefreshSessionRepository, UserRepository
+from app.services.auth import AuthService, TokenPair
 
 PASSWORD = "session-test-password-123!"
 AUTH_HEADERS = {"X-Requested-With": "FlowTest"}
@@ -231,6 +231,116 @@ async def test_password_change_cannot_leave_a_concurrent_refresh_active(
             )
 
     await asyncio.gather(rotate(), change_password())
+    async with factory() as session:
+        active = await session.scalar(
+            select(func.count())
+            .select_from(RefreshSession)
+            .where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))
+        )
+        assert active == 0
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FLOWTEST_AUTH_TEST_DATABASE_URL"),
+    reason="Requires PostgreSQL independent transaction snapshots",
+)
+@pytest.mark.asyncio
+async def test_password_change_rejects_login_using_a_pre_change_credential_snapshot(
+    session_context: tuple[async_sessionmaker[AsyncSession], User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, user = session_context
+    credentials_read = asyncio.Event()
+    password_changed = asyncio.Event()
+    original_get = UserRepository.get_by_email
+
+    async def paused_get(repository: UserRepository, email: str) -> User | None:
+        result = await original_get(repository, email)
+        credentials_read.set()
+        await asyncio.wait_for(password_changed.wait(), timeout=5)
+        return result
+
+    monkeypatch.setattr(UserRepository, "get_by_email", paused_get)
+
+    async def stale_login() -> str:
+        async with factory() as session:
+            try:
+                await AuthService(session).login(email=user.email, password=PASSWORD)
+                return "issued"
+            except AppError as error:
+                return error.code
+
+    login_task = asyncio.create_task(stale_login())
+    await asyncio.wait_for(credentials_read.wait(), timeout=5)
+    async with factory() as session:
+        current_user = await session.get(User, user.id)
+        assert current_user is not None
+        await AuthService(session).change_password(
+            user=current_user,
+            current_password=PASSWORD,
+            new_password="replacement-password-123!",
+        )
+    password_changed.set()
+    assert await login_task == "INVALID_CREDENTIALS"
+    async with factory() as session:
+        active = await session.scalar(
+            select(func.count())
+            .select_from(RefreshSession)
+            .where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))
+        )
+        assert active == 0
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FLOWTEST_AUTH_TEST_DATABASE_URL"),
+    reason="Requires PostgreSQL row lock serialization",
+)
+@pytest.mark.asyncio
+async def test_password_change_revokes_login_that_already_holds_the_user_lock(
+    session_context: tuple[async_sessionmaker[AsyncSession], User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, user = session_context
+    login_locked = asyncio.Event()
+    allow_issue = asyncio.Event()
+    change_lock_requested = asyncio.Event()
+    original_issue = AuthService._issue_pair
+    original_lock = UserRepository.lock_session_changes
+
+    async def paused_issue(service: AuthService, current_user: User) -> TokenPair:
+        login_locked.set()
+        await asyncio.wait_for(allow_issue.wait(), timeout=5)
+        return await original_issue(service, current_user)
+
+    async def observed_lock(repository: UserRepository, user_id: UUID) -> bool:
+        if login_locked.is_set():
+            change_lock_requested.set()
+        return await original_lock(repository, user_id)
+
+    monkeypatch.setattr(AuthService, "_issue_pair", paused_issue)
+    monkeypatch.setattr(UserRepository, "lock_session_changes", observed_lock)
+
+    async def login() -> None:
+        async with factory() as session:
+            await AuthService(session).login(email=user.email, password=PASSWORD)
+
+    async def change() -> None:
+        async with factory() as session:
+            current_user = await session.get(User, user.id)
+            assert current_user is not None
+            await AuthService(session).change_password(
+                user=current_user,
+                current_password=PASSWORD,
+                new_password="replacement-password-123!",
+            )
+
+    login_task = asyncio.create_task(login())
+    await asyncio.wait_for(login_locked.wait(), timeout=5)
+    change_task = asyncio.create_task(change())
+    await asyncio.wait_for(change_lock_requested.wait(), timeout=5)
+    assert not change_task.done()
+    allow_issue.set()
+    await asyncio.gather(login_task, change_task)
     async with factory() as session:
         active = await session.scalar(
             select(func.count())

@@ -14,8 +14,10 @@ import { server } from './test/server'
 describe('App authentication', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     useAuthStore.setState({
       phase: 'initializing',
+      sessionId: null,
       initialized: false,
       initializing: false,
       token: null,
@@ -214,6 +216,56 @@ describe('App authentication', () => {
 
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect(useAuthStore.getState().token).toBe('rotated-token')
+  })
+
+  it('shows login directly when initialization me confirms an invalid access token', async () => {
+    server.use(
+      http.post('/api/v1/auth/refresh', () =>
+        HttpResponse.json({ access_token: 'candidate', expires_in: 900 }),
+      ),
+      http.get('/api/v1/auth/me', () =>
+        HttpResponse.json({ error: { code: 'INVALID_ACCESS_TOKEN' } }, { status: 401 }),
+      ),
+    )
+    renderApp()
+    expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '重试连接' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the initialization candidate and offers retry when me returns 503', async () => {
+    let refreshes = 0
+    let meCalls = 0
+    server.use(
+      http.post('/api/v1/auth/refresh', () => {
+        refreshes += 1
+        return HttpResponse.json({ access_token: 'candidate', expires_in: 900 })
+      }),
+      http.get('/api/v1/auth/me', () => {
+        meCalls += 1
+        return meCalls === 1 ? HttpResponse.json({}, { status: 503 }) : HttpResponse.json(user)
+      }),
+    )
+    renderApp()
+    await userEvent.setup().click(await screen.findByRole('button', { name: '重试连接' }))
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+    expect(useAuthStore.getState().token).toBe('candidate')
+    expect(refreshes).toBe(1)
+  })
+
+  it('keeps an unconfirmed logout and displays the error before OIDC navigation', async () => {
+    localStorage.setItem('flowtest:logout-pending:v1', '1')
+    server.use(
+      http.post('/api/v1/auth/logout', () =>
+        HttpResponse.json({ error: { message: '注销服务暂时不可用' } }, { status: 503 }),
+      ),
+    )
+    renderApp('/dashboard', [project], { enabled: true, provider: '公司统一身份' })
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('link', { name: /使用 公司统一身份 登录/ }))
+    expect(await screen.findByText('注销服务暂时不可用')).toBeVisible()
+    expect(localStorage.getItem('flowtest:logout-pending:v1')).toBe('1')
+    expect(sessionStorage.getItem('flowtest:oidc-attempt:v1')).toBeNull()
   })
 
   it('shows the configured OIDC login entry without exposing credentials', async () => {
