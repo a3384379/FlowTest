@@ -2,6 +2,17 @@ import axios from 'axios'
 
 import { authClient, SessionBoundaryError } from '../../lib/auth-client'
 import type { User } from '../../lib/api'
+import {
+  AuthSessionLifecycle,
+  matchesIntent,
+  parseSessionEvent,
+  parseLogoutIntent,
+  PENDING_LOGOUT_KEY,
+  SESSION_KEY,
+  type ClientSession,
+  type LogoutIntent,
+  type SessionEvent,
+} from './auth-session-lifecycle'
 
 export type SessionPhase =
   | 'initializing'
@@ -24,6 +35,7 @@ export type SessionSnapshot = {
   tokenVersion: number
   organizationId: string | null
   sessionStartedAtMs: number | null
+  sessionId: string | null
   notice: string | null
 }
 
@@ -33,32 +45,22 @@ type SessionPort = {
 }
 
 type TokenCandidate = { token: string; expiresAtMs: number; ttlSeconds: number; epoch: number }
-type SessionEvent = {
-  kind: 'logout' | 'password-changed' | 'refresh-done'
-  userId: string
-  atMs: number
-}
-
-const PENDING_LOGOUT_KEY = 'flowtest:logout-pending:v1'
-
 export class AuthSessionCoordinator {
-  private refreshTask: Promise<string> | null = null
-  private initializeTask: Promise<void> | null = null
+  private refreshTask: { epoch: number; promise: Promise<string> } | null = null
+  private initializeTask: { epoch: number; promise: Promise<void> } | null = null
   private candidate: TokenCandidate | null = null
-  private channel: BroadcastChannel | null = null
+  private readonly lifecycle = new AuthSessionLifecycle()
+  private readonly channel: BroadcastChannel | null
   private lastRecoveryCheck = 0
 
   constructor(private readonly port: SessionPort) {
-    if (typeof BroadcastChannel !== 'undefined') {
-      this.channel = new BroadcastChannel('flowtest-auth-session')
-      this.channel.onmessage = (event: MessageEvent<SessionEvent>) => {
-        const message = event.data
-        if (
-          (message.kind === 'logout' || message.kind === 'password-changed') &&
-          this.snapshot().user?.id === message.userId &&
-          message.atMs >= (this.snapshot().sessionStartedAtMs ?? 0)
-        ) {
-          this.invalidate('登录状态已变化，请重新登录')
+    this.channel =
+      typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('flowtest-auth-session')
+    if (this.channel) {
+      this.channel.onmessage = (event: MessageEvent<unknown>) => {
+        const message = parseSessionEvent(event.data)
+        if (message && matchesIntent(message.intent, this.snapshot().sessionId)) {
+          this.invalidate('登录状态已变化，请重新登录。')
         }
       }
     }
@@ -69,66 +71,111 @@ export class AuthSessionCoordinator {
   }
 
   initialize(): Promise<void> {
-    if (this.snapshot().initialized && this.snapshot().phase !== 'temporarily-unavailable') {
+    const snapshot = this.snapshot()
+    if (snapshot.initialized && snapshot.phase !== 'temporarily-unavailable') {
       return Promise.resolve()
     }
-    if (this.initializeTask) return this.initializeTask
-    const task = this.restore()
+    if (this.initializeTask?.epoch === snapshot.epoch) return this.initializeTask.promise
+    const task = { epoch: snapshot.epoch, promise: this.restore(snapshot.epoch) }
     this.initializeTask = task
-    void task
-      .finally(() => {
-        if (this.initializeTask === task) this.initializeTask = null
-      })
-      .catch(() => undefined)
-    return task
+    void task.promise.finally(() => {
+      if (this.initializeTask === task) this.initializeTask = null
+    })
+    return task.promise
   }
 
-  private async restore(): Promise<void> {
+  private async restore(epoch: number): Promise<void> {
     this.port.write({ initializing: true })
     try {
-      if (pendingLogout()) {
-        await this.withBrowserLock(() => authClient.post('/auth/logout'))
-        setPendingLogout(false)
-        this.port.write({ phase: 'anonymous', initialized: true, initializing: false })
-        return
-      }
-      await this.refresh()
-    } catch (error) {
-      if (isCode(error, 'INVALID_REFRESH_TOKEN')) {
-        if (this.snapshot().phase !== 'anonymous') this.invalidate(null)
+      const snapshot = this.adoptSession()
+      const intent = this.lifecycle.pendingLogout()
+      if (matchesIntent(intent, snapshot.sessionId)) {
+        await this.restoreLogout(intent!, epoch)
       } else {
+        // Refresh owns its error classification; initialization only owns its marker.
+        await this.refresh().catch(() => undefined)
+      }
+    } catch (error) {
+      if (this.snapshot().epoch === epoch && !(error instanceof SessionBoundaryError)) {
         this.temporaryFailure()
       }
     } finally {
-      this.port.write({ initialized: true, initializing: false })
+      if (this.snapshot().epoch === epoch) {
+        this.port.write({ initialized: true, initializing: false })
+      }
+    }
+  }
+
+  private async restoreLogout(intent: LogoutIntent, epoch: number): Promise<void> {
+    try {
+      await this.withBrowserLock(async () => {
+        this.assertEpoch(epoch)
+        await this.resolvePendingLogout(epoch)
+      })
+      if (this.snapshot().epoch === epoch) this.invalidate(null)
+    } catch (error) {
+      if (this.snapshot().epoch !== epoch || error instanceof SessionBoundaryError) return
+      if (this.lifecycle.pendingLogout()?.id === intent.id) {
+        this.invalidate('本地已退出，但尚未确认服务端会话已注销。')
+      }
     }
   }
 
   async login(payload: { email: string; password: string }): Promise<void> {
-    const startEpoch = this.snapshot().epoch + 1
-    this.candidate = null
-    this.port.write({ epoch: startEpoch, organizationId: null })
-    const response = await this.withBrowserLock(() =>
-      authClient.post<unknown>('/auth/login', payload),
-    )
-    const candidate = tokenCandidate(response.data, startEpoch)
-    const user = userFromLogin(response.data)
-    if (this.snapshot().epoch !== startEpoch) throw new SessionBoundaryError('登录身份已变化')
-    this.publish(candidate, user)
-    setPendingLogout(false)
+    const epoch = this.beginLogin()
+    await this.withBrowserLock(async () => {
+      const session = await this.prepareLogin(epoch)
+      const response = await authClient.post<unknown>('/auth/login', payload)
+      this.assertActive(epoch)
+      this.publish(tokenCandidate(response.data, epoch), userFromLogin(response.data), session)
+    })
+  }
+
+  async prepareOIDCLogin(): Promise<void> {
+    const epoch = this.beginLogin()
+    await this.withBrowserLock(async () => {
+      const session = await this.prepareLogin(epoch)
+      this.lifecycle.rememberOIDCAttempt(session.id)
+    })
+  }
+
+  private beginLogin(): number {
+    this.invalidate(null)
+    return this.snapshot().epoch
+  }
+
+  private async prepareLogin(epoch: number): Promise<ClientSession> {
+    this.assertEpoch(epoch)
+    await this.resolvePendingLogout(epoch)
+    this.assertEpoch(epoch)
+    const session = this.lifecycle.startSession()
+    this.port.write({ sessionId: session.id })
+    return session
+  }
+
+  private async resolvePendingLogout(epoch: number): Promise<void> {
+    const intent = this.lifecycle.pendingLogout()
+    const session = this.lifecycle.session()
+    if (!matchesIntent(intent, session?.id ?? null)) return
+    this.assertEpoch(epoch)
+    await authClient.post('/auth/logout')
+    this.assertEpoch(epoch)
+    this.lifecycle.completeLogout(intent!)
   }
 
   async ensureFreshAccessToken(): Promise<string> {
-    const snapshot = this.snapshot()
-    if (snapshot.phase === 'logging-out') throw new SessionBoundaryError('正在退出登录')
+    if (!this.snapshot().user) throw new SessionBoundaryError('已退出登录')
+    const snapshot = this.adoptSession()
+    this.assertActive(snapshot.epoch)
     if (snapshot.token && !nearExpiry(snapshot.expiresAtMs, snapshot.issuedTtlSeconds)) {
       return snapshot.token
     }
     try {
       return await this.refresh()
     } catch (error) {
+      if (this.snapshot().epoch !== snapshot.epoch) throw error
+      this.assertActive(snapshot.epoch)
       if (
-        this.snapshot().epoch === snapshot.epoch &&
         this.snapshot().phase === 'temporarily-unavailable' &&
         snapshot.token &&
         snapshot.expiresAtMs &&
@@ -141,10 +188,9 @@ export class AuthSessionCoordinator {
   }
 
   async recoverExpiredAccessToken(usedVersion: number | undefined): Promise<string> {
-    const snapshot = this.snapshot()
-    if (snapshot.phase === 'logging-out' || !snapshot.user) {
-      throw new SessionBoundaryError('登录身份已变化')
-    }
+    const snapshot = this.adoptSession()
+    this.assertActive(snapshot.epoch)
+    if (!snapshot.user) throw new SessionBoundaryError('登录身份已变化')
     if (snapshot.token && usedVersion !== snapshot.tokenVersion) return snapshot.token
     return this.refresh()
   }
@@ -159,99 +205,115 @@ export class AuthSessionCoordinator {
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     const token = await this.ensureFreshAccessToken()
     const snapshot = this.snapshot()
-    await this.withBrowserLock(() =>
-      authClient.post(
+    await this.withBrowserLock(async () => {
+      this.assertActive(snapshot.epoch)
+      await authClient.post(
         '/auth/change-password',
         { current_password: currentPassword, new_password: newPassword },
         { headers: { Authorization: `Bearer ${token}` } },
-      ),
-    )
+      )
+    })
     if (this.snapshot().epoch !== snapshot.epoch) return
-    if (snapshot.user) {
-      this.channel?.postMessage({
-        kind: 'password-changed',
-        userId: snapshot.user.id,
-        atMs: Date.now(),
-      } satisfies SessionEvent)
-    }
+    const intent = this.lifecycle.beginLogout(snapshot.sessionId)
+    this.broadcast({ kind: 'password-changed', intent })
+    // Password changes revoke refresh sessions; the remaining cookie is cleaned on recovery.
     this.invalidate('密码已修改，请重新登录。')
   }
 
   async logout(): Promise<void> {
-    const snapshot = this.snapshot()
-    setPendingLogout(true)
-    this.port.write({ phase: 'logging-out', epoch: snapshot.epoch + 1 })
+    const snapshot = this.adoptSession()
+    const intent = this.lifecycle.beginLogout(snapshot.sessionId)
+    this.broadcast({ kind: 'logout-intent', intent })
+    const refresh = this.refreshTask?.promise
+    this.invalidate(null)
+    const epoch = this.snapshot().epoch
+    this.port.write({ phase: 'logging-out' })
     try {
-      if (this.refreshTask) {
-        try {
-          await this.refreshTask
-        } catch {
-          // The pending refresh has finished; logout must still revoke the current cookie.
-        }
-      }
-      await this.withBrowserLock(() => authClient.post('/auth/logout'))
-      setPendingLogout(false)
-      if (snapshot.user) {
-        this.channel?.postMessage({
-          kind: 'logout',
-          userId: snapshot.user.id,
-          atMs: Date.now(),
-        } satisfies SessionEvent)
-      }
-      this.invalidate(null)
-    } catch {
-      this.invalidate('本地已退出，但尚未确认服务端会话已注销。')
+      if (refresh) await refresh.catch(() => undefined)
+      await this.withBrowserLock(async () => {
+        this.assertEpoch(epoch)
+        await this.resolvePendingLogout(epoch)
+      })
+      if (this.snapshot().epoch === epoch) this.port.write({ phase: 'anonymous' })
+    } catch (error) {
+      if (this.snapshot().epoch !== epoch || error instanceof SessionBoundaryError) return
+      this.port.write({
+        phase: 'anonymous',
+        notice: '本地已退出，但尚未确认服务端会话已注销。',
+      })
     }
   }
 
   registerRecoveryListeners(): () => void {
     const check = () => {
-      if (Date.now() - this.lastRecoveryCheck < 1000) return
-      this.lastRecoveryCheck = Date.now()
-      const snapshot = this.snapshot()
-      if (snapshot.phase === 'logging-out' || !snapshot.user) return
-      if (nearExpiry(snapshot.expiresAtMs, snapshot.issuedTtlSeconds)) {
-        void this.ensureFreshAccessToken().catch(() => undefined)
+      try {
+        const snapshot = this.snapshot()
+        if (!snapshot.user) return
+        this.assertActive(snapshot.epoch)
+        if (Date.now() - this.lastRecoveryCheck < 1000) return
+        this.lastRecoveryCheck = Date.now()
+        if (nearExpiry(snapshot.expiresAtMs, snapshot.issuedTtlSeconds)) {
+          void this.ensureFreshAccessToken().catch(() => undefined)
+        }
+      } catch (error) {
+        if (!(error instanceof SessionBoundaryError)) throw error
       }
     }
     const onVisibility = () => {
       if (document.visibilityState === 'visible') check()
     }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PENDING_LOGOUT_KEY && event.newValue) {
+        const intent = parseLogoutIntent(event.newValue)
+        if (matchesIntent(intent, this.snapshot().sessionId)) {
+          this.invalidate('登录状态已变化，请重新登录。')
+          return
+        }
+      }
+      if (
+        event.key === PENDING_LOGOUT_KEY ||
+        event.key === SESSION_KEY ||
+        event.key === 'flowtest:logout-pending:v1' ||
+        event.key === null
+      ) {
+        check()
+      }
+    }
     window.addEventListener('focus', check)
     window.addEventListener('online', check)
+    window.addEventListener('storage', onStorage)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.removeEventListener('focus', check)
       window.removeEventListener('online', check)
+      window.removeEventListener('storage', onStorage)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }
 
   private refresh(): Promise<string> {
-    if (this.refreshTask) return this.refreshTask
-    const task = this.performRefresh()
+    const start = this.adoptSession()
+    this.assertActive(start.epoch)
+    if (this.refreshTask?.epoch === start.epoch) return this.refreshTask.promise
+    const task = { epoch: start.epoch, promise: this.performRefresh(start) }
     this.refreshTask = task
-    void task
+    void task.promise
       .finally(() => {
         if (this.refreshTask === task) this.refreshTask = null
       })
       .catch(() => undefined)
-    return task
+    return task.promise
   }
 
-  private async performRefresh(): Promise<string> {
-    const start = this.snapshot()
+  private async performRefresh(start: SessionSnapshot): Promise<string> {
     this.port.write({ phase: 'refreshing' })
     try {
       const candidate = await this.obtainCandidate(start.epoch)
+      this.assertActive(start.epoch)
       const user = await this.confirmCandidate(candidate, start)
-      this.publish(candidate, user)
-      this.candidate = null
-      this.channel?.postMessage({
-        kind: 'refresh-done',
-        userId: user.id,
-        atMs: Date.now(),
-      } satisfies SessionEvent)
+      this.assertActive(start.epoch)
+      this.publish(candidate, user, { id: start.sessionId!, userId: user.id })
+      if (this.candidate === candidate) this.candidate = null
       return candidate.token
     } catch (error) {
       this.handleRefreshFailure(error, start)
@@ -265,14 +327,18 @@ export class AuthSessionCoordinator {
       return candidate
     }
     const refreshed = await this.withBrowserLock(async () => {
+      this.assertActive(epoch)
       try {
         return tokenCandidate((await authClient.post<unknown>('/auth/refresh')).data, epoch)
       } catch (error) {
+        this.assertActive(epoch)
         if (!isCode(error, 'REFRESH_ROTATION_CONFLICT')) throw error
         await new Promise((resolve) => window.setTimeout(resolve, 250))
+        this.assertActive(epoch)
         return tokenCandidate((await authClient.post<unknown>('/auth/refresh')).data, epoch)
       }
     })
+    this.assertActive(epoch)
     this.candidate = refreshed
     return refreshed
   }
@@ -281,7 +347,7 @@ export class AuthSessionCoordinator {
     const me = await authClient.get<User>('/auth/me', {
       headers: { Authorization: `Bearer ${candidate.token}` },
     })
-    if (this.snapshot().epoch !== start.epoch) throw new SessionBoundaryError('登录身份已变化')
+    this.assertActive(start.epoch)
     if (start.user && start.user.id !== me.data.id) {
       this.invalidate('账号已变化，请重新登录。')
       throw new SessionBoundaryError('账号已变化，请重新登录')
@@ -290,15 +356,46 @@ export class AuthSessionCoordinator {
   }
 
   private handleRefreshFailure(error: unknown, start: SessionSnapshot): void {
+    if (this.snapshot().epoch !== start.epoch || error instanceof SessionBoundaryError) return
     if (isCode(error, 'INVALID_REFRESH_TOKEN') || isCode(error, 'INVALID_ACCESS_TOKEN')) {
       this.invalidate(start.user ? '登录状态已失效，请重新登录。' : null)
-    } else if (this.snapshot().epoch === start.epoch) {
+    } else {
       this.temporaryFailure()
     }
   }
 
-  private publish(candidate: TokenCandidate, user: User): void {
+  private adoptSession(): SessionSnapshot {
+    const snapshot = this.snapshot()
+    if (snapshot.sessionId) return snapshot
+    const session = this.lifecycle.ensureSession(snapshot.user?.id ?? null)
+    const attempt = this.lifecycle.oidcAttempt()
+    if (attempt && attempt !== session.id) throw new SessionBoundaryError('登录身份已变化')
+    this.port.write({ sessionId: session.id })
+    return this.snapshot()
+  }
+
+  private assertEpoch(epoch: number): void {
+    if (this.snapshot().epoch !== epoch) throw new SessionBoundaryError('登录身份已变化')
+  }
+
+  private assertActive(epoch: number): void {
+    this.assertEpoch(epoch)
+    const snapshot = this.snapshot()
+    const session = this.lifecycle.session()
+    if (matchesIntent(this.lifecycle.pendingLogout(), snapshot.sessionId)) {
+      this.invalidate('本地已退出，但尚未确认服务端会话已注销。')
+      throw new SessionBoundaryError('已退出登录')
+    }
+    if (snapshot.phase === 'logging-out' || (session && session.id !== snapshot.sessionId)) {
+      this.invalidate('登录状态已变化，请重新登录。')
+      throw new SessionBoundaryError('登录身份已变化')
+    }
+  }
+
+  private publish(candidate: TokenCandidate, user: User, session: ClientSession): void {
+    this.assertActive(candidate.epoch)
     const previous = this.snapshot()
+    this.lifecycle.confirmUser(session, user.id)
     this.port.write({
       phase: 'authenticated',
       token: candidate.token,
@@ -307,7 +404,7 @@ export class AuthSessionCoordinator {
       expiresAtMs: candidate.expiresAtMs,
       issuedTtlSeconds: candidate.ttlSeconds,
       tokenVersion: previous.tokenVersion + 1,
-      sessionStartedAtMs: previous.user?.id === user.id ? previous.sessionStartedAtMs : Date.now(),
+      sessionStartedAtMs: previous.sessionStartedAtMs ?? Date.now(),
       initialized: true,
       initializing: false,
       notice: null,
@@ -325,6 +422,7 @@ export class AuthSessionCoordinator {
       expiresAtMs: null,
       issuedTtlSeconds: null,
       sessionStartedAtMs: null,
+      sessionId: null,
       organizationId: null,
       epoch: snapshot.epoch + 1,
       initialized: true,
@@ -340,6 +438,10 @@ export class AuthSessionCoordinator {
       initializing: false,
       notice: '认证服务暂时不可用，本次操作未完成，请稍后重试。',
     })
+  }
+
+  private broadcast(event: SessionEvent): void {
+    this.channel?.postMessage(event)
   }
 
   private async withBrowserLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -396,21 +498,4 @@ function nearExpiry(expiresAtMs: number | null, ttlSeconds: number | null): bool
 
 function isCode(error: unknown, code: string): boolean {
   return axios.isAxiosError(error) && error.response?.data?.error?.code === code
-}
-
-function pendingLogout(): boolean {
-  try {
-    return localStorage.getItem(PENDING_LOGOUT_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-function setPendingLogout(pending: boolean): void {
-  try {
-    if (pending) localStorage.setItem(PENDING_LOGOUT_KEY, '1')
-    else localStorage.removeItem(PENDING_LOGOUT_KEY)
-  } catch {
-    // Browsers can disable local storage. The current page still blocks restoration.
-  }
 }
