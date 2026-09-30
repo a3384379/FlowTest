@@ -14,8 +14,11 @@ const OIDC_ATTEMPT_KEY = 'flowtest:oidc-attempt:v1'
 export class AuthSessionLifecycle {
   private memorySession: ClientSession | null = null
   private memoryIntent: LogoutIntent | null = null
+  private sessionWriteFailed = false
+  private intentWriteFailed = false
 
   session(): ClientSession | null {
+    if (this.sessionWriteFailed) return this.memorySession
     const raw = readStorage(SESSION_KEY)
     return raw === undefined ? this.memorySession : parseSession(raw)
   }
@@ -59,6 +62,7 @@ export class AuthSessionLifecycle {
   }
 
   pendingLogout(): LogoutIntent | null {
+    if (this.intentWriteFailed && this.memoryIntent) return this.memoryIntent
     const raw = readStorage(PENDING_LOGOUT_KEY)
     if (raw === undefined) return this.memoryIntent
     if (raw !== null) return parseLogoutIntent(raw) ?? { id: 'unrecognized', sessionId: null }
@@ -73,20 +77,21 @@ export class AuthSessionLifecycle {
       sessionId,
     }
     this.memoryIntent = intent
-    writeStorage(PENDING_LOGOUT_KEY, JSON.stringify(intent))
+    this.intentWriteFailed = !writeStorage(PENDING_LOGOUT_KEY, JSON.stringify(intent))
     return intent
   }
 
   completeLogout(intent: LogoutIntent): void {
     if (this.pendingLogout()?.id !== intent.id) return
     this.memoryIntent = null
-    writeStorage(PENDING_LOGOUT_KEY, null)
-    writeStorage(LEGACY_LOGOUT_KEY, null)
+    const removed = writeStorage(PENDING_LOGOUT_KEY, null)
+    const legacyRemoved = writeStorage(LEGACY_LOGOUT_KEY, null)
+    this.intentWriteFailed = !removed || !legacyRemoved
   }
 
   private saveSession(session: ClientSession): void {
     this.memorySession = session
-    writeStorage(SESSION_KEY, JSON.stringify(session))
+    this.sessionWriteFailed = !writeStorage(SESSION_KEY, JSON.stringify(session))
   }
 }
 
@@ -141,12 +146,14 @@ function readStorage(key: string, perTab = false): string | null | undefined {
   }
 }
 
-function writeStorage(key: string, value: string | null, perTab = false): void {
+function writeStorage(key: string, value: string | null, perTab = false): boolean {
   try {
     const storage = perTab ? sessionStorage : localStorage
     if (value === null) storage.removeItem(key)
     else storage.setItem(key, value)
+    return true
   } catch {
-    // Tokens remain in memory; disabled storage cannot provide cross-page persistence.
+    // Callers retain their current-page intent when storage rejects writes.
+    return false
   }
 }

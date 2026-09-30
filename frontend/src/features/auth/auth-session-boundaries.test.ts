@@ -43,6 +43,7 @@ describe('authentication operation boundaries', () => {
   afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup())
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it.each([200, 401, 503])(
@@ -365,6 +366,57 @@ describe('authentication operation boundaries', () => {
     const current = lifecycle.beginLogout(session.id)
     lifecycle.completeLogout(old)
     expect(lifecycle.pendingLogout()).toEqual(current)
+  })
+
+  it('still calls server logout when storage reads work but quota rejects writes', async () => {
+    new AuthSessionLifecycle().startSession(user.id)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    })
+    let logouts = 0
+    server.use(
+      http.post('/api/v1/auth/logout', () => {
+        logouts += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { coordinator, store } = session()
+    await coordinator.logout()
+    expect(logouts).toBe(1)
+    expect(store.getState()).toMatchObject({
+      phase: 'anonymous',
+      user: null,
+      token: null,
+      notice: null,
+    })
+  })
+
+  it('preserves failed in-memory logout intent through a later explicit login when writes are rejected', async () => {
+    new AuthSessionLifecycle().startSession(user.id)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    })
+    let logouts = 0
+    server.use(
+      http.post('/api/v1/auth/logout', () => {
+        logouts += 1
+        return logouts === 1
+          ? HttpResponse.json({}, { status: 503 })
+          : new HttpResponse(null, { status: 204 })
+      }),
+      http.post('/api/v1/auth/login', () => loginResponse('new-token')),
+    )
+    const { coordinator, store } = session()
+    await coordinator.logout()
+    expect(store.getState().notice).toContain('尚未确认')
+    await coordinator.login({ email: user.email, password: 'test-password' })
+    expect(logouts).toBe(2)
+    expect(store.getState()).toMatchObject({
+      phase: 'authenticated',
+      user,
+      token: 'new-token',
+      notice: null,
+    })
   })
 
   it('keeps a pending logout blocking restoration when shared generation metadata was lost', async () => {
