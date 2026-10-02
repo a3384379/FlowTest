@@ -48,11 +48,11 @@ const laterCase = { ...baseCase, id: 'case-later-page', name: '跨页用例' }
 beforeEach(() => authenticateTestUser(user))
 afterEach(() => useAuthStore.setState({ user: null }))
 
-function mockWorkspace(viewer = false) {
+function mockWorkspace(viewer = false, otherCaseCount: number = 98) {
   const records = [
     baseCase,
     { ...baseCase, id: 'case-unfiled', folder_id: null, name: '未分类用例' },
-    ...Array.from({ length: 98 }, (_, index) => ({
+    ...Array.from({ length: otherCaseCount }, (_, index) => ({
       ...baseCase,
       id: 'case-other-' + index,
       folder_id: 'folder-other',
@@ -145,13 +145,23 @@ function renderWorkspace(initialEntry?: string) {
   )
 }
 
-it('browses every asset page without moving records and clears selection outside the new directory', async () => {
+it('reads every server page before filtering the complete asset directory without writes', async () => {
   const { pages, writes } = mockWorkspace()
+  renderWorkspace('/projects/' + project.id + '/assets?folder=' + folder.id)
+  expect(await screen.findByText('跨页用例')).toBeVisible()
+  expect(screen.getByText('目录用例')).toBeVisible()
+  expect(screen.getByText('筛选命中 101 个用例、0 个套件。')).toBeVisible()
+  expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
+  expect(pages).toHaveBeenCalledWith(1)
+  expect(pages).toHaveBeenCalledWith(2)
+  expect(writes).not.toHaveBeenCalled()
+})
+
+it('clears selection outside the new directory without moving records', async () => {
+  const { writes } = mockWorkspace(false, 0)
   renderWorkspace('/projects/' + project.id + '/assets?folder=unfiled')
   const unfiled = (await screen.findByText('未分类用例')).closest('tr')!
   const toolbar = within(screen.getByText('仅选择当前页').closest<HTMLElement>('.asset-toolbar')!)
-  expect(screen.getByText('筛选命中 101 个用例、0 个套件。')).toBeVisible()
-  expect(pages).toHaveBeenCalledWith(2)
   fireEvent.click(unfiled.querySelector<HTMLInputElement>('input[type="checkbox"]')!)
   expect(toolbar.getByText(/批量移动 \(1\)/).closest('button')).toBeEnabled()
   fireEvent.click(

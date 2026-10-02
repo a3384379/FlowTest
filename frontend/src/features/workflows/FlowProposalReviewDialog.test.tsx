@@ -158,11 +158,17 @@ describe('FlowProposalReviewDialog', () => {
     expect(within(dialog).getByText('断言差异')).toBeInTheDocument()
     expect(within(dialog).getByText('证据 / 置信度')).toBeInTheDocument()
     expect(within(dialog).getByText('未决项 0')).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: '发布版本' })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: '运行' })).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole('button', { name: '发布版本', hidden: true }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole('button', { name: '运行', hidden: true }),
+    ).not.toBeInTheDocument()
 
-    expect(within(dialog).getByRole('button', { name: '应用到工作流草稿' })).toBeDisabled()
-    await browser.click(within(dialog).getByRole('button', { name: '接受' }))
+    expect(within(dialog).getByLabelText('应用到工作流草稿')).toBeDisabled()
+    expect(applyCalls).toBe(0)
+    expect(appliedWorkflowId).toBe('')
+    await browser.click(within(dialog).getByLabelText('接受'))
     await waitFor(() =>
       expect(within(dialog).getByLabelText('应用到工作流草稿')).not.toBeDisabled(),
     )
