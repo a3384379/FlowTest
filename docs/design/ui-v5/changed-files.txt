@@ -8,6 +8,7 @@ docs/design/ui-v5/modules.csv
 docs/design/ui-v5/nodes.csv
 docs/design/ui-v5/source-inventory.csv
 docs/design/ui-v5/visual-deviations.md
+frontend/Dockerfile
 frontend/e2e/grouped-navigation.spec.ts
 frontend/e2e/s15-test-assets.spec.ts
 frontend/e2e/s16-advanced-workflow.spec.ts

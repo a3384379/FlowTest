@@ -8,7 +8,7 @@
 - 需求来源：[用户指定的共享对话](https://chatgpt.com/share/6abef2e2-07b8-83ea-bfde-691d3d72d13b)，使用其最新 v5 冰蓝白完整实施交接包，而非较早的 v3/v4 方向。完整方案、状态契约、全模块/节点矩阵、视觉规范、实施提示与验收材料在编辑前已读取。
 - 原工作区：`/Volumes/雷电/project/FlowTest`，`codex/control-flow-validation`。开始时工作区干净。
 - 实施工作树：`/Users/sqz/Documents/Codex/2026-10-02/task/FlowTest`，`codex/ui-v5-ice-light`。
-- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本功能改动集中于前端、浏览器验收和设计记录，没有新增后端业务、数据库、执行引擎或 CI 治理改动。提交合并时另修复安全门禁发现的 urllib3、Axios 依赖漏洞及 Debian 运行层漏洞，见下方独立记录。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
+- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本功能改动集中于前端、浏览器验收和设计记录，没有新增后端业务、数据库、执行引擎或 CI 治理改动。提交合并时另修复安全门禁发现的 urllib3、Axios 依赖漏洞及 Debian / Alpine 运行层漏洞，见下方独立记录。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
 - 本地 Node 22.22.0。主干同步后在实施工作树独立执行冻结锁文件安装，保留仓库的 pnpm 11.16 声明。Linux 浏览器验证使用 Playwright 1.62.1；构建与远程门禁按仓库声明执行。
 
 ## 实际改动
@@ -85,13 +85,15 @@
 
 运行层修复在本地 Linux arm64 完成：应用运行镜像使用已有阶段二 Python 基础镜像构建通过，mock 镜像使用其正常源码构建通过；两份 Dockerfile 的 `docker build --check` 无警告。实际应用镜像导入 `app.main` 并以独立本地 CA 验证 HTTPS 成功响应、错误主机名拒绝、不可信 CA 拒绝，保持严格证书校验；三个库实际版本均达到上述下限（`github-debian-runtime-build.log`、`github-debian-mock-build.log`、`github-debian-runtime-probe-local-tls-fixed.log`）。CI 路由 91 项定向回归通过（`github-runtime-routing-targeted.log`）。这些构建验证没有替代最新提交的 Linux amd64 全镜像扫描或 Compose 检查。
 
+`676c65a` 的远程后端镜像扫描通过后，前端镜像扫描发现 Alpine PCRE2 10.47-r1 的四项高危条目。`frontend/Dockerfile` 在原有 OpenSSL 更新操作中加入 `pcre2>=10.49-r0`，使用基础镜像原有 Alpine 3.24 签名源；不切换软件源或更新 Nginx / Node 工具链。最低版本依据 [PCRE2 10.49 官方安全修复说明](https://github.com/PCRE2Project/pcre2/releases/tag/pcre2-10.49)。本地 Linux arm64 构建取得 PCRE2 10.49-r0；Dockerfile 静态检查无警告，实际镜像的 Nginx 配置检查、首页、流程路由回退和 JS 资源读取通过（`github-frontend-pcre2-build.log`、`github-frontend-pcre2-check.log`、`github-frontend-pcre2-smoke.log`）。完整远程扫描仍按最新提交确认。
+
 上述本地 Linux 浏览器检查在依赖修复前完成；修复后的完整浏览器与部署检查以最新 PR 提交的远程自动验证为准，不沿用旧提交的绿灯。`1259622` 的完整 CI 后端、Windows 和升级回滚检查通过；前端两项测试超时，浏览器矩阵暴露旧导航/布局定位与 1280px 运行截图问题，尚待修复并重新验证。隔离验证栈和临时进程已清理，原工作区仍干净，已有运行实例健康。
 
 ### 完整 CI 中的浏览器与测试修复
 
 `1259622` 的前端全量测试有 649 项通过，两项复合/目录交互测试超过 60 秒。将 GraphQL 配置/绑定与 gRPC mTLS 分成独立场景，并使用一次真实粘贴输入验证完整字段；目录选择测试将查询限定到标签、当前行与工具栏，保留跨 100 条读取、禁止意外写入和切目录清选择的断言。没有提高超时、关闭测试或降低覆盖率。单工作线程下两文件 34 项定向检查通过（`github-ci-timeout-fixed-targeted.log`）；随后全量覆盖率 111 文件 / 652 项通过（`github-ci-followup-full-coverage.log`，482.09s），四项覆盖率保持 84.88% / 80.41% / 84.41% / 87.19%。
 
-旧侧栏验收已迁移到 68px 常用任务栏及全部模块抽屉，保留三档视口中的未应用草稿/URL/tab、键盘进入/退出、焦点恢复、浏览器历史和逐帧尺寸稳定检查。S16 用抽屉自身关闭按钮退出列表，直接从新版顶栏选择环境，版本 Diff / 调试使用命名的更多按钮；S21 等待实际弹窗/下拉动画完成再选择；发布门禁和 API 候选选项定位限定到对应行/下拉；新增节点使用宽屏停靠库拖入可命中的画布。小屏顶部改为两行，保留项目、全局搜索、外观及退出入口。截图前增加整图中心与画布中心的几何断言；测量尚未反映新布局时，继续通过真实适应画布操作取景，截图阈值和节点/状态内容比较保持。相关浏览器脚本在本任务独立的 BuildKit PostgreSQL、Redis、MinIO、mock、API/Worker 进程与专用端口上复核，默认 Compose 的 mock 地址保持；本地可通过 `FLOWTEST_E2E_MOCK_TARGET_URL` 选择隔离目标。临时进程不连接原实例数据库。最终本地普通模式已通过导航、发布门禁、编排审计/交互及三视口 27 张截图（32 项，`github-buildkit-browser-ci-followup-final.log`）；S16 / S21 的脚本修复继续定向复核，不能将整次运行写为全通过。原有基线没有再次更新，0.003 像素门槛保持。
+旧侧栏验收已迁移到 68px 常用任务栏及全部模块抽屉，保留三档视口中的未应用草稿/URL/tab、键盘进入/退出、焦点恢复、浏览器历史和逐帧尺寸稳定检查。S16 用抽屉自身关闭按钮退出列表，等待焦点恢复后直接从新版顶栏选择环境，并等待下拉完整动效结束，版本 Diff / 调试使用命名的更多按钮；S21 等待实际弹窗/下拉动画完成再选择；发布门禁和 API 候选选项定位限定到对应行/下拉；新增节点使用宽屏停靠库拖入可命中的画布。小屏顶部改为两行，保留项目、全局搜索、外观及退出入口。截图前增加整图中心与画布中心的几何断言；测量尚未反映新布局时，继续通过真实适应画布操作取景，截图阈值和节点/状态内容比较保持。相关浏览器脚本在本任务独立的 BuildKit PostgreSQL、Redis、MinIO、mock、API/Worker 进程与专用端口上复核，默认 Compose 的 mock 地址保持；本地可通过 `FLOWTEST_E2E_MOCK_TARGET_URL` 选择隔离目标。临时进程不连接原实例数据库。最终本地普通模式已通过导航、发布门禁、编排审计/交互及三视口 27 张截图（32 项，`github-buildkit-browser-ci-followup-final.log`）；其后 S21 定向复核通过（`github-buildkit-browser-ci-last-two.log`），S16 在补齐焦点恢复等待后完整主路径通过（`github-buildkit-browser-ci-s16-focus.log`，含运行、节点重放和断点调试）。分次验证不能将此前整次运行写为全通过。原有基线没有再次更新，0.003 像素门槛保持。
 
 以下为此前各轮验证记录，不能替代主干同步后的最终门禁。
 

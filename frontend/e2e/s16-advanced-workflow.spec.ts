@@ -29,6 +29,7 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
       .getByRole('dialog', { name: '工作流列表', exact: true })
       .getByRole('button', { name: /close|关闭/i })
       .click()
+    await expect(listToggle).toBeFocused()
   }
   await expect(page.getByText('已发布 v2')).toBeVisible()
 
@@ -43,9 +44,9 @@ async function selectWorkflowEnvironment(page: Page) {
   await expect(environment).toBeEnabled()
   await environment.click()
   const dropdown = page.locator('.ant-select-dropdown:visible').last()
-  await expect(dropdown).not.toHaveClass(/ant-slide.*-active/)
   const firstOption = dropdown.locator('.ant-select-item-option').first()
   await expect(firstOption).toBeVisible()
+  await expect(dropdown).not.toHaveClass(/ant-slide-up-(?:appear|enter|leave)/)
   await firstOption.click()
   await expect(page.getByRole('button', { name: /运\s*行/ })).toBeEnabled()
   await page.keyboard.press('Escape')

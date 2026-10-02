@@ -76,6 +76,6 @@ V5-074,质量与交付,键盘焦点,导航/抽屉/模态/检查器,可达、可�
 V5-075,质量与交付,减弱动效,系统减少动效,非必要动画取消，状态仍可见,已验证,frontend/src/theme/use-reduced-motion.ts; qa-appearance-delivery-result.log,Antd/图表/画布响应系统减少动效；非必要 CSS 动画取消。
 V5-076,质量与交付,图规模,同环境小/中/大图前后对照,不凭空宣称性能提升,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-077,质量与交付,工作区保护,对比修改前后status/diff,不覆盖原有修改/编码,已验证,git-status-delivery.log; git-diff-delivery.patch,原工作区基线干净，改动仅在独立工作树；同步最新主干并保留其修改，无 reset/clean。浏览器服务仅使用本任务独立数据库。
-V5-078,质量与交付,当前版本,核对lockfile与baseline差异,不为适配设计升级全部依赖,已验证,backend/uv.lock; frontend/package.json; frontend/pnpm-lock.yaml; backend/Dockerfile; mock-target/Dockerfile; implementation.md,未为设计升级全部依赖；单独修复合并门禁发现的 urllib3 / Axios 和缓存 Debian 运行库漏洞。工具链与扫描规则保持，完整门禁按最新提交确认。
+V5-078,质量与交付,当前版本,核对lockfile与baseline差异,不为适配设计升级全部依赖,已验证,backend/uv.lock; frontend/package.json; frontend/pnpm-lock.yaml; backend/Dockerfile; frontend/Dockerfile; mock-target/Dockerfile; implementation.md,未为设计升级全部依赖；单独修复合并门禁发现的 urllib3 / Axios 和缓存 Debian / Alpine 运行库漏洞。工具链与扫描规则保持，完整门禁按最新提交确认。
 V5-079,质量与交付,真实测试,检查测试日志与截图来源,未测不写通过，不用原型替代,已验证,github-ci-followup-full-coverage.log; frontend/e2e/workflow-editor-visual.spec.ts-snapshots/README.md,最终本地单工作线程前端 111 文件 / 652 测试通过；Linux 基线为合成项目真实 DOM，保留 0.003 像素阈值及取景几何检查。完整远程门禁与发布验收单独确认。
 V5-080,质量与交付,回滚,回退本次主题/组件挂接,不清数据库/草稿/session,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
