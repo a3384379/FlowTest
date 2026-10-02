@@ -12,6 +12,9 @@ import {
   Typography,
 } from 'antd'
 import { useEffect, useState } from 'react'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import AssertionEvidence from '../features/evidence/AssertionEvidence'
+import WorkflowNodeRelations from './WorkflowNodeRelations'
 
 import type {
   ExecutionCheckpoint,
@@ -40,6 +43,9 @@ type RuntimeInspectorProps = {
   execution: WorkflowNodeExecution | undefined
   nodes: WorkflowNodeExecution[]
   context: Record<string, unknown>
+  onLocateNode?: (nodeId: string) => void
+  initialAttempt?: number
+  onSelectAttempt?: (attempt: number) => void
 }
 
 export default function WorkflowRunInspector({
@@ -51,6 +57,9 @@ export default function WorkflowRunInspector({
   execution,
   nodes,
   context,
+  onLocateNode,
+  initialAttempt,
+  onSelectAttempt,
 }: RuntimeInspectorProps) {
   if (!node) return <EmptyRuntimeInspector mode={mode} />
   return (
@@ -64,6 +73,9 @@ export default function WorkflowRunInspector({
       execution={execution}
       nodes={nodes}
       context={context}
+      onLocateNode={onLocateNode}
+      initialAttempt={initialAttempt}
+      onSelectAttempt={onSelectAttempt}
     />
   )
 }
@@ -77,9 +89,18 @@ function RuntimeNodeDetail({
   execution,
   nodes,
   context,
+  onLocateNode,
+  initialAttempt,
+  onSelectAttempt,
 }: RuntimeInspectorProps & { node: WorkflowNode }) {
   const observations = execution?.result?.observations ?? []
-  const [attempt, setAttempt] = useState(observations.at(-1)?.attempt)
+  const [attempt, setAttempt] = useRuntimeAttempt(
+    projectId,
+    executionId,
+    node.id,
+    initialAttempt,
+    observations,
+  )
   const observation = selectedObservation(observations, attempt)
   const input = upstreamOutputs(node.id, definition, nodes)
   return (
@@ -89,13 +110,26 @@ function RuntimeNodeDetail({
         <SnapshotTag mode={mode} />
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
+      {execution?.result?.assertions.length ? (
+        <AssertionEvidence items={execution.result.assertions} />
+      ) : null}
+      <ExecutionError execution={execution} />
+      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <WorkflowNodeRelations node={node} definition={definition} onLocateNode={onLocateNode} />
       <ControlIterations
         output={execution?.output}
         projectId={projectId}
         executionId={executionId}
         nodeId={node.id}
       />
-      <ObservationPicker observations={observations} selected={observation} onChange={setAttempt} />
+      <ObservationPicker
+        observations={observations}
+        selected={observation}
+        onChange={(nextAttempt) => {
+          setAttempt(nextAttempt)
+          onSelectAttempt?.(nextAttempt)
+        }}
+      />
       <RuntimeTabs
         projectId={projectId}
         input={input}
@@ -107,6 +141,38 @@ function RuntimeNodeDetail({
         请求、响应和变量按本次执行策略展示；开启脱敏时，敏感值会显示为占位符。
       </Typography.Paragraph>
     </aside>
+  )
+}
+
+function useRuntimeAttempt(
+  projectId: string | undefined,
+  executionId: string | undefined,
+  nodeId: string,
+  initialAttempt: number | undefined,
+  observations: WorkflowNodeObservation[],
+) {
+  return useRouteScopedState<number | undefined>(
+    projectId ?? null,
+    `${executionId}:${nodeId}:${initialAttempt}`,
+    initialAttempt ?? observations.at(-1)?.attempt,
+  )
+}
+
+function MissingAttempt({
+  initialAttempt,
+  observations,
+}: {
+  initialAttempt?: number
+  observations: WorkflowNodeObservation[]
+}) {
+  if (!initialAttempt || observations.some((item) => item.attempt === initialAttempt)) return null
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      title="指定请求尝试未保存证据"
+      description="已保留本次执行的节点结果；有请求证据时显示最后一条可用记录。"
+    />
   )
 }
 
@@ -568,11 +634,16 @@ function RuntimeSummary({
           children: <RuntimeStatus status={execution?.status ?? 'pending'} />,
         },
         { key: 'type', label: '节点类型', children: execution?.node_type ?? node.type },
-        { key: 'attempts', label: '尝试次数', children: execution?.attempts ?? 0 },
+        { key: 'attempts', label: '尝试次数', children: execution?.attempts ?? '未提供' },
         {
           key: 'duration',
           label: '耗时',
-          children: <Duration value={nodeDuration(execution, observation)} />,
+          children: (
+            <Duration
+              value={nodeDuration(execution, observation)}
+              running={execution?.status === 'running'}
+            />
+          ),
         },
       ]}
     />
@@ -618,6 +689,7 @@ function RuntimeTabs({
 }) {
   return (
     <Tabs
+      defaultActiveKey={execution?.status === 'failed' ? 'diagnostics' : 'input'}
       size="small"
       items={[
         {
@@ -690,8 +762,10 @@ function ResponseDetail({ observation }: { observation: WorkflowNodeObservation 
 function DiagnosticsDetail({ execution }: { execution: WorkflowNodeExecution | undefined }) {
   return (
     <>
-      <ExecutionError execution={execution} />
-      <Payload title="断言" value={execution?.result?.assertions ?? []} />
+      <Typography.Text strong>断言</Typography.Text>
+      <Typography.Paragraph type="secondary">
+        {execution?.result?.assertions.length ? '期望值和实际值见上方断言证据。' : '未提供断言证据'}
+      </Typography.Paragraph>
       <Payload title="指标" value={execution?.result?.metrics ?? []} />
     </>
   )
@@ -873,8 +947,8 @@ function nodeDuration(
   return new Date(execution.completed_at).getTime() - new Date(execution.started_at).getTime()
 }
 
-function Duration({ value }: { value: number | null }) {
-  return <span>{value === null ? '计时中' : formatDuration(value)}</span>
+function Duration({ value, running }: { value: number | null; running: boolean }) {
+  return <span>{value === null ? (running ? '计时中' : '未提供') : formatDuration(value)}</span>
 }
 
 function formatDuration(value: number): string {

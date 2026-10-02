@@ -25,10 +25,13 @@ export async function listReportProjects(): Promise<Page<Project>> {
   return response.data
 }
 
-export async function listReportExecutions(projectId: string): Promise<Page<ReportExecution>> {
+export async function listReportExecutions(
+  projectId: string,
+  page = 1,
+): Promise<Page<ReportExecution>> {
   const response = await apiClient.get<Page<ReportExecution>>(
     `/projects/${projectId}/reports/executions`,
-    { params: { page: 1, page_size: 50 } },
+    { params: { page, page_size: 50 } },
   )
   return response.data
 }

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { ConfigProvider } from 'antd'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -30,6 +31,44 @@ vi.mock('../features/workflows/workflow-service', () => ({
 describe('WorkflowDesigner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('edits workflow settings in the graph draft and supports undo', async () => {
+    const browser = userEvent.setup()
+    render(<DesignerHarness initial={workflowDefinition} />)
+    await browser.click(screen.getByRole('button', { name: '流程设置' }))
+    fireEvent.change(await screen.findByRole('spinbutton', { name: '并发上限' }), {
+      target: { value: '7' },
+    })
+    expect(screen.getByRole('spinbutton', { name: '并发上限' })).toHaveValue('7')
+    await browser.click(screen.getByRole('button', { name: '关闭流程设置' }))
+    await browser.click(screen.getByRole('button', { name: 'undo 撤销' }))
+    await browser.click(screen.getByRole('button', { name: '流程设置' }))
+    expect(await screen.findByRole('spinbutton', { name: '并发上限' })).toHaveValue(
+      String(workflowDefinition.settings.concurrency),
+    )
+  })
+
+  it('only displays frozen workflow settings in historical mode', async () => {
+    const onChange = vi.fn()
+    const browser = userEvent.setup()
+    render(
+      <WorkflowDesigner
+        definition={{ ...workflowDefinition, variables: { order_id: 'old-order' } }}
+        apis={[]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        runtimeMode="history"
+        onChange={onChange}
+      />,
+    )
+    await browser.click(screen.getByRole('button', { name: '流程设置' }))
+    expect(await screen.findByRole('spinbutton', { name: '并发上限' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '变量 order_id 的初始值' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '添加变量' })).not.toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('adds an inline control block with versioned regions as one editor change', async () => {
@@ -347,6 +386,7 @@ describe('WorkflowDesigner', () => {
     render(<DesignerHarness initial={controlDefinition} />)
 
     fireEvent.click(screen.getByText('请求用户'))
+    fireEvent.click(screen.getByRole('tab', { name: '输入 / 输出' }))
     expect(screen.getByLabelText('映射源表达式')).toHaveValue('row.email')
     fireEvent.change(screen.getByLabelText('映射源表达式'), {
       target: { value: 'row.user.email' },
@@ -355,7 +395,7 @@ describe('WorkflowDesigner', () => {
     expect(screen.getAllByLabelText('映射源表达式')).toHaveLength(2)
     await browser.click(screen.getAllByRole('button', { name: '删除映射' })[1])
 
-    fireEvent.click(screen.getByText('提取邮箱'))
+    fireEvent.click(screen.getByTestId('rf__node-extract'))
     expect(screen.getByDisplayValue('selected_email')).toBeVisible()
     fireEvent.change(screen.getByDisplayValue('selected_email'), {
       target: { value: 'mapped_email' },
@@ -670,6 +710,49 @@ describe('WorkflowDesigner', () => {
     fireEvent.click(screen.getByTestId('rf__node-api'))
     await waitFor(() => expect(screen.getByDisplayValue('尚未应用的名称')).toBeVisible())
     expect(screen.queryAllByText('节点配置尚未应用')).toHaveLength(0)
+  })
+  it('offers apply, discard and cancel when selecting another node without changing the graph on discard', async () => {
+    const session = new DraftSession()
+    const onChange = vi.fn()
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <DraftContext.Provider value={session}>
+          <WorkflowDesigner
+            definition={workflowDefinition}
+            apis={[apiDefinition]}
+            artifacts={[]}
+            credentials={[]}
+            statuses={{}}
+            editable
+            onChange={onChange}
+          />
+        </DraftContext.Provider>
+      </ConfigProvider>,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '未应用名称' } })
+    expect(session.nodeEditors.size).toBe(1)
+    expect([...session.nodeEditors.values()][0].dirty).toBe(true)
+    fireEvent.click(screen.getByTestId('rf__node-end'))
+    const dialog = (await screen.findByText('节点配置尚未应用')).closest<HTMLElement>('.ant-modal')!
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '应用配置后继续' })).toBeVisible(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消切换' }))
+    expect(screen.getByDisplayValue('未应用名称')).toBeVisible()
+    fireEvent.click(screen.getByTestId('rf__node-end'))
+    fireEvent.click(
+      within(
+        (await screen.findByText('节点配置尚未应用')).closest<HTMLElement>('.ant-modal')!,
+      ).getByRole('button', {
+        name: '丢弃此节点修改',
+      }),
+    )
+    await waitFor(() => expect(screen.getByDisplayValue('结束')).toBeVisible())
+    expect(onChange).not.toHaveBeenCalled()
+    expect(session.nodeEditors.size).toBe(0)
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    expect(screen.getByDisplayValue('查询用户')).toBeVisible()
   })
   it('uses the right-click target and guards editable input and proposal actions', async () => {
     const onChange = vi.fn()

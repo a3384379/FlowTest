@@ -4,6 +4,7 @@ import WorkflowRuntimeDock from '../flow/WorkflowRuntimeDock'
 import { workflowLayoutKey } from '../flow/editor/layout-preferences'
 import {
   BugOutlined,
+  BarChartOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   DiffOutlined,
@@ -38,7 +39,7 @@ import {
   Typography,
 } from 'antd'
 import { useEffect, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
 import ExecutionCheckpointLog from '../features/workflows/ExecutionCheckpointLog'
@@ -50,6 +51,7 @@ import FlowSpecReviewDialog, {
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
 import NativeWorkflowTransferDialog from '../features/workflows/NativeWorkflowTransferDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
+import { executionAttempt, reportExecutionPath } from '../features/workflows/execution-navigation'
 import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
@@ -73,23 +75,43 @@ export default function WorkflowsPage() {
   const [nativeTransferOpen, setNativeTransferOpen] = useState(false)
   const [repairExecution, setRepairExecution] = useState<WorkflowExecution>()
   const [iterationDebugOpen, setIterationDebugOpen] = useState(false)
-  const initialWorkflowId = searchParams.get('focus') ?? undefined
-  const state = useWorkflows(initialWorkflowId)
+  const { initialWorkflowId, initialExecutionId } = workflowRouteSelection(searchParams)
+  const workflows = useWorkflows(initialWorkflowId, initialExecutionId)
+  const state = {
+    ...workflows,
+    showHistory: (executionId: string) => {
+      const next = new URLSearchParams(searchParams)
+      next.set('execution', executionId)
+      next.delete('node')
+      next.delete('attempt')
+      setSearchParams(next)
+      workflows.showHistory(executionId)
+    },
+    showDraft: () => {
+      const next = new URLSearchParams(searchParams)
+      next.delete('execution')
+      next.delete('node')
+      next.delete('attempt')
+      setSearchParams(next)
+      workflows.showDraft()
+    },
+  }
   useEffect(() => {
     const listed = state.workflows.data
+    if (initialExecutionId) return
     if (!initialWorkflowId || !listed || listed.items.length < listed.total) return
     if (listed.items.some((workflow) => workflow.id === initialWorkflowId)) return
     const next = new URLSearchParams(searchParams)
     next.delete('focus')
     setSearchParams(next, { replace: true })
-  }, [initialWorkflowId, searchParams, setSearchParams, state.workflows.data])
+  }, [initialExecutionId, initialWorkflowId, searchParams, setSearchParams, state.workflows.data])
   const userId = useAuthStore((store) => store.user?.id)
   const tabs = useWorkflowTabs({
     userId,
     projectId: state.projectId,
     workflowIds: state.workflows.data?.items.map((item) => item.id) ?? [],
     activeWorkflowId: state.workflowId,
-    hasExplicitFocus: Boolean(initialWorkflowId),
+    hasExplicitFocus: Boolean(initialWorkflowId || initialExecutionId),
     selectWorkflow: state.setWorkflowSelection,
     saveWorkflowDraft: state.saveWorkflowDraft,
     discardWorkflowDraft: state.discardWorkflowDraft,
@@ -191,6 +213,13 @@ export default function WorkflowsPage() {
   )
 }
 
+function workflowRouteSelection(params: URLSearchParams) {
+  return {
+    initialWorkflowId: params.get('focus') ?? undefined,
+    initialExecutionId: params.get('execution') ?? undefined,
+  }
+}
+
 type WorkflowState = ReturnType<typeof useWorkflows>
 
 function selectedPublishedVersion(state: WorkflowState): number | null {
@@ -217,9 +246,33 @@ function WorkflowExecutionPanels({
     <WorkflowRuntimeDock
       mode={mode}
       status={state.runtimeExecution && <StatusTag status={state.runtimeExecution.status} />}
+      summary={<RuntimeDockSummary state={state} />}
     >
       <WorkflowRuntimeTabs key={preferredTab} initialKey={preferredTab} items={items} />
     </WorkflowRuntimeDock>
+  )
+}
+
+function RuntimeDockSummary({ state }: { state: WorkflowState }) {
+  if (!state.runtimeExecution)
+    return (
+      <Typography.Text type="secondary">选择执行记录，查看当次节点状态与证据。</Typography.Text>
+    )
+  const nodes = state.runtimeNodes
+  const failed = nodes.filter((node) => node.status === 'failed').length
+  const completed = nodes.filter((node) =>
+    ['passed', 'failed', 'skipped', 'cancelled'].includes(node.status),
+  ).length
+  return (
+    <Space wrap>
+      <Tag>
+        节点记录 {completed}/{nodes.length} 已结束
+      </Tag>
+      <Tag color={failed ? 'error' : 'default'}>失败 {failed} 步</Tag>
+      <Typography.Text type="secondary">
+        执行 {state.runtimeExecution.id.slice(0, 8)} · 点击节点查看证据
+      </Typography.Text>
+    </Space>
   )
 }
 
@@ -941,16 +994,7 @@ function WorkbenchMore({
             options={options(state.projects.data?.items)}
             onChange={state.selectProject}
           />
-          <Select
-            aria-label="工作流环境"
-            placeholder={state.environmentPlaceholder}
-            status={state.environmentStatus}
-            value={state.environmentId}
-            loading={state.environments.isLoading}
-            disabled={!state.projectId}
-            options={options(state.environments.data)}
-            onChange={state.setEnvironmentSelection}
-          />
+
           <Button
             icon={<PlusOutlined />}
             disabled={!state.projectId || !state.apis.data?.items.length}
@@ -1020,7 +1064,16 @@ function HeaderPrimaryActions({
         loading={state.saving}
         onClick={() => void state.saveDraft()}
       >
-        保存
+        保存草稿
+      </Button>
+      <Button
+        icon={<CloudUploadOutlined />}
+        aria-label="发布版本"
+        disabled={disabled}
+        loading={state.publishing}
+        onClick={() => void state.publish()}
+      >
+        发布版本
       </Button>
       <Button
         type="primary"
@@ -1030,7 +1083,7 @@ function HeaderPrimaryActions({
         loading={state.executing || Boolean(state.activeExecutionId)}
         onClick={() => void state.execute()}
       >
-        运行
+        执行
       </Button>
       {state.breakpointNodeId && (
         <Button
@@ -1109,7 +1162,8 @@ function WorkflowTabs({
       },
     ]
   })
-  if (items.length < 2) {
+  const execution = state.runtimeExecution ?? state.lastResult?.execution
+  if (!items.length && !execution) {
     return storageError ? (
       <Alert
         showIcon
@@ -1133,6 +1187,7 @@ function WorkflowTabs({
             if (action === 'remove' && typeof targetKey === 'string') onClose([targetKey])
           }}
         />
+        <ExecutionReportTab projectId={state.projectId} execution={execution} />
         <Dropdown
           menu={{
             items: [
@@ -1159,6 +1214,24 @@ function WorkflowTabs({
         />
       )}
     </div>
+  )
+}
+
+function ExecutionReportTab({
+  projectId,
+  execution,
+}: {
+  projectId: string | null
+  execution: WorkflowExecution | null | undefined
+}) {
+  if (!projectId || !execution) return null
+  return (
+    <Link
+      className="execution-report-tab"
+      to={reportExecutionPath(projectId, { executionId: execution.id })}
+    >
+      <BarChartOutlined /> 执行报告 {execution.id.slice(0, 8)}
+    </Link>
   )
 }
 
@@ -1190,12 +1263,18 @@ function WorkflowWorkspace({
       header={
         <WorkflowWorkbenchHeader
           left={workspaceTitle(state)}
-          center={<WorkspaceModeSwitch state={state} />}
+          center={
+            <Space wrap>
+              <WorkspaceModeSwitch state={state} />
+              <WorkflowEnvironmentSelect state={state} />
+            </Space>
+          }
           right={
             <Space>
               {state.workspaceMode !== 'history' && (
                 <HeaderPrimaryActions state={state} onIterationDebug={onIterationDebug} />
               )}
+              <WorkflowReportLink state={state} />
               {state.workspaceMode === 'draft' && !state.debugResult && (
                 <Button
                   icon={<HistoryOutlined />}
@@ -1250,6 +1329,56 @@ function WorkflowWorkspace({
   )
 }
 
+function WorkflowEnvironmentSelect({ state }: { state: WorkflowState }) {
+  if (state.workspaceMode !== 'draft' && state.runtimeExecution)
+    return <Tag>执行环境：{executionEnvironmentLabel(state.runtimeExecution)}</Tag>
+  return (
+    <Select
+      aria-label="工作流环境"
+      id="workflow-environment-select"
+      className="workflow-environment-select"
+      placeholder={state.environmentPlaceholder}
+      status={state.environmentStatus}
+      value={state.environmentId}
+      loading={state.environments.isLoading}
+      disabled={!state.projectId}
+      options={options(state.environments.data)}
+      onChange={state.setEnvironmentSelection}
+    />
+  )
+}
+
+function WorkflowReportLink({ state }: { state: WorkflowState }) {
+  const [params] = useSearchParams()
+  const execution = state.runtimeExecution
+  if (!execution || !state.projectId) return null
+  return (
+    <Link
+      className="workflow-report-link"
+      aria-label="查看完整报告"
+      to={reportExecutionPath(state.projectId, {
+        executionId: execution.id,
+        nodeId: params.get('node'),
+        attempt: executionAttempt(params),
+      })}
+    >
+      <BarChartOutlined /> 查看完整报告
+    </Link>
+  )
+}
+
+function executionEnvironmentLabel(execution: WorkflowExecution): string {
+  const environment = execution.snapshot.environment
+  if (
+    environment &&
+    typeof environment === 'object' &&
+    'name' in environment &&
+    typeof environment.name === 'string'
+  )
+    return environment.name
+  return execution.environment_id
+}
+
 function WorkspaceModeSwitch({ state }: { state: WorkflowState }) {
   return (
     <Segmented
@@ -1287,11 +1416,14 @@ function workspaceTitle(state: WorkflowState) {
         <Typography.Title level={1} className="workflow-page-title">
           流程编排
         </Typography.Title>
-        <span className="workflow-workspace-name">{workflow?.name ?? '历史执行快照'}</span>
+        <span className="workflow-workspace-name">
+          {executionSnapshotName(state.runtimeExecution) ?? '历史执行快照'}
+        </span>
         <Space size={4} wrap>
           <Tag icon={<LockOutlined />} color="gold">
             历史快照 · 不可修改
           </Tag>
+          <Tag>{executionSnapshotVersion(state.runtimeExecution)}</Tag>
         </Space>
       </div>
     )
@@ -1305,6 +1437,30 @@ function workspaceTitle(state: WorkflowState) {
       {workflow && <DraftMetadata state={state} workflow={workflow} />}
     </div>
   )
+}
+
+function executionSnapshotVersion(execution: WorkflowExecution | null | undefined): string {
+  const workflow = execution?.snapshot.workflow
+  if (
+    workflow &&
+    typeof workflow === 'object' &&
+    'version' in workflow &&
+    typeof workflow.version === 'number'
+  )
+    return `执行版本 v${workflow.version}`
+  return '未提供执行版本'
+}
+
+function executionSnapshotName(execution: WorkflowExecution | null | undefined): string | null {
+  const workflow = execution?.snapshot.workflow
+  if (
+    workflow &&
+    typeof workflow === 'object' &&
+    'name' in workflow &&
+    typeof workflow.name === 'string'
+  )
+    return workflow.name
+  return null
 }
 
 function FocusDraftActions({
@@ -1363,16 +1519,19 @@ function DraftEditor({
   state: WorkflowState
   onIterationDebug: () => void
 }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const workflow = state.selectedWorkflow
-  if (!workflow) return <Empty description="请选择或新建工作流" />
-  const resources = workflowDesignerResources(state, workflow.id)
+  if (!workflow && state.workspaceMode === 'draft')
+    return <Empty description="请选择或新建工作流" />
+  const workflowId = designerWorkflowId(state)
+  const resources = workflowDesignerResources(state, workflowId)
   return (
     <>
       <DraftAlerts state={state} />
       <WorkflowDesigner
-        key={`${workflow.id}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
+        key={`${workflowId}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
         surface="workspace"
-        workflowId={workflow.id}
+        workflowId={workflowId}
         projectId={state.projectId}
         environmentId={state.environmentId}
         definition={state.designerDefinition}
@@ -1389,11 +1548,41 @@ function DraftEditor({
         runtimeExecutionId={state.runtimeExecution?.id}
         runtimeNodes={state.runtimeNodes}
         runtimeContext={state.runtimeContext}
+        {...designerFocusProps(state.workspaceMode, searchParams, setSearchParams)}
         focusActions={<FocusDraftActions state={state} onIterationDebug={onIterationDebug} />}
         onChange={state.setDraftDefinition}
       />
     </>
   )
+}
+
+function designerWorkflowId(state: WorkflowState): string {
+  return state.runtimeExecution?.workflow_id ?? state.workflowId ?? 'historical'
+}
+
+function designerFocusProps(
+  mode: WorkflowState['workspaceMode'],
+  params: URLSearchParams,
+  setParams: ReturnType<typeof useSearchParams>[1],
+) {
+  if (mode === 'draft') return {}
+  return {
+    focusNodeId: params.get('node') ?? undefined,
+    runtimeAttempt: executionAttempt(params),
+    onNodeFocus: (nodeId: string | null) => {
+      const next = new URLSearchParams(params)
+      if (nodeId) next.set('node', nodeId)
+      else next.delete('node')
+      if (!nodeId || nodeId !== params.get('node')) next.delete('attempt')
+      setParams(next, { replace: true })
+    },
+    onAttemptFocus: (nodeId: string, attempt: number) => {
+      const next = new URLSearchParams(params)
+      next.set('node', nodeId)
+      next.set('attempt', String(attempt))
+      setParams(next, { replace: true })
+    },
+  }
 }
 
 function DraftAlerts({ state }: { state: WorkflowState }) {
@@ -1408,6 +1597,15 @@ function DraftAlerts({ state }: { state: WorkflowState }) {
           title="正在查看历史执行快照"
           description="画布、节点配置、接口版本和运行结果均来自当次执行，不会随当前草稿变化。"
           className="workflow-snapshot-alert"
+        />
+      )}
+      {historyAlert && state.historyError && (
+        <Alert
+          type="error"
+          showIcon
+          title="历史执行快照加载失败"
+          description={state.historyError}
+          action={<Button onClick={state.reloadHistory}>重试</Button>}
         />
       )}
       {runningAlert && (

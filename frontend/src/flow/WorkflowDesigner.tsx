@@ -10,6 +10,14 @@ import { useDraftSession } from '../features/drafts/draft-session'
 import { nodeEditorScope } from './editor/editor-identity'
 import { nodeRegistryItem, type NodeRegistryKey } from './editor/node-registry'
 import {
+  dataReferences,
+  nodePresentation,
+  unresolvedReferenceCount,
+  type RegionPreview,
+} from './editor/node-presentation'
+import { iceColors } from '../theme/ice-theme'
+import { reducedMotionEnabled } from '../theme/use-reduced-motion'
+import {
   addControlBlock,
   controlCapabilityLabel,
   type ControlBlockKind,
@@ -83,6 +91,7 @@ import '@xyflow/react/dist/style.css'
 import {
   Alert,
   Button,
+  Checkbox,
   Dropdown,
   Empty,
   Input,
@@ -107,6 +116,9 @@ import type {
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import WorkflowRunInspector from './WorkflowRunInspector'
+import WorkflowRunTrajectory from './WorkflowRunTrajectory'
+import WorkflowSettingsEditor from './WorkflowSettingsEditor'
+import { useNodeSelectionGuard } from './editor/use-node-selection-guard'
 import { getApiDetail } from '../features/api-console/api-service'
 import { listApis } from '../features/workflows/workflow-service'
 import {
@@ -142,6 +154,10 @@ type DesignerProps = {
   runtimeExecutionId?: string
   runtimeNodes?: WorkflowNodeExecution[]
   runtimeContext?: Record<string, unknown>
+  focusNodeId?: string
+  onNodeFocus?: (nodeId: string | null) => void
+  runtimeAttempt?: number
+  onAttemptFocus?: (nodeId: string, attempt: number) => void
   focusActions?: ReactNode
   onChange: (definition: WorkflowDefinition) => void
 }
@@ -154,6 +170,8 @@ type NodeData = Record<string, unknown> & {
   typeLabel: string
   status: string
   runtimeLabel: string
+  summary?: string
+  regions?: RegionPreview[]
   canCopy?: boolean
   canDelete?: boolean
   onConfigure?: () => void
@@ -172,8 +190,8 @@ type CanvasEdge = Edge<CanvasEdgeData, 'workflowEdge'>
 
 const nodeTypes = { workflowNode: WorkflowNodeCard }
 const edgeTypes = { workflowEdge: WorkflowCanvasEdge }
-const NODE_INITIAL_WIDTH = 210
-const NODE_INITIAL_HEIGHT = 72
+const NODE_INITIAL_WIDTH = 232
+const NODE_INITIAL_HEIGHT = 110
 
 export default function WorkflowDesigner(props: DesignerProps) {
   return (
@@ -222,6 +240,10 @@ function WorkflowDesignerReady({
   runtimeExecutionId,
   runtimeNodes,
   runtimeContext,
+  focusNodeId,
+  onNodeFocus,
+  runtimeAttempt,
+  onAttemptFocus,
   focusActions,
   onChange,
 }: ReadyDesignerProps) {
@@ -233,16 +255,33 @@ function WorkflowDesignerReady({
     definition,
     canvasEditable,
     onChange,
-    recoverNodeSelection(draftSession, scope, definition),
+    designerInitialSelection(
+      draftSession,
+      scope,
+      definition,
+      runtimeNodes,
+      runtimeMode,
+      focusNodeId,
+    ),
   )
   const selectedId = primaryNodeId(editor.selection)
   const selectedEdge = primaryEdge(definition, editor.selection)
   const canvasRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null)
   useCanvasAutoFrame(canvasRef, flowRef, definition, editor.selection, scope)
+  useRuntimeSelection(
+    editor.select,
+    definition,
+    runtimeNodes,
+    runtimeMode,
+    runtimeExecutionId,
+    focusNodeId,
+  )
   const dropPosition = useRef<{ x: number; y: number } | null>(null)
   const [dimensions, setDimensions] = useState<CanvasDimensions>(() => new Map())
   const [focusMode, setFocusMode] = useState(false)
+  const [libraryContainer, setLibraryContainer] = useState<HTMLDivElement | null>(null)
+  const [showDataReferences, setShowDataReferences] = useState(false)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [wrapPathOpen, setWrapPathOpen] = useState(false)
@@ -250,6 +289,7 @@ function WorkflowDesignerReady({
   const [wrapPathEnd, setWrapPathEnd] = useState<string | null>(null)
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null)
   const [modal, modalHolder] = Modal.useModal()
+  const selectionGuard = useNodeSelectionGuard(draftSession, scope, canvasEditable)
   const wrapChoices = useMemo(
     () => mainWrapChoices(definition, selectedId ?? ''),
     [definition, selectedId],
@@ -297,13 +337,14 @@ function WorkflowDesignerReady({
         runtimeByNode.get(node.id),
       ).data,
       canCopy: canvasEditable && resolveEffectiveNodeType(node) !== 'start',
+      ...nodePresentation(node, definition),
       canDelete: canvasEditable && canDeleteNode(definition, node),
       onConfigure: configureInspector,
       onCopy: copySelectedNode,
       onDelete: () => void requestDelete(),
     },
   }))
-  const edges = definition.edges.map((edge) => ({
+  const executionEdges = definition.edges.map((edge) => ({
     ...toCanvasEdge(edge, proposalEdgeStatuses[edge.id]),
     selected: editor.selection?.kind === 'edge' && editor.selection.id === edge.id,
     sourceHandle: edge.condition ?? 'out',
@@ -316,6 +357,10 @@ function WorkflowDesignerReady({
     },
     ariaLabel: `从 ${definition.nodes.find((node) => node.id === edge.source)?.name ?? edge.source} 到 ${definition.nodes.find((node) => node.id === edge.target)?.name ?? edge.target} 的连线`,
   }))
+  const edges: CanvasEdge[] = [
+    ...executionEdges,
+    ...canvasReferenceEdges(definition, showDataReferences),
+  ]
   const selected = selectedNode(definition, selectedId)
   const selectedApi = resolveSelectedApi(
     apiSelection,
@@ -347,25 +392,22 @@ function WorkflowDesignerReady({
     requestAnimationFrame(() => focusInspector(canvasRef.current))
   }
   async function finishSelectionChange(): Promise<boolean> {
-    const keys = draftSession.dirtyNodeEditorKeys(scope)
-    if (!keys.length) return true
-    const approved = await modal.confirm({
-      title: '节点配置尚未应用',
-      content: '切换前应用当前配置，或返回继续编辑。',
-      okText: '应用配置后继续',
-      cancelText: '返回编辑',
-    })
-    if (!approved) return false
-    for (const key of keys) {
-      if (!(await draftSession.nodeEditorActions.get(key)?.())) return false
-    }
-    return true
+    return selectionGuard.request()
   }
   async function selectObject(kind: 'node' | 'edge', id: string) {
     const selection = editor.latest.current.selection
-    if (selection?.kind === kind && selection.id === id) return
-    if (draftSession.dirtyNodeEditorKeys(scope).length && !(await finishSelectionChange())) return
+    if (jsonEqual(selection, { kind, id })) {
+      if (kind === 'node') onNodeFocus?.(id)
+      return
+    }
+    if (
+      canvasEditable &&
+      draftSession.dirtyNodeEditorKeys(scope).length &&
+      !(await finishSelectionChange())
+    )
+      return
     editor.click(kind, id)
+    onNodeFocus?.(kind === 'node' ? id : null)
   }
   async function openObjectMenu(kind: 'node' | 'edge', id: string, event: React.MouseEvent) {
     await selectObject(kind, id)
@@ -374,7 +416,10 @@ function WorkflowDesignerReady({
     canvasRef.current?.focus()
   }
   async function clearSelection() {
-    if (await finishSelectionChange()) editor.select(emptySelection())
+    if (await finishSelectionChange()) {
+      editor.select(emptySelection())
+      onNodeFocus?.(null)
+    }
   }
   async function requestDelete() {
     if (!canvasEditable || confirming) return
@@ -667,6 +712,7 @@ function WorkflowDesignerReady({
   if (!definition.nodes.length) return <Empty description="暂无可展示的流程定义或执行快照" />
   return (
     <div className={`workflow-designer workflow-editor-${surface}${focusMode ? ' is-focus' : ''}`}>
+      {selectionGuard.dialog}
       {modalHolder}
       <WorkflowContextMenu
         point={menuPoint}
@@ -711,8 +757,36 @@ function WorkflowDesignerReady({
       <WorkflowShortcutHelp open={shortcutHelp} onClose={() => setShortcutHelp(false)} />
       <DesignerModeToolbar mode={mode}>
         <DesignerToolbar
+          workflowSettings={
+            <WorkflowSettingsEditor
+              definition={definition}
+              editable={canvasEditable}
+              historical={Boolean(runtimeMode)}
+              beforeOpen={finishSelectionChange}
+              onChange={editor.commit}
+            />
+          }
+          libraryContainer={libraryContainer}
+          showDataReferences={showDataReferences}
+          onDataReferences={setShowDataReferences}
           projectId={projectId}
           runtimeMode={runtimeMode}
+          runtimeNavigation={
+            <RuntimeTrajectoryEntry
+              mode={runtimeMode}
+              executionId={runtimeExecutionId}
+              definition={definition}
+              nodes={runtimeNodes}
+              selectedId={selectedId}
+              dockContainer={libraryContainer}
+              surface={surface}
+              focused={focusMode}
+              onSelect={(nodeId) => {
+                setFocusMode(false)
+                void selectObject('node', nodeId)
+              }}
+            />
+          }
           apiSelection={selectedApiId}
           apiSelectionOverride={apiSelectionOverride}
           apis={apis}
@@ -777,10 +851,15 @@ function WorkflowDesignerReady({
           onFocus={() => setFocusMode((value) => !value)}
           onHelp={() => setShortcutHelp(true)}
           onFitView={() =>
-            void flowRef.current?.fitView({ duration: 200, padding: 0.18, maxZoom: 1 })
+            void flowRef.current?.fitView({
+              duration: reducedMotionEnabled() ? 0 : 200,
+              padding: 0.18,
+              maxZoom: 1,
+            })
           }
         />
       </DesignerModeToolbar>
+      <MissingRuntimeNode requestedId={focusNodeId} definition={definition} mode={runtimeMode} />
       <Modal
         title={wrapPathTitle(wrapPathKind)}
         open={wrapPathOpen}
@@ -800,175 +879,227 @@ function WorkflowDesignerReady({
           onChange={setWrapPathEnd}
         />
       </Modal>
-      <WorkflowInspectorShell
-        key={workflowLayoutKey(userId, projectId)}
-        visible={showInspector(editor.selection, focusMode)}
-        preferenceKey={workflowLayoutKey(userId, projectId)}
-        title={inspectorTitle(Boolean(selectedEdge), runtimeMode)}
-        onClose={() => void clearSelection()}
-        canvas={
-          <div
-            ref={canvasRef}
-            className="workflow-canvas"
-            data-testid="workflow-canvas-stage"
-            aria-label="工作流画布"
-            tabIndex={0}
-            onDrop={dropLibraryNode}
-            onDragOver={(event) => {
-              if (canvasEditable) {
-                event.preventDefault()
-                event.dataTransfer.dropEffect = 'copy'
-              }
-            }}
-            onKeyDown={hotkeys}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) editor.cancelDrag()
-            }}
-          >
-            <ReactFlow<CanvasNode, CanvasEdge>
-              fitView
-              fitViewOptions={{ maxZoom: 1, padding: 0.18 }}
-              onInit={(instance) => {
-                flowRef.current = instance
+      <div className="workflow-canvas-stage">
+        <div ref={setLibraryContainer} className="workflow-library-slot" />
+        <WorkflowInspectorShell
+          key={workflowLayoutKey(userId, projectId)}
+          visible={showInspector(editor.selection, focusMode)}
+          preferenceKey={workflowLayoutKey(userId, projectId)}
+          title={inspectorTitle(Boolean(selectedEdge), runtimeMode)}
+          onClose={() => void clearSelection()}
+          canvas={
+            <div
+              ref={canvasRef}
+              className="workflow-canvas"
+              data-testid="workflow-canvas-stage"
+              aria-label="工作流画布"
+              tabIndex={0}
+              onDrop={dropLibraryNode}
+              onDragOver={(event) => {
+                if (canvasEditable) {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'copy'
+                }
               }}
-              multiSelectionKeyCode={null}
-              deleteKeyCode={null}
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              nodesDraggable={canvasEditable}
-              nodesConnectable={canvasEditable}
-              edgesReconnectable={canvasEditable}
-              onNodeClick={(_event, node) => {
-                void selectObject('node', node.id)
-                canvasRef.current?.focus()
+              onKeyDown={hotkeys}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) editor.cancelDrag()
               }}
-              onEdgeClick={(_event, edge) => {
-                void selectObject('edge', edge.id)
-                canvasRef.current?.focus()
-              }}
-              onNodeContextMenu={(event, node) => {
-                event.preventDefault()
-                void openObjectMenu('node', node.id, event)
-              }}
-              onEdgeContextMenu={(event, edge) => {
-                event.preventDefault()
-                void openObjectMenu('edge', edge.id, event)
-              }}
-              onPaneClick={() => {
-                void clearSelection()
-                canvasRef.current?.focus()
-              }}
-              onNodeDragStart={editor.beginDrag}
-              onNodeDragStop={(_event, _node, moved) =>
-                editor.endDrag(moved.map((node) => ({ id: node.id, position: node.position })))
-              }
-              onNodesChange={(changes) => {
-                setDimensions((current) =>
-                  updateCanvasDimensions(
-                    current,
-                    changes,
-                    new Set(definition.nodes.map((node) => node.id)),
-                  ),
-                )
-                const updates = changes.flatMap((change) =>
-                  change.type === 'position' && change.position
-                    ? [{ id: change.id, position: change.position }]
-                    : [],
-                )
-                const change = changes.find((item) => item.type === 'position')
-                editor.positionsChanged(
-                  updates,
-                  change?.type === 'position' ? change.dragging : undefined,
-                )
-              }}
-              onConnect={(connection) =>
-                editor.accept(
-                  connectGraphNodes(editor.latest.current.definition, {
+            >
+              <ReactFlow<CanvasNode, CanvasEdge>
+                colorMode="light"
+                fitView
+                fitViewOptions={{ maxZoom: 1, padding: 0.18 }}
+                onInit={(instance) => {
+                  flowRef.current = instance
+                }}
+                multiSelectionKeyCode={null}
+                deleteKeyCode={null}
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                nodesDraggable={canvasEditable}
+                nodesConnectable={canvasEditable}
+                edgesReconnectable={canvasEditable}
+                onNodeClick={(_event, node) => {
+                  void selectObject('node', node.id)
+                  canvasRef.current?.focus()
+                }}
+                onEdgeClick={(_event, edge) => {
+                  if (!definition.edges.some((item) => item.id === edge.id)) return
+                  void selectObject('edge', edge.id)
+                  canvasRef.current?.focus()
+                }}
+                onNodeContextMenu={(event, node) => {
+                  event.preventDefault()
+                  void openObjectMenu('node', node.id, event)
+                }}
+                onEdgeContextMenu={(event, edge) => {
+                  if (!definition.edges.some((item) => item.id === edge.id)) return
+                  event.preventDefault()
+                  void openObjectMenu('edge', edge.id, event)
+                }}
+                onPaneClick={() => {
+                  void clearSelection()
+                  canvasRef.current?.focus()
+                }}
+                onNodeDragStart={editor.beginDrag}
+                onNodeDragStop={(_event, _node, moved) =>
+                  editor.endDrag(moved.map((node) => ({ id: node.id, position: node.position })))
+                }
+                onNodesChange={(changes) => {
+                  setDimensions((current) =>
+                    updateCanvasDimensions(
+                      current,
+                      changes,
+                      new Set(definition.nodes.map((node) => node.id)),
+                    ),
+                  )
+                  const updates = changes.flatMap((change) =>
+                    change.type === 'position' && change.position
+                      ? [{ id: change.id, position: change.position }]
+                      : [],
+                  )
+                  const change = changes.find((item) => item.type === 'position')
+                  editor.positionsChanged(
+                    updates,
+                    change?.type === 'position' ? change.dragging : undefined,
+                  )
+                }}
+                onConnect={(connection) =>
+                  editor.accept(
+                    connectGraphNodes(editor.latest.current.definition, {
+                      sourceId: connection.source,
+                      targetId: connection.target,
+                      branch:
+                        connection.sourceHandle === 'true' || connection.sourceHandle === 'false'
+                          ? connection.sourceHandle
+                          : null,
+                      edgeId: `edge-${crypto.randomUUID()}`,
+                    }),
+                  )
+                }
+                onReconnect={(edge, connection) =>
+                  void reconnect(edge.id, {
                     sourceId: connection.source,
                     targetId: connection.target,
                     branch:
                       connection.sourceHandle === 'true' || connection.sourceHandle === 'false'
                         ? connection.sourceHandle
                         : null,
-                    edgeId: `edge-${crypto.randomUUID()}`,
-                  }),
-                )
+                    edgeId: edge.id,
+                  })
+                }
+              >
+                <Background gap={20} size={1} />
+                <Panel position="top-left" className="workflow-canvas-diagnostics">
+                  <WorkflowDiagnostics
+                    localDraft={canvasEditable}
+                    issues={diagnostics}
+                    onLocate={(issue) => {
+                      if (issue.nodeId) void selectObject('node', issue.nodeId)
+                      else if (issue.edgeId) void selectObject('edge', issue.edgeId)
+                    }}
+                  />
+                </Panel>
+                <MiniMap pannable zoomable position="bottom-left" />
+                <Panel position="top-right">
+                  <ReferenceLegend visible={showDataReferences} definition={definition} />
+                </Panel>
+                <Controls position="bottom-right" showFitView={false} showInteractive={false} />
+              </ReactFlow>
+            </div>
+          }
+        >
+          {selectedEdge ? (
+            <WorkflowEdgeInspector
+              edge={selectedEdge}
+              definition={definition}
+              editable={canvasEditable}
+              onDelete={() => void requestDelete()}
+              onSwap={() =>
+                editor.accept(swapBranches(editor.latest.current.definition, selectedEdge.source))
               }
-              onReconnect={(edge, connection) =>
-                void reconnect(edge.id, {
-                  sourceId: connection.source,
-                  targetId: connection.target,
-                  branch:
-                    connection.sourceHandle === 'true' || connection.sourceHandle === 'false'
-                      ? connection.sourceHandle
-                      : null,
-                  edgeId: edge.id,
+              onUpdate={(edge) =>
+                applyChange({
+                  ...editor.latest.current.definition,
+                  edges: editor.latest.current.definition.edges.map((item) =>
+                    item.id === edge.id ? edge : item,
+                  ),
                 })
               }
-            >
-              <Background gap={20} size={1} />
-              <Panel position="top-left" className="workflow-canvas-diagnostics">
-                <WorkflowDiagnostics
-                  localDraft={canvasEditable}
-                  issues={diagnostics}
-                  onLocate={(issue) => {
-                    if (issue.nodeId) void selectObject('node', issue.nodeId)
-                    else if (issue.edgeId) void selectObject('edge', issue.edgeId)
-                  }}
-                />
-              </Panel>
-              <MiniMap pannable zoomable position="bottom-left" />
-              <Controls position="bottom-right" showFitView={false} showInteractive={false} />
-            </ReactFlow>
-          </div>
-        }
-      >
-        {selectedEdge ? (
-          <WorkflowEdgeInspector
-            edge={selectedEdge}
-            definition={definition}
-            editable={canvasEditable}
-            onDelete={() => void requestDelete()}
-            onSwap={() =>
-              editor.accept(swapBranches(editor.latest.current.definition, selectedEdge.source))
-            }
-            onUpdate={(edge) =>
-              applyChange({
-                ...editor.latest.current.definition,
-                edges: editor.latest.current.definition.edges.map((item) =>
-                  item.id === edge.id ? edge : item,
-                ),
-              })
-            }
-          />
-        ) : (
-          <DesignerInspector
-            scope={scope}
-            projectId={projectId}
-            environmentId={environmentId}
-            runtimeMode={runtimeMode}
-            runtimeExecutionId={runtimeExecutionId}
-            runtimeNodes={runtimeNodes}
-            runtimeContext={runtimeContext}
-            runtimeByNode={runtimeByNode}
-            selected={selected}
-            definition={definition}
-            apis={apis}
-            artifacts={artifacts}
-            workflows={publishedWorkflows}
-            credentials={credentials}
-            graphqlSchemas={graphqlSchemas}
-            grpcDescriptors={grpcDescriptors}
-            eventSources={eventSources}
-            editable={canvasEditable}
-            onChange={applyChange}
-            onClearSelection={() => editor.select(emptySelection())}
-            onDelete={() => void requestDelete()}
-          />
-        )}
-      </WorkflowInspectorShell>
+            />
+          ) : (
+            <DesignerInspector
+              scope={scope}
+              projectId={projectId}
+              environmentId={environmentId}
+              runtimeMode={runtimeMode}
+              runtimeExecutionId={runtimeExecutionId}
+              runtimeNodes={runtimeNodes}
+              runtimeContext={runtimeContext}
+              runtimeAttempt={runtimeAttempt}
+              onAttemptFocus={onAttemptFocus}
+              runtimeByNode={runtimeByNode}
+              onLocateNode={(nodeId) => void selectObject('node', nodeId)}
+              selected={selected}
+              definition={definition}
+              apis={apis}
+              artifacts={artifacts}
+              workflows={publishedWorkflows}
+              credentials={credentials}
+              graphqlSchemas={graphqlSchemas}
+              grpcDescriptors={grpcDescriptors}
+              eventSources={eventSources}
+              editable={canvasEditable}
+              onChange={applyChange}
+              onClearSelection={() => editor.select(emptySelection())}
+              onDelete={() => void requestDelete()}
+            />
+          )}
+        </WorkflowInspectorShell>
+      </div>
+    </div>
+  )
+}
+
+function MissingRuntimeNode({
+  requestedId,
+  definition,
+  mode,
+}: {
+  requestedId?: string
+  definition: WorkflowDefinition
+  mode?: string
+}) {
+  if (!mode || !requestedId || definition.nodes.some((node) => node.id === requestedId)) return null
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      title="指定节点不在当次执行快照中"
+      description="已显示本次运行的失败节点或首个可查看节点，请从执行轨迹重新选择。"
+    />
+  )
+}
+
+function ReferenceLegend({
+  visible,
+  definition,
+}: {
+  visible: boolean
+  definition: WorkflowDefinition
+}) {
+  if (!visible) return null
+  const unresolved = unresolvedReferenceCount(definition)
+  return (
+    <div className="workflow-reference-legend">
+      <Tag>实线：执行顺序</Tag>
+      <Tag color="blue">虚线：数据引用 · 只读</Tag>
+      {unresolved > 0 && (
+        <Tag color="warning">{unresolved} 项引用/表达式未解析，请在配置中核对</Tag>
+      )}
     </div>
   )
 }
@@ -1016,6 +1147,9 @@ function DesignerInspector({
   runtimeNodes,
   runtimeContext,
   runtimeByNode,
+  onLocateNode,
+  runtimeAttempt,
+  onAttemptFocus,
   selected,
   definition,
   apis,
@@ -1037,6 +1171,9 @@ function DesignerInspector({
   runtimeNodes: WorkflowNodeExecution[]
   runtimeContext: Record<string, unknown>
   runtimeByNode: Map<string, WorkflowNodeExecution>
+  onLocateNode: (nodeId: string) => void
+  runtimeAttempt?: number
+  onAttemptFocus?: (nodeId: string, attempt: number) => void
   selected: WorkflowNode | null
   definition: WorkflowDefinition
   apis: ApiDefinition[]
@@ -1062,6 +1199,11 @@ function DesignerInspector({
         execution={selected ? runtimeByNode.get(selected.id) : undefined}
         nodes={runtimeNodes}
         context={runtimeContext}
+        onLocateNode={onLocateNode}
+        initialAttempt={runtimeAttempt}
+        onSelectAttempt={(attempt) => {
+          if (selected) onAttemptFocus?.(selected.id, attempt)
+        }}
       />
     )
   }
@@ -1092,6 +1234,7 @@ function DesignerInspector({
           editable={editable}
           onChange={update}
           onDelete={onDelete}
+          onLocateNode={onLocateNode}
         />
       )}
     </WorkflowNodeEditSession>
@@ -1165,8 +1308,13 @@ function workflowReference(workflow: Workflow | undefined) {
 }
 
 function DesignerToolbar({
+  workflowSettings,
+  libraryContainer,
+  showDataReferences,
+  onDataReferences,
   projectId,
   runtimeMode,
+  runtimeNavigation,
   apiSelection,
   apiSelectionOverride,
   apis,
@@ -1224,8 +1372,13 @@ function DesignerToolbar({
   onHelp,
   onFitView,
 }: {
+  workflowSettings: ReactNode
+  libraryContainer: HTMLElement | null
+  showDataReferences: boolean
+  onDataReferences: (value: boolean) => void
   projectId?: string | null
   runtimeMode?: 'run' | 'history'
+  runtimeNavigation?: ReactNode
   apiSelection?: string
   apiSelectionOverride?: ApiDefinition
   apis: ApiDefinition[]
@@ -1292,6 +1445,7 @@ function DesignerToolbar({
         data-testid={focusMode ? 'workflow-focus-toolbar' : 'workflow-canvas-toolbar'}
       >
         <Space wrap>
+          {runtimeNavigation}
           <Tag color={runtimeMode === 'history' ? 'gold' : 'processing'}>
             {runtimeMode === 'history' ? '历史快照 · 只读' : '实时运行视图'}
           </Tag>
@@ -1300,6 +1454,13 @@ function DesignerToolbar({
           </Typography.Text>
         </Space>
         <Space>
+          {workflowSettings}
+          <Checkbox
+            checked={showDataReferences}
+            onChange={(event) => onDataReferences(event.target.checked)}
+          >
+            数据引用
+          </Checkbox>
           <Button icon={<AimOutlined />} onClick={onFitView}>
             适应画布
           </Button>
@@ -1347,6 +1508,13 @@ function DesignerToolbar({
         </Button>
       </Space>
       <Space className="workflow-toolbar-secondary">
+        {workflowSettings}
+        <Checkbox
+          checked={showDataReferences}
+          onChange={(event) => onDataReferences(event.target.checked)}
+        >
+          数据引用
+        </Checkbox>
         <Dropdown
           trigger={['click']}
           menu={{
@@ -1408,6 +1576,8 @@ function DesignerToolbar({
         <FocusModeButton enabled={allowFocus} active={focusMode} onClick={onFocus} />
       </Space>
       <WorkflowNodeLibrary
+        dockContainer={libraryContainer}
+        docked={allowFocus && !focusMode}
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
         items={createNodeLibraryItems({
@@ -1878,15 +2048,16 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
       />
       <div className={`flow-node flow-node-${data.nodeType} is-${data.status}`}>
         {!start && <Handle type="target" position={Position.Left} />}
-        <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
-        <span>
-          <strong>{data.label}</strong>
-          <small>{data.typeLabel}</small>
-        </span>
-        <span className="flow-node-status">
-          {statusLabel(data.status)}
-          {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
-        </span>
+        <div className="flow-node-heading">
+          <span className="flow-node-icon">{nodeIcon(data.nodeType)}</span>
+          <span className="flow-node-copy">
+            <strong>{data.label}</strong>
+            <small>{data.typeLabel}</small>
+          </span>
+        </div>
+        <div className="flow-node-summary">{data.summary}</div>
+        <NodeRegionPreview regions={data.regions ?? []} />
+        <NodeFooter data={data} />
         {!terminal &&
           (data.nodeType === 'condition' ? (
             <>
@@ -1899,6 +2070,52 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
       </div>
     </>
   )
+}
+
+function NodeRegionPreview({ regions }: { regions: RegionPreview[] }) {
+  if (!regions.length) return null
+  return (
+    <div className="flow-node-regions">
+      {regions.map((region) => (
+        <div key={region.id}>
+          <strong>
+            {region.label} · {region.steps.length} 步
+          </strong>
+          <small>{region.steps.join(' → ') || '尚未配置步骤'}</small>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NodeFooter({ data }: { data: NodeData }) {
+  return (
+    <footer className="flow-node-footer">
+      <span className="flow-node-status">
+        {statusLabel(data.status)}
+        {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
+      </span>
+      <span>{data.regions?.length ? '内部步骤见配置' : '查看详情'}</span>
+    </footer>
+  )
+}
+
+function canvasReferenceEdges(definition: WorkflowDefinition, visible: boolean): CanvasEdge[] {
+  if (!visible) return []
+  const executionIds = new Set(definition.edges.map((edge) => edge.id))
+  return dataReferences(definition)
+    .filter((reference) => !executionIds.has(reference.id))
+    .map((reference) => ({
+      ...reference,
+      type: 'workflowEdge',
+      sourceHandle: 'out',
+      selectable: false,
+      reconnectable: false,
+      focusable: false,
+      className: 'workflow-data-reference',
+      style: { stroke: iceColors.brandDecorative, strokeDasharray: '5 5' },
+      ariaLabel: `${reference.label}（只读，不影响执行）`,
+    }))
 }
 
 function WorkflowCanvasEdge({
@@ -1996,7 +2213,7 @@ function toCanvasEdge(
     target: edge.target,
     markerEnd: { type: MarkerType.ArrowClosed },
     label: edge.condition ? (edge.condition === 'true' ? '是' : '否') : undefined,
-    animated: status === 'rewired',
+    animated: false,
     style: color ? { stroke: color, strokeWidth: 3 } : undefined,
     data: {
       branch: edge.condition,
@@ -2010,10 +2227,10 @@ function toCanvasEdge(
 function proposalEdgeColor(status: ProposalGraphStatus | undefined): string | undefined {
   if (!status) return undefined
   const colors: Record<ProposalGraphStatus, string> = {
-    added: '#16a34a',
-    modified: '#d97706',
-    removed: '#dc2626',
-    rewired: '#7c3aed',
+    added: iceColors.success,
+    modified: iceColors.warning,
+    removed: iceColors.danger,
+    rewired: iceColors.iconExtract,
   }
   return colors[status]
 }
@@ -2231,6 +2448,69 @@ function canMutateGraph(editable: boolean, mode: string, runtimeMode?: string): 
   return editable && mode === 'edit' && runtimeMode === undefined
 }
 
+function designerInitialSelection(
+  session: ReturnType<typeof useDraftSession>,
+  scope: string,
+  definition: WorkflowDefinition,
+  nodes: WorkflowNodeExecution[],
+  mode?: string,
+  requestedId?: string,
+) {
+  return mode
+    ? runtimeNodeSelection(definition, nodes, requestedId)
+    : recoverNodeSelection(session, scope, definition)
+}
+
+function RuntimeTrajectoryEntry({
+  mode,
+  surface,
+  focused,
+  ...props
+}: Omit<Parameters<typeof WorkflowRunTrajectory>[0], 'mode' | 'docked'> & {
+  mode?: 'run' | 'history'
+  surface: 'workspace' | 'embedded'
+  focused: boolean
+}) {
+  if (!mode) return null
+  return (
+    <WorkflowRunTrajectory {...props} mode={mode} docked={surface === 'workspace' && !focused} />
+  )
+}
+
+function runtimeNodeSelection(
+  definition: WorkflowDefinition,
+  nodes: WorkflowNodeExecution[],
+  requestedId?: string,
+): WorkflowSelection {
+  const requested = definition.nodes.find((node) => node.id === requestedId)
+  const failed = nodes.find(
+    (node) => node.status === 'failed' && definition.nodes.some((item) => item.id === node.node_id),
+  )
+  const node =
+    requested ??
+    definition.nodes.find((item) => item.id === failed?.node_id) ??
+    definition.nodes.find((item) => item.type !== 'start' && item.type !== 'end')
+  return node ? { kind: 'node', id: node.id } : emptySelection()
+}
+
+function useRuntimeSelection(
+  select: (selection: WorkflowSelection) => void,
+  definition: WorkflowDefinition,
+  nodes: WorkflowNodeExecution[],
+  mode?: string,
+  executionId?: string,
+  requestedId?: string,
+) {
+  const applied = useRef<string | null>(null)
+  useEffect(() => {
+    if (!mode || !definition.nodes.length) return
+    const key = JSON.stringify([mode, executionId, requestedId])
+    if (applied.current === key) return
+    applied.current = key
+    select(runtimeNodeSelection(definition, nodes, requestedId))
+  }, [definition, executionId, mode, nodes, requestedId, select])
+}
+
 function useCanvasAutoFrame(
   canvasRef: React.RefObject<HTMLDivElement | null>,
   flowRef: React.RefObject<ReactFlowInstance<CanvasNode, CanvasEdge> | null>,
@@ -2242,6 +2522,21 @@ function useCanvasAutoFrame(
   useEffect(() => {
     latest.current = { definition, selection }
   }, [definition, selection])
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const canvas = canvasRef.current
+      const instance = flowRef.current
+      if (!canvas || !instance) return
+      keepSelectionVisible(
+        instance,
+        definition,
+        selection,
+        { width: canvas.clientWidth, height: canvas.clientHeight },
+        selectionToolbarSize(canvas),
+      )
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [canvasRef, definition, flowRef, selection])
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return

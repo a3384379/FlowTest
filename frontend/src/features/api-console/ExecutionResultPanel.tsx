@@ -1,5 +1,6 @@
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { Alert, Descriptions, Empty, Table, Tabs, Tag, Typography } from 'antd'
+import { useId } from 'react'
+import AssertionEvidence from '../evidence/AssertionEvidence'
 
 import type { Execution, ExecutionDetail } from '../../lib/api'
 
@@ -9,11 +10,46 @@ type Props = {
 }
 
 export default function ExecutionResultPanel({ result, history }: Props) {
+  const tabsId = useId()
   return (
     <Tabs
+      id={tabsId}
       items={[
-        { key: 'response', label: '响应', children: <ResponseView result={result} /> },
-        { key: 'assertions', label: '断言', children: <AssertionsView result={result} /> },
+        { key: 'response', label: '响应结果', children: <ResponseView result={result} /> },
+        {
+          key: 'headers',
+          label: '响应头',
+          children: result ? (
+            <pre className="response-code">{formatJson(result.execution.response_headers)}</pre>
+          ) : (
+            <Empty description="未提供响应头" />
+          ),
+        },
+        {
+          key: 'request',
+          label: '实际请求',
+          children: result ? (
+            <>
+              <Typography.Text strong>
+                {result.execution.request_method} {result.execution.request_url}
+              </Typography.Text>
+              <pre className="response-code">
+                {formatJson({
+                  headers: result.execution.request_headers,
+                  body: result.execution.request_body,
+                  target_snapshot: result.execution.target_snapshot,
+                })}
+              </pre>
+            </>
+          ) : (
+            <Empty description="未提供请求记录" />
+          ),
+        },
+        {
+          key: 'assertions',
+          label: `断言${result ? `（${result.assertions.length}）` : ''}`,
+          children: <AssertionsView result={result} />,
+        },
         { key: 'history', label: '执行历史', children: <HistoryView history={history} /> },
       ]}
     />
@@ -35,10 +71,16 @@ function ResponseView({ result }: { result: ExecutionDetail | null }) {
           <ExecutionStatus status={execution.status} />
         </Descriptions.Item>
       </Descriptions>
-      <Typography.Text strong>请求目标快照</Typography.Text>
-      <pre className="response-code">{formatJson(execution.target_snapshot)}</pre>
-      <Typography.Text strong>响应 Body</Typography.Text>
-      <pre className="response-code">{formatJson(execution.response_body)}</pre>
+      <div className="response-body-layout">
+        <div>
+          <Typography.Text strong>响应 Body</Typography.Text>
+          <pre className="response-code">{formatJson(execution.response_body)}</pre>
+        </div>
+        <aside className="response-evidence-sidebar">
+          <Typography.Paragraph strong>响应断言</Typography.Paragraph>
+          <AssertionsView result={result} />
+        </aside>
+      </div>
     </>
   )
 }
@@ -46,30 +88,11 @@ function ResponseView({ result }: { result: ExecutionDetail | null }) {
 function AssertionsView({ result }: { result: ExecutionDetail | null }) {
   if (!result) return <Empty description="暂无断言结果" />
   return (
-    <Table
-      rowKey="id"
-      size="small"
-      pagination={false}
-      dataSource={result.assertions}
-      columns={[
-        {
-          title: '结果',
-          dataIndex: 'passed',
-          render: (passed: boolean) =>
-            passed ? (
-              <Tag icon={<CheckCircleOutlined />} color="success">
-                通过
-              </Tag>
-            ) : (
-              <Tag icon={<CloseCircleOutlined />} color="error">
-                失败
-              </Tag>
-            ),
-        },
-        { title: '类型', dataIndex: 'kind' },
-        { title: '目标', dataIndex: 'target', render: (value: string | null) => value ?? '—' },
-        { title: '说明', dataIndex: 'message' },
-      ]}
+    <AssertionEvidence
+      items={result.assertions.map((item) => ({
+        ...item,
+        name: item.target ? `${item.kind} · ${item.target}` : item.kind,
+      }))}
     />
   )
 }
@@ -99,10 +122,21 @@ function HistoryView({ history }: { history: Execution[] }) {
 
 function ExecutionStatus({ status }: { status: Execution['status'] }) {
   const passed = status === 'passed'
-  return <Tag color={passed ? 'green' : status === 'running' ? 'blue' : 'red'}>{status}</Tag>
+  const labels: Record<Execution['status'], string> = {
+    passed: '通过',
+    running: '运行中',
+    failed: '失败',
+    error: '执行错误',
+  }
+  return (
+    <Tag color={passed ? 'success' : status === 'running' ? 'processing' : 'error'}>
+      {labels[status]}
+    </Tag>
+  )
 }
 
 function formatJson(value: unknown) {
+  if (value === undefined) return '未提供'
   if (typeof value === 'string') return value
   return JSON.stringify(value, null, 2) ?? ''
 }

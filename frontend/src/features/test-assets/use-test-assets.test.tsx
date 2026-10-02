@@ -6,7 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TestCase, TestSuite, VersionDiff } from '../../lib/api'
 import { listFolders } from '../projects/asset-service'
 import { useProjectContext } from '../projects/use-project-context'
-import { listEnvironments, listWorkflows } from '../workflows/workflow-service'
+import { getProjectPermission } from '../projects/project-service'
+import { listEnvironments } from '../workflows/workflow-service'
+import { listAssetWorkflows, listCaseCatalog, listSuiteCatalog } from './asset-workspace-service'
 import {
   cloneTestCase,
   cloneTestSuite,
@@ -14,9 +16,7 @@ import {
   createTestSuite,
   diffTestCaseVersions,
   diffTestSuiteVersions,
-  listTestCases,
   listTestCaseVersions,
-  listTestSuites,
   listTestSuiteVersions,
   moveTestCases,
   moveTestSuites,
@@ -30,6 +30,8 @@ import { useTestAssets } from './use-test-assets'
 vi.mock('../projects/use-project-context')
 vi.mock('../projects/asset-service')
 vi.mock('../workflows/workflow-service')
+vi.mock('../projects/project-service')
+vi.mock('./asset-workspace-service')
 vi.mock('./test-asset-service')
 
 const testCase = {
@@ -52,9 +54,12 @@ describe('useTestAssets', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(useProjectContext).mockReturnValue({ projectId: 'project-1' } as never)
-    vi.mocked(listTestCases).mockResolvedValue(page([testCase]))
-    vi.mocked(listTestSuites).mockResolvedValue(page([testSuite]))
-    vi.mocked(listWorkflows).mockResolvedValue(page([]))
+    vi.mocked(listCaseCatalog).mockResolvedValue(page([testCase]))
+    vi.mocked(listSuiteCatalog).mockResolvedValue(page([testSuite]))
+    vi.mocked(listAssetWorkflows).mockResolvedValue(page([]))
+    vi.mocked(getProjectPermission).mockResolvedValue({
+      capabilities: ['read', 'edit', 'execute'],
+    } as never)
     vi.mocked(listEnvironments).mockResolvedValue([])
     vi.mocked(listFolders).mockResolvedValue([])
     vi.mocked(createTestCase).mockResolvedValue(testCase)
@@ -79,9 +84,10 @@ describe('useTestAssets', () => {
       result.current.setSearch('登录')
       result.current.setTag('smoke')
     })
-    await waitFor(() => expect(listTestCases).toHaveBeenCalledWith('project-1', '登录', 'smoke'))
+    await waitFor(() => expect(listCaseCatalog).toHaveBeenCalledWith('project-1', '登录', 'smoke'))
     await waitFor(() => expect(result.current.cases.data?.items).toEqual([testCase]))
     await waitFor(() => expect(result.current.suites.data?.items).toEqual([testSuite]))
+    expect(result.current.caseOptions.data?.items).toEqual([testCase])
   })
 
   it('creates and updates case and suite drafts through one stable hook', async () => {

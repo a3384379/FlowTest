@@ -31,9 +31,10 @@ export async function listTestCases(
   projectId: string,
   search: string,
   tag: string,
+  page = 1,
 ): Promise<Page<TestCase>> {
   const response = await apiClient.get<Page<TestCase>>(`/projects/${projectId}/test-cases`, {
-    params: { page: 1, page_size: 100, search: search || undefined, tag: tag || undefined },
+    params: { page, page_size: 100, search: search || undefined, tag: tag || undefined },
   })
   return response.data
 }
@@ -127,9 +128,10 @@ export async function listTestSuites(
   projectId: string,
   search: string,
   tag: string,
+  page = 1,
 ): Promise<Page<TestSuite>> {
   const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
-    params: { page: 1, page_size: 100, search: search || undefined, tag: tag || undefined },
+    params: { page, page_size: 100, search: search || undefined, tag: tag || undefined },
   })
   return response.data
 }

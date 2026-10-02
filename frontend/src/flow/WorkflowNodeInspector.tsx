@@ -1,4 +1,4 @@
-import { editorNode, restoreEditedNode } from './editor/graph-analysis'
+import { analyzeGraph, editorNode, restoreEditedNode } from './editor/graph-analysis'
 import { getApiDetail } from '../features/api-console/api-service'
 import WorkflowJsonInput from './WorkflowJsonInput'
 import WorkflowControlFields from './WorkflowControlFields'
@@ -14,6 +14,7 @@ import {
   Select,
   Space,
   Tag,
+  Tabs,
   Typography,
 } from 'antd'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -37,6 +38,7 @@ import {
   listServiceEndpoints,
 } from '../features/service-targets/service-target-service'
 import WorkflowApiRequestEditor from './WorkflowApiRequestEditor'
+import WorkflowNodeRelations from './WorkflowNodeRelations'
 import { useInspectorPresentation } from './editor/inspector-presentation'
 import type { WorkflowNodeEditKind } from './editor/node-edit-session'
 
@@ -55,6 +57,7 @@ type InspectorProps = {
   editable: boolean
   onChange: (definition: WorkflowDefinition, kind: WorkflowNodeEditKind) => void
   onDelete: () => void
+  onLocateNode?: (nodeId: string) => void
 }
 
 export default function WorkflowNodeInspector({
@@ -72,6 +75,7 @@ export default function WorkflowNodeInspector({
   editable,
   onChange,
   onDelete,
+  onLocateNode,
 }: InspectorProps) {
   const presentation = useInspectorPresentation()
   if (!originalNode) return <EmptyInspector />
@@ -93,39 +97,69 @@ export default function WorkflowNodeInspector({
         <Tag>{nodeTypeName(node)}</Tag>
       </ConfigSection>
       <div className="workflow-node-configuration-main">
-        <InspectorNodeFields
-          node={node}
-          definition={definition}
-          apis={apis}
-          artifacts={artifacts}
-          workflows={workflows}
-          credentials={credentials}
-          graphqlSchemas={graphqlSchemas}
-          grpcDescriptors={grpcDescriptors}
-          eventSources={eventSources}
-          projectId={projectId}
-          environmentId={environmentId}
-          editable={editable}
-          onUpdate={updateNode}
-          onStructureChange={(next) => onChange(next, 'structure')}
-          onRegionUpdate={(region) =>
-            onChange(
-              {
-                ...definition,
-                regions: definition.regions?.map((item) => (item.id === region.id ? region : item)),
-              },
-              'regions',
-            )
-          }
+        <Tabs
+          items={[
+            {
+              key: 'config',
+              label: '配置',
+              children: (
+                <InspectorNodeFields
+                  node={node}
+                  definition={definition}
+                  apis={apis}
+                  artifacts={artifacts}
+                  workflows={workflows}
+                  credentials={credentials}
+                  graphqlSchemas={graphqlSchemas}
+                  grpcDescriptors={grpcDescriptors}
+                  eventSources={eventSources}
+                  projectId={projectId}
+                  environmentId={environmentId}
+                  editable={editable}
+                  onUpdate={updateNode}
+                  onStructureChange={(next) => onChange(next, 'structure')}
+                  onRegionUpdate={(region) =>
+                    onChange(
+                      {
+                        ...definition,
+                        regions: definition.regions?.map((item) =>
+                          item.id === region.id ? region : item,
+                        ),
+                      },
+                      'regions',
+                    )
+                  }
+                />
+              ),
+            },
+            {
+              key: 'io',
+              label: '输入 / 输出',
+              children: (
+                <>
+                  <WorkflowNodeRelations
+                    node={originalNode}
+                    definition={definition}
+                    onLocateNode={onLocateNode}
+                  />
+                  {node.type === 'api' && (
+                    <MappingFields
+                      node={node}
+                      definition={definition}
+                      editable={editable}
+                      onChange={(next) => onChange(next, 'edges')}
+                    />
+                  )}
+                </>
+              ),
+            },
+            {
+              key: 'validation',
+              label: '校验',
+              children: <NodeValidation node={originalNode} definition={definition} />,
+            },
+          ]}
         />
-        {node.type === 'api' && (
-          <MappingFields
-            node={node}
-            definition={definition}
-            editable={editable}
-            onChange={(next) => onChange(next, 'edges')}
-          />
-        )}
       </div>
       <div className="workflow-config-danger">
         <Button
@@ -138,6 +172,45 @@ export default function WorkflowNodeInspector({
         </Button>
       </div>
     </aside>
+  )
+}
+
+function NodeValidation({
+  node,
+  definition,
+}: {
+  node: WorkflowNode
+  definition: WorkflowDefinition
+}) {
+  const current = {
+    ...definition,
+    nodes: definition.nodes.map((item) => (item.id === node.id ? node : item)),
+  }
+  const relatedEdges = new Set(
+    definition.edges
+      .filter((edge) => edge.source === node.id || edge.target === node.id)
+      .map((edge) => edge.id),
+  )
+  const issues = analyzeGraph(current).filter(
+    (issue) => issue.nodeId === node.id || (issue.edgeId && relatedEdges.has(issue.edgeId)),
+  )
+  return (
+    <section className="workflow-node-validation">
+      <Typography.Title level={5}>节点与连线结构校验</Typography.Title>
+      {issues.map((issue, index) => (
+        <Alert
+          key={`${issue.code}:${index}`}
+          showIcon
+          type="warning"
+          title={issue.message}
+          description={issue.code}
+        />
+      ))}
+      {!issues.length && <Typography.Paragraph>暂未检测到该节点的结构问题。</Typography.Paragraph>}
+      <Typography.Paragraph type="secondary">
+        表单格式、完整流程和运行前置条件仍需分别校验。这里不会保存、发布或执行流程。
+      </Typography.Paragraph>
+    </section>
   )
 }
 

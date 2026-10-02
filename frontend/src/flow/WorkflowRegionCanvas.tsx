@@ -1,5 +1,14 @@
-import { Controls, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react'
+import {
+  Background,
+  Controls,
+  MarkerType,
+  Position,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from '@xyflow/react'
 import type { WorkflowRegion } from '../lib/api'
+import { iceColors } from '../theme/ice-theme'
 import { linearRegionPath } from './editor/control-blocks'
 
 type Props = {
@@ -31,7 +40,8 @@ function canvasEdges(region: WorkflowRegion): Edge[] {
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    markerEnd: { type: MarkerType.ArrowClosed },
+    markerEnd: { type: MarkerType.ArrowClosed, color: iceColors.edge },
+    style: { stroke: iceColors.edge, strokeWidth: 1.5 },
     animated: false,
   }))
 }
@@ -48,6 +58,7 @@ export default function WorkflowRegionCanvas({
   return (
     <div className="workflow-region-canvas" aria-label={`${region.role} 区域画布`}>
       <ReactFlow
+        colorMode="light"
         defaultNodes={canvasNodes(region, selectedNodeId)}
         defaultEdges={canvasEdges(region)}
         nodesDraggable={editable}
@@ -74,6 +85,7 @@ export default function WorkflowRegionCanvas({
           })
         }}
       >
+        <Background color={iceColors.nodeBorder} gap={20} size={0.7} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

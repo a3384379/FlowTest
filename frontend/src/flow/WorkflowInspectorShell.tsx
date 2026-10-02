@@ -35,25 +35,25 @@ export default function WorkflowInspectorShell({
     observer.observe(container.current)
     return () => observer.disconnect()
   }, [])
-  const overlay = width > 0 && width < 880
+  const overlay = width > 0 && width < 760
   const docked = visible && !overlay
   function saveWidth(sizes: number[]) {
     const size = sizes[1]
-    if (!Number.isFinite(size) || size < 320) return
+    if (!Number.isFinite(size) || size < 304) return
     setStorageError(!writeLayoutPreferences(preferenceKey, { inspectorWidth: size }))
   }
   return (
     <div ref={container} className={inspectorShellClassName(overlay, maximized)}>
       <Splitter
         onResize={(sizes) => {
-          if (sizes[1] >= 320) setInspectorWidth(sizes[1])
+          if (sizes[1] >= 304) setInspectorWidth(sizes[1])
         }}
         onResizeEnd={saveWidth}
       >
         <Splitter.Panel min={canvasMinimumWidth(overlay, width)}>{canvas}</Splitter.Panel>
         <Splitter.Panel
           size={docked ? inspectorWidth : 0}
-          min={docked ? 320 : 0}
+          min={docked ? 304 : 0}
           max={640}
           resizable={docked}
         >
@@ -122,5 +122,5 @@ function inspectorShellClassName(overlay: boolean, maximized: boolean): string {
 
 function canvasMinimumWidth(overlay: boolean, containerWidth: number): number {
   if (overlay) return 0
-  return Math.max(480, Math.ceil(containerWidth * 0.52))
+  return Math.max(440, Math.ceil(containerWidth * 0.5))
 }

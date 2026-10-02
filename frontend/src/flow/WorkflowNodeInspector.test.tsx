@@ -180,6 +180,7 @@ it('EDGE09 requires an explicit incoming edge and updates only that edge', async
     />,
   )
   const browser = userEvent.setup()
+  await browser.click(screen.getByRole('tab', { name: '输入 / 输出' }))
   const add = screen.getByRole('button', { name: 'plus 添加' })
   expect(add).toBeDisabled()
   await browser.click(screen.getByRole('combobox', { name: '选择入站连线' }))

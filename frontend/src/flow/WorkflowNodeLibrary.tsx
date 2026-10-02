@@ -8,8 +8,9 @@ import {
   PlusOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
-import { Button, Drawer, Empty, Input, Tag, Typography } from 'antd'
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { Button, Drawer, Empty, Input, Tag, Tooltip, Typography } from 'antd'
+import { useMemo, useState, useSyncExternalStore, type DragEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   nodeLibraryCategories,
   type NodeIconKey,
@@ -37,11 +38,17 @@ export default function WorkflowNodeLibrary({
   open,
   onClose,
   items,
+  docked = false,
+  dockContainer,
 }: {
   open: boolean
   onClose: () => void
   items: NodeLibraryItem[]
+  docked?: boolean
+  dockContainer?: HTMLElement | null
 }) {
+  const wide = useSyncExternalStore(subscribeLibraryViewport, libraryViewport)
+  const inline = docked && wide && !open && Boolean(dockContainer)
   const [query, setQuery] = useState('')
   const [activeCategory, setActiveCategory] =
     useState<(typeof nodeLibraryCategories)[number]>('接口/协议')
@@ -49,13 +56,49 @@ export default function WorkflowNodeLibrary({
   const visible = useMemo(
     () =>
       items.filter((item) => {
-        if (!normalizedQuery) return item.category === activeCategory
+        if (!normalizedQuery) return inline || item.category === activeCategory
         return `${item.category} ${item.label} ${item.description} ${item.keywords} ${item.prerequisite ?? ''}`
           .toLowerCase()
           .includes(normalizedQuery)
       }),
-    [activeCategory, items, normalizedQuery],
+    [activeCategory, items, normalizedQuery, inline],
   )
+
+  if (inline && dockContainer)
+    return createPortal(
+      <aside className="workflow-node-library-docked" aria-label="节点库">
+        <header>
+          <strong>节点库</strong>
+          <Tag>{items.length}</Tag>
+        </header>
+        <Input.Search
+          aria-label="搜索节点类型"
+          placeholder="搜索名称或类型"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          allowClear
+        />
+        <div className="workflow-library-inline-results">
+          {nodeLibraryCategories.map((category) => {
+            const matches = visible.filter((item) => item.category === category)
+            if (!matches.length) return null
+            return (
+              <section key={category}>
+                <h3>{category}</h3>
+                {matches.map((item) => (
+                  <NodeLibraryRow key={item.id} item={item} />
+                ))}
+              </section>
+            )
+          })}
+          {!visible.length && (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的节点类型" />
+          )}
+        </div>
+        <Typography.Text type="secondary">点击添加或拖入画布</Typography.Text>
+      </aside>,
+      dockContainer,
+    )
 
   return (
     <Drawer
@@ -105,6 +148,42 @@ export default function WorkflowNodeLibrary({
         </Button>
       </div>
     </Drawer>
+  )
+}
+
+function subscribeLibraryViewport(listener: () => void): () => void {
+  const media = window.matchMedia('(min-width: 1360px)')
+  media.addEventListener('change', listener)
+  return () => media.removeEventListener('change', listener)
+}
+function libraryViewport(): boolean {
+  return window.matchMedia('(min-width: 1360px)').matches
+}
+
+function NodeLibraryRow({ item }: { item: NodeLibraryItem }) {
+  return (
+    <div className="workflow-library-row" draggable={!item.disabled} onDragStart={item.onDragStart}>
+      <Tooltip title={item.unavailableReason ?? item.description}>
+        <span>
+          <Button
+            type="text"
+            block
+            disabled={item.disabled}
+            aria-label={`添加${item.label}`}
+            icon={nodeIcons[item.icon]}
+            onClick={item.onAdd}
+          >
+            {item.label}
+          </Button>
+        </span>
+      </Tooltip>
+      {item.resourceControl && (
+        <details>
+          <summary>选择资源</summary>
+          {item.resourceControl}
+        </details>
+      )}
+    </div>
   )
 }
 

@@ -90,11 +90,15 @@ export async function createTestPlan(
   return response.data
 }
 
-export async function runTestPlan(projectId: string, planId: string): Promise<TestPlanRun> {
+export async function runTestPlan(
+  projectId: string,
+  planId: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TestPlanRun> {
   const response = await apiClient.post<TestPlanRun>(
     `/projects/${projectId}/test-plans/${planId}/runs`,
     undefined,
-    { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
   )
   return response.data
 }

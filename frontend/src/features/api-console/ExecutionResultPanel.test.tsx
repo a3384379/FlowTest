@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
@@ -35,9 +35,15 @@ describe('ExecutionResultPanel', () => {
 
     expect(screen.getByText('上游服务返回错误')).toBeVisible()
     expect(screen.getByText('upstream failed')).toBeVisible()
-    await browser.click(screen.getByRole('tab', { name: '断言' }))
-    expect(screen.getByText('状态码期望 200，实际 500')).toBeVisible()
+    await browser.click(screen.getByRole('tab', { name: '断言（1）' }))
+    expect(
+      within(screen.getByRole('tabpanel', { name: '断言（1）' })).getByText(
+        '状态码期望 200，实际 500',
+      ),
+    ).toBeVisible()
     await browser.click(screen.getByRole('tab', { name: '执行历史' }))
-    expect(screen.getAllByText('failed').at(-1)).toBeVisible()
+    expect(
+      within(screen.getByRole('tabpanel', { name: '执行历史' })).getByText('失败'),
+    ).toBeVisible()
   })
 })

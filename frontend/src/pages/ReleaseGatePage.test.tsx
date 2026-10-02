@@ -99,6 +99,10 @@ describe('ReleaseGatePage', () => {
     expect(await screen.findByRole('heading', { name: '发布门禁' })).toBeVisible()
     expect(screen.getByText(/不可变快照/)).toBeVisible()
     expect(await screen.findByText('v3.0.0-rc.1')).toBeVisible()
+    const latest = screen.getByRole('region', { name: '最新判断的冻结证据' })
+    expect(within(latest).getByText('Quality Gate 已通过')).toBeVisible()
+    expect(within(latest).getByText(/不会触发生产部署/)).toBeVisible()
+    expect(within(latest).queryByRole('button', { name: /编辑|删除|部署/ })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '查看证据' }))
 
     const dialog = await screen.findByRole('dialog', { name: '发布判断证据' })
@@ -106,6 +110,43 @@ describe('ReleaseGatePage', () => {
     expect(within(dialog).getByText('QUALITY_GATE_PASSED')).toBeVisible()
     expect(within(dialog).getByText(/历史判断只读/)).toBeVisible()
     expect(within(dialog).queryByRole('button', { name: /编辑|删除/ })).not.toBeInTheDocument()
+  })
+
+  it('shows blocking evidence before passing evidence in the frozen decision workspace', async () => {
+    handlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-decisions`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...decision,
+              status: 'block',
+              reasons: [
+                ...decision.reasons,
+                {
+                  code: 'CONTRACT_EVIDENCE_MISSING',
+                  evidence_type: 'contract_compatibility',
+                  status: 'blocked',
+                  message: '必需契约证据未提供',
+                  expected: 'present',
+                  actual: null,
+                },
+              ],
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+    )
+    renderPage()
+    await screen.findByText('必需契约证据未提供')
+    const latest = screen.getByRole('region', { name: '最新判断的冻结证据' })
+    const rows = within(latest).getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('必需契约证据未提供')
+    expect(rows[1]).toHaveTextContent('阻断')
+    expect(within(latest).getByText('BLOCK')).toBeVisible()
   })
 
   it('creates a typed release policy with the configured thresholds', async () => {

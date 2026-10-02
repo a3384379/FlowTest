@@ -15,7 +15,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import BodyEditor from './BodyEditor'
 import { toBodyFields, toBodyInput, type BodyEditorFields } from './body-edit'
@@ -43,6 +43,7 @@ type APIWorkbenchProps = {
   artifacts?: Artifact[]
   redactionMode?: BulkRedactionMode
   draftScope?: string
+  requestActions?: ReactNode
 }
 
 export type WorkbenchFields = BodyEditorFields & {
@@ -69,7 +70,16 @@ type RestoredApiDraft = {
 
 export default function APIWorkbench(props: APIWorkbenchProps) {
   if (!props.detail) {
-    return props.loading ? <Card loading /> : <Empty description="请选择接口后进行持续编辑" />
+    return (
+      <Card
+        className="api-request-panel"
+        title="请求编辑"
+        extra={props.requestActions}
+        loading={props.loading}
+      >
+        <Empty description="请选择接口后进行持续编辑" />
+      </Card>
+    )
   }
   return <LoadedAPIWorkbench {...props} detail={props.detail} />
 }
@@ -81,6 +91,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
   const redactionMode = props.redactionMode ?? 'off'
   return (
     <Card
+      className="api-request-panel"
       loading={props.loading}
       title={
         <Space>
@@ -108,12 +119,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
           >
             预览最终请求
           </Button>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={props.saving}
-            onClick={() => form.submit()}
-          >
+          <Button icon={<SaveOutlined />} loading={props.saving} onClick={() => form.submit()}>
             保存新版本
           </Button>
         </Space>
@@ -136,8 +142,14 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
             />
           </Form.Item>
           <Form.Item name="path" rules={[{ required: true, message: '请输入请求路径' }]}>
-            <Input placeholder="/api/users/{{user_id}}" />
+            <Input aria-label="请求路径" placeholder="/api/users/{{user_id}}" />
           </Form.Item>
+          {props.requestActions}
+        </div>
+        <div className="api-request-context">
+          <Typography.Text type="secondary">
+            发送与预览使用已保存版本 v{props.detail.version.version}；编辑后请先保存新版本。
+          </Typography.Text>
         </div>
         <Tabs
           key={props.detail?.definition.id}

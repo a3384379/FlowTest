@@ -1,0 +1,148 @@
+# v5 冰蓝白实施记录
+
+已在真实前端落实冰蓝白主题及核心工作区布局：接口管理采用“目录—请求—响应”，流程编排采用节点库、画布、检查器和运行证据，用例管理采用目录、完整分页资产列表与详情抽屉，报告和发布门禁优先显示失败证据。后续补齐了报告与编排的双向定位、运行轨迹、来源定位、检查器分区、节点切换确认与流程级配置，并补齐用例/套件的固定版本、计划、执行与报告关联。26 个原有模块继续通过常用任务栏或全部模块目录访问。其余页面共享新的主题与应用壳，业务操作、权限与能力开关沿用原实现。
+
+## 基线与工作树
+
+- 实施日期：2026-10-02。首轮开始约 12:45，功能联动续作约 15:53，用例功能续作自 18:13（Asia/Shanghai）；以日志时间为各次验证时间。
+- 需求来源：[用户指定的共享对话](https://chatgpt.com/share/6abef2e2-07b8-83ea-bfde-691d3d72d13b)，使用其最新 v5 冰蓝白完整实施交接包，而非较早的 v3/v4 方向。完整方案、状态契约、全模块/节点矩阵、视觉规范、实施提示与验收材料在编辑前已读取。
+- 原工作区：`/Volumes/雷电/project/FlowTest`，`codex/control-flow-validation`。开始时工作区干净。
+- 实施工作树：`/Users/sqz/Documents/Codex/2026-10-02/task/FlowTest`，`codex/ui-v5-ice-light`。
+- 代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`；本次改动尚未提交、推送或部署。没有修改后端、数据库、执行引擎、依赖声明或锁文件。
+- Node 22.22.0；复用原工作区相同锁文件安装的依赖。pnpm 启动器为 11.19，仓库声明为 11.16；运行时 `pnpm_config_verify_deps_before_run=warn` 仅阻止工作树路径差异触发重新安装，不修改依赖。
+
+## 实际改动
+
+完整文件清单见 [changed-files.txt](changed-files.txt)。对应工作树的未提交 diff 可用于审阅全部源码改动。
+
+| 工作区             | 主要源码                                                                                                                                  | 行为与目的                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 主题与应用壳       | `frontend/src/theme/`、`main.tsx`、`App.tsx`、`features/navigation/`、`styles.css`                                                        | 单一颜色入口；浅色画布、代码、弹层、图表；68px 常用导航与可搜索模块目录；用户外观偏好独立存储；减少透明与系统减少动效                  |
+| 流程布局           | `flow/WorkflowDesigner.tsx`、`WorkflowWorkspaceShell.tsx`、`WorkflowInspectorShell.tsx`、`WorkflowNodeLibrary.tsx`、`workflow-editor.css` | 列表抽屉；宽屏节点库，1280 抽屉；检查器默认 320px；节点显示类型、真实配置来源、所属区域与运行状态；内联区域同步浅色样式                |
+| 流程关系与生命周期 | `flow/editor/node-presentation.ts`、`WorkflowNodeRelations.tsx`、`WorkflowSettingsEditor.tsx`、`pages/WorkflowsPage.tsx`                  | 数据引用为只读展示边；来源/下游可定位；显著呈现保存/发布/执行；历史采用冻结快照；流程级变量与执行设置接入图草稿、撤销与重做            |
+| 接口管理           | `pages/ApiConsolePage.tsx`、`features/api-console/APIWorkbench.tsx`、`ExecutionResultPanel.tsx`、`use-api-console.ts`                     | 左目录与环境卡片；方法/路径行中的发送操作；请求与响应分区和内部滚动；响应、实际请求、断言与历史 tabs；HTTP200 的断言失败仍显示失败提示 |
+| 失败证据           | `features/evidence/`、`flow/WorkflowRunInspector.tsx`、`pages/ReportsPage.tsx`                                                            | 失败优先排序；期望/实际并排；`undefined` 为“未提供”，保留真实 `null`/`false`/`0`；不存在的尝试次数或耗时不冒充 0                       |
+| 用例管理           | `pages/TestAssetsPage.tsx`、`features/test-assets/`、`features/task-plans/task-plan-service.ts`                                           | 完整分页目录、当前页选择、详情与发布版本、流程绑定、固定成员版本、创建计划与显式执行、近期结果/报告/冻结编排、项目能力守卫             |
+| 总览与报告         | `pages/DashboardPage.tsx`、`pages/ReportsPage.tsx`、`ReportExecutionWorkspace.tsx`、两处趋势图                                            | 本页统计与后端 total 分开；报告服务端分页；执行轨迹与证据工作区；双向定位冻结画布并保留请求尝试；局部加载错误与重试；390px 证据单列    |
+| 发布门禁           | `pages/ReleaseGatePage.tsx`                                                                                                               | 显示策略、历史和最新结果；最新冻结判断展示逐项证据与决策上下文，阻断优先；保留策略表、历史表和人工生成判断操作                         |
+
+保存仍由 `useWorkflows.saveDraft`/`saveWorkflowDraftFor` 完成，发布和执行使用原处理器。`WorkflowDefinition` 仍是持久化图的权威；节点编辑先应用再进入图，保存时的并发编辑与版本冲突保护保持。主题切换不清空旧导航、workspace tabs、节点草稿或工作流存储。
+
+数据引用展示仅使用已有显式节点引用、类型化 `node_output` 来源和字段映射。无法解析的绑定显示未解析，不猜测上游。展示边不能被选中、重连或写入 `WorkflowDefinition.edges`。浏览器夹具中开启数据引用后，展示边从 0 变为 2，执行边保持 5 条。
+
+关联对象通过现有项目路由和查询参数导航，包含执行、节点与请求尝试次数；没有新增持久化对象 tab 模型。未新增接口、执行能力、端口、策略版本或报告检查点。SQL/Redis 只读约束、受控环境模板/实例/TTL、性能默认不自动负载、AI/MCP 人工审批与逐项审核、秘密边界和项目请求级策略均保持。
+
+## 功能联动补齐
+
+根据用户关于“报告和编排没有关联、编排缺功能”的反馈，本次继续实现以下可操作行为，而非仅调整样式：
+
+- 报告详情替换为完整页面工作区：左侧逐节点执行轨迹，右侧当次证据；默认选中失败节点，可切换响应、请求、提取、断言和变量映射。报告列表接入已有服务端分页。
+- “定位画布”和“查看完整报告”双向传递项目、执行、节点与请求尝试次数。可刷新直接链接；重复选择同一节点不会清掉已选尝试。原流程被删除时仍可读取执行快照，不回退到其他流程草稿。
+- 运行/历史模式在宽屏以执行轨迹替换节点库，1280px 提供轨迹抽屉。选择轨迹或数据来源可定位画布；来源显示基于真实图引用，不增加执行边。
+- 节点检查器划分配置、输入/输出和校验。API 字段映射只有一个主要编辑入口；节点切换提供应用后继续、丢弃此节点修改和取消，输入校验失败时保留当前表单。
+- 流程设置支持已有初始变量，以及失败即停止、并发上限 1–100、默认超时 1–300 秒。变更进入现有图草稿和撤销/重做链；保留所有其他定义字段及 run_policy。添加变量校验名称格式、长度和重复项，删除可撤销。历史设置只读。
+
+对应源码为 `features/reports/ReportExecutionWorkspace.tsx`、`features/workflows/execution-navigation.ts`、`flow/WorkflowRunTrajectory.tsx`、`WorkflowNodeRelations.tsx`、`WorkflowSettingsEditor.tsx`、`editor/use-node-selection-guard.tsx` 及页面/查询层挂接。没有自动保存、发布、执行或重发历史请求。
+
+## 阶段与验证范围
+
+“已验证”在本记录中指列明的本地前端范围，不能当作完整发布验收通过。
+
+| 阶段                | 状态     | 交付与已执行验证                                                                                                                     | 剩余验收/回滚范围                                                                                                      |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| P0 源码盘点         | 已验证   | 基线/status、依赖、12 项职责、26 模块、28 注册项与额外 start 映射；已有行为测试先于修改执行                                          | [源码盘点](source-inventory.csv)、[模块映射](modules.csv)、[节点映射](nodes.csv)；无业务回滚                           |
+| P1 主题与应用壳     | 已验证   | 主题与导航、特殊认证状态、用户外观隔离、弹层焦点与深色系统浅色呈现；前端单元与浏览器检查                                             | 逐页所有弹层/屏幕阅读器审计未完成；回滚 theme/main/App/navigation/CSS 挂接                                             |
+| P2 流程核心         | 已验证   | 既有图编辑/控制字段/草稿竞态/热键回归；桌面三个视口、真实内联区域、未应用提示、冻结历史、数据边不污染执行边                          | 28 类节点的真实引擎执行与大图性能未重跑；回滚流程呈现文件，不清草稿/session                                            |
+| P3 接口、用例与报告 | 已验证   | 接口发送与断言失败提示、既有请求/版本/文件回归；完整分页目录/清选择、资产版本/计划/执行/报告关联；统计分母/本页筛选；桌面与390px证据 | 真实目标请求、服务器冲突/导出与通知实投未执行；资产导入导出/追加既有计划/全历史统计仍需后端能力；回滚对应前端呈现文件  |
+| P4 其他页面族       | 已映射   | 26 模块共享主题、入口与原权限差异；门禁证据分区已实现并测；既有环境/性能/AI/MCP/治理前端回归执行                                     | 其余模块逐页真实浏览器、多角色、能力开关与安全边界验收未逐项执行；不以共用主题冒充完整逐页重设计验收                   |
+| P5 最终验收         | 已改未测 | 最终格式/Lint/类型/构建、前端回归和所列浏览器截图；80 项矩阵记录各自范围；修复减少动效下的定位测量                                   | 完整 `make check`、覆盖率阈值、Compose Playwright、后端、Windows、真实各角色与发布验收未运行；没有 CI/PR merge/GA 结论 |
+
+## 用例与套件功能补齐
+
+首轮只完成了目录与列表布局，未达到方案的“目录—列表—详情、绑定版本—计划—执行—报告”操作链。本轮接入已有 API，没有新增后端契约或自动创建真实资产。
+
+- 目录与套件/流程选项逐页读取完整记录，超过 100 条不截断；每页显示 20 条。目录计数包括筛选结果中的用例与套件。切目录、页码、类型和筛选时清除批量选择，操作对象仅限当前页。分页读取发生重复/数量变化时提示重载，不把部分数据标为完整。
+- 名称打开详情，可通过 `type/focus/version` 深链接查看资产。草稿、发布版本和执行结果独立。发布版本展示冻结流程/环境/覆盖项；指定版本缺失时保留错误并禁用计划/执行，不回退到其他版本。
+- 用例可明确选择流程版本，套件可选择成员版本。仅改套件说明时保留原成员版本，避免静默绑定最新版本。保存失败保留表单并显示标准错误。
+- “加入计划”创建含明确 `target_type/target_id/target_version` 的新手动计划；“执行”先展示版本和计划名称，用户点击后创建计划并入队。发布不会自动执行。入队失败重试复用已创建计划与同一 Idempotency-Key。
+- 最近结果从计划运行项及 `source_suite` 冻结来源关联，覆盖最近 20 次项目计划运行，显示当前查询数量与后端 total。无记录只说明这个范围没有记录。混合计划的其他资产不会影响本用例/套件结果；失败、排队、运行、取消和隔离分开。
+- 结果链接进入具体执行报告，详情提供报告与冻结编排回看、固定成员版本和直接引用该资产的计划。项目权限沿用既有 capabilities；无编辑/执行能力时禁用相关操作。只读回看没有写请求。
+- 1440px 列表/详情与 390px 套件详情完成浏览器验证；手机页面/抽屉宽度均为 390px。所有操作使用隔离契约夹具，实际后端写入为零。模拟失败入队后重试：1 次创建计划、2 次入队、同一幂等键。
+
+对应源码为 `AssetDetailDrawer.tsx`、`AssetPlanDialog.tsx`、`AssetRunEvidence.tsx`、`asset-workspace-service.ts`、`asset-run-view-model.ts`、`use-asset-history.ts` 及现有页面/服务挂接。导入导出、追加已有计划、按资产全历史聚合尚无现成契约，列为独立后端待办；没有用原型按钮冒充可用功能。
+
+## 检查记录
+
+工作目录均为上述实施工作树。开发期间的失败及修复日志保留在 `output/playwright/ui-v5/logs/`，最终结论以下表和实际日志为准。
+
+| 检查                  | 命令与范围                                                                                                                                                                                                      | 结果/日志                                                                                                                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 修改前表征基线        | `make test-frontend-targeted TARGETS='[...]'`，5 个相关文件                                                                                                                                                     | 65 项通过；`baseline-tests-reuse.log`                                                                                                                                                     |
+| 全部前端单元/组件测试 | `cd frontend`；`pnpm_config_verify_deps_before_run=warn pnpm test`                                                                                                                                              | 用例补齐后 107 文件、586 项通过（83.76s）；`assets-frontend-all.log`。之前 568 项日志保留作历史记录，当前结论以本轮日志为准                                                               |
+| 用例与门禁针对性回归  | `make test-frontend-targeted TARGETS='["src/pages/TestAssetsWorkspace.test.tsx","src/pages/TestAssetsPage.test.tsx","src/pages/ReleaseGatePage.test.tsx","src/features/test-assets/use-test-assets.test.tsx"]'` | 4 文件、18 项通过；`assets-gate-final.log`                                                                                                                                                |
+| 最终动效/弹层影响范围 | `make test-frontend-targeted`，外观、App、接口、报告、用例目录、门禁6文件                                                                                                                                       | 6文件、29项通过；`reduced-motion-popup-delivery.log`；浏览器同时检查减少动效下的弹层几何与开关操作                                                                                        |
+| 格式                  | `cd frontend`；`pnpm_config_verify_deps_before_run=warn pnpm format:check`                                                                                                                                      | 通过；`association-format-final-complete.log`                                                                                                                                             |
+| Lint 与类型           | `cd frontend`；`pnpm_config_verify_deps_before_run=warn pnpm lint`                                                                                                                                              | ESLint（复杂度≤10）及 `tsc -b` 通过；`association-lint-final-complete.log`                                                                                                                |
+| 生产构建              | `cd frontend`；`pnpm_config_verify_deps_before_run=warn pnpm build`                                                                                                                                             | 通过；`association-build-final-complete.log`                                                                                                                                              |
+| 功能联动针对性检查    | `make test-frontend-targeted`，报告/编排页面、检查器、导航及设置                                                                                                                                                | 6文件45项、设置2项、定位影响范围2文件35项通过；`association-tests-expanded.log`、`settings-variables-final.log`、`association-location-tests.log`。新增缺失入口测试在实现前失败，之后通过 |
+| 修改与文档            | `git diff --check`；CSV行数、源码路径与文档链接核对                                                                                                                                                             | 通过记录见 `association-docs-check.log`、`association-git-status-final.log`、`git-diff-delivery.patch`                                                                                    |
+| 集中颜色对            | 按相对亮度核算正文/说明/主色/控件边界等10组token色对                                                                                                                                                            | 正文14.08、说明6.13、次级文字5.21、主色/浅蓝背景4.54、控件边界/白底3.15；`contrast-token-check.log`；不是整站WCAG审计                                                                     |
+| 浏览器                | Playwright CLI；1440×900、1280×800、1600×1000、390×844；系统深色/减少动效                                                                                                                                       | 真实前端配隔离契约夹具；相关截图与 `qa-*-result.log`；不操作真实后端资产/目标                                                                                                             |
+
+本次不收集覆盖率，不降低仓库阈值。未运行的后端、全覆盖率、Compose E2E、部署形态与远程门禁属于独立的后续发布验证；没有根据前端本地通过推断其结果。
+
+## 本轮功能联动与截图
+
+本轮浏览器仍运行真实前端和隔离契约夹具。设置添加/撤销/重做、历史返回恢复草稿和证据导航都检查了网络写入，未发出后端资产变更或真实目标请求。完整脚本和诊断过程留在 `output/playwright/ui-v5/`。
+
+| 场景             | 实现截图/证据                                                                                                                                                                                                                                      | 已观察结果                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 节点未应用时切换 | [三种选择](../../../output/playwright/ui-v5/22-node-switch-confirmation.png)；`qa-association-settings-result.log`                                                                                                                                 | 取消保留输入，应用后继续进入目标节点；丢弃有组件回归                                                        |
+| 流程设置         | [变量与执行设置](../../../output/playwright/ui-v5/23-workflow-settings-1440.png)；`qa-association-settings-result.log`                                                                                                                             | 添加变量可撤销/重做；图定义其他字段和运行策略有回归保护；零后端写入                                         |
+| 历史/草稿隔离    | [历史执行轨迹](../../../output/playwright/ui-v5/24-workflow-history-trajectory-1440.png)；`qa-association-frozen-complete-result.log`                                                                                                              | 冻结并发20不混入草稿7和新增变量；返回后节点名称/变量/设置恢复；零后端写入                                   |
+| 报告工作区       | [桌面完整报告](../../../output/playwright/ui-v5/25-report-workspace-1440.png)                                                                                                                                                                      | 轨迹选择、失败金额对照、冻结环境、定位画布和导出入口                                                        |
+| 精确请求证据联动 | `qa-association-attempt-result.log`                                                                                                                                                                                                                | 来源定位后选择第1次请求，报告→画布→报告及刷新均保留该次503响应；同节点再选不重置尝试；零后端写入            |
+| 响应式联动       | [390px完整报告](../../../output/playwright/ui-v5/26-report-workspace-390.png)、[1280px历史画布](../../../output/playwright/ui-v5/27-history-trajectory-1280.png)；`qa-association-responsive-result.log`、`qa-association-mobile-final-result.log` | 手机页面宽390、无整体横向溢出，轨迹自动显示选中节点，冻结上下文单列；1280px轨迹抽屉选择后关闭并定位正确节点 |
+
+## 首轮主题与布局截图
+
+| 场景          | 实现截图                                                                                                                                                                                                                   | 观察                                                                          |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 流程/1440     | [流程编辑器](../../../output/playwright/ui-v5/03-workflow-1440.png)                                                                                                                                                        | 白色节点、蓝色执行关系、节点库/检查器/运行面板                                |
+| 流程/1280     | [1280工作区](../../../output/playwright/ui-v5/04-workflow-1280.png)                                                                                                                                                        | 节点库抽屉，保留可读检查器                                                    |
+| 系统深色/1600 | [浅色工作区](../../../output/playwright/ui-v5/05-workflow-dark-os-1600.png)                                                                                                                                                | 主题仍为 ice-light，无深色主画布                                              |
+| 历史证据      | [冻结快照](../../../output/playwright/ui-v5/07-workflow-history-evidence-1440.png)                                                                                                                                         | v1/冻结环境；保存与发布按钮不存在；期望29900与实际29901                       |
+| 内联控制结构  | [控制块](../../../output/playwright/ui-v5/08-workflow-control-1440.png)、[内部区域](../../../output/playwright/ui-v5/09-workflow-control-region.png)                                                                       | 真实 foreach 区域与其两个步骤，无装饰端口                                     |
+| 接口          | [1440工作台](../../../output/playwright/ui-v5/06-api-workbench-1440.png)、[1280](../../../output/playwright/ui-v5/13-api-workbench-1280.png)                                                                               | 请求/响应分区；HTTP200与失败断言同时显示                                      |
+| 用例          | [目录与列表](../../../output/playwright/ui-v5/17-assets-1440.png)                                                                                                                                                          | 首轮布局记录；当前版本以本轮 28–34 截图为准                                   |
+| 报告          | [桌面失败证据](../../../output/playwright/ui-v5/10-report-evidence-1440.png)、[手机证据](../../../output/playwright/ui-v5/11-report-evidence-390.png)、[手机列表](../../../output/playwright/ui-v5/12-report-list-390.png) | 后端total120、本页1条；手机页面宽度390，无页面横向溢出                        |
+| 门禁          | [逐项证据与决策上下文](../../../output/playwright/ui-v5/18-release-gate-1440.png)                                                                                                                                          | BLOCK及2项真实夹具阻断原因；无部署操作                                        |
+| 应用壳与外观  | [总览](../../../output/playwright/ui-v5/14-quality-overview-1440.png)、[模块目录](../../../output/playwright/ui-v5/20-module-directory.png)、[外观](../../../output/playwright/ui-v5/21-appearance-settings.png)           | 搜索模块/关闭焦点恢复；减少透明可操作；系统深色和减少动效时弹层白色且在视口内 |
+
+原型与真实模型不一致处见 [必要视觉差异](visual-deviations.md)。全部80项见 [验收矩阵](acceptance.csv)，其中源码映射和部分前端回归不能代替其完整真实环境条件。
+
+## 用例续作验证与截图
+
+定向回归 `make test-frontend-targeted` 涉及用例页面/工作区、useTestAssets、资产服务/目录/运行模型、计划确认和 TestPlansPage 共 8 文件，33 项通过（`assets-targeted-final.log`）。修改前基线为 4 文件/14 项（`assets-baseline.log`）。
+
+本轮最终 `pnpm format:check`、`pnpm lint`（包含 `tsc -b`）和 `pnpm build` 均通过，分别见 `assets-format-check-final.log`、`assets-lint-complete.log`、`assets-build-final.log`。浏览器操作记录在 `assets-browser-retry-stats.log`、`assets-mobile-measurements.log`。
+
+| 场景                 | 证据                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| 完整目录与绑定/结果  | [1440px 列表](../../../output/playwright/ui-v5/28-assets-list-1440.png)                |
+| 资产详情与冻结定义   | [1440px 详情](../../../output/playwright/ui-v5/29-asset-detail-1440.png)               |
+| 用例执行与报告       | [执行证据](../../../output/playwright/ui-v5/30-asset-execution-evidence-1440.png)      |
+| 执行前确认版本与计划 | [可审阅的操作](../../../output/playwright/ui-v5/31-asset-plan-review-1440.png)         |
+| 套件成员固定版本     | [1440px 套件](../../../output/playwright/ui-v5/32-suite-fixed-versions-1440.png)       |
+| 套件关联计划         | [390px 关联计划](../../../output/playwright/ui-v5/33-suite-related-plans-390.png)      |
+| 套件报告/编排回看    | [390px 执行证据](../../../output/playwright/ui-v5/34-suite-execution-evidence-390.png) |
+
+## 剩余风险与回滚
+
+当前核心工作区可供代码与视觉审阅。用例目录已通过现有分页读取完整记录；大项目的目录首载请求量仍随资产数量增长，服务端目录筛选/聚合属于后续优化。近期结果只覆盖最近 20 次项目计划运行，不能替代按资产全历史检索。加入计划当前创建新手动计划，追加已有计划、用例原生导入导出仍需后端能力。报告失败过滤仍是本页过滤，服务端失败分页未实现。未提供的维护状态等字段不会填假数据。
+
+减少动效规则使用 `transition-duration: 0s`，避免给所有定位属性引入非零过渡、干扰弹层/画布几何测量。Ant Design 仍使用其正常的系统动效开关；图表和画布也响应系统偏好。深色系统且减少动效时，外观弹层实测位于1440px视口内、背景白色、开关可点击。
+
+全站共用主题会影响既有弹层、表单和图表，故正式合并前仍需完整前端覆盖率与风险对应的 PR Required Gate，以及真实权限/后端/Compose验收。现有 Ant Design `maskClosable` 弃用提示未作无关重构；不宣称大图性能提升或完整可访问性合规。
+
+回滚只回退本工作树列出的前端主题、工作区与导航改动。不要清数据库、缓存、旧导航、workspace tabs、节点表单或工作流 session。旧偏好存储未删除，外观偏好独立使用 `flowtest:appearance:v5:<user>`；未提交状态可在审阅 diff 后按明确文件范围回退，不使用全局 reset/clean。
