@@ -87,6 +87,8 @@
 
 `676c65a` 的远程后端镜像扫描通过后，前端镜像扫描发现 Alpine PCRE2 10.47-r1 的四项高危条目。`frontend/Dockerfile` 在原有 OpenSSL 更新操作中加入 `pcre2>=10.49-r0`，使用基础镜像原有 Alpine 3.24 签名源；不切换软件源或更新 Nginx / Node 工具链。最低版本依据 [PCRE2 10.49 官方安全修复说明](https://github.com/PCRE2Project/pcre2/releases/tag/pcre2-10.49)。本地 Linux arm64 构建取得 PCRE2 10.49-r0；Dockerfile 静态检查无警告，实际镜像的 Nginx 配置检查、首页、流程路由回退和 JS 资源读取通过（`github-frontend-pcre2-build.log`、`github-frontend-pcre2-check.log`、`github-frontend-pcre2-smoke.log`）。完整远程扫描仍按最新提交确认。
 
+`eaba4f9` 的远程扫描已通过后端、前端和三种 runner 镜像，环境 daemon 的复用基础镜像仍含 PCRE2 10.48-r0。因此在 `backend/Dockerfile` 选择环境 daemon 基础镜像之后增加 `pcre2>=10.49-r0` 更新；本地复用基础层的扫描又发现 Expat 2.8.4-r0 高危条目，因此同一位置校验 `libexpat>=2.8.5-r0`，依据 [Expat 2.8.5 官方修复说明](https://github.com/libexpat/libexpat/releases/tag/R_2_8_5)。缓存与源码构建路径都取得最低修复版本，保留原工具链、签名源和扫描规则。本地实际 daemon 镜像构建、目标 Dockerfile 静态检查、动态库加载、dockerd / containerd / ctr / Docker 命令及文件系统工具版本检查通过；Grype 0.116.1 的可修复高危/严重项为 0（`github-daemon-pcre2-expat-build.log`、`github-daemon-pcre2-expat-check.log`、`github-daemon-pcre2-expat-smoke.log`、`github-daemon-pcre2-expat-grype.json`）。最新远程全镜像和真实 daemon 部署结果按后续提交核对。
+
 上述本地 Linux 浏览器检查在依赖修复前完成；修复后的完整浏览器与部署检查以最新 PR 提交的远程自动验证为准，不沿用旧提交的绿灯。`1259622` 的完整 CI 后端、Windows 和升级回滚检查通过；前端两项测试超时，浏览器矩阵暴露旧导航/布局定位与 1280px 运行截图问题，尚待修复并重新验证。隔离验证栈和临时进程已清理，原工作区仍干净，已有运行实例健康。
 
 ### 完整 CI 中的浏览器与测试修复
@@ -95,7 +97,11 @@
 
 旧侧栏验收已迁移到 68px 常用任务栏及全部模块抽屉，保留三档视口中的未应用草稿/URL/tab、键盘进入/退出、焦点恢复、浏览器历史和逐帧尺寸稳定检查。S16 用抽屉自身关闭按钮退出列表，等待焦点恢复后直接从新版顶栏选择环境，并等待下拉完整动效结束，版本 Diff / 调试使用命名的更多按钮；S21 等待实际弹窗/下拉动画完成再选择；发布门禁和 API 候选选项定位限定到对应行/下拉；新增节点使用宽屏停靠库拖入可命中的画布。小屏顶部改为两行，保留项目、全局搜索、外观及退出入口。截图前增加整图中心与画布中心的几何断言；测量尚未反映新布局时，继续通过真实适应画布操作取景，截图阈值和节点/状态内容比较保持。相关浏览器脚本在本任务独立的 BuildKit PostgreSQL、Redis、MinIO、mock、API/Worker 进程与专用端口上复核，默认 Compose 的 mock 地址保持；本地可通过 `FLOWTEST_E2E_MOCK_TARGET_URL` 选择隔离目标。临时进程不连接原实例数据库。最终本地普通模式已通过导航、发布门禁、编排审计/交互及三视口 27 张截图（32 项，`github-buildkit-browser-ci-followup-final.log`）；其后 S21 定向复核通过（`github-buildkit-browser-ci-last-two.log`），S16 在补齐焦点恢复等待后完整主路径通过（`github-buildkit-browser-ci-s16-focus.log`，含运行、节点重放和断点调试）。分次验证不能将此前整次运行写为全通过。原有基线没有再次更新，0.003 像素门槛保持。
 
-`676c65a` 的完整远程矩阵已有 61 项通过，剩余 S16 列表关闭焦点竞争及 S30 弹窗动效导致的一次重试已按真实生命周期补齐。前端 650 / 652 项通过，目录复合交互与流程提案人工审核两项超时。因此将完整分页读取（保留 101 条记录）与目录切换清选择拆成独立场景；提案审核改用已有明确按钮标签，禁止发布/运行的断言同时检查隐藏按钮，并保留未接受前零应用、接受后只应用一次的检查。两文件 19 项定向检查通过（`github-second-followup-targeted.log`，29.28s）；未提高超时、关闭测试或降低覆盖率。S30 等待弹窗与下拉动效结束并限定选项范围。S16 / S30 同次无重试复核全部通过（含登录准备 3 项，15.3s，`github-second-followup-s16-s30-final.log`）；该次复核使用准备好的项目夹具，首次空库缺夹具的失败日志保留。Linux 全量覆盖率仍待实际结果。
+`676c65a` 的完整远程矩阵已有 61 项通过，剩余 S16 列表关闭焦点竞争及 S30 弹窗动效导致的一次重试已按真实生命周期补齐。前端 650 / 652 项通过，目录复合交互与流程提案人工审核两项超时。因此将完整分页读取（保留 101 条记录）与目录切换清选择拆成独立场景；提案审核改用已有明确按钮标签，禁止发布/运行的断言同时检查隐藏按钮，并保留未接受前零应用、接受后只应用一次的检查。两文件 19 项定向检查通过（`github-second-followup-targeted.log`，29.28s）；未提高超时、关闭测试或降低覆盖率。S30 等待弹窗与下拉动效结束并限定选项范围。S16 / S30 同次无重试复核全部通过（含登录准备 3 项，15.3s，`github-second-followup-s16-s30-final.log`）；该次复核使用准备好的项目夹具，首次空库缺夹具的失败日志保留。Linux 全量尝试通过 110 文件 / 613 项测试（726.25s），其中新分页/目录测试各约 42.1s、提案审核 12.45s；图命令文件因本地容器遗漏外部 docs 夹具未加载。补齐夹具后该文件 40 项定向检查通过（`github-linux-frontend-coverage-artifacts/results.log`、`github-linux-graph-command-artifacts/results.log`）。这是分次检查，不宣称完整覆盖率通过；最终覆盖率仍由最新 PR 提交的完整 CI 验证。
+
+`eaba4f9` 的远程完整 Compose 检查和升级回滚已通过：非 S29 浏览器矩阵 63 项首次通过，其他冒烟 / Runner Fabric 场景亦通过（`github-eaba4f9-compose.log`）。后端覆盖率 90.64%，1692 项通过、11 项跳过，取消测试在强制取消阶段出现一次 SQLite 数据库锁竞争失败；`676c65a` 到 `eaba4f9` 未改动后端源码 / 测试 / 依赖，随后整个 `tests/test_workflows_api.py` 24 项定向复核通过（10.79s，`github-cancel-sqlite-file-targeted.log`）。未修改或跳过取消测试，也未将定向复核视为原完整门禁已通过，保留该失败日志供单独跟踪，并按最新提交重新执行完整门禁。
+
+`eaba4f9` 的前端完整 CI 有 651 / 653 项通过，提案审核已通过，目录两个场景仍因 60 秒超时失败。隔离 Linux 逐步计时显示查询 / 选择不到 1 秒，而文本按钮的每次 `toBeVisible` 检查约 20 秒；改为直接检查对应表格行可见，保留完整分页、目录过滤、选择清空和禁止意外写入的断言。按钮操作与页面视觉继续由真实浏览器矩阵验证。单文件 9 项定向回归通过（`github-asset-row-visibility-targeted.log`，5.87s）；Linux V8 覆盖采集下 9 项测试断言通过，其中分页 / 清选择为 926ms / 511ms（`github-linux-asset-row-artifacts/results.log`，10.52s）。该单文件覆盖率不足全局 80% 门槛，其退出码不作为完整覆盖率通过证据；诊断计时代码仅在忽略目录的临时归档内，未进入产品或提交。
 
 以下为此前各轮验证记录，不能替代主干同步后的最终门禁。
 

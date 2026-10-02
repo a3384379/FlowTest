@@ -148,8 +148,8 @@ function renderWorkspace(initialEntry?: string) {
 it('reads every server page before filtering the complete asset directory without writes', async () => {
   const { pages, writes } = mockWorkspace()
   renderWorkspace('/projects/' + project.id + '/assets?folder=' + folder.id)
-  expect(await screen.findByText('跨页用例')).toBeVisible()
-  expect(screen.getByText('目录用例')).toBeVisible()
+  expect((await screen.findByText('跨页用例')).closest('tr')).toBeVisible()
+  expect(screen.getByText('目录用例').closest('tr')).toBeVisible()
   expect(screen.getByText('筛选命中 101 个用例、0 个套件。')).toBeVisible()
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
   expect(pages).toHaveBeenCalledWith(1)
@@ -168,8 +168,8 @@ it('clears selection outside the new directory without moving records', async ()
     within(screen.getByLabelText('浏览测试资产目录')).getByText('核心回归').closest('button')!,
   )
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
-  expect(screen.getByText('目录用例')).toBeVisible()
-  expect(screen.getByText('跨页用例')).toBeVisible()
+  expect(screen.getByText('目录用例').closest('tr')).toBeVisible()
+  expect(screen.getByText('跨页用例').closest('tr')).toBeVisible()
   expect(toolbar.getByText(/批量移动 \(0\)/).closest('button')).toBeDisabled()
   expect(toolbar.getByLabelText('测试用例批量目录').closest('.ant-select')).toHaveTextContent(
     '移动到目录',
