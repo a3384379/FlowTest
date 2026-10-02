@@ -33,6 +33,7 @@ export async function seedEditor(
   }
   const project = await create('/projects', { name: `流程编辑验收 ${Date.now()}` })
   const root = `/projects/${project.id}`
+  const mockTargetUrl = process.env.FLOWTEST_E2E_MOCK_TARGET_URL ?? 'http://mock-target:8080'
   await create(
     `${root}/security-policy`,
     { allowed_hosts: ['mock-target'], allowed_private_cidrs: ['172.16.0.0/12'] },
@@ -40,7 +41,7 @@ export async function seedEditor(
   )
   const environment = await create(`${root}/environments`, {
     name: '验收环境',
-    base_url: 'http://mock-target:8080',
+    base_url: mockTargetUrl,
     classification: 'test',
   })
   const service = await create(`${root}/services`, {
@@ -49,7 +50,7 @@ export async function seedEditor(
   })
   await create(`${root}/environments/${environment.id}/service-endpoints`, {
     service_id: service.id,
-    base_url: 'http://mock-target:8080',
+    base_url: mockTargetUrl,
   })
   const api = await create<ApiDetail>(`${root}/apis`, {
     name: '验收健康接口',

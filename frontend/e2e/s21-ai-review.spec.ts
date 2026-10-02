@@ -17,8 +17,12 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
 
   await page.getByRole('button', { name: /新建 AI 任务/ }).click()
   const createDialog = page.getByRole('dialog', { name: '新建 AI 建议任务' })
+  await expect(createDialog).toBeVisible()
+  await expect(createDialog).not.toHaveClass(/ant-zoom.*-(appear|enter|leave)/)
   await createDialog.getByLabel('任务类型').click()
-  await page.getByText('Workflow 草稿', { exact: true }).click()
+  const options = page.locator('.ant-select-dropdown:visible')
+  await expect(options).not.toHaveClass(/ant-slide.*-(appear|enter|leave)/)
+  await options.getByText('Workflow 草稿', { exact: true }).click()
   const created = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/v1/ai/jobs') && response.request().method() === 'POST',

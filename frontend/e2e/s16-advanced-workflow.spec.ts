@@ -24,7 +24,12 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
   const listToggle = page.getByRole('button', { name: '切换工作流列表' })
   if ((await listToggle.getAttribute('aria-expanded')) === 'false') await listToggle.click()
   await page.getByRole('button', { name: parentName, exact: true }).click()
-  if ((await listToggle.getAttribute('aria-expanded')) === 'true') await listToggle.click()
+  if ((await listToggle.getAttribute('aria-expanded')) === 'true') {
+    await page
+      .getByRole('dialog', { name: '工作流列表', exact: true })
+      .getByRole('button', { name: /close|关闭/i })
+      .click()
+  }
   await expect(page.getByText('已发布 v2')).toBeVisible()
 
   await selectWorkflowEnvironment(page)
@@ -34,11 +39,11 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
 })
 
 async function selectWorkflowEnvironment(page: Page) {
-  await page.getByRole('button', { name: '工作流更多操作', exact: true }).click()
   const environment = page.getByRole('combobox', { name: '工作流环境' })
   await expect(environment).toBeEnabled()
   await environment.click()
   const dropdown = page.locator('.ant-select-dropdown:visible').last()
+  await expect(dropdown).not.toHaveClass(/ant-slide.*-active/)
   const firstOption = dropdown.locator('.ant-select-item-option').first()
   await expect(firstOption).toBeVisible()
   await firstOption.click()
@@ -67,7 +72,7 @@ async function verifyCanvasEditing(page: Page) {
 }
 
 async function verifyVersionDiff(page: Page) {
-  await page.getByRole('button', { name: /更\s*多/ }).click()
+  await page.getByRole('button', { name: '工作流更多操作', exact: true }).click()
   await page.getByRole('button', { name: /版本 Diff/ }).click()
   const dialog = page.getByRole('dialog', { name: '工作流版本 Diff' })
   await expect(dialog).toContainText('批量调用 v1')
@@ -87,7 +92,7 @@ async function verifyExecutionDebugAndReplay(page: Page) {
   await expect(latestRun).toContainText('节点重放结果')
   await expect(latestRun).toContainText('passed')
 
-  await page.getByRole('button', { name: /更\s*多/ }).click()
+  await page.getByRole('button', { name: '工作流更多操作', exact: true }).click()
   await page.getByLabel('调试断点').click()
   await page.getByText('批量调用 v2', { exact: true }).last().click()
   await page.getByRole('button', { name: /调试至断点/ }).click()

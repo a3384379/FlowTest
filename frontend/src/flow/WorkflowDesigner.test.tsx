@@ -522,10 +522,10 @@ describe('WorkflowDesigner', () => {
     expect(copied.nodes.at(-1)?.bindings).not.toBe(grpcNode?.bindings)
   })
 
-  it('edits protocol capability configuration, mTLS, and upstream bindings', async () => {
+  it('edits GraphQL capability configuration and upstream bindings', async () => {
     const browser = userEvent.setup()
     const graphqlDefinition = protocolGraph('graphql')
-    const graphqlView = render(
+    render(
       <DesignerHarness
         initial={graphqlDefinition}
         graphqlSchemas={[graphqlSchema]}
@@ -536,17 +536,23 @@ describe('WorkflowDesigner', () => {
     fireEvent.click(screen.getByTestId('rf__node-graphql-4'))
     expect(screen.getByDisplayValue('https://api.example.com/graphql')).toBeVisible()
     await browser.clear(screen.getByLabelText('GraphQL Endpoint'))
-    await browser.type(screen.getByLabelText('GraphQL Endpoint'), 'https://graphql.example.com')
+    await browser.paste('https://graphql.example.com')
     fireEvent.blur(screen.getByLabelText('Variables（JSON）'), {
       target: { value: '{"id":"initial"}' },
     })
     await browser.click(screen.getByRole('button', { name: 'plus 添加' }))
     expect(screen.getByLabelText('Capability 绑定源')).toHaveValue('node_outputs.api.body')
-    await browser.type(screen.getByLabelText('Capability 绑定源'), '.id')
+    await browser.click(screen.getByLabelText('Capability 绑定源'))
+    await browser.paste('.id')
     await browser.clear(screen.getByLabelText('Capability 绑定目标'))
-    await browser.type(screen.getByLabelText('Capability 绑定目标'), 'variables.id')
-    graphqlView.unmount()
+    await browser.paste('variables.id')
+    expect(screen.getByLabelText('GraphQL Endpoint')).toHaveValue('https://graphql.example.com')
+    expect(screen.getByLabelText('Capability 绑定源')).toHaveValue('node_outputs.api.body.id')
+    expect(screen.getByLabelText('Capability 绑定目标')).toHaveValue('variables.id')
+  })
 
+  it('configures gRPC mTLS and removes upstream bindings', async () => {
+    const browser = userEvent.setup()
     render(
       <DesignerHarness
         initial={protocolGraph('grpc')}

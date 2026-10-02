@@ -185,11 +185,35 @@ body {
   }
 }
 @media (max-width: 560px) {
-  .shell-brand,
-  .shell-topbar-left .global-search {
+  .shell-brand {
     display: none;
   }
-  .topbar {
+  .shell-topbar-left > .ant-space-item:has(.shell-brand),
+  .shell-topbar-left > .ant-space-item:has(.shell-platform-title) {
+    display: none;
+  }
+  .shell-topbar-left {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .shell-topbar-account {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .global-project-select {
+    width: 100px;
+    min-width: 96px;
+  }
+  .global-search {
+    width: min(42vw, 180px);
+    min-width: 64px;
+  }
+  .app-shell .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: auto;
+    min-height: 96px;
+    padding-block: 8px;
     padding-right: 8px;
   }
   .shell-topbar-account .ant-btn {

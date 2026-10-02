@@ -166,7 +166,10 @@ test('F02：A v12 未应用请求的取消、恢复与确认切换到 B v2', asy
 })
 async function chooseApiB(page: Page) {
   await page.locator('.workflow-inspector .config-target .ant-select').first().click()
-  await page.getByTitle('候选接口 B', { exact: true }).click()
+  await page
+    .locator('.ant-select-dropdown:visible')
+    .getByTitle('候选接口 B', { exact: true })
+    .click()
 }
 test('F03：80 字符映射编辑、第二行编辑、删除各自完整撤销', async ({ page }) => {
   await seedEditor(page)

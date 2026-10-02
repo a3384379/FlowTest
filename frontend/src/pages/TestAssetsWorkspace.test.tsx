@@ -152,20 +152,18 @@ it('browses every asset page without moving records and clears selection outside
   const toolbar = within(screen.getByText('仅选择当前页').closest<HTMLElement>('.asset-toolbar')!)
   expect(screen.getByText('筛选命中 101 个用例、0 个套件。')).toBeVisible()
   expect(pages).toHaveBeenCalledWith(2)
-  fireEvent.click(within(unfiled).getByRole('checkbox'))
-  expect(toolbar.getByRole('button', { name: /批量移动 \(1\)/ })).toBeEnabled()
+  fireEvent.click(unfiled.querySelector<HTMLInputElement>('input[type="checkbox"]')!)
+  expect(toolbar.getByText(/批量移动 \(1\)/).closest('button')).toBeEnabled()
   fireEvent.click(
-    within(screen.getByRole('navigation', { name: '浏览测试资产目录' })).getByRole('button', {
-      name: /核心回归/,
-    }),
+    within(screen.getByLabelText('浏览测试资产目录')).getByText('核心回归').closest('button')!,
   )
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
   expect(screen.getByText('目录用例')).toBeVisible()
   expect(screen.getByText('跨页用例')).toBeVisible()
-  expect(toolbar.getByRole('button', { name: /批量移动 \(0\)/ })).toBeDisabled()
-  expect(
-    toolbar.getByRole('combobox', { name: '测试用例批量目录' }).closest('.ant-select'),
-  ).toHaveTextContent('移动到目录')
+  expect(toolbar.getByText(/批量移动 \(0\)/).closest('button')).toBeDisabled()
+  expect(toolbar.getByLabelText('测试用例批量目录').closest('.ant-select')).toHaveTextContent(
+    '移动到目录',
+  )
   expect(writes).not.toHaveBeenCalled()
 })
 
