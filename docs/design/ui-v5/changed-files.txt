@@ -1,5 +1,3 @@
-backend/Dockerfile
-backend/uv.lock
 docs/design/README.md
 docs/design/ui-v5/acceptance.csv
 docs/design/ui-v5/changed-files.txt
@@ -8,11 +6,11 @@ docs/design/ui-v5/modules.csv
 docs/design/ui-v5/nodes.csv
 docs/design/ui-v5/source-inventory.csv
 docs/design/ui-v5/visual-deviations.md
-frontend/Dockerfile
 frontend/e2e/grouped-navigation.spec.ts
 frontend/e2e/s15-test-assets.spec.ts
 frontend/e2e/s16-advanced-workflow.spec.ts
 frontend/e2e/s21-ai-review.spec.ts
+frontend/e2e/s23-multi-protocol.spec.ts
 frontend/e2e/s30-failure-intelligence.spec.ts
 frontend/e2e/s31-release-gate.spec.ts
 frontend/e2e/s58-failure-repair.spec.ts
@@ -52,8 +50,6 @@ frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-07-focus-mode-ch
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-08-run-mode-chromium-linux.png
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-09-history-mode-chromium-linux.png
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/README.md
-frontend/package.json
-frontend/pnpm-lock.yaml
 frontend/src/App.test.tsx
 frontend/src/App.tsx
 frontend/src/features/api-console/APIWorkbench.tsx
@@ -135,4 +131,3 @@ frontend/src/theme/AppearanceSettings.tsx
 frontend/src/theme/IceThemeProvider.tsx
 frontend/src/theme/ice-theme.ts
 frontend/src/theme/use-reduced-motion.ts
-mock-target/Dockerfile

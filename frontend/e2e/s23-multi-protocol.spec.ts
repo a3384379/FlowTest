@@ -47,9 +47,16 @@ async function importGrpcReflection(page: import('@playwright/test').Page) {
   const name = `S23 gRPC ${Date.now()}`
   await page.getByRole('button', { name: /导入协议 Schema/ }).click()
   const dialog = page.getByRole('dialog', { name: '导入协议 Schema' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).not.toHaveClass(/ant-zoom.*-(appear|enter|leave)/)
   await dialog.getByLabel('名称').fill(name)
   await dialog.getByLabel('导入格式').click()
-  await page.getByText('Server Reflection（TLS）', { exact: true }).click()
+  const dropdown = page.locator('.ant-select-dropdown:visible').last()
+  const reflection = dropdown.getByText('Server Reflection（TLS）', { exact: true })
+  await expect(reflection).toBeVisible()
+  await expect(dropdown).not.toHaveClass(/ant-slide-up-(?:appear|enter|leave)/)
+  await reflection.click()
+  await expect(dialog.getByText('Reflection Endpoint', { exact: true })).toBeVisible()
   await dialog.getByLabel('Schema 内容').fill('grpc-target:50051')
   await dialog.getByText('明文', { exact: true }).click()
   const response = page.waitForResponse(
