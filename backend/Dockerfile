@@ -140,6 +140,7 @@ RUN set -eux; \
     ctr --version
 
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
+RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0'
 
 FROM debian:trixie-slim AS python-base-source
 
@@ -244,6 +245,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 FROM ${FLOWTEST_PYTHON_BASE} AS python-runtime
+# Refresh fixed Debian libraries after selecting the reusable Python base.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --only-upgrade \
+        libssl3t64 openssl-provider-legacy libpcre2-8-0; \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libssl3t64)" ge '3.5.7-1~deb13u3'; \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' openssl-provider-legacy)" ge '3.5.7-1~deb13u3'; \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" ge '10.46-1~deb13u3'; \
+    apt-get dist-clean
 WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
